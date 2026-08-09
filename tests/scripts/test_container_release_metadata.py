@@ -25,9 +25,20 @@ def test_stable_tag_emits_exact_public_package_metadata() -> None:
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [
         "version=1.2.3",
+        "image_version_tag=v1.2.3",
         f"commit_tag=sha-{SHA}",
+        f"dev_tag=dev-sha-{SHA}",
+        "latest_alias=latest",
         "api_image=ghcr.io/carstvaartjes/vonk-forge-api",
         "worker_image=ghcr.io/carstvaartjes/vonk-forge-worker",
+        (
+            "api_dev_source=ghcr.io/carstvaartjes/vonk-forge-api:"
+            f"dev-sha-{SHA}"
+        ),
+        (
+            "worker_dev_source=ghcr.io/carstvaartjes/vonk-forge-worker:"
+            f"dev-sha-{SHA}"
+        ),
         "hermes_image=ghcr.io/carstvaartjes/vonk-forge-hermes",
         (
             "deployment_bundle_repository="

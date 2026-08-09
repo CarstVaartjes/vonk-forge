@@ -259,9 +259,9 @@ jobs:
               --format '{{ json .Provenance }}' \
               | jq -e --arg revision "$GITHUB_SHA" \
                 '([.. | objects | select(
-                  (.predicateType? | strings | startswith("https://slsa.dev/provenance/"))
-                  or (.SLSA?.buildType? | strings | length > 0)
-                  or (.buildDefinition?.buildType? | strings | length > 0)
+                  ((.predicateType? // "") | startswith("https://slsa.dev/provenance/"))
+                  or (((.SLSA?.buildType? // "") | length) > 0)
+                  or (((.buildDefinition?.buildType? // "") | length) > 0)
                   )] | length > 0)
                  and ([.. | strings | select(. == $revision)] | length > 0)' \
                 >/dev/null
@@ -269,7 +269,7 @@ jobs:
               --format '{{ json .SBOM }}' \
               | jq -e '[.. | objects | select(
                   .SPDXID? == "SPDXRef-DOCUMENT"
-                  and (.spdxVersion? | strings | startswith("SPDX-"))
+                  and ((.spdxVersion? // "") | startswith("SPDX-"))
                 )] | length > 0' >/dev/null
           done
 
@@ -313,6 +313,6 @@ jobs:
             +refs/heads/main:refs/remotes/origin/main
           [[ "$GITHUB_SHA" == \
             "$(git rev-parse --verify refs/remotes/origin/main^{commit})" ]]
-          scripts/promote-dev-aliases \
+          scripts/promote-image-aliases \
             "$API_IMAGE" "$API_DIGEST" \
             "$WORKER_IMAGE" "$WORKER_DIGEST" "$DEV_ALIAS"

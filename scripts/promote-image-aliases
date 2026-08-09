@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Reconcile the two public development convenience aliases from an authoritative
-# immutable digest pair. Deployments consume the immutable pair, never these aliases.
+# Reconcile public API/worker convenience aliases from an authoritative
+# immutable digest pair. Deployments consume the immutable pair, never aliases.
 set -euo pipefail
 umask 077
 
 usage() {
   printf '%s\n' \
-    'usage: promote-dev-aliases API_IMAGE API_DIGEST WORKER_IMAGE WORKER_DIGEST dev' \
+    'usage: promote-image-aliases API_IMAGE API_DIGEST WORKER_IMAGE WORKER_DIGEST dev|latest' \
     >&2
   exit 64
 }
@@ -17,12 +17,12 @@ readonly api_image=$1 api_digest=$2 worker_image=$3 worker_digest=$4 alias=$5
 [[ "$worker_image" == ghcr.io/carstvaartjes/vonk-forge-worker ]] || usage
 [[ "$api_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || usage
 [[ "$worker_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || usage
-[[ "$alias" == dev ]] || usage
+[[ "$alias" == dev || "$alias" == latest ]] || usage
 
-readonly scratch=$(mktemp -d /tmp/vonk-dev-alias-promotion.XXXXXXXXXX)
-[[ "$scratch" =~ ^/tmp/vonk-dev-alias-promotion\.[A-Za-z0-9]{10}$ \
+readonly scratch=$(mktemp -d /tmp/vonk-image-alias-promotion.XXXXXXXXXX)
+[[ "$scratch" =~ ^/tmp/vonk-image-alias-promotion\.[A-Za-z0-9]{10}$ \
   && -d "$scratch" && ! -L "$scratch" ]] || {
-  printf '%s\n' 'development alias scratch path is unsafe' >&2
+  printf '%s\n' 'image alias scratch path is unsafe' >&2
   exit 1
 }
 
@@ -62,7 +62,7 @@ set_alias() {
       [[ "$observed" == "$digest" ]] && return 0
     fi
   done
-  printf '%s development alias did not converge\n' "$role" >&2
+  printf '%s %s alias did not converge\n' "$role" "$alias" >&2
   return 1
 }
 
@@ -79,11 +79,11 @@ finish() {
         || rollback_failed=1
     fi
     printf '%s\n' \
-      'development aliases were not advanced as a pair; rerun the failed publication job to reconcile the authoritative immutable pair' \
+      "$alias aliases were not advanced as a pair; rerun the failed publication job to reconcile the authoritative immutable pair" \
       >&2
     if [[ "$rollback_failed" -ne 0 ]]; then
       printf '%s\n' \
-        'one or more previous development aliases could not be restored' >&2
+        "one or more previous $alias aliases could not be restored" >&2
     fi
     [[ "$status" -ne 0 ]] || status=1
   fi
@@ -102,4 +102,4 @@ set_alias api "$api_image" "$api_digest"
 set_alias worker "$worker_image" "$worker_digest"
 promotion_complete=1
 
-printf '%s\n' 'development aliases match the authoritative immutable pair'
+printf '%s aliases match the authoritative immutable pair\n' "$alias"

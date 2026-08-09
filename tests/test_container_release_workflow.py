@@ -5,6 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github/workflows/ci.yml"
+ALLOWED_SIGNERS = ROOT / ".github/release-allowed-signers"
 
 
 def workflow() -> str:
@@ -59,6 +60,7 @@ def release_expressions() -> dict[str, str]:
     digest = f"sha256:{'a' * 64}"
     return {
         "${{ needs.release-metadata.outputs.version }}": "1.2.3",
+        "${{ needs.release-metadata.outputs.image_version_tag }}": "v1.2.3",
         "${{ needs.release-metadata.outputs.api_image }}": "ghcr.io/example/api",
         "${{ needs.release-metadata.outputs.worker_image }}": "ghcr.io/example/worker",
         "${{ needs.release-metadata.outputs.hermes_image }}": "ghcr.io/example/hermes",
@@ -83,12 +85,48 @@ def test_release_metadata_is_tag_only_and_read_only() -> None:
     assert "startsWith(github.ref_name, 'v')" in text
     assert "scripts/container-release-metadata" in text
     metadata = job("release-metadata")
+    for output in (
+        "image_version_tag",
+        "dev_tag",
+        "latest_alias",
+        "api_dev_source",
+        "worker_dev_source",
+    ):
+        assert f"{output}: ${{{{ steps.release.outputs.{output} }}}}" in metadata
     assert (
         "deployment_bundle_repository: "
         "${{ steps.release.outputs.deployment_bundle_repository }}"
     ) in metadata
     assert "platform_channel: ${{ steps.release.outputs.platform_channel }}" in metadata
     assert "vars.VONK_PLATFORM_RELEASES_ENABLED == 'true'" in metadata
+
+
+def test_release_tag_is_ssh_signed_trusted_and_reachable_from_main() -> None:
+    metadata = job("release-metadata")
+    verify = workflow_step("release-metadata", "Verify signed accepted release tag")
+
+    assert "fetch-depth: 0" in workflow_step(
+        "release-metadata", "Check out tagged commit"
+    )
+    assert "+refs/heads/main:refs/remotes/origin/main" in verify
+    assert "git show refs/remotes/origin/main:.github/release-allowed-signers" in verify
+    assert "git cat-file -t" in verify and "= tag" in verify
+    assert "gpg.format=ssh" in verify
+    assert "gpg.ssh.allowedSignersFile" in verify
+    assert "verify-tag" in verify
+    assert "git merge-base --is-ancestor" in verify
+    assert metadata.index("Verify signed accepted release tag") < metadata.index(
+        "Validate release metadata"
+    )
+
+
+def test_release_signer_allowlist_contains_only_public_ssh_authority() -> None:
+    text = ALLOWED_SIGNERS.read_text(encoding="utf-8")
+
+    assert text.endswith("\n")
+    assert text.count("\n") == 1
+    assert "cvaartjes@visualfabriq.com ssh-ed25519 " in text
+    assert "PRIVATE" not in text
 
 
 def test_tag_release_builds_and_publishes_exact_platform_target() -> None:
@@ -262,18 +300,23 @@ def test_publisher_needs_every_ci_gate_and_alone_can_write_packages() -> None:
     for read_only_job in ("lint", "generated-clients", "test"):
         assert "packages: write" not in job(read_only_job)
         assert "contents: write" not in job(read_only_job)
-    assert workflow().count("packages: write") == 1
+    alias = job("advance-production-aliases")
+    assert "permissions:\n      contents: read\n      packages: write" in alias
+    assert workflow().count("packages: write") == 2
     assert workflow().count("contents: write") == 1
 
 
 def test_all_container_publications_are_serialized_without_cancellation() -> None:
     publisher = job("publish-images")
+    alias = job("advance-production-aliases")
 
     assert "concurrency:\n      group: vonk-forge-container-publication" in publisher
     assert "cancel-in-progress: false" in publisher
     assert publisher.index("concurrency:") < publisher.index(
         "Refuse an existing release version"
     )
+    assert "group: vonk-forge-production-alias" in alias
+    assert "cancel-in-progress: false" in alias
     assert workflow().count("group: vonk-forge-container-publication") == 1
 
 
@@ -285,17 +328,14 @@ def test_publisher_uses_pinned_docker_actions_and_exact_artifacts() -> None:
         "docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a",
     ):
         assert action in text
-    assert text.count("docker/build-push-action@") == 3
-    for package in (
-        "vonk-forge-api",
-        "vonk-forge-worker",
-        "vonk-forge-hermes",
-    ):
-        assert package in text
-    assert text.count("platforms: linux/amd64") == 3
-    assert text.count("provenance: mode=max") == 3
-    assert text.count("sbom: true") == 3
-    assert text.count("push: true") == 3
+    assert text.count("docker/build-push-action@") == 1
+    metadata = (ROOT / "scripts/container-release-metadata").read_text()
+    for package in ("vonk-forge-api", "vonk-forge-worker", "vonk-forge-hermes"):
+        assert package in metadata
+    assert text.count("platforms: linux/amd64") == 1
+    assert text.count("provenance: mode=max") == 1
+    assert text.count("sbom: true") == 1
+    assert text.count("push: true") == 1
 
 
 def test_complete_summary_uses_all_three_build_digests() -> None:
@@ -320,26 +360,44 @@ def test_complete_summary_uses_all_three_build_digests() -> None:
 def test_public_input_scanner_runs_before_every_image_build() -> None:
     publisher = job("publish-images")
     scanner = publisher.index("scripts/verify-public-image-inputs")
-    for build in (
-        "Build and push API image",
-        "Build and push worker image",
-        "Build and push Hermes image",
-    ):
-        assert scanner < publisher.index(build)
+    assert scanner < publisher.index("Build and push Hermes image")
 
 
-def test_each_build_has_its_exact_three_tag_set() -> None:
-    for step_name, image_output in (
-        ("Build and push API image", "api_image"),
-        ("Build and push worker image", "worker_image"),
-        ("Build and push Hermes image", "hermes_image"),
-    ):
-        image = f"${{{{ needs.release-metadata.outputs.{image_output} }}}}"
-        assert step_block("publish-images", step_name, "tags") == [
-            f"{image}:${{{{ needs.release-metadata.outputs.version }}}}",
-            f"{image}:${{{{ needs.release-metadata.outputs.commit_tag }}}}",
-            f"{image}:latest",
-        ]
+def test_api_and_worker_are_promoted_from_accepted_dev_manifests() -> None:
+    publisher = job("publish-images")
+    assert "Build and push API image" not in publisher
+    assert "Build and push worker image" not in publisher
+    assert publisher.count("docker/build-push-action@") == 1
+
+    for role in ("API", "worker"):
+        step = workflow_step(
+            "publish-images", f"Promote accepted {role} image"
+        )
+        assert "dev_source" in step.lower()
+        assert "skopeo inspect --format '{{.Digest}}'" in step
+        assert 'org.opencontainers.image.revision' in step
+        assert "docker buildx imagetools inspect" in step
+        assert ".Provenance" in step and ".SBOM" in step
+        assert "slsa.dev/provenance" in step
+        assert ".SLSA?.buildType?" in step
+        assert "SPDXRef-DOCUMENT" in step
+        assert "docker buildx imagetools create" in step
+        assert "IMAGE_VERSION_TAG" in step
+        assert "digest=" in step
+        assert "GITHUB_OUTPUT" in step
+        assert "refusing to overwrite immutable" in step
+        assert "manifest unknown|name unknown|not found" in step
+        assert ":latest" not in step
+        assert ":dev" not in step.replace(":dev-sha-", ":source-")
+
+
+def test_hermes_build_keeps_its_existing_release_tags() -> None:
+    image = "${{ needs.release-metadata.outputs.hermes_image }}"
+    assert step_block("publish-images", "Build and push Hermes image", "tags") == [
+        f"{image}:${{{{ needs.release-metadata.outputs.version }}}}",
+        f"{image}:${{{{ needs.release-metadata.outputs.commit_tag }}}}",
+        f"{image}:latest",
+    ]
 
 
 def test_existing_version_guard_allows_only_known_absence(
@@ -347,11 +405,14 @@ def test_existing_version_guard_allows_only_known_absence(
 ) -> None:
     publisher = job("publish-images")
     assert publisher.index("Refuse an existing release version") < publisher.index(
-        "Build and push API image"
+        "Promote accepted API image"
     )
     assert "scripts/refuse-existing-image-version" in workflow_step(
         "publish-images", "Refuse an existing release version"
     )
+    guard = workflow_step("publish-images", "Refuse an existing release version")
+    assert "CONTROL_API_IMAGE" not in guard
+    assert "CONTROL_WORKER_IMAGE" not in guard
 
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
@@ -372,6 +433,7 @@ def test_existing_version_guard_allows_only_known_absence(
         **os.environ,
         "PATH": f"{fake_bin}:{os.environ['PATH']}",
         "RELEASE_VERSION": "1.2.3",
+        "IMAGE_VERSION_TAG": "v1.2.3",
         "CONTROL_API_IMAGE": "ghcr.io/example/api",
         "CONTROL_WORKER_IMAGE": "ghcr.io/example/worker",
         "HERMES_AGENT_IMAGE": "ghcr.io/example/hermes",
@@ -397,6 +459,22 @@ def test_existing_version_guard_allows_only_known_absence(
     assert "registry returned 503" not in results["mixed-error"].stderr
 
 
+def test_latest_alias_advances_only_after_release_evidence() -> None:
+    alias = job("advance-production-aliases")
+
+    assert "needs: [release-metadata, publish-images, release-manifest]" in alias
+    assert "if: needs.release-manifest.result == 'success'" in alias
+    assert "environment: platform-release" in alias
+    assert "GITHUB_REF_NAME" in alias
+    assert "sort -V" in alias
+    assert "scripts/promote-image-aliases" in alias
+    assert '"$API_IMAGE" "$API_DIGEST"' in alias
+    assert '"$WORKER_IMAGE" "$WORKER_DIGEST" "$LATEST_ALIAS"' in alias
+    assert "needs.publish-images.outputs.api_digest" in alias
+    assert "needs.publish-images.outputs.worker_digest" in alias
+    assert ":dev" not in alias
+
+
 def test_manifest_receives_digests_only_through_environment() -> None:
     step = workflow_step("release-manifest", "Create digest-pinned image environment")
     run = step_run("release-manifest", "Create digest-pinned image environment")
@@ -408,6 +486,14 @@ def test_manifest_receives_digests_only_through_environment() -> None:
     ):
         assert f"{name}: ${{{{ needs.publish-images.outputs.{output} }}}}" in step
         assert f"needs.publish-images.outputs.{output}" not in run
+    assert (
+        "CONTROL_API_IMAGE: ${{ needs.release-metadata.outputs.api_image }}:"
+        "${{ needs.release-metadata.outputs.image_version_tag }}"
+    ) in step
+    assert (
+        "CONTROL_WORKER_IMAGE: ${{ needs.release-metadata.outputs.worker_image }}:"
+        "${{ needs.release-metadata.outputs.image_version_tag }}"
+    ) in step
 
 
 def test_release_manifest_checks_out_scripts_before_using_them() -> None:

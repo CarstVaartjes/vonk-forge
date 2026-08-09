@@ -137,6 +137,7 @@ def test_development_compose_is_source_only_and_absent_from_bundle() -> None:
     source = ROOT / "deploy/compose"
 
     assert (source / "compose.dev.yaml").is_file()
+    assert (source / "compose.dev.images.yaml").is_file()
     raw = module.build_deployment_bundle(source)
     verified = module.verify_deployment_bundle(raw, _descriptor(raw))
 
@@ -145,6 +146,8 @@ def test_development_compose_is_source_only_and_absent_from_bundle() -> None:
 
     assert "compose.dev.yaml" not in verified.files
     assert "compose.dev.yaml" not in archive_names
+    assert "compose.dev.images.yaml" not in verified.files
+    assert "compose.dev.images.yaml" not in archive_names
 
 
 def test_bundle_ignores_interpreter_cache_artifacts(tmp_path: Path) -> None:
