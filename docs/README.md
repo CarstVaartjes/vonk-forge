@@ -28,6 +28,10 @@ LiteLLM publishes only routes acknowledged by the control plane.
   `vonk-forge-agent` ARM64 Debian package. The verified package can then be
   published to the public Cloudflare R2 APT repository at
   `packages.vonkforge.ai`.
+- Accepted `main` commits publish authenticated development packages to apt
+  `dev`; trusted stable tags attach the exact accepted package evidence to the
+  GitHub Release before apt `stable` advances. Package and apt signing
+  authority remain separate from NAS runtime secrets.
 - The initial local product does not require Railway or a global catalog. The
   future `vonk-forge-web` frontend belongs on Cloudflare Pages; its global
   API/validation worker/PostgreSQL backend may later run on Railway.
@@ -39,7 +43,7 @@ LiteLLM publishes only routes acknowledged by the control plane.
 - [Architecture overview](architecture-overview.md)
 - [Source-first local Compose deployment](../deploy/compose/README.md)
 - [Development NAS installation and runtime secrets](runbooks/development-nas-installation.md)
-- [Agent Debian package release and APT installation](operations/agent-package-release.md)
+- [Agent Debian package `dev`/`stable` release, secrets, and APT installation](operations/agent-package-release.md)
 - [Testing and CI](testing-and-ci.md)
 - [Identity verification policy](identity-verifier.md)
 - [Control-plane bootstrap](runbooks/control-plane-bootstrap.md)

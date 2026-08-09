@@ -34,6 +34,28 @@ Both repository variables are default-off and must be `true`:
 - `VONK_CONTAINER_RELEASES_ENABLED`
 - `VONK_PLATFORM_RELEASES_ENABLED`
 
+## Agent package channel boundary
+
+The reusable native ARM64 package build consumes only canonical metadata from
+the trusted tag and the protected `agent-release` environment. It returns the
+exact package filename and version to this workflow. The GitHub Release job
+rejects an unexpected downloaded-artifact member and attaches the accepted
+`.deb`, checksum, CycloneDX/SPDX SBOMs, SLSA provenance, Sigstore bundle, and
+systemd exposure report. GitHub-hosted package attestations are verified
+separately with `gh attestation verify`.
+
+Only after `gh release create` succeeds may the protected `apt-release`
+environment publish that same accepted artifact to apt `stable`. The reusable
+apt publisher has `contents: read`, receives no GitHub Release write authority,
+and owns only the production apt key and stable private-state bucket. The
+development path uses `agent-development` and `apt-development` from exact
+accepted `main`; it cannot create Releases or publish stable state.
+
+Configure and operate those four environments using the
+[agent package channel guide](../operations/agent-package-release.md). In
+particular, do not place apt keys, R2 credentials, agent keys, or NAS runtime
+secret files in the `platform-release` environment or release artifacts.
+
 The image/bundle build job has `contents: read` and `packages: write`, but no
 OIDC permission. A separate `publish-platform-target` job uses the protected
 GitHub environment `platform-release`, downloads the immutable build evidence,

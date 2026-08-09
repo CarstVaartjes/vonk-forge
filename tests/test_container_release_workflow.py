@@ -252,16 +252,14 @@ def test_release_chain_is_default_off_and_dependency_gated() -> None:
 def test_tag_release_builds_agent_package_from_same_release_metadata() -> None:
     package = job("build-agent-package")
     manifest = job("release-manifest")
+    metadata = workflow_step("release-metadata", "Validate release metadata")
 
     assert "needs: [release-metadata]" in package
     assert "uses: ./.github/workflows/agent-package-build.yml" in package
-    for input_name in (
-        "channel",
-        "version",
-        "next_version",
-        "package",
-        "artifact_name",
-    ):
+    assert "scripts/agent-package-metadata" in metadata
+    assert "production \"$GITHUB_REF_TYPE\" \"$GITHUB_REF_NAME\"" in metadata
+    assert "channel: stable" in package
+    for input_name in ("version", "next_version", "package", "artifact_name"):
         assert (
             f"{input_name}: ${{{{ needs.release-metadata.outputs.{input_name} }}}}"
             in package
@@ -285,16 +283,30 @@ def test_tag_release_builds_agent_package_from_same_release_metadata() -> None:
 
 def test_tag_release_attaches_agent_package_to_public_release() -> None:
     release = workflow_step("release-manifest", "Create public GitHub Release")
-    assert "vonk-forge-agent_" in release
-    assert "sigstore.json" in release
+
+    assert "PACKAGE: ${{ needs.build-agent-package.outputs.package }}" in release
+    assert "VERSION: ${{ needs.build-agent-package.outputs.version }}" in release
+    for asset in (
+        '"release-output/agent-package/$PACKAGE"',
+        '"release-output/agent-package/${PACKAGE}.sha256"',
+        '"release-output/agent-package/vonk-forge-agent_${VERSION}_arm64.sbom.cdx.json"',
+        '"release-output/agent-package/vonk-forge-agent_${VERSION}_arm64.sbom.spdx.json"',
+        '"release-output/agent-package/vonk-forge-agent_${VERSION}_arm64.provenance.json"',
+        '"release-output/agent-package/${PACKAGE}.sigstore.json"',
+        '"release-output/agent-package/vonk-forge-systemd-security.json"',
+    ):
+        assert asset in release
+    assert "refusing unexpected agent package release asset" in release
+    assert "gh release create" in release
 
 
 def test_apt_publication_consumes_the_unified_release_artifact() -> None:
     apt = job("publish-apt")
 
     assert "needs: [release-metadata, build-agent-package, release-manifest]" in apt
+    assert "if: needs.release-manifest.result == 'success'" in apt
     assert "uses: ./.github/workflows/agent-apt-publish.yml" in apt
-    assert "channel: ${{ needs.release-metadata.outputs.channel }}" in apt
+    assert "channel: stable" in apt
     assert "version: ${{ needs.build-agent-package.outputs.version }}" in apt
     assert "package: ${{ needs.build-agent-package.outputs.package }}" in apt
     assert (
@@ -302,6 +314,10 @@ def test_apt_publication_consumes_the_unified_release_artifact() -> None:
     )
     assert "environment: apt-release" in apt
     assert "source_sha: ${{ github.sha }}" in apt
+    assert "permissions:\n      contents: read" in apt
+    assert "contents: write" not in apt
+    assert "id-token: write" not in apt
+    assert "secrets:" not in apt
     for forbidden in (
         "R2_APT_PUBLIC_BUCKET",
         "R2_APT_STATE_BUCKET",

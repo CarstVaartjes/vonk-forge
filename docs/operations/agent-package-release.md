@@ -1,123 +1,191 @@
-# GPU node agent package release operations
+# GPU node agent package channels
 
-The production GPU node service is distributed as one reproducible ARM64 Debian
-package. A platform tag such as `v0.1.0` builds natively on Ubuntu 24.04 ARM64,
-runs the Rust and Debian security gates, creates a keyless Sigstore bundle, and
-attaches that exact `.deb` to the same GitHub Release as the three control-plane
-images and platform manifest. The optional apt publication consumes that
-verified package after the platform release; it does not create another tag.
+Vonk Forge publishes one reproducible ARM64 Debian package through two explicit
+channels. An accepted exact `main` tip produces
+`X.Y.Z~dev.<commit-epoch>+g<sha12>` and advances apt distribution `dev`. A
+trusted annotated, SSH-signed `vX.Y.Z` tag reachable from `main` produces
+`X.Y.Z`, attaches the accepted package evidence to that tag's GitHub Release,
+and then advances apt distribution `stable`.
 
-The workflow never builds community recipe containers. This package contains
-only the Vonk agent, stable supervisor, and narrow host helper.
+There is no mutable `.deb` called `dev` or `latest`. Development Actions
+artifacts are named with the full source commit; production files are immutable
+GitHub Release assets. The apt distributions are moving discovery channels.
 
-## Trust boundaries
+## Trust and secret boundaries
 
-Two independent signing identities are intentional:
+Three independent authorities are intentional:
 
-- `VONK_AGENT_RELEASE_PRIVATE_KEY` is an Ed25519 key. It signs the agent slot
-  manifests and the helper's artifact authorization. Its public key is embedded
-  in the authenticated `.deb`.
-- `APT_REPOSITORY_GPG_PRIVATE_KEY` signs apt `InRelease` metadata. The expected
-  full fingerprint is the protected `APT_REPOSITORY_GPG_FINGERPRINT` variable.
-- GitHub OIDC creates the keyless Cosign bundle and GitHub artifact attestation.
-  It is short-lived and is not stored as a repository secret.
+- The agent Ed25519 key signs the packaged A/B slot and host-helper
+  authorization. Its public-key digest is verified before every build.
+- The development and production apt OpenPGP keys independently sign their
+  channel's `InRelease` metadata. Apt authenticates the package before the
+  embedded agent key is trusted.
+- GitHub OIDC creates short-lived keyless Sigstore bundles and GitHub artifact
+  attestations. No stored OIDC credential exists.
 
-The `.deb` must be authenticated by apt, GitHub attestations, or its Sigstore
-bundle before the embedded agent key is trusted. A SHA-256 sidecar alone detects
-corruption but does not establish publisher identity.
+The package build never receives apt or R2 credentials. The apt publisher never
+receives `VONK_AGENT_RELEASE_PRIVATE_KEY`. Development and production use
+different apt signing keys and different private state buckets. Never copy an
+apt key or private state bucket between `apt-development` and `apt-release`.
+The two agent environments deliberately contain the same `VONK_AGENT_RELEASE_PRIVATE_KEY`
+and matching fingerprint so all accepted
+packages retain one embedded agent trust root.
 
-## GitHub environments
+Runtime secrets and NAS secrets—including database passwords, database URLs,
+Git signing keys, generated API/worker authority, controller tokens, mTLS
+identities, Tailscale credentials, and model-provider keys—never enter a
+package, container image, Git tree, GitHub Actions artifact, CI log,
+attestation, SBOM, provenance document, or Compose artifact. They are created
+and mounted as runtime files on the target host; see the
+[NAS runtime-secret guide](../runbooks/development-nas-installation.md).
+These runtime secrets remain outside every release supply-chain boundary.
 
-Create two protected environments with required reviewers and prevent untrusted
-branches from deploying to them.
+## Configure the four GitHub environments
 
-The `agent-release` environment contains:
+Create all four environments before enabling publication. Protect them with
+deployment branch/tag rules and required reviewers appropriate to their
+authority. Repository-level secrets are not a substitute for environment
+secrets.
 
-- secret `VONK_AGENT_RELEASE_PRIVATE_KEY`, an unencrypted PEM Ed25519 private
-  key stored only in GitHub's protected environment; and
-- no R2, apt, Railway, container-registry, or controller credentials.
+### `agent-development`
 
-The `apt-release` environment contains:
+Allow only `main`. Configure:
 
-- secret `APT_REPOSITORY_GPG_PRIVATE_KEY`;
-- secret `APT_GPG_PASSPHRASE`;
-- secret `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, and `R2_SECRET_ACCESS_KEY` for an
-  R2 token limited to the two exact buckets;
-- variable `APT_REPOSITORY_GPG_FINGERPRINT` with the full uppercase fingerprint;
-- variable `R2_APT_PUBLIC_BUCKET` for public repository objects; and
-- variable `R2_APT_STATE_BUCKET` for private, versioned aptly state.
+- secret `VONK_AGENT_RELEASE_PRIVATE_KEY`: the unencrypted PEM Ed25519 private
+  key used by the package builder;
+- variable `VONK_AGENT_RELEASE_KEY_FINGERPRINT`: lowercase SHA-256 of the raw
+  32-byte Ed25519 public key; and
+- no apt, R2, registry, production, controller, or runtime credential.
 
-Do not place these secrets in Railway, repository variables, Compose, or the
-local controller. The release and apt jobs are separately permissioned, and the
-apt job never receives `VONK_AGENT_RELEASE_PRIVATE_KEY`.
+### `agent-release`
 
-## R2 and DNS
+Allow only protected production tags. Configure the same
+`VONK_AGENT_RELEASE_PRIVATE_KEY` secret and the same
+`VONK_AGENT_RELEASE_KEY_FINGERPRINT` variable as `agent-development`. Configure
+no apt, R2, controller, NAS, or runtime credential.
 
-Use separate buckets. Bind the public bucket to the custom domain
-`packages.vonkforge.ai` in Cloudflare R2 and keep the state bucket private with
-no custom domain. Configure the public bucket for static object delivery and
-ensure these paths are reachable without redirects:
-
-```text
-/dists/stable/InRelease
-/dists/stable/main/binary-arm64/Packages.xz
-/pool/...
-/vonk-forge-archive-keyring.gpg
-```
-
-The publication job restores a checksum-verified private aptly state, adds one
-new immutable version, signs a new snapshot, uploads the public repository, and
-only then advances `latest` state. Publication is serialized. If public upload
-fails, rerunning the same tag reconstructs from the previous state and the R2
-copy remains idempotent.
-
-Cloudflare caching must revalidate or use a short TTL for `InRelease`, `Release`,
-and `Packages*`. Immutable files below `pool/` can use a long cache lifetime.
-
-## First key creation
-
-Create both keys on an offline administrator workstation. For the agent key:
+Create and fingerprint the shared agent key on an offline administrator host:
 
 ```bash
 umask 077
 openssl genpkey -algorithm ED25519 -out vonk-agent-release.pem
-openssl pkey -in vonk-agent-release.pem -pubout > vonk-agent-release-public.pem
+openssl pkey -in vonk-agent-release.pem -pubout -outform DER \
+  > vonk-agent-release-public.der
+test "$(stat -c %s vonk-agent-release-public.der)" = 44
+test "$(head -c 12 vonk-agent-release-public.der | od -An -v -tx1 | tr -d ' \n')" \
+  = 302a300506032b6570032100
+tail -c 32 vonk-agent-release-public.der | sha256sum
 ```
 
-Create the apt signing key as a dedicated, expiring certification/signing key,
-record its complete fingerprint out of band, and export only the private key to
-the protected environment. Keep encrypted offline backups and a written
-revocation procedure for both identities.
+Store the displayed 64-character lowercase digest as the fingerprint variable.
+Keep encrypted offline backups and a written revocation procedure. The workflow
+rejects another algorithm, malformed PEM, or a mismatched fingerprint before
+building.
 
-## Release procedure
+### `apt-development`
 
-1. Run the complete read-only CI on the intended commit. The `Rust GPU node
-   agent release` workflow is retained as a manual validation tool only; it
-   cannot create a second public release.
-2. Review the package verifier output, systemd exposure reports, lifecycle test,
-   Sigstore identity, and physical GPU node acceptance evidence.
-3. Create the exact annotated tag `v<major>.<minor>.<patch>` on that reviewed
-   commit and push it. Never move or reuse a release tag.
-4. Approve `agent-release` as part of the unified platform workflow, then
-   separately approve `apt-release` after the GitHub Release assets are visible.
-5. Verify `InRelease` and installation from a disposable Ubuntu 24.04 ARM64 host.
+Allow only `main`. Configure:
 
-The workflow refuses prerelease-shaped tags, non-ARM64 builds, downgrade tests
-that succeed, non-reproducible packages, mismatched release fingerprints, and
-packages whose maintainer scripts perform network access.
+- secret `APT_REPOSITORY_GPG_PRIVATE_KEY`: exported private OpenPGP key used
+  only for the `dev` repository;
+- secret `APT_GPG_PASSPHRASE`: that key's passphrase;
+- secrets `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, and `R2_SECRET_ACCESS_KEY`: a
+  Cloudflare R2 token limited to the public apt bucket and the development apt
+  state bucket;
+- variable `APT_REPOSITORY_GPG_FINGERPRINT`: the full 40-character uppercase
+  primary-key fingerprint;
+- variable `R2_APT_PUBLIC_BUCKET`: the bucket served as
+  `https://packages.vonkforge.ai`; and
+- variable `R2_APT_STATE_BUCKET`: a private development-only bucket with no
+  public endpoint.
 
-## Consumer installation
+### `apt-release`
 
-Download the archive key without piping data into a shell, compare the displayed
-fingerprint with the independently published release fingerprint, then install
-it as an apt keyring:
+Allow only protected production tags and require a production reviewer.
+Configure the same secret and variable names as `apt-development`, but use a
+different OpenPGP private key, passphrase, R2 access token, and private stable
+state bucket. `R2_APT_PUBLIC_BUCKET` may name the same public bucket because the
+publisher owns disjoint `dists/dev` and `dists/stable` trees and fixed keyring
+filenames. The production token should be limited to that public bucket and
+the production state bucket only.
+
+For each apt environment, generate a dedicated expiring certification/signing
+key offline, export its encrypted private key for the environment secret, and
+record the complete primary fingerprint through an independent channel. Verify
+the exported key before upload:
 
 ```bash
+gpg --batch --with-colons --show-keys apt-private-key.asc \
+  | awk -F: '$1 == "fpr" { print $10; exit }'
+```
+
+The workflow accepts exactly one secret primary key and requires the result to
+equal `APT_REPOSITORY_GPG_FINGERPRINT`.
+
+## R2 layout and publication safety
+
+Bind only the public bucket to `packages.vonkforge.ai`. Both state buckets stay
+private and must have object versioning/backups appropriate to signing state.
+The public roots include:
+
+```text
+dists/dev/InRelease
+dists/stable/InRelease
+pool/...
+vonk-forge-dev-archive-keyring.gpg
+vonk-forge-archive-keyring.gpg
+```
+
+Each private channel records immutable
+`versions/<version>/aptly-state.tar.gz`,
+`versions/<version>/public-tree.tar.gz`, and
+`versions/<version>/commit.json`; `latest.json` is only a pointer. The commit
+manifest binds both archives by size and SHA-256 and is written before public
+publication. Package/index data is uploaded before `Release` and
+`Release.gpg`; `InRelease` is the final public commit object; `latest.json`
+advances last. Cache `pool/` objects for a long period, but require short TTL or
+revalidation for `InRelease`, `Release`, and `Packages*`.
+
+## Install the `dev` channel
+
+Obtain the development apt fingerprint from an independently authenticated
+operator record, not from the same bucket as the key. Set it explicitly and
+require an exact match before installing the keyring:
+
+```bash
+EXPECTED_DEV_APT_FINGERPRINT='REPLACE_WITH_40_CHARACTER_UPPERCASE_FINGERPRINT'
+curl --fail --proto '=https' --tlsv1.3 \
+  --output /tmp/vonk-forge-dev-archive-keyring.gpg \
+  https://packages.vonkforge.ai/vonk-forge-dev-archive-keyring.gpg
+observed=$(gpg --batch --show-keys --with-colons \
+  /tmp/vonk-forge-dev-archive-keyring.gpg \
+  | awk -F: '$1 == "fpr" { print $10; exit }')
+test "$observed" = "$EXPECTED_DEV_APT_FINGERPRINT"
+sudo install -o root -g root -m 0644 \
+  /tmp/vonk-forge-dev-archive-keyring.gpg \
+  /usr/share/keyrings/vonk-forge-dev-archive-keyring.gpg
+printf '%s\n' \
+  'deb [arch=arm64 signed-by=/usr/share/keyrings/vonk-forge-dev-archive-keyring.gpg] https://packages.vonkforge.ai dev main' \
+  | sudo tee /etc/apt/sources.list.d/vonk-forge-dev.list >/dev/null
+sudo apt update
+sudo apt install vonk-forge-agent
+```
+
+## Install the `stable` channel
+
+Use the independently recorded production fingerprint:
+
+```bash
+EXPECTED_STABLE_APT_FINGERPRINT='REPLACE_WITH_40_CHARACTER_UPPERCASE_FINGERPRINT'
 curl --fail --proto '=https' --tlsv1.3 \
   --output /tmp/vonk-forge-archive-keyring.gpg \
   https://packages.vonkforge.ai/vonk-forge-archive-keyring.gpg
-gpg --show-keys --with-fingerprint /tmp/vonk-forge-archive-keyring.gpg
-sudo install -o root -g root -m 0644 /tmp/vonk-forge-archive-keyring.gpg \
+observed=$(gpg --batch --show-keys --with-colons \
+  /tmp/vonk-forge-archive-keyring.gpg \
+  | awk -F: '$1 == "fpr" { print $10; exit }')
+test "$observed" = "$EXPECTED_STABLE_APT_FINGERPRINT"
+sudo install -o root -g root -m 0644 \
+  /tmp/vonk-forge-archive-keyring.gpg \
   /usr/share/keyrings/vonk-forge-archive-keyring.gpg
 printf '%s\n' \
   'deb [arch=arm64 signed-by=/usr/share/keyrings/vonk-forge-archive-keyring.gpg] https://packages.vonkforge.ai stable main' \
@@ -126,39 +194,160 @@ sudo apt update
 sudo apt install vonk-forge-agent
 ```
 
-Installation is offline-safe after apt has cached the `.deb`: `postinst` creates
-only local users, directories, A/B state, and systemd enablement. It does not
-pair, download, or start a network client. Pairing is a separate explicit
-controller operation. To test an offline reinstall, disconnect egress and run
-`sudo apt install --reinstall /var/cache/apt/archives/vonk-forge-agent_*.deb`.
+Keep only one Vonk Forge source enabled during normal operation. Installation
+is offline-safe after apt has cached the `.deb`; maintainer scripts create only
+local users, directories, A/B state, and systemd enablement. Pairing is a
+separate explicit controller operation.
 
-For a GitHub Release download, verify the keyless identity before installation:
+## Update and switch channels
+
+Inspect the installed and candidate versions before every channel change:
 
 ```bash
-cosign verify-blob \
-  --bundle vonk-forge-agent_0.1.0_arm64.deb.sigstore.json \
-  --certificate-identity-regexp '^https://github.com/.*/vonk-forge/.github/workflows/ci.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  vonk-forge-agent_0.1.0_arm64.deb
-gh attestation verify vonk-forge-agent_0.1.0_arm64.deb --repo CarstVaartjes/vonk-forge
+dpkg-query -W -f='${Version}\n' vonk-forge-agent
+apt-cache policy vonk-forge-agent
+sudo apt update
+sudo apt install --only-upgrade vonk-forge-agent
 ```
 
-## Recovery and key rotation
+Debian orders `X.Y.Z~dev.<epoch>+g<sha12>` before `X.Y.Z`, so moving from a
+development build for a release line to that final release is an upgrade.
+Newer development epochs sort after older epochs. Confirm a proposed ordering
+when needed:
 
-Do not silently replace a compromised key.
+```bash
+dpkg --compare-versions "$CANDIDATE_VERSION" gt "$INSTALLED_VERSION"
+```
 
-For apt key rotation, dual-publish the old and new public keyrings, communicate
-both fingerprints out of band, ship the new keyring through the still-trusted
-old repository, then change the repository signer. Retain old signed metadata
-until the migration window closes.
+To move from `dev` to `stable`, first install and verify the stable keyring,
+write the stable source, remove the development source, then update:
 
-For agent key rotation, release a supervisor/helper `.deb` authenticated by the
-still-trusted apt/Sigstore identity that contains an explicitly reviewed key
-transition. Roll it out as a topology-aware canary before signing agent slots
-with the new key. A suspected compromise freezes agent updates and apt
-publication until incident review establishes which trust root remains valid.
+```bash
+sudo rm -f /etc/apt/sources.list.d/vonk-forge-dev.list
+sudo apt update
+apt-cache policy vonk-forge-agent
+sudo apt install vonk-forge-agent
+```
 
-The private aptly state is recoverable from `versions/<version>/`; select the
-last state whose public `InRelease` is known good, copy it to `latest`, and rerun
-publication under the protected `apt-release` environment. Never reconstruct an
-index by scraping untrusted package files from the public bucket.
+Reverse the source filenames to move to `dev`. Merely changing the source does not bypass
+Debian or package downgrade protection. If the selected channel's
+candidate is older than the installed version, apt will not downgrade it and
+the package `preinst` also refuses a downgrade. Wait for that channel to catch
+up or use the separately reviewed recovery procedure; do not add
+`--allow-downgrades` and do not remove the package just to evade this guard.
+
+## Verify immutable development evidence
+
+Select the successful `Agent package release` run for the accepted `main` SHA,
+then download the full-SHA artifact:
+
+```bash
+SOURCE_SHA='REPLACE_WITH_40_CHARACTER_MAIN_SHA'
+gh run list --workflow agent-release.yml --branch main --commit "$SOURCE_SHA"
+gh run download RUN_ID --name "vonk-agent-development-$SOURCE_SHA" --dir agent-package
+cd agent-package
+sha256sum --check vonk-forge-agent_*_arm64.deb.sha256
+gh attestation verify vonk-forge-agent_*_arm64.deb \
+  --repo CarstVaartjes/vonk-forge \
+  --signer-workflow CarstVaartjes/vonk-forge/.github/workflows/agent-package-build.yml \
+  --source-digest "$SOURCE_SHA" --source-ref refs/heads/main
+cosign verify-blob \
+  --bundle vonk-forge-agent_*_arm64.deb.sigstore.json \
+  --certificate-identity-regexp '^https://github.com/CarstVaartjes/vonk-forge/.github/workflows/agent-package-build.yml@refs/heads/main$' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  vonk-forge-agent_*_arm64.deb
+```
+
+Use an exact filename if more than one package is present; shell globs must
+resolve to one file.
+
+## Verify immutable production evidence
+
+Download the exact signed tag's Release assets and verify checksum, GitHub
+attestation, and Sigstore identity before a manual install:
+
+```bash
+TAG=v0.1.0
+VERSION=${TAG#v}
+gh release download "$TAG" --repo CarstVaartjes/vonk-forge \
+  --dir "release-$VERSION"
+cd "release-$VERSION"
+sha256sum --check "vonk-forge-agent_${VERSION}_arm64.deb.sha256"
+gh attestation verify "vonk-forge-agent_${VERSION}_arm64.deb" \
+  --repo CarstVaartjes/vonk-forge \
+  --signer-workflow CarstVaartjes/vonk-forge/.github/workflows/agent-package-build.yml \
+  --source-ref "refs/tags/$TAG"
+cosign verify-blob \
+  --bundle "vonk-forge-agent_${VERSION}_arm64.deb.sigstore.json" \
+  --certificate-identity-regexp "^https://github.com/CarstVaartjes/vonk-forge/.github/workflows/agent-package-build\\.yml@refs/tags/${TAG}$" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  "vonk-forge-agent_${VERSION}_arm64.deb"
+```
+
+The Release also contains the CycloneDX/SPDX SBOMs, SLSA provenance,
+`vonk-forge-systemd-security.json`, and the Sigstore bundle from the accepted
+reusable build. GitHub attestations remain in GitHub's attestation store and
+are verified with `gh attestation verify`; they are not fabricated as a local
+JSON file.
+
+## Publication procedure
+
+For development, merge to `main`. The workflow verifies the exact current
+`origin/main` tip before build and again inside the protected
+`apt-development` job immediately before private-state access. A superseded
+commit cannot advance `dev`.
+
+For production:
+
+1. Run the complete read-only acceptance on the intended `main` commit.
+2. Confirm all workspace versions equal `X.Y.Z` and the canonical platform
+   input exists.
+3. Create and push one annotated trusted SSH-signed `vX.Y.Z` tag. Never move or
+   reuse it.
+4. Approve `agent-release`; verify the package and platform evidence.
+5. Confirm the GitHub Release exists with the exact accepted package set.
+6. Approve `apt-release`. Stable apt publication cannot start before successful
+   GitHub Release creation.
+7. Verify `InRelease` and install from a disposable Ubuntu 24.04 ARM64 host.
+
+## Interrupted publication and recovery
+
+An interrupted run is normally recovered by rerunning the exact accepted
+`main` commit or signed tag. Before rerunning, preserve logs and inspect the
+channel's private bucket:
+
+- no `commit.json`: the attempt is uncommitted; exact matching partial archives
+  may be completed, while conflicting bytes fail closed;
+- `versions/<version>/commit.json` exists: it is authoritative even when
+  `latest.json` is absent or stale; an exact rerun replays the checksum-bound
+  public tree and then repairs the pointer;
+- publication stopped before `InRelease`: clients continue to see the prior
+  signed commit object; and
+- publication wrote `InRelease` but not `latest.json`: clients can use the new
+  repository while an exact rerun safely repairs private discovery state.
+
+Do not reconstruct trusted aptly state from the public bucket. Do not edit
+`latest.json`, delete immutable version objects, or copy state between channels. Restore a
+private bucket only from its authenticated, same-channel backup, then rerun the
+exact source. If any committed hash differs, signing authority is uncertain,
+or a supposedly immutable version conflicts, stop publication and begin an
+incident review.
+
+## Key rotation
+
+Do not rotate either authority by silently replacing one environment secret.
+
+For an apt key rotation, first implement and review an overlap release that
+publishes a separately named new keyring while metadata is still signed by the
+old key. Publish both fingerprints out of band, migrate clients so `signed-by`
+trusts the reviewed overlap, and only then switch the environment signer in a
+new version. Retain old signed metadata and an offline revocation certificate
+through the migration window. The current fixed keyring workflow intentionally
+fails closed rather than pretending a one-step signer replacement is safe.
+
+For an agent key rotation, use the still-trusted apt/Sigstore identities to
+ship a specifically reviewed supervisor/helper transition package. Update the
+same key and fingerprint in both agent environments, canary the transition,
+and only then sign later slots with the new key. A suspected compromise freezes
+both development and production publication until incident review determines
+which trust root remains valid.

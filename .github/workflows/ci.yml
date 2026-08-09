@@ -322,7 +322,7 @@ jobs:
     needs: [release-metadata]
     uses: ./.github/workflows/agent-package-build.yml
     with:
-      channel: ${{ needs.release-metadata.outputs.channel }}
+      channel: stable
       version: ${{ needs.release-metadata.outputs.version }}
       next_version: ${{ needs.release-metadata.outputs.next_version }}
       package: ${{ needs.release-metadata.outputs.package }}
@@ -850,26 +850,52 @@ jobs:
             > vonk-forge-images.env
           sha256sum vonk-forge-images.env > vonk-forge-images.env.sha256
       - name: Create public GitHub Release
-        run: >-
-          gh release create "$GITHUB_REF_NAME"
-          vonk-forge-images.env vonk-forge-images.env.sha256
-          release-output/control-deployment-descriptor.json
-          release-output/docker-compose.production.yml
-          release-output/vonk-forge-host-updater.tar
-          release-output/vonk-forge-host-updater.tar.sha256
-          release-output/platform-release.json
-          release-output/platform-publication.json
-          release-output/agent-package/vonk-forge-agent_${{ needs.release-metadata.outputs.version }}_arm64.deb
-          release-output/agent-package/vonk-forge-agent_${{ needs.release-metadata.outputs.version }}_arm64.deb.sha256
-          release-output/agent-package/vonk-forge-agent_${{ needs.release-metadata.outputs.version }}_arm64.sbom.spdx.json
-          release-output/agent-package/vonk-forge-agent_${{ needs.release-metadata.outputs.version }}_arm64.provenance.json
-          release-output/agent-package/vonk-forge-agent_${{ needs.release-metadata.outputs.version }}_arm64.deb.sigstore.json
-          --repo "$GITHUB_REPOSITORY"
-          --verify-tag
-          --title "Vonk Forge ${{ needs.release-metadata.outputs.version }}"
-          --generate-notes
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PACKAGE: ${{ needs.build-agent-package.outputs.package }}
+          VERSION: ${{ needs.build-agent-package.outputs.version }}
+        run: |
+          set -euo pipefail
+          [[ "$PACKAGE" == "vonk-forge-agent_${VERSION}_arm64.deb" ]]
+          release_assets=(
+            "release-output/agent-package/$PACKAGE"
+            "release-output/agent-package/${PACKAGE}.sha256"
+            "release-output/agent-package/vonk-forge-agent_${VERSION}_arm64.sbom.cdx.json"
+            "release-output/agent-package/vonk-forge-agent_${VERSION}_arm64.sbom.spdx.json"
+            "release-output/agent-package/vonk-forge-agent_${VERSION}_arm64.provenance.json"
+            "release-output/agent-package/${PACKAGE}.sigstore.json"
+            "release-output/agent-package/vonk-forge-systemd-security.json"
+          )
+          mapfile -t expected_names < <(
+            printf '%s\n' "${release_assets[@]##*/}" | LC_ALL=C sort
+          )
+          mapfile -t actual_names < <(
+            find release-output/agent-package -mindepth 1 -maxdepth 1 \
+              -printf '%f\n' | LC_ALL=C sort
+          )
+          if [[ "${actual_names[*]}" != "${expected_names[*]}" ]]; then
+            echo "refusing unexpected agent package release asset set" >&2
+            printf 'expected: %s\nactual: %s\n' \
+              "${expected_names[*]}" "${actual_names[*]}" >&2
+            exit 1
+          fi
+          for asset in "${release_assets[@]}"; do
+            [[ -f "$asset" && ! -L "$asset" ]]
+          done
+          gh release create "$GITHUB_REF_NAME" \
+            vonk-forge-images.env vonk-forge-images.env.sha256 \
+            release-output/control-deployment-descriptor.json \
+            release-output/docker-compose.production.yml \
+            release-output/vonk-forge-host-updater.tar \
+            release-output/vonk-forge-host-updater.tar.sha256 \
+            release-output/platform-release.json \
+            release-output/platform-publication.json \
+            "${release_assets[@]}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "Vonk Forge $VERSION" \
+            --generate-notes
 
   advance-production-aliases:
     name: Advance accepted production image aliases
@@ -1033,7 +1059,7 @@ jobs:
     if: needs.release-manifest.result == 'success'
     uses: ./.github/workflows/agent-apt-publish.yml
     with:
-      channel: ${{ needs.release-metadata.outputs.channel }}
+      channel: stable
       version: ${{ needs.build-agent-package.outputs.version }}
       package: ${{ needs.build-agent-package.outputs.package }}
       artifact_name: ${{ needs.build-agent-package.outputs.artifact_name }}
