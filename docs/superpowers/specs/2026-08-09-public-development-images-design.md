@@ -33,15 +33,22 @@ ghcr.io/carstvaartjes/vonk-forge-api
 ghcr.io/carstvaartjes/vonk-forge-worker
 ```
 
-Development tags use `dev-sha-<full-40-character-commit>`. The generated
-development Compose file pins both the readable development tag and immutable
-manifest digest. The workflow never publishes `latest`.
+Development publication uses immutable `dev-sha-<full-40-character-commit>`
+tags and updates the moving `dev` convenience tag only after that exact commit
+passes every scan and image-only acceptance gate. The generated development
+Compose file always pins the readable immutable development tag and manifest
+digest; it never consumes the moving alias. The development workflow never
+publishes or changes `latest`.
 
 A production release does not rebuild these images. After all production gates
 pass, it adds the stable `vX.Y.Z` tag to the already-tested digest for the tagged
-commit and records that digest in signed release metadata and the platform
-target. Tags identify channels; digest identity, attestations, signed release
-evidence, and production configuration authorize production use.
+commit and updates the moving `latest` convenience tag to that same digest. It
+records the digest in signed release metadata and the platform target. The
+production workflow never publishes or changes `dev`. Moving aliases identify
+channels for operator convenience; immutable tag-plus-digest references,
+attestations, signed release evidence, and production configuration authorize
+deployment. Production Compose artifacts therefore use
+`vX.Y.Z@sha256:<digest>`, never plain `latest`.
 
 ## Development workflow
 
@@ -65,8 +72,9 @@ The workflow:
 6. Runs the complete image-only Compose stack, including repository
    initialization, PostgreSQL migration, worker/API health, readiness request,
    restart, and clean teardown.
-7. Logs in to GHCR only after those checks pass, pushes the exact tested images,
-   and records their digests and GitHub provenance attestations.
+7. Logs in to GHCR only after those checks pass, pushes the exact tested images
+   under immutable commit tags, verifies their registry digests and provenance,
+   and only then advances the `dev` aliases to those exact manifests.
 8. Renders and uploads one `docker-compose.yml` artifact with exact image
    digests and source commit. The artifact contains no secret values.
 
@@ -158,6 +166,7 @@ Development and production share tested API/worker image digests, not Compose
 configuration or runtime authority. Separation is explicit through:
 
 - `dev-sha-*` versus stable `vX.Y.Z` tags;
+- moving `dev` versus `latest` aliases, each writable only by its own workflow;
 - development versus signed production deployment artifacts;
 - `VONK_DEPLOYMENT_MODE=development` and synthetic generation identity;
 - a development-only `dev-init` command and named volumes;
@@ -171,6 +180,10 @@ Production is initiated only by a signed `vX.Y.Z` tag whose commit already has
 the accepted `main` development images; it never treats a branch, manual
 workflow ref, or untested rebuild as production input.
 
+Both workflows treat a moving alias update as their final publication step. A
+failed build, scan, acceptance run, digest check, attestation, or release gate
+therefore leaves the previously accepted alias in place.
+
 ## Operator flow
 
 For a new accepted commit, the operator downloads the workflow's generated
@@ -180,6 +193,12 @@ public digest-pinned images. The existing `secrets/` directory and named volumes
 remain untouched.
 
 No registry login is required while the GHCR packages are public.
+
+The operator documentation gives copy/paste instructions for creating the
+three runtime secret files directly on a NAS, an alternative workstation-to-SMB
+flow, safe file permissions, Compose-project import, non-secret validation,
+rotation, backup boundaries, and recovery. The generated admin key and worker
+token remain inside service-specific named volumes and are not operator inputs.
 
 ## Failure and verification behavior
 

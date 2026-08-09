@@ -319,22 +319,26 @@ git commit -S -m "test: exercise image-only development stack"
 - Create: `scripts/tests/test_dev_image_workflow.py`
 
 **Interfaces:**
-- Produces: immutable `dev-sha-<40-hex>` API/worker tags and digest outputs.
+- Produces: immutable `dev-sha-<40-hex>` API/worker tags, moving `dev` aliases,
+  and digest outputs.
 - Produces: artifact `vonk-forge-dev-compose-<sha>/docker-compose.yml`.
 - Consumes: only the exact current `origin/main` tip.
 
 - [ ] **Step 1: Write failing metadata and workflow contract tests**
 
-Test exact-main ref validation, development tag generation, repository names,
-digest format, and rejection of branches/tags/abbreviated SHAs. Parse the
-workflow and assert no `environment`, build args, build secrets, `latest`, or
-pre-acceptance registry login/push exists.
+Test exact-main ref validation, immutable development tag generation, the exact
+`dev` alias, repository names, digest format, and rejection of
+branches/tags/abbreviated SHAs. Parse the workflow and assert no `environment`,
+build args, build secrets, `latest`, or pre-acceptance registry login/push
+exists. Require the `dev` alias update to occur only after immutable publication,
+digest verification, provenance, and Compose rendering succeed.
 
 - [ ] **Step 2: Implement deterministic metadata**
 
 `scripts/dev-image-metadata` accepts event ref, selected SHA, and fetched
 origin-main SHA; all must identify `refs/heads/main` at one full commit. It emits
-API/worker repository names and `dev-sha-<sha>` tags only.
+API/worker repository names, immutable `dev-sha-<sha>` tags, and the exact `dev`
+convenience alias. The renderer consumes only immutable tag-plus-digest refs.
 
 - [ ] **Step 3: Build exact OCI archives before registry login**
 
@@ -348,7 +352,9 @@ and run `scripts/dev-image-acceptance` against them. Do not expose
 Only after acceptance, log into GHCR and use Skopeo to copy the tested OCI
 archives to their development tags. Resolve immutable registry digests, render
 the final Compose file with tag-plus-digest references, validate it, attest the
-published subjects, and upload only `docker-compose.yml`.
+published subjects, and upload only `docker-compose.yml`. As the final registry
+mutation, advance each `dev` alias to its already-verified immutable manifest
+without rebuilding it. Never publish or change `latest` in this workflow.
 
 - [ ] **Step 5: Run workflow contract tests and local workflow commands**
 
@@ -377,15 +383,18 @@ git commit -S -m "ci: publish accepted main development images"
 
 **Interfaces:**
 - Consumes: signed `vX.Y.Z` tag commit and existing `dev-sha-<commit>` manifests.
-- Produces: stable API/worker tags pointing to exactly those manifests.
+- Produces: stable API/worker tags and moving `latest` aliases pointing to
+  exactly those manifests.
 - Preserves: existing Hermes build and platform release evidence pipeline.
 
 - [ ] **Step 1: Write failing release-promotion tests**
 
 Assert release metadata includes development source references for the exact tag
 commit. Assert the workflow no longer builds API/worker, refuses absent or
-mismatched development manifests, never emits `latest`, promotes by digest, and
-feeds promoted digest outputs into existing SBOM/provenance/platform evidence.
+mismatched development manifests, never emits or changes `dev`, promotes by
+digest, and feeds promoted digest outputs into existing
+SBOM/provenance/platform evidence. Require `latest` to advance only after every
+signed-release gate, stable-tag digest check, and release-evidence step passes.
 
 - [ ] **Step 2: Run release tests and verify current rebuild behavior fails**
 
@@ -401,8 +410,10 @@ Expected: failure because CI currently rebuilds API/worker and publishes
 Inspect each `dev-sha-<tag-commit>` manifest, verify its source revision and
 attestation identity, then use `docker buildx imagetools create --tag
 <repository>:<version> <repository>@<digest>`. Reinspect the stable tag and
-require digest equality. Keep the existing output names consumed by platform
-evidence. Do not modify Hermes behavior in this task.
+require digest equality. After all release evidence succeeds, update
+`<repository>:latest` from that same immutable digest and verify equality again.
+Keep the existing output names consumed by platform evidence. Never mutate
+`<repository>:dev`. Do not modify Hermes behavior in this task.
 
 - [ ] **Step 4: Run release and supply-chain tests**
 
@@ -436,6 +447,7 @@ git commit -S -m "ci: promote accepted images for production"
 - Modify: `.gitignore`
 - Modify: `README.md`
 - Modify: `deploy/compose/README.md`
+- Create: `docs/runbooks/development-nas-installation.md`
 
 **Interfaces:**
 - Produces: documented operator layout containing only Compose and three secret files.
@@ -448,10 +460,19 @@ to build from SMB. Preserve unrelated user files and production deployment docs.
 
 - [ ] **Step 2: Document public image and secret flow**
 
-Document main development publication, signed-tag production promotion, Action
-artifact download, UGREEN project redeployment, relative NAS secret paths,
-repository fast-forward behavior, intentional repository-volume rollback, and
-the fact that no secret enters CI or an image.
+Document main development publication (`dev-sha-*` plus `dev`), signed-tag
+production promotion (`vX.Y.Z` plus `latest`), Action artifact download, generic
+NAS Compose-project redeployment, relative NAS secret paths, repository
+fast-forward behavior, intentional repository-volume rollback, and the fact
+that no secret enters CI or an image.
+
+Add a dedicated installation runbook with the exact three-file directory
+layout, NAS-shell and PowerShell-safe generation/copy instructions, restrictive
+permissions, database URL construction, private SSH signing-key handling,
+Compose import and first-start checks, non-secret troubleshooting, rotation,
+backup/restore boundaries, and an explicit list of generated credentials held
+only in named volumes. Commands must avoid printing secret values or placing
+them in command history.
 
 - [ ] **Step 3: Run all focused verification**
 
