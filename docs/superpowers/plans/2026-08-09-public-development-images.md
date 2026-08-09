@@ -316,6 +316,7 @@ git commit -S -m "test: exercise image-only development stack"
 **Files:**
 - Create: `.github/workflows/dev-images.yml`
 - Create: `scripts/dev-image-metadata`
+- Create: `scripts/promote-dev-aliases`
 - Create: `scripts/tests/test_dev_image_workflow.py`
 
 **Interfaces:**
@@ -331,7 +332,10 @@ Test exact-main ref validation, immutable development tag generation, the exact
 branches/tags/abbreviated SHAs. Parse the workflow and assert no `environment`,
 build args, build secrets, `latest`, or pre-acceptance registry login/push
 exists. Require the `dev` alias update to occur only after immutable publication,
-digest verification, provenance, and Compose rendering succeed.
+digest verification, provenance, and Compose rendering succeed. Exercise
+initial publication, partial-state roll-forward, established-pair rollback,
+rollback failure, idempotent reruns, and failed-job repair using fake registry
+state.
 
 - [ ] **Step 2: Implement deterministic metadata**
 
@@ -354,7 +358,10 @@ archives to their development tags. Resolve immutable registry digests, render
 the final Compose file with tag-plus-digest references, validate it, attest the
 published subjects, and upload only `docker-compose.yml`. As the final registry
 mutation, advance each `dev` alias to its already-verified immutable manifest
-without rebuilding it. Never publish or change `latest` in this workflow.
+without rebuilding it. Serialize and retry the cross-repository reconciliation,
+verify both resulting digests, roll back an established pair on failure, and
+retain the accepted OCI artifact so a failed-job rerun repairs first-publication
+or cancellation drift. Never publish or change `latest` in this workflow.
 
 - [ ] **Step 5: Run workflow contract tests and local workflow commands**
 
@@ -368,7 +375,7 @@ Expected: all tests and metadata validation pass.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add .github/workflows/dev-images.yml scripts/dev-image-metadata scripts/tests/test_dev_image_workflow.py
+git add .github/workflows/dev-images.yml scripts/dev-image-metadata scripts/promote-dev-aliases scripts/tests/test_dev_image_workflow.py
 git commit -S -m "ci: publish accepted main development images"
 ```
 
@@ -378,8 +385,10 @@ git commit -S -m "ci: publish accepted main development images"
 
 **Files:**
 - Modify: `.github/workflows/ci.yml`
+- Create: `.github/release-allowed-signers`
 - Modify: `scripts/container-release-metadata`
-- Modify: `control/tests/test_container_release.py`
+- Modify: `tests/scripts/test_container_release_metadata.py`
+- Modify: `tests/test_container_release_workflow.py`
 
 **Interfaces:**
 - Consumes: signed `vX.Y.Z` tag commit and existing `dev-sha-<commit>` manifests.
@@ -395,11 +404,16 @@ mismatched development manifests, never emits or changes `dev`, promotes by
 digest, and feeds promoted digest outputs into existing
 SBOM/provenance/platform evidence. Require `latest` to advance only after every
 signed-release gate, stable-tag digest check, and release-evidence step passes.
+The tag verifier must use a trusted signer allowlist read from fetched `main`,
+require an annotated SSH-signed tag, and prove the tagged commit is reachable
+from `origin/main` before any release build or publication job can run.
 
 - [ ] **Step 2: Run release tests and verify current rebuild behavior fails**
 
 ```bash
-uv run --project control --frozen pytest -q control/tests/test_container_release.py
+./.venv/bin/python -m pytest -q \
+  tests/scripts/test_container_release_metadata.py \
+  tests/test_container_release_workflow.py
 ```
 
 Expected: failure because CI currently rebuilds API/worker and publishes
@@ -418,7 +432,9 @@ Keep the existing output names consumed by platform evidence. Never mutate
 - [ ] **Step 4: Run release and supply-chain tests**
 
 ```bash
-uv run --project control --frozen pytest -q control/tests/test_container_release.py
+./.venv/bin/python -m pytest -q \
+  tests/scripts/test_container_release_metadata.py \
+  tests/test_container_release_workflow.py
 scripts/verify-supply-chain --json
 ```
 
@@ -428,7 +444,7 @@ digests.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add .github/workflows/ci.yml scripts/container-release-metadata control/tests/test_container_release.py
+git add .github/workflows/ci.yml .github/release-allowed-signers scripts/container-release-metadata tests/scripts/test_container_release_metadata.py tests/test_container_release_workflow.py
 git commit -S -m "ci: promote accepted images for production"
 ```
 

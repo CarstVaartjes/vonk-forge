@@ -180,9 +180,15 @@ Production is initiated only by a signed `vX.Y.Z` tag whose commit already has
 the accepted `main` development images; it never treats a branch, manual
 workflow ref, or untested rebuild as production input.
 
-Both workflows treat a moving alias update as their final publication step. A
-failed build, scan, acceptance run, digest check, attestation, or release gate
-therefore leaves the previously accepted alias in place.
+Both workflows treat moving-alias reconciliation as their final publication
+step. Failures before that step leave the previously accepted aliases in place.
+Because two tags in separate registry repositories cannot be changed atomically,
+the API and worker aliases are explicitly eventually consistent conveniences,
+not deployment authority. Reconciliation is serialized, idempotent, retried,
+digest-verified, and rolls an established pair back on partial failure. A first
+publication or interrupted rollback exits red and is repaired by rerunning the
+failed publication job from its retained, already-accepted OCI archives. The
+digest-pinned Compose artifact remains authoritative throughout.
 
 ## Operator flow
 

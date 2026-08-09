@@ -259,8 +259,9 @@ jobs:
               --format '{{ json .Provenance }}' \
               | jq -e --arg revision "$GITHUB_SHA" \
                 '([.. | objects | select(
-                    (.predicateType? | strings | startswith("https://slsa.dev/provenance/"))
-                    or (.buildDefinition?.buildType? | strings | length > 0)
+                  (.predicateType? | strings | startswith("https://slsa.dev/provenance/"))
+                  or (.SLSA?.buildType? | strings | length > 0)
+                  or (.buildDefinition?.buildType? | strings | length > 0)
                   )] | length > 0)
                  and ([.. | strings | select(. == $revision)] | length > 0)' \
                 >/dev/null
@@ -308,45 +309,10 @@ jobs:
           WORKER_IMAGE: ${{ needs.build-and-accept.outputs.worker_image }}
         run: |
           set -euo pipefail
-          previous_api_digest=$(skopeo inspect --format '{{.Digest}}' \
-            "docker://$API_IMAGE:$DEV_ALIAS" 2>/dev/null || true)
-          previous_worker_digest=$(skopeo inspect --format '{{.Digest}}' \
-            "docker://$WORKER_IMAGE:$DEV_ALIAS" 2>/dev/null || true)
-          promotion_started=0
-          promotion_complete=0
-          rollback_aliases() {
-            local status=$?
-            trap - EXIT INT TERM
-            if [[ "$promotion_started" -eq 1 && "$promotion_complete" -eq 0 ]]; then
-              if [[ "$previous_api_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-                skopeo copy --all --preserve-digests \
-                  "docker://$API_IMAGE@$previous_api_digest" \
-                  "docker://$API_IMAGE:$DEV_ALIAS" >/dev/null 2>&1 || true
-              fi
-              if [[ "$previous_worker_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-                skopeo copy --all --preserve-digests \
-                  "docker://$WORKER_IMAGE@$previous_worker_digest" \
-                  "docker://$WORKER_IMAGE:$DEV_ALIAS" >/dev/null 2>&1 || true
-              fi
-            fi
-            exit "$status"
-          }
-          trap rollback_aliases EXIT
-          trap 'exit 130' INT
-          trap 'exit 143' TERM
           git fetch --force --no-tags origin \
             +refs/heads/main:refs/remotes/origin/main
           [[ "$GITHUB_SHA" == \
             "$(git rev-parse --verify refs/remotes/origin/main^{commit})" ]]
-          promotion_started=1
-          skopeo copy --all --preserve-digests \
-            "docker://$API_IMAGE@$API_DIGEST" \
-            "docker://$API_IMAGE:$DEV_ALIAS"
-          skopeo copy --all --preserve-digests \
-            "docker://$WORKER_IMAGE@$WORKER_DIGEST" \
-            "docker://$WORKER_IMAGE:$DEV_ALIAS"
-          [[ $(skopeo inspect --format '{{.Digest}}' \
-            "docker://$API_IMAGE:$DEV_ALIAS") == "$API_DIGEST" ]]
-          [[ $(skopeo inspect --format '{{.Digest}}' \
-            "docker://$WORKER_IMAGE:$DEV_ALIAS") == "$WORKER_DIGEST" ]]
-          promotion_complete=1
+          scripts/promote-dev-aliases \
+            "$API_IMAGE" "$API_DIGEST" \
+            "$WORKER_IMAGE" "$WORKER_DIGEST" "$DEV_ALIAS"
