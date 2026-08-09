@@ -1,6 +1,7 @@
 .superpowers/
 .worktrees/
 .tooling/
+.dev/
 /target/
 .env
 .env.*

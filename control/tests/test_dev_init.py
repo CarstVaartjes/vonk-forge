@@ -229,6 +229,121 @@ def test_stage_runtime_secrets_rejects_symlink_inputs_and_projection_roots(
         stage_runtime_secrets(source, api_root, tmp_path / "worker")
 
 
+def test_stage_runtime_secrets_rejects_parent_symlink_aliases_before_mutation(
+    tmp_path: Path,
+) -> None:
+    source = _secret_source(tmp_path / "source")
+    actual_parent = tmp_path / "actual-parent"
+    shared = actual_parent / "shared"
+    shared.mkdir(parents=True)
+    sentinel = shared / "operator-owned"
+    sentinel.write_bytes(b"preserve-me\n")
+    alias_parent = tmp_path / "alias-parent"
+    alias_parent.symlink_to(actual_parent, target_is_directory=True)
+
+    with pytest.raises(DevInitError, match="physically distinct"):
+        stage_runtime_secrets(source, shared, alias_parent / "shared")
+
+    assert sentinel.read_bytes() == b"preserve-me\n"
+    assert {path.name for path in shared.iterdir()} == {"operator-owned"}
+
+
+def test_stage_runtime_secrets_preserves_generated_credentials_and_refreshes_inputs(
+    tmp_path: Path,
+) -> None:
+    source = _secret_source(tmp_path / "source")
+    api_root = tmp_path / "api"
+    worker_root = tmp_path / "worker"
+    stage_runtime_secrets(source, api_root, worker_root)
+    admin_key = (api_root / "admin-grant-private-key").read_bytes()
+    worker_token = (worker_root / "worker-api-token").read_bytes()
+    (source / "database-url").write_bytes(
+        b"postgresql://vonk:replacement@postgres/vonk\n"
+    )
+    (source / "git-signing-key").write_bytes(b"replacement-signing-key\n")
+    api_root.chmod(0o700)
+    worker_root.chmod(0o700)
+    (api_root / "unexpected-api-authority").write_bytes(b"remove\n")
+    (worker_root / "unexpected-worker-authority").write_bytes(b"remove\n")
+
+    stage_runtime_secrets(source, api_root, worker_root)
+
+    assert (api_root / "admin-grant-private-key").read_bytes() == admin_key
+    assert (worker_root / "worker-api-token").read_bytes() == worker_token
+    assert (api_root / "database-url").read_bytes() == (
+        b"postgresql://vonk:replacement@postgres/vonk\n"
+    )
+    assert (worker_root / "database-url").read_bytes() == (
+        b"postgresql://vonk:replacement@postgres/vonk\n"
+    )
+    assert (api_root / "git-signing-key").read_bytes() == b"replacement-signing-key\n"
+    assert {path.name for path in api_root.iterdir()} == {
+        "admin-grant-private-key",
+        "database-url",
+        "git-signing-key",
+    }
+    assert {path.name for path in worker_root.iterdir()} == {
+        "database-url",
+        "worker-api-token",
+    }
+
+
+@pytest.mark.parametrize(
+    ("projection", "name", "malformed"),
+    (
+        ("api", "admin-grant-private-key", b"not-an-ed25519-private-key\n"),
+        ("worker", "worker-api-token", b"short"),
+    ),
+)
+def test_stage_runtime_secrets_rejects_malformed_generated_credentials(
+    tmp_path: Path, projection: str, name: str, malformed: bytes
+) -> None:
+    source = _secret_source(tmp_path / "source")
+    api_root = tmp_path / "api"
+    worker_root = tmp_path / "worker"
+    stage_runtime_secrets(source, api_root, worker_root)
+    root = api_root if projection == "api" else worker_root
+    root.chmod(0o700)
+    target = root / name
+    target.unlink()
+    target.write_bytes(malformed)
+    target.chmod(0o400)
+
+    with pytest.raises(DevInitError, match="generated credential"):
+        stage_runtime_secrets(source, api_root, worker_root)
+
+    assert target.read_bytes() == malformed
+
+
+@pytest.mark.parametrize(
+    ("projection", "name"),
+    (
+        ("api", "admin-grant-private-key"),
+        ("worker", "worker-api-token"),
+    ),
+)
+def test_stage_runtime_secrets_rejects_symlinked_generated_credentials(
+    tmp_path: Path, projection: str, name: str
+) -> None:
+    source = _secret_source(tmp_path / "source")
+    api_root = tmp_path / "api"
+    worker_root = tmp_path / "worker"
+    stage_runtime_secrets(source, api_root, worker_root)
+    root = api_root if projection == "api" else worker_root
+    root.chmod(0o700)
+    target = root / name
+    target.unlink()
+    outside = tmp_path / f"outside-{name}"
+    outside.write_bytes(b"must-not-be-read-or-replaced\n")
+    target.symlink_to(outside)
+
+    with pytest.raises(DevInitError, match="generated credential"):
+        stage_runtime_secrets(source, api_root, worker_root)
+
+    assert target.is_symlink()
+    assert outside.read_bytes() == b"must-not-be-read-or-replaced\n"
+
+
 def test_main_initializes_repository_synthetic_state_and_runtime_secrets(
     tmp_path: Path, local_acceptance: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -258,3 +373,40 @@ def test_main_initializes_repository_synthetic_state_and_runtime_secrets(
     assert (api_root / "admin-grant-private-key").is_file()
     assert (worker_root / "worker-api-token").is_file()
     assert all(path.is_dir() for path in (state, routes, supervisor))
+
+
+def test_main_preflights_all_required_environment_before_cloning(
+    tmp_path: Path, local_acceptance: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _origin_path, _publisher, repository_url, expected = _origin(tmp_path)
+    source = _secret_source(tmp_path / "source")
+    repository = tmp_path / "repository"
+    monkeypatch.setenv("VONK_DEV_EXPECTED_COMMIT", expected)
+    monkeypatch.setenv("VONK_DEV_REPOSITORY_URL", repository_url)
+    monkeypatch.setenv("VONK_REPOSITORY_PATH", str(repository))
+    monkeypatch.setenv("VONK_DEV_SECRET_SOURCE_ROOT", str(source))
+    monkeypatch.setenv("VONK_DEV_API_SECRET_ROOT", str(tmp_path / "api"))
+    monkeypatch.delenv("VONK_DEV_WORKER_SECRET_ROOT", raising=False)
+
+    with pytest.raises(DevInitError, match="VONK_DEV_WORKER_SECRET_ROOT is required"):
+        main()
+
+    assert not repository.exists()
+
+
+def test_active_projection_retries_partial_writes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_write = os.write
+
+    def partial_write(descriptor: int, content: bytes) -> int:
+        return real_write(descriptor, content[:7])
+
+    monkeypatch.setattr(dev_init.os, "write", partial_write)
+    identity = tmp_path / "identity"
+
+    dev_init._write_active_projection(identity)
+
+    raw = (identity / "active.json").read_bytes()
+    assert raw.endswith(b"\n")
+    assert json.loads(raw)["projection_kind"] == "active"

@@ -18,6 +18,7 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from .host_state import HostOperationPlan, SelectionReceipt
 
 _COMMIT = re.compile(r"[0-9a-f]{40}\Z")
+_WORKER_TOKEN = re.compile(rb"[A-Za-z0-9_-]{43}\Z")
 _PUBLIC_REPOSITORY_URL = "https://github.com/CarstVaartjes/vonk-forge.git"
 _API_UID = 10001
 _API_GID = 10001
@@ -379,6 +380,87 @@ def _clear_projection(parent: int) -> None:
         raise DevInitError("development secret projection cannot be cleared") from error
 
 
+def _read_generated_credential(parent: int, name: str) -> bytes | None:
+    try:
+        descriptor = os.open(
+            name,
+            os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC,
+            dir_fd=parent,
+        )
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        raise DevInitError(f"generated credential {name} is unsafe") from error
+    try:
+        before = os.fstat(descriptor)
+        uid, gid = _service_identity()
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_nlink != 1
+            or before.st_uid != uid
+            or before.st_gid != gid
+            or stat.S_IMODE(before.st_mode) != 0o400
+            or not 0 < before.st_size <= _MAX_SECRET_BYTES
+        ):
+            raise DevInitError(f"generated credential {name} is unsafe")
+        content = bytearray()
+        while len(content) <= _MAX_SECRET_BYTES:
+            chunk = os.read(descriptor, min(4096, _MAX_SECRET_BYTES + 1 - len(content)))
+            if not chunk:
+                break
+            content.extend(chunk)
+        after = os.fstat(descriptor)
+        before_identity = (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_mtime_ns,
+            before.st_ctime_ns,
+        )
+        after_identity = (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+            after.st_ctime_ns,
+        )
+        if len(content) != before.st_size or before_identity != after_identity:
+            raise DevInitError(f"generated credential {name} changed while read")
+        return bytes(content)
+    except OSError as error:
+        raise DevInitError(f"generated credential {name} cannot be read") from error
+    finally:
+        os.close(descriptor)
+
+
+def _admin_credential(parent: int) -> bytes:
+    name = "admin-grant-private-key"
+    content = _read_generated_credential(parent, name)
+    if content is None:
+        return ed25519.Ed25519PrivateKey.generate().private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    try:
+        private_key = serialization.load_pem_private_key(content, password=None)
+    except (TypeError, ValueError) as error:
+        raise DevInitError(f"generated credential {name} is malformed") from error
+    if not isinstance(private_key, ed25519.Ed25519PrivateKey):
+        raise DevInitError(f"generated credential {name} is malformed")
+    return content
+
+
+def _worker_credential(parent: int) -> bytes:
+    name = "worker-api-token"
+    content = _read_generated_credential(parent, name)
+    if content is None:
+        return secrets.token_urlsafe(32).encode("ascii")
+    if _WORKER_TOKEN.fullmatch(content) is None:
+        raise DevInitError(f"generated credential {name} is malformed")
+    return content
+
+
 def _seal_projection(parent: int) -> None:
     try:
         os.fchmod(parent, 0o550)
@@ -446,16 +528,21 @@ def stage_runtime_secrets(source: Path, api_root: Path, worker_root: Path) -> No
         raise DevInitError("development secret projections must be distinct")
     database_url = _read_source_secret(source, "database-url")
     signing_key = _read_source_secret(source, "git-signing-key")
-    admin_key = ed25519.Ed25519PrivateKey.generate().private_bytes(
-        serialization.Encoding.PEM,
-        serialization.PrivateFormat.PKCS8,
-        serialization.NoEncryption(),
-    )
-    worker_token = secrets.token_urlsafe(32).encode("ascii")
     api = _projection_directory(api_root, label="API")
     worker = -1
     try:
         worker = _projection_directory(worker_root, label="worker")
+        api_identity = os.fstat(api)
+        worker_identity = os.fstat(worker)
+        if (api_identity.st_dev, api_identity.st_ino) == (
+            worker_identity.st_dev,
+            worker_identity.st_ino,
+        ):
+            raise DevInitError(
+                "development secret projections must be physically distinct"
+            )
+        admin_key = _admin_credential(api)
+        worker_token = _worker_credential(worker)
         _clear_projection(api)
         _clear_projection(worker)
         for name, content in (
@@ -532,7 +619,12 @@ def _write_active_projection(identity_root: Path) -> None:
             0o644,
         )
         content = _active_projection()
-        os.write(descriptor, content)
+        offset = 0
+        while offset < len(content):
+            written = os.write(descriptor, content[offset:])
+            if written <= 0:
+                raise DevInitError("development identity write was incomplete")
+            offset += written
         if os.geteuid() == 0:
             os.fchown(descriptor, 0, 0)
         os.fchmod(descriptor, 0o644)
@@ -560,15 +652,21 @@ def _required_environment(name: str) -> str:
 
 def main() -> int:
     """Initialize repository, synthetic state, and disjoint runtime authority."""
+    repository_path = Path(_required_environment("VONK_REPOSITORY_PATH"))
+    repository_url = _required_environment("VONK_DEV_REPOSITORY_URL")
+    expected_commit = _required_environment("VONK_DEV_EXPECTED_COMMIT")
+    secret_source = Path(_required_environment("VONK_DEV_SECRET_SOURCE_ROOT"))
+    api_secret_root = Path(_required_environment("VONK_DEV_API_SECRET_ROOT"))
+    worker_secret_root = Path(_required_environment("VONK_DEV_WORKER_SECRET_ROOT"))
     initialize_repository(
-        Path(_required_environment("VONK_REPOSITORY_PATH")),
-        _required_environment("VONK_DEV_REPOSITORY_URL"),
-        _required_environment("VONK_DEV_EXPECTED_COMMIT"),
+        repository_path,
+        repository_url,
+        expected_commit,
     )
     stage_runtime_secrets(
-        Path(_required_environment("VONK_DEV_SECRET_SOURCE_ROOT")),
-        Path(_required_environment("VONK_DEV_API_SECRET_ROOT")),
-        Path(_required_environment("VONK_DEV_WORKER_SECRET_ROOT")),
+        secret_source,
+        api_secret_root,
+        worker_secret_root,
     )
     identity_root = Path(os.environ.get("VONK_CONTROL_IDENTITY_ROOT", "/control-identity"))
     _write_active_projection(identity_root)
