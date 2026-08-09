@@ -134,13 +134,83 @@ def _failing_up_docker(tmp_path: Path) -> tuple[Path, Path]:
     return fake_bin, log
 
 
+def _successful_lifecycle_tools(tmp_path: Path) -> tuple[Path, Path]:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    log = tmp_path / "docker.log"
+    docker = fake_bin / "docker"
+    docker.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -eu\n"
+        "printf '%q ' \"$@\" >> \"$VONK_TEST_DOCKER_LOG\"\n"
+        "printf '\\n' >> \"$VONK_TEST_DOCKER_LOG\"\n"
+        "if [[ \"$1\" == image && \" $* \" == *' --format '* ]]; then\n"
+        "  printf '%s\\n' 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'\n"
+        "  exit 0\n"
+        "fi\n"
+        "if [[ \"$1\" == image ]]; then\n"
+        "  printf '%s\\n' '[{\"Config\":{\"User\":\"10001:10001\",\"Env\":[],\"Labels\":{},\"Entrypoint\":[],\"Cmd\":[]}}]'\n"
+        "  exit 0\n"
+        "fi\n"
+        "if [[ \"$1\" == history ]]; then exit 0; fi\n"
+        "if [[ \"$1\" == create ]]; then printf '%s\\n' scanner-container; exit 0; fi\n"
+        "if [[ \"$1\" == export ]]; then tar -cf - --files-from /dev/null; exit 0; fi\n"
+        "if [[ \"$1\" == rm || \"$1\" == run ]]; then exit 0; fi\n"
+        "if [[ \"$1\" == ps ]]; then exit 0; fi\n"
+        "if [[ \"$1\" == inspect && \" $* \" == *'{{json .Mounts}}'* ]]; then\n"
+        "  printf '%s\\n' '[{\"Destination\":\"/repository\",\"Type\":\"volume\",\"Source\":\"fixture-repository\"}]'\n"
+        "  exit 0\n"
+        "fi\n"
+        "if [[ \"$1\" == inspect ]]; then\n"
+        "  case \"${*: -1}\" in\n"
+        "    dev-init-id|migrate-id) printf '%s\\n' 'exited 0' ;;\n"
+        "    *) printf '%s\\n' 'running 0' ;;\n"
+        "  esac\n"
+        "  exit 0\n"
+        "fi\n"
+        "if [[ \"$1\" == compose && \" $* \" == *' ps -aq '* ]]; then\n"
+        "  printf '%s-id\\n' \"${*: -1}\"\n"
+        "  exit 0\n"
+        "fi\n"
+        "if [[ \"$1\" == compose && \" $* \" == *' exec '* ]]; then\n"
+        "  case \" $* \" in\n"
+        "    *' git -C /repository rev-parse '*) printf '%s\\n' \"$VONK_TEST_COMMIT\" ;;\n"
+        "    *'find /control-identity'*) printf '%s\\n' identity-fingerprint ;;\n"
+        "    *' psql '*) printf '%s\\n' 16384 ;;\n"
+        "  esac\n"
+        "  exit 0\n"
+        "fi\n"
+        "if [[ \"$1\" == compose ]]; then exit 0; fi\n"
+        "exit 97\n",
+        encoding="utf-8",
+    )
+    docker.chmod(0o755)
+    curl = fake_bin / "curl"
+    curl.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -eu\n"
+        "printf 'curl ' >> \"$VONK_TEST_DOCKER_LOG\"\n"
+        "printf '%q ' \"$@\" >> \"$VONK_TEST_DOCKER_LOG\"\n"
+        "printf '\\n' >> \"$VONK_TEST_DOCKER_LOG\"\n",
+        encoding="utf-8",
+    )
+    curl.chmod(0o755)
+    return fake_bin, log
+
+
 def _run(
-    repository: Path, fake_bin: Path, log: Path, *arguments: str
+    repository: Path,
+    fake_bin: Path,
+    log: Path,
+    *arguments: str,
+    extra_environment: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     environment = os.environ | {
         "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
         "VONK_TEST_DOCKER_LOG": str(log),
     }
+    if extra_environment:
+        environment.update(extra_environment)
     return subprocess.run(
         (str(repository / "scripts/dev-image-acceptance"), *arguments),
         cwd=repository,
@@ -301,6 +371,38 @@ def test_renders_local_origin_override_as_a_separate_temporary_compose_overlay(
     assert "VONK_DEV_WORKER_IMAGE" in overlay
 
 
+def test_preserves_public_manifest_digests_in_runtime_identity_overlay(
+    tmp_path: Path,
+) -> None:
+    repository = _fixture_repository(tmp_path)
+    fake_bin, log = _config_capturing_docker(tmp_path)
+    commit = _commit(repository)
+    api_image = (
+        f"ghcr.io/carstvaartjes/vonk-forge-api:dev-sha-{commit}@sha256:" + "a" * 64
+    )
+    worker_image = (
+        f"ghcr.io/carstvaartjes/vonk-forge-worker:dev-sha-{commit}@sha256:"
+        + "b" * 64
+    )
+
+    result = _run(
+        repository,
+        fake_bin,
+        log,
+        "--api-image",
+        api_image,
+        "--worker-image",
+        worker_image,
+        "--commit",
+        commit,
+    )
+
+    assert result.returncode == 48
+    overlay = Path(f"{log}.compose-2").read_text(encoding="utf-8")
+    assert overlay.count(api_image) == 2
+    assert overlay.count(worker_image) == 2
+
+
 def test_failed_compose_start_prints_bounded_diagnostics_before_teardown(
     tmp_path: Path,
 ) -> None:
@@ -324,6 +426,45 @@ def test_failed_compose_start_prints_bounded_diagnostics_before_teardown(
     assert " ps -a " in f" {commands} "
     assert " logs --tail 100 --no-color " in f" {commands} "
     assert " down --volumes --remove-orphans " in f" {commands} "
+
+
+def test_successful_lifecycle_exercises_health_isolation_restart_and_teardown(
+    tmp_path: Path,
+) -> None:
+    repository = _fixture_repository(tmp_path)
+    fake_bin, log = _successful_lifecycle_tools(tmp_path)
+    commit = _commit(repository)
+
+    result = _run(
+        repository,
+        fake_bin,
+        log,
+        "--api-image",
+        API_IMAGE,
+        "--worker-image",
+        WORKER_IMAGE,
+        "--commit",
+        commit,
+        extra_environment={"VONK_TEST_COMMIT": commit},
+    )
+
+    commands = log.read_text(encoding="utf-8").splitlines()
+    normalized_commands = [line.replace("\\", "") for line in commands]
+    assert result.returncode == 0, result.stderr
+    assert "development image acceptance passed" in result.stdout
+    assert sum(" up --wait --pull never " in f" {line} " for line in commands) == 2
+    assert any(" restart control-api control-worker " in f" {line} " for line in commands)
+    assert sum(line.startswith("curl ") for line in commands) == 2
+    assert any(
+        "test -r /run/secrets/git-signing-key" in line
+        for line in normalized_commands
+    )
+    assert any(
+        "test -r /run/secrets/worker-api-token" in line
+        for line in normalized_commands
+    )
+    assert any("{{json .Mounts}}" in line for line in normalized_commands)
+    assert any(" down --volumes --remove-orphans " in f" {line} " for line in commands)
 
 
 def test_local_wrapper_runs_the_image_only_template_without_a_source_origin() -> None:

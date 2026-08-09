@@ -194,10 +194,18 @@ EOF
 # create or remove Docker resources.
 [[ -x "$scanner" ]] || die "development image scanner is unavailable"
 "$scanner" "$api_image" "$worker_image"
-api_process_image="ghcr.io/carstvaartjes/vonk-forge-api:dev-sha-$expected_commit@$(docker image inspect --format '{{.Id}}' "$api_image")"
-worker_process_image="ghcr.io/carstvaartjes/vonk-forge-worker:dev-sha-$expected_commit@$(docker image inspect --format '{{.Id}}' "$worker_image")"
+if [[ "$api_image" == "vonk-forge-api:dev-local" ]]; then
+  api_process_image="vonk-forge-api@$(docker image inspect --format '{{.Id}}' "$api_image")"
+else
+  api_process_image=$api_image
+fi
+if [[ "$worker_image" == "vonk-forge-worker:dev-local" ]]; then
+  worker_process_image="vonk-forge-worker@$(docker image inspect --format '{{.Id}}' "$worker_image")"
+else
+  worker_process_image=$worker_image
+fi
 [[ "$api_process_image" =~ @sha256:[0-9a-f]{64}$ && "$worker_process_image" =~ @sha256:[0-9a-f]{64}$ ]] \
-  || die "local development images did not provide immutable IDs"
+  || die "development images did not provide immutable identities"
 # Git runs inside dev-init as its isolated UID.  Give that UID ownership of
 # this disposable, acceptance-only bare origin without touching the checkout.
 docker run --rm --user 0:0 --volume "$origin_dir:/source-origin" \
