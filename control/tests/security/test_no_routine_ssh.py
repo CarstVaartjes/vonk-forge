@@ -84,15 +84,17 @@ def test_legacy_runtime_is_explicitly_isolated_from_production_modules() -> None
     assert "subprocess" in _imports(legacy)
 
 
-def test_production_worker_image_does_not_install_direct_transport_tools() -> None:
+def test_production_worker_image_has_local_git_without_direct_transport_tools() -> None:
     dockerfile = (ROOT / "control/Dockerfile").read_text()
+    runtime = dockerfile.split(" AS runtime-root", 1)[1].split(" AS api-root", 1)[0]
     worker = dockerfile.split(" AS worker", 1)[1].split(" AS api", 1)[0]
-    api = dockerfile.split(" AS api", 1)[1]
+    api_root = dockerfile.split(" AS api-root", 1)[1].split(" AS worker", 1)[0]
 
+    assert "apt-get install --yes --no-install-recommends git" in runtime
     assert "apt-get" not in worker
     assert "openssh-client" not in worker
     assert " git" not in worker
-    assert "git openssh-client" in api
+    assert "apt-get install --yes --no-install-recommends openssh-client" in api_root
 
 
 def test_production_worker_has_no_cluster_egress_network() -> None:
@@ -153,7 +155,8 @@ def test_built_worker_image_contains_no_direct_transport_executable() -> None:
             "-eu",
             "-c",
             (
-                "for executable in ssh scp git vonkctl; do "
+                "command -v git; "
+                "for executable in ssh scp vonkctl; do "
                 "! command -v \"$executable\"; done; "
                 "test ! -e /repository; test ! -e /vonk-cluster-profiles; "
                 "test ! -e /scripts"
