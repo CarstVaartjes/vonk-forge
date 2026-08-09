@@ -252,14 +252,31 @@ def test_tag_release_builds_agent_package_from_same_release_metadata() -> None:
     package = job("build-agent-package")
     manifest = job("release-manifest")
 
-    assert "runs-on: ubuntu-24.04-arm" in package
-    assert "environment: agent-release" in package
     assert "needs: [release-metadata]" in package
-    assert "scripts/build-agent-deb" in package
-    assert "Test fresh, offline, upgrade, downgrade, remove lifecycle" in package
-    assert "needs.release-metadata.outputs.version" in package
-    assert "actions/upload-artifact@" in package
-    assert "platform-agent-release-" in package
+    assert "uses: ./.github/workflows/agent-package-build.yml" in package
+    for input_name in (
+        "channel",
+        "version",
+        "next_version",
+        "package",
+        "artifact_name",
+    ):
+        assert (
+            f"{input_name}: ${{{{ needs.release-metadata.outputs.{input_name} }}}}"
+            in package
+        )
+    assert "environment: agent-release" in package
+    assert "artifact-metadata: write" in package
+    assert "attestations: write" in package
+    assert "id-token: write" in package
+    assert "secrets:" not in package
+    for forbidden in (
+        "scripts/build-agent-deb",
+        "VONK_AGENT_RELEASE_PRIVATE_KEY",
+        "dpkg -i",
+        "cosign sign-blob",
+    ):
+        assert forbidden not in package
     assert "build-agent-package" in manifest.split("needs:", 1)[1].splitlines()[0]
     assert "agent-package-evidence" in job("publish-images")
     assert "vonk-forge-agent_" in job("publish-images")
@@ -276,7 +293,7 @@ def test_apt_publication_consumes_the_unified_release_artifact() -> None:
 
     assert "needs: [release-metadata, build-agent-package, release-manifest]" in apt
     assert "environment: apt-release" in apt
-    assert "platform-agent-release-${{ needs.release-metadata.outputs.version }}" in apt
+    assert "name: ${{ needs.build-agent-package.outputs.artifact_name }}" in apt
     assert "R2_APT_PUBLIC_BUCKET" in apt
     assert "R2_APT_STATE_BUCKET" in apt
     assert "scripts/verify-agent-deb" in apt
