@@ -525,6 +525,139 @@ def test_release_operations_document_exact_apt_channel_bootstrap() -> None:
     assert "public bucket" in text.lower()
 
 
+def _package_guide_bash_block(heading: str) -> str:
+    text = (ROOT / "docs/operations/agent-package-release.md").read_text()
+    section = text.split(heading, 1)[1]
+    return section.split("```bash\n", 1)[1].split("\n```", 1)[0]
+
+
+def _generate_openpgp_keyring_fixtures(tmp_path: Path) -> tuple[Path, Path, str, str]:
+    home = tmp_path / "gnupg-generate"
+    home.mkdir(mode=0o700)
+    for identity in (
+        "Vonk Fixture One <one@example.invalid>",
+        "Vonk Fixture Two <two@example.invalid>",
+    ):
+        result = subprocess.run(
+            [
+                "/usr/bin/gpg",
+                "--batch",
+                "--homedir",
+                home,
+                "--pinentry-mode",
+                "loopback",
+                "--passphrase",
+                "",
+                "--quick-generate-key",
+                identity,
+                "ed25519",
+                "sign",
+                "1d",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
+    listing = subprocess.run(
+        ["/usr/bin/gpg", "--batch", "--homedir", home, "--with-colons", "--list-keys"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
+    fingerprints: list[str] = []
+    awaiting_primary = False
+    for line in listing:
+        fields = line.split(":")
+        if fields[0] == "pub":
+            awaiting_primary = True
+        elif awaiting_primary and fields[0] == "fpr":
+            fingerprints.append(fields[9])
+            awaiting_primary = False
+    assert len(fingerprints) == 2
+
+    single = tmp_path / "single-primary.gpg"
+    multiple = tmp_path / "multiple-primary.gpg"
+    single.write_bytes(
+        subprocess.run(
+            ["/usr/bin/gpg", "--batch", "--homedir", home, "--export", fingerprints[0]],
+            check=True,
+            capture_output=True,
+        ).stdout
+    )
+    multiple.write_bytes(
+        subprocess.run(
+            ["/usr/bin/gpg", "--batch", "--homedir", home, "--export", *fingerprints],
+            check=True,
+            capture_output=True,
+        ).stdout
+    )
+    return single, multiple, fingerprints[0], fingerprints[1]
+
+
+def test_apt_bootstrap_rejects_ambiguous_or_wrong_primary_keyrings(
+    tmp_path: Path,
+) -> None:
+    single, multiple, first_fingerprint, second_fingerprint = (
+        _generate_openpgp_keyring_fixtures(tmp_path)
+    )
+    empty = tmp_path / "empty.gpg"
+    empty.write_bytes(b"")
+    corrupt = tmp_path / "corrupt.gpg"
+    corrupt.write_bytes(b"not an OpenPGP keyring\n")
+
+    for heading in ("## Install the `dev` channel", "## Install the `stable` channel"):
+        block = _package_guide_bash_block(heading)
+        assert block.startswith("(\nset -euo pipefail\n")
+        assert block.endswith("\n)")
+        assert block.index("}\nverify_single_primary_keyring ") < block.index(
+            "sudo install"
+        )
+        function = re.search(
+            r"verify_single_primary_keyring\(\) \{\n.*?\n\}", block, re.DOTALL
+        )
+        assert function is not None
+        verify_home = tmp_path / f"verify-{heading.count('dev')}"
+        verify_home.mkdir(mode=0o700, exist_ok=True)
+
+        cases = (
+            (single, first_fingerprint, True),
+            (empty, first_fingerprint, False),
+            (corrupt, first_fingerprint, False),
+            (multiple, first_fingerprint, False),
+            (single, second_fingerprint, False),
+            (single, "A" * 39, False),
+        )
+        for case_index, (keyring, expected, accepted) in enumerate(cases):
+            install_marker = tmp_path / (
+                f"installed-{heading.count('dev')}-{case_index}"
+            )
+            result = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    (
+                        "set -euo pipefail\n"
+                        f"{function.group(0)}\n"
+                        'verify_single_primary_keyring "$KEYRING" "$EXPECTED"\n'
+                        'printf installed > "$INSTALL_MARKER"'
+                    ),
+                ],
+                env={
+                    **os.environ,
+                    "EXPECTED": expected,
+                    "GNUPGHOME": str(verify_home),
+                    "INSTALL_MARKER": str(install_marker),
+                    "KEYRING": str(keyring),
+                },
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            assert (result.returncode == 0) is accepted, result.stderr
+            assert install_marker.exists() is accepted
+
+
 def test_release_operations_document_isolated_signing_and_state_authority() -> None:
     text = (ROOT / "docs/operations/agent-package-release.md").read_text()
 

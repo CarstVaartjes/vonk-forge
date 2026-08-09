@@ -153,14 +153,37 @@ operator record, not from the same bucket as the key. Set it explicitly and
 require an exact match before installing the keyring:
 
 ```bash
+(
+set -euo pipefail
 EXPECTED_DEV_APT_FINGERPRINT='REPLACE_WITH_40_CHARACTER_UPPERCASE_FINGERPRINT'
 curl --fail --proto '=https' --tlsv1.3 \
   --output /tmp/vonk-forge-dev-archive-keyring.gpg \
   https://packages.vonkforge.ai/vonk-forge-dev-archive-keyring.gpg
-observed=$(gpg --batch --show-keys --with-colons \
+verify_single_primary_keyring() {
+  local keyring=$1 expected=$2 metadata
+  [[ "$expected" =~ ^[0-9A-F]{40}$ ]]
+  metadata=$(gpg --batch --show-keys --with-colons "$keyring")
+  LC_ALL=C awk -F: -v expected="$expected" '
+    $1 == "pub" { primaries++; awaiting_fingerprint=1; next }
+    awaiting_fingerprint {
+      if ($1 != "fpr" || length($10) != 40 || $10 ~ /[^0-9A-F]/) {
+        malformed=1
+      } else {
+        fingerprints++
+        observed=$10
+      }
+      awaiting_fingerprint=0
+    }
+    END {
+      if (primaries != 1 || fingerprints != 1 || malformed || observed != expected) {
+        exit 1
+      }
+    }
+  ' <<<"$metadata"
+}
+verify_single_primary_keyring \
   /tmp/vonk-forge-dev-archive-keyring.gpg \
-  | awk -F: '$1 == "fpr" { print $10; exit }')
-test "$observed" = "$EXPECTED_DEV_APT_FINGERPRINT"
+  "$EXPECTED_DEV_APT_FINGERPRINT"
 sudo install -o root -g root -m 0644 \
   /tmp/vonk-forge-dev-archive-keyring.gpg \
   /usr/share/keyrings/vonk-forge-dev-archive-keyring.gpg
@@ -169,6 +192,7 @@ printf '%s\n' \
   | sudo tee /etc/apt/sources.list.d/vonk-forge-dev.list >/dev/null
 sudo apt update
 sudo apt install vonk-forge-agent
+)
 ```
 
 ## Install the `stable` channel
@@ -176,14 +200,37 @@ sudo apt install vonk-forge-agent
 Use the independently recorded production fingerprint:
 
 ```bash
+(
+set -euo pipefail
 EXPECTED_STABLE_APT_FINGERPRINT='REPLACE_WITH_40_CHARACTER_UPPERCASE_FINGERPRINT'
 curl --fail --proto '=https' --tlsv1.3 \
   --output /tmp/vonk-forge-archive-keyring.gpg \
   https://packages.vonkforge.ai/vonk-forge-archive-keyring.gpg
-observed=$(gpg --batch --show-keys --with-colons \
+verify_single_primary_keyring() {
+  local keyring=$1 expected=$2 metadata
+  [[ "$expected" =~ ^[0-9A-F]{40}$ ]]
+  metadata=$(gpg --batch --show-keys --with-colons "$keyring")
+  LC_ALL=C awk -F: -v expected="$expected" '
+    $1 == "pub" { primaries++; awaiting_fingerprint=1; next }
+    awaiting_fingerprint {
+      if ($1 != "fpr" || length($10) != 40 || $10 ~ /[^0-9A-F]/) {
+        malformed=1
+      } else {
+        fingerprints++
+        observed=$10
+      }
+      awaiting_fingerprint=0
+    }
+    END {
+      if (primaries != 1 || fingerprints != 1 || malformed || observed != expected) {
+        exit 1
+      }
+    }
+  ' <<<"$metadata"
+}
+verify_single_primary_keyring \
   /tmp/vonk-forge-archive-keyring.gpg \
-  | awk -F: '$1 == "fpr" { print $10; exit }')
-test "$observed" = "$EXPECTED_STABLE_APT_FINGERPRINT"
+  "$EXPECTED_STABLE_APT_FINGERPRINT"
 sudo install -o root -g root -m 0644 \
   /tmp/vonk-forge-archive-keyring.gpg \
   /usr/share/keyrings/vonk-forge-archive-keyring.gpg
@@ -192,6 +239,7 @@ printf '%s\n' \
   | sudo tee /etc/apt/sources.list.d/vonk-forge.list >/dev/null
 sudo apt update
 sudo apt install vonk-forge-agent
+)
 ```
 
 Keep only one Vonk Forge source enabled during normal operation. Installation
