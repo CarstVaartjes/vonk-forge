@@ -1,0 +1,55 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import re
+import sys
+from collections.abc import Sequence
+
+SEMVER = r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+STABLE_VERSION = re.compile(rf"^{SEMVER}$")
+DEVELOPMENT_VERSION = re.compile(
+    rf"^{SEMVER}~dev\.(?:0|[1-9][0-9]*)\+g[0-9a-f]{{12}}$"
+)
+CHANNELS = {
+    "dev": {
+        "repository": "vonk-forge-dev",
+        "distribution": "dev",
+        "public_prefix": "dists/dev",
+        "keyring": "vonk-forge-dev-archive-keyring.gpg",
+    },
+    "stable": {
+        "repository": "vonk-forge",
+        "distribution": "stable",
+        "public_prefix": "dists/stable",
+        "keyring": "vonk-forge-archive-keyring.gpg",
+    },
+}
+
+
+def metadata(arguments: Sequence[str]) -> list[str]:
+    if len(arguments) != 2:
+        raise ValueError
+    channel, version = arguments
+    authority = CHANNELS.get(channel)
+    version_pattern = DEVELOPMENT_VERSION if channel == "dev" else STABLE_VERSION
+    if authority is None or version_pattern.fullmatch(version) is None:
+        raise ValueError
+    return [
+        *(f"{name}={value}" for name, value in authority.items()),
+        f"snapshot={channel}-{version}",
+        f"state_prefix=versions/{version}",
+    ]
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    try:
+        lines = metadata(sys.argv[1:] if argv is None else argv)
+    except ValueError:
+        print("agent apt metadata is invalid", file=sys.stderr)
+        return 64
+    print("\n".join(lines))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
