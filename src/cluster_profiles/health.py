@@ -173,6 +173,8 @@ class NodeHealthService:
     ) -> None:
         if not collector or timeout_seconds <= 0 or cpu_sample_milliseconds <= 0 or max_workers <= 0:
             raise LocalHealthError("invalid collector or health timing configuration")
+        if fleet is not None and topology is None:
+            raise LocalHealthError("generic fleet health requires topology")
         self.backend = backend
         self.collector = collector
         self.raw_schema = dict(raw_schema)
@@ -199,8 +201,6 @@ class NodeHealthService:
         if fleet is None:
             self._functions = self._validate_local_assets()
         else:
-            if topology is None:
-                raise LocalHealthError("generic fleet health requires topology")
             self._functions = self._validate_generic_assets(fleet, topology)
 
     @classmethod
