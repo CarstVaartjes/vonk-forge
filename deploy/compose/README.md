@@ -16,13 +16,33 @@ global catalog is unavailable.
 
 ## Local NAS development stack
 
-Use the development stack to try the control API, bundled web interface,
-PostgreSQL catalog, and worker on a Docker-capable NAS before publishing a
-platform release. It builds the API and worker from the checkout and uses only
-development sentinels; it does not use GHCR, TUF keys, mTLS credentials, Caddy,
-LiteLLM, Cloudflare, or Railway.
+Use the image-only development stack to try the control API, bundled web
+interface, PostgreSQL catalog, and worker on any Docker Compose-capable NAS.
+GitHub Actions builds and accepts the API and worker from `main`, publishes
+public immutable `dev-sha-*` images, and uploads digest-locked
+`docker-compose.dev.yml` and `docker-compose.pinned.yml` files. Signed releases
+publish `docker-compose.production.yml` from the full production graph. The NAS
+imports the pinned development file as `docker-compose.yml` and pulls the
+images; it never builds from a checkout or SMB share.
 
-From the repository checkout:
+The complete NAS project contains only:
+
+```text
+vonk-forge/
+├── docker-compose.yml
+└── secrets/
+    ├── postgres-password
+    ├── database-url
+    └── git-signing-key
+```
+
+Follow [Development NAS installation and runtime secrets](../../docs/runbooks/development-nas-installation.md)
+for secure generation, host ownership and modes, generic NAS UI import,
+rotation, backup, and first-start checks. No GitHub, registry, TUF, mTLS,
+Cloudflare, or production credential belongs in this project.
+
+Repository contributors with prebuilt `dev-local` images can exercise the same
+graph locally:
 
 ```bash
 scripts/dev-compose

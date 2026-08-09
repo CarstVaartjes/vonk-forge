@@ -69,7 +69,8 @@ def _fake_skopeo(tmp_path: Path) -> tuple[Path, Path, Path]:
         "with log_path.open('a') as stream: stream.write(' '.join(args)+'\\n')\n"
         "state=json.loads(state_path.read_text())\n"
         "ref=args[-1]\n"
-        "role='api' if 'vonk-forge-api' in ref else 'worker'\n"
+        "role=('api' if 'vonk-forge-api' in ref else "
+        "'worker' if 'vonk-forge-worker' in ref else 'hermes')\n"
         "if args[0] == 'inspect':\n"
         "    digest=state.get(role)\n"
         "    if not digest:\n"
@@ -97,16 +98,20 @@ def _promote_aliases(
     *,
     failures: str = "",
     alias: str = "dev",
+    include_hermes: bool = False,
 ) -> subprocess.CompletedProcess[str]:
+    arguments = [
+        str(ALIAS_SCRIPT),
+        "ghcr.io/carstvaartjes/vonk-forge-api",
+        DIGEST_A,
+        "ghcr.io/carstvaartjes/vonk-forge-worker",
+        DIGEST_B,
+        alias,
+    ]
+    if include_hermes:
+        arguments.extend(("ghcr.io/carstvaartjes/vonk-forge-hermes", DIGEST_C))
     return subprocess.run(
-        (
-            str(ALIAS_SCRIPT),
-            "ghcr.io/carstvaartjes/vonk-forge-api",
-            DIGEST_A,
-            "ghcr.io/carstvaartjes/vonk-forge-worker",
-            DIGEST_B,
-            alias,
-        ),
+        arguments,
         cwd=ROOT,
         env={
             "PATH": f"{fake_bin}:{os.environ['PATH']}",
@@ -200,14 +205,42 @@ def test_alias_reconciliation_rolls_forward_an_initial_partial_state(
 def test_same_reconciliation_contract_applies_to_latest(tmp_path: Path) -> None:
     fake_bin, state, log = _fake_skopeo(tmp_path)
 
-    result = _promote_aliases(fake_bin, state, log, alias="latest")
+    result = _promote_aliases(
+        fake_bin, state, log, alias="latest", include_hermes=True
+    )
 
     assert result.returncode == 0, result.stderr
     assert json.loads(state.read_text(encoding="utf-8")) == {
         "api": DIGEST_A,
         "worker": DIGEST_B,
+        "hermes": DIGEST_C,
     }
     assert all(":latest" in line for line in log.read_text().splitlines())
+
+
+def test_latest_failure_restores_an_established_triplet(tmp_path: Path) -> None:
+    fake_bin, state, log = _fake_skopeo(tmp_path)
+    state.write_text(
+        json.dumps({"api": DIGEST_D, "worker": DIGEST_D, "hermes": DIGEST_D})
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = _promote_aliases(
+        fake_bin,
+        state,
+        log,
+        alias="latest",
+        include_hermes=True,
+        failures=f"hermes:{DIGEST_C}",
+    )
+
+    assert result.returncode != 0
+    assert json.loads(state.read_text(encoding="utf-8")) == {
+        "api": DIGEST_D,
+        "worker": DIGEST_D,
+        "hermes": DIGEST_D,
+    }
 
 
 def test_alias_failure_restores_an_established_pair(tmp_path: Path) -> None:
@@ -226,7 +259,7 @@ def test_alias_failure_restores_an_established_pair(tmp_path: Path) -> None:
         "api": DIGEST_C,
         "worker": DIGEST_D,
     }
-    assert "not advanced as a pair" in result.stderr
+    assert "not advanced as a set" in result.stderr
 
 
 def test_alias_failure_is_red_when_rollback_cannot_converge(tmp_path: Path) -> None:
@@ -279,12 +312,15 @@ def test_workflow_is_main_only_publication_without_repository_secrets() -> None:
     assert "workflow_dispatch:" in text
     assert "packages: write" in text
     assert "packages: write" not in validator
-    assert "permissions:\n      contents: read\n      packages: write" in publisher
+    assert "attestations: write" in publisher
+    assert "contents: read" in publisher
+    assert "id-token: write" in publisher
+    assert "packages: write" in publisher
     assert text.count("packages: write") == 1
     assert "contents: read" in text
     assert "environment:" not in text
-    assert "id-token: write" not in text
-    assert "attestations: write" not in text
+    assert "id-token: write" in publisher
+    assert "attestations: write" in publisher
     assert "secrets.GITHUB_TOKEN" in _step(text, "Log in to GHCR")
     assert text.count("${{ secrets.") == 1
     assert "refs/remotes/origin/main" in _step(text, "Verify exact main tip")
@@ -336,10 +372,20 @@ def test_workflow_publishes_tested_archives_then_renders_immutable_compose() -> 
     assert "slsa.dev/provenance" in verify
     assert ".SLSA?.buildType?" in verify
     assert "SPDXRef-DOCUMENT" in verify
+    for role in ("API", "worker"):
+        attestation = _step(text, f"Sign accepted {role} image provenance")
+        assert "uses: actions/attest@" in attestation
+        assert "subject-name:" in attestation
+        assert "subject-digest:" in attestation
+        assert "push-to-registry: true" in attestation
     assert "scripts/render-dev-compose" in render
     assert ":${IMMUTABLE_TAG}@${API_DIGEST}" in render
     assert ":${IMMUTABLE_TAG}@${WORKER_DIGEST}" in render
-    assert "path: dist/docker-compose.yml" in upload
+    assert ":dev@${API_DIGEST}" in render
+    assert ":dev@${WORKER_DIGEST}" in render
+    assert "--channel dev" in render
+    assert "dist/docker-compose.pinned.yml" in upload
+    assert "dist/docker-compose.dev.yml" in upload
     assert "if-no-files-found: error" in upload
     assert "secrets/" not in upload
 
@@ -359,8 +405,7 @@ def test_dev_alias_is_the_last_mutation_and_latest_is_never_published() -> None:
     assert "finish" in alias_helper
     assert "set_alias" in alias_helper
     assert "for attempt in 1 2 3" in alias_helper
-    assert "previous_api_digest" in alias_helper
-    assert "previous_worker_digest" in alias_helper
+    assert "previous_digests" in alias_helper
     assert "trap" in alias_helper
     assert "rerun the failed publication job" in alias_helper
     assert "cancel-in-progress: false" in text

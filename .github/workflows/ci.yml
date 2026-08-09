@@ -10,8 +10,9 @@ on:
 permissions:
   contents: read
 
-# A new commit supersedes an older PR check. Release/manual evidence must not
-# be cancelled because it is an intentional publication or operator run.
+# A new commit supersedes an older PR check. Tag releases use separate groups,
+# so one valid version can never evict another version from GitHub's pending
+# concurrency slot.
 concurrency:
   group: vonk-forge-ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -146,6 +147,7 @@ jobs:
       - name: Run focused repository contracts
         run: >-
           uv run --python 3.12 --frozen --with pytest==9.1.1 pytest -q
+          tests/runbooks/test_development_nas_installation.py
           tests/runbooks/test_workload_packages.py
           tests/test_ci_platform_boundaries.py
           tests/test_container_release_workflow.py
@@ -464,34 +466,25 @@ jobs:
           if-no-files-found: error
           path: dist/*
 
-  publish-images:
-    name: Publish public container images
+  validate-release-images:
+    name: Validate accepted release images
     needs: [lint, generated-clients, test, release-metadata, build-agent-package]
     runs-on: ubuntu-latest
-    environment: platform-release
-    concurrency:
-      group: vonk-forge-container-publication
-      cancel-in-progress: false
     permissions:
+      attestations: read
       contents: read
-      packages: write
     outputs:
       api_digest: ${{ steps.api.outputs.digest }}
       worker_digest: ${{ steps.worker.outputs.digest }}
-      hermes_digest: ${{ steps.hermes.outputs.digest }}
     steps:
       - name: Check out tagged commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Verify public image inputs
         run: scripts/verify-public-image-inputs
       - name: Verify supply-chain evidence
         run: scripts/verify-supply-chain --json
-      - name: Install uv and Python
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
-        with:
-          version: "0.12.1"
-          python-version: "3.12"
-          enable-cache: true
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
       - name: Install Skopeo from Ubuntu
@@ -500,12 +493,6 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends skopeo
-      - name: Log in to GHCR
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Refuse an existing release version
         shell: bash
         env:
@@ -513,19 +500,27 @@ jobs:
           HERMES_AGENT_IMAGE: ${{ needs.release-metadata.outputs.hermes_image }}
         run: |
           scripts/refuse-existing-image-version \
-            "$RELEASE_VERSION" \
-            "$HERMES_AGENT_IMAGE"
-      - name: Promote accepted API image
+            "$RELEASE_VERSION" "$HERMES_AGENT_IMAGE"
+      - name: Validate accepted API image
         id: api
         shell: bash
         env:
           API_IMAGE: ${{ needs.release-metadata.outputs.api_image }}
           DEV_SOURCE: ${{ needs.release-metadata.outputs.api_dev_source }}
+          GH_TOKEN: ${{ github.token }}
           IMAGE_VERSION_TAG: ${{ needs.release-metadata.outputs.image_version_tag }}
         run: |
           set -euo pipefail
           digest=$(skopeo inspect --format '{{.Digest}}' "docker://$DEV_SOURCE")
           [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          gh attestation verify "oci://$API_IMAGE@$digest" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/dev-images.yml" \
+            --signer-digest "$GITHUB_SHA" \
+            --source-digest "$GITHUB_SHA" \
+            --source-ref refs/heads/main \
+            --deny-self-hosted-runners \
+            --format json > "$RUNNER_TEMP/api-attestation.json"
           skopeo inspect --config "docker://$API_IMAGE@$digest" \
             | jq -e --arg revision "$GITHUB_SHA" \
               --arg source "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
@@ -551,33 +546,36 @@ jobs:
           inspect_error="$RUNNER_TEMP/api-version-inspect-error"
           if observed=$(skopeo inspect --format '{{.Digest}}' \
             "docker://$API_IMAGE:$IMAGE_VERSION_TAG" 2>"$inspect_error"); then
-            if [[ "$observed" != "$digest" ]]; then
+            [[ "$observed" == "$digest" ]] || {
               echo "refusing to overwrite immutable API release tag" >&2
               exit 1
-            fi
-          else
-            if ! grep -Eiq 'manifest unknown|name unknown|not found' \
-              "$inspect_error"; then
-              echo "API release tag lookup failed" >&2
-              exit 1
-            fi
-            docker buildx imagetools create \
-              --tag "$API_IMAGE:$IMAGE_VERSION_TAG" "$API_IMAGE@$digest"
+            }
+          elif ! grep -Eiq 'manifest unknown|name unknown|not found' \
+            "$inspect_error"; then
+            echo "API release tag lookup failed" >&2
+            exit 1
           fi
-          [[ $(skopeo inspect --format '{{.Digest}}' \
-            "docker://$API_IMAGE:$IMAGE_VERSION_TAG") == "$digest" ]]
           printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
-      - name: Promote accepted worker image
+      - name: Validate accepted worker image
         id: worker
         shell: bash
         env:
           DEV_SOURCE: ${{ needs.release-metadata.outputs.worker_dev_source }}
+          GH_TOKEN: ${{ github.token }}
           IMAGE_VERSION_TAG: ${{ needs.release-metadata.outputs.image_version_tag }}
           WORKER_IMAGE: ${{ needs.release-metadata.outputs.worker_image }}
         run: |
           set -euo pipefail
           digest=$(skopeo inspect --format '{{.Digest}}' "docker://$DEV_SOURCE")
           [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          gh attestation verify "oci://$WORKER_IMAGE@$digest" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/dev-images.yml" \
+            --signer-digest "$GITHUB_SHA" \
+            --source-digest "$GITHUB_SHA" \
+            --source-ref refs/heads/main \
+            --deny-self-hosted-runners \
+            --format json > "$RUNNER_TEMP/worker-attestation.json"
           skopeo inspect --config "docker://$WORKER_IMAGE@$digest" \
             | jq -e --arg revision "$GITHUB_SHA" \
               --arg source "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
@@ -603,22 +601,121 @@ jobs:
           inspect_error="$RUNNER_TEMP/worker-version-inspect-error"
           if observed=$(skopeo inspect --format '{{.Digest}}' \
             "docker://$WORKER_IMAGE:$IMAGE_VERSION_TAG" 2>"$inspect_error"); then
-            if [[ "$observed" != "$digest" ]]; then
+            [[ "$observed" == "$digest" ]] || {
               echo "refusing to overwrite immutable worker release tag" >&2
               exit 1
-            fi
-          else
-            if ! grep -Eiq 'manifest unknown|name unknown|not found' \
-              "$inspect_error"; then
-              echo "worker release tag lookup failed" >&2
+            }
+          elif ! grep -Eiq 'manifest unknown|name unknown|not found' \
+            "$inspect_error"; then
+            echo "worker release tag lookup failed" >&2
+            exit 1
+          fi
+          printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+
+  publish-images:
+    name: Publish public container images
+    needs: [validate-release-images, release-metadata, build-agent-package]
+    runs-on: ubuntu-latest
+    environment: platform-release
+    concurrency:
+      group: vonk-forge-container-publication-${{ needs.release-metadata.outputs.version }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      api_digest: ${{ steps.api.outputs.digest }}
+      worker_digest: ${{ steps.worker.outputs.digest }}
+      hermes_digest: ${{ steps.hermes.outputs.digest }}
+    steps:
+      - name: Check out tagged commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.1"
+          python-version: "3.12"
+          enable-cache: true
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      - name: Install Skopeo from Ubuntu
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends skopeo
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Promote accepted API image
+        id: api
+        shell: bash
+        env:
+          API_IMAGE: ${{ needs.release-metadata.outputs.api_image }}
+          DIGEST: ${{ needs.validate-release-images.outputs.api_digest }}
+          IMAGE_VERSION_TAG: ${{ needs.release-metadata.outputs.image_version_tag }}
+        run: |
+          set -euo pipefail
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          inspect_error="$RUNNER_TEMP/api-version-inspect-error"
+          if observed=$(skopeo inspect --format '{{.Digest}}' \
+            "docker://$API_IMAGE:$IMAGE_VERSION_TAG" 2>"$inspect_error"); then
+            [[ "$observed" == "$DIGEST" ]] || {
+              echo "refusing to overwrite immutable API release tag" >&2
               exit 1
-            fi
+            }
+          elif grep -Eiq 'manifest unknown|name unknown|not found' \
+            "$inspect_error"; then
             docker buildx imagetools create \
-              --tag "$WORKER_IMAGE:$IMAGE_VERSION_TAG" "$WORKER_IMAGE@$digest"
+              --tag "$API_IMAGE:$IMAGE_VERSION_TAG" "$API_IMAGE@$DIGEST"
+          else
+            echo "API release tag lookup failed" >&2
+            exit 1
           fi
           [[ $(skopeo inspect --format '{{.Digest}}' \
-            "docker://$WORKER_IMAGE:$IMAGE_VERSION_TAG") == "$digest" ]]
-          printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+            "docker://$API_IMAGE:$IMAGE_VERSION_TAG") == "$DIGEST" ]]
+          printf 'digest=%s\n' "$DIGEST" >> "$GITHUB_OUTPUT"
+      - name: Promote accepted worker image
+        id: worker
+        shell: bash
+        env:
+          DIGEST: ${{ needs.validate-release-images.outputs.worker_digest }}
+          IMAGE_VERSION_TAG: ${{ needs.release-metadata.outputs.image_version_tag }}
+          WORKER_IMAGE: ${{ needs.release-metadata.outputs.worker_image }}
+        run: |
+          set -euo pipefail
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          inspect_error="$RUNNER_TEMP/worker-version-inspect-error"
+          if observed=$(skopeo inspect --format '{{.Digest}}' \
+            "docker://$WORKER_IMAGE:$IMAGE_VERSION_TAG" 2>"$inspect_error"); then
+            [[ "$observed" == "$DIGEST" ]] || {
+              echo "refusing to overwrite immutable worker release tag" >&2
+              exit 1
+            }
+          elif grep -Eiq 'manifest unknown|name unknown|not found' \
+            "$inspect_error"; then
+            docker buildx imagetools create \
+              --tag "$WORKER_IMAGE:$IMAGE_VERSION_TAG" "$WORKER_IMAGE@$DIGEST"
+          else
+            echo "worker release tag lookup failed" >&2
+            exit 1
+          fi
+          [[ $(skopeo inspect --format '{{.Digest}}' \
+            "docker://$WORKER_IMAGE:$IMAGE_VERSION_TAG") == "$DIGEST" ]]
+          printf 'digest=%s\n' "$DIGEST" >> "$GITHUB_OUTPUT"
+      - name: Recheck the immutable Hermes version
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.release-metadata.outputs.version }}
+          HERMES_AGENT_IMAGE: ${{ needs.release-metadata.outputs.hermes_image }}
+        run: |
+          scripts/refuse-existing-image-version \
+            "$RELEASE_VERSION" "$HERMES_AGENT_IMAGE"
       - name: Build and push Hermes image
         id: hermes
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
@@ -633,7 +730,6 @@ jobs:
           tags: |
             ${{ needs.release-metadata.outputs.hermes_image }}:${{ needs.release-metadata.outputs.version }}
             ${{ needs.release-metadata.outputs.hermes_image }}:${{ needs.release-metadata.outputs.commit_tag }}
-            ${{ needs.release-metadata.outputs.hermes_image }}:latest
           labels: |
             org.opencontainers.image.title=vonk-forge-hermes
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
@@ -667,6 +763,10 @@ jobs:
         run: |
           set -euo pipefail
           install -d -m 0700 release-output
+          scripts/render-production-compose \
+            --output release-output/docker-compose.production.yml \
+            --api-image "${{ needs.release-metadata.outputs.api_image }}:latest@${{ steps.api.outputs.digest }}" \
+            --worker-image "${{ needs.release-metadata.outputs.worker_image }}:latest@${{ steps.worker.outputs.digest }}"
           release_input="release/platform/${RELEASE_VERSION}.input.json"
           test -f "$release_input"
           uv run --frozen scripts/build-control-deployment-bundle \
@@ -767,6 +867,7 @@ jobs:
             release-output/bundle-publication.json
             release-output/control-deployment-descriptor.json
             release-output/control-deployment.tar
+            release-output/docker-compose.production.yml
             release-output/vonk-forge-host-updater.tar
             release-output/vonk-forge-host-updater.tar.sha256
             release-output/platform-release.json
@@ -886,6 +987,7 @@ jobs:
           gh release create "$GITHUB_REF_NAME"
           vonk-forge-images.env vonk-forge-images.env.sha256
           release-output/control-deployment-descriptor.json
+          release-output/docker-compose.production.yml
           release-output/vonk-forge-host-updater.tar
           release-output/vonk-forge-host-updater.tar.sha256
           release-output/platform-release.json
@@ -904,31 +1006,25 @@ jobs:
 
   advance-production-aliases:
     name: Advance accepted production image aliases
-    needs: [release-metadata, publish-images, release-manifest]
+    needs: [release-metadata, release-manifest]
     if: needs.release-manifest.result == 'success'
     runs-on: ubuntu-latest
     environment: platform-release
+    # Every queued run reconciles the globally newest completed release. A
+    # replacement pending run therefore preserves convergence while this
+    # shared group prevents concurrent rollback races between release refs.
     concurrency:
-      group: vonk-forge-production-alias
+      group: vonk-forge-production-alias-reconciliation
       cancel-in-progress: false
     permissions:
       contents: read
       packages: write
     steps:
-      - name: Check out release tag history
+      - name: Check out accepted alias tooling
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Refuse a superseded production tag
-        shell: bash
-        run: |
-          set -euo pipefail
-          git fetch --force --tags origin
-          newest_tag=$(git tag --list 'v*' \
-            | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' \
-            | sort -V | tail -n 1)
-          [[ -n "$newest_tag" && "$newest_tag" == "$GITHUB_REF_NAME" ]]
       - name: Install Skopeo from Ubuntu
         shell: bash
         run: |
@@ -941,19 +1037,128 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Advance verified latest aliases
+      - name: Reconcile the newest completed production release
         shell: bash
         env:
-          API_DIGEST: ${{ needs.publish-images.outputs.api_digest }}
           API_IMAGE: ${{ needs.release-metadata.outputs.api_image }}
+          GH_TOKEN: ${{ github.token }}
+          HERMES_IMAGE: ${{ needs.release-metadata.outputs.hermes_image }}
           LATEST_ALIAS: ${{ needs.release-metadata.outputs.latest_alias }}
-          WORKER_DIGEST: ${{ needs.publish-images.outputs.worker_digest }}
           WORKER_IMAGE: ${{ needs.release-metadata.outputs.worker_image }}
         run: |
           set -euo pipefail
-          scripts/promote-image-aliases \
-            "$API_IMAGE" "$API_DIGEST" \
-            "$WORKER_IMAGE" "$WORKER_DIGEST" "$LATEST_ALIAS"
+          select_newest_completed_release() {
+            local candidate releases_json
+            local -a release_tags
+            releases_json=$(gh release list \
+              --repo "$GITHUB_REPOSITORY" \
+              --limit 1000 \
+              --json tagName,isDraft,isPrerelease)
+            mapfile -t release_tags < <(
+              jq -r '.[] | select(
+                (.isDraft | not) and (.isPrerelease | not)
+              ) | .tagName' <<<"$releases_json" \
+                | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' \
+                | sort -Vr
+            )
+            for candidate in "${release_tags[@]}"; do
+              if git rev-parse --verify "refs/tags/$candidate^{commit}" \
+                >/dev/null 2>&1; then
+                printf '%s\n' "$candidate"
+                return 0
+              fi
+            done
+            return 1
+          }
+          verify_release_tag() {
+            local target_tag=$1 target_commit
+            local allowed_signers="$RUNNER_TEMP/release-allowed-signers"
+            [[ $(git cat-file -t "refs/tags/$target_tag") == tag ]]
+            git show refs/remotes/origin/main:.github/release-allowed-signers \
+              > "$allowed_signers"
+            test -s "$allowed_signers"
+            git -c gpg.format=ssh \
+              -c gpg.ssh.allowedSignersFile="$allowed_signers" \
+              verify-tag "refs/tags/$target_tag"
+            target_commit=$(git rev-list -n 1 "refs/tags/$target_tag")
+            git merge-base --is-ancestor \
+              "$target_commit" refs/remotes/origin/main
+          }
+          load_release_digests() {
+            local target_tag=$1 target_version=${1#v}
+            local evidence_dir checksum_line expected_hash expected_name
+            local actual_hash key value
+            local -a checksum_lines
+            declare -A release_images=()
+            evidence_dir=$(mktemp -d \
+              "$RUNNER_TEMP/vonk-production-alias.XXXXXXXXXX")
+            gh release download "$target_tag" \
+              --repo "$GITHUB_REPOSITORY" \
+              --dir "$evidence_dir" \
+              --pattern vonk-forge-images.env \
+              --pattern vonk-forge-images.env.sha256
+            mapfile -t checksum_lines \
+              < "$evidence_dir/vonk-forge-images.env.sha256"
+            [[ "${#checksum_lines[@]}" -eq 1 ]]
+            checksum_line=${checksum_lines[0]}
+            read -r expected_hash expected_name \
+              <<<"$checksum_line"
+            [[ "$expected_hash" =~ ^[0-9a-f]{64}$ ]]
+            [[ "$expected_name" == vonk-forge-images.env ]]
+            actual_hash=$(sha256sum "$evidence_dir/vonk-forge-images.env")
+            [[ "${actual_hash%% *}" == "$expected_hash" ]]
+            while IFS='=' read -r key value; do
+              [[ -n "$key" && -n "$value" ]]
+              [[ -z "${release_images[$key]+present}" ]]
+              case "$key" in
+                CONTROL_API_IMAGE|CONTROL_WORKER_IMAGE|HERMES_AGENT_IMAGE)
+                  release_images["$key"]=$value
+                  ;;
+                *)
+                  echo "unexpected release image key: $key" >&2
+                  return 1
+                  ;;
+              esac
+            done < "$evidence_dir/vonk-forge-images.env"
+            [[ "${#release_images[@]}" -eq 3 ]]
+            api_reference=${release_images[CONTROL_API_IMAGE]}
+            worker_reference=${release_images[CONTROL_WORKER_IMAGE]}
+            hermes_reference=${release_images[HERMES_AGENT_IMAGE]}
+            [[ "$api_reference" == "$API_IMAGE:$target_tag@"sha256:* ]]
+            [[ "$worker_reference" == "$WORKER_IMAGE:$target_tag@"sha256:* ]]
+            [[ "$hermes_reference" == "$HERMES_IMAGE:$target_version@"sha256:* ]]
+            api_digest=${api_reference##*@}
+            worker_digest=${worker_reference##*@}
+            hermes_digest=${hermes_reference##*@}
+            [[ "$api_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+            [[ "$worker_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+            [[ "$hermes_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+            rm -rf -- "$evidence_dir"
+          }
+          for attempt in 1 2 3; do
+            git fetch --force --no-tags origin \
+              +refs/heads/main:refs/remotes/origin/main
+            git fetch --force --tags origin
+            target_tag=$(select_newest_completed_release)
+            verify_release_tag "$target_tag"
+            target_version=${target_tag#v}
+            load_release_digests "$target_tag"
+            [[ $(skopeo inspect --format '{{.Digest}}' \
+              "docker://$API_IMAGE:$target_tag") == "$api_digest" ]]
+            [[ $(skopeo inspect --format '{{.Digest}}' \
+              "docker://$WORKER_IMAGE:$target_tag") == "$worker_digest" ]]
+            [[ $(skopeo inspect --format '{{.Digest}}' \
+              "docker://$HERMES_IMAGE:$target_version") == "$hermes_digest" ]]
+            scripts/promote-image-aliases \
+              "$API_IMAGE" "$api_digest" \
+              "$WORKER_IMAGE" "$worker_digest" "$LATEST_ALIAS" \
+              "$HERMES_IMAGE" "$hermes_digest"
+            git fetch --force --tags origin
+            observed_tag=$(select_newest_completed_release)
+            [[ "$observed_tag" == "$target_tag" ]] && exit 0
+          done
+          echo "production release tags did not stabilize" >&2
+          exit 1
 
   publish-apt:
     name: Publish the verified agent package to apt

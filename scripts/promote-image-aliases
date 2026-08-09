@@ -1,23 +1,36 @@
 #!/usr/bin/env bash
-# Reconcile public API/worker convenience aliases from an authoritative
-# immutable digest pair. Deployments consume the immutable pair, never aliases.
+# Reconcile public convenience aliases from an authoritative immutable digest
+# set. Deployments consume immutable references, never these moving aliases.
 set -euo pipefail
 umask 077
 
 usage() {
   printf '%s\n' \
-    'usage: promote-image-aliases API_IMAGE API_DIGEST WORKER_IMAGE WORKER_DIGEST dev|latest' \
+    'usage: promote-image-aliases API_IMAGE API_DIGEST WORKER_IMAGE WORKER_DIGEST dev|latest [HERMES_IMAGE HERMES_DIGEST]' \
     >&2
   exit 64
 }
 
-[[ "$#" -eq 5 ]] || usage
+[[ "$#" -eq 5 || "$#" -eq 7 ]] || usage
 readonly api_image=$1 api_digest=$2 worker_image=$3 worker_digest=$4 alias=$5
 [[ "$api_image" == ghcr.io/carstvaartjes/vonk-forge-api ]] || usage
 [[ "$worker_image" == ghcr.io/carstvaartjes/vonk-forge-worker ]] || usage
 [[ "$api_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || usage
 [[ "$worker_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || usage
 [[ "$alias" == dev || "$alias" == latest ]] || usage
+
+roles=(api worker)
+images=("$api_image" "$worker_image")
+digests=("$api_digest" "$worker_digest")
+if [[ "$#" -eq 7 ]]; then
+  readonly hermes_image=$6 hermes_digest=$7
+  [[ "$alias" == latest ]] || usage
+  [[ "$hermes_image" == ghcr.io/carstvaartjes/vonk-forge-hermes ]] || usage
+  [[ "$hermes_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || usage
+  roles+=(hermes)
+  images+=("$hermes_image")
+  digests+=("$hermes_digest")
+fi
 
 readonly scratch=$(mktemp -d /tmp/vonk-image-alias-promotion.XXXXXXXXXX)
 [[ "$scratch" =~ ^/tmp/vonk-image-alias-promotion\.[A-Za-z0-9]{10}$ \
@@ -28,8 +41,7 @@ readonly scratch=$(mktemp -d /tmp/vonk-image-alias-promotion.XXXXXXXXXX)
 
 promotion_started=0
 promotion_complete=0
-previous_api_digest=
-previous_worker_digest=
+previous_digests=()
 
 inspect_alias() {
   local role=$1 image=$2 observed
@@ -67,19 +79,19 @@ set_alias() {
 }
 
 finish() {
-  local status=$? rollback_failed=0
+  local status=$? rollback_failed=0 index previous
   trap - EXIT INT TERM
   set +e
   if [[ "$promotion_started" -eq 1 && "$promotion_complete" -eq 0 ]]; then
-    if [[ "$previous_api_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-      set_alias api "$api_image" "$previous_api_digest" || rollback_failed=1
-    fi
-    if [[ "$previous_worker_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-      set_alias worker "$worker_image" "$previous_worker_digest" \
-        || rollback_failed=1
-    fi
+    for index in "${!roles[@]}"; do
+      previous=${previous_digests[$index]:-}
+      if [[ "$previous" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+        set_alias "${roles[$index]}" "${images[$index]}" "$previous" \
+          || rollback_failed=1
+      fi
+    done
     printf '%s\n' \
-      "$alias aliases were not advanced as a pair; rerun the failed publication job to reconcile the authoritative immutable pair" \
+      "$alias aliases were not advanced as a set; rerun the failed publication job to reconcile the authoritative immutable set" \
       >&2
     if [[ "$rollback_failed" -ne 0 ]]; then
       printf '%s\n' \
@@ -95,11 +107,13 @@ trap finish EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-previous_api_digest=$(inspect_alias api "$api_image")
-previous_worker_digest=$(inspect_alias worker "$worker_image")
+for index in "${!roles[@]}"; do
+  previous_digests+=("$(inspect_alias "${roles[$index]}" "${images[$index]}")")
+done
 promotion_started=1
-set_alias api "$api_image" "$api_digest"
-set_alias worker "$worker_image" "$worker_digest"
+for index in "${!roles[@]}"; do
+  set_alias "${roles[$index]}" "${images[$index]}" "${digests[$index]}"
+done
 promotion_complete=1
 
-printf '%s aliases match the authoritative immutable pair\n' "$alias"
+printf '%s aliases match the authoritative immutable set\n' "$alias"

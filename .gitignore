@@ -2,6 +2,7 @@
 .worktrees/
 .tooling/
 .dev/
+/secrets/
 /target/
 .env
 .env.*

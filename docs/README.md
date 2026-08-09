@@ -38,6 +38,7 @@ LiteLLM publishes only routes acknowledged by the control plane.
 
 - [Architecture overview](architecture-overview.md)
 - [Source-first local Compose deployment](../deploy/compose/README.md)
+- [Development NAS installation and runtime secrets](runbooks/development-nas-installation.md)
 - [Agent Debian package release and APT installation](operations/agent-package-release.md)
 - [Testing and CI](testing-and-ci.md)
 - [Identity verification policy](identity-verifier.md)
