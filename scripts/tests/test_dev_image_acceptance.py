@@ -126,6 +126,15 @@ def _failing_up_docker(tmp_path: Path) -> tuple[Path, Path]:
         "if [[ \"$1\" == create ]]; then printf '%s\\n' scanner-container; exit 0; fi\n"
         "if [[ \"$1\" == export ]]; then tar -cf - --files-from /dev/null; exit 0; fi\n"
         "if [[ \"$1\" == rm || \"$1\" == ps ]]; then exit 0; fi\n"
+        "if [[ \"$1\" == compose && \" $* \" == *' logs '* ]]; then\n"
+        "  printf '%s\\n' \\\n"
+        "    'api | -----BEGIN OPENSSH PRIVATE KEY-----' \\\n"
+        "    'api | QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFB' \\\n"
+        "    'api | -----END OPENSSH PRIVATE KEY-----' \\\n"
+        "    'worker | dGhpcy1pcy1hLXN5bnRoZXRpYy13b3JrZXItdG9rZW4tMTIzNDU2Nzg5MA' \\\n"
+        "    'migrate | postgresql+psycopg://control:visible@postgres:5432/control'\n"
+        "  exit 0\n"
+        "fi\n"
         "if [[ \"$1\" == compose && \" $* \" == *' up '* ]]; then exit 49; fi\n"
         "exit 0\n",
         encoding="utf-8",
@@ -426,6 +435,11 @@ def test_failed_compose_start_prints_bounded_diagnostics_before_teardown(
     assert " ps -a " in f" {commands} "
     assert " logs --tail 100 --no-color " in f" {commands} "
     assert " down --volumes --remove-orphans " in f" {commands} "
+    assert "BEGIN OPENSSH PRIVATE KEY" not in result.stderr
+    assert "QUFBQUFBQUFBQUFB" not in result.stderr
+    assert "dGhpcy1pcy1hLXN5bnRoZXRpYy13b3JrZXI" not in result.stderr
+    assert "control:visible" not in result.stderr
+    assert "[redacted]" in result.stderr
 
 
 def test_successful_lifecycle_exercises_health_isolation_restart_and_teardown(
