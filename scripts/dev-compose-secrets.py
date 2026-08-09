@@ -214,11 +214,18 @@ def _create_file(directory: int, name: str, content: bytes) -> None:
 
 
 def _remove_temporary_directory(parent: int, name: str, descriptor: int) -> None:
+    pinned = os.fstat(descriptor)
     try:
         for child in os.listdir(descriptor):
             os.unlink(child, dir_fd=descriptor)
     finally:
         os.close(descriptor)
+        try:
+            current = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        except FileNotFoundError:
+            return
+        if not _same_inode(pinned, current):
+            return
         try:
             os.rmdir(name, dir_fd=parent)
         except FileNotFoundError:
@@ -227,14 +234,35 @@ def _remove_temporary_directory(parent: int, name: str, descriptor: int) -> None
 
 def _generate_signing_key(directory: int) -> None:
     temporary = f".git-signing-key.{secrets.token_hex(16)}"
+    temporary_descriptor = -1
     try:
         os.mkdir(temporary, 0o700, dir_fd=directory)
+        listed = os.stat(
+            temporary,
+            dir_fd=directory,
+            follow_symlinks=False,
+        )
         temporary_descriptor = os.open(
             temporary,
             _DIRECTORY_FLAGS,
             dir_fd=directory,
         )
+        opened = os.fstat(temporary_descriptor)
+        if (
+            not stat.S_ISDIR(listed.st_mode)
+            or not stat.S_ISDIR(opened.st_mode)
+            or not _same_inode(listed, opened)
+        ):
+            raise SecretPreparationError(
+                "development signing-key staging changed while opening"
+            )
+    except SecretPreparationError:
+        if temporary_descriptor >= 0:
+            os.close(temporary_descriptor)
+        raise
     except OSError as error:
+        if temporary_descriptor >= 0:
+            os.close(temporary_descriptor)
         raise SecretPreparationError(
             "development signing-key staging cannot be created"
         ) from error
