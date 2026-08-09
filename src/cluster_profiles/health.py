@@ -179,13 +179,19 @@ class NodeHealthService:
         self.collector = collector
         self.raw_schema = dict(raw_schema)
         self.result_schema = dict(result_schema)
-        try:
+        if fleet is None:
+            try:
+                raw_validator_class = validators.validator_for(self.raw_schema)
+                raw_validator_class.check_schema(self.raw_schema)
+                result_validator_class = validators.validator_for(self.result_schema)
+                result_validator_class.check_schema(self.result_schema)
+            except Exception as error:
+                raise LocalHealthError(f"invalid node health schema: {error}") from error
+        else:
             raw_validator_class = validators.validator_for(self.raw_schema)
             raw_validator_class.check_schema(self.raw_schema)
             result_validator_class = validators.validator_for(self.result_schema)
             result_validator_class.check_schema(self.result_schema)
-        except Exception as error:
-            raise LocalHealthError(f"invalid node health schema: {error}") from error
         self._raw_validator = raw_validator_class(self.raw_schema)
         self._result_validator = result_validator_class(self.result_schema)
         self.inventory = inventory
