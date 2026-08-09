@@ -36,9 +36,10 @@ ghcr.io/carstvaartjes/vonk-forge-worker
 Development publication uses immutable `dev-sha-<full-40-character-commit>`
 tags and updates the moving `dev` convenience tag only after that exact commit
 passes every scan and image-only acceptance gate. The generated development
-Compose file always pins the readable immutable development tag and manifest
-digest; it never consumes the moving alias. The development workflow never
-publishes or changes `latest`.
+Compose outputs always include a manifest digest. The explicit pinned file uses
+the immutable development tag; the readable development-channel file uses
+`dev@sha256:<digest>`, so the digest still wins if the alias later moves. The
+development workflow never publishes or changes `latest`.
 
 A production release does not rebuild these images. After all production gates
 pass, it adds the stable `vX.Y.Z` tag to the already-tested digest for the tagged
@@ -47,14 +48,16 @@ records the digest in signed release metadata and the platform target. The
 production workflow never publishes or changes `dev`. Moving aliases identify
 channels for operator convenience; immutable tag-plus-digest references,
 attestations, signed release evidence, and production configuration authorize
-deployment. Production Compose artifacts therefore use
-`vX.Y.Z@sha256:<digest>`, never plain `latest`.
+deployment. The production Compose artifact uses `latest@sha256:<digest>` in
+the real production graph; it never uses plain `latest`.
 
 ## Development workflow
 
 A dedicated `.github/workflows/dev-images.yml` runs on pushes to `main` and
-manual dispatch. It has `contents: read` and `packages: write`, but uses no
-GitHub environment and receives no repository or development secrets. Both
+manual dispatch. Its publisher has least-privilege `contents: read`,
+`packages: write`, `attestations: write`, and `id-token: write` permissions so
+it can publish the images and GitHub-signed provenance, but it uses no GitHub
+environment and receives no repository or development secrets. Both
 triggers publish only the current `origin/main` tip. A manual run must select
 `refs/heads/main`; the workflow checks that its checked-out commit equals the
 freshly fetched `origin/main` tip before any image build or package-write step.
@@ -75,8 +78,12 @@ The workflow:
 7. Logs in to GHCR only after those checks pass, pushes the exact tested images
    under immutable commit tags, verifies their registry digests and provenance,
    and only then advances the `dev` aliases to those exact manifests.
-8. Renders and uploads one `docker-compose.yml` artifact with exact image
-   digests and source commit. The artifact contains no secret values.
+8. Signs both published subjects with GitHub OIDC artifact attestations bound
+   to repository, workflow, source ref, commit, and digest.
+9. Renders and uploads `docker-compose.dev.yml` and
+   `docker-compose.pinned.yml`, both with exact image digests and source commit.
+   Signed releases separately publish `docker-compose.production.yml` from the
+   full production graph. No Compose artifact contains secret values.
 
 The workflow fails before registry login or publication if any build, scan, or
 runtime acceptance check fails.
@@ -182,13 +189,18 @@ workflow ref, or untested rebuild as production input.
 
 Both workflows treat moving-alias reconciliation as their final publication
 step. Failures before that step leave the previously accepted aliases in place.
-Because two tags in separate registry repositories cannot be changed atomically,
-the API and worker aliases are explicitly eventually consistent conveniences,
-not deployment authority. Reconciliation is serialized, idempotent, retried,
-digest-verified, and rolls an established pair back on partial failure. A first
+Because tags in separate registry repositories cannot be changed atomically,
+the API, worker, and Hermes aliases are explicitly eventually consistent
+conveniences, not deployment authority. Production reconciliation is serialized
+through one global Actions concurrency group, and every surviving run selects
+the highest completed stable release. It revalidates that release's annotated
+SSH-signed tag and `main` ancestry, verifies the checksum and strict contents of
+its `vonk-forge-images.env` release assets, and requires immutable registry tags
+to match those recorded digests before promotion. Reconciliation is idempotent,
+retried, and rolls an established alias set back on partial failure. A first
 publication or interrupted rollback exits red and is repaired by rerunning the
-failed publication job from its retained, already-accepted OCI archives. The
-digest-pinned Compose artifact remains authoritative throughout.
+failed publication job. The digest-pinned Compose artifact remains authoritative
+throughout.
 
 ## Operator flow
 

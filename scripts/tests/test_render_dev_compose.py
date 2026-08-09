@@ -16,6 +16,8 @@ COMMIT = "a" * 40
 DIGEST = "b" * 64
 API_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-api:dev-sha-{COMMIT}@sha256:{DIGEST}"
 WORKER_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-worker:dev-sha-{COMMIT}@sha256:{DIGEST}"
+API_DEV_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-api:dev@sha256:{DIGEST}"
+WORKER_DEV_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-worker:dev@sha256:{DIGEST}"
 
 
 def _renderer():
@@ -50,6 +52,33 @@ def test_render_accepts_exact_public_dev_images_and_replaces_each_token_once(
     assert text.count(WORKER_IMAGE) == 1
     assert text.count(f"VONK_DEV_EXPECTED_COMMIT: {COMMIT}") == 1
     assert "__VONK_" not in text
+
+
+def test_render_accepts_digest_locked_dev_channel_only_when_selected(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "docker-compose.dev.yml"
+    renderer = _renderer()
+
+    renderer.render(
+        TEMPLATE,
+        output,
+        API_DEV_IMAGE,
+        WORKER_DEV_IMAGE,
+        COMMIT,
+        channel="dev",
+    )
+
+    text = output.read_text(encoding="utf-8")
+    assert API_DEV_IMAGE in text and WORKER_DEV_IMAGE in text
+    with pytest.raises(ValueError):
+        renderer.render(
+            TEMPLATE,
+            tmp_path / "wrong-channel.yml",
+            API_DEV_IMAGE,
+            WORKER_DEV_IMAGE,
+            COMMIT,
+        )
 
 
 @pytest.mark.parametrize(

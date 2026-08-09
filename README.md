@@ -74,9 +74,17 @@ uv sync --dev
 uv run pytest
 ```
 
-To run the control API, bundled web interface, PostgreSQL catalog, and worker
-as locally built development containers on a NAS, use the separate development
-Compose stack:
+For a NAS, download the generated development Compose artifact and install its
+`docker-compose.pinned.yml` as `docker-compose.yml`; the sibling
+`docker-compose.dev.yml` remains digest-locked despite its readable `dev` tag.
+Signed releases separately publish the full `docker-compose.production.yml`.
+The NAS pulls public images and never receives source, Dockerfiles, build
+contexts, or image archives. Follow the
+[development NAS installation guide](docs/runbooks/development-nas-installation.md)
+for the exact three runtime secret files and generic Compose-project import.
+
+Repository contributors with the two `dev-local` images already built can run
+the same image-only stack locally:
 
 ```bash
 scripts/dev-compose
@@ -84,8 +92,12 @@ curl --fail http://127.0.0.1:8080/api/v1/readyz
 scripts/dev-compose down
 ```
 
-This never publishes images or deploys to production. Production uses the
-reviewed digest-pinned platform Compose path described in
+This local command never publishes images or deploys to production. Accepted
+`main` commits publish immutable `dev-sha-*` tags and the `dev` convenience
+alias. Signed release tags promote the exact accepted digests to immutable
+`vX.Y.Z` tags and the `latest` convenience alias. Generated Compose and release
+artifacts always use immutable tag-plus-digest references, never a moving
+alias. Production uses the reviewed digest-pinned platform Compose path in
 [`deploy/compose/README.md`](deploy/compose/README.md).
 
 The repository deliberately keeps expensive acceptance work local. Pull
@@ -159,6 +171,7 @@ reconciled by the repository-less worker.
 - [Architecture overview](docs/architecture-overview.md)
 - [Recipe catalog and WorkloadRun operations](docs/runbooks/workload-packages.md)
 - [NAS pull-only Compose deployment](deploy/compose/README.md)
+- [Development NAS installation and runtime secrets](docs/runbooks/development-nas-installation.md)
 - [Source-first recipe containers and local builds](deploy/compose/README.md#recipe-containers-are-source-first)
 - [Agent package release and APT installation](docs/operations/agent-package-release.md)
 - [Control-plane bootstrap](docs/runbooks/control-plane-bootstrap.md)

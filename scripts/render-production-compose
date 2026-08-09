@@ -1,0 +1,94 @@
+#!/usr/bin/env python3
+"""Render the canonical production graph with digest-locked latest images."""
+
+from __future__ import annotations
+
+import argparse
+import os
+import re
+import tempfile
+from pathlib import Path
+
+API_TOKEN = "${CONTROL_API_IMAGE:?set a digest-pinned control-api image}"
+WORKER_TOKEN = "${CONTROL_WORKER_IMAGE:?set a digest-pinned control-worker image}"
+TOKEN_COUNTS = {API_TOKEN: 3, WORKER_TOKEN: 8}
+IMAGE_PATTERN = re.compile(
+    r"ghcr\.io/carstvaartjes/vonk-forge-(?P<role>api|worker)"
+    r":latest@sha256:[0-9a-f]{64}\Z"
+)
+
+
+def _validate_image(image: str, role: str) -> None:
+    match = IMAGE_PATTERN.fullmatch(image)
+    if match is None or match.group("role") != role:
+        raise ValueError(
+            f"{role} image must be the public production alias locked by digest"
+        )
+
+
+def render(template: Path, output: Path, api_image: str, worker_image: str) -> None:
+    """Render one production Compose file without resolving operator inputs."""
+    if not template.is_file() or template.is_symlink():
+        raise ValueError("template must be an existing regular file")
+    if not output.parent.is_dir():
+        raise ValueError("output parent must exist")
+    try:
+        if template.samefile(output):
+            raise ValueError("template and output must be different files")
+    except FileNotFoundError:
+        if template.resolve() == output.resolve():
+            raise ValueError("template and output must be different files")
+    _validate_image(api_image, "api")
+    _validate_image(worker_image, "worker")
+
+    text = template.read_text(encoding="utf-8")
+    for token, count in TOKEN_COUNTS.items():
+        if text.count(token) != count:
+            role = "API" if token == API_TOKEN else "worker"
+            raise ValueError(f"template {role} image token count changed")
+    rendered = text.replace(API_TOKEN, api_image).replace(WORKER_TOKEN, worker_image)
+    if "CONTROL_API_IMAGE" in rendered or "CONTROL_WORKER_IMAGE" in rendered:
+        raise ValueError("template contains unresolved control image input")
+    if "VONK_DEPLOYMENT_MODE: production" not in rendered:
+        raise ValueError("template is not the production graph")
+
+    descriptor, stage_name = tempfile.mkstemp(
+        prefix=".render-production-compose-", dir=output.parent
+    )
+    stage = Path(stage_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
+            stream.write(rendered)
+            stream.flush()
+            os.fsync(stream.fileno())
+        stage.chmod(0o644)
+        os.replace(stage, output)
+    except BaseException:
+        stage.unlink(missing_ok=True)
+        raise
+
+
+def _arguments() -> argparse.Namespace:
+    root = Path(__file__).resolve().parents[1]
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--template", type=Path, default=root / "deploy/compose/compose.yaml"
+    )
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--api-image", required=True)
+    parser.add_argument("--worker-image", required=True)
+    return parser.parse_args()
+
+
+def main() -> None:
+    arguments = _arguments()
+    render(
+        arguments.template,
+        arguments.output,
+        arguments.api_image,
+        arguments.worker_image,
+    )
+
+
+if __name__ == "__main__":
+    main()

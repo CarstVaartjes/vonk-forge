@@ -144,7 +144,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
+      attestations: write
       contents: read
+      id-token: write
       packages: write
     steps:
       - name: Check out publication tooling
@@ -273,6 +275,20 @@ jobs:
                 )] | length > 0' >/dev/null
           done
 
+      - name: Sign accepted API image provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ needs.build-and-accept.outputs.api_image }}
+          subject-digest: ${{ steps.publish.outputs.api_digest }}
+          push-to-registry: true
+
+      - name: Sign accepted worker image provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ needs.build-and-accept.outputs.worker_image }}
+          subject-digest: ${{ steps.publish.outputs.worker_digest }}
+          push-to-registry: true
+
       - name: Render digest-pinned Compose artifact
         shell: bash
         env:
@@ -285,11 +301,18 @@ jobs:
           set -euo pipefail
           install -d -m 0700 dist
           scripts/render-dev-compose \
-            --output dist/docker-compose.yml \
+            --output dist/docker-compose.pinned.yml \
             --api-image "$API_IMAGE:${IMMUTABLE_TAG}@${API_DIGEST}" \
             --worker-image "$WORKER_IMAGE:${IMMUTABLE_TAG}@${WORKER_DIGEST}" \
             --commit "$GITHUB_SHA"
-          docker compose -f dist/docker-compose.yml config -q
+          scripts/render-dev-compose \
+            --output dist/docker-compose.dev.yml \
+            --api-image "$API_IMAGE:dev@${API_DIGEST}" \
+            --worker-image "$WORKER_IMAGE:dev@${WORKER_DIGEST}" \
+            --commit "$GITHUB_SHA" \
+            --channel dev
+          docker compose -f dist/docker-compose.pinned.yml config -q
+          docker compose -f dist/docker-compose.dev.yml config -q
 
       - name: Upload Compose artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -297,7 +320,9 @@ jobs:
           name: ${{ needs.build-and-accept.outputs.artifact_name }}
           if-no-files-found: error
           retention-days: 30
-          path: dist/docker-compose.yml
+          path: |
+            dist/docker-compose.pinned.yml
+            dist/docker-compose.dev.yml
 
       - name: Advance accepted development aliases
         shell: bash

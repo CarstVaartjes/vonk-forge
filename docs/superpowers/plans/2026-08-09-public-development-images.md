@@ -322,7 +322,10 @@ git commit -S -m "test: exercise image-only development stack"
 **Interfaces:**
 - Produces: immutable `dev-sha-<40-hex>` API/worker tags, moving `dev` aliases,
   and digest outputs.
-- Produces: artifact `vonk-forge-dev-compose-<sha>/docker-compose.yml`.
+- Produces: artifact `vonk-forge-dev-compose-<sha>` containing
+  `docker-compose.dev.yml` and `docker-compose.pinned.yml`.
+- Produces on signed releases: `docker-compose.production.yml` from the full
+  production graph.
 - Consumes: only the exact current `origin/main` tip.
 
 - [ ] **Step 1: Write failing metadata and workflow contract tests**
@@ -342,7 +345,8 @@ state.
 `scripts/dev-image-metadata` accepts event ref, selected SHA, and fetched
 origin-main SHA; all must identify `refs/heads/main` at one full commit. It emits
 API/worker repository names, immutable `dev-sha-<sha>` tags, and the exact `dev`
-convenience alias. The renderer consumes only immutable tag-plus-digest refs.
+convenience alias. The renderer consumes only digest-locked refs; its pinned
+mode additionally requires the immutable development tag.
 
 - [ ] **Step 3: Build exact OCI archives before registry login**
 
@@ -355,8 +359,9 @@ and run `scripts/dev-image-acceptance` against them. Do not expose
 
 Only after acceptance, log into GHCR and use Skopeo to copy the tested OCI
 archives to their development tags. Resolve immutable registry digests, render
-the final Compose file with tag-plus-digest references, validate it, attest the
-published subjects, and upload only `docker-compose.yml`. As the final registry
+the two development Compose files with tag-plus-digest references, validate
+them, sign the published subjects with GitHub artifact attestations, and upload
+only those Compose files. As the final registry
 mutation, advance each `dev` alias to its already-verified immutable manifest
 without rebuilding it. Serialize and retry the cross-repository reconciliation,
 verify both resulting digests, roll back an established pair on failure, and
@@ -393,8 +398,9 @@ git commit -S -m "ci: publish accepted main development images"
 **Interfaces:**
 - Consumes: signed `vX.Y.Z` tag commit and existing `dev-sha-<commit>` manifests.
 - Produces: stable API/worker tags and moving `latest` aliases pointing to
-  exactly those manifests.
-- Preserves: existing Hermes build and platform release evidence pipeline.
+  exactly those manifests, plus the release's Hermes `latest` alias.
+- Preserves: existing Hermes build and platform release evidence pipeline while
+  moving Hermes `latest` only in the final reconciled alias set.
 
 - [ ] **Step 1: Write failing release-promotion tests**
 
@@ -406,7 +412,10 @@ SBOM/provenance/platform evidence. Require `latest` to advance only after every
 signed-release gate, stable-tag digest check, and release-evidence step passes.
 The tag verifier must use a trusted signer allowlist read from fetched `main`,
 require an annotated SSH-signed tag, and prove the tagged commit is reachable
-from `origin/main` before any release build or publication job can run.
+from `origin/main` before any release build or publication job can run. Require
+the final globally serialized reconciler to select the highest completed stable
+release and use only checksum-verified `vonk-forge-images.env` release evidence
+as digest authority.
 
 - [ ] **Step 2: Run release tests and verify current rebuild behavior fails**
 
@@ -426,8 +435,9 @@ attestation identity, then use `docker buildx imagetools create --tag
 <repository>:<version> <repository>@<digest>`. Reinspect the stable tag and
 require digest equality. After all release evidence succeeds, update
 `<repository>:latest` from that same immutable digest and verify equality again.
-Keep the existing output names consumed by platform evidence. Never mutate
-`<repository>:dev`. Do not modify Hermes behavior in this task.
+Promote API, worker, and Hermes convenience aliases as one reconciled set. Keep
+the existing output names consumed by platform evidence. Never mutate
+`<repository>:dev`.
 
 - [ ] **Step 4: Run release and supply-chain tests**
 

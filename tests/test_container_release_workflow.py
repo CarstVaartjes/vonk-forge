@@ -141,6 +141,10 @@ def test_tag_release_builds_and_publishes_exact_platform_target() -> None:
     assert "environment: platform-release" in publisher
     assert "id-token: write" not in publisher
     build = workflow_step("publish-images", "Build canonical platform release")
+    assert "scripts/render-production-compose" in build
+    assert "docker-compose.production.yml" in build
+    assert ":latest@${{ steps.api.outputs.digest }}" in build
+    assert ":latest@${{ steps.worker.outputs.digest }}" in build
     assert "scripts/build-control-deployment-bundle" in build
     assert "scripts/publish-platform-target describe-bundle" in build
     assert "scripts/build-platform-manifest" in build
@@ -221,6 +225,7 @@ def test_release_attaches_exact_platform_publication_evidence() -> None:
     release = workflow_step("release-manifest", "Create public GitHub Release")
     for name in (
         "control-deployment-descriptor.json",
+        "docker-compose.production.yml",
         "platform-release.json",
         "platform-publication.json",
     ):
@@ -234,7 +239,7 @@ def test_release_chain_is_default_off_and_dependency_gated() -> None:
 
     assert "vars.VONK_CONTAINER_RELEASES_ENABLED == 'true'" in metadata
     assert (
-        "needs: [lint, generated-clients, test, release-metadata, build-agent-package]"
+        "needs: [validate-release-images, release-metadata, build-agent-package]"
         in publisher
     )
     assert (
@@ -284,13 +289,19 @@ def test_manual_agent_validation_does_not_publish_a_second_tag_release() -> None
 
 def test_publisher_needs_every_ci_gate_and_alone_can_write_packages() -> None:
     metadata = job("release-metadata")
+    validator = job("validate-release-images")
     publisher = job("publish-images")
     manifest = job("release-manifest")
 
     assert (
         "needs: [lint, generated-clients, test, release-metadata, build-agent-package]"
+        in validator
+    )
+    assert (
+        "needs: [validate-release-images, release-metadata, build-agent-package]"
         in publisher
     )
+    assert "packages: write" not in validator
     assert "permissions:\n      contents: read\n      packages: write" in publisher
     assert "packages: write" not in metadata
     assert "packages: write" not in manifest
@@ -306,18 +317,21 @@ def test_publisher_needs_every_ci_gate_and_alone_can_write_packages() -> None:
     assert workflow().count("contents: write") == 1
 
 
-def test_all_container_publications_are_serialized_without_cancellation() -> None:
+def test_release_builds_are_per_version_and_alias_jobs_reconcile_globally() -> None:
+    text = workflow()
     publisher = job("publish-images")
     alias = job("advance-production-aliases")
 
-    assert "concurrency:\n      group: vonk-forge-container-publication" in publisher
+    assert "github.event.pull_request.number || github.ref" in text
+    assert "cancel-in-progress: ${{ github.event_name == 'pull_request' }}" in text
+    assert "group: vonk-forge-container-publication-${{" in publisher
+    assert "needs.release-metadata.outputs.version" in publisher
     assert "cancel-in-progress: false" in publisher
-    assert publisher.index("concurrency:") < publisher.index(
-        "Refuse an existing release version"
-    )
-    assert "group: vonk-forge-production-alias" in alias
+    assert publisher.index("concurrency:") < publisher.index("Promote accepted API image")
+    assert "group: vonk-forge-production-alias-reconciliation" in alias
     assert "cancel-in-progress: false" in alias
-    assert workflow().count("group: vonk-forge-container-publication") == 1
+    assert "globally newest completed release" in alias
+    assert text.count("group: vonk-forge-container-publication-") == 1
 
 
 def test_publisher_uses_pinned_docker_actions_and_exact_artifacts() -> None:
@@ -358,9 +372,13 @@ def test_complete_summary_uses_all_three_build_digests() -> None:
 
 
 def test_public_input_scanner_runs_before_every_image_build() -> None:
+    validator = job("validate-release-images")
     publisher = job("publish-images")
-    scanner = publisher.index("scripts/verify-public-image-inputs")
-    assert scanner < publisher.index("Build and push Hermes image")
+    assert "scripts/verify-public-image-inputs" in validator
+    assert "scripts/verify-supply-chain --json" in validator
+    assert "scripts/verify-public-image-inputs" not in publisher
+    assert "scripts/verify-supply-chain --json" not in publisher
+    assert "Build and push Hermes image" in publisher
 
 
 def test_api_and_worker_are_promoted_from_accepted_dev_manifests() -> None:
@@ -370,25 +388,33 @@ def test_api_and_worker_are_promoted_from_accepted_dev_manifests() -> None:
     assert publisher.count("docker/build-push-action@") == 1
 
     for role in ("API", "worker"):
-        step = workflow_step(
-            "publish-images", f"Promote accepted {role} image"
+        validation = workflow_step(
+            "validate-release-images", f"Validate accepted {role} image"
         )
-        assert "dev_source" in step.lower()
-        assert "skopeo inspect --format '{{.Digest}}'" in step
-        assert 'org.opencontainers.image.revision' in step
-        assert "docker buildx imagetools inspect" in step
-        assert ".Provenance" in step and ".SBOM" in step
-        assert "slsa.dev/provenance" in step
-        assert ".SLSA?.buildType?" in step
-        assert "SPDXRef-DOCUMENT" in step
-        assert "docker buildx imagetools create" in step
-        assert "IMAGE_VERSION_TAG" in step
-        assert "digest=" in step
-        assert "GITHUB_OUTPUT" in step
-        assert "refusing to overwrite immutable" in step
-        assert "manifest unknown|name unknown|not found" in step
-        assert ":latest" not in step
-        assert ":dev" not in step.replace(":dev-sha-", ":source-")
+        promotion = workflow_step("publish-images", f"Promote accepted {role} image")
+        assert "dev_source" in validation.lower()
+        assert "skopeo inspect --format '{{.Digest}}'" in validation
+        assert 'org.opencontainers.image.revision' in validation
+        assert "docker buildx imagetools inspect" in validation
+        assert ".Provenance" in validation and ".SBOM" in validation
+        assert "slsa.dev/provenance" in validation
+        assert ".SLSA?.buildType?" in validation
+        assert "SPDXRef-DOCUMENT" in validation
+        assert "gh attestation verify" in validation
+        assert "--signer-workflow" in validation
+        assert "--source-digest \"$GITHUB_SHA\"" in validation
+        assert "--source-ref refs/heads/main" in validation
+        assert "refusing to overwrite immutable" in validation
+        assert "manifest unknown|name unknown|not found" in validation
+        assert "GITHUB_OUTPUT" in validation
+        assert "docker buildx imagetools create" in promotion
+        assert "refusing to overwrite immutable" in promotion
+        assert "manifest unknown|name unknown|not found" in promotion
+        assert "needs.validate-release-images.outputs" in promotion
+        assert "IMAGE_VERSION_TAG" in promotion
+        assert "GITHUB_OUTPUT" in promotion
+        assert ":latest" not in promotion
+        assert ":dev" not in promotion
 
 
 def test_hermes_build_keeps_its_existing_release_tags() -> None:
@@ -396,21 +422,21 @@ def test_hermes_build_keeps_its_existing_release_tags() -> None:
     assert step_block("publish-images", "Build and push Hermes image", "tags") == [
         f"{image}:${{{{ needs.release-metadata.outputs.version }}}}",
         f"{image}:${{{{ needs.release-metadata.outputs.commit_tag }}}}",
-        f"{image}:latest",
     ]
+    assert "scripts/refuse-existing-image-version" in workflow_step(
+        "publish-images", "Recheck the immutable Hermes version"
+    )
 
 
 def test_existing_version_guard_allows_only_known_absence(
     tmp_path: Path,
 ) -> None:
-    publisher = job("publish-images")
-    assert publisher.index("Refuse an existing release version") < publisher.index(
-        "Promote accepted API image"
-    )
     assert "scripts/refuse-existing-image-version" in workflow_step(
-        "publish-images", "Refuse an existing release version"
+        "validate-release-images", "Refuse an existing release version"
     )
-    guard = workflow_step("publish-images", "Refuse an existing release version")
+    guard = workflow_step(
+        "validate-release-images", "Refuse an existing release version"
+    )
     assert "CONTROL_API_IMAGE" not in guard
     assert "CONTROL_WORKER_IMAGE" not in guard
 
@@ -428,7 +454,9 @@ def test_existing_version_guard_allows_only_known_absence(
         "esac\n"
     )
     docker.chmod(0o755)
-    script = rendered_step_run("publish-images", "Refuse an existing release version")
+    script = rendered_step_run(
+        "validate-release-images", "Refuse an existing release version"
+    )
     environment = {
         **os.environ,
         "PATH": f"{fake_bin}:{os.environ['PATH']}",
@@ -462,16 +490,37 @@ def test_existing_version_guard_allows_only_known_absence(
 def test_latest_alias_advances_only_after_release_evidence() -> None:
     alias = job("advance-production-aliases")
 
-    assert "needs: [release-metadata, publish-images, release-manifest]" in alias
+    assert "validate-production-alias:" not in workflow()
+    assert "needs: [release-metadata, release-manifest]" in alias
     assert "if: needs.release-manifest.result == 'success'" in alias
     assert "environment: platform-release" in alias
-    assert "GITHUB_REF_NAME" in alias
-    assert "sort -V" in alias
+    assert "group: vonk-forge-production-alias-reconciliation" in alias
+    assert "cancel-in-progress: false" in alias
     assert "scripts/promote-image-aliases" in alias
-    assert '"$API_IMAGE" "$API_DIGEST"' in alias
-    assert '"$WORKER_IMAGE" "$WORKER_DIGEST" "$LATEST_ALIAS"' in alias
-    assert "needs.publish-images.outputs.api_digest" in alias
-    assert "needs.publish-images.outputs.worker_digest" in alias
+    assert "sort -V" in alias
+    assert '"$API_IMAGE" "$api_digest"' in alias
+    assert '"$WORKER_IMAGE" "$worker_digest" "$LATEST_ALIAS"' in alias
+    assert '"$HERMES_IMAGE" "$hermes_digest"' in alias
+    assert alias.index("Log in to GHCR") < alias.index(
+        "Reconcile the newest completed production release"
+    )
+    assert "gh release list" in alias
+    assert "select_newest_completed_release" in alias
+    assert "mapfile -t release_tags" in alias
+    assert "for candidate in \"${release_tags[@]}\"" in alias
+    assert "newer production tag is not complete" not in alias
+    assert "gh release download \"$target_tag\"" in alias
+    assert "vonk-forge-images.env.sha256" in alias
+    assert "sha256sum" in alias
+    assert "git -c gpg.format=ssh" in alias
+    assert "verify-tag \"refs/tags/$target_tag\"" in alias
+    assert "git merge-base --is-ancestor" in alias
+    assert "CONTROL_API_IMAGE" in alias
+    assert "CONTROL_WORKER_IMAGE" in alias
+    assert "HERMES_AGENT_IMAGE" in alias
+    assert '"docker://$API_IMAGE:$target_tag"' in alias
+    assert '"docker://$WORKER_IMAGE:$target_tag"' in alias
+    assert '"docker://$HERMES_IMAGE:$target_version"' in alias
     assert ":dev" not in alias
 
 
