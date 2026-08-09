@@ -1,0 +1,166 @@
+name: vonk-forge-dev
+
+x-dev-generation: &dev-generation
+  VONK_DEPLOYMENT_MODE: development
+  VONK_CONTROL_STARTUP_MODE: selected
+  VONK_CONTROL_GENERATION_ID: gen-000000000000000000000000
+  VONK_DATABASE_REVISION: 0020_recipe_catalog_bridge
+  VONK_PLATFORM_VERSION: 0.1.0
+  VONK_PLATFORM_RELEASE_DIGEST: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  VONK_PLATFORM_BUILD_DIGEST: sha256:1111111111111111111111111111111111111111111111111111111111111111
+  VONK_CONTROL_START_NONCE: "4444444444444444444444444444444444444444444444444444444444444444"
+  VONK_CONTROL_IDENTITY_ROOT: /control-identity
+  VONK_DATABASE_URL_FILE: /run/secrets/database-url
+  VONK_REPOSITORY_PATH: /repository
+  VONK_DEPLOYMENT_BRANCH: main
+  VONK_STATE_PATH: /state
+  VONK_AGENT_RUNTIME: disabled
+  VONK_MANAGEMENT_CIDRS: 127.0.0.1/32
+  VONK_GLOBAL_CATALOG_URL: https://vonkforge.ai
+
+x-api-image: &api-image __VONK_API_IMAGE__
+x-worker-image: &worker-image __VONK_WORKER_IMAGE__
+
+services:
+  postgres:
+    image: postgres:18.3@sha256:7e32e9833a6fb1c92c32552794cb6ed569d51b445a54907d35fc112ef39684db
+    environment:
+      POSTGRES_DB: control
+      POSTGRES_USER: control
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres-password
+    secrets: [postgres-password]
+    volumes: [dev-postgres-data:/var/lib/postgresql]
+    networks: [data]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U control -d control"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  dev-init:
+    image: *api-image
+    user: "0:0"
+    command: [python, -m, vonk_control.dev_init]
+    environment:
+      VONK_CONTROL_IDENTITY_ROOT: /control-identity
+      VONK_DEV_API_SECRET_ROOT: /api-secrets
+      VONK_DEV_EXPECTED_COMMIT: __VONK_EXPECTED_COMMIT__
+      VONK_DEV_REPOSITORY_URL: https://github.com/CarstVaartjes/vonk-forge.git
+      VONK_DEV_SECRET_SOURCE_ROOT: /host-secrets
+      VONK_DEV_WORKER_SECRET_ROOT: /worker-secrets
+      VONK_REPOSITORY_PATH: /repository
+      VONK_ROUTE_ROOT: /routes
+      VONK_STATE_PATH: /state
+      VONK_SUPERVISOR_ROOT: /supervisor
+    volumes:
+      - dev-repository:/repository
+      - dev-api-secrets:/api-secrets
+      - dev-worker-secrets:/worker-secrets
+      - dev-control-identity:/control-identity
+      - dev-control-state:/state
+      - dev-route-publications:/routes
+      - dev-supervisor-state:/supervisor
+    secrets:
+      - source: database-url
+        target: /host-secrets/database-url
+      - source: git-signing-key
+        target: /host-secrets/git-signing-key
+    restart: "no"
+
+  migrate:
+    image: *api-image
+    command:
+      - python
+      - -c
+      - >-
+        from pathlib import Path;
+        from alembic import command;
+        from alembic.config import Config;
+        config=Config('/srv/vonk-control/alembic.ini');
+        config.set_main_option('sqlalchemy.url', Path('/run/secrets/database-url').read_text().strip());
+        command.upgrade(config, 'head')
+    environment:
+      VONK_DEPLOYMENT_MODE: development
+    secrets: [database-url]
+    depends_on:
+      postgres: {condition: service_healthy}
+      dev-init: {condition: service_completed_successfully}
+    networks: [data]
+    restart: "no"
+
+  control-worker:
+    image: *worker-image
+    command: [python, -m, vonk_control.worker]
+    user: "10001:10001"
+    read_only: true
+    tmpfs: [/run/vonk-signer, /tmp]
+    environment:
+      <<: *dev-generation
+      VONK_CONTROL_PROCESS_IMAGE: *worker-image
+      VONK_INTERNAL_API_URL: http://control-api:8000
+      VONK_WORKER_API_TOKEN_FILE: /run/secrets/worker-api-token
+    volumes:
+      - dev-repository:/repository:ro
+      - dev-control-identity:/control-identity:ro
+      - dev-control-state:/state
+      - dev-route-publications:/routes
+      - dev-supervisor-state:/supervisor
+      - dev-worker-secrets:/run/secrets:ro
+    networks: [application, data]
+    depends_on:
+      postgres: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+      dev-init: {condition: service_completed_successfully}
+
+  control-api:
+    image: *api-image
+    command: [python, -m, vonk_control.api]
+    user: "10001:10001"
+    read_only: true
+    tmpfs: [/run/vonk-workload-signer, /tmp]
+    environment:
+      <<: *dev-generation
+      VONK_CONTROL_PROCESS_IMAGE: *api-image
+      VONK_GIT_SIGNING_KEY_FILE: /run/secrets/git-signing-key
+      VONK_ADMIN_GRANT_PRIVATE_KEY_FILE: /run/secrets/admin-grant-private-key
+    volumes:
+      - dev-repository:/repository
+      - dev-control-identity:/control-identity:ro
+      - dev-control-state:/state
+      - dev-route-publications:/routes
+      - dev-supervisor-state:/supervisor
+      - dev-api-secrets:/run/secrets:ro
+    networks: [application, data]
+    ports: ["127.0.0.1:${VONK_DEV_PORT:-8080}:8000"]
+    depends_on:
+      postgres: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+      dev-init: {condition: service_completed_successfully}
+      control-worker: {condition: service_started}
+    healthcheck:
+      test: [CMD, python, -m, vonk_control.healthcheck]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+networks:
+  application: {}
+  data: {internal: true}
+
+secrets:
+  postgres-password:
+    file: ./secrets/postgres-password
+  database-url:
+    file: ./secrets/database-url
+  git-signing-key:
+    file: ./secrets/git-signing-key
+
+volumes:
+  dev-postgres-data: {}
+  dev-control-identity: {}
+  dev-control-state: {}
+  dev-route-publications: {}
+  dev-supervisor-state: {}
+  dev-repository: {}
+  dev-api-secrets: {}
+  dev-worker-secrets: {}

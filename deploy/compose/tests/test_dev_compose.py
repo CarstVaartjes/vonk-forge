@@ -76,6 +76,15 @@ def test_dev_compose_builds_local_control_services_without_release_images(
     ]
 
 
+def test_local_source_compose_remains_distinct_from_published_image_template() -> None:
+    image_template = ROOT / "deploy/compose/compose.dev.images.yaml"
+
+    assert COMPOSE.exists()
+    assert image_template.exists()
+    assert "build:" in COMPOSE.read_text(encoding="utf-8")
+    assert "__VONK_API_IMAGE__" in image_template.read_text(encoding="utf-8")
+
+
 def test_dev_compose_initializes_identity_before_api_and_worker(tmp_path: Path) -> None:
     services = _rendered(tmp_path)["services"]
 
