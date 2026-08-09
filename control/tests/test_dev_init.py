@@ -7,14 +7,16 @@ import subprocess
 from pathlib import Path
 
 import pytest
-
-import vonk_control.dev_init as dev_init
+from vonk_control import dev_init
 from vonk_control.dev_init import (
     DevInitError,
     initialize_repository,
     main,
     stage_runtime_secrets,
 )
+
+API_IMAGE = "ghcr.io/example/vonk-forge-api@sha256:" + "a" * 64
+WORKER_IMAGE = "ghcr.io/example/vonk-forge-worker@sha256:" + "b" * 64
 
 
 def _git(root: Path, *arguments: str) -> str:
@@ -707,6 +709,8 @@ def test_main_initializes_repository_synthetic_state_and_runtime_secrets(
     monkeypatch.setenv("VONK_DEV_SECRET_SOURCE_ROOT", str(source))
     monkeypatch.setenv("VONK_DEV_API_SECRET_ROOT", str(api_root))
     monkeypatch.setenv("VONK_DEV_WORKER_SECRET_ROOT", str(worker_root))
+    monkeypatch.setenv("VONK_DEV_API_IMAGE", API_IMAGE)
+    monkeypatch.setenv("VONK_DEV_WORKER_IMAGE", WORKER_IMAGE)
     monkeypatch.setenv("VONK_CONTROL_IDENTITY_ROOT", str(identity))
     monkeypatch.setenv("VONK_STATE_PATH", str(state))
     monkeypatch.setenv("VONK_ROUTE_ROOT", str(routes))
@@ -714,7 +718,11 @@ def test_main_initializes_repository_synthetic_state_and_runtime_secrets(
 
     assert main() == 0
     assert _git(repository, "rev-parse", "main") == expected
-    assert json.loads((identity / "active.json").read_text(encoding="ascii"))["projection_kind"] == "active"
+    projection = json.loads((identity / "active.json").read_text(encoding="ascii"))
+    assert projection["projection_kind"] == "active"
+    generation = projection["selection"]["generation"]
+    assert generation["api_image"] == API_IMAGE
+    assert generation["worker_image"] == WORKER_IMAGE
     assert (api_root / "admin-grant-private-key").is_file()
     assert (worker_root / "worker-api-token").is_file()
     assert all(path.is_dir() for path in (state, routes, supervisor))
@@ -739,6 +747,26 @@ def test_main_preflights_all_required_environment_before_cloning(
     assert not repository.exists()
 
 
+def test_main_rejects_an_unpinned_process_image_before_cloning(
+    tmp_path: Path, local_acceptance: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _origin_path, _publisher, repository_url, expected = _origin(tmp_path)
+    repository = tmp_path / "repository"
+    monkeypatch.setenv("VONK_DEV_EXPECTED_COMMIT", expected)
+    monkeypatch.setenv("VONK_DEV_REPOSITORY_URL", repository_url)
+    monkeypatch.setenv("VONK_REPOSITORY_PATH", str(repository))
+    monkeypatch.setenv("VONK_DEV_SECRET_SOURCE_ROOT", str(tmp_path / "source"))
+    monkeypatch.setenv("VONK_DEV_API_SECRET_ROOT", str(tmp_path / "api"))
+    monkeypatch.setenv("VONK_DEV_WORKER_SECRET_ROOT", str(tmp_path / "worker"))
+    monkeypatch.setenv("VONK_DEV_API_IMAGE", "vonk-forge-api:dev-local")
+    monkeypatch.setenv("VONK_DEV_WORKER_IMAGE", WORKER_IMAGE)
+
+    with pytest.raises(DevInitError, match="VONK_DEV_API_IMAGE is invalid"):
+        main()
+
+    assert not repository.exists()
+
+
 def test_active_projection_retries_partial_writes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -750,8 +778,9 @@ def test_active_projection_retries_partial_writes(
     monkeypatch.setattr(dev_init.os, "write", partial_write)
     identity = tmp_path / "identity"
 
-    dev_init._write_active_projection(identity)
+    dev_init._write_active_projection(identity, API_IMAGE, WORKER_IMAGE)
 
     raw = (identity / "active.json").read_bytes()
     assert raw.endswith(b"\n")
     assert json.loads(raw)["projection_kind"] == "active"
+    assert stat.S_IMODE((identity / "active.json").stat().st_mode) == 0o444

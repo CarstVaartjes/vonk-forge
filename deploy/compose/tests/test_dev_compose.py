@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import stat
 import subprocess
 from pathlib import Path
 
@@ -11,9 +10,12 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
 COMPOSE = ROOT / "deploy/compose/compose.dev.yaml"
+IMAGE_TEMPLATE = ROOT / "deploy/compose/compose.dev.images.yaml"
 SCRIPT = ROOT / "scripts/dev-compose"
 SECRETS_HELPER = ROOT / "scripts/dev-compose-secrets.py"
 EXPECTED_COMMIT = "a" * 40
+DEV_API_IMAGE = "vonk-forge-dev/control-api@sha256:" + "0" * 64
+DEV_WORKER_IMAGE = "vonk-forge-dev/control-worker@sha256:" + "1" * 64
 
 
 def _rendered(tmp_path: Path) -> dict[str, object]:
@@ -114,11 +116,13 @@ def test_dev_compose_runs_packaged_initializer_with_disjoint_runtime_authority(
     assert initializer["environment"] == {
         "VONK_CONTROL_IDENTITY_ROOT": "/control-identity",
         "VONK_DEV_API_SECRET_ROOT": "/api-secrets",
+        "VONK_DEV_API_IMAGE": DEV_API_IMAGE,
         "VONK_DEV_EXPECTED_COMMIT": EXPECTED_COMMIT,
         "VONK_DEV_LOCAL_ACCEPTANCE": "1",
         "VONK_DEV_REPOSITORY_URL": "file:///source-origin",
         "VONK_DEV_SECRET_SOURCE_ROOT": "/host-secrets",
         "VONK_DEV_WORKER_SECRET_ROOT": "/worker-secrets",
+        "VONK_DEV_WORKER_IMAGE": DEV_WORKER_IMAGE,
         "VONK_REPOSITORY_PATH": "/repository",
         "VONK_ROUTE_ROOT": "/routes",
         "VONK_STATE_PATH": "/state",
@@ -174,9 +178,9 @@ def _script_repository(tmp_path: Path) -> tuple[Path, Path]:
     shutil.copy2(SCRIPT, local_script)
     if SECRETS_HELPER.exists():
         shutil.copy2(SECRETS_HELPER, local_script.parent / SECRETS_HELPER.name)
-    local_compose = repository / "deploy/compose/compose.dev.yaml"
+    local_compose = repository / "deploy/compose/compose.dev.images.yaml"
     local_compose.parent.mkdir(parents=True)
-    local_compose.write_text("services: {}\n", encoding="utf-8")
+    shutil.copy2(IMAGE_TEMPLATE, local_compose)
     subprocess.run(("git", "init", "-q", "-b", "main", str(repository)), check=True)
     subprocess.run(
         ("git", "-C", str(repository), "config", "user.email", "test@example.invalid"),
@@ -200,13 +204,29 @@ def _fake_docker(tmp_path: Path) -> Path:
     fake_docker.write_text(
         "#!/usr/bin/env bash\n"
         "set -e\n"
-        "printf '%s\\n%s\\n%s\\n' \"${VONK_DEV_EXPECTED_COMMIT:-}\" "
-        "\"${VONK_DEV_ORIGIN_DIR:-absent}\" \"$VONK_DEV_SECRETS_DIR\" "
-        "> \"$VONK_TEST_CAPTURE_DIR/environment\"\n"
-        "git --git-dir=\"$VONK_DEV_ORIGIN_DIR\" rev-parse refs/heads/main "
-        "> \"$VONK_TEST_CAPTURE_DIR/main\"\n"
-        "stat -c %a \"$VONK_DEV_ORIGIN_DIR\" > \"$VONK_TEST_CAPTURE_DIR/mode\"\n"
+        "touch \"$VONK_TEST_CAPTURE_DIR/environment\"\n"
         "printf '%s\\n' \"$@\" > \"$VONK_TEST_CAPTURE_DIR/arguments\"\n"
+        "if [[ \"${1:-}\" == image ]]; then\n"
+        "  case \"${*: -1}\" in\n"
+        "    *api*) printf 'sha256:%064d\\n' 0 ;;\n"
+        "    *worker*) printf 'sha256:%064d\\n' 1 ;;\n"
+        "  esac\n"
+        "  exit 0\n"
+        "fi\n"
+        "file_number=0\n"
+        "while [[ \"$#\" -gt 0 ]]; do\n"
+        "  if [[ \"$1\" == --file ]]; then\n"
+        "    file_number=$((file_number + 1))\n"
+        "    if [[ \"$file_number\" -eq 1 ]]; then\n"
+        "      cp \"$2\" \"$VONK_TEST_CAPTURE_DIR/rendered-compose.yaml\"\n"
+        "    else\n"
+        "      cp \"$2\" \"$VONK_TEST_CAPTURE_DIR/rendered-overlay.yaml\"\n"
+        "    fi\n"
+        "    shift 2\n"
+        "    continue\n"
+        "  fi\n"
+        "  shift\n"
+        "done\n"
         "if [[ \" $* \" == *\" up \"* && \" $* \" != *\" --wait \"* ]]; then\n"
         "  exit 89\n"
         "fi\n"
@@ -231,181 +251,79 @@ def _existing_secrets(tmp_path: Path) -> Path:
     return secrets
 
 
-def test_dev_compose_script_uses_a_unique_one_use_origin_and_ignores_override(
-    tmp_path: Path,
-) -> None:
+def _run_dev_compose(
+    repository: Path,
+    local_script: Path,
+    fake_bin: Path,
+    secrets: Path,
+    capture: Path,
+    *arguments: str,
+    docker_exit: int = 0,
+) -> subprocess.CompletedProcess[str]:
+    environment = os.environ | {
+        "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
+        "VONK_DEV_SECRETS_DIR": str(secrets),
+        "VONK_DEV_ORIGIN_DIR": str(capture / "ignored-origin.git"),
+        "VONK_TEST_CAPTURE_DIR": str(capture),
+        "VONK_TEST_DOCKER_EXIT": str(docker_exit),
+    }
+    return subprocess.run(
+        (str(local_script), *arguments),
+        cwd=repository,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _captured_compose_arguments(capture: Path) -> list[str]:
+    return (capture / "arguments").read_text(encoding="utf-8").splitlines()
+
+
+def test_dev_compose_script_renders_the_image_only_graph(tmp_path: Path) -> None:
     repository, local_script = _script_repository(tmp_path)
     secrets = _existing_secrets(tmp_path)
     fake_bin = _fake_docker(tmp_path)
-    arbitrary_origin = tmp_path / "arbitrary-origin.git"
-    arbitrary_tmp = tmp_path / "attacker-controlled-tmp"
-    arbitrary_tmp.mkdir()
-    expected = subprocess.run(
-        ("git", "-C", str(repository), "rev-parse", "HEAD"),
+    capture = tmp_path / "capture"
+    capture.mkdir()
+    expected_commit = subprocess.run(
+        ("git", "-C", str(repository), "rev-parse", "main"),
         check=True,
         capture_output=True,
         text=True,
     ).stdout.strip()
-    origins: list[Path] = []
-    for invocation in ("first", "second"):
-        capture = tmp_path / f"capture-{invocation}"
-        capture.mkdir()
-        environment = os.environ | {
-            "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
-            "VONK_DEV_ORIGIN_DIR": str(arbitrary_origin),
-            "VONK_DEV_SECRETS_DIR": str(secrets),
-            "VONK_TEST_CAPTURE_DIR": str(capture),
-            "TMPDIR": str(arbitrary_tmp),
-        }
 
-        subprocess.run(
-            (str(local_script), "config"),
-            cwd=repository,
-            env=environment,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-
-        exported_commit, origin, exported_secrets = (
-            capture / "environment"
-        ).read_text(encoding="utf-8").splitlines()
-        origin_path = Path(origin)
-        origins.append(origin_path)
-        assert exported_commit == expected
-        assert exported_secrets == str(secrets)
-        assert origin_path.parent == Path("/tmp")
-        assert origin_path.name.startswith("vonk-forge-dev-origin.")
-        assert (capture / "main").read_text(encoding="utf-8").strip() == expected
-        assert (capture / "mode").read_text(encoding="utf-8").strip() == "755"
-        assert not origin_path.exists()
-        arguments = (capture / "arguments").read_text(encoding="utf-8").splitlines()
-        assert arguments[-1] == "config"
-        assert str(repository / "deploy/compose/compose.dev.yaml") in arguments
-
-    assert origins[0] != origins[1]
-    assert not arbitrary_origin.exists()
-    assert not (repository / ".dev/vonk-forge-origin.git").exists()
-    assert not (repository / ".dev/.vonk-forge-origin.owner").exists()
-    assert stat.S_IMODE(secrets.stat().st_mode) == 0o700
-    assert {
-        path.name: stat.S_IMODE(path.stat().st_mode) for path in secrets.iterdir()
-    } == {
-        "database-url": 0o600,
-        "git-signing-key": 0o600,
-        "git-signing-key.pub": 0o600,
-        "postgres-password": 0o600,
-    }
-
-
-def test_dev_compose_origin_is_not_redirected_when_dev_is_swapped_after_validation(
-    tmp_path: Path,
-) -> None:
-    repository, local_script = _script_repository(tmp_path)
-    secrets = _existing_secrets(tmp_path)
-    fake_bin = _fake_docker(tmp_path)
-    real_mktemp = shutil.which("mktemp")
-    assert real_mktemp is not None
-    fake_mktemp = fake_bin / "mktemp"
-    fake_mktemp.write_text(
-        "#!/usr/bin/env bash\n"
-        "set -e\n"
-        "mv -- \"$VONK_TEST_REPOSITORY_ROOT/.dev\" "
-        "\"$VONK_TEST_REPOSITORY_ROOT/.dev.checked\"\n"
-        "ln -s -- \"$VONK_TEST_SWAPPED_DEV\" "
-        "\"$VONK_TEST_REPOSITORY_ROOT/.dev\"\n"
-        f"exec {real_mktemp} \"$@\"\n",
-        encoding="utf-8",
-    )
-    fake_mktemp.chmod(0o755)
-    capture = tmp_path / "capture"
-    capture.mkdir()
-    swapped_dev = tmp_path / "attacker-development"
-    swapped_dev.mkdir()
-    sentinel = swapped_dev / "operator-owned"
-    sentinel.write_text("preserve\n", encoding="utf-8")
-    arbitrary_tmp = tmp_path / "attacker-controlled-tmp"
-    arbitrary_tmp.mkdir()
-    environment = os.environ | {
-        "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
-        "TMPDIR": str(arbitrary_tmp),
-        "VONK_DEV_SECRETS_DIR": str(secrets),
-        "VONK_TEST_CAPTURE_DIR": str(capture),
-        "VONK_TEST_REPOSITORY_ROOT": str(repository),
-        "VONK_TEST_SWAPPED_DEV": str(swapped_dev),
-    }
-
-    result = subprocess.run(
-        (str(local_script), "config"),
-        cwd=repository,
-        env=environment,
-        check=False,
-        capture_output=True,
-        text=True,
+    result = _run_dev_compose(
+        repository, local_script, fake_bin, secrets, capture, "config"
     )
 
-    origin = Path(
-        (capture / "environment").read_text(encoding="utf-8").splitlines()[1]
-    )
     assert result.returncode == 0
-    assert origin.parent == Path("/tmp")
-    assert origin.name.startswith("vonk-forge-dev-origin.")
-    assert not origin.exists()
-    assert sentinel.read_text(encoding="utf-8") == "preserve\n"
-    assert {path.name for path in swapped_dev.iterdir()} == {"operator-owned"}
-    assert (repository / ".dev.checked").is_dir()
-
-
-@pytest.mark.parametrize("service", ("dev-init", "migrate"))
-def test_dev_compose_script_rejects_one_shot_only_targeted_up_before_origin_creation(
-    tmp_path: Path, service: str
-) -> None:
-    repository, local_script = _script_repository(tmp_path)
-    secrets = _existing_secrets(tmp_path)
-    fake_bin = _fake_docker(tmp_path)
-    real_mktemp = shutil.which("mktemp")
-    assert real_mktemp is not None
-    fake_mktemp = fake_bin / "mktemp"
-    fake_mktemp.write_text(
-        "#!/usr/bin/env bash\n"
-        "set -e\n"
-        "touch \"$VONK_TEST_CAPTURE_DIR/mktemp-called\"\n"
-        f"exec {real_mktemp} \"$@\"\n",
-        encoding="utf-8",
-    )
-    fake_mktemp.chmod(0o755)
-    capture = tmp_path / "capture"
-    capture.mkdir()
-    environment = os.environ | {
-        "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
-        "VONK_DEV_SECRETS_DIR": str(secrets),
-        "VONK_TEST_CAPTURE_DIR": str(capture),
-    }
-
-    result = subprocess.run(
-        (str(local_script), "up", "-d", service),
-        cwd=repository,
-        env=environment,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-
-    assert result.returncode != 0
-    assert service in result.stderr
-    assert "one-shot" in result.stderr
-    assert not (capture / "environment").exists()
-    assert not (capture / "mktemp-called").exists()
+    rendered = (capture / "rendered-compose.yaml").read_text(encoding="utf-8")
+    assert "vonk-forge-api:dev-local" in rendered
+    assert "vonk-forge-worker:dev-local" in rendered
+    assert expected_commit in rendered
+    assert "__VONK_" not in rendered
+    assert "build:" not in rendered
+    assert "VONK_DEV_LOCAL_ACCEPTANCE" not in rendered
+    assert "file:///source-origin" not in rendered
+    assert str(repository) not in rendered
+    overlay = (capture / "rendered-overlay.yaml").read_text(encoding="utf-8")
+    assert "VONK_DEV_API_IMAGE: vonk-forge-api@sha256:" in overlay
+    assert "VONK_DEV_WORKER_IMAGE: vonk-forge-worker@sha256:" in overlay
+    assert "VONK_CONTROL_PROCESS_IMAGE: vonk-forge-api@sha256:" in overlay
+    assert "VONK_CONTROL_PROCESS_IMAGE: vonk-forge-worker@sha256:" in overlay
 
 
 @pytest.mark.parametrize(
     ("arguments", "expected_tail"),
     (
-        ((), ("up", "-d", "--build", "--wait")),
-        (("up", "-d", "control-api"), ("up", "-d", "control-api", "--wait")),
+        ((), ("up", "-d", "--wait", "--pull", "never")),
+        (("up", "-d", "control-api"), ("up", "-d", "control-api", "--wait", "--pull", "never")),
+        (("config",), ("config",)),
     ),
 )
-def test_dev_compose_script_waits_for_every_supported_up_path(
+def test_dev_compose_script_uses_safe_image_only_defaults(
     tmp_path: Path, arguments: tuple[str, ...], expected_tail: tuple[str, ...]
 ) -> None:
     repository, local_script = _script_repository(tmp_path)
@@ -413,72 +331,18 @@ def test_dev_compose_script_waits_for_every_supported_up_path(
     fake_bin = _fake_docker(tmp_path)
     capture = tmp_path / "capture"
     capture.mkdir()
-    environment = os.environ | {
-        "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
-        "VONK_DEV_SECRETS_DIR": str(secrets),
-        "VONK_TEST_CAPTURE_DIR": str(capture),
-    }
 
-    result = subprocess.run(
-        (str(local_script), *arguments),
-        cwd=repository,
-        env=environment,
-        check=False,
-        capture_output=True,
-        text=True,
+    result = _run_dev_compose(
+        repository, local_script, fake_bin, secrets, capture, *arguments
     )
 
-    origin = Path(
-        (capture / "environment").read_text(encoding="utf-8").splitlines()[1]
-    )
-    compose_arguments = (capture / "arguments").read_text(
-        encoding="utf-8"
-    ).splitlines()
     assert result.returncode == 0
+    compose_arguments = _captured_compose_arguments(capture)
     assert tuple(compose_arguments[-len(expected_tail) :]) == expected_tail
-    assert not origin.exists()
+    assert "--build" not in compose_arguments
 
 
-@pytest.mark.parametrize(
-    "arguments",
-    (
-        ("create",),
-        ("start",),
-        ("run", "-d", "control-api"),
-        ("restart",),
-        ("up", "--no-start"),
-        ("up", "--no-start=true"),
-    ),
-)
-def test_dev_compose_script_rejects_lifecycles_without_a_safe_origin_lifetime(
-    tmp_path: Path, arguments: tuple[str, ...]
-) -> None:
-    repository, local_script = _script_repository(tmp_path)
-    secrets = _existing_secrets(tmp_path)
-    fake_bin = _fake_docker(tmp_path)
-    capture = tmp_path / "capture"
-    capture.mkdir()
-    environment = os.environ | {
-        "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
-        "VONK_DEV_SECRETS_DIR": str(secrets),
-        "VONK_TEST_CAPTURE_DIR": str(capture),
-    }
-
-    result = subprocess.run(
-        (str(local_script), *arguments),
-        cwd=repository,
-        env=environment,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-
-    assert result.returncode != 0
-    assert "unsupported" in result.stderr
-    assert not (capture / "environment").exists()
-
-
-def test_dev_compose_script_cleans_one_use_origin_after_docker_failure(
+def test_dev_compose_script_removes_its_render_workspace_after_success(
     tmp_path: Path,
 ) -> None:
     repository, local_script = _script_repository(tmp_path)
@@ -486,27 +350,46 @@ def test_dev_compose_script_cleans_one_use_origin_after_docker_failure(
     fake_bin = _fake_docker(tmp_path)
     capture = tmp_path / "capture"
     capture.mkdir()
-    environment = os.environ | {
-        "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
-        "VONK_DEV_SECRETS_DIR": str(secrets),
-        "VONK_TEST_CAPTURE_DIR": str(capture),
-        "VONK_TEST_DOCKER_EXIT": "37",
-    }
 
-    result = subprocess.run(
-        (str(local_script), "config"),
-        cwd=repository,
-        env=environment,
-        check=False,
-        capture_output=True,
-        text=True,
+    result = _run_dev_compose(
+        repository, local_script, fake_bin, secrets, capture, "config"
     )
 
-    origin = Path(
-        (capture / "environment").read_text(encoding="utf-8").splitlines()[1]
+    compose_arguments = _captured_compose_arguments(capture)
+    project_directory = Path(
+        compose_arguments[compose_arguments.index("--project-directory") + 1]
+    )
+    assert result.returncode == 0
+    assert project_directory.parent == Path("/tmp")
+    assert project_directory.name.startswith("vonk-forge-dev-compose.")
+    assert not project_directory.exists()
+
+
+def test_dev_compose_script_removes_its_render_workspace_after_docker_failure(
+    tmp_path: Path,
+) -> None:
+    repository, local_script = _script_repository(tmp_path)
+    secrets = _existing_secrets(tmp_path)
+    fake_bin = _fake_docker(tmp_path)
+    capture = tmp_path / "capture"
+    capture.mkdir()
+
+    result = _run_dev_compose(
+        repository,
+        local_script,
+        fake_bin,
+        secrets,
+        capture,
+        "config",
+        docker_exit=37,
+    )
+
+    compose_arguments = _captured_compose_arguments(capture)
+    project_directory = Path(
+        compose_arguments[compose_arguments.index("--project-directory") + 1]
     )
     assert result.returncode == 37
-    assert not origin.exists()
+    assert not project_directory.exists()
 
 
 def test_dev_compose_script_rejects_a_symlinked_development_directory(

@@ -18,6 +18,7 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from .host_state import HostOperationPlan, SelectionReceipt
 
 _COMMIT = re.compile(r"[0-9a-f]{40}\Z")
+_IMAGE = re.compile(r"[^\s]{1,1900}@sha256:[0-9a-f]{64}\Z")
 _WORKER_TOKEN = re.compile(rb"[A-Za-z0-9_-]{43}\Z")
 _PUBLIC_REPOSITORY_URL = "https://github.com/CarstVaartjes/vonk-forge.git"
 _API_UID = 10001
@@ -29,8 +30,6 @@ _TARGET_SHA256 = "0" * 64
 _BUILD_DIGEST = "sha256:" + "1" * 64
 _VERSION = "0.1.0"
 _DATABASE_REVISION = "0020_recipe_catalog_bridge"
-_API_IMAGE = "vonk-forge-dev/control-api@sha256:" + "0" * 64
-_WORKER_IMAGE = "vonk-forge-dev/control-worker@sha256:" + "1" * 64
 _GIT_HOME = "/nonexistent/vonk-control"
 
 
@@ -684,7 +683,7 @@ def stage_runtime_secrets(source: Path, api_root: Path, worker_root: Path) -> No
             os.close(worker)
 
 
-def _active_projection() -> bytes:
+def _active_projection(api_image: str, worker_image: str) -> bytes:
     target_name = f"platform/releases/{_VERSION}/{_TARGET_SHA256}.json"
     plan = HostOperationPlan(
         operation_id="dev-compose",
@@ -697,8 +696,8 @@ def _active_projection() -> bytes:
         build_digest=_BUILD_DIGEST,
         platform_version=_VERSION,
         deployment_bundle_digest="sha256:" + "3" * 64,
-        api_image=_API_IMAGE,
-        worker_image=_WORKER_IMAGE,
+        api_image=api_image,
+        worker_image=worker_image,
         database_revision=_DATABASE_REVISION,
     )
     selection = SelectionReceipt.from_plan(plan, previous_generation=None)
@@ -727,7 +726,9 @@ def _initialize_directory(path: Path, *, mode: int, uid: int, gid: int) -> None:
         raise DevInitError("development runtime directory cannot be initialized") from error
 
 
-def _write_active_projection(identity_root: Path) -> None:
+def _write_active_projection(
+    identity_root: Path, api_image: str, worker_image: str
+) -> None:
     _initialize_directory(identity_root, mode=0o755, uid=0, gid=0)
     destination = identity_root / "active.json"
     temporary = identity_root / f".active.json.{secrets.token_hex(12)}.new"
@@ -736,9 +737,9 @@ def _write_active_projection(identity_root: Path) -> None:
         descriptor = os.open(
             temporary,
             os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
-            0o644,
+            0o600,
         )
-        content = _active_projection()
+        content = _active_projection(api_image, worker_image)
         offset = 0
         while offset < len(content):
             written = os.write(descriptor, content[offset:])
@@ -747,7 +748,7 @@ def _write_active_projection(identity_root: Path) -> None:
             offset += written
         if os.geteuid() == 0:
             os.fchown(descriptor, 0, 0)
-        os.fchmod(descriptor, 0o644)
+        os.fchmod(descriptor, 0o444)
         os.fsync(descriptor)
         os.close(descriptor)
         descriptor = -1
@@ -770,6 +771,13 @@ def _required_environment(name: str) -> str:
     return value
 
 
+def _required_image_environment(name: str) -> str:
+    value = _required_environment(name)
+    if _IMAGE.fullmatch(value) is None:
+        raise DevInitError(f"{name} is invalid")
+    return value
+
+
 def main() -> int:
     """Initialize repository, synthetic state, and disjoint runtime authority."""
     repository_path = Path(_required_environment("VONK_REPOSITORY_PATH"))
@@ -778,6 +786,8 @@ def main() -> int:
     secret_source = Path(_required_environment("VONK_DEV_SECRET_SOURCE_ROOT"))
     api_secret_root = Path(_required_environment("VONK_DEV_API_SECRET_ROOT"))
     worker_secret_root = Path(_required_environment("VONK_DEV_WORKER_SECRET_ROOT"))
+    api_image = _required_image_environment("VONK_DEV_API_IMAGE")
+    worker_image = _required_image_environment("VONK_DEV_WORKER_IMAGE")
     initialize_repository(
         repository_path,
         repository_url,
@@ -789,7 +799,7 @@ def main() -> int:
         worker_secret_root,
     )
     identity_root = Path(os.environ.get("VONK_CONTROL_IDENTITY_ROOT", "/control-identity"))
-    _write_active_projection(identity_root)
+    _write_active_projection(identity_root, api_image, worker_image)
     uid, gid = _service_identity()
     for name, default in (
         ("VONK_STATE_PATH", "/state"),
