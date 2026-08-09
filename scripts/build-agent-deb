@@ -22,16 +22,26 @@ ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = "vonk-forge-agent"
 TARGET = "aarch64-unknown-linux-gnu"
 BINARIES = ("vonk-agent", "vonk-agent-helper", "vonk-agent-supervisor")
-SEMVER = re.compile(
-    r"(?:0|[1-9][0-9]*)\."
-    r"(?:0|[1-9][0-9]*)\."
-    r"(?:0|[1-9][0-9]*)(?:[-+][0-9A-Za-z.-]+)?\Z"
+SEMVER = r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+PACKAGE_VERSION = re.compile(
+    rf"(?:{SEMVER}|{SEMVER}~dev.(?:0|[1-9][0-9]*)\+g[0-9a-f]{{12}})\Z"
 )
+DEVELOPMENT_VERSION = re.compile(
+    rf"{SEMVER}~dev.((?:0|[1-9][0-9]*))\+g[0-9a-f]{{12}}\Z"
+)
+MAX_EPOCH = 4_102_444_800
 MAX_BINARY_BYTES = 512 * 1024 * 1024
 
 
 class BuildError(RuntimeError):
     pass
+
+
+def valid_package_version(version: str) -> bool:
+    if PACKAGE_VERSION.fullmatch(version) is None:
+        return False
+    development = DEVELOPMENT_VERSION.fullmatch(version)
+    return development is None or int(development.group(1)) <= MAX_EPOCH
 
 
 def canonical(value: object) -> bytes:
@@ -300,9 +310,9 @@ def build(
     binaries_dir: Path | None,
     epoch: int,
 ) -> Path:
-    if SEMVER.fullmatch(version) is None:
-        raise BuildError("version is not canonical SemVer")
-    if not 0 <= epoch <= 4_102_444_800:
+    if not valid_package_version(version):
+        raise BuildError("version is not canonical package version")
+    if not 0 <= epoch <= MAX_EPOCH:
         raise BuildError("SOURCE_DATE_EPOCH is outside the supported range")
     key_metadata = private_key.lstat()
     if (

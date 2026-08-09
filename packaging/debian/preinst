@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-new_version=@VERSION@
+new_version='@VERSION@'
 if [ "${1:-}" = upgrade ] && [ -n "${2:-}" ]; then
     if dpkg --compare-versions "$new_version" lt "$2"; then
         echo "vonk-forge-agent: refusing downgrade from $2 to $new_version" >&2

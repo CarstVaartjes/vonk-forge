@@ -7,6 +7,8 @@ import struct
 import subprocess
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 BUILD = ROOT / "scripts/build-agent-deb"
 VERIFY = ROOT / "scripts/verify-agent-deb"
@@ -33,12 +35,17 @@ def _release_key(path: Path) -> None:
     path.chmod(0o600)
 
 
-def _build(output: Path, binaries: Path, key: Path) -> subprocess.CompletedProcess[str]:
+def _build(
+    output: Path,
+    binaries: Path,
+    key: Path,
+    version: str = "0.1.0",
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [
             BUILD,
             "--version",
-            "0.1.0",
+            version,
             "--release-private-key",
             key,
             "--binaries-dir",
@@ -104,7 +111,7 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
     assert "python" not in postinst
     assert "curl" not in postinst
     assert "wget" not in postinst
-    assert "new_version=0.1.0" in preinst
+    assert "new_version='0.1.0'" in preinst
     assert os.access(control / "preinst", os.X_OK)
     fields = subprocess.run(
         ["/usr/bin/dpkg-deb", "--field", first_deb, "Depends"],
@@ -201,3 +208,44 @@ def test_builder_rejects_symlinked_release_key(tmp_path: Path) -> None:
 
     assert result.returncode == 2
     assert "private key permissions are unsafe" in result.stderr
+
+
+def test_builder_accepts_exact_derived_development_version(tmp_path: Path) -> None:
+    binaries = tmp_path / "binaries"
+    binaries.mkdir()
+    for name in ("vonk-agent", "vonk-agent-helper", "vonk-agent-supervisor"):
+        _aarch64_fixture(binaries / name, name.encode())
+    key = tmp_path / "release.pem"
+    _release_key(key)
+    version = "0.1.0~dev.1786300000+g0123456789ab"
+
+    result = _build(tmp_path / "dist", binaries, key, version)
+
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "dist" / f"vonk-forge-agent_{version}_arm64.deb").is_file()
+
+
+@pytest.mark.parametrize(
+    "version",
+    (
+        "0.1.0-rc.1",
+        "0.1.0+build.1",
+        "0.1.0~dev.1786300000+g0123456789abc",
+        "0.1.0~dev.1786300000+g0123456789AB",
+        "0.1.0~dev.4102444801+g0123456789ab",
+    ),
+)
+def test_builder_rejects_noncanonical_package_versions(
+    tmp_path: Path, version: str
+) -> None:
+    binaries = tmp_path / "binaries"
+    binaries.mkdir()
+    for name in ("vonk-agent", "vonk-agent-helper", "vonk-agent-supervisor"):
+        _aarch64_fixture(binaries / name, name.encode())
+    key = tmp_path / "release.pem"
+    _release_key(key)
+
+    result = _build(tmp_path / "dist", binaries, key, version)
+
+    assert result.returncode == 2
+    assert "version is not canonical package version" in result.stderr

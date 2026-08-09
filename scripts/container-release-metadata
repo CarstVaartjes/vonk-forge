@@ -4,6 +4,17 @@ from __future__ import annotations
 import re
 import sys
 from collections.abc import Sequence
+from importlib.machinery import SourceFileLoader
+from importlib.util import module_from_spec, spec_from_loader
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+loader = SourceFileLoader("agent_package_metadata", str(ROOT / "scripts/agent-package-metadata"))
+spec = spec_from_loader(loader.name, loader)
+if spec is None:
+    raise RuntimeError("agent package metadata is unavailable")
+agent_package_metadata = module_from_spec(spec)
+loader.exec_module(agent_package_metadata)
 
 TAG = re.compile(r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
@@ -24,10 +35,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 64
     ref_type, ref_name, commit = arguments
     match = TAG.fullmatch(ref_name)
-    if ref_type != "tag" or match is None or COMMIT.fullmatch(commit) is None:
+    try:
+        version = agent_package_metadata.workspace_version()
+    except ValueError:
+        version = None
+    if (
+        ref_type != "tag"
+        or match is None
+        or COMMIT.fullmatch(commit) is None
+        or ref_name[1:] != version
+    ):
         print("release metadata is invalid", file=sys.stderr)
         return 64
-    print(f"version={ref_name[1:]}")
+    print(f"version={version}")
     print(f"image_version_tag={ref_name}")
     print(f"commit_tag=sha-{commit}")
     print(f"dev_tag=dev-sha-{commit}")
