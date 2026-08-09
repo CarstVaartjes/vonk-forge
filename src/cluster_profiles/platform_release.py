@@ -6,11 +6,12 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 from importlib import resources
 from pathlib import Path
 from typing import Any
 
-from jsonschema import ValidationError, validate
+from jsonschema import ValidationError, validators
 
 _MAX_MANIFEST_BYTES = 1024 * 1024
 _SEMVER = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
@@ -196,7 +197,7 @@ class PlatformRelease:
         if not isinstance(document, dict):
             raise PlatformReleaseError("platform release manifest must be an object")
         try:
-            validate(instance=document, schema=_schema())
+            _validator().validate(document)
         except ValidationError as error:
             location = ".".join(str(part) for part in error.absolute_path)
             prefix = f"{location}: " if location else ""
@@ -334,6 +335,14 @@ def _schema() -> dict[str, Any]:
     if not isinstance(value, dict):
         raise TypeError("platform update schema is invalid")
     return value
+
+
+@lru_cache(maxsize=1)
+def _validator() -> Any:
+    schema = _schema()
+    validator_class = validators.validator_for(schema)
+    validator_class.check_schema(schema)
+    return validator_class(schema)
 
 
 def _artifact(document: dict[str, Any]) -> Artifact:

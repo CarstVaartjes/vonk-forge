@@ -7,6 +7,7 @@ from pathlib import Path
 
 import jsonschema
 import pytest
+from jsonschema import Draft202012Validator
 
 from cluster_profiles.backend import CommandResult
 from cluster_profiles.fleet import Fleet, ManagementEndpoint, NodeId, NodeRecord
@@ -174,6 +175,36 @@ def test_node_probes_overlap_and_results_are_canonical():
     assert tuple(result.nodes) == ("node1", "node2")
     assert {call[0] for call in backend.calls} == {"node1", "node2"}
     assert all(call[2][:4] == ("--json", "--cpu-sample-ms", "250", "--interface") for call in backend.calls)
+
+
+def test_health_service_reuses_checked_schemas_and_bounds_malformed_collectors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    schemas = {
+        RAW_SCHEMA["$id"]: 0,
+        json.loads((ROOT / "schemas/node-health.schema.json").read_text())["$id"]: 0,
+    }
+    check_schema = Draft202012Validator.check_schema
+
+    def count_checked_schema(cls, schema: dict, *args: object, **kwargs: object) -> None:
+        schemas[schema["$id"]] += 1
+        check_schema(schema, *args, **kwargs)
+
+    monkeypatch.setattr(
+        Draft202012Validator, "check_schema", classmethod(count_checked_schema)
+    )
+    subject, _, raws = service()
+    del raws["node1"]["schema_version"]
+
+    for _ in range(2):
+        node = subject.collect().nodes["node1"]
+        assert node.status == "critical"
+        assert node.errors == ("collector_malformed",)
+
+    assert schemas == {
+        "https://vonk-forge.local/schemas/node-health-raw.schema.json": 1,
+        "https://vonk-forge.local/schemas/node-health.schema.json": 1,
+    }
 
 
 @pytest.mark.parametrize("field", ("earlyoom_enabled", "earlyoom_active"))
