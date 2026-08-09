@@ -73,7 +73,12 @@ def test_production_rust_capabilities_are_exact_and_legacy_python_is_not_package
 
 
 def test_release_workflow_runs_every_cutover_owner_before_publication() -> None:
-    workflow = _source(".github/workflows/agent-release.yml")
-    assert "cargo test --workspace --locked" in workflow
-    assert "tests/acceptance/test_rust_agent_parity.py" in workflow
-    assert "test_agent_deb.py" in workflow
+    orchestrator = _source(".github/workflows/agent-release.yml")
+    package_builder = _source(".github/workflows/agent-package-build.yml")
+
+    assert "uses: ./.github/workflows/agent-package-build.yml" in orchestrator
+    assert "needs: [package-metadata, build-test-sign]" in orchestrator
+    assert "uses: ./.github/workflows/agent-apt-publish.yml" in orchestrator
+    assert "cargo test --workspace --locked" in package_builder
+    assert "tests/acceptance/test_rust_agent_parity.py" in package_builder
+    assert "test_agent_deb.py" in package_builder
