@@ -1,13 +1,15 @@
-name: Rust Vonk Forge agent release
+name: Rust Vonk Forge agent development
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: vonk-forge-agent-release-${{ github.ref }}
+  group: vonk-forge-agent-development-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -28,6 +30,16 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Verify exact current main tip
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git fetch --no-tags --prune origin \
+            +refs/heads/main:refs/remotes/origin/main
+          main_sha=$(git rev-parse --verify refs/remotes/origin/main^{commit})
+          test "$GITHUB_SHA" = "$main_sha"
       - name: Derive immutable development package metadata
         id: metadata
         shell: bash
@@ -56,3 +68,40 @@ jobs:
       attestations: write
       contents: read
       id-token: write
+
+  verify-main-for-apt:
+    name: Reverify exact main tip before apt publication
+    needs: [build-test-sign]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out accepted main commit for publication gate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Reverify exact current main tip
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git fetch --no-tags --prune origin \
+            +refs/heads/main:refs/remotes/origin/main
+          main_sha=$(git rev-parse --verify refs/remotes/origin/main^{commit})
+          test "$GITHUB_SHA" = "$main_sha"
+
+  publish-apt:
+    name: Publish accepted development package to apt dev
+    needs: [package-metadata, build-test-sign, verify-main-for-apt]
+    uses: ./.github/workflows/agent-apt-publish.yml
+    with:
+      channel: ${{ needs.package-metadata.outputs.channel }}
+      version: ${{ needs.build-test-sign.outputs.version }}
+      package: ${{ needs.build-test-sign.outputs.package }}
+      artifact_name: ${{ needs.build-test-sign.outputs.artifact_name }}
+      environment: apt-development
+      source_sha: ${{ github.sha }}
+    permissions:
+      contents: read
