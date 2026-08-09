@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github/workflows/agent-release.yml"
 UNIFIED_WORKFLOW = ROOT / ".github/workflows/ci.yml"
 PACKAGE_WORKFLOW = ROOT / ".github/workflows/agent-package-build.yml"
+APT_WORKFLOW = ROOT / ".github/workflows/agent-apt-publish.yml"
 
 
 def package_step_run(step_name: str) -> str:
@@ -21,6 +22,21 @@ def package_step_run(step_name: str) -> str:
             break
         run_lines.append(line[10:] if line else "")
     return "\n".join(run_lines)
+
+
+def apt_workflow() -> str:
+    return APT_WORKFLOW.read_text()
+
+
+def apt_step(step_name: str) -> str:
+    lines = apt_workflow().splitlines()
+    step_start = lines.index(f"      - name: {step_name}")
+    step_lines: list[str] = []
+    for line in lines[step_start:]:
+        if line.startswith("      - name: ") and step_lines:
+            break
+        step_lines.append(line)
+    return "\n".join(step_lines)
 
 
 def generate_private_key(path: Path, algorithm: str) -> None:
@@ -202,8 +218,10 @@ def test_stable_sigstore_identity_renders_the_exact_version() -> None:
         [
             "bash",
             "-c",
-            f"VERSION=1.2.3; GITHUB_REPOSITORY=example/vonk; {line}; "
-            "printf '%s\\n' \"$identity\"",
+            (
+                f"VERSION=1.2.3; GITHUB_REPOSITORY=example/vonk; {line}; "
+                "printf '%s\\n' \"$identity\""
+            ),
         ],
         check=True,
         capture_output=True,
@@ -245,29 +263,100 @@ def test_manual_agent_workflow_calls_the_development_package_builder() -> None:
         assert forbidden not in text
 
 
-def test_apt_publication_is_isolated_and_uses_persistent_private_state() -> None:
-    text = UNIFIED_WORKFLOW.read_text()
-    assert "environment: apt-release" in text
-    assert "group: vonk-forge-apt-publication" in text
-    assert "APT_REPOSITORY_GPG_PRIVATE_KEY" in text
-    assert "R2_APT_STATE_BUCKET" in text
-    assert "R2_APT_PUBLIC_BUCKET" in text
-    assert "publish switch" in text
-    assert "rclone copyto" in text
-    assert "aptly-state.tar.gz" in text
-    assert "packages.vonkforge.ai" in text
-    assert "APT_REPOSITORY_GPG_FINGERPRINT" in text
-    assert "vonk-forge-archive-keyring.gpg" in text
-    assert (
-        "secrets.VONK_AGENT_RELEASE_PRIVATE_KEY"
-        not in text.split("  publish-apt:", 1)[1]
-    )
+def test_reusable_apt_publisher_has_a_strict_channel_boundary() -> None:
+    text = apt_workflow()
+
+    assert "workflow_call:" in text
+    for input_name in (
+        "channel",
+        "version",
+        "package",
+        "artifact_name",
+        "environment",
+        "source_sha",
+    ):
+        assert f"      {input_name}:\n        required: true\n        type: string" in text
+    for forbidden in ("repository:", "distribution:", "keyring:", "state_prefix:"):
+        assert f"      {forbidden}" not in text.split("    inputs:", 1)[1].split(
+            "permissions:", 1
+        )[0]
+    assert "dev:apt-development" in text
+    assert "stable:apt-release" in text
+    assert "environment: ${{ inputs.environment }}" in text
+    assert "group: vonk-forge-agent-apt-${{ inputs.channel }}" in text
+    assert "cancel-in-progress: false" in text
+
+
+def test_reusable_apt_publisher_verifies_package_before_credentials() -> None:
+    text = apt_workflow()
+    verify = text.index("Verify exact downloaded package")
+    restore = text.index("Restore checksum-protected private state")
+    key = text.index("Materialize and verify apt signing key")
+
+    assert verify < restore < key
+    verify_step = apt_step("Verify exact downloaded package")
+    assert "scripts/verify-agent-deb" in verify_step
+    assert "dpkg-deb --field" in verify_step
+    assert "resolvedDependencies" in verify_step
+    for credential in (
+        "APT_GPG_PASSPHRASE",
+        "APT_REPOSITORY_GPG_PRIVATE_KEY",
+        "R2_ACCESS_KEY_ID",
+        "R2_SECRET_ACCESS_KEY",
+    ):
+        assert credential not in verify_step
+
+
+def test_reusable_apt_publisher_restores_only_authenticated_private_state() -> None:
+    restore = apt_step("Restore checksum-protected private state")
+
+    assert "R2_APT_STATE_BUCKET" in restore
+    assert "R2_APT_PUBLIC_BUCKET" not in restore
+    assert "sha256sum -c" in restore
+    assert "checksum_name" in restore
+    assert "duplicate archive member" in restore
+    assert "publication-receipt.json" in restore
+    assert "unsafe path" in restore
+    assert "contains links" in restore
+    assert "STATE_PREFIX: ${{ steps.package.outputs.state_prefix }}" in restore
+    assert 'immutable_prefix="$STATE_PREFIX"' in restore
+    assert "dpkg --compare-versions" in restore
+    assert '"lt"' in restore and '"eq"' in restore
+    assert "package_sha256" in restore
+    assert "source_sha" in restore
+    assert "reuse_snapshot" in restore
+
+
+def test_reusable_apt_publisher_preserves_immutable_receipts_and_ordering() -> None:
+    text = apt_workflow()
+    local = apt_step("Publish and verify signed apt index locally")
+    durable = apt_step("Publish immutable state, public files, then latest state")
+
+    assert "snapshot create" in local
+    assert "publish switch" in local
+    assert "publication-receipt.json" in local
+    assert "jq -cS" in local
+    assert "gpgv" in local and "InRelease" in local
+    signing = apt_step("Materialize and verify apt signing key")
+    assert "install -m 0600" in signing
+    assert "sec_count" in signing
+    assert "${#fingerprints[@]}" not in signing
+    assert "--immutable" in durable
+    assert "STATE_PREFIX: ${{ steps.package.outputs.state_prefix }}" in durable
+    immutable = durable.index('immutable="$STATE_PREFIX"')
+    public = durable.index('rclone copy "$RUNNER_TEMP/apt-public/"')
+    latest = durable.index("latest/aptly-state.tar.gz")
+    assert immutable < public < latest
+    assert "rclone copy" in durable
+    assert "packages.vonkforge.ai" in durable
+    assert "VONK_AGENT_RELEASE_PRIVATE_KEY" not in text
 
 
 def test_release_actions_are_commit_pinned_and_secrets_are_environment_scoped() -> None:
     agent_text = WORKFLOW.read_text()
     unified_text = UNIFIED_WORKFLOW.read_text()
     package_text = PACKAGE_WORKFLOW.read_text()
+    apt_text = APT_WORKFLOW.read_text()
     assert "uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" in package_text
     assert (
         "uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
@@ -275,12 +364,13 @@ def test_release_actions_are_commit_pinned_and_secrets_are_environment_scoped() 
     )
     assert (
         "uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
-        in unified_text
+        in apt_text
     )
     for line in (
         agent_text.splitlines()
         + unified_text.splitlines()
         + package_text.splitlines()
+        + apt_text.splitlines()
     ):
         if "uses:" in line:
             assert "@v" not in line

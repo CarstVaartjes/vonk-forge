@@ -5,6 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github/workflows/ci.yml"
+APT_WORKFLOW = ROOT / ".github/workflows/agent-apt-publish.yml"
 ALLOWED_SIGNERS = ROOT / ".github/release-allowed-signers"
 
 
@@ -292,11 +293,26 @@ def test_apt_publication_consumes_the_unified_release_artifact() -> None:
     apt = job("publish-apt")
 
     assert "needs: [release-metadata, build-agent-package, release-manifest]" in apt
+    assert "uses: ./.github/workflows/agent-apt-publish.yml" in apt
+    assert "channel: ${{ needs.release-metadata.outputs.channel }}" in apt
+    assert "version: ${{ needs.build-agent-package.outputs.version }}" in apt
+    assert "package: ${{ needs.build-agent-package.outputs.package }}" in apt
+    assert (
+        "artifact_name: ${{ needs.build-agent-package.outputs.artifact_name }}" in apt
+    )
     assert "environment: apt-release" in apt
-    assert "name: ${{ needs.build-agent-package.outputs.artifact_name }}" in apt
-    assert "R2_APT_PUBLIC_BUCKET" in apt
-    assert "R2_APT_STATE_BUCKET" in apt
-    assert "scripts/verify-agent-deb" in apt
+    assert "source_sha: ${{ github.sha }}" in apt
+    for forbidden in (
+        "R2_APT_PUBLIC_BUCKET",
+        "R2_APT_STATE_BUCKET",
+        "APT_REPOSITORY_GPG_PRIVATE_KEY",
+        "scripts/verify-agent-deb",
+        "aptly ",
+        "rclone ",
+    ):
+        assert forbidden not in apt
+    assert "dev:apt-development" in APT_WORKFLOW.read_text()
+    assert "stable:apt-release" in APT_WORKFLOW.read_text()
 
 
 def test_manual_agent_validation_does_not_publish_a_second_tag_release() -> None:

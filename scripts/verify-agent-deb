@@ -44,10 +44,14 @@ FORBIDDEN_MAINTAINER = re.compile(
     rb"(?:\bcurl\b|\bwget\b|\bgit\s+(?:clone|pull|fetch)\b|https?://|\bapt(?:-get)?\b)",
     re.IGNORECASE,
 )
-SEMVER = re.compile(
+SEMVER_TEXT = (
     r"(?:0|[1-9][0-9]*)\."
     r"(?:0|[1-9][0-9]*)\."
-    r"(?:0|[1-9][0-9]*)(?:[-+][0-9A-Za-z.-]+)?\Z"
+    r"(?:0|[1-9][0-9]*)"
+)
+PACKAGE_VERSION = re.compile(
+    rf"(?:{SEMVER_TEXT}|"
+    rf"{SEMVER_TEXT}~dev\.(?:0|[1-9][0-9]*)\+g[0-9a-f]{{12}})\Z"
 )
 
 
@@ -93,8 +97,8 @@ def verify(deb: Path) -> dict[str, object]:
         raise VerificationError("package identity is invalid")
     if fields["Architecture"] != "arm64":
         raise VerificationError("package architecture is not arm64")
-    if SEMVER.fullmatch(fields["Version"]) is None:
-        raise VerificationError("package version is not canonical SemVer")
+    if PACKAGE_VERSION.fullmatch(fields["Version"]) is None:
+        raise VerificationError("package version is not canonical")
 
     with tempfile.TemporaryDirectory(prefix="vonk-agent-deb-verify-") as temporary:
         root = Path(temporary)

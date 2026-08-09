@@ -222,7 +222,16 @@ def test_builder_accepts_exact_derived_development_version(tmp_path: Path) -> No
     result = _build(tmp_path / "dist", binaries, key, version)
 
     assert result.returncode == 0, result.stderr
-    assert (tmp_path / "dist" / f"vonk-forge-agent_{version}_arm64.deb").is_file()
+    package = tmp_path / "dist" / f"vonk-forge-agent_{version}_arm64.deb"
+    assert package.is_file()
+    verified = subprocess.run(
+        [VERIFY, "--json", package],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert verified.returncode == 0, verified.stderr
 
 
 @pytest.mark.parametrize(
