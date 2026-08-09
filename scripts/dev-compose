@@ -20,6 +20,34 @@ if [[ ! -d "$development_root" ]] \
   echo "development wrapper ownership or mode is unsafe" >&2
   exit 1
 fi
+if [[ "$#" -eq 0 ]]; then
+  set -- up -d --build --wait
+fi
+case "$1" in
+  up)
+    wait_requested=false
+    for argument in "$@"; do
+      if [[ "$argument" == --no-start || "$argument" == --no-start=* ]]; then
+        echo "unsupported development Compose lifecycle: up --no-start" >&2
+        exit 1
+      fi
+      if [[ "$argument" == --wait ]]; then
+        wait_requested=true
+      fi
+    done
+    if [[ "$wait_requested" == false ]]; then
+      set -- "$@" --wait
+    fi
+    ;;
+  create|start|run|restart|scale|watch)
+    echo "unsupported development Compose lifecycle: $1" >&2
+    exit 1
+    ;;
+  -*)
+    echo "unsupported development Compose wrapper option: $1" >&2
+    exit 1
+    ;;
+esac
 secrets_dir=${VONK_DEV_SECRETS_DIR:-"$repository_root/.dev/vonk-forge-secrets"}
 mkdir -p "$secrets_dir"
 secrets_dir=$(cd "$secrets_dir" && pwd)
@@ -46,23 +74,20 @@ origin_dir=
 cleanup_origin() {
   status=$?
   trap - EXIT
-  if [[ -n "$origin_dir" && "$origin_dir" == "$development_root"/vonk-forge-origin.* ]]; then
+  if [[ "$origin_dir" =~ ^/tmp/vonk-forge-dev-origin\.[A-Za-z0-9]{10}$ ]]; then
     rm -rf -- "$origin_dir" || true
   fi
   exit "$status"
 }
 trap cleanup_origin EXIT
 
-origin_dir=$(mktemp -d "$development_root/vonk-forge-origin.XXXXXXXXXX")
+origin_dir=$(mktemp -d /tmp/vonk-forge-dev-origin.XXXXXXXXXX)
 git init --bare -q "$origin_dir"
 git --git-dir="$origin_dir" fetch -q --no-tags "$repository_root" "$expected_commit"
 git --git-dir="$origin_dir" update-ref refs/heads/main "$expected_commit"
 git --git-dir="$origin_dir" symbolic-ref HEAD refs/heads/main
 chmod -R a+rX "$origin_dir"
 
-if [[ "$#" -eq 0 ]]; then
-  set -- up -d --build --wait
-fi
 export VONK_DEV_SECRETS_DIR="$secrets_dir"
 export VONK_DEV_EXPECTED_COMMIT="$expected_commit"
 export VONK_DEV_ORIGIN_DIR="$origin_dir"

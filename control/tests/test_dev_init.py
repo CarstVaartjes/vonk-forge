@@ -120,8 +120,8 @@ def test_all_git_subprocesses_drop_root_credentials_and_use_a_sanitized_environm
     assert any("rev-parse" in command for command, _kwargs in calls)
     assert any("merge-base" in command for command, _kwargs in calls)
     for _command, kwargs in calls:
-        assert kwargs["user"] == 10001
-        assert kwargs["group"] == 10001
+        assert kwargs["user"] == 65534
+        assert kwargs["group"] == 65534
         assert kwargs["extra_groups"] == ()
         assert kwargs["env"] == {
             "GIT_CONFIG_GLOBAL": "/dev/null",
@@ -157,6 +157,105 @@ def test_git_subprocesses_do_not_request_a_credential_change_when_not_root(
     assert "user" not in calls[0]
     assert "group" not in calls[0]
     assert "extra_groups" not in calls[0]
+
+
+def test_existing_repository_transfers_to_git_identity_before_git_and_restores_api(
+    tmp_path: Path,
+    local_acceptance: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _origin_path, _publisher, repository_url, expected = _origin(tmp_path)
+    destination = tmp_path / "repository"
+    initialize_repository(destination, repository_url, expected)
+    real_run = subprocess.run
+    events: list[tuple[object, ...]] = []
+
+    def record_chown(
+        path: str | os.PathLike[str], uid: int, gid: int, **_kwargs: object
+    ) -> None:
+        events.append(("owner", Path(path), uid, gid))
+
+    def run_as_current_user(
+        command: tuple[str, ...], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        events.append(
+            (
+                "git",
+                kwargs.pop("user", None),
+                kwargs.pop("group", None),
+                kwargs.pop("extra_groups", None),
+            )
+        )
+        return real_run(command, **kwargs)
+
+    monkeypatch.setattr(dev_init.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(dev_init.os, "chown", record_chown)
+    monkeypatch.setattr(dev_init.subprocess, "run", run_as_current_user)
+
+    initialize_repository(destination, repository_url, expected)
+
+    first_git = next(index for index, event in enumerate(events) if event[0] == "git")
+    last_git = max(index for index, event in enumerate(events) if event[0] == "git")
+    assert any(
+        event[0] == "owner" and event[2:] == (65534, 65534)
+        for event in events[:first_git]
+    )
+    assert all(
+        event[1:] == (65534, 65534, ())
+        for event in events
+        if event[0] == "git"
+    )
+    assert any(
+        event[0] == "owner" and event[2:] == (10001, 10001)
+        for event in events[last_git + 1 :]
+    )
+    assert events[-1][0] == "owner"
+    assert events[-1][2:] == (10001, 10001)
+
+
+def test_repository_ownership_is_restored_to_api_after_git_failure(
+    tmp_path: Path,
+    local_acceptance: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _origin_path, _publisher, repository_url, expected = _origin(tmp_path)
+    destination = tmp_path / "repository"
+    initialize_repository(destination, repository_url, expected)
+    events: list[tuple[object, ...]] = []
+
+    def record_chown(
+        path: str | os.PathLike[str], uid: int, gid: int, **_kwargs: object
+    ) -> None:
+        events.append(("owner", Path(path), uid, gid))
+
+    def fail_git(
+        command: tuple[str, ...], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        events.append(
+            (
+                "git",
+                kwargs.get("user"),
+                kwargs.get("group"),
+                kwargs.get("extra_groups"),
+            )
+        )
+        return subprocess.CompletedProcess(command, 2, stdout="")
+
+    monkeypatch.setattr(dev_init.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(dev_init.os, "chown", record_chown)
+    monkeypatch.setattr(dev_init.subprocess, "run", fail_git)
+
+    with pytest.raises(DevInitError, match="Git could not"):
+        initialize_repository(destination, repository_url, expected)
+
+    first_git = next(index for index, event in enumerate(events) if event[0] == "git")
+    assert any(
+        event[0] == "owner" and event[2:] == (65534, 65534)
+        for event in events[:first_git]
+    )
+    assert events[first_git][1:] == (65534, 65534, ())
+    assert events[-1][0] == "owner"
+    assert events[-1][2:] == (10001, 10001)
 
 
 def test_initialize_repository_rejects_unsafe_fresh_roots_and_commit_ids(
