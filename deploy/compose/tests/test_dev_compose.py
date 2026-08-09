@@ -328,8 +328,57 @@ def test_dev_compose_origin_is_not_redirected_when_dev_is_swapped_after_validati
     assert (repository / ".dev.checked").is_dir()
 
 
-def test_dev_compose_script_waits_for_an_explicit_detached_dev_init_startup(
-    tmp_path: Path,
+@pytest.mark.parametrize("service", ("dev-init", "migrate"))
+def test_dev_compose_script_rejects_one_shot_only_targeted_up_before_origin_creation(
+    tmp_path: Path, service: str
+) -> None:
+    repository, local_script = _script_repository(tmp_path)
+    secrets = _existing_secrets(tmp_path)
+    fake_bin = _fake_docker(tmp_path)
+    real_mktemp = shutil.which("mktemp")
+    assert real_mktemp is not None
+    fake_mktemp = fake_bin / "mktemp"
+    fake_mktemp.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -e\n"
+        "touch \"$VONK_TEST_CAPTURE_DIR/mktemp-called\"\n"
+        f"exec {real_mktemp} \"$@\"\n",
+        encoding="utf-8",
+    )
+    fake_mktemp.chmod(0o755)
+    capture = tmp_path / "capture"
+    capture.mkdir()
+    environment = os.environ | {
+        "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
+        "VONK_DEV_SECRETS_DIR": str(secrets),
+        "VONK_TEST_CAPTURE_DIR": str(capture),
+    }
+
+    result = subprocess.run(
+        (str(local_script), "up", "-d", service),
+        cwd=repository,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert service in result.stderr
+    assert "one-shot" in result.stderr
+    assert not (capture / "environment").exists()
+    assert not (capture / "mktemp-called").exists()
+
+
+@pytest.mark.parametrize(
+    ("arguments", "expected_tail"),
+    (
+        ((), ("up", "-d", "--build", "--wait")),
+        (("up", "-d", "control-api"), ("up", "-d", "control-api", "--wait")),
+    ),
+)
+def test_dev_compose_script_waits_for_every_supported_up_path(
+    tmp_path: Path, arguments: tuple[str, ...], expected_tail: tuple[str, ...]
 ) -> None:
     repository, local_script = _script_repository(tmp_path)
     secrets = _existing_secrets(tmp_path)
@@ -343,7 +392,7 @@ def test_dev_compose_script_waits_for_an_explicit_detached_dev_init_startup(
     }
 
     result = subprocess.run(
-        (str(local_script), "up", "-d", "dev-init"),
+        (str(local_script), *arguments),
         cwd=repository,
         env=environment,
         check=False,
@@ -354,9 +403,11 @@ def test_dev_compose_script_waits_for_an_explicit_detached_dev_init_startup(
     origin = Path(
         (capture / "environment").read_text(encoding="utf-8").splitlines()[1]
     )
-    arguments = (capture / "arguments").read_text(encoding="utf-8").splitlines()
+    compose_arguments = (capture / "arguments").read_text(
+        encoding="utf-8"
+    ).splitlines()
     assert result.returncode == 0
-    assert arguments[-4:] == ["up", "-d", "dev-init", "--wait"]
+    assert tuple(compose_arguments[-len(expected_tail) :]) == expected_tail
     assert not origin.exists()
 
 

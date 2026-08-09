@@ -27,6 +27,10 @@ case "$1" in
   up)
     wait_requested=false
     for argument in "$@"; do
+      if [[ "$argument" == dev-init || "$argument" == migrate ]]; then
+        echo "unsupported one-shot development Compose target: $argument" >&2
+        exit 1
+      fi
       if [[ "$argument" == --no-start || "$argument" == --no-start=* ]]; then
         echo "unsupported development Compose lifecycle: up --no-start" >&2
         exit 1
