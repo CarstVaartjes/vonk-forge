@@ -3,17 +3,21 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+from collections import Counter
 from pathlib import Path
 
 import pytest
+from jsonschema import Draft202012Validator
 
+from cluster_profiles import catalog as catalog_module
+from cluster_profiles import contracts as contracts_module
 from cluster_profiles.catalog import (
     Catalog,
     CatalogError,
     fingerprint,
     validate_evidence_indexes,
 )
-from cluster_profiles.contracts import load_workload
+from cluster_profiles.contracts import ProfileValidationError, load_workload
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
@@ -54,6 +58,64 @@ def test_default_selector_resolves_to_canonical_home(catalog_root: Path) -> None
     catalog = Catalog.load(catalog_root)
 
     assert catalog.resolve_profile("default").id == "agent-full-dual"
+
+
+def test_catalog_load_checks_each_packaged_schema_once_and_rejects_invalid_workload(
+    catalog_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Repeated catalog loads must reuse checked schemas without relaxing payload validation."""
+    for module in (catalog_module, contracts_module):
+        validator = getattr(module, "_validator", None)
+        if validator is not None:
+            validator.cache_clear()
+
+    names: dict[int, str] = {}
+    catalog_schema = catalog_module._schema
+    contract_schema = contracts_module._load_schema
+
+    def load_catalog_schema(name: str) -> dict:
+        schema = catalog_schema(name)
+        names[id(schema)] = name
+        return schema
+
+    def load_contract_schema(name: str) -> dict:
+        schema = contract_schema(name)
+        names[id(schema)] = name
+        return schema
+
+    checked: Counter[str] = Counter()
+    check_schema = Draft202012Validator.check_schema
+
+    def count_checked_schema(cls, schema: dict, *args: object, **kwargs: object) -> None:
+        checked[names[id(schema)]] += 1
+        check_schema(schema, *args, **kwargs)
+
+    monkeypatch.setattr(catalog_module, "_schema", load_catalog_schema)
+    monkeypatch.setattr(contracts_module, "_load_schema", load_contract_schema)
+    monkeypatch.setattr(
+        Draft202012Validator, "check_schema", classmethod(count_checked_schema)
+    )
+
+    Catalog.load(REPOSITORY_ROOT)
+    Catalog.load(REPOSITORY_ROOT)
+
+    assert checked == Counter(
+        {
+            "model-definitions.schema.json": 1,
+            "accepted-cluster-profiles.schema.json": 1,
+            "model-definition-evidence.schema.json": 1,
+            "workload.schema.json": 1,
+            "cluster-profile.schema.json": 1,
+        }
+    )
+
+    workload = catalog_root / "config/workloads/deepseek-agent-dual.toml"
+    workload.write_text(
+        workload.read_text(encoding="utf-8") + "\nunexpected = true\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ProfileValidationError, match="unexpected"):
+        load_workload(workload)
 
 
 def test_each_model_definition_has_its_own_adapter_command_path() -> None:

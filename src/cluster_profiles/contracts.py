@@ -5,12 +5,13 @@ from __future__ import annotations
 import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from functools import lru_cache
 from importlib import resources
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
-from jsonschema import ValidationError, validate
+from jsonschema import ValidationError, validators
 
 from .placement import PlacementRequirement
 
@@ -171,9 +172,17 @@ def _load_schema(name: str) -> dict[str, Any]:
         raise RuntimeError(f"cannot load contract schema {name}: {error}") from error
 
 
+@lru_cache(maxsize=None)
+def _validator(name: str) -> Any:
+    schema = _load_schema(name)
+    validator_class = validators.validator_for(schema)
+    validator_class.check_schema(schema)
+    return validator_class(schema)
+
+
 def _validate(data: dict[str, Any], schema_name: str) -> None:
     try:
-        validate(instance=data, schema=_load_schema(schema_name))
+        _validator(schema_name).validate(data)
     except ValidationError as error:
         location = ".".join(str(part) for part in error.absolute_path)
         prefix = f"{location}: " if location else ""

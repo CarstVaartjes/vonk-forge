@@ -13,7 +13,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
-from jsonschema import ValidationError, validate, validators
+from jsonschema import ValidationError, validators
 
 from .backend import CommandResult, SshBackend
 from .fleet import Fleet
@@ -177,6 +177,15 @@ class NodeHealthService:
         self.collector = collector
         self.raw_schema = dict(raw_schema)
         self.result_schema = dict(result_schema)
+        try:
+            raw_validator_class = validators.validator_for(self.raw_schema)
+            raw_validator_class.check_schema(self.raw_schema)
+            result_validator_class = validators.validator_for(self.result_schema)
+            result_validator_class.check_schema(self.result_schema)
+        except Exception as error:
+            raise LocalHealthError(f"invalid node health schema: {error}") from error
+        self._raw_validator = raw_validator_class(self.raw_schema)
+        self._result_validator = result_validator_class(self.result_schema)
         self.inventory = inventory
         self.rdma_baseline = rdma_baseline
         self.timeout_seconds = timeout_seconds
@@ -246,11 +255,6 @@ class NodeHealthService:
         return resolved
 
     def _validate_local_assets(self) -> Mapping[str, tuple[tuple[str, str], ...]]:
-        try:
-            validators.validator_for(self.raw_schema).check_schema(self.raw_schema)
-            validators.validator_for(self.result_schema).check_schema(self.result_schema)
-        except Exception as error:
-            raise LocalHealthError(f"invalid node health schema: {error}") from error
         try:
             hosts = self.inventory["hosts"]
             baseline = self.rdma_baseline["rdma_counters_after"]
@@ -348,8 +352,6 @@ class NodeHealthService:
         self, fleet: Fleet, topology: Mapping[str, Any]
     ) -> Mapping[str, tuple[tuple[str, str], ...]]:
         try:
-            validators.validator_for(self.raw_schema).check_schema(self.raw_schema)
-            validators.validator_for(self.result_schema).check_schema(self.result_schema)
             validate_topology_references(topology)
             topology_nodes = set(topology["nodes"])
             if topology_nodes != {node_id.value for node_id in fleet.nodes}:
@@ -419,7 +421,7 @@ class NodeHealthService:
             nodes,
         )
         try:
-            validate(result.to_dict(), self.result_schema)
+            self._result_validator.validate(result.to_dict())
         except Exception as error:
             raise LocalHealthError(f"generated node health violates schema: {error}") from error
         return result
@@ -436,7 +438,7 @@ class NodeHealthService:
             return failure
         try:
             raw = json.loads(result.stdout.decode("utf-8"))
-            validate(raw, self.raw_schema)
+            self._raw_validator.validate(raw)
         except (UnicodeDecodeError, json.JSONDecodeError, ValidationError, TypeError):
             return self._empty_node("critical", "collector_malformed")
         return self._evaluate(node, raw)

@@ -8,12 +8,13 @@ import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass, fields, is_dataclass
 from datetime import datetime
+from functools import lru_cache
 from itertools import pairwise
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
-from jsonschema import ValidationError, validate
+from jsonschema import ValidationError, validators
 
 from .contracts import (
     ClusterProfile,
@@ -79,6 +80,14 @@ def _schema(name: str) -> dict[str, Any]:
         return json.load(source)
 
 
+@lru_cache(maxsize=None)
+def _validator(name: str) -> Any:
+    schema = _schema(name)
+    validator_class = validators.validator_for(schema)
+    validator_class.check_schema(schema)
+    return validator_class(schema)
+
+
 def validate_evidence_indexes(root: Path) -> None:
     """Validate the checked-in maturity and accepted-profile indexes."""
     for name, schema_name in (
@@ -86,7 +95,9 @@ def validate_evidence_indexes(root: Path) -> None:
         ("accepted-cluster-profiles.json", "accepted-cluster-profiles.schema.json"),
     ):
         try:
-            validate(_load_json(root / "inventory/reports" / name), _schema(schema_name))
+            _validator(schema_name).validate(
+                _load_json(root / "inventory/reports" / name)
+            )
         except ValidationError as error:
             location = ".".join(str(part) for part in error.absolute_path)
             prefix = f"{location}: " if location else ""
@@ -333,7 +344,7 @@ def _validate_stage_evidence(
         raise CatalogError(f"{stage} maturity evidence must name its canonical report: {definition.id}")
     try:
         report = _load_json(_repository_file(root, expected_path, f"{stage} maturity evidence"))
-        validate(report, _schema("model-definition-evidence.schema.json"))
+        _validator("model-definition-evidence.schema.json").validate(report)
     except (CatalogError, ValidationError) as error:
         raise CatalogError(f"invalid {stage} maturity evidence: {definition.id}") from error
     if report["stage"] != stage or report["definition_id"] != definition.id:

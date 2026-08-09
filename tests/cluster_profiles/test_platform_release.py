@@ -8,6 +8,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import pytest
+from jsonschema import Draft202012Validator
 from securesystemslib.signer import CryptoSigner
 from tuf.api.exceptions import DownloadHTTPError
 from tuf.api.metadata import (
@@ -137,6 +138,47 @@ def test_platform_release_loads_strict_typed_contract(tmp_path: Path) -> None:
     assert release.agent_for("linux-arm64").protocol.minimum == 1
     assert release.digest.startswith("sha256:")
     assert len(release.digest) == 71
+
+
+def test_platform_release_reuses_checked_schema_and_rejects_invalid_manifest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    validator = getattr(platform_release_module, "_validator", None)
+    if validator is not None:
+        validator.cache_clear()
+
+    schemas: set[int] = set()
+    load_schema = platform_release_module._schema
+
+    def track_schema() -> dict:
+        schema = load_schema()
+        schemas.add(id(schema))
+        return schema
+
+    checked = 0
+    check_schema = Draft202012Validator.check_schema
+
+    def count_checked_schema(cls, schema: dict, *args: object, **kwargs: object) -> None:
+        nonlocal checked
+        assert id(schema) in schemas
+        checked += 1
+        check_schema(schema, *args, **kwargs)
+
+    monkeypatch.setattr(platform_release_module, "_schema", track_schema)
+    monkeypatch.setattr(
+        Draft202012Validator, "check_schema", classmethod(count_checked_schema)
+    )
+
+    raw = json.dumps(_manifest(), sort_keys=True, separators=(",", ":")).encode()
+    PlatformRelease.from_bytes(raw)
+    PlatformRelease.from_bytes(raw)
+
+    assert checked == 1
+
+    invalid = _manifest()
+    invalid["unexpected"] = True
+    with pytest.raises(PlatformReleaseError, match="unexpected"):
+        PlatformRelease.from_bytes(json.dumps(invalid).encode())
 
 
 def test_platform_release_exposes_version_bound_agent_debian_package() -> None:
