@@ -1,0 +1,42 @@
+#!/usr/bin/env python3
+"""Validate an accepted main commit and emit development image metadata."""
+
+from __future__ import annotations
+
+import re
+import sys
+from collections.abc import Sequence
+
+
+COMMIT = re.compile(r"[0-9a-f]{40}\Z")
+MAIN_REF = "refs/heads/main"
+API_IMAGE = "ghcr.io/carstvaartjes/vonk-forge-api"
+WORKER_IMAGE = "ghcr.io/carstvaartjes/vonk-forge-worker"
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if len(arguments) != 3:
+        print("development image metadata is invalid", file=sys.stderr)
+        return 64
+    event_ref, selected_commit, origin_main_commit = arguments
+    if (
+        event_ref != MAIN_REF
+        or COMMIT.fullmatch(selected_commit) is None
+        or COMMIT.fullmatch(origin_main_commit) is None
+        or selected_commit != origin_main_commit
+    ):
+        print("development image metadata is invalid", file=sys.stderr)
+        return 64
+
+    print(f"commit={selected_commit}")
+    print(f"immutable_tag=dev-sha-{selected_commit}")
+    print("dev_alias=dev")
+    print(f"api_image={API_IMAGE}")
+    print(f"worker_image={WORKER_IMAGE}")
+    print(f"artifact_name=vonk-forge-dev-compose-{selected_commit}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
