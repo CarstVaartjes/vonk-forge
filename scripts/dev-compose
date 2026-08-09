@@ -2,6 +2,11 @@
 set -euo pipefail
 
 repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+development_root="$repository_root/.dev"
+if [[ -z ${VONK_DEV_SECRETS_DIR:-} || -z ${VONK_DEV_ORIGIN_DIR:-} ]]; then
+  mkdir -p "$development_root"
+  chmod 700 "$development_root"
+fi
 secrets_dir=${VONK_DEV_SECRETS_DIR:-"$repository_root/.dev/vonk-forge-secrets"}
 mkdir -p "$secrets_dir"
 secrets_dir=$(cd "$secrets_dir" && pwd)
@@ -23,10 +28,29 @@ if [[ ! -e "$secrets_dir/git-signing-key" ]]; then
   chmod 600 "$secrets_dir/git-signing-key"
 fi
 
+expected_commit=$(git -C "$repository_root" rev-parse --verify 'HEAD^{commit}')
+origin_dir=${VONK_DEV_ORIGIN_DIR:-"$development_root/vonk-forge-origin.git"}
+if [[ -L "$origin_dir" ]]; then
+  echo "development origin must not be a symlink" >&2
+  exit 1
+fi
+if [[ ! -e "$origin_dir" ]]; then
+  git init --bare -q "$origin_dir"
+elif [[ ! -d "$origin_dir" ]] \
+  || [[ $(git --git-dir="$origin_dir" rev-parse --is-bare-repository 2>/dev/null) != true ]]; then
+  echo "development origin is not a bare Git repository" >&2
+  exit 1
+fi
+git --git-dir="$origin_dir" fetch -q --no-tags "$repository_root" "$expected_commit"
+git --git-dir="$origin_dir" update-ref refs/heads/main "$expected_commit"
+git --git-dir="$origin_dir" symbolic-ref HEAD refs/heads/main
+
 if [[ "$#" -eq 0 ]]; then
   set -- up -d --build --wait
 fi
 export VONK_DEV_SECRETS_DIR="$secrets_dir"
+export VONK_DEV_EXPECTED_COMMIT="$expected_commit"
+export VONK_DEV_ORIGIN_DIR="$origin_dir"
 exec docker compose \
   --project-name vonk-forge-dev \
   --file "$repository_root/deploy/compose/compose.dev.yaml" \

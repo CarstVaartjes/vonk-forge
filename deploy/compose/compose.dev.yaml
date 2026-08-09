@@ -12,6 +12,7 @@ x-dev-generation: &dev-generation
   VONK_CONTROL_IDENTITY_ROOT: /control-identity
   VONK_DATABASE_URL_FILE: /run/secrets/database-url
   VONK_REPOSITORY_PATH: /repository
+  VONK_DEPLOYMENT_BRANCH: main
   VONK_STATE_PATH: /state
   VONK_AGENT_RUNTIME: disabled
   VONK_MANAGEMENT_CIDRS: 127.0.0.1/32
@@ -50,8 +51,7 @@ services:
         command.upgrade(config, 'head')
     environment:
       VONK_DEPLOYMENT_MODE: development
-    volumes:
-      - dev-runtime-secrets:/run/secrets:ro
+    secrets: [database-url]
     depends_on:
       postgres: {condition: service_healthy}
       dev-init: {condition: service_completed_successfully}
@@ -62,21 +62,31 @@ services:
     build:
       context: ../..
       dockerfile: control/Dockerfile
-      target: worker
+      target: api
     user: "0:0"
-    command: [python, /usr/local/bin/dev-compose-init.py]
+    command: [python, -m, vonk_control.dev_init]
     environment:
       VONK_CONTROL_IDENTITY_ROOT: /control-identity
+      VONK_DEV_API_SECRET_ROOT: /api-secrets
+      VONK_DEV_EXPECTED_COMMIT: "${VONK_DEV_EXPECTED_COMMIT:?run scripts/dev-compose first}"
+      VONK_DEV_LOCAL_ACCEPTANCE: "1"
+      VONK_DEV_REPOSITORY_URL: file:///source-origin
       VONK_DEV_SECRET_SOURCE_ROOT: /host-secrets
-      VONK_DEV_RUNTIME_SECRET_ROOT: /runtime-secrets
+      VONK_DEV_WORKER_SECRET_ROOT: /worker-secrets
+      VONK_REPOSITORY_PATH: /repository
+      VONK_ROUTE_ROOT: /routes
+      VONK_STATE_PATH: /state
+      VONK_SUPERVISOR_ROOT: /supervisor
     volumes:
-      - ../../scripts/dev-compose-init.py:/usr/local/bin/dev-compose-init.py:ro
+      - ${VONK_DEV_ORIGIN_DIR:?run scripts/dev-compose first}:/source-origin:ro
       - ${VONK_DEV_SECRETS_DIR:?run scripts/dev-compose first}:/host-secrets:ro
+      - dev-repository:/repository
+      - dev-api-secrets:/api-secrets
+      - dev-worker-secrets:/worker-secrets
       - dev-control-identity:/control-identity
       - dev-control-state:/state
       - dev-route-publications:/routes
       - dev-supervisor-state:/supervisor
-      - dev-runtime-secrets:/runtime-secrets
     restart: "no"
 
   control-worker:
@@ -94,12 +104,12 @@ services:
       VONK_INTERNAL_API_URL: http://control-api:8000
       VONK_WORKER_API_TOKEN_FILE: /run/secrets/worker-api-token
     volumes:
-      - ../../:/repository
+      - dev-repository:/repository:ro
       - dev-control-identity:/control-identity:ro
       - dev-control-state:/state
       - dev-route-publications:/routes
       - dev-supervisor-state:/supervisor
-      - dev-runtime-secrets:/run/secrets:ro
+      - dev-worker-secrets:/run/secrets:ro
     networks: [application, data]
     depends_on:
       postgres: {condition: service_healthy}
@@ -121,12 +131,12 @@ services:
       VONK_GIT_SIGNING_KEY_FILE: /run/secrets/git-signing-key
       VONK_ADMIN_GRANT_PRIVATE_KEY_FILE: /run/secrets/admin-grant-private-key
     volumes:
-      - ../../:/repository
+      - dev-repository:/repository
       - dev-control-identity:/control-identity:ro
       - dev-control-state:/state
       - dev-route-publications:/routes
       - dev-supervisor-state:/supervisor
-      - dev-runtime-secrets:/run/secrets:ro
+      - dev-api-secrets:/run/secrets:ro
     networks: [application, data]
     ports: ["127.0.0.1:${VONK_DEV_PORT:-8080}:8000"]
     depends_on:
@@ -147,6 +157,8 @@ networks:
 secrets:
   postgres-password:
     file: "${VONK_DEV_SECRETS_DIR:?run scripts/dev-compose first}/postgres-password"
+  database-url:
+    file: "${VONK_DEV_SECRETS_DIR:?run scripts/dev-compose first}/database-url"
 
 volumes:
   dev-postgres-data: {}
@@ -154,4 +166,6 @@ volumes:
   dev-control-state: {}
   dev-route-publications: {}
   dev-supervisor-state: {}
-  dev-runtime-secrets: {}
+  dev-repository: {}
+  dev-api-secrets: {}
+  dev-worker-secrets: {}
