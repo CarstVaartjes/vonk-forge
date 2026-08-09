@@ -16,7 +16,12 @@ owns the GPU node/NAS runtime and its GitHub Actions platform release: one
 stable `vX.Y.Z` tag builds the signed ARM64 `vonk-forge-agent` Debian package,
 the API/worker/Hermes control images, and their signed platform manifest. The
 same verified package can then be published to the Cloudflare R2 APT repository
-at `packages.vonkforge.ai`. The separate `vonk-forge-web` repository
+at `packages.vonkforge.ai`. Accepted `main` commits separately advance the
+signed apt `dev` package channel; production tags attach immutable package
+evidence to their GitHub Release before advancing apt `stable`. The
+[agent package channel guide](docs/operations/agent-package-release.md) lists
+all four protected environments, exact keyring bootstrap commands, and channel
+switch/recovery rules. The separate `vonk-forge-web` repository
 will later publish a global catalog frontend through Cloudflare Pages and may
 add a Railway API/worker/PostgreSQL service; that future service is optional and
 never replaces the local catalog authority.
@@ -173,7 +178,7 @@ reconciled by the repository-less worker.
 - [NAS pull-only Compose deployment](deploy/compose/README.md)
 - [Development NAS installation and runtime secrets](docs/runbooks/development-nas-installation.md)
 - [Source-first recipe containers and local builds](deploy/compose/README.md#recipe-containers-are-source-first)
-- [Agent package release and APT installation](docs/operations/agent-package-release.md)
+- [Agent development/stable package release and APT installation](docs/operations/agent-package-release.md)
 - [Control-plane bootstrap](docs/runbooks/control-plane-bootstrap.md)
 - [`vonkctl` runbook](docs/runbooks/vonkctl.md)
 - [Inventory runbook](docs/runbooks/inventory.md)

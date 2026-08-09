@@ -475,15 +475,62 @@ def test_development_agent_workflow_has_no_production_authority() -> None:
 def test_release_operations_are_documented() -> None:
     text = (ROOT / "docs/operations/agent-package-release.md").read_text()
     for expected in (
+        "agent-development",
         "agent-release",
+        "apt-development",
         "apt-release",
         "packages.vonkforge.ai",
         "VONK_AGENT_RELEASE_PRIVATE_KEY",
+        "VONK_AGENT_RELEASE_KEY_FINGERPRINT",
         "APT_REPOSITORY_GPG_PRIVATE_KEY",
+        "APT_GPG_PASSPHRASE",
+        "APT_REPOSITORY_GPG_FINGERPRINT",
+        "R2_ACCOUNT_ID",
+        "R2_ACCESS_KEY_ID",
+        "R2_SECRET_ACCESS_KEY",
+        "R2_APT_PUBLIC_BUCKET",
         "R2_APT_STATE_BUCKET",
         "cosign verify-blob",
+        "gh attestation verify",
         "apt install vonk-forge-agent",
+        "apt update",
+        "apt-cache policy vonk-forge-agent",
+        "dpkg --compare-versions",
         "offline",
         "key rotation",
+        "interrupted",
+        "versions/<version>/commit.json",
+        "runtime secrets",
+        "NAS secrets",
     ):
         assert expected in text
+
+
+def test_release_operations_document_exact_apt_channel_bootstrap() -> None:
+    text = (ROOT / "docs/operations/agent-package-release.md").read_text()
+
+    for expected in (
+        "https://packages.vonkforge.ai/vonk-forge-dev-archive-keyring.gpg",
+        "https://packages.vonkforge.ai/vonk-forge-archive-keyring.gpg",
+        "signed-by=/usr/share/keyrings/vonk-forge-dev-archive-keyring.gpg] https://packages.vonkforge.ai dev main",
+        "signed-by=/usr/share/keyrings/vonk-forge-archive-keyring.gpg] https://packages.vonkforge.ai stable main",
+        "/etc/apt/sources.list.d/vonk-forge-dev.list",
+        "/etc/apt/sources.list.d/vonk-forge.list",
+    ):
+        assert expected in text
+
+    assert "changing the source" in text.lower()
+    assert "does not bypass" in text.lower()
+    assert "do not reconstruct" in text.lower()
+    assert "public bucket" in text.lower()
+
+
+def test_release_operations_document_isolated_signing_and_state_authority() -> None:
+    text = (ROOT / "docs/operations/agent-package-release.md").read_text()
+
+    assert "same `VONK_AGENT_RELEASE_PRIVATE_KEY`" in text
+    assert "different apt signing keys" in text.lower()
+    assert "different private state buckets" in text.lower()
+    assert "never copy" in text.lower()
+    assert "`apt-development`" in text
+    assert "`apt-release`" in text
