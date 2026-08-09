@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.machinery
 import importlib.util
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -34,6 +35,12 @@ def _rendered(tmp_path: Path) -> tuple[object, Path]:
     return renderer, output
 
 
+def _copy_template(tmp_path: Path, text: str) -> Path:
+    template = tmp_path / "template.yaml"
+    template.write_text(text, encoding="utf-8")
+    return template
+
+
 def test_render_accepts_exact_public_dev_images_and_replaces_each_token_once(
     tmp_path: Path,
 ) -> None:
@@ -44,6 +51,80 @@ def test_render_accepts_exact_public_dev_images_and_replaces_each_token_once(
     assert text.count(WORKER_IMAGE) == 1
     assert text.count(f"VONK_DEV_EXPECTED_COMMIT: {COMMIT}") == 1
     assert "__VONK_" not in text
+
+
+@pytest.mark.parametrize(
+    "token",
+    (
+        "__VONK_API_IMAGE__",
+        "__VONK_WORKER_IMAGE__",
+        "__VONK_EXPECTED_COMMIT__",
+    ),
+)
+def test_render_rejects_duplicate_renderer_tokens_before_staging(
+    tmp_path: Path, token: str
+) -> None:
+    template = _copy_template(
+        tmp_path,
+        TEMPLATE.read_text(encoding="utf-8") + f"\nx-duplicate: {token}\n",
+    )
+    output = tmp_path / "docker-compose.yml"
+    output.write_text("previous output\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="exactly once"):
+        _renderer().render(template, output, API_IMAGE, WORKER_IMAGE, COMMIT)
+
+    assert output.read_text(encoding="utf-8") == "previous output\n"
+    assert list(tmp_path.glob(".render-dev-compose-*")) == []
+
+
+@pytest.mark.parametrize(
+    "expression", ("${CALLER_VALUE:-resolved-by-compose}", "$CALLER_VALUE")
+)
+def test_render_rejects_extra_compose_interpolation_even_when_caller_resolves_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, expression: str
+) -> None:
+    template = _copy_template(
+        tmp_path,
+        TEMPLATE.read_text(encoding="utf-8")
+        + f'\nx-extra: "{expression}"\n',
+    )
+    output = tmp_path / "docker-compose.yml"
+    output.write_text("previous output\n", encoding="utf-8")
+    monkeypatch.setenv("CALLER_VALUE", "caller-controlled")
+
+    with pytest.raises(ValueError, match="interpolation"):
+        _renderer().render(template, output, API_IMAGE, WORKER_IMAGE, COMMIT)
+
+    assert output.read_text(encoding="utf-8") == "previous output\n"
+    assert list(tmp_path.glob(".render-dev-compose-*")) == []
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    (
+        "${VONK_DEV_PORT-8080}",
+        "${VONK_DEV_PORT:-8080",
+        "${VONK_DEV_PORT:-8080}:${VONK_DEV_PORT:-8080}",
+    ),
+)
+def test_render_rejects_malformed_or_duplicate_dev_port_interpolation(
+    tmp_path: Path, replacement: str
+) -> None:
+    template = _copy_template(
+        tmp_path,
+        TEMPLATE.read_text(encoding="utf-8").replace(
+            "${VONK_DEV_PORT:-8080}", replacement
+        ),
+    )
+    output = tmp_path / "docker-compose.yml"
+    output.write_text("previous output\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="VONK_DEV_PORT"):
+        _renderer().render(template, output, API_IMAGE, WORKER_IMAGE, COMMIT)
+
+    assert output.read_text(encoding="utf-8") == "previous output\n"
+    assert list(tmp_path.glob(".render-dev-compose-*")) == []
 
 
 @pytest.mark.parametrize(
@@ -111,6 +192,54 @@ def test_render_preserves_output_and_removes_staging_when_compose_validation_fai
     with pytest.raises(subprocess.CalledProcessError):
         renderer.render(TEMPLATE, output, API_IMAGE, WORKER_IMAGE, COMMIT)
 
+    assert output.read_text(encoding="utf-8") == "previous output\n"
+    assert list(tmp_path.glob(".render-dev-compose-*")) == []
+
+
+def test_compose_validation_uses_only_path_and_fixed_dev_port(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    renderer = _renderer()
+    stage = tmp_path / "docker-compose.yml"
+    stage.write_text("services: {}\n", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    def capture_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        captured.update(kwargs)
+        return subprocess.CompletedProcess(args[0], 0, "", "")
+
+    monkeypatch.setattr(renderer.subprocess, "run", capture_run)
+    monkeypatch.setenv("COMPOSE_FILE", "/attacker/compose.yaml")
+    monkeypatch.setenv("COMPOSE_PROJECT_NAME", "caller-project")
+    monkeypatch.setenv("VONK_DEV_PORT", "65535")
+
+    renderer._validate_compose(stage)
+
+    assert captured["env"] == {"PATH": os.environ["PATH"], "VONK_DEV_PORT": "8080"}
+
+
+def test_cleanup_failure_preserves_output_and_cleans_staging_on_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    renderer = _renderer()
+    output = tmp_path / "docker-compose.yml"
+    output.write_text("previous output\n", encoding="utf-8")
+    real_rmtree = renderer.shutil.rmtree
+    attempts = 0
+
+    def fail_once(path: Path) -> None:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise OSError("synthetic cleanup failure")
+        real_rmtree(path)
+
+    monkeypatch.setattr(renderer.shutil, "rmtree", fail_once)
+
+    with pytest.raises(OSError, match="synthetic cleanup failure"):
+        renderer.render(TEMPLATE, output, API_IMAGE, WORKER_IMAGE, COMMIT)
+
+    assert attempts == 2
     assert output.read_text(encoding="utf-8") == "previous output\n"
     assert list(tmp_path.glob(".render-dev-compose-*")) == []
 
