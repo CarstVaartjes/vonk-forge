@@ -230,6 +230,7 @@ def test_builder_accepts_exact_derived_development_version(tmp_path: Path) -> No
     (
         "0.1.0-rc.1",
         "0.1.0+build.1",
+        "0.1.0~devX1786300000+g0123456789ab",
         "0.1.0~dev.1786300000+g0123456789abc",
         "0.1.0~dev.1786300000+g0123456789AB",
         "0.1.0~dev.4102444801+g0123456789ab",

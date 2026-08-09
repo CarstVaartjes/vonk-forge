@@ -24,10 +24,10 @@ TARGET = "aarch64-unknown-linux-gnu"
 BINARIES = ("vonk-agent", "vonk-agent-helper", "vonk-agent-supervisor")
 SEMVER = r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
 PACKAGE_VERSION = re.compile(
-    rf"(?:{SEMVER}|{SEMVER}~dev.(?:0|[1-9][0-9]*)\+g[0-9a-f]{{12}})\Z"
+    rf"(?:{SEMVER}|{SEMVER}~dev\.(?:0|[1-9][0-9]*)\+g[0-9a-f]{{12}})\Z"
 )
 DEVELOPMENT_VERSION = re.compile(
-    rf"{SEMVER}~dev.((?:0|[1-9][0-9]*))\+g[0-9a-f]{{12}}\Z"
+    rf"{SEMVER}~dev\.((?:0|[1-9][0-9]*))\+g[0-9a-f]{{12}}\Z"
 )
 MAX_EPOCH = 4_102_444_800
 MAX_BINARY_BYTES = 512 * 1024 * 1024
