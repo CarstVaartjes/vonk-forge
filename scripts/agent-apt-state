@@ -473,10 +473,22 @@ def publish_committed(
     if manifest["publication"] != receipt:
         raise StateError("committed publication conflicts with request")
     validated = validate_bundle(public_bundle, "public", receipt)
-    for name in sorted(validated.files):
-        if not name.startswith("public/"):
-            continue
-        public_store.write(name.removeprefix("public/"), validated.files[name])
+    public_files = {
+        name.removeprefix("public/"): content
+        for name, content in validated.files.items()
+        if name.startswith("public/")
+    }
+    release = f"dists/{receipt['distribution']}/Release"
+    release_gpg = f"dists/{receipt['distribution']}/Release.gpg"
+    inrelease = f"dists/{receipt['distribution']}/InRelease"
+    commit_objects = {release, release_gpg, inrelease}
+    upload_order = [
+        *sorted(set(public_files) - commit_objects),
+        *(name for name in (release, release_gpg) if name in public_files),
+        inrelease,
+    ]
+    for name in upload_order:
+        public_store.write(name, public_files[name])
     pointer = canonical_json(
         {
             "channel": receipt["channel"],
