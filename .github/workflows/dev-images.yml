@@ -10,16 +10,22 @@ permissions:
 
 concurrency:
   group: vonk-forge-development-images
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
-  publish-development-images:
-    name: Publish accepted main images
+  build-and-accept:
+    name: Build and accept main images
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
       contents: read
-      packages: write
+    outputs:
+      commit: ${{ steps.metadata.outputs.commit }}
+      immutable_tag: ${{ steps.metadata.outputs.immutable_tag }}
+      dev_alias: ${{ steps.metadata.outputs.dev_alias }}
+      api_image: ${{ steps.metadata.outputs.api_image }}
+      worker_image: ${{ steps.metadata.outputs.worker_image }}
+      artifact_name: ${{ steps.metadata.outputs.artifact_name }}
     steps:
       - name: Check out full main history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -121,6 +127,53 @@ jobs:
             --worker-image vonk-forge-worker:dev-local \
             --commit "$GITHUB_SHA"
 
+      - name: Upload accepted OCI archives
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: accepted-development-images-${{ github.sha }}-${{ github.run_id }}
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+          path: |
+            ${{ runner.temp }}/vonk-forge-api.oci.tar
+            ${{ runner.temp }}/vonk-forge-worker.oci.tar
+
+  publish-development-images:
+    name: Publish accepted main images
+    needs: [build-and-accept]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out publication tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      - name: Install Skopeo from Ubuntu
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends skopeo
+      - name: Download accepted OCI archives
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: accepted-development-images-${{ github.sha }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/accepted
+      - name: Recheck exact main before publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --force --no-tags origin \
+            +refs/heads/main:refs/remotes/origin/main
+          [[ "$GITHUB_SHA" == \
+            "$(git rev-parse --verify refs/remotes/origin/main^{commit})" ]]
+
       - name: Log in to GHCR
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
@@ -132,25 +185,48 @@ jobs:
         id: publish
         shell: bash
         env:
-          API_IMAGE: ${{ steps.metadata.outputs.api_image }}
-          IMMUTABLE_TAG: ${{ steps.metadata.outputs.immutable_tag }}
-          WORKER_IMAGE: ${{ steps.metadata.outputs.worker_image }}
+          API_IMAGE: ${{ needs.build-and-accept.outputs.api_image }}
+          IMMUTABLE_TAG: ${{ needs.build-and-accept.outputs.immutable_tag }}
+          WORKER_IMAGE: ${{ needs.build-and-accept.outputs.worker_image }}
         run: |
           set -euo pipefail
-          api_digest_file="$RUNNER_TEMP/api.digest"
-          worker_digest_file="$RUNNER_TEMP/worker.digest"
-          skopeo copy --all --preserve-digests \
-            --digestfile "$api_digest_file" \
-            "oci-archive:$RUNNER_TEMP/vonk-forge-api.oci.tar" \
-            "docker://$API_IMAGE:${IMMUTABLE_TAG}"
-          skopeo copy --all --preserve-digests \
-            --digestfile "$worker_digest_file" \
-            "oci-archive:$RUNNER_TEMP/vonk-forge-worker.oci.tar" \
-            "docker://$WORKER_IMAGE:${IMMUTABLE_TAG}"
-          api_digest=$(tr -d '\r\n' < "$api_digest_file")
-          worker_digest=$(tr -d '\r\n' < "$worker_digest_file")
-          [[ "$api_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-          [[ "$worker_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          publish_immutable() {
+            local role=$1 archive=$2 image=$3
+            local manifest="$RUNNER_TEMP/${role}.manifest.json"
+            local digest_file="$RUNNER_TEMP/${role}.digest"
+            local inspect_error="$RUNNER_TEMP/${role}.inspect-error"
+            local expected observed pushed
+            skopeo inspect --raw "oci-archive:$archive" > "$manifest"
+            expected=$(skopeo manifest-digest "$manifest")
+            [[ "$expected" =~ ^sha256:[0-9a-f]{64}$ ]]
+            if observed=$(skopeo inspect --format '{{.Digest}}' \
+              "docker://$image:${IMMUTABLE_TAG}" 2>"$inspect_error"); then
+              if [[ "$observed" != "$expected" ]]; then
+                echo "refusing to overwrite immutable $role image tag" >&2
+                return 1
+              fi
+            else
+              if ! grep -Eiq 'manifest unknown|name unknown|not found' \
+                "$inspect_error"; then
+                echo "immutable $role image lookup failed" >&2
+                return 1
+              fi
+              skopeo copy --all --preserve-digests \
+                --digestfile "$digest_file" \
+                "oci-archive:$archive" \
+                "docker://$image:${IMMUTABLE_TAG}"
+              pushed=$(tr -d '\r\n' < "$digest_file")
+              if [[ "$pushed" != "$expected" ]]; then
+                echo "immutable $role image digest changed during publication" >&2
+                return 1
+              fi
+            fi
+            printf '%s\n' "$expected"
+          }
+          api_digest=$(publish_immutable api \
+            "$RUNNER_TEMP/accepted/vonk-forge-api.oci.tar" "$API_IMAGE")
+          worker_digest=$(publish_immutable worker \
+            "$RUNNER_TEMP/accepted/vonk-forge-worker.oci.tar" "$WORKER_IMAGE")
           printf 'api_digest=%s\nworker_digest=%s\n' \
             "$api_digest" "$worker_digest" >> "$GITHUB_OUTPUT"
 
@@ -158,10 +234,10 @@ jobs:
         shell: bash
         env:
           API_DIGEST: ${{ steps.publish.outputs.api_digest }}
-          API_IMAGE: ${{ steps.metadata.outputs.api_image }}
-          IMMUTABLE_TAG: ${{ steps.metadata.outputs.immutable_tag }}
+          API_IMAGE: ${{ needs.build-and-accept.outputs.api_image }}
+          IMMUTABLE_TAG: ${{ needs.build-and-accept.outputs.immutable_tag }}
           WORKER_DIGEST: ${{ steps.publish.outputs.worker_digest }}
-          WORKER_IMAGE: ${{ steps.metadata.outputs.worker_image }}
+          WORKER_IMAGE: ${{ needs.build-and-accept.outputs.worker_image }}
         run: |
           set -euo pipefail
           for identity in api worker; do
@@ -182,20 +258,28 @@ jobs:
             docker buildx imagetools inspect "$image@$digest" \
               --format '{{ json .Provenance }}' \
               | jq -e --arg revision "$GITHUB_SHA" \
-                '.. | strings | select(. == $revision)' >/dev/null
+                '([.. | objects | select(
+                    (.predicateType? | strings | startswith("https://slsa.dev/provenance/"))
+                    or (.buildDefinition?.buildType? | strings | length > 0)
+                  )] | length > 0)
+                 and ([.. | strings | select(. == $revision)] | length > 0)' \
+                >/dev/null
             docker buildx imagetools inspect "$image@$digest" \
               --format '{{ json .SBOM }}' \
-              | jq -e '. != null' >/dev/null
+              | jq -e '[.. | objects | select(
+                  .SPDXID? == "SPDXRef-DOCUMENT"
+                  and (.spdxVersion? | strings | startswith("SPDX-"))
+                )] | length > 0' >/dev/null
           done
 
       - name: Render digest-pinned Compose artifact
         shell: bash
         env:
           API_DIGEST: ${{ steps.publish.outputs.api_digest }}
-          API_IMAGE: ${{ steps.metadata.outputs.api_image }}
-          IMMUTABLE_TAG: ${{ steps.metadata.outputs.immutable_tag }}
+          API_IMAGE: ${{ needs.build-and-accept.outputs.api_image }}
+          IMMUTABLE_TAG: ${{ needs.build-and-accept.outputs.immutable_tag }}
           WORKER_DIGEST: ${{ steps.publish.outputs.worker_digest }}
-          WORKER_IMAGE: ${{ steps.metadata.outputs.worker_image }}
+          WORKER_IMAGE: ${{ needs.build-and-accept.outputs.worker_image }}
         run: |
           set -euo pipefail
           install -d -m 0700 dist
@@ -209,7 +293,7 @@ jobs:
       - name: Upload Compose artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ${{ steps.metadata.outputs.artifact_name }}
+          name: ${{ needs.build-and-accept.outputs.artifact_name }}
           if-no-files-found: error
           retention-days: 30
           path: dist/docker-compose.yml
@@ -218,16 +302,43 @@ jobs:
         shell: bash
         env:
           API_DIGEST: ${{ steps.publish.outputs.api_digest }}
-          API_IMAGE: ${{ steps.metadata.outputs.api_image }}
-          DEV_ALIAS: ${{ steps.metadata.outputs.dev_alias }}
+          API_IMAGE: ${{ needs.build-and-accept.outputs.api_image }}
+          DEV_ALIAS: ${{ needs.build-and-accept.outputs.dev_alias }}
           WORKER_DIGEST: ${{ steps.publish.outputs.worker_digest }}
-          WORKER_IMAGE: ${{ steps.metadata.outputs.worker_image }}
+          WORKER_IMAGE: ${{ needs.build-and-accept.outputs.worker_image }}
         run: |
           set -euo pipefail
+          previous_api_digest=$(skopeo inspect --format '{{.Digest}}' \
+            "docker://$API_IMAGE:$DEV_ALIAS" 2>/dev/null || true)
+          previous_worker_digest=$(skopeo inspect --format '{{.Digest}}' \
+            "docker://$WORKER_IMAGE:$DEV_ALIAS" 2>/dev/null || true)
+          promotion_started=0
+          promotion_complete=0
+          rollback_aliases() {
+            local status=$?
+            trap - EXIT INT TERM
+            if [[ "$promotion_started" -eq 1 && "$promotion_complete" -eq 0 ]]; then
+              if [[ "$previous_api_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+                skopeo copy --all --preserve-digests \
+                  "docker://$API_IMAGE@$previous_api_digest" \
+                  "docker://$API_IMAGE:$DEV_ALIAS" >/dev/null 2>&1 || true
+              fi
+              if [[ "$previous_worker_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+                skopeo copy --all --preserve-digests \
+                  "docker://$WORKER_IMAGE@$previous_worker_digest" \
+                  "docker://$WORKER_IMAGE:$DEV_ALIAS" >/dev/null 2>&1 || true
+              fi
+            fi
+            exit "$status"
+          }
+          trap rollback_aliases EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
           git fetch --force --no-tags origin \
             +refs/heads/main:refs/remotes/origin/main
           [[ "$GITHUB_SHA" == \
             "$(git rev-parse --verify refs/remotes/origin/main^{commit})" ]]
+          promotion_started=1
           skopeo copy --all --preserve-digests \
             "docker://$API_IMAGE@$API_DIGEST" \
             "docker://$API_IMAGE:$DEV_ALIAS"
@@ -238,3 +349,4 @@ jobs:
             "docker://$API_IMAGE:$DEV_ALIAS") == "$API_DIGEST" ]]
           [[ $(skopeo inspect --format '{{.Digest}}' \
             "docker://$WORKER_IMAGE:$DEV_ALIAS") == "$WORKER_DIGEST" ]]
+          promotion_complete=1
