@@ -106,11 +106,26 @@ import re
 import sys
 
 password = os.environ["VONK_ACCEPTANCE_PASSWORD"]
+key_begin = re.compile(r"-----BEGIN(?: [A-Z0-9]+)* PRIVATE KEY-----", re.I)
+key_end = re.compile(r"-----END(?: [A-Z0-9]+)* PRIVATE KEY-----", re.I)
+opaque_token = re.compile(
+    r"(?<![A-Za-z0-9+/=_-])[A-Za-z0-9+/=_-]{32,}(?![A-Za-z0-9+/=_-])"
+)
+inside_key = False
 for line in sys.stdin:
+    begins_key = key_begin.search(line) is not None
+    ends_key = key_end.search(line) is not None
+    if inside_key or begins_key:
+        print("[redacted]")
+        inside_key = not ends_key
+        continue
     if password in line or re.search(r"password|token|secret|private key|signing key", line, re.I):
         print("[redacted]")
     else:
-        print(re.sub(r"postgresql(?:\+[^:]+)?://[^@\s]+@", "[redacted-db-url]", line))
+        sanitized = re.sub(
+            r"postgresql(?:\+[^:]+)?://[^@\s]+@", "[redacted-db-url]", line
+        )
+        print(opaque_token.sub("[redacted-token]", sanitized))
 '
 }
 
