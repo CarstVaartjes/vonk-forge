@@ -1,3 +1,7 @@
+import hashlib
+import json
+import os
+import struct
 import subprocess
 from pathlib import Path
 
@@ -5,6 +9,89 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github/workflows/agent-release.yml"
 UNIFIED_WORKFLOW = ROOT / ".github/workflows/ci.yml"
 PACKAGE_WORKFLOW = ROOT / ".github/workflows/agent-package-build.yml"
+
+
+def package_step_run(step_name: str) -> str:
+    lines = PACKAGE_WORKFLOW.read_text().splitlines()
+    step_start = lines.index(f"      - name: {step_name}")
+    run_start = lines.index("        run: |", step_start) + 1
+    run_lines: list[str] = []
+    for line in lines[run_start:]:
+        if line and not line.startswith("          "):
+            break
+        run_lines.append(line[10:] if line else "")
+    return "\n".join(run_lines)
+
+
+def generate_private_key(path: Path, algorithm: str) -> None:
+    result = subprocess.run(
+        ["/usr/bin/openssl", "genpkey", "-algorithm", algorithm, "-out", path],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    path.chmod(0o600)
+
+
+def public_spki(private_key: Path) -> bytes:
+    return subprocess.run(
+        [
+            "/usr/bin/openssl",
+            "pkey",
+            "-in",
+            private_key,
+            "-pubout",
+            "-outform",
+            "DER",
+        ],
+        check=True,
+        capture_output=True,
+    ).stdout
+
+
+def run_key_authority(
+    private_key: Path, expected_fingerprint: str, runner_temp: Path
+) -> subprocess.CompletedProcess[str]:
+    runner_temp.mkdir()
+    return subprocess.run(
+        ["bash", "-c", package_step_run("Materialize and verify protected agent key")],
+        cwd=ROOT,
+        env={
+            **os.environ,
+            "EXPECTED_FINGERPRINT": expected_fingerprint,
+            "RELEASE_PRIVATE_KEY": private_key.read_text(),
+            "RUNNER_TEMP": str(runner_temp),
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
+def signing_key_id(private_key: Path, tmp_path: Path) -> str:
+    artifact = tmp_path / "vonk-agent"
+    raw = bytearray(256)
+    raw[:16] = b"\x7fELF\x02\x01\x01" + bytes(9)
+    struct.pack_into("<H", raw, 18, 183)
+    artifact.write_bytes(raw)
+    result = subprocess.run(
+        [
+            ROOT / "scripts/sign-agent-release",
+            "--artifact",
+            artifact,
+            "--private-key",
+            private_key,
+            "--output",
+            tmp_path / "signed",
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)["key_id"]
 
 
 def test_reusable_agent_package_build_has_a_strict_call_boundary() -> None:
@@ -42,6 +129,36 @@ def test_reusable_agent_package_build_validates_authority_before_key_use() -> No
     assert "openssl pkey" in text
     assert "-pubout -outform DER" in text
     assert "sha256sum" in text
+
+
+def test_prebuild_authority_rejects_non_ed25519_with_matching_spki_hash(
+    tmp_path: Path,
+) -> None:
+    private_key = tmp_path / "rsa.pem"
+    generate_private_key(private_key, "RSA")
+    old_workflow_fingerprint = hashlib.sha256(public_spki(private_key)).hexdigest()
+    runner_temp = tmp_path / "rsa-runner"
+
+    result = run_key_authority(private_key, old_workflow_fingerprint, runner_temp)
+
+    assert result.returncode != 0
+    assert {path.name for path in runner_temp.iterdir()} == {
+        "vonk-agent-release.pem"
+    }
+
+
+def test_prebuild_authority_matches_signing_ed25519_key_id(tmp_path: Path) -> None:
+    private_key = tmp_path / "ed25519.pem"
+    generate_private_key(private_key, "ED25519")
+    expected_key_id = signing_key_id(private_key, tmp_path)
+    runner_temp = tmp_path / "ed25519-runner"
+
+    result = run_key_authority(private_key, expected_key_id, runner_temp)
+
+    assert result.returncode == 0, result.stderr
+    assert {path.name for path in runner_temp.iterdir()} == {
+        "vonk-agent-release.pem"
+    }
 
 
 def test_reusable_agent_package_build_preserves_acceptance_gates() -> None:
