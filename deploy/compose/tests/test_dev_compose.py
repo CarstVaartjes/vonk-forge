@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import stat
 import subprocess
 from pathlib import Path
 
@@ -11,6 +12,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[3]
 COMPOSE = ROOT / "deploy/compose/compose.dev.yaml"
 SCRIPT = ROOT / "scripts/dev-compose"
+SECRETS_HELPER = ROOT / "scripts/dev-compose-secrets.py"
 EXPECTED_COMMIT = "a" * 40
 
 
@@ -161,6 +163,8 @@ def _script_repository(tmp_path: Path) -> tuple[Path, Path]:
     local_script = repository / "scripts/dev-compose"
     local_script.parent.mkdir(parents=True)
     shutil.copy2(SCRIPT, local_script)
+    if SECRETS_HELPER.exists():
+        shutil.copy2(SECRETS_HELPER, local_script.parent / SECRETS_HELPER.name)
     local_compose = repository / "deploy/compose/compose.dev.yaml"
     local_compose.parent.mkdir(parents=True)
     local_compose.write_text("services: {}\n", encoding="utf-8")
@@ -206,9 +210,15 @@ def _fake_docker(tmp_path: Path) -> Path:
 
 def _existing_secrets(tmp_path: Path) -> Path:
     secrets = tmp_path / "secrets"
-    secrets.mkdir()
-    for name in ("postgres-password", "database-url", "git-signing-key"):
+    secrets.mkdir(mode=0o700)
+    for name in (
+        "postgres-password",
+        "database-url",
+        "git-signing-key",
+        "git-signing-key.pub",
+    ):
         (secrets / name).write_text("already-created\n", encoding="utf-8")
+        (secrets / name).chmod(0o600)
     return secrets
 
 
@@ -268,6 +278,15 @@ def test_dev_compose_script_uses_a_unique_one_use_origin_and_ignores_override(
     assert not arbitrary_origin.exists()
     assert not (repository / ".dev/vonk-forge-origin.git").exists()
     assert not (repository / ".dev/.vonk-forge-origin.owner").exists()
+    assert stat.S_IMODE(secrets.stat().st_mode) == 0o700
+    assert {
+        path.name: stat.S_IMODE(path.stat().st_mode) for path in secrets.iterdir()
+    } == {
+        "database-url": 0o600,
+        "git-signing-key": 0o600,
+        "git-signing-key.pub": 0o600,
+        "postgres-password": 0o600,
+    }
 
 
 def test_dev_compose_origin_is_not_redirected_when_dev_is_swapped_after_validation(
@@ -514,3 +533,206 @@ def test_dev_compose_script_rejects_a_symlinked_development_directory(
     assert not (capture / "environment").exists()
     assert sentinel.read_text(encoding="utf-8") == "preserve\n"
     assert {path.name for path in external.iterdir()} == {"operator-owned"}
+
+
+def test_dev_compose_rejects_development_directory_symlink_swapped_in_before_safe_open(
+    tmp_path: Path,
+) -> None:
+    repository, local_script = _script_repository(tmp_path)
+    development_root = repository / ".dev"
+    development_root.mkdir(mode=0o700)
+    pinned_root = repository / ".dev.pinned"
+    fake_bin = _fake_docker(tmp_path)
+    real_python = shutil.which("python3")
+    real_stat = shutil.which("stat")
+    assert real_python is not None
+    assert real_stat is not None
+    capture = tmp_path / "capture"
+    capture.mkdir()
+    swap_dev = capture / "swap-dev"
+    swap_dev.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -e\n"
+        "if [[ ! -e \"$VONK_TEST_CAPTURE_DIR/dev-swapped\" ]]; then\n"
+        "  touch \"$VONK_TEST_CAPTURE_DIR/dev-swapped\"\n"
+        "  mv -- \"$VONK_TEST_REPOSITORY_ROOT/.dev\" "
+        "\"$VONK_TEST_REPOSITORY_ROOT/.dev.pinned\"\n"
+        "  ln -s -- \"$VONK_TEST_REPOSITORY_ROOT/.dev.pinned\" "
+        "\"$VONK_TEST_REPOSITORY_ROOT/.dev\"\n"
+        "fi\n",
+        encoding="utf-8",
+    )
+    swap_dev.chmod(0o755)
+    fake_stat = fake_bin / "stat"
+    fake_stat.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -e\n"
+        "output=$(" + real_stat + " \"$@\")\n"
+        "if [[ \" $* \" == *\" $VONK_TEST_REPOSITORY_ROOT/.dev \"* ]] "
+        "&& [[ \" $* \" == *\" %d:%i \"* ]]; then\n"
+        "  \"$VONK_TEST_CAPTURE_DIR/swap-dev\"\n"
+        "fi\n"
+        "printf '%s\\n' \"$output\"\n",
+        encoding="utf-8",
+    )
+    fake_stat.chmod(0o755)
+    fake_python = fake_bin / "python3"
+    fake_python.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -e\n"
+        "\"$VONK_TEST_CAPTURE_DIR/swap-dev\"\n"
+        f"exec {real_python} \"$@\"\n",
+        encoding="utf-8",
+    )
+    fake_python.chmod(0o755)
+    environment = os.environ | {
+        "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
+        "VONK_TEST_CAPTURE_DIR": str(capture),
+        "VONK_TEST_REPOSITORY_ROOT": str(repository),
+    }
+
+    result = subprocess.run(
+        (str(local_script), "config"),
+        cwd=repository,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert (capture / "dev-swapped").is_file()
+    assert development_root.is_symlink()
+    assert pinned_root.is_dir()
+    assert not (pinned_root / "vonk-forge-secrets").exists()
+    assert not (capture / "environment").exists()
+
+
+@pytest.mark.parametrize(
+    ("name", "dangling"),
+    (
+        ("postgres-password", True),
+        ("database-url", False),
+        ("git-signing-key", False),
+        ("git-signing-key.pub", True),
+    ),
+)
+def test_dev_compose_rejects_managed_secret_file_symlinks(
+    tmp_path: Path,
+    name: str,
+    dangling: bool,
+) -> None:
+    repository, local_script = _script_repository(tmp_path)
+    secrets = repository / ".dev/vonk-forge-secrets"
+    secrets.mkdir(parents=True, mode=0o700)
+    secrets.parent.chmod(0o700)
+    secrets.chmod(0o700)
+    outside = tmp_path / f"outside-{name}"
+    if not dangling:
+        outside.write_text("preserve\n", encoding="utf-8")
+    (secrets / name).symlink_to(outside)
+    fake_bin = _fake_docker(tmp_path)
+    capture = tmp_path / "capture"
+    capture.mkdir()
+    environment = os.environ | {
+        "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
+        "VONK_TEST_CAPTURE_DIR": str(capture),
+    }
+
+    result = subprocess.run(
+        (str(local_script), "config"),
+        cwd=repository,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert not (capture / "environment").exists()
+    if dangling:
+        assert not outside.exists()
+    else:
+        assert outside.read_text(encoding="utf-8") == "preserve\n"
+
+
+def test_dev_compose_rolls_back_private_key_if_public_key_is_swapped_during_install(
+    tmp_path: Path,
+) -> None:
+    repository, local_script = _script_repository(tmp_path)
+    secrets = repository / ".dev/vonk-forge-secrets"
+    secrets.mkdir(parents=True, mode=0o700)
+    secrets.parent.chmod(0o700)
+    secrets.chmod(0o700)
+    outside = tmp_path / "outside-public-key"
+    outside.write_text("preserve\n", encoding="utf-8")
+    fake_bin = _fake_docker(tmp_path)
+    real_ssh_keygen = shutil.which("ssh-keygen")
+    assert real_ssh_keygen is not None
+    fake_ssh_keygen = fake_bin / "ssh-keygen"
+    fake_ssh_keygen.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -e\n"
+        f"{real_ssh_keygen} \"$@\"\n"
+        "ln -s -- \"$VONK_TEST_OUTSIDE_PUBLIC_KEY\" "
+        "\"$VONK_TEST_SECRETS_DIR/git-signing-key.pub\"\n",
+        encoding="utf-8",
+    )
+    fake_ssh_keygen.chmod(0o755)
+    capture = tmp_path / "capture"
+    capture.mkdir()
+    environment = os.environ | {
+        "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
+        "VONK_TEST_CAPTURE_DIR": str(capture),
+        "VONK_TEST_OUTSIDE_PUBLIC_KEY": str(outside),
+        "VONK_TEST_SECRETS_DIR": str(secrets),
+    }
+
+    result = subprocess.run(
+        (str(local_script), "config"),
+        cwd=repository,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert not (capture / "environment").exists()
+    assert not (secrets / "git-signing-key").exists()
+    assert (secrets / "git-signing-key.pub").is_symlink()
+    assert outside.read_text(encoding="utf-8") == "preserve\n"
+
+
+def test_dev_compose_rejects_an_existing_private_key_without_its_public_mate(
+    tmp_path: Path,
+) -> None:
+    repository, local_script = _script_repository(tmp_path)
+    secrets = repository / ".dev/vonk-forge-secrets"
+    secrets.mkdir(parents=True, mode=0o700)
+    secrets.parent.chmod(0o700)
+    secrets.chmod(0o700)
+    private_key = secrets / "git-signing-key"
+    private_key.write_text("partial-private-key\n", encoding="utf-8")
+    private_key.chmod(0o600)
+    fake_bin = _fake_docker(tmp_path)
+    capture = tmp_path / "capture"
+    capture.mkdir()
+    environment = os.environ | {
+        "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
+        "VONK_TEST_CAPTURE_DIR": str(capture),
+    }
+
+    result = subprocess.run(
+        (str(local_script), "config"),
+        cwd=repository,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert not (capture / "environment").exists()
+    assert private_key.read_text(encoding="utf-8") == "partial-private-key\n"
+    assert not (secrets / "git-signing-key.pub").exists()

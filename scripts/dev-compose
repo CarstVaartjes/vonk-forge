@@ -4,22 +4,7 @@ umask 077
 unset VONK_DEV_ORIGIN_DIR
 
 repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-development_root="$repository_root/.dev"
-current_uid=$(id -u)
-
-if [[ -L "$development_root" ]]; then
-  echo "development directory must not be a symlink" >&2
-  exit 1
-fi
-if [[ ! -e "$development_root" ]]; then
-  mkdir -m 700 "$development_root"
-fi
-if [[ ! -d "$development_root" ]] \
-  || [[ $(stat -c %u "$development_root") != "$current_uid" ]] \
-  || [[ $(stat -c %a "$development_root") != 700 ]]; then
-  echo "development wrapper ownership or mode is unsafe" >&2
-  exit 1
-fi
+secrets_helper="$repository_root/scripts/dev-compose-secrets.py"
 if [[ "$#" -eq 0 ]]; then
   set -- up -d --build --wait
 fi
@@ -52,25 +37,12 @@ case "$1" in
     exit 1
     ;;
 esac
-secrets_dir=${VONK_DEV_SECRETS_DIR:-"$repository_root/.dev/vonk-forge-secrets"}
-mkdir -p "$secrets_dir"
-secrets_dir=$(cd "$secrets_dir" && pwd)
-chmod 700 "$secrets_dir"
-
-if [[ ! -e "$secrets_dir/postgres-password" ]]; then
-  openssl rand -hex 24 > "$secrets_dir/postgres-password"
-  chmod 600 "$secrets_dir/postgres-password"
-fi
-if [[ ! -e "$secrets_dir/database-url" ]]; then
-  password=$(<"$secrets_dir/postgres-password")
-  printf 'postgresql+psycopg://control:%s@postgres:5432/control\n' "$password" \
-    > "$secrets_dir/database-url"
-  chmod 600 "$secrets_dir/database-url"
-fi
-if [[ ! -e "$secrets_dir/git-signing-key" ]]; then
-  ssh-keygen -q -t ed25519 -N '' -C vonk-forge-dev \
-    -f "$secrets_dir/git-signing-key"
-  chmod 600 "$secrets_dir/git-signing-key"
+if [[ -n ${VONK_DEV_SECRETS_DIR:-} ]]; then
+  secrets_dir=$(python3 "$secrets_helper" \
+    --repository-root "$repository_root" \
+    --external-secrets-dir "$VONK_DEV_SECRETS_DIR")
+else
+  secrets_dir=$(python3 "$secrets_helper" --repository-root "$repository_root")
 fi
 
 expected_commit=$(git -C "$repository_root" rev-parse --verify 'HEAD^{commit}')
