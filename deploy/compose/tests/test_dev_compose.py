@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import stat
 import subprocess
 from pathlib import Path
 
@@ -26,6 +25,7 @@ def _rendered(tmp_path: Path) -> dict[str, object]:
         (secrets / name).write_text(value, encoding="utf-8")
     environment = os.environ | {
         "VONK_DEV_EXPECTED_COMMIT": EXPECTED_COMMIT,
+        "VONK_DEV_ORIGIN_DIR": str(tmp_path / "one-use-origin.git"),
         "VONK_DEV_SECRETS_DIR": str(secrets),
     }
     result = subprocess.run(
@@ -117,7 +117,7 @@ def test_dev_compose_runs_packaged_initializer_with_disjoint_runtime_authority(
     assert init_volumes["/source-origin"]["type"] == "bind"
     assert init_volumes["/source-origin"]["read_only"] is True
     assert init_volumes["/source-origin"]["source"] == str(
-        ROOT / ".dev/vonk-forge-origin.git"
+        tmp_path / "one-use-origin.git"
     )
     assert "/host-secrets" not in init_volumes
     assert init_volumes["/repository"]["type"] == "volume"
@@ -180,7 +180,7 @@ def _script_repository(tmp_path: Path) -> tuple[Path, Path]:
     return repository, local_script
 
 
-def _fake_docker(tmp_path: Path) -> tuple[Path, Path]:
+def _fake_docker(tmp_path: Path) -> Path:
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     fake_docker = fake_bin / "docker"
@@ -190,13 +190,15 @@ def _fake_docker(tmp_path: Path) -> tuple[Path, Path]:
         "printf '%s\\n%s\\n%s\\n' \"${VONK_DEV_EXPECTED_COMMIT:-}\" "
         "\"${VONK_DEV_ORIGIN_DIR:-absent}\" \"$VONK_DEV_SECRETS_DIR\" "
         "> \"$VONK_TEST_CAPTURE_DIR/environment\"\n"
-        "printf '%s\\n' \"$@\" > \"$VONK_TEST_CAPTURE_DIR/arguments\"\n",
+        "git --git-dir=\"$VONK_DEV_ORIGIN_DIR\" rev-parse refs/heads/main "
+        "> \"$VONK_TEST_CAPTURE_DIR/main\"\n"
+        "stat -c %a \"$VONK_DEV_ORIGIN_DIR\" > \"$VONK_TEST_CAPTURE_DIR/mode\"\n"
+        "printf '%s\\n' \"$@\" > \"$VONK_TEST_CAPTURE_DIR/arguments\"\n"
+        "exit \"${VONK_TEST_DOCKER_EXIT:-0}\"\n",
         encoding="utf-8",
     )
     fake_docker.chmod(0o755)
-    capture = tmp_path / "capture"
-    capture.mkdir()
-    return fake_bin, capture
+    return fake_bin
 
 
 def _existing_secrets(tmp_path: Path) -> Path:
@@ -207,74 +209,74 @@ def _existing_secrets(tmp_path: Path) -> Path:
     return secrets
 
 
-def test_dev_compose_script_publishes_head_to_its_fixed_owned_origin(
+def test_dev_compose_script_uses_a_unique_one_use_origin_and_ignores_override(
     tmp_path: Path,
 ) -> None:
     repository, local_script = _script_repository(tmp_path)
     secrets = _existing_secrets(tmp_path)
-    fake_bin, capture = _fake_docker(tmp_path)
+    fake_bin = _fake_docker(tmp_path)
     arbitrary_origin = tmp_path / "arbitrary-origin.git"
-    environment = os.environ | {
-        "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
-        "VONK_DEV_ORIGIN_DIR": str(arbitrary_origin),
-        "VONK_DEV_SECRETS_DIR": str(secrets),
-        "VONK_TEST_CAPTURE_DIR": str(capture),
-    }
-
-    subprocess.run(
-        (str(local_script), "config"),
-        cwd=repository,
-        env=environment,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-
     expected = subprocess.run(
         ("git", "-C", str(repository), "rev-parse", "HEAD"),
         check=True,
         capture_output=True,
         text=True,
     ).stdout.strip()
-    exported_commit, origin, exported_secrets = (
-        capture / "environment"
-    ).read_text(encoding="utf-8").splitlines()
-    assert exported_commit == expected
-    assert origin == "absent"
-    assert exported_secrets == str(secrets)
-    fixed_origin = repository / ".dev/vonk-forge-origin.git"
+    origins: list[Path] = []
+    for invocation in ("first", "second"):
+        capture = tmp_path / f"capture-{invocation}"
+        capture.mkdir()
+        environment = os.environ | {
+            "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
+            "VONK_DEV_ORIGIN_DIR": str(arbitrary_origin),
+            "VONK_DEV_SECRETS_DIR": str(secrets),
+            "VONK_TEST_CAPTURE_DIR": str(capture),
+        }
+
+        subprocess.run(
+            (str(local_script), "config"),
+            cwd=repository,
+            env=environment,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        exported_commit, origin, exported_secrets = (
+            capture / "environment"
+        ).read_text(encoding="utf-8").splitlines()
+        origin_path = Path(origin)
+        origins.append(origin_path)
+        assert exported_commit == expected
+        assert exported_secrets == str(secrets)
+        assert origin_path.parent == repository / ".dev"
+        assert origin_path.name.startswith("vonk-forge-origin.")
+        assert (capture / "main").read_text(encoding="utf-8").strip() == expected
+        assert (capture / "mode").read_text(encoding="utf-8").strip() == "755"
+        assert not origin_path.exists()
+        arguments = (capture / "arguments").read_text(encoding="utf-8").splitlines()
+        assert arguments[-1] == "config"
+        assert str(repository / "deploy/compose/compose.dev.yaml") in arguments
+
+    assert origins[0] != origins[1]
     assert not arbitrary_origin.exists()
-    assert subprocess.run(
-        ("git", "--git-dir", str(fixed_origin), "rev-parse", "refs/heads/main"),
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip() == expected
-    marker = repository / ".dev/.vonk-forge-origin.owner"
-    assert marker.read_bytes() == b"vonk-forge-dev-origin-v1\n"
-    assert stat.S_IMODE(marker.stat().st_mode) == 0o600
-    assert marker.stat().st_uid == os.geteuid()
-    arguments = (capture / "arguments").read_text(encoding="utf-8").splitlines()
-    assert arguments[-1] == "config"
-    assert str(repository / "deploy/compose/compose.dev.yaml") in arguments
+    assert not (repository / ".dev/vonk-forge-origin.git").exists()
+    assert not (repository / ".dev/.vonk-forge-origin.owner").exists()
 
 
-def test_dev_compose_script_rejects_an_unmarked_existing_bare_origin(
+def test_dev_compose_script_cleans_one_use_origin_after_docker_failure(
     tmp_path: Path,
 ) -> None:
     repository, local_script = _script_repository(tmp_path)
     secrets = _existing_secrets(tmp_path)
-    fake_bin, capture = _fake_docker(tmp_path)
-    development_root = repository / ".dev"
-    development_root.mkdir(mode=0o700)
-    subprocess.run(
-        ("git", "init", "--bare", "-q", str(development_root / "vonk-forge-origin.git")),
-        check=True,
-    )
+    fake_bin = _fake_docker(tmp_path)
+    capture = tmp_path / "capture"
+    capture.mkdir()
     environment = os.environ | {
         "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
         "VONK_DEV_SECRETS_DIR": str(secrets),
         "VONK_TEST_CAPTURE_DIR": str(capture),
+        "VONK_TEST_DOCKER_EXIT": "37",
     }
 
     result = subprocess.run(
@@ -286,80 +288,27 @@ def test_dev_compose_script_rejects_an_unmarked_existing_bare_origin(
         text=True,
     )
 
-    assert result.returncode != 0
-    assert "ownership marker" in result.stderr
-    assert not (capture / "environment").exists()
+    origin = Path(
+        (capture / "environment").read_text(encoding="utf-8").splitlines()[1]
+    )
+    assert result.returncode == 37
+    assert not origin.exists()
 
 
-@pytest.mark.parametrize("fault", ("content", "mode", "hardlink"))
-def test_dev_compose_script_requires_an_exact_safe_origin_marker(
-    tmp_path: Path, fault: str
+def test_dev_compose_script_rejects_a_symlinked_development_directory(
+    tmp_path: Path,
 ) -> None:
     repository, local_script = _script_repository(tmp_path)
     secrets = _existing_secrets(tmp_path)
-    fake_bin, capture = _fake_docker(tmp_path)
+    fake_bin = _fake_docker(tmp_path)
+    capture = tmp_path / "capture"
+    capture.mkdir()
     development_root = repository / ".dev"
-    development_root.mkdir(mode=0o700)
-    origin = development_root / "vonk-forge-origin.git"
-    subprocess.run(("git", "init", "--bare", "-q", str(origin)), check=True)
-    origin.chmod(0o700)
-    marker = development_root / ".vonk-forge-origin.owner"
-    marker.write_bytes(
-        b"wrong-owner\n" if fault == "content" else b"vonk-forge-dev-origin-v1\n"
-    )
-    marker.chmod(0o644 if fault == "mode" else 0o600)
-    if fault == "hardlink":
-        os.link(marker, development_root / ".second-owner-name")
-    environment = os.environ | {
-        "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
-        "VONK_DEV_SECRETS_DIR": str(secrets),
-        "VONK_TEST_CAPTURE_DIR": str(capture),
-    }
-
-    result = subprocess.run(
-        (str(local_script), "config"),
-        cwd=repository,
-        env=environment,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-
-    assert result.returncode != 0
-    assert "ownership marker" in result.stderr
-    assert not (capture / "environment").exists()
-
-
-@pytest.mark.parametrize("component", ("wrapper", "origin", "marker"))
-def test_dev_compose_script_rejects_symlinked_origin_components(
-    tmp_path: Path, component: str
-) -> None:
-    repository, local_script = _script_repository(tmp_path)
-    secrets = _existing_secrets(tmp_path)
-    fake_bin, capture = _fake_docker(tmp_path)
-    development_root = repository / ".dev"
-    external = tmp_path / f"external-{component}"
-    if component == "wrapper":
-        external.mkdir(mode=0o700)
-        development_root.symlink_to(external, target_is_directory=True)
-    else:
-        development_root.mkdir(mode=0o700)
-        origin = development_root / "vonk-forge-origin.git"
-        if component == "origin":
-            subprocess.run(("git", "init", "--bare", "-q", str(external)), check=True)
-            external.chmod(0o700)
-            origin.symlink_to(external, target_is_directory=True)
-        else:
-            subprocess.run(("git", "init", "--bare", "-q", str(origin)), check=True)
-            origin.chmod(0o700)
-        marker = development_root / ".vonk-forge-origin.owner"
-        if component == "marker":
-            external.write_bytes(b"vonk-forge-dev-origin-v1\n")
-            external.chmod(0o600)
-            marker.symlink_to(external)
-        else:
-            marker.write_bytes(b"vonk-forge-dev-origin-v1\n")
-            marker.chmod(0o600)
+    external = tmp_path / "external-development"
+    external.mkdir(mode=0o700)
+    sentinel = external / "operator-owned"
+    sentinel.write_text("preserve\n", encoding="utf-8")
+    development_root.symlink_to(external, target_is_directory=True)
     environment = os.environ | {
         "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
         "VONK_DEV_SECRETS_DIR": str(secrets),
@@ -377,3 +326,5 @@ def test_dev_compose_script_rejects_symlinked_origin_components(
 
     assert result.returncode != 0
     assert not (capture / "environment").exists()
+    assert sentinel.read_text(encoding="utf-8") == "preserve\n"
+    assert {path.name for path in external.iterdir()} == {"operator-owned"}
