@@ -67,12 +67,14 @@ services:
     command: [python, -m, vonk_control.dev_init]
     environment:
       VONK_CONTROL_IDENTITY_ROOT: /control-identity
+      VONK_DEV_API_IMAGE: vonk-forge-dev/control-api@sha256:0000000000000000000000000000000000000000000000000000000000000000
       VONK_DEV_API_SECRET_ROOT: /api-secrets
       VONK_DEV_EXPECTED_COMMIT: "${VONK_DEV_EXPECTED_COMMIT:?run scripts/dev-compose first}"
       VONK_DEV_LOCAL_ACCEPTANCE: "1"
       VONK_DEV_REPOSITORY_URL: file:///source-origin
       VONK_DEV_SECRET_SOURCE_ROOT: /host-secrets
       VONK_DEV_WORKER_SECRET_ROOT: /worker-secrets
+      VONK_DEV_WORKER_IMAGE: vonk-forge-dev/control-worker@sha256:1111111111111111111111111111111111111111111111111111111111111111
       VONK_REPOSITORY_PATH: /repository
       VONK_ROUTE_ROOT: /routes
       VONK_STATE_PATH: /state

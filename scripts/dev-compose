@@ -1,42 +1,31 @@
 #!/usr/bin/env bash
+# Run the local development graph from already-built images.  The public NAS
+# artifact is rendered elsewhere; this wrapper never builds images or provides
+# a local repository-origin override.
 set -euo pipefail
 umask 077
-unset VONK_DEV_ORIGIN_DIR
 
-repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
+template="$repository_root/deploy/compose/compose.dev.images.yaml"
 secrets_helper="$repository_root/scripts/dev-compose-secrets.py"
+api_image='vonk-forge-api:dev-local'
+worker_image='vonk-forge-worker:dev-local'
+workspace=
+overlay=
+
 if [[ "$#" -eq 0 ]]; then
-  set -- up -d --build --wait
+  set -- up -d --wait --pull never
+elif [[ "$1" == up ]]; then
+  has_wait=false
+  has_pull=false
+  for argument in "$@"; do
+    [[ "$argument" == --wait ]] && has_wait=true
+    [[ "$argument" == --pull || "$argument" == --pull=* ]] && has_pull=true
+  done
+  [[ "$has_wait" == true ]] || set -- "$@" --wait
+  [[ "$has_pull" == true ]] || set -- "$@" --pull never
 fi
-case "$1" in
-  up)
-    wait_requested=false
-    for argument in "$@"; do
-      if [[ "$argument" == dev-init || "$argument" == migrate ]]; then
-        echo "unsupported one-shot development Compose target: $argument" >&2
-        exit 1
-      fi
-      if [[ "$argument" == --no-start || "$argument" == --no-start=* ]]; then
-        echo "unsupported development Compose lifecycle: up --no-start" >&2
-        exit 1
-      fi
-      if [[ "$argument" == --wait ]]; then
-        wait_requested=true
-      fi
-    done
-    if [[ "$wait_requested" == false ]]; then
-      set -- "$@" --wait
-    fi
-    ;;
-  create|start|run|restart|scale|watch)
-    echo "unsupported development Compose lifecycle: $1" >&2
-    exit 1
-    ;;
-  -*)
-    echo "unsupported development Compose wrapper option: $1" >&2
-    exit 1
-    ;;
-esac
+
 if [[ -n ${VONK_DEV_SECRETS_DIR:-} ]]; then
   secrets_dir=$(python3 "$secrets_helper" \
     --repository-root "$repository_root" \
@@ -45,29 +34,62 @@ else
   secrets_dir=$(python3 "$secrets_helper" --repository-root "$repository_root")
 fi
 
-expected_commit=$(git -C "$repository_root" rev-parse --verify 'HEAD^{commit}')
-origin_dir=
-cleanup_origin() {
+expected_commit=$(git -C "$repository_root" rev-parse --verify 'refs/heads/main^{commit}')
+[[ "$expected_commit" =~ ^[0-9a-f]{40}$ ]] || {
+  printf '%s\n' 'local main must resolve to a full commit' >&2
+  exit 2
+}
+
+workspace=$(mktemp -d /tmp/vonk-forge-dev-compose.XXXXXXXXXX)
+cleanup() {
   status=$?
   trap - EXIT
-  if [[ "$origin_dir" =~ ^/tmp/vonk-forge-dev-origin\.[A-Za-z0-9]{10}$ ]]; then
-    rm -rf -- "$origin_dir" || true
+  if [[ "$workspace" =~ ^/tmp/vonk-forge-dev-compose\.[A-Za-z0-9]{10}$ \
+    && -d "$workspace" && ! -L "$workspace" ]]; then
+    rm -rf -- "$workspace"
   fi
   exit "$status"
 }
-trap cleanup_origin EXIT
+trap cleanup EXIT
 
-origin_dir=$(mktemp -d /tmp/vonk-forge-dev-origin.XXXXXXXXXX)
-git init --bare -q "$origin_dir"
-git --git-dir="$origin_dir" fetch -q --no-tags "$repository_root" "$expected_commit"
-git --git-dir="$origin_dir" update-ref refs/heads/main "$expected_commit"
-git --git-dir="$origin_dir" symbolic-ref HEAD refs/heads/main
-chmod -R a+rX "$origin_dir"
+[[ -f "$template" && ! -L "$template" ]] || {
+  printf '%s\n' 'development image template is unavailable' >&2
+  exit 2
+}
+[[ $(grep -o '__VONK_API_IMAGE__' "$template" | wc -l) -eq 1 ]] || exit 2
+[[ $(grep -o '__VONK_WORKER_IMAGE__' "$template" | wc -l) -eq 1 ]] || exit 2
+[[ $(grep -o '__VONK_EXPECTED_COMMIT__' "$template" | wc -l) -eq 1 ]] || exit 2
+sed \
+  -e "s|__VONK_API_IMAGE__|$api_image|" \
+  -e "s|__VONK_WORKER_IMAGE__|$worker_image|" \
+  -e "s|__VONK_EXPECTED_COMMIT__|$expected_commit|" \
+  "$template" > "$workspace/docker-compose.yml"
+ln -s "$secrets_dir" "$workspace/secrets"
 
-export VONK_DEV_SECRETS_DIR="$secrets_dir"
-export VONK_DEV_EXPECTED_COMMIT="$expected_commit"
-export VONK_DEV_ORIGIN_DIR="$origin_dir"
+api_id=$(docker image inspect --format '{{.Id}}' "$api_image")
+worker_id=$(docker image inspect --format '{{.Id}}' "$worker_image")
+[[ "$api_id" =~ ^sha256:[0-9a-f]{64}$ && "$worker_id" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+  printf '%s\n' 'local development images did not provide immutable IDs' >&2
+  exit 2
+}
+overlay="$workspace/docker-compose.local.yaml"
+cat > "$overlay" <<EOF
+services:
+  dev-init:
+    environment:
+      VONK_DEV_API_IMAGE: vonk-forge-api@$api_id
+      VONK_DEV_WORKER_IMAGE: vonk-forge-worker@$worker_id
+  control-api:
+    environment:
+      VONK_CONTROL_PROCESS_IMAGE: vonk-forge-api@$api_id
+  control-worker:
+    environment:
+      VONK_CONTROL_PROCESS_IMAGE: vonk-forge-worker@$worker_id
+EOF
+
 docker compose \
   --project-name vonk-forge-dev \
-  --file "$repository_root/deploy/compose/compose.dev.yaml" \
+  --project-directory "$workspace" \
+  --file "$workspace/docker-compose.yml" \
+  --file "$overlay" \
   "$@"

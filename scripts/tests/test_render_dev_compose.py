@@ -9,7 +9,6 @@ from pathlib import Path
 
 import pytest
 
-
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/render-dev-compose"
 TEMPLATE = ROOT / "deploy/compose/compose.dev.images.yaml"
@@ -264,6 +263,8 @@ def test_rendered_compose_is_image_only_and_has_exact_runtime_boundaries(
     assert services["control-api"]["image"] == API_IMAGE
     assert services["control-worker"]["image"] == WORKER_IMAGE
     assert services["dev-init"]["environment"]["VONK_DEV_EXPECTED_COMMIT"] == COMMIT
+    assert services["dev-init"]["environment"]["VONK_DEV_API_IMAGE"] == API_IMAGE
+    assert services["dev-init"]["environment"]["VONK_DEV_WORKER_IMAGE"] == WORKER_IMAGE
     assert services["control-api"]["environment"]["VONK_DEPLOYMENT_BRANCH"] == "main"
     assert services["control-worker"]["environment"]["VONK_DEPLOYMENT_BRANCH"] == "main"
 

@@ -43,11 +43,13 @@ services:
     command: [python, -m, vonk_control.dev_init]
     environment:
       VONK_CONTROL_IDENTITY_ROOT: /control-identity
+      VONK_DEV_API_IMAGE: *api-image
       VONK_DEV_API_SECRET_ROOT: /api-secrets
       VONK_DEV_EXPECTED_COMMIT: __VONK_EXPECTED_COMMIT__
       VONK_DEV_REPOSITORY_URL: https://github.com/CarstVaartjes/vonk-forge.git
       VONK_DEV_SECRET_SOURCE_ROOT: /host-secrets
       VONK_DEV_WORKER_SECRET_ROOT: /worker-secrets
+      VONK_DEV_WORKER_IMAGE: *worker-image
       VONK_REPOSITORY_PATH: /repository
       VONK_ROUTE_ROOT: /routes
       VONK_STATE_PATH: /state

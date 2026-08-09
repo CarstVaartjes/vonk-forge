@@ -1,0 +1,317 @@
+#!/usr/bin/env bash
+# Run the complete development image lifecycle without building, pulling, or
+# publishing images.  This command is intentionally destructive only within a
+# randomly named, temporary Compose project.
+set -euo pipefail
+umask 077
+
+readonly repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
+readonly template="$repository_root/deploy/compose/compose.dev.images.yaml"
+readonly scanner="$repository_root/scripts/verify-dev-image-secrets"
+readonly temporary_prefix="/tmp/vonk-forge-dev-acceptance."
+
+api_image=
+worker_image=
+expected_commit=
+acceptance_root=
+compose_file=
+override_file=
+origin_dir=
+project_name=
+port=
+api_process_image=
+worker_process_image=
+compose_started=0
+
+die() {
+  printf '%s\n' "$*" >&2
+  exit 2
+}
+
+usage() {
+  cat >&2 <<'EOF'
+usage: dev-image-acceptance --api-image REF --worker-image REF --commit SHA
+EOF
+  exit 2
+}
+
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
+    --api-image)
+      [[ "$#" -ge 2 ]] || usage
+      api_image=$2
+      shift 2
+      ;;
+    --worker-image)
+      [[ "$#" -ge 2 ]] || usage
+      worker_image=$2
+      shift 2
+      ;;
+    --commit)
+      [[ "$#" -ge 2 ]] || usage
+      expected_commit=$2
+      shift 2
+      ;;
+    --help|-h)
+      usage
+      ;;
+    *)
+      usage
+      ;;
+  esac
+done
+
+[[ "$expected_commit" =~ ^[0-9a-f]{40}$ ]] || die "commit must be exactly 40 lowercase hexadecimal characters"
+[[ -n "$api_image" && -n "$worker_image" ]] || usage
+
+validate_image() {
+  local image=$1 role=$2 local_image public_pattern
+  local_image="vonk-forge-${role}:dev-local"
+  public_pattern="^ghcr\\.io/carstvaartjes/vonk-forge-${role}:dev-sha-${expected_commit}@sha256:[0-9a-f]{64}$"
+  [[ "$image" == "$local_image" || "$image" =~ $public_pattern ]] || die "$role image must be the local dev image or a digest-pinned development image for this commit"
+}
+
+validate_image "$api_image" api
+validate_image "$worker_image" worker
+
+local_main=$(git -C "$repository_root" rev-parse --verify 'refs/heads/main^{commit}') \
+  || die "local main branch is required for image acceptance"
+[[ "$expected_commit" == "$local_main" ]] \
+  || die "commit must equal the local main tip for image acceptance"
+
+make_temporary_workspace() {
+  local candidate suffix
+  candidate=$(mktemp -d "${temporary_prefix}XXXXXXXXXX")
+  [[ "$candidate" =~ ^/tmp/vonk-forge-dev-acceptance\.[A-Za-z0-9]{10}$ \
+    && -d "$candidate" && ! -L "$candidate" ]] \
+    || die "temporary workspace is not a trusted acceptance path"
+  acceptance_root=$candidate
+  compose_file="$acceptance_root/docker-compose.yml"
+  override_file="$acceptance_root/docker-compose.acceptance.yaml"
+  origin_dir="$acceptance_root/source-origin.git"
+  suffix=$(printf '%s' "${candidate##*.}" | tr '[:upper:]' '[:lower:]')
+  project_name="vonk-forge-accept-$suffix"
+}
+
+compose() {
+  env -u COMPOSE_FILE -u COMPOSE_PROJECT_NAME VONK_DEV_PORT="$port" \
+    docker compose -p "$project_name" --project-directory "$acceptance_root" \
+      -f "$compose_file" -f "$override_file" "$@"
+}
+
+sanitize_diagnostics() {
+  VONK_ACCEPTANCE_PASSWORD="$postgres_password" python3 -c '
+import os
+import re
+import sys
+
+password = os.environ["VONK_ACCEPTANCE_PASSWORD"]
+for line in sys.stdin:
+    if password in line or re.search(r"password|token|secret|private key|signing key", line, re.I):
+        print("[redacted]")
+    else:
+        print(re.sub(r"postgresql(?:\+[^:]+)?://[^@\s]+@", "[redacted-db-url]", line))
+'
+}
+
+diagnostics() {
+  printf '%s\n' "development image acceptance failed; Compose status follows" >&2
+  compose ps -a --format json 2>&1 | head -c 32768 | sanitize_diagnostics >&2 || true
+  printf '%s\n' "development image acceptance failed; bounded service log lines follow" >&2
+  compose logs --tail 100 --no-color 2>&1 | head -c 32768 | sanitize_diagnostics >&2 || true
+}
+
+cleanup() {
+  local status=$?
+  trap - EXIT INT TERM
+  set +e
+  if [[ "$status" -ne 0 && "$compose_started" -eq 1 ]]; then
+    diagnostics
+  fi
+  if [[ -n "$acceptance_root" && -n "$project_name" && -n "$compose_file" ]]; then
+    compose down --volumes --remove-orphans >/dev/null 2>&1
+  fi
+  if [[ -n "$origin_dir" && -d "$origin_dir" && ! -L "$origin_dir" ]]; then
+    docker run --rm --user 0:0 --volume "$origin_dir:/source-origin" \
+      "$api_image" chown -R "$(id -u):$(id -g)" /source-origin >/dev/null 2>&1 || true
+  fi
+  if [[ -n "${secrets_dir:-}" && -d "$secrets_dir" && ! -L "$secrets_dir" ]]; then
+    docker run --rm --user 0:0 --volume "$secrets_dir:/acceptance-secrets" \
+      "$api_image" chown -R "$(id -u):$(id -g)" /acceptance-secrets >/dev/null 2>&1 || true
+  fi
+  if [[ "$acceptance_root" =~ ^/tmp/vonk-forge-dev-acceptance\.[A-Za-z0-9]{10}$ \
+    && -d "$acceptance_root" && ! -L "$acceptance_root" ]]; then
+    rm -rf -- "$acceptance_root"
+  fi
+  exit "$status"
+}
+
+make_temporary_workspace
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+git init --bare -q "$origin_dir"
+git --git-dir="$origin_dir" fetch -q --no-tags "$repository_root" "$expected_commit"
+git --git-dir="$origin_dir" update-ref refs/heads/main "$expected_commit"
+git --git-dir="$origin_dir" symbolic-ref HEAD refs/heads/main
+chmod -R a+rX "$origin_dir"
+
+render_acceptance_compose() {
+  [[ -f "$template" && ! -L "$template" ]] || die "development image template is unavailable"
+  [[ $(grep -o '__VONK_API_IMAGE__' "$template" | wc -l) -eq 1 ]] \
+    || die "development image template has an invalid API token"
+  [[ $(grep -o '__VONK_WORKER_IMAGE__' "$template" | wc -l) -eq 1 ]] \
+    || die "development image template has an invalid worker token"
+  [[ $(grep -o '__VONK_EXPECTED_COMMIT__' "$template" | wc -l) -eq 1 ]] \
+    || die "development image template has an invalid commit token"
+  sed \
+    -e "s|__VONK_API_IMAGE__|$api_image|" \
+    -e "s|__VONK_WORKER_IMAGE__|$worker_image|" \
+    -e "s|__VONK_EXPECTED_COMMIT__|$expected_commit|" \
+    "$template" > "$compose_file"
+  cat > "$override_file" <<EOF
+services:
+  dev-init:
+    environment:
+      VONK_DEV_LOCAL_ACCEPTANCE: "1"
+      VONK_DEV_API_IMAGE: $api_process_image
+      VONK_DEV_REPOSITORY_URL: file:///source-origin
+      VONK_DEV_WORKER_IMAGE: $worker_process_image
+    volumes:
+      - $origin_dir:/source-origin:ro
+  control-api:
+    environment:
+      VONK_CONTROL_PROCESS_IMAGE: $api_process_image
+  control-worker:
+    environment:
+      VONK_CONTROL_PROCESS_IMAGE: $worker_process_image
+EOF
+}
+
+# The cleanup trap is installed before this first Docker operation.  It is
+# deliberately after all input/path validation, so invalid requests never
+# create or remove Docker resources.
+[[ -x "$scanner" ]] || die "development image scanner is unavailable"
+"$scanner" "$api_image" "$worker_image"
+api_process_image="ghcr.io/carstvaartjes/vonk-forge-api:dev-sha-$expected_commit@$(docker image inspect --format '{{.Id}}' "$api_image")"
+worker_process_image="ghcr.io/carstvaartjes/vonk-forge-worker:dev-sha-$expected_commit@$(docker image inspect --format '{{.Id}}' "$worker_image")"
+[[ "$api_process_image" =~ @sha256:[0-9a-f]{64}$ && "$worker_process_image" =~ @sha256:[0-9a-f]{64}$ ]] \
+  || die "local development images did not provide immutable IDs"
+# Git runs inside dev-init as its isolated UID.  Give that UID ownership of
+# this disposable, acceptance-only bare origin without touching the checkout.
+docker run --rm --user 0:0 --volume "$origin_dir:/source-origin" \
+  "$api_image" chown -R 65534:65534 /source-origin
+
+render_acceptance_compose
+
+port=$(python3 - <<'PY'
+import socket
+
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+    listener.bind(("127.0.0.1", 0))
+    print(listener.getsockname()[1])
+PY
+)
+
+secrets_dir="$acceptance_root/secrets"
+mkdir -m 0700 "$secrets_dir"
+postgres_password=$(python3 - <<'PY'
+import secrets
+print(secrets.token_urlsafe(32))
+PY
+)
+printf '%s\n' "$postgres_password" > "$secrets_dir/postgres-password"
+printf 'postgresql+psycopg://control:%s@postgres:5432/control\n' "$postgres_password" \
+  > "$secrets_dir/database-url"
+ssh-keygen -q -t ed25519 -N '' -f "$secrets_dir/git-signing-key" >/dev/null
+chmod 0600 "$secrets_dir/postgres-password" "$secrets_dir/database-url" \
+  "$secrets_dir/git-signing-key" "$secrets_dir/git-signing-key.pub"
+docker run --rm --user 0:0 --volume "$secrets_dir:/acceptance-secrets" \
+  "$api_image" chown -R 10001:10001 /acceptance-secrets
+
+compose config -q
+
+service_container() {
+  local service=$1 container
+  container=$(compose ps -aq "$service")
+  [[ -n "$container" ]] || die "missing Compose container for $service"
+  printf '%s\n' "$container"
+}
+
+assert_exited_successfully() {
+  local service=$1 container state
+  container=$(service_container "$service")
+  state=$(docker inspect --format '{{.State.Status}} {{.State.ExitCode}}' "$container")
+  [[ "$state" == 'exited 0' ]] || die "$service did not exit successfully"
+}
+
+assert_running() {
+  local service=$1 container state
+  container=$(service_container "$service")
+  state=$(docker inspect --format '{{.State.Status}} {{.State.ExitCode}}' "$container")
+  [[ "$state" == 'running 0' ]] || die "$service is not running"
+}
+
+assert_runtime_boundaries() {
+  local api_container
+  api_container=$(service_container control-api)
+  docker inspect --format '{{json .Mounts}}' "$api_container" | python3 -c '
+import json
+import sys
+
+repository_root = sys.argv[1]
+for mount in json.load(sys.stdin):
+    if mount["Destination"] == "/repository" and (
+        mount["Type"] == "bind" or mount.get("Source") == repository_root
+    ):
+        raise SystemExit("control-api has an unsafe repository bind mount")
+' "$repository_root"
+  compose exec -T control-api sh -ec \
+    'test -r /run/secrets/git-signing-key && test ! -e /run/secrets/worker-api-token'
+  compose exec -T control-worker sh -ec \
+    'test -r /run/secrets/worker-api-token && test ! -e /run/secrets/git-signing-key'
+}
+
+repository_commit() {
+  compose exec -T control-api git -C /repository rev-parse refs/heads/main
+}
+
+identity_fingerprint() {
+  compose exec -T control-api sh -ec \
+    'find /control-identity -type f -print0 | sort -z | xargs -0 -r sha256sum | sha256sum'
+}
+
+database_identity() {
+  compose exec -T postgres psql --username control --dbname control --tuples-only \
+    --no-align --command 'select oid from pg_database where datname = current_database()'
+}
+
+compose_started=1
+compose up --wait --pull never
+assert_exited_successfully dev-init
+assert_exited_successfully migrate
+assert_running postgres
+assert_running control-worker
+assert_running control-api
+curl --fail --silent --show-error "http://127.0.0.1:$port/api/v1/readyz" >/dev/null
+[[ $(repository_commit) == "$expected_commit" ]] || die "repository main does not match the accepted commit"
+assert_runtime_boundaries
+before_identity=$(identity_fingerprint)
+[[ -n "$before_identity" ]] || die "development identity volume is empty"
+before_database=$(database_identity)
+[[ -n "$before_database" ]] || die "PostgreSQL database identity is unavailable"
+
+compose restart control-api control-worker
+compose up --wait --pull never
+assert_running control-worker
+assert_running control-api
+curl --fail --silent --show-error "http://127.0.0.1:$port/api/v1/readyz" >/dev/null
+[[ $(repository_commit) == "$expected_commit" ]] || die "repository main did not persist across restart"
+assert_runtime_boundaries
+[[ $(identity_fingerprint) == "$before_identity" ]] \
+  || die "development identity did not persist across restart"
+[[ $(database_identity) == "$before_database" ]] \
+  || die "PostgreSQL database identity did not persist across restart"
+
+printf '%s\n' "development image acceptance passed"
