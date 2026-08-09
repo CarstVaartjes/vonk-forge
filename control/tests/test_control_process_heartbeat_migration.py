@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from pathlib import Path
 
 from alembic import command
@@ -24,6 +23,7 @@ def test_control_process_heartbeat_migration_preserves_existing_rows(
     engine = create_engine(database)
     command.upgrade(config, "0011_update_rollouts")
     existing_id = "11111111-1111-4111-8111-111111111111"
+    now = "2026-08-06 10:00:00+00:00"
     with engine.begin() as connection:
         connection.execute(
             text(
@@ -37,7 +37,7 @@ def test_control_process_heartbeat_migration_preserves_existing_rows(
                 "id": existing_id,
                 "request_id": "22222222-2222-4222-8222-222222222222",
                 "digest": "a" * 64,
-                "now": datetime(2026, 8, 6, 10, tzinfo=UTC),
+                "now": now,
             },
         )
 
@@ -73,7 +73,7 @@ def test_control_process_heartbeat_migration_preserves_existing_rows(
                 "release": f"sha256:{'b' * 64}",
                 "build": f"sha256:{'c' * 64}",
                 "nonce": "d" * 64,
-                "now": datetime(2026, 8, 6, 10, tzinfo=UTC),
+                "now": now,
             },
         )
 
