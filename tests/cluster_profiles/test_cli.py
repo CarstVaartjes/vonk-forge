@@ -1003,6 +1003,23 @@ pool = "default"
     assert set(dependencies.switcher.backend._aliases) == {node_id, "node1"}
 
 
+def test_accepted_rdma_evidence_uses_current_node_identifiers() -> None:
+    evidence = json.loads(
+        (REPOSITORY_ROOT / "inventory/reports/rdma-nccl.json").read_text()
+    )
+
+    for counter_map_name in (
+        "rdma_counters_before",
+        "rdma_counters_after",
+        "rdma_counter_deltas",
+    ):
+        counter_map = evidence[counter_map_name]
+        assert not any(
+            key.startswith(("spark1/", "spark2/")) for key in counter_map
+        )
+        assert {key.split("/", 1)[0] for key in counter_map} >= {"node1", "node2"}
+
+
 def test_node_health_dependencies_use_the_health_specific_output_cap(tmp_path: Path) -> None:
     dependencies = build_dependencies(
         REPOSITORY_ROOT,
