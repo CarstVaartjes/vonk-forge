@@ -29,10 +29,27 @@ _VERSION = "0.1.0"
 _DATABASE_REVISION = "0020_recipe_catalog_bridge"
 _API_IMAGE = "vonk-forge-dev/control-api@sha256:" + "0" * 64
 _WORKER_IMAGE = "vonk-forge-dev/control-worker@sha256:" + "1" * 64
+_GIT_HOME = "/nonexistent/vonk-control"
 
 
 class DevInitError(RuntimeError):
     """The development runtime cannot be initialized safely."""
+
+
+def _git_environment() -> dict[str, str]:
+    return {
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_TERMINAL_PROMPT": "0",
+        "HOME": _GIT_HOME,
+        "PATH": os.defpath,
+    }
+
+
+def _git_identity() -> dict[str, object]:
+    if os.geteuid() != 0:
+        return {}
+    return {"user": _API_UID, "group": _API_GID, "extra_groups": ()}
 
 
 def _canonical(value: object) -> bytes:
@@ -83,20 +100,17 @@ def _git(
     if root is not None:
         command += ("-C", str(root))
     command += arguments
-    environment = os.environ | {
-        "GIT_CONFIG_NOSYSTEM": "1",
-        "GIT_TERMINAL_PROMPT": "0",
-    }
     try:
         result = subprocess.run(
             command,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
-            env=environment,
+            env=_git_environment(),
             check=False,
             text=True,
             timeout=60,
+            **_git_identity(),
         )
     except (OSError, subprocess.TimeoutExpired) as error:
         raise DevInitError(f"Git could not {action}") from error
@@ -155,9 +169,10 @@ def _is_ancestor(
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            env=os.environ | {"GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0"},
+            env=_git_environment(),
             check=False,
             timeout=60,
+            **_git_identity(),
         )
     except (OSError, subprocess.TimeoutExpired) as error:
         raise DevInitError("Git could not compare repository commits") from error
@@ -188,6 +203,7 @@ def _chown_repository_tree(root: Path) -> None:
 def _initialize_fresh_repository(
     root: Path, repository_url: str, expected_commit: str, *, local_origin: bool
 ) -> None:
+    _prepare_empty_repository_root(root)
     _git(
         None,
         ("clone", "--no-checkout", "--origin", "origin", repository_url, str(root)),
@@ -208,6 +224,32 @@ def _initialize_fresh_repository(
         action="check out development repository main",
         local_origin=local_origin,
     )
+
+
+def _prepare_empty_repository_root(root: Path) -> None:
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    descriptor = -1
+    try:
+        try:
+            root.mkdir(mode=0o700)
+        except FileExistsError:
+            pass
+        descriptor = os.open(root, flags)
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISDIR(metadata.st_mode):
+            raise DevInitError("development repository root is unsafe")
+        if os.listdir(descriptor):
+            raise DevInitError("development repository root is not empty")
+        if os.geteuid() == 0:
+            os.fchown(descriptor, _API_UID, _API_GID)
+        os.fchmod(descriptor, 0o700)
+    except DevInitError:
+        raise
+    except OSError as error:
+        raise DevInitError("development repository root cannot be prepared") from error
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
 
 
 def _initialize_existing_repository(
@@ -276,7 +318,6 @@ def initialize_repository(root: Path, repository_url: str, expected_commit: str)
                 root, repository_url, expected_commit, local_origin=local_origin
             )
         else:
-            root.rmdir()
             _initialize_fresh_repository(
                 root, repository_url, expected_commit, local_origin=local_origin
             )

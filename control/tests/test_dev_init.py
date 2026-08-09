@@ -66,6 +66,99 @@ def test_initialize_repository_clones_main_at_the_expected_commit(
     assert _git(destination, "remote", "get-url", "origin") == repository_url
 
 
+def test_initialize_repository_clones_into_an_existing_empty_mountpoint(
+    tmp_path: Path,
+    local_acceptance: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _origin_path, _publisher, repository_url, expected = _origin(tmp_path)
+    destination = tmp_path / "repository"
+    destination.mkdir()
+
+    def reject_rmdir(_path: Path) -> None:
+        raise AssertionError("the mounted repository root must never be removed")
+
+    monkeypatch.setattr(Path, "rmdir", reject_rmdir)
+
+    initialize_repository(destination, repository_url, expected)
+
+    assert _git(destination, "rev-parse", "main") == expected
+
+
+def test_all_git_subprocesses_drop_root_credentials_and_use_a_sanitized_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[tuple[str, ...], dict[str, object]]] = []
+
+    def capture_run(
+        command: tuple[str, ...], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="accepted\n")
+
+    monkeypatch.setattr(dev_init.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(dev_init.subprocess, "run", capture_run)
+    monkeypatch.setenv("HOME", str(tmp_path / "attacker-home"))
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.fsmonitor")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", str(tmp_path / "root-command"))
+
+    assert dev_init._git(
+        tmp_path,
+        ("rev-parse", "HEAD"),
+        action="inspect test repository",
+        local_origin=True,
+    ) == "accepted"
+    assert dev_init._is_ancestor(
+        tmp_path,
+        "a" * 40,
+        "b" * 40,
+        local_origin=True,
+    )
+
+    assert len(calls) == 2
+    assert any("rev-parse" in command for command, _kwargs in calls)
+    assert any("merge-base" in command for command, _kwargs in calls)
+    for _command, kwargs in calls:
+        assert kwargs["user"] == 10001
+        assert kwargs["group"] == 10001
+        assert kwargs["extra_groups"] == ()
+        assert kwargs["env"] == {
+            "GIT_CONFIG_GLOBAL": "/dev/null",
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_TERMINAL_PROMPT": "0",
+            "HOME": "/nonexistent/vonk-control",
+            "PATH": os.defpath,
+        }
+
+
+def test_git_subprocesses_do_not_request_a_credential_change_when_not_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    def capture_run(
+        command: tuple[str, ...], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(kwargs)
+        return subprocess.CompletedProcess(command, 0, stdout="")
+
+    monkeypatch.setattr(dev_init.os, "geteuid", lambda: 1000)
+    monkeypatch.setattr(dev_init.subprocess, "run", capture_run)
+
+    dev_init._git(
+        tmp_path,
+        ("status", "--porcelain=v1"),
+        action="inspect test repository",
+        local_origin=True,
+    )
+
+    assert len(calls) == 1
+    assert "user" not in calls[0]
+    assert "group" not in calls[0]
+    assert "extra_groups" not in calls[0]
+
+
 def test_initialize_repository_rejects_unsafe_fresh_roots_and_commit_ids(
     tmp_path: Path, local_acceptance: None
 ) -> None:

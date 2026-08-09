@@ -78,7 +78,7 @@ services:
       VONK_STATE_PATH: /state
       VONK_SUPERVISOR_ROOT: /supervisor
     volumes:
-      - ../../.dev/vonk-forge-origin.git:/source-origin:ro
+      - ${VONK_DEV_ORIGIN_DIR:?internal wrapper}:/source-origin:ro
       - dev-repository:/repository
       - dev-api-secrets:/api-secrets
       - dev-worker-secrets:/worker-secrets
