@@ -132,6 +132,7 @@ def _failing_up_docker(tmp_path: Path) -> tuple[Path, Path]:
         "    'api | QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFB' \\\n"
         "    'api | -----END OPENSSH PRIVATE KEY-----' \\\n"
         "    'worker | dGhpcy1pcy1hLXN5bnRoZXRpYy13b3JrZXItdG9rZW4tMTIzNDU2Nzg5MA' \\\n"
+        "    'proxy | Authorization: Bearer abcdefghijklmnop' \\\n"
         "    'migrate | postgresql+psycopg://control:visible@postgres:5432/control'\n"
         "  exit 0\n"
         "fi\n"
@@ -438,6 +439,7 @@ def test_failed_compose_start_prints_bounded_diagnostics_before_teardown(
     assert "BEGIN OPENSSH PRIVATE KEY" not in result.stderr
     assert "QUFBQUFBQUFBQUFB" not in result.stderr
     assert "dGhpcy1pcy1hLXN5bnRoZXRpYy13b3JrZXI" not in result.stderr
+    assert "abcdefghijklmnop" not in result.stderr
     assert "control:visible" not in result.stderr
     assert "[redacted]" in result.stderr
 
@@ -474,10 +476,30 @@ def test_successful_lifecycle_exercises_health_isolation_restart_and_teardown(
         for line in normalized_commands
     )
     assert any(
+        "test -r /run/secrets/admin-grant-private-key" in line
+        for line in normalized_commands
+    )
+    assert any(
         "test -r /run/secrets/worker-api-token" in line
         for line in normalized_commands
     )
-    assert any("{{json .Mounts}}" in line for line in normalized_commands)
+    assert sum("{{json .Mounts}}" in line for line in normalized_commands) == 4
+    assert sum(
+        "{{json .Mounts}}" in line and "control-api-id" in line
+        for line in normalized_commands
+    ) == 2
+    assert sum(
+        "{{json .Mounts}}" in line and "control-worker-id" in line
+        for line in normalized_commands
+    ) == 2
+    worker_boundary_commands = [
+        line
+        for line in normalized_commands
+        if "compose" in line and "exec -T control-worker" in line
+    ]
+    assert worker_boundary_commands
+    assert all("git-signing-key" in line for line in worker_boundary_commands)
+    assert all("admin-grant-private-key" in line for line in worker_boundary_commands)
     assert any(" down --volumes --remove-orphans " in f" {line} " for line in commands)
 
 
