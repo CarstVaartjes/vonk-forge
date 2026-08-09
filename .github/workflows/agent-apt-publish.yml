@@ -111,7 +111,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y aptly gnupg rclone
 
-      - name: Restore checksum-protected private state
+      - name: Prepare committed or recoverable private state
         id: state
         shell: bash
         env:
@@ -127,171 +127,15 @@ jobs:
           R2_APT_STATE_BUCKET: ${{ vars.R2_APT_STATE_BUCKET }}
           SNAPSHOT: ${{ steps.package.outputs.snapshot }}
           SOURCE_SHA: ${{ inputs.source_sha }}
-          STATE_PREFIX: ${{ steps.package.outputs.state_prefix }}
           VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          test -n "$R2_APT_STATE_BUCKET"
-          state_root="$RUNNER_TEMP/apt-state"
-          install -d -m 0700 "$state_root"
-          expected_listing=$'aptly-state.tar.gz\naptly-state.tar.gz.sha256'
-
-          validate_listing() {
-            local listing=$1
-            local prefix=$2
-            if [[ "$listing" != "$expected_listing" ]]; then
-              echo "private apt state is incomplete at $prefix" >&2
-              exit 1
-            fi
-          }
-
-          fetch_state() {
-            local prefix=$1
-            local destination=$2
-            install -d -m 0700 "$destination"
-            rclone copyto \
-              "r2:${R2_APT_STATE_BUCKET}/${prefix}/aptly-state.tar.gz" \
-              "$destination/aptly-state.tar.gz"
-            rclone copyto \
-              "r2:${R2_APT_STATE_BUCKET}/${prefix}/aptly-state.tar.gz.sha256" \
-              "$destination/aptly-state.tar.gz.sha256"
-            test "$(wc -l < "$destination/aptly-state.tar.gz.sha256")" = 1
-            read -r checksum_hash checksum_name checksum_extra \
-              < "$destination/aptly-state.tar.gz.sha256"
-            [[ "$checksum_hash" =~ ^[0-9a-f]{64}$ ]]
-            test "$checksum_name" = aptly-state.tar.gz
-            test -z "${checksum_extra:-}"
-            (cd "$destination" && sha256sum -c aptly-state.tar.gz.sha256)
-            duplicate_member=$(
-              tar -tzf "$destination/aptly-state.tar.gz" | sort | uniq -d
-            )
-            if [[ -n "$duplicate_member" ]]; then
-              echo "aptly state archive contains a duplicate archive member" >&2
-              exit 1
-            fi
-            if tar -tzf "$destination/aptly-state.tar.gz" | awk '
-              $0 ~ /^\// || $0 ~ /(^|\/)\.\.(\/|$)/ || $0 ~ /\\/ ||
-              $0 !~ /^(aptly(\/|$)|publication-receipt\.json)$/ { bad=1 }
-              END { exit !bad }
-            '; then
-              echo "aptly state archive contains an unsafe path" >&2
-              exit 1
-            fi
-            if tar -tvzf "$destination/aptly-state.tar.gz" | awk '
-              substr($1, 1, 1) != "-" && substr($1, 1, 1) != "d" { bad=1 }
-              END { exit !bad }
-            '; then
-              echo "aptly state archive contains links or special files" >&2
-              exit 1
-            fi
-            test "$(tar -tzf "$destination/aptly-state.tar.gz" | grep -Fxc publication-receipt.json)" = 1
-            tar -xzf "$destination/aptly-state.tar.gz" -C "$destination"
-            test -d "$destination/aptly" && test ! -L "$destination/aptly"
-            test -f "$destination/publication-receipt.json"
-            test ! -L "$destination/publication-receipt.json"
-            test "$(wc -l < "$destination/publication-receipt.json")" = 1
-            canonical=$(jq -cS . "$destination/publication-receipt.json")
-            test "$(cat "$destination/publication-receipt.json")" = "$canonical"
-            jq -e \
-              --arg channel "$CHANNEL" \
-              --arg distribution "$DISTRIBUTION" \
-              'keys == ["channel", "distribution", "package", "package_sha256",
-                        "snapshot", "source_sha", "version"] and
-               .channel == $channel and .distribution == $distribution and
-               (.package_sha256 | test("^[0-9a-f]{64}$")) and
-               (.source_sha | test("^[0-9a-f]{40}$")) and
-               .snapshot == (.channel + "-" + .version) and
-               .package == ("vonk-forge-agent_" + .version + "_arm64.deb")' \
-              "$destination/publication-receipt.json" >/dev/null
-            receipt_version=$(jq -r .version \
-              "$destination/publication-receipt.json")
-            scripts/agent-apt-metadata "$CHANNEL" "$receipt_version" >/dev/null
-          }
-
-          require_exact_receipt() {
-            local receipt=$1
-            jq -e \
-              --arg channel "$CHANNEL" \
-              --arg distribution "$DISTRIBUTION" \
-              --arg package "$PACKAGE" \
-              --arg package_sha256 "$PACKAGE_SHA256" \
-              --arg snapshot "$SNAPSHOT" \
-              --arg source_sha "$SOURCE_SHA" \
-              --arg version "$VERSION" \
-              '.channel == $channel and .distribution == $distribution and
-               .package == $package and .package_sha256 == $package_sha256 and
-               .snapshot == $snapshot and .source_sha == $source_sha and
-               .version == $version' "$receipt" >/dev/null
-          }
-
-          latest_listing=$(rclone lsf \
-            "r2:${R2_APT_STATE_BUCKET}/latest" --files-only --order-by name)
-          latest_exists=false
-          if [[ -n "$latest_listing" ]]; then
-            validate_listing "$latest_listing" latest
-            fetch_state latest "$state_root/latest"
-            latest_exists=true
-            latest_version=$(jq -r .version "$state_root/latest/publication-receipt.json")
-            if dpkg --compare-versions "$VERSION" "lt" "$latest_version"; then
-              echo "refusing to roll back apt channel" >&2
-              exit 1
-            fi
-          fi
-
-          immutable_prefix="$STATE_PREFIX"
-          immutable_listing=$(rclone lsf \
-            "r2:${R2_APT_STATE_BUCKET}/${immutable_prefix}" \
-            --files-only --order-by name)
-          immutable_exists=false
-          if [[ -n "$immutable_listing" ]]; then
-            validate_listing "$immutable_listing" "$immutable_prefix"
-            fetch_state "$immutable_prefix" "$state_root/immutable"
-            require_exact_receipt "$state_root/immutable/publication-receipt.json"
-            immutable_exists=true
-          fi
-
-          restored=false
-          reuse_snapshot=false
-          selected=
-          if [[ "$latest_exists" == true ]] && \
-             dpkg --compare-versions "$VERSION" "eq" "$latest_version"; then
-            require_exact_receipt "$state_root/latest/publication-receipt.json"
-            test "$immutable_exists" = true
-            cmp --silent \
-              "$state_root/latest/aptly-state.tar.gz" \
-              "$state_root/immutable/aptly-state.tar.gz"
-            cmp --silent \
-              "$state_root/latest/aptly-state.tar.gz.sha256" \
-              "$state_root/immutable/aptly-state.tar.gz.sha256"
-            selected="$state_root/immutable"
-            restored=true
-            reuse_snapshot=true
-          elif [[ "$immutable_exists" == true ]]; then
-            selected="$state_root/immutable"
-            restored=true
-            reuse_snapshot=true
-          elif [[ "$latest_exists" == true ]]; then
-            selected="$state_root/latest"
-            restored=true
-          fi
-
-          if [[ "$restored" == true ]]; then
-            cp -a "$selected/aptly" "$RUNNER_TEMP/aptly"
-            if [[ "$reuse_snapshot" == true ]]; then
-              cp "$selected/publication-receipt.json" \
-                "$RUNNER_TEMP/publication-receipt.json"
-              cp "$selected/aptly-state.tar.gz" "$RUNNER_TEMP/aptly-state.tar.gz"
-              cp "$selected/aptly-state.tar.gz.sha256" \
-                "$RUNNER_TEMP/aptly-state.tar.gz.sha256"
-            fi
-          else
-            install -d -m 0700 "$RUNNER_TEMP/aptly"
-          fi
-          install -d -m 0700 "$RUNNER_TEMP/apt-public"
-          printf 'restored=%s\n' "$restored" >> "$GITHUB_OUTPUT"
-          printf 'reuse_snapshot=%s\n' "$reuse_snapshot" >> "$GITHUB_OUTPUT"
+          scripts/agent-apt-state prepare \
+            --work-dir "$RUNNER_TEMP/agent-apt-publication" \
+            >> "$GITHUB_OUTPUT"
 
       - name: Materialize and verify apt signing key
+        if: steps.state.outputs.needs_generation == 'true'
         id: signing
         shell: bash
         env:
@@ -323,33 +167,32 @@ jobs:
           test "$fingerprint" = "$APT_REPOSITORY_GPG_FINGERPRINT"
           printf 'fingerprint=%s\n' "$fingerprint" >> "$GITHUB_OUTPUT"
 
-      - name: Publish and verify signed apt index locally
+      - name: Generate missing aptly state or public tree
+        if: steps.state.outputs.needs_generation == 'true'
         shell: bash
         env:
-          CHANNEL: ${{ inputs.channel }}
           DISTRIBUTION: ${{ steps.package.outputs.distribution }}
           FINGERPRINT: ${{ steps.signing.outputs.fingerprint }}
+          HAS_STATE: ${{ steps.state.outputs.has_state }}
           KEYRING: ${{ steps.package.outputs.keyring }}
           PACKAGE: ${{ inputs.package }}
-          PACKAGE_SHA256: ${{ steps.package.outputs.package_sha256 }}
           REPOSITORY: ${{ steps.package.outputs.repository }}
           RESTORED: ${{ steps.state.outputs.restored }}
-          REUSE_SNAPSHOT: ${{ steps.state.outputs.reuse_snapshot }}
           SNAPSHOT: ${{ steps.package.outputs.snapshot }}
-          SOURCE_SHA: ${{ inputs.source_sha }}
-          VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
           export GNUPGHOME="$RUNNER_TEMP/gnupg"
+          work="$RUNNER_TEMP/agent-apt-publication"
+          install -d -m 0755 "$work/public"
           config="$RUNNER_TEMP/aptly.conf"
           jq -n \
-            --arg root "$RUNNER_TEMP/aptly" \
-            --arg publish "$RUNNER_TEMP/apt-public" \
+            --arg root "$work/aptly" \
+            --arg publish "$work/public" \
             '{rootDir:$root, architectures:["arm64"],
               dependencyFollowSuggests:false, dependencyFollowRecommends:false,
               FileSystemPublishEndpoints:{r2:{rootDir:$publish,linkMethod:"copy"}}}' \
             > "$config"
-          if [[ "$REUSE_SNAPSHOT" != true ]]; then
+          if [[ "$HAS_STATE" != true ]]; then
             if [[ "$RESTORED" != true ]]; then
               aptly -config="$config" repo create \
                 -distribution="$DISTRIBUTION" -component=main "$REPOSITORY"
@@ -371,37 +214,57 @@ jobs:
               -architectures=arm64 -distribution="$DISTRIBUTION" -component=main \
               "$SNAPSHOT" filesystem:r2:
           fi
-          inrelease="$RUNNER_TEMP/apt-public/dists/${DISTRIBUTION}/InRelease"
+          inrelease="$work/public/dists/${DISTRIBUTION}/InRelease"
           test -s "$inrelease"
-          keyring_path="$RUNNER_TEMP/apt-public/$KEYRING"
+          keyring_path="$work/public/$KEYRING"
           gpg --batch --export "$FINGERPRINT" > "$keyring_path"
           test -s "$keyring_path"
           chmod 0644 "$keyring_path"
           gpgv --keyring "$keyring_path" "$inrelease"
-          if [[ "$REUSE_SNAPSHOT" != true ]]; then
-            jq -cS -n \
-              --arg channel "$CHANNEL" \
-              --arg distribution "$DISTRIBUTION" \
-              --arg package "$PACKAGE" \
-              --arg package_sha256 "$PACKAGE_SHA256" \
-              --arg snapshot "$SNAPSHOT" \
-              --arg source_sha "$SOURCE_SHA" \
-              --arg version "$VERSION" \
-              '{channel:$channel, distribution:$distribution, package:$package,
-                package_sha256:$package_sha256, snapshot:$snapshot,
-                source_sha:$source_sha, version:$version}' \
-              > "$RUNNER_TEMP/publication-receipt.json"
-            tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \
-              -czf "$RUNNER_TEMP/aptly-state.tar.gz" \
-              -C "$RUNNER_TEMP" aptly publication-receipt.json
-            (cd "$RUNNER_TEMP" && \
-              sha256sum aptly-state.tar.gz > aptly-state.tar.gz.sha256)
-          fi
 
-      - name: Publish immutable state, public files, then latest state
+      - name: Build any missing immutable bundles
         shell: bash
         env:
           CHANNEL: ${{ inputs.channel }}
+          DISTRIBUTION: ${{ steps.package.outputs.distribution }}
+          PACKAGE: ${{ inputs.package }}
+          PACKAGE_SHA256: ${{ steps.package.outputs.package_sha256 }}
+          SNAPSHOT: ${{ steps.package.outputs.snapshot }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          scripts/agent-apt-state bundle \
+            --work-dir "$RUNNER_TEMP/agent-apt-publication"
+
+      - name: Commit immutable publication manifest
+        shell: bash
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          DISTRIBUTION: ${{ steps.package.outputs.distribution }}
+          PACKAGE: ${{ inputs.package }}
+          PACKAGE_SHA256: ${{ steps.package.outputs.package_sha256 }}
+          RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          RCLONE_CONFIG_R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+          RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          RCLONE_CONFIG_R2_TYPE: s3
+          R2_APT_STATE_BUCKET: ${{ vars.R2_APT_STATE_BUCKET }}
+          SNAPSHOT: ${{ steps.package.outputs.snapshot }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          scripts/agent-apt-state commit \
+            --work-dir "$RUNNER_TEMP/agent-apt-publication"
+
+      - name: Publish exact committed public tree and latest pointer
+        shell: bash
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          DISTRIBUTION: ${{ steps.package.outputs.distribution }}
+          PACKAGE: ${{ inputs.package }}
+          PACKAGE_SHA256: ${{ steps.package.outputs.package_sha256 }}
           RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           RCLONE_CONFIG_R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
           RCLONE_CONFIG_R2_PROVIDER: Cloudflare
@@ -409,25 +272,12 @@ jobs:
           RCLONE_CONFIG_R2_TYPE: s3
           R2_APT_PUBLIC_BUCKET: ${{ vars.R2_APT_PUBLIC_BUCKET }}
           R2_APT_STATE_BUCKET: ${{ vars.R2_APT_STATE_BUCKET }}
+          SNAPSHOT: ${{ steps.package.outputs.snapshot }}
           SOURCE_SHA: ${{ inputs.source_sha }}
-          STATE_PREFIX: ${{ steps.package.outputs.state_prefix }}
           VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          test -n "$R2_APT_PUBLIC_BUCKET" && test -n "$R2_APT_STATE_BUCKET"
-          immutable="$STATE_PREFIX"
-          rclone copyto --immutable \
-            "$RUNNER_TEMP/aptly-state.tar.gz" \
-            "r2:${R2_APT_STATE_BUCKET}/${immutable}/aptly-state.tar.gz"
-          rclone copyto --immutable \
-            "$RUNNER_TEMP/aptly-state.tar.gz.sha256" \
-            "r2:${R2_APT_STATE_BUCKET}/${immutable}/aptly-state.tar.gz.sha256"
-          rclone copy "$RUNNER_TEMP/apt-public/" \
-            "r2:${R2_APT_PUBLIC_BUCKET}/"
-          rclone copyto "$RUNNER_TEMP/aptly-state.tar.gz" \
-            "r2:${R2_APT_STATE_BUCKET}/latest/aptly-state.tar.gz"
-          rclone copyto "$RUNNER_TEMP/aptly-state.tar.gz.sha256" \
-            "r2:${R2_APT_STATE_BUCKET}/latest/aptly-state.tar.gz.sha256"
+          scripts/agent-apt-state publish
           printf 'Published %s version %s from %s to https://packages.vonkforge.ai/\n' \
             "$CHANNEL" "$VERSION" "$SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
 

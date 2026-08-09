@@ -10,6 +10,7 @@ WORKFLOW = ROOT / ".github/workflows/agent-release.yml"
 UNIFIED_WORKFLOW = ROOT / ".github/workflows/ci.yml"
 PACKAGE_WORKFLOW = ROOT / ".github/workflows/agent-package-build.yml"
 APT_WORKFLOW = ROOT / ".github/workflows/agent-apt-publish.yml"
+APT_STATE = ROOT / "scripts/agent-apt-state"
 
 
 def package_step_run(step_name: str) -> str:
@@ -290,7 +291,7 @@ def test_reusable_apt_publisher_has_a_strict_channel_boundary() -> None:
 def test_reusable_apt_publisher_verifies_package_before_credentials() -> None:
     text = apt_workflow()
     verify = text.index("Verify exact downloaded package")
-    restore = text.index("Restore checksum-protected private state")
+    restore = text.index("Prepare committed or recoverable private state")
     key = text.index("Materialize and verify apt signing key")
 
     assert verify < restore < key
@@ -308,48 +309,71 @@ def test_reusable_apt_publisher_verifies_package_before_credentials() -> None:
 
 
 def test_reusable_apt_publisher_restores_only_authenticated_private_state() -> None:
-    restore = apt_step("Restore checksum-protected private state")
+    restore = apt_step("Prepare committed or recoverable private state")
+    state = APT_STATE.read_text()
 
     assert "R2_APT_STATE_BUCKET" in restore
     assert "R2_APT_PUBLIC_BUCKET" not in restore
-    assert "sha256sum -c" in restore
-    assert "checksum_name" in restore
-    assert "duplicate archive member" in restore
-    assert "publication-receipt.json" in restore
-    assert "unsafe path" in restore
-    assert "contains links" in restore
-    assert "STATE_PREFIX: ${{ steps.package.outputs.state_prefix }}" in restore
-    assert 'immutable_prefix="$STATE_PREFIX"' in restore
-    assert "dpkg --compare-versions" in restore
-    assert '"lt"' in restore and '"eq"' in restore
-    assert "package_sha256" in restore
-    assert "source_sha" in restore
-    assert "reuse_snapshot" in restore
+    assert "scripts/agent-apt-state prepare" in restore
+    assert "tarfile.open" in state
+    assert "unsafe archive member" in state
+    assert "publication-receipt.json" in state
+    assert '"/usr/bin/dpkg", "--compare-versions"' in state
+    assert "commit.json" in state
+    assert "latest.json" in state
 
 
 def test_reusable_apt_publisher_preserves_immutable_receipts_and_ordering() -> None:
     text = apt_workflow()
-    local = apt_step("Publish and verify signed apt index locally")
-    durable = apt_step("Publish immutable state, public files, then latest state")
+    local = apt_step("Generate missing aptly state or public tree")
+    commit = apt_step("Commit immutable publication manifest")
+    publish = apt_step("Publish exact committed public tree and latest pointer")
+    state = APT_STATE.read_text()
 
     assert "snapshot create" in local
     assert "publish switch" in local
-    assert "publication-receipt.json" in local
-    assert "jq -cS" in local
     assert "gpgv" in local and "InRelease" in local
+    assert "publication-receipt.json" in state
+    assert "canonical_json" in state
     signing = apt_step("Materialize and verify apt signing key")
     assert "install -m 0600" in signing
     assert "sec_count" in signing
     assert "${#fingerprints[@]}" not in signing
-    assert "--immutable" in durable
-    assert "STATE_PREFIX: ${{ steps.package.outputs.state_prefix }}" in durable
-    immutable = durable.index('immutable="$STATE_PREFIX"')
-    public = durable.index('rclone copy "$RUNNER_TEMP/apt-public/"')
-    latest = durable.index("latest/aptly-state.tar.gz")
-    assert immutable < public < latest
-    assert "rclone copy" in durable
-    assert "packages.vonkforge.ai" in durable
+    assert "scripts/agent-apt-state commit" in commit
+    assert "scripts/agent-apt-state publish" in publish
+    assert text.index("Commit immutable publication manifest") < text.index(
+        "Publish exact committed public tree and latest pointer"
+    )
+    assert "packages.vonkforge.ai" in publish
     assert "VONK_AGENT_RELEASE_PRIVATE_KEY" not in text
+
+
+def test_reusable_apt_publisher_uses_manifest_last_exact_replay_protocol() -> None:
+    text = apt_workflow()
+    prepare = apt_step("Prepare committed or recoverable private state")
+    signing = apt_step("Materialize and verify apt signing key")
+    local = apt_step("Generate missing aptly state or public tree")
+    bundles = apt_step("Build any missing immutable bundles")
+    commit = apt_step("Commit immutable publication manifest")
+    publish = apt_step("Publish exact committed public tree and latest pointer")
+
+    assert "scripts/agent-apt-state prepare" in prepare
+    assert "tar -t" not in prepare
+    assert "steps.state.outputs.needs_generation == 'true'" in signing
+    assert "steps.state.outputs.needs_generation == 'true'" in local
+    assert "scripts/agent-apt-state bundle" in bundles
+    assert "scripts/agent-apt-state commit" in commit
+    assert "R2_APT_PUBLIC_BUCKET" not in commit
+    assert "scripts/agent-apt-state publish" in publish
+    assert text.index("Commit immutable publication manifest") < text.index(
+        "Publish exact committed public tree and latest pointer"
+    )
+    for removed in (
+        "latest/aptly-state.tar.gz",
+        "aptly-state.tar.gz.sha256",
+        "rclone copyto --immutable",
+    ):
+        assert removed not in text
 
 
 def test_release_actions_are_commit_pinned_and_secrets_are_environment_scoped() -> None:

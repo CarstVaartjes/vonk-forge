@@ -1,0 +1,669 @@
+#!/usr/bin/env python3
+"""Crash-safe private state and exact public-tree transactions for agent apt."""
+
+from __future__ import annotations
+
+import argparse
+import gzip
+import hashlib
+import io
+import json
+import os
+import re
+import subprocess
+import sys
+import tarfile
+import tempfile
+from dataclasses import dataclass
+from functools import cmp_to_key
+from pathlib import Path
+from typing import Any, Protocol
+
+RECEIPT_KEYS = {
+    "channel",
+    "distribution",
+    "package",
+    "package_sha256",
+    "snapshot",
+    "source_sha",
+    "version",
+}
+CHANNELS = {
+    "dev": ("dev", "vonk-forge-dev-archive-keyring.gpg"),
+    "stable": ("stable", "vonk-forge-archive-keyring.gpg"),
+}
+COMMIT_RE = re.compile(r"^versions/([^/]+)/commit\.json$")
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+MAX_BUNDLE_BYTES = 1024 * 1024 * 1024
+MAX_MEMBER_BYTES = 512 * 1024 * 1024
+
+
+class StateError(RuntimeError):
+    pass
+
+
+class ObjectStore(Protocol):
+    def list(self, prefix: str) -> list[str]: ...
+
+    def read(self, key: str) -> bytes: ...
+
+    def write(self, key: str, data: bytes) -> None: ...
+
+
+@dataclass(frozen=True)
+class ValidatedBundle:
+    receipt: dict[str, str]
+    files: dict[str, bytes]
+    directories: frozenset[str]
+
+
+@dataclass(frozen=True)
+class Preparation:
+    mode: str
+    state_bundle: bytes | None
+    public_bundle: bytes | None
+    has_state: bool
+    has_public: bool
+    high_water_version: str | None
+
+
+def sha256(raw: bytes) -> str:
+    return hashlib.sha256(raw).hexdigest()
+
+
+def canonical_json(value: object) -> bytes:
+    return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
+
+
+def parse_canonical_json(raw: bytes) -> Any:
+    try:
+        value = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise StateError("JSON object is invalid") from error
+    if canonical_json(value) != raw:
+        raise StateError("JSON object is not canonical")
+    return value
+
+
+def _validate_receipt(value: object) -> dict[str, str]:
+    if not isinstance(value, dict) or set(value) != RECEIPT_KEYS:
+        raise StateError("publication receipt is invalid")
+    if not all(isinstance(value[key], str) for key in RECEIPT_KEYS):
+        raise StateError("publication receipt is invalid")
+    receipt = {key: value[key] for key in RECEIPT_KEYS}
+    authority = CHANNELS.get(receipt["channel"])
+    if (
+        authority is None
+        or receipt["distribution"] != authority[0]
+        or SHA_RE.fullmatch(receipt["source_sha"]) is None
+        or SHA256_RE.fullmatch(receipt["package_sha256"]) is None
+        or receipt["snapshot"] != f"{receipt['channel']}-{receipt['version']}"
+        or receipt["package"]
+        != f"vonk-forge-agent_{receipt['version']}_arm64.deb"
+    ):
+        raise StateError("publication receipt is invalid")
+    metadata = subprocess.run(
+        [
+            Path(__file__).with_name("agent-apt-metadata"),
+            receipt["channel"],
+            receipt["version"],
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if metadata.returncode != 0:
+        raise StateError("publication receipt is invalid")
+    return receipt
+
+
+def _member_name(member: tarfile.TarInfo) -> str:
+    name = member.name
+    if (
+        not name
+        or name.startswith("/")
+        or "\\" in name
+        or any(ord(character) < 32 or ord(character) == 127 for character in name)
+    ):
+        raise StateError("unsafe archive member")
+    parts = name.split("/")
+    if any(part in {"", ".", ".."} for part in parts):
+        raise StateError("unsafe archive member")
+    canonical = "/".join(parts)
+    if canonical != name:
+        raise StateError("unsafe archive member")
+    if not (member.isdir() or member.isreg()):
+        raise StateError("unsafe archive member")
+    if member.size < 0 or member.size > MAX_MEMBER_BYTES:
+        raise StateError("unsafe archive member")
+    return canonical
+
+
+def validate_bundle(
+    raw: bytes, kind: str, expected_receipt: dict[str, str] | None = None
+) -> ValidatedBundle:
+    if kind not in {"state", "public"} or not 1 <= len(raw) <= MAX_BUNDLE_BYTES:
+        raise StateError("bundle is invalid")
+    root = "aptly" if kind == "state" else "public"
+    files: dict[str, bytes] = {}
+    directories: set[str] = set()
+    destinations: set[str] = set()
+    try:
+        with tarfile.open(fileobj=io.BytesIO(raw), mode="r:gz") as archive:
+            for member in archive.getmembers():
+                name = _member_name(member)
+                if name in destinations:
+                    raise StateError("unsafe archive member")
+                destinations.add(name)
+                if name != "publication-receipt.json" and not (
+                    name == root or name.startswith(f"{root}/")
+                ):
+                    raise StateError("unsafe archive member")
+                if member.isdir():
+                    directories.add(name)
+                    continue
+                stream = archive.extractfile(member)
+                if stream is None:
+                    raise StateError("unsafe archive member")
+                files[name] = stream.read(MAX_MEMBER_BYTES + 1)
+                if len(files[name]) != member.size:
+                    raise StateError("unsafe archive member")
+    except (tarfile.TarError, OSError, EOFError) as error:
+        raise StateError("bundle is invalid") from error
+    if root not in directories or "publication-receipt.json" not in files:
+        raise StateError("bundle is incomplete")
+    receipt = _validate_receipt(
+        parse_canonical_json(files["publication-receipt.json"])
+    )
+    if expected_receipt is not None and receipt != _validate_receipt(expected_receipt):
+        raise StateError("publication receipt does not match request")
+    if kind == "public":
+        distribution, keyring = CHANNELS[receipt["channel"]]
+        required = {
+            f"public/dists/{distribution}/InRelease",
+            f"public/{keyring}",
+        }
+        if not required.issubset(files) or not any(
+            Path(name).name == receipt["package"] for name in files
+        ):
+            raise StateError("public bundle is incomplete")
+        package_files = [
+            content
+            for name, content in files.items()
+            if Path(name).name == receipt["package"]
+        ]
+        if len(package_files) != 1 or sha256(package_files[0]) != receipt["package_sha256"]:
+            raise StateError("public package hash does not match receipt")
+        for name in files:
+            if name == "publication-receipt.json":
+                continue
+            relative = name.removeprefix("public/")
+            if relative != keyring and not relative.startswith(
+                (f"dists/{distribution}/", "pool/")
+            ):
+                raise StateError("unsafe archive member")
+    return ValidatedBundle(
+        receipt=receipt,
+        files=files,
+        directories=frozenset(directories),
+    )
+
+
+def _tar_info(name: str, *, directory: bool, size: int = 0) -> tarfile.TarInfo:
+    member = tarfile.TarInfo(name)
+    member.uid = 0
+    member.gid = 0
+    member.uname = ""
+    member.gname = ""
+    member.mtime = 0
+    member.mode = 0o755 if directory else 0o644
+    member.type = tarfile.DIRTYPE if directory else tarfile.REGTYPE
+    member.size = 0 if directory else size
+    return member
+
+
+def build_bundle(root: Path, kind: str, publication: dict[str, str]) -> bytes:
+    receipt = _validate_receipt(publication)
+    expected_name = "aptly" if kind == "state" else "public"
+    if kind not in {"state", "public"} or root.name != expected_name:
+        raise StateError("bundle root is invalid")
+    if not root.is_dir() or root.is_symlink():
+        raise StateError("bundle root is invalid")
+    entries = [root, *sorted(root.rglob("*"), key=lambda path: path.as_posix())]
+    output = io.BytesIO()
+    with (
+        gzip.GzipFile(fileobj=output, mode="wb", filename="", mtime=0) as compressed,
+        tarfile.open(fileobj=compressed, mode="w") as archive,
+    ):
+        for path in entries:
+            if path.is_symlink() or not (path.is_dir() or path.is_file()):
+                raise StateError("bundle source is unsafe")
+            name = expected_name
+            if path != root:
+                name = f"{expected_name}/{path.relative_to(root).as_posix()}"
+            if path.is_dir():
+                archive.addfile(_tar_info(name, directory=True))
+            else:
+                raw = path.read_bytes()
+                archive.addfile(
+                    _tar_info(name, directory=False, size=len(raw)),
+                    io.BytesIO(raw),
+                )
+        receipt_raw = canonical_json(receipt)
+        archive.addfile(
+            _tar_info(
+                "publication-receipt.json",
+                directory=False,
+                size=len(receipt_raw),
+            ),
+            io.BytesIO(receipt_raw),
+        )
+    raw = output.getvalue()
+    validate_bundle(raw, kind, receipt)
+    return raw
+
+
+def _prefix(receipt: dict[str, str]) -> str:
+    return f"versions/{receipt['version']}"
+
+
+def _object_record(key: str, raw: bytes) -> dict[str, object]:
+    return {"key": key, "sha256": sha256(raw), "size": len(raw)}
+
+
+def _manifest(
+    receipt: dict[str, str], state_bundle: bytes, public_bundle: bytes
+) -> bytes:
+    prefix = _prefix(receipt)
+    return canonical_json(
+        {
+            "objects": {
+                "aptly_state": _object_record(
+                    f"{prefix}/aptly-state.tar.gz", state_bundle
+                ),
+                "public_tree": _object_record(
+                    f"{prefix}/public-tree.tar.gz", public_bundle
+                ),
+            },
+            "publication": receipt,
+            "schema_version": 1,
+        }
+    )
+
+
+def _validate_manifest(raw: bytes, key: str) -> dict[str, Any]:
+    value = parse_canonical_json(raw)
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"objects", "publication", "schema_version"}
+        or value["schema_version"] != 1
+        or not isinstance(value["objects"], dict)
+        or set(value["objects"]) != {"aptly_state", "public_tree"}
+    ):
+        raise StateError("commit manifest is invalid")
+    receipt = _validate_receipt(value["publication"])
+    if key != f"{_prefix(receipt)}/commit.json":
+        raise StateError("commit manifest path is invalid")
+    expected_names = {
+        "aptly_state": f"{_prefix(receipt)}/aptly-state.tar.gz",
+        "public_tree": f"{_prefix(receipt)}/public-tree.tar.gz",
+    }
+    for name, expected_key in expected_names.items():
+        record = value["objects"][name]
+        if (
+            not isinstance(record, dict)
+            or set(record) != {"key", "sha256", "size"}
+            or record["key"] != expected_key
+            or not isinstance(record["size"], int)
+            or not 1 <= record["size"] <= MAX_BUNDLE_BYTES
+            or not isinstance(record["sha256"], str)
+            or SHA256_RE.fullmatch(record["sha256"]) is None
+        ):
+            raise StateError("commit manifest is invalid")
+    return value
+
+
+def _write_immutable(store: ObjectStore, key: str, raw: bytes) -> None:
+    existing = store.list(key)
+    if key in existing:
+        if store.read(key) != raw:
+            raise StateError(f"immutable object conflict: {key}")
+        return
+    if existing:
+        raise StateError(f"immutable object path conflict: {key}")
+    store.write(key, raw)
+    if store.read(key) != raw:
+        raise StateError(f"persisted object hash mismatch: {key}")
+
+
+def commit_candidate(
+    store: ObjectStore,
+    publication: dict[str, str],
+    state_bundle: bytes,
+    public_bundle: bytes,
+) -> bytes:
+    receipt = _validate_receipt(publication)
+    validate_bundle(state_bundle, "state", receipt)
+    validate_bundle(public_bundle, "public", receipt)
+    prefix = _prefix(receipt)
+    manifest = _manifest(receipt, state_bundle, public_bundle)
+    _write_immutable(store, f"{prefix}/aptly-state.tar.gz", state_bundle)
+    _write_immutable(store, f"{prefix}/public-tree.tar.gz", public_bundle)
+    _write_immutable(store, f"{prefix}/commit.json", manifest)
+    return manifest
+
+
+def _read_committed(
+    store: ObjectStore, key: str, raw: bytes | None = None
+) -> tuple[dict[str, Any], bytes, bytes]:
+    manifest_raw = store.read(key) if raw is None else raw
+    manifest = _validate_manifest(manifest_raw, key)
+    bundles: dict[str, bytes] = {}
+    for name in ("aptly_state", "public_tree"):
+        record = manifest["objects"][name]
+        bundle = store.read(record["key"])
+        if len(bundle) != record["size"] or sha256(bundle) != record["sha256"]:
+            raise StateError("committed object hash mismatch")
+        bundles[name] = bundle
+    receipt = manifest["publication"]
+    validate_bundle(bundles["aptly_state"], "state", receipt)
+    validate_bundle(bundles["public_tree"], "public", receipt)
+    return manifest, bundles["aptly_state"], bundles["public_tree"]
+
+
+def _compare_versions(left: str, right: str) -> int:
+    for relation, result in (("lt", -1), ("gt", 1)):
+        compared = subprocess.run(
+            ["/usr/bin/dpkg", "--compare-versions", left, relation, right],
+            check=False,
+        )
+        if compared.returncode == 0:
+            return result
+    return 0
+
+
+def prepare_candidate(
+    store: ObjectStore, publication: dict[str, str]
+) -> Preparation:
+    requested = _validate_receipt(publication)
+    committed: list[tuple[dict[str, Any], str, bytes]] = []
+    for key in store.list("versions/"):
+        if not key.endswith("/commit.json"):
+            continue
+        match = COMMIT_RE.fullmatch(key)
+        if match is None:
+            raise StateError("commit manifest path is invalid")
+        raw = store.read(key)
+        manifest = _validate_manifest(raw, key)
+        if manifest["publication"]["channel"] != requested["channel"]:
+            raise StateError("commit manifest channel is invalid")
+        committed.append((manifest, key, raw))
+    committed.sort(
+        key=cmp_to_key(
+            lambda left, right: _compare_versions(
+                left[0]["publication"]["version"],
+                right[0]["publication"]["version"],
+            )
+        )
+    )
+    high = committed[-1] if committed else None
+    high_version = high[0]["publication"]["version"] if high else None
+    if high_version is not None:
+        comparison = _compare_versions(requested["version"], high_version)
+        if comparison < 0:
+            raise StateError("refusing to roll back apt channel")
+        if comparison == 0:
+            if high[0]["publication"] != requested:
+                raise StateError("committed publication conflicts with request")
+            _, state_bundle, public_bundle = _read_committed(
+                store, high[1], high[2]
+            )
+            return Preparation(
+                mode="committed",
+                state_bundle=state_bundle,
+                public_bundle=public_bundle,
+                has_state=True,
+                has_public=True,
+                high_water_version=high_version,
+            )
+
+    prefix = _prefix(requested)
+    keys = store.list(f"{prefix}/")
+    allowed = {
+        f"{prefix}/aptly-state.tar.gz",
+        f"{prefix}/public-tree.tar.gz",
+    }
+    if not set(keys).issubset(allowed):
+        raise StateError("uncommitted immutable prefix is invalid")
+    requested_state = None
+    requested_public = None
+    state_key = f"{prefix}/aptly-state.tar.gz"
+    public_key = f"{prefix}/public-tree.tar.gz"
+    if state_key in keys:
+        requested_state = store.read(state_key)
+        validate_bundle(requested_state, "state", requested)
+    if public_key in keys:
+        requested_public = store.read(public_key)
+        validate_bundle(requested_public, "public", requested)
+    base_state = requested_state
+    if base_state is None and high is not None:
+        _, base_state, _ = _read_committed(store, high[1], high[2])
+    return Preparation(
+        mode="pending",
+        state_bundle=base_state,
+        public_bundle=requested_public,
+        has_state=requested_state is not None,
+        has_public=requested_public is not None,
+        high_water_version=high_version,
+    )
+
+
+def publish_committed(
+    state_store: ObjectStore,
+    public_store: ObjectStore,
+    publication: dict[str, str],
+) -> bytes:
+    receipt = _validate_receipt(publication)
+    commit_key = f"{_prefix(receipt)}/commit.json"
+    manifest_raw = state_store.read(commit_key)
+    manifest, _, public_bundle = _read_committed(
+        state_store, commit_key, manifest_raw
+    )
+    if manifest["publication"] != receipt:
+        raise StateError("committed publication conflicts with request")
+    validated = validate_bundle(public_bundle, "public", receipt)
+    for name in sorted(validated.files):
+        if not name.startswith("public/"):
+            continue
+        public_store.write(name.removeprefix("public/"), validated.files[name])
+    pointer = canonical_json(
+        {
+            "channel": receipt["channel"],
+            "commit": commit_key,
+            "commit_sha256": sha256(manifest_raw),
+            "version": receipt["version"],
+        }
+    )
+    state_store.write("latest.json", pointer)
+    return pointer
+
+
+class RcloneStore:
+    def __init__(self, bucket: str) -> None:
+        if re.fullmatch(r"[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]", bucket) is None:
+            raise StateError("object store bucket is invalid")
+        self.remote = f"r2:{bucket}"
+
+    def _run(self, arguments: list[str], *, input_raw: bytes | None = None) -> bytes:
+        completed = subprocess.run(
+            ["rclone", *arguments],
+            input=input_raw,
+            check=False,
+            capture_output=True,
+        )
+        if completed.returncode != 0:
+            raise StateError("object store operation failed")
+        return completed.stdout
+
+    def list(self, prefix: str) -> list[str]:
+        clean = prefix.rstrip("/")
+        if prefix.endswith("/"):
+            parent = clean
+        else:
+            parent = clean.rsplit("/", 1)[0] if "/" in clean else ""
+        remote = self.remote if not parent else f"{self.remote}/{parent}"
+        output = self._run(
+            ["lsf", remote, "--recursive", "--files-only", "--order-by", "name"]
+        )
+        names = output.decode("utf-8").splitlines()
+        keys = [f"{parent}/{name}" if parent else name for name in names]
+        return sorted(key for key in keys if key.startswith(prefix))
+
+    def read(self, key: str) -> bytes:
+        return self._run(["cat", f"{self.remote}/{key}"])
+
+    def write(self, key: str, data: bytes) -> None:
+        with tempfile.NamedTemporaryFile(prefix="agent-apt-object-") as temporary:
+            temporary.write(data)
+            temporary.flush()
+            self._run(["copyto", temporary.name, f"{self.remote}/{key}"])
+
+
+def _receipt_from_environment() -> dict[str, str]:
+    names = {
+        "channel": "CHANNEL",
+        "distribution": "DISTRIBUTION",
+        "package": "PACKAGE",
+        "package_sha256": "PACKAGE_SHA256",
+        "snapshot": "SNAPSHOT",
+        "source_sha": "SOURCE_SHA",
+        "version": "VERSION",
+    }
+    return _validate_receipt({name: os.environ.get(variable, "") for name, variable in names.items()})
+
+
+def _work_directory(value: str) -> Path:
+    runner = Path(os.environ.get("RUNNER_TEMP", "")).resolve()
+    work = Path(value).resolve()
+    if not runner.is_dir() or not work.is_relative_to(runner) or work == runner:
+        raise StateError("work directory is invalid")
+    work.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return work
+
+
+def _write_private(path: Path, raw: bytes) -> None:
+    path.write_bytes(raw)
+    path.chmod(0o600)
+
+
+def extract_bundle(
+    raw: bytes,
+    kind: str,
+    destination: Path,
+    expected_receipt: dict[str, str],
+) -> None:
+    validated = validate_bundle(raw, kind, expected_receipt)
+    root = "aptly" if kind == "state" else "public"
+    target_root = destination / root
+    if target_root.exists():
+        raise StateError("bundle extraction target already exists")
+    for name in sorted(validated.directories, key=lambda item: (item.count("/"), item)):
+        if name == root or name.startswith(f"{root}/"):
+            target = destination / name
+            target.mkdir(mode=0o700 if kind == "state" else 0o755, exist_ok=False)
+    for name, content in sorted(validated.files.items()):
+        if not name.startswith(f"{root}/"):
+            continue
+        target = destination / name
+        target.parent.mkdir(
+            mode=0o700 if kind == "state" else 0o755,
+            parents=True,
+            exist_ok=True,
+        )
+        target.write_bytes(content)
+        target.chmod(0o600 if kind == "state" else 0o644)
+
+
+def _state_store() -> RcloneStore:
+    return RcloneStore(os.environ.get("R2_APT_STATE_BUCKET", ""))
+
+
+def _prepare(work: Path, receipt: dict[str, str]) -> None:
+    prepared = prepare_candidate(_state_store(), receipt)
+    if prepared.state_bundle is not None:
+        if prepared.has_state:
+            _write_private(work / "aptly-state.tar.gz", prepared.state_bundle)
+        else:
+            _write_private(work / "base-aptly-state.tar.gz", prepared.state_bundle)
+        extract_bundle(prepared.state_bundle, "state", work, _validate_receipt(
+            validate_bundle(prepared.state_bundle, "state").receipt
+        ))
+    if prepared.public_bundle is not None:
+        _write_private(work / "public-tree.tar.gz", prepared.public_bundle)
+    needs_generation = not (prepared.has_state and prepared.has_public)
+    print(f"mode={prepared.mode}")
+    print(f"has_state={str(prepared.has_state).lower()}")
+    print(f"has_public={str(prepared.has_public).lower()}")
+    print(f"restored={str(prepared.state_bundle is not None).lower()}")
+    print(f"needs_generation={str(needs_generation).lower()}")
+
+
+def _bundle(work: Path, receipt: dict[str, str]) -> None:
+    state_path = work / "aptly-state.tar.gz"
+    if state_path.exists():
+        validate_bundle(state_path.read_bytes(), "state", receipt)
+    else:
+        _write_private(state_path, build_bundle(work / "aptly", "state", receipt))
+    public_path = work / "public-tree.tar.gz"
+    if public_path.exists():
+        validate_bundle(public_path.read_bytes(), "public", receipt)
+    else:
+        _write_private(public_path, build_bundle(work / "public", "public", receipt))
+
+
+def _commit(work: Path, receipt: dict[str, str]) -> None:
+    manifest = commit_candidate(
+        _state_store(),
+        receipt,
+        (work / "aptly-state.tar.gz").read_bytes(),
+        (work / "public-tree.tar.gz").read_bytes(),
+    )
+    _write_private(work / "commit.json", manifest)
+
+
+def _publish(receipt: dict[str, str]) -> None:
+    publish_committed(
+        _state_store(),
+        RcloneStore(os.environ.get("R2_APT_PUBLIC_BUCKET", "")),
+        receipt,
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("command", choices=("prepare", "bundle", "commit", "publish"))
+    parser.add_argument("--work-dir")
+    arguments = parser.parse_args(argv)
+    try:
+        receipt = _receipt_from_environment()
+        if arguments.command in {"prepare", "bundle", "commit"}:
+            if arguments.work_dir is None:
+                raise StateError("work directory is required")
+            work = _work_directory(arguments.work_dir)
+        if arguments.command == "prepare":
+            _prepare(work, receipt)
+        elif arguments.command == "bundle":
+            _bundle(work, receipt)
+        elif arguments.command == "commit":
+            _commit(work, receipt)
+        else:
+            _publish(receipt)
+    except (OSError, StateError, KeyError) as error:
+        print(f"agent apt state failed: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
