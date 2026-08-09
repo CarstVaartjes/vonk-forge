@@ -237,6 +237,42 @@ def test_generic_fleet_missing_topology_precedes_malformed_schema_validation() -
         )
 
 
+def test_generic_fleet_preserves_schema_error_boundary() -> None:
+    node_id = NodeId.parse("spk_00000000000000000000000000000001")
+    fleet = Fleet(
+        2,
+        {
+            node_id: NodeRecord(
+                node_id,
+                "node-1",
+                "node-1.local",
+                ManagementEndpoint("node-1.local", "operator"),
+                {},
+                "ready",
+            )
+        },
+    )
+    topology = {
+        "schema_version": 1,
+        "nodes": [node_id.value],
+        "links": [],
+    }
+
+    with pytest.raises(jsonschema.SchemaError):
+        NodeHealthService(
+            backend=FakeBackend({}),
+            collector=b"collector",
+            raw_schema={"type": 7},
+            result_schema={"type": "object"},
+            inventory={},
+            rdma_baseline={},
+            timeout_seconds=10,
+            cpu_sample_milliseconds=250,
+            fleet=fleet,
+            topology=topology,
+        )
+
+
 @pytest.mark.parametrize("field", ("earlyoom_enabled", "earlyoom_active"))
 def test_active_or_enabled_earlyoom_is_critical(field):
     subject, _, raws = service()
