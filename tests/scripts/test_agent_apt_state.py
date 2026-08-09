@@ -1,0 +1,355 @@
+from __future__ import annotations
+
+import hashlib
+import io
+import sys
+import tarfile
+from importlib.machinery import SourceFileLoader
+from importlib.util import module_from_spec, spec_from_loader
+from pathlib import Path
+from types import ModuleType
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[2]
+SCRIPT = ROOT / "scripts/agent-apt-state"
+SHA = "0123456789abcdef0123456789abcdef01234567"
+PACKAGE_SHA = hashlib.sha256(b"package bytes").hexdigest()
+
+
+def load_state_module() -> ModuleType:
+    assert SCRIPT.is_file(), "agent-apt-state has not been implemented"
+    loaded = sys.modules.get("agent_apt_state")
+    if loaded is not None:
+        return loaded
+    loader = SourceFileLoader("agent_apt_state", str(SCRIPT))
+    spec = spec_from_loader(loader.name, loader)
+    assert spec is not None
+    module = module_from_spec(spec)
+    sys.modules[loader.name] = module
+    loader.exec_module(module)
+    return module
+
+
+class FakeR2:
+    def __init__(
+        self,
+        name: str,
+        operations: list[str],
+        *,
+        fail_once: set[str] | None = None,
+        corrupt_once: set[str] | None = None,
+    ) -> None:
+        self.name = name
+        self.operations = operations
+        self.objects: dict[str, bytes] = {}
+        self.fail_once = set() if fail_once is None else set(fail_once)
+        self.corrupt_once = set() if corrupt_once is None else set(corrupt_once)
+
+    def list(self, prefix: str) -> list[str]:
+        self.operations.append(f"{self.name}:list:{prefix}")
+        return sorted(key for key in self.objects if key.startswith(prefix))
+
+    def read(self, key: str) -> bytes:
+        self.operations.append(f"{self.name}:read:{key}")
+        return self.objects[key]
+
+    def write(self, key: str, data: bytes) -> None:
+        if key in self.fail_once:
+            self.fail_once.remove(key)
+            self.operations.append(f"{self.name}:write-failed:{key}")
+            raise OSError("injected R2 failure")
+        self.operations.append(f"{self.name}:write:{key}")
+        if key in self.corrupt_once:
+            self.corrupt_once.remove(key)
+            self.objects[key] = b"corrupted in transit"
+        else:
+            self.objects[key] = data
+
+
+def receipt(version: str = "0.1.0~dev.1786300000+g0123456789ab") -> dict[str, str]:
+    return {
+        "channel": "dev",
+        "distribution": "dev",
+        "package": f"vonk-forge-agent_{version}_arm64.deb",
+        "package_sha256": PACKAGE_SHA,
+        "snapshot": f"dev-{version}",
+        "source_sha": SHA,
+        "version": version,
+    }
+
+
+def bundles(tmp_path: Path, publication: dict[str, str]) -> tuple[bytes, bytes]:
+    state = load_state_module()
+    aptly = tmp_path / "aptly"
+    aptly.mkdir()
+    (aptly / "db").write_bytes(b"trusted aptly database")
+    public = tmp_path / "public"
+    (public / "dists/dev").mkdir(parents=True)
+    (public / "dists/dev/InRelease").write_bytes(b"signed-at-t1")
+    (public / "vonk-forge-dev-archive-keyring.gpg").write_bytes(b"public key")
+    package = public / "pool/main/v/vonk-forge-agent" / publication["package"]
+    package.parent.mkdir(parents=True)
+    package.write_bytes(b"package bytes")
+    return (
+        state.build_bundle(aptly, "state", publication),
+        state.build_bundle(public, "public", publication),
+    )
+
+
+def test_partial_immutable_objects_are_completable_and_conflicts_fail(
+    tmp_path: Path,
+) -> None:
+    state = load_state_module()
+    publication = receipt()
+    state_bundle, public_bundle = bundles(tmp_path, publication)
+    operations: list[str] = []
+    prefix = f"versions/{publication['version']}"
+    private = FakeR2(
+        "state", operations, fail_once={f"{prefix}/commit.json"}
+    )
+
+    with pytest.raises(OSError, match="injected R2 failure"):
+        state.commit_candidate(private, publication, state_bundle, public_bundle)
+
+    assert set(private.objects) == {
+        f"{prefix}/aptly-state.tar.gz",
+        f"{prefix}/public-tree.tar.gz",
+    }
+
+    manifest = state.commit_candidate(
+        private, publication, state_bundle, public_bundle
+    )
+
+    assert private.objects[f"{prefix}/commit.json"] == manifest
+    assert operations.index(f"state:write:{prefix}/aptly-state.tar.gz") < operations.index(
+        f"state:write:{prefix}/public-tree.tar.gz"
+    )
+    assert operations.index(f"state:write:{prefix}/public-tree.tar.gz") < operations.index(
+        f"state:write-failed:{prefix}/commit.json"
+    )
+    writes = [operation for operation in operations if ":write:" in operation]
+    assert writes[-1] == f"state:write:{prefix}/commit.json"
+
+    (tmp_path / "aptly/db").write_bytes(b"different aptly database")
+    changed = state.build_bundle(tmp_path / "aptly", "state", publication)
+    with pytest.raises(state.StateError, match="immutable object conflict"):
+        state.commit_candidate(private, publication, changed, public_bundle)
+
+
+def test_single_partial_data_object_is_completed_on_exact_retry(tmp_path: Path) -> None:
+    state = load_state_module()
+    publication = receipt()
+    state_bundle, public_bundle = bundles(tmp_path, publication)
+    operations: list[str] = []
+    prefix = f"versions/{publication['version']}"
+    private = FakeR2(
+        "state",
+        operations,
+        fail_once={f"{prefix}/public-tree.tar.gz"},
+    )
+
+    with pytest.raises(OSError, match="injected R2 failure"):
+        state.commit_candidate(private, publication, state_bundle, public_bundle)
+    assert set(private.objects) == {f"{prefix}/aptly-state.tar.gz"}
+
+    state.commit_candidate(private, publication, state_bundle, public_bundle)
+
+    assert set(private.objects) == {
+        f"{prefix}/aptly-state.tar.gz",
+        f"{prefix}/public-tree.tar.gz",
+        f"{prefix}/commit.json",
+    }
+
+
+def test_commit_requires_persisted_data_hashes_to_match(tmp_path: Path) -> None:
+    state = load_state_module()
+    publication = receipt()
+    state_bundle, public_bundle = bundles(tmp_path, publication)
+    operations: list[str] = []
+    prefix = f"versions/{publication['version']}"
+    private = FakeR2(
+        "state",
+        operations,
+        corrupt_once={f"{prefix}/aptly-state.tar.gz"},
+    )
+
+    with pytest.raises(state.StateError, match="persisted object hash mismatch"):
+        state.commit_candidate(private, publication, state_bundle, public_bundle)
+
+    assert f"{prefix}/commit.json" not in private.objects
+
+
+def test_committed_manifest_is_the_monotonic_high_water_without_latest(
+    tmp_path: Path,
+) -> None:
+    state = load_state_module()
+    operations: list[str] = []
+    private = FakeR2("state", operations)
+    high = receipt("0.1.0~dev.1786300002+g0123456789ab")
+    state_bundle, public_bundle = bundles(tmp_path, high)
+    state.commit_candidate(private, high, state_bundle, public_bundle)
+    assert "latest.json" not in private.objects
+
+    older = receipt("0.1.0~dev.1786300001+g0123456789ab")
+    with pytest.raises(state.StateError, match="roll back"):
+        state.prepare_candidate(private, older)
+
+
+def test_commit_precedes_public_bytes_and_single_latest_pointer(
+    tmp_path: Path,
+) -> None:
+    state = load_state_module()
+    publication = receipt()
+    state_bundle, public_bundle = bundles(tmp_path, publication)
+    operations: list[str] = []
+    private = FakeR2("state", operations)
+    public = FakeR2("public", operations)
+
+    state.commit_candidate(private, publication, state_bundle, public_bundle)
+    state.publish_committed(private, public, publication)
+
+    prefix = f"versions/{publication['version']}"
+    commit_index = operations.index(f"state:write:{prefix}/commit.json")
+    public_indexes = [
+        index
+        for index, operation in enumerate(operations)
+        if operation.startswith("public:write:")
+    ]
+    latest_index = operations.index("state:write:latest.json")
+    assert commit_index < min(public_indexes) < latest_index
+    assert not any(key.startswith("latest/") for key in private.objects)
+    pointer = state.parse_canonical_json(private.objects["latest.json"])
+    assert pointer == {
+        "channel": "dev",
+        "commit": f"{prefix}/commit.json",
+        "commit_sha256": state.sha256(private.objects[f"{prefix}/commit.json"]),
+        "version": publication["version"],
+    }
+
+
+def test_equal_replay_publishes_persisted_public_bytes_without_regeneration(
+    tmp_path: Path,
+) -> None:
+    state = load_state_module()
+    publication = receipt()
+    state_bundle, public_bundle = bundles(tmp_path, publication)
+    operations: list[str] = []
+    private = FakeR2("state", operations)
+    public = FakeR2("public", operations)
+    state.commit_candidate(private, publication, state_bundle, public_bundle)
+    state.publish_committed(private, public, publication)
+
+    prepared = state.prepare_candidate(private, publication)
+    assert prepared.mode == "committed"
+    assert prepared.public_bundle == public_bundle
+
+    regenerated = tmp_path / "regenerated/public"
+    (regenerated / "dists/dev").mkdir(parents=True)
+    (regenerated / "dists/dev/InRelease").write_bytes(b"signed-at-t2")
+    (regenerated / "vonk-forge-dev-archive-keyring.gpg").write_bytes(b"public key")
+    package = regenerated / "pool/main/v/vonk-forge-agent" / publication["package"]
+    package.parent.mkdir(parents=True)
+    package.write_bytes(b"package bytes")
+    assert state.build_bundle(regenerated, "public", publication) != public_bundle
+
+    state.publish_committed(private, public, publication)
+
+    assert public.objects["dists/dev/InRelease"] == b"signed-at-t1"
+
+
+def test_public_failure_does_not_advance_latest_and_exact_retry_completes(
+    tmp_path: Path,
+) -> None:
+    state = load_state_module()
+    publication = receipt()
+    state_bundle, public_bundle = bundles(tmp_path, publication)
+    operations: list[str] = []
+    private = FakeR2("state", operations)
+    public = FakeR2(
+        "public", operations, fail_once={"dists/dev/InRelease"}
+    )
+    state.commit_candidate(private, publication, state_bundle, public_bundle)
+
+    with pytest.raises(OSError, match="injected R2 failure"):
+        state.publish_committed(private, public, publication)
+    assert "latest.json" not in private.objects
+
+    state.publish_committed(private, public, publication)
+
+    assert public.objects["dists/dev/InRelease"] == b"signed-at-t1"
+    assert "latest.json" in private.objects
+
+
+def test_public_bundle_binds_the_exact_verified_package_hash(tmp_path: Path) -> None:
+    state = load_state_module()
+    publication = receipt()
+    publication["package_sha256"] = "b" * 64
+
+    with pytest.raises(state.StateError, match="public package hash"):
+        bundles(tmp_path, publication)
+
+
+@pytest.mark.parametrize(
+    "names",
+    (
+        ("aptly", "aptly/db", "aptly/./db", "publication-receipt.json"),
+        ("aptly", "aptly/db", "aptly//db", "publication-receipt.json"),
+        ("aptly", "aptly/db", "aptly/../db", "publication-receipt.json"),
+        ("aptly", "aptly/db", "/aptly/db", "publication-receipt.json"),
+        ("aptly", "aptly/db", "aptly/control\nname", "publication-receipt.json"),
+        ("aptly", "aptly/db", "outside/file", "publication-receipt.json"),
+    ),
+)
+def test_structural_tar_validation_rejects_noncanonical_destinations(
+    names: tuple[str, ...],
+) -> None:
+    state = load_state_module()
+    publication = receipt()
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+        for name in names:
+            member = tarfile.TarInfo(name)
+            if name in {"aptly", "aptly/db"}:
+                member.type = tarfile.DIRTYPE
+                archive.addfile(member)
+            else:
+                raw = state.canonical_json(publication) if name == "publication-receipt.json" else b"x"
+                member.size = len(raw)
+                archive.addfile(member, io.BytesIO(raw))
+
+    with pytest.raises(state.StateError, match="unsafe archive member"):
+        state.validate_bundle(buffer.getvalue(), "state", publication)
+
+
+@pytest.mark.parametrize(
+    "member_type",
+    (
+        tarfile.SYMTYPE,
+        tarfile.LNKTYPE,
+        tarfile.CHRTYPE,
+        tarfile.BLKTYPE,
+        tarfile.FIFOTYPE,
+    ),
+)
+def test_structural_tar_validation_rejects_links_devices_and_fifos(
+    member_type: bytes,
+) -> None:
+    state = load_state_module()
+    publication = receipt()
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+        root = tarfile.TarInfo("aptly")
+        root.type = tarfile.DIRTYPE
+        archive.addfile(root)
+        unsafe = tarfile.TarInfo("aptly/unsafe")
+        unsafe.type = member_type
+        unsafe.linkname = "aptly/db"
+        archive.addfile(unsafe)
+        raw = state.canonical_json(publication)
+        receipt_member = tarfile.TarInfo("publication-receipt.json")
+        receipt_member.size = len(raw)
+        archive.addfile(receipt_member, io.BytesIO(raw))
+
+    with pytest.raises(state.StateError, match="unsafe archive member"):
+        state.validate_bundle(buffer.getvalue(), "state", publication)
