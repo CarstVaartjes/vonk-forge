@@ -175,6 +175,9 @@ def test_existing_repository_transfers_to_git_identity_before_git_and_restores_a
     ) -> None:
         events.append(("owner", Path(path), uid, gid))
 
+    def record_fchown(descriptor: int, uid: int, gid: int) -> None:
+        events.append(("owner", descriptor, uid, gid))
+
     def run_as_current_user(
         command: tuple[str, ...], **kwargs: object
     ) -> subprocess.CompletedProcess[str]:
@@ -190,6 +193,7 @@ def test_existing_repository_transfers_to_git_identity_before_git_and_restores_a
 
     monkeypatch.setattr(dev_init.os, "geteuid", lambda: 0)
     monkeypatch.setattr(dev_init.os, "chown", record_chown)
+    monkeypatch.setattr(dev_init.os, "fchown", record_fchown)
     monkeypatch.setattr(dev_init.subprocess, "run", run_as_current_user)
 
     initialize_repository(destination, repository_url, expected)
@@ -228,6 +232,9 @@ def test_repository_ownership_is_restored_to_api_after_git_failure(
     ) -> None:
         events.append(("owner", Path(path), uid, gid))
 
+    def record_fchown(descriptor: int, uid: int, gid: int) -> None:
+        events.append(("owner", descriptor, uid, gid))
+
     def fail_git(
         command: tuple[str, ...], **kwargs: object
     ) -> subprocess.CompletedProcess[str]:
@@ -243,6 +250,7 @@ def test_repository_ownership_is_restored_to_api_after_git_failure(
 
     monkeypatch.setattr(dev_init.os, "geteuid", lambda: 0)
     monkeypatch.setattr(dev_init.os, "chown", record_chown)
+    monkeypatch.setattr(dev_init.os, "fchown", record_fchown)
     monkeypatch.setattr(dev_init.subprocess, "run", fail_git)
 
     with pytest.raises(DevInitError, match="Git could not"):
@@ -256,6 +264,114 @@ def test_repository_ownership_is_restored_to_api_after_git_failure(
     assert events[first_git][1:] == (65534, 65534, ())
     assert events[-1][0] == "owner"
     assert events[-1][2:] == (10001, 10001)
+
+
+@pytest.mark.parametrize("root_last", (False, True))
+def test_repository_ownership_walk_rejects_a_listed_directory_swapped_for_external_symlink(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    root_last: bool,
+) -> None:
+    repository = tmp_path / "repository"
+    mutable = repository / "mutable"
+    mutable.mkdir(parents=True)
+    (mutable / "repository-file").write_text("repository\n", encoding="utf-8")
+    external = tmp_path / "external-secrets"
+    external.mkdir()
+    external_secret = external / "worker-api-token"
+    external_secret.write_text("preserve\n", encoding="utf-8")
+    external_secret.chmod(0o400)
+    external.chmod(0o550)
+    external_before = external.stat()
+    secret_before = external_secret.stat()
+    ownership_targets: list[tuple[int, int]] = []
+    swapped = False
+    real_open = os.open
+    real_stat = os.stat
+
+    def swap_directory() -> None:
+        nonlocal swapped
+        if swapped:
+            return
+        mutable.rename(repository / "detached-mutable")
+        mutable.symlink_to(external, target_is_directory=True)
+        swapped = True
+
+    def race_walk(
+        _root: Path,
+        *,
+        topdown: bool,
+        followlinks: bool,
+    ) -> object:
+        assert followlinks is False
+        if topdown:
+            yield repository, ["mutable"], []
+            swap_directory()
+            yield mutable, [], [external_secret.name]
+        else:
+            swap_directory()
+            yield mutable, [], [external_secret.name]
+            yield repository, ["mutable"], []
+
+    def race_open(
+        path: str | os.PathLike[str],
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        if path == "mutable" and dir_fd is not None:
+            swap_directory()
+        return real_open(path, flags, mode, dir_fd=dir_fd)
+
+    def record_chown(
+        path: str | os.PathLike[str],
+        _uid: int,
+        _gid: int,
+        *,
+        dir_fd: int | None = None,
+        follow_symlinks: bool = True,
+    ) -> None:
+        metadata = real_stat(
+            path,
+            dir_fd=dir_fd,
+            follow_symlinks=follow_symlinks,
+        )
+        ownership_targets.append((metadata.st_dev, metadata.st_ino))
+
+    def record_fchown(descriptor: int, _uid: int, _gid: int) -> None:
+        metadata = os.fstat(descriptor)
+        ownership_targets.append((metadata.st_dev, metadata.st_ino))
+
+    monkeypatch.setattr(dev_init.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(dev_init.os, "walk", race_walk)
+    monkeypatch.setattr(dev_init.os, "open", race_open)
+    monkeypatch.setattr(dev_init.os, "chown", record_chown)
+    monkeypatch.setattr(dev_init.os, "fchown", record_fchown)
+
+    with pytest.raises(DevInitError, match="ownership"):
+        dev_init._chown_repository_tree(
+            repository,
+            65534 if not root_last else 10001,
+            65534 if not root_last else 10001,
+            root_last=root_last,
+        )
+
+    assert swapped
+    assert (secret_before.st_dev, secret_before.st_ino) not in ownership_targets
+    assert external_secret.read_text(encoding="utf-8") == "preserve\n"
+    external_after = external.stat()
+    secret_after = external_secret.stat()
+    assert (external_after.st_uid, external_after.st_gid, stat.S_IMODE(external_after.st_mode)) == (
+        external_before.st_uid,
+        external_before.st_gid,
+        stat.S_IMODE(external_before.st_mode),
+    )
+    assert (secret_after.st_uid, secret_after.st_gid, stat.S_IMODE(secret_after.st_mode)) == (
+        secret_before.st_uid,
+        secret_before.st_gid,
+        stat.S_IMODE(secret_before.st_mode),
+    )
 
 
 def test_initialize_repository_rejects_unsafe_fresh_roots_and_commit_ids(

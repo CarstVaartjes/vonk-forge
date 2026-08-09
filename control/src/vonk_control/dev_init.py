@@ -190,25 +190,55 @@ def _chown_repository_tree(
 ) -> None:
     if os.geteuid() != 0:
         return
-    try:
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+
+    def chown_directory(descriptor: int) -> None:
         if not root_last:
-            os.chown(root, uid, gid, follow_symlinks=False)
-            os.chmod(root, 0o700, follow_symlinks=False)
-        for parent, directories, files in os.walk(
-            root, topdown=not root_last, followlinks=False
-        ):
-            for name in (*directories, *files):
+            os.fchown(descriptor, uid, gid)
+            os.fchmod(descriptor, 0o700)
+        for name in os.listdir(descriptor):
+            metadata = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+            if not stat.S_ISDIR(metadata.st_mode):
                 os.chown(
-                    Path(parent) / name,
+                    name,
                     uid,
                     gid,
+                    dir_fd=descriptor,
                     follow_symlinks=False,
                 )
+                continue
+            child = os.open(name, flags, dir_fd=descriptor)
+            try:
+                opened = os.fstat(child)
+                if (
+                    not stat.S_ISDIR(opened.st_mode)
+                    or (opened.st_dev, opened.st_ino)
+                    != (metadata.st_dev, metadata.st_ino)
+                ):
+                    raise DevInitError(
+                        "development repository ownership traversal changed"
+                    )
+                chown_directory(child)
+            finally:
+                os.close(child)
         if root_last:
-            os.chown(root, uid, gid, follow_symlinks=False)
-            os.chmod(root, 0o700, follow_symlinks=False)
+            os.fchown(descriptor, uid, gid)
+            os.fchmod(descriptor, 0o700)
+
+    descriptor = -1
+    try:
+        descriptor = os.open(root, flags)
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISDIR(metadata.st_mode):
+            raise DevInitError("development repository root is unsafe")
+        chown_directory(descriptor)
+    except DevInitError:
+        raise
     except OSError as error:
         raise DevInitError("development repository ownership cannot be initialized") from error
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
 
 
 def _initialize_fresh_repository(
