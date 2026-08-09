@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+# Reconcile the two public development convenience aliases from an authoritative
+# immutable digest pair. Deployments consume the immutable pair, never these aliases.
+set -euo pipefail
+umask 077
+
+usage() {
+  printf '%s\n' \
+    'usage: promote-dev-aliases API_IMAGE API_DIGEST WORKER_IMAGE WORKER_DIGEST dev' \
+    >&2
+  exit 64
+}
+
+[[ "$#" -eq 5 ]] || usage
+readonly api_image=$1 api_digest=$2 worker_image=$3 worker_digest=$4 alias=$5
+[[ "$api_image" == ghcr.io/carstvaartjes/vonk-forge-api ]] || usage
+[[ "$worker_image" == ghcr.io/carstvaartjes/vonk-forge-worker ]] || usage
+[[ "$api_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || usage
+[[ "$worker_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || usage
+[[ "$alias" == dev ]] || usage
+
+readonly scratch=$(mktemp -d /tmp/vonk-dev-alias-promotion.XXXXXXXXXX)
+[[ "$scratch" =~ ^/tmp/vonk-dev-alias-promotion\.[A-Za-z0-9]{10}$ \
+  && -d "$scratch" && ! -L "$scratch" ]] || {
+  printf '%s\n' 'development alias scratch path is unsafe' >&2
+  exit 1
+}
+
+promotion_started=0
+promotion_complete=0
+previous_api_digest=
+previous_worker_digest=
+
+inspect_alias() {
+  local role=$1 image=$2 observed
+  local error_file="$scratch/$role.inspect-error"
+  if observed=$(skopeo inspect --format '{{.Digest}}' \
+    "docker://$image:$alias" 2>"$error_file"); then
+    [[ "$observed" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+      printf '%s alias digest is invalid\n' "$role" >&2
+      return 1
+    }
+    printf '%s\n' "$observed"
+    return 0
+  fi
+  if grep -Eiq 'manifest unknown|name unknown|not found' "$error_file"; then
+    return 0
+  fi
+  printf '%s alias lookup failed\n' "$role" >&2
+  return 1
+}
+
+set_alias() {
+  local role=$1 image=$2 digest=$3 attempt observed
+  observed=$(inspect_alias "$role" "$image") || return 1
+  [[ "$observed" == "$digest" ]] && return 0
+  for attempt in 1 2 3; do
+    if skopeo copy --all --preserve-digests \
+      "docker://$image@$digest" "docker://$image:$alias" \
+      >/dev/null 2>&1; then
+      observed=$(inspect_alias "$role" "$image") || continue
+      [[ "$observed" == "$digest" ]] && return 0
+    fi
+  done
+  printf '%s development alias did not converge\n' "$role" >&2
+  return 1
+}
+
+finish() {
+  local status=$? rollback_failed=0
+  trap - EXIT INT TERM
+  set +e
+  if [[ "$promotion_started" -eq 1 && "$promotion_complete" -eq 0 ]]; then
+    if [[ "$previous_api_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+      set_alias api "$api_image" "$previous_api_digest" || rollback_failed=1
+    fi
+    if [[ "$previous_worker_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+      set_alias worker "$worker_image" "$previous_worker_digest" \
+        || rollback_failed=1
+    fi
+    printf '%s\n' \
+      'development aliases were not advanced as a pair; rerun the failed publication job to reconcile the authoritative immutable pair' \
+      >&2
+    if [[ "$rollback_failed" -ne 0 ]]; then
+      printf '%s\n' \
+        'one or more previous development aliases could not be restored' >&2
+    fi
+    [[ "$status" -ne 0 ]] || status=1
+  fi
+  rm -rf -- "$scratch"
+  exit "$status"
+}
+
+trap finish EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+previous_api_digest=$(inspect_alias api "$api_image")
+previous_worker_digest=$(inspect_alias worker "$worker_image")
+promotion_started=1
+set_alias api "$api_image" "$api_digest"
+set_alias worker "$worker_image" "$worker_digest"
+promotion_complete=1
+
+printf '%s\n' 'development aliases match the authoritative immutable pair'
