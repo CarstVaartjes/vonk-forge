@@ -78,8 +78,7 @@ services:
       VONK_STATE_PATH: /state
       VONK_SUPERVISOR_ROOT: /supervisor
     volumes:
-      - ${VONK_DEV_ORIGIN_DIR:?run scripts/dev-compose first}:/source-origin:ro
-      - ${VONK_DEV_SECRETS_DIR:?run scripts/dev-compose first}:/host-secrets:ro
+      - ../../.dev/vonk-forge-origin.git:/source-origin:ro
       - dev-repository:/repository
       - dev-api-secrets:/api-secrets
       - dev-worker-secrets:/worker-secrets
@@ -87,6 +86,11 @@ services:
       - dev-control-state:/state
       - dev-route-publications:/routes
       - dev-supervisor-state:/supervisor
+    secrets:
+      - source: database-url
+        target: /host-secrets/database-url
+      - source: git-signing-key
+        target: /host-secrets/git-signing-key
     restart: "no"
 
   control-worker:
@@ -159,6 +163,8 @@ secrets:
     file: "${VONK_DEV_SECRETS_DIR:?run scripts/dev-compose first}/postgres-password"
   database-url:
     file: "${VONK_DEV_SECRETS_DIR:?run scripts/dev-compose first}/database-url"
+  git-signing-key:
+    file: "${VONK_DEV_SECRETS_DIR:?run scripts/dev-compose first}/git-signing-key"
 
 volumes:
   dev-postgres-data: {}

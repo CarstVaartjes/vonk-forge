@@ -238,14 +238,51 @@ def test_stage_runtime_secrets_rejects_parent_symlink_aliases_before_mutation(
     shared.mkdir(parents=True)
     sentinel = shared / "operator-owned"
     sentinel.write_bytes(b"preserve-me\n")
+    shared.chmod(0o751)
+    before = shared.stat()
     alias_parent = tmp_path / "alias-parent"
     alias_parent.symlink_to(actual_parent, target_is_directory=True)
 
-    with pytest.raises(DevInitError, match="physically distinct"):
+    with pytest.raises(DevInitError, match="projection"):
         stage_runtime_secrets(source, shared, alias_parent / "shared")
 
+    after = shared.stat()
     assert sentinel.read_bytes() == b"preserve-me\n"
     assert {path.name for path in shared.iterdir()} == {"operator-owned"}
+    assert stat.S_IMODE(after.st_mode) == stat.S_IMODE(before.st_mode) == 0o751
+    assert (after.st_uid, after.st_gid) == (before.st_uid, before.st_gid)
+
+
+def test_stage_runtime_secrets_requires_absolute_projection_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = _secret_source(tmp_path / "source")
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(DevInitError, match="absolute"):
+        stage_runtime_secrets(source, Path("api"), tmp_path / "worker")
+
+    assert not (tmp_path / "api").exists()
+    assert not (tmp_path / "worker").exists()
+
+
+def test_stage_runtime_secrets_rejects_symlinked_parent_components(
+    tmp_path: Path,
+) -> None:
+    source = _secret_source(tmp_path / "source")
+    actual_parent = tmp_path / "actual-parent"
+    actual_parent.mkdir()
+    linked_parent = tmp_path / "linked-parent"
+    linked_parent.symlink_to(actual_parent, target_is_directory=True)
+
+    with pytest.raises(DevInitError, match="projection"):
+        stage_runtime_secrets(
+            source,
+            tmp_path / "api",
+            linked_parent / "worker",
+        )
+
+    assert not (actual_parent / "worker").exists()
 
 
 def test_stage_runtime_secrets_preserves_generated_credentials_and_refreshes_inputs(

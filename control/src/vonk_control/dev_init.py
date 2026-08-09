@@ -347,25 +347,46 @@ def _service_identity() -> tuple[int, int]:
     return os.geteuid(), os.getegid()
 
 
-def _projection_directory(root: Path, *, label: str) -> int:
+def _projection_path(root: Path, *, label: str) -> tuple[str, ...]:
+    if root.anchor != "/" or len(root.parts) < 2 or any(
+        part in {"", ".", ".."} for part in root.parts[1:]
+    ):
+        raise DevInitError(f"{label} projection path must be absolute and normalized")
+    return root.parts[1:]
+
+
+def _open_projection_directory(root: Path, *, label: str) -> int:
+    components = _projection_path(root, label=label)
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
     try:
-        root.mkdir(mode=0o700, parents=True, exist_ok=True)
-        descriptor = os.open(
-            root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
-        )
+        current = os.open("/", flags)
     except OSError as error:
         raise DevInitError(f"{label} projection root is unsafe") from error
     try:
-        metadata = os.fstat(descriptor)
-        if not stat.S_ISDIR(metadata.st_mode):
-            raise DevInitError(f"{label} projection root is unsafe")
+        for component in components:
+            try:
+                child = os.open(component, flags, dir_fd=current)
+            except FileNotFoundError:
+                try:
+                    os.mkdir(component, 0o700, dir_fd=current)
+                except FileExistsError:
+                    pass
+                child = os.open(component, flags, dir_fd=current)
+            os.close(current)
+            current = child
+        return current
+    except OSError as error:
+        os.close(current)
+        raise DevInitError(f"{label} projection component is unsafe") from error
+
+
+def _prepare_projection_directory(parent: int) -> None:
+    try:
         uid, gid = _service_identity()
-        os.fchown(descriptor, uid, gid)
-        os.fchmod(descriptor, 0o700)
-        return descriptor
-    except Exception:
-        os.close(descriptor)
-        raise
+        os.fchown(parent, uid, gid)
+        os.fchmod(parent, 0o700)
+    except OSError as error:
+        raise DevInitError("development secret projection cannot be prepared") from error
 
 
 def _clear_projection(parent: int) -> None:
@@ -511,8 +532,10 @@ def _write_projection_secret(parent: int, name: str, content: bytes) -> None:
 
 
 def _is_distinct_projection_roots(api_root: Path, worker_root: Path) -> bool:
-    api = api_root.absolute()
-    worker = worker_root.absolute()
+    _projection_path(api_root, label="API")
+    _projection_path(worker_root, label="worker")
+    api = api_root
+    worker = worker_root
     return not (
         api == worker or api.is_relative_to(worker) or worker.is_relative_to(api)
     )
@@ -528,10 +551,10 @@ def stage_runtime_secrets(source: Path, api_root: Path, worker_root: Path) -> No
         raise DevInitError("development secret projections must be distinct")
     database_url = _read_source_secret(source, "database-url")
     signing_key = _read_source_secret(source, "git-signing-key")
-    api = _projection_directory(api_root, label="API")
+    api = _open_projection_directory(api_root, label="API")
     worker = -1
     try:
-        worker = _projection_directory(worker_root, label="worker")
+        worker = _open_projection_directory(worker_root, label="worker")
         api_identity = os.fstat(api)
         worker_identity = os.fstat(worker)
         if (api_identity.st_dev, api_identity.st_ino) == (
@@ -541,6 +564,8 @@ def stage_runtime_secrets(source: Path, api_root: Path, worker_root: Path) -> No
             raise DevInitError(
                 "development secret projections must be physically distinct"
             )
+        _prepare_projection_directory(api)
+        _prepare_projection_directory(worker)
         admin_key = _admin_credential(api)
         worker_token = _worker_credential(worker)
         _clear_projection(api)
