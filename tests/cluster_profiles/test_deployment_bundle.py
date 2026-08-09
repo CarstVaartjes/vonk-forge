@@ -132,6 +132,21 @@ def test_bundle_is_deterministic_and_binds_every_runtime_asset() -> None:
     assert len(verified.manifest_sha256) == 64
 
 
+def test_development_compose_is_source_only_and_absent_from_bundle() -> None:
+    module = _bundle_module()
+    source = ROOT / "deploy/compose"
+
+    assert (source / "compose.dev.yaml").is_file()
+    raw = module.build_deployment_bundle(source)
+    verified = module.verify_deployment_bundle(raw, _descriptor(raw))
+
+    with tarfile.open(fileobj=io.BytesIO(raw), mode="r:") as archive:
+        archive_names = {member.name for member in archive.getmembers()}
+
+    assert "compose.dev.yaml" not in verified.files
+    assert "compose.dev.yaml" not in archive_names
+
+
 def test_bundle_ignores_interpreter_cache_artifacts(tmp_path: Path) -> None:
     module = _bundle_module()
     source = tmp_path / "compose"
