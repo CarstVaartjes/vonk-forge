@@ -40,6 +40,7 @@ jobs:
       - name: Check out apt publication tooling
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Download accepted package artifact
@@ -110,6 +111,33 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y aptly gnupg rclone
+
+      - name: Reverify accepted development source authority
+        shell: bash
+        env:
+          CALLER_SHA: ${{ github.sha }}
+          CHANNEL: ${{ inputs.channel }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$CALLER_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$SOURCE_SHA" = "$CALLER_SHA"
+          case "$CHANNEL" in
+            dev)
+              test "$GITHUB_REF" = "refs/heads/main"
+              git fetch --no-tags --prune origin \
+                +refs/heads/main:refs/remotes/origin/main
+              main_sha=$(git rev-parse --verify refs/remotes/origin/main^{commit})
+              test "$SOURCE_SHA" = "$main_sha"
+              ;;
+            stable)
+              ;;
+            *)
+              echo "unsupported agent apt channel" >&2
+              exit 64
+              ;;
+          esac
 
       - name: Prepare committed or recoverable private state
         id: state

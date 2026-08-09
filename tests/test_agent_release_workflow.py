@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import re
 import struct
 import subprocess
 from pathlib import Path
@@ -252,15 +253,14 @@ def test_development_agent_workflow_runs_only_for_exact_main_sources() -> None:
     dispatch = text.split("  workflow_dispatch:", 1)[1].split("\n\npermissions:", 1)[0]
     assert "inputs:" not in dispatch
     assert "version:" not in dispatch
-    assert text.count("fetch-depth: 0") == 2
-    assert text.count("git fetch --no-tags --prune origin") == 2
-    assert text.count('test "$GITHUB_REF" = "refs/heads/main"') == 2
-    assert text.count('test "$GITHUB_SHA" = "$main_sha"') == 2
+    assert text.count("fetch-depth: 0") == 1
+    assert text.count("git fetch --no-tags --prune origin") == 1
+    assert text.count('test "$GITHUB_REF" = "refs/heads/main"') == 1
+    assert text.count('test "$GITHUB_SHA" = "$main_sha"') == 1
     assert text.index("Verify exact current main tip") < text.index(
         "Derive immutable development package metadata"
     )
-    assert "verify-main-for-apt:" in text
-    assert "needs: [build-test-sign]" in text
+    assert "verify-main-for-apt:" not in text
 
 
 def test_development_agent_workflow_calls_both_reusable_channel_boundaries() -> None:
@@ -275,7 +275,7 @@ def test_development_agent_workflow_calls_both_reusable_channel_boundaries() -> 
     assert "uses: ./.github/workflows/agent-apt-publish.yml" in text
     assert "environment: apt-development" in text
     assert "source_sha: ${{ github.sha }}" in text
-    assert "needs: [package-metadata, build-test-sign, verify-main-for-apt]" in text
+    assert "needs: [package-metadata, build-test-sign]" in text
     assert "artifact_name: ${{ needs.build-test-sign.outputs.artifact_name }}" in text
     assert "secrets:" not in text
     for forbidden in (
@@ -314,10 +314,11 @@ def test_reusable_apt_publisher_has_a_strict_channel_boundary() -> None:
 def test_reusable_apt_publisher_verifies_package_before_credentials() -> None:
     text = apt_workflow()
     verify = text.index("Verify exact downloaded package")
+    authority = text.index("Reverify accepted development source authority")
     restore = text.index("Prepare committed or recoverable private state")
     key = text.index("Materialize and verify apt signing key")
 
-    assert verify < restore < key
+    assert verify < authority < restore < key
     verify_step = apt_step("Verify exact downloaded package")
     assert "scripts/verify-agent-deb" in verify_step
     assert "dpkg-deb --field" in verify_step
@@ -329,6 +330,38 @@ def test_reusable_apt_publisher_verifies_package_before_credentials() -> None:
         "R2_SECRET_ACCESS_KEY",
     ):
         assert credential not in verify_step
+
+
+def test_reusable_apt_publisher_rechecks_dev_authority_inside_protected_job() -> None:
+    text = apt_workflow()
+    authority = apt_step("Reverify accepted development source authority")
+    step_names = re.findall(r"^      - name: (.+)$", text, re.MULTILINE)
+    authority_index = step_names.index(
+        "Reverify accepted development source authority"
+    )
+
+    assert "environment: ${{ inputs.environment }}" in text
+    assert "CALLER_SHA: ${{ github.sha }}" in authority
+    assert "CHANNEL: ${{ inputs.channel }}" in authority
+    assert "SOURCE_SHA: ${{ inputs.source_sha }}" in authority
+    assert 'test "$SOURCE_SHA" = "$CALLER_SHA"' in authority
+    assert 'test "$GITHUB_REF" = "refs/heads/main"' in authority
+    assert "git fetch --no-tags --prune origin" in authority
+    assert "+refs/heads/main:refs/remotes/origin/main" in authority
+    assert 'test "$SOURCE_SHA" = "$main_sha"' in authority
+    assert "dev)" in authority
+    stable_case = authority.split("stable)", 1)[1].split("*)", 1)[0]
+    assert "origin/main" not in stable_case
+    assert step_names[authority_index + 1] == (
+        "Prepare committed or recoverable private state"
+    )
+    for forbidden in (
+        "APT_GPG_PASSPHRASE",
+        "APT_REPOSITORY_GPG_PRIVATE_KEY",
+        "R2_ACCESS_KEY_ID",
+        "R2_SECRET_ACCESS_KEY",
+    ):
+        assert forbidden not in authority
 
 
 def test_reusable_apt_publisher_restores_only_authenticated_private_state() -> None:
