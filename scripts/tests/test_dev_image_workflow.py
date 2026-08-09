@@ -35,6 +35,18 @@ def _step(text: str, name: str) -> str:
     return text[start:] if following < 0 else text[start:following]
 
 
+def _job(text: str, name: str) -> str:
+    marker = f"  {name}:"
+    start = text.index(marker)
+    following = text.find("\n  ", start + len(marker))
+    while following >= 0:
+        candidate = text[following + 1 :].splitlines()[0]
+        if candidate.startswith("  ") and not candidate.startswith("    "):
+            break
+        following = text.find("\n  ", following + 3)
+    return text[start:] if following < 0 else text[start:following]
+
+
 def test_metadata_emits_only_the_exact_main_development_channel() -> None:
     result = _metadata("refs/heads/main", SHA, SHA)
 
@@ -79,10 +91,15 @@ def test_metadata_rejects_missing_or_extra_arguments() -> None:
 
 def test_workflow_is_main_only_publication_without_repository_secrets() -> None:
     text = _workflow()
+    validator = _job(text, "build-and-accept")
+    publisher = _job(text, "publish-development-images")
 
     assert "branches: [main]" in text
     assert "workflow_dispatch:" in text
     assert "packages: write" in text
+    assert "packages: write" not in validator
+    assert "permissions:\n      contents: read\n      packages: write" in publisher
+    assert text.count("packages: write") == 1
     assert "contents: read" in text
     assert "environment:" not in text
     assert "id-token: write" not in text
@@ -114,6 +131,9 @@ def test_workflow_builds_scans_and_accepts_oci_archives_before_login() -> None:
     assert "scripts/verify-dev-image-secrets" in accept
     assert "scripts/dev-image-acceptance" in accept
     assert text.index("Scan and accept image-only stack") < text.index("Log in to GHCR")
+    assert "Upload accepted OCI archives" in text
+    assert "needs: [build-and-accept]" in text
+    assert "Download accepted OCI archives" in text
 
 
 def test_workflow_publishes_tested_archives_then_renders_immutable_compose() -> None:
@@ -127,8 +147,13 @@ def test_workflow_publishes_tested_archives_then_renders_immutable_compose() -> 
     assert publish.count("oci-archive:") == 2
     assert ":${IMMUTABLE_TAG}" in publish
     assert "digestfile" in publish
+    assert "skopeo manifest-digest" in publish
+    assert "refusing to overwrite immutable" in publish
+    assert "manifest unknown|name unknown|not found" in publish
     assert "docker buildx imagetools inspect" in verify
     assert ".Provenance" in verify and ".SBOM" in verify
+    assert "slsa.dev/provenance" in verify
+    assert "SPDXRef-DOCUMENT" in verify
     assert "scripts/render-dev-compose" in render
     assert ":${IMMUTABLE_TAG}@${API_DIGEST}" in render
     assert ":${IMMUTABLE_TAG}@${WORKER_DIGEST}" in render
@@ -149,6 +174,15 @@ def test_dev_alias_is_the_last_mutation_and_latest_is_never_published() -> None:
     assert "docker://$WORKER_IMAGE@$WORKER_DIGEST" in alias
     assert "docker://$WORKER_IMAGE:$DEV_ALIAS" in alias
     assert "skopeo inspect" in alias
+    assert "rollback_aliases" in alias
+    assert "previous_api_digest" in alias
+    assert "previous_worker_digest" in alias
+    assert "trap" in alias
+    assert "cancel-in-progress: false" in text
+    assert text.count("refs/remotes/origin/main") >= 2
+    assert text.index("Recheck exact main before publication") < text.index(
+        "Log in to GHCR"
+    )
     assert ":latest" not in text
     assert "latest=" not in text
     render = _step(text, "Render digest-pinned Compose artifact")
