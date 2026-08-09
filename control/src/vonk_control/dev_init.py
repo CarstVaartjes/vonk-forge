@@ -22,6 +22,8 @@ _WORKER_TOKEN = re.compile(rb"[A-Za-z0-9_-]{43}\Z")
 _PUBLIC_REPOSITORY_URL = "https://github.com/CarstVaartjes/vonk-forge.git"
 _API_UID = 10001
 _API_GID = 10001
+_GIT_UID = 65534
+_GIT_GID = 65534
 _MAX_SECRET_BYTES = 64 * 1024
 _TARGET_SHA256 = "0" * 64
 _BUILD_DIGEST = "sha256:" + "1" * 64
@@ -49,7 +51,7 @@ def _git_environment() -> dict[str, str]:
 def _git_identity() -> dict[str, object]:
     if os.geteuid() != 0:
         return {}
-    return {"user": _API_UID, "group": _API_GID, "extra_groups": ()}
+    return {"user": _GIT_UID, "group": _GIT_GID, "extra_groups": ()}
 
 
 def _canonical(value: object) -> bytes:
@@ -183,19 +185,28 @@ def _is_ancestor(
     raise DevInitError("Git could not compare repository commits")
 
 
-def _chown_repository_tree(root: Path) -> None:
+def _chown_repository_tree(
+    root: Path, uid: int, gid: int, *, root_last: bool
+) -> None:
     if os.geteuid() != 0:
         return
     try:
-        for parent, directories, files in os.walk(root, followlinks=False):
-            os.chown(parent, _API_UID, _API_GID, follow_symlinks=False)
+        if not root_last:
+            os.chown(root, uid, gid, follow_symlinks=False)
+            os.chmod(root, 0o700, follow_symlinks=False)
+        for parent, directories, files in os.walk(
+            root, topdown=not root_last, followlinks=False
+        ):
             for name in (*directories, *files):
                 os.chown(
                     Path(parent) / name,
-                    _API_UID,
-                    _API_GID,
+                    uid,
+                    gid,
                     follow_symlinks=False,
                 )
+        if root_last:
+            os.chown(root, uid, gid, follow_symlinks=False)
+            os.chmod(root, 0o700, follow_symlinks=False)
     except OSError as error:
         raise DevInitError("development repository ownership cannot be initialized") from error
 
@@ -241,7 +252,7 @@ def _prepare_empty_repository_root(root: Path) -> None:
         if os.listdir(descriptor):
             raise DevInitError("development repository root is not empty")
         if os.geteuid() == 0:
-            os.fchown(descriptor, _API_UID, _API_GID)
+            os.fchown(descriptor, _GIT_UID, _GIT_GID)
         os.fchmod(descriptor, 0o700)
     except DevInitError:
         raise
@@ -311,29 +322,42 @@ def initialize_repository(root: Path, repository_url: str, expected_commit: str)
     local_origin = _origin_is_allowed(repository_url)
     if root.is_symlink():
         raise DevInitError("development repository root is unsafe")
-    if root.exists():
-        _directory(root, label="development repository root")
-        if any(root.iterdir()):
-            _initialize_existing_repository(
-                root, repository_url, expected_commit, local_origin=local_origin
-            )
+    managed_ownership = False
+    try:
+        if root.exists():
+            _directory(root, label="development repository root")
+            if any(root.iterdir()):
+                if os.geteuid() == 0:
+                    managed_ownership = True
+                    _chown_repository_tree(
+                        root, _GIT_UID, _GIT_GID, root_last=False
+                    )
+                _initialize_existing_repository(
+                    root, repository_url, expected_commit, local_origin=local_origin
+                )
+            else:
+                managed_ownership = os.geteuid() == 0
+                _initialize_fresh_repository(
+                    root, repository_url, expected_commit, local_origin=local_origin
+                )
         else:
+            managed_ownership = os.geteuid() == 0
             _initialize_fresh_repository(
                 root, repository_url, expected_commit, local_origin=local_origin
             )
-    else:
-        _initialize_fresh_repository(
-            root, repository_url, expected_commit, local_origin=local_origin
-        )
-    _repository_is_clean(root, local_origin=local_origin)
-    if _git(
-        root,
-        ("rev-parse", "--verify", "refs/heads/main^{commit}"),
-        action="verify development repository main",
-        local_origin=local_origin,
-    ) != expected_commit:
-        raise DevInitError("development repository did not resolve to the expected commit")
-    _chown_repository_tree(root)
+        _repository_is_clean(root, local_origin=local_origin)
+        if _git(
+            root,
+            ("rev-parse", "--verify", "refs/heads/main^{commit}"),
+            action="verify development repository main",
+            local_origin=local_origin,
+        ) != expected_commit:
+            raise DevInitError(
+                "development repository did not resolve to the expected commit"
+            )
+    finally:
+        if managed_ownership and root.exists() and not root.is_symlink():
+            _chown_repository_tree(root, _API_UID, _API_GID, root_last=True)
 
 
 def _read_source_secret(root: Path, name: str) -> bytes:

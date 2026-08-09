@@ -194,6 +194,9 @@ def _fake_docker(tmp_path: Path) -> Path:
         "> \"$VONK_TEST_CAPTURE_DIR/main\"\n"
         "stat -c %a \"$VONK_DEV_ORIGIN_DIR\" > \"$VONK_TEST_CAPTURE_DIR/mode\"\n"
         "printf '%s\\n' \"$@\" > \"$VONK_TEST_CAPTURE_DIR/arguments\"\n"
+        "if [[ \" $* \" == *\" up \"* && \" $* \" != *\" --wait \"* ]]; then\n"
+        "  exit 89\n"
+        "fi\n"
         "exit \"${VONK_TEST_DOCKER_EXIT:-0}\"\n",
         encoding="utf-8",
     )
@@ -216,6 +219,8 @@ def test_dev_compose_script_uses_a_unique_one_use_origin_and_ignores_override(
     secrets = _existing_secrets(tmp_path)
     fake_bin = _fake_docker(tmp_path)
     arbitrary_origin = tmp_path / "arbitrary-origin.git"
+    arbitrary_tmp = tmp_path / "attacker-controlled-tmp"
+    arbitrary_tmp.mkdir()
     expected = subprocess.run(
         ("git", "-C", str(repository), "rev-parse", "HEAD"),
         check=True,
@@ -231,6 +236,7 @@ def test_dev_compose_script_uses_a_unique_one_use_origin_and_ignores_override(
             "VONK_DEV_ORIGIN_DIR": str(arbitrary_origin),
             "VONK_DEV_SECRETS_DIR": str(secrets),
             "VONK_TEST_CAPTURE_DIR": str(capture),
+            "TMPDIR": str(arbitrary_tmp),
         }
 
         subprocess.run(
@@ -249,8 +255,8 @@ def test_dev_compose_script_uses_a_unique_one_use_origin_and_ignores_override(
         origins.append(origin_path)
         assert exported_commit == expected
         assert exported_secrets == str(secrets)
-        assert origin_path.parent == repository / ".dev"
-        assert origin_path.name.startswith("vonk-forge-origin.")
+        assert origin_path.parent == Path("/tmp")
+        assert origin_path.name.startswith("vonk-forge-dev-origin.")
         assert (capture / "main").read_text(encoding="utf-8").strip() == expected
         assert (capture / "mode").read_text(encoding="utf-8").strip() == "755"
         assert not origin_path.exists()
@@ -262,6 +268,135 @@ def test_dev_compose_script_uses_a_unique_one_use_origin_and_ignores_override(
     assert not arbitrary_origin.exists()
     assert not (repository / ".dev/vonk-forge-origin.git").exists()
     assert not (repository / ".dev/.vonk-forge-origin.owner").exists()
+
+
+def test_dev_compose_origin_is_not_redirected_when_dev_is_swapped_after_validation(
+    tmp_path: Path,
+) -> None:
+    repository, local_script = _script_repository(tmp_path)
+    secrets = _existing_secrets(tmp_path)
+    fake_bin = _fake_docker(tmp_path)
+    real_mktemp = shutil.which("mktemp")
+    assert real_mktemp is not None
+    fake_mktemp = fake_bin / "mktemp"
+    fake_mktemp.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -e\n"
+        "mv -- \"$VONK_TEST_REPOSITORY_ROOT/.dev\" "
+        "\"$VONK_TEST_REPOSITORY_ROOT/.dev.checked\"\n"
+        "ln -s -- \"$VONK_TEST_SWAPPED_DEV\" "
+        "\"$VONK_TEST_REPOSITORY_ROOT/.dev\"\n"
+        f"exec {real_mktemp} \"$@\"\n",
+        encoding="utf-8",
+    )
+    fake_mktemp.chmod(0o755)
+    capture = tmp_path / "capture"
+    capture.mkdir()
+    swapped_dev = tmp_path / "attacker-development"
+    swapped_dev.mkdir()
+    sentinel = swapped_dev / "operator-owned"
+    sentinel.write_text("preserve\n", encoding="utf-8")
+    arbitrary_tmp = tmp_path / "attacker-controlled-tmp"
+    arbitrary_tmp.mkdir()
+    environment = os.environ | {
+        "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
+        "TMPDIR": str(arbitrary_tmp),
+        "VONK_DEV_SECRETS_DIR": str(secrets),
+        "VONK_TEST_CAPTURE_DIR": str(capture),
+        "VONK_TEST_REPOSITORY_ROOT": str(repository),
+        "VONK_TEST_SWAPPED_DEV": str(swapped_dev),
+    }
+
+    result = subprocess.run(
+        (str(local_script), "config"),
+        cwd=repository,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    origin = Path(
+        (capture / "environment").read_text(encoding="utf-8").splitlines()[1]
+    )
+    assert result.returncode == 0
+    assert origin.parent == Path("/tmp")
+    assert origin.name.startswith("vonk-forge-dev-origin.")
+    assert not origin.exists()
+    assert sentinel.read_text(encoding="utf-8") == "preserve\n"
+    assert {path.name for path in swapped_dev.iterdir()} == {"operator-owned"}
+    assert (repository / ".dev.checked").is_dir()
+
+
+def test_dev_compose_script_waits_for_an_explicit_detached_dev_init_startup(
+    tmp_path: Path,
+) -> None:
+    repository, local_script = _script_repository(tmp_path)
+    secrets = _existing_secrets(tmp_path)
+    fake_bin = _fake_docker(tmp_path)
+    capture = tmp_path / "capture"
+    capture.mkdir()
+    environment = os.environ | {
+        "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
+        "VONK_DEV_SECRETS_DIR": str(secrets),
+        "VONK_TEST_CAPTURE_DIR": str(capture),
+    }
+
+    result = subprocess.run(
+        (str(local_script), "up", "-d", "dev-init"),
+        cwd=repository,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    origin = Path(
+        (capture / "environment").read_text(encoding="utf-8").splitlines()[1]
+    )
+    arguments = (capture / "arguments").read_text(encoding="utf-8").splitlines()
+    assert result.returncode == 0
+    assert arguments[-4:] == ["up", "-d", "dev-init", "--wait"]
+    assert not origin.exists()
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    (
+        ("create",),
+        ("start",),
+        ("run", "-d", "control-api"),
+        ("restart",),
+        ("up", "--no-start"),
+        ("up", "--no-start=true"),
+    ),
+)
+def test_dev_compose_script_rejects_lifecycles_without_a_safe_origin_lifetime(
+    tmp_path: Path, arguments: tuple[str, ...]
+) -> None:
+    repository, local_script = _script_repository(tmp_path)
+    secrets = _existing_secrets(tmp_path)
+    fake_bin = _fake_docker(tmp_path)
+    capture = tmp_path / "capture"
+    capture.mkdir()
+    environment = os.environ | {
+        "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
+        "VONK_DEV_SECRETS_DIR": str(secrets),
+        "VONK_TEST_CAPTURE_DIR": str(capture),
+    }
+
+    result = subprocess.run(
+        (str(local_script), *arguments),
+        cwd=repository,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "unsupported" in result.stderr
+    assert not (capture / "environment").exists()
 
 
 def test_dev_compose_script_cleans_one_use_origin_after_docker_failure(
