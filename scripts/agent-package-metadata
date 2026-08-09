@@ -1,0 +1,104 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import re
+import sys
+import tomllib
+from collections.abc import Sequence
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+VERSION_FILES = (
+    (ROOT / "Cargo.toml", ("workspace", "package", "version")),
+    (ROOT / "pyproject.toml", ("project", "version")),
+    (ROOT / "control/pyproject.toml", ("project", "version")),
+    (ROOT / "agent/pyproject.toml", ("project", "version")),
+)
+SEMVER = r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+SEMVER_RE = re.compile(rf"^{SEMVER}$")
+TAG_RE = re.compile(rf"^v({SEMVER})$")
+SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+EPOCH_RE = re.compile(r"^(?:0|[1-9][0-9]*)$")
+MAX_EPOCH = 4_102_444_800
+
+
+def workspace_version() -> str:
+    versions: list[str] = []
+    for path, keys in VERSION_FILES:
+        try:
+            value: object = tomllib.loads(path.read_text())
+            for key in keys:
+                if not isinstance(value, dict):
+                    raise ValueError
+                value = value[key]
+        except (KeyError, OSError, tomllib.TOMLDecodeError, ValueError) as error:
+            raise ValueError("workspace version is invalid") from error
+        if not isinstance(value, str) or SEMVER_RE.fullmatch(value) is None:
+            raise ValueError("workspace version is invalid")
+        versions.append(value)
+    if len(set(versions)) != 1:
+        raise ValueError("workspace version is invalid")
+    return versions[0]
+
+
+def parse_epoch(value: str, *, reserve_next: bool = False) -> int:
+    if EPOCH_RE.fullmatch(value) is None:
+        raise ValueError("epoch is invalid")
+    epoch = int(value)
+    if epoch > MAX_EPOCH or (reserve_next and epoch == MAX_EPOCH):
+        raise ValueError("epoch is invalid")
+    return epoch
+
+
+def stable_next_version(version: str) -> str:
+    major, minor, patch = version.split(".")
+    return f"{major}.{minor}.{int(patch) + 1}"
+
+
+def metadata(arguments: Sequence[str]) -> list[str]:
+    if len(arguments) != 5:
+        raise ValueError("metadata arguments are invalid")
+    release, ref_type, ref_name, sha, epoch_text = arguments
+    if SHA_RE.fullmatch(sha) is None:
+        raise ValueError("source SHA is invalid")
+    epoch = parse_epoch(epoch_text, reserve_next=release == "development")
+    version = workspace_version()
+    if release == "development":
+        if (ref_type, ref_name) != ("branch", "main"):
+            raise ValueError("development source is invalid")
+        package_version = f"{version}~dev.{epoch}+g{sha[:12]}"
+        next_version = f"{version}~dev.{epoch + 1}+g{sha[:12]}"
+        artifact_name = f"vonk-agent-development-{sha}"
+        channel = "dev"
+    elif release == "production":
+        tag = TAG_RE.fullmatch(ref_name)
+        if ref_type != "tag" or tag is None or tag.group(1) != version:
+            raise ValueError("production source is invalid")
+        package_version = version
+        next_version = stable_next_version(version)
+        artifact_name = f"vonk-agent-production-{sha}"
+        channel = "stable"
+    else:
+        raise ValueError("release channel is invalid")
+    return [
+        f"version={package_version}",
+        f"next_version={next_version}",
+        f"package=vonk-forge-agent_{package_version}_arm64.deb",
+        f"artifact_name={artifact_name}",
+        f"channel={channel}",
+        f"snapshot={channel}-{package_version}",
+    ]
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    try:
+        lines = metadata(sys.argv[1:] if argv is None else argv)
+    except ValueError:
+        print("agent package metadata is invalid", file=sys.stderr)
+        return 64
+    print("\n".join(lines))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
