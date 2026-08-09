@@ -85,7 +85,13 @@ def bundles(tmp_path: Path, publication: dict[str, str]) -> tuple[bytes, bytes]:
     aptly.mkdir()
     (aptly / "db").write_bytes(b"trusted aptly database")
     public = tmp_path / "public"
-    (public / "dists/dev").mkdir(parents=True)
+    (public / "dists/dev/main/binary-arm64").mkdir(parents=True)
+    (public / "dists/dev/main/binary-arm64/Packages").write_bytes(b"package index")
+    (public / "dists/dev/main/binary-arm64/Packages.gz").write_bytes(
+        b"compressed package index"
+    )
+    (public / "dists/dev/Release").write_bytes(b"release metadata")
+    (public / "dists/dev/Release.gpg").write_bytes(b"detached signature")
     (public / "dists/dev/InRelease").write_bytes(b"signed-at-t1")
     (public / "vonk-forge-dev-archive-keyring.gpg").write_bytes(b"public key")
     package = public / "pool/main/v/vonk-forge-agent" / publication["package"]
@@ -226,6 +232,68 @@ def test_commit_precedes_public_bytes_and_single_latest_pointer(
         "commit_sha256": state.sha256(private.objects[f"{prefix}/commit.json"]),
         "version": publication["version"],
     }
+
+
+def test_inrelease_is_the_final_public_commit_after_all_other_public_objects(
+    tmp_path: Path,
+) -> None:
+    state = load_state_module()
+    publication = receipt()
+    state_bundle, public_bundle = bundles(tmp_path, publication)
+    operations: list[str] = []
+    private = FakeR2("state", operations)
+    public = FakeR2("public", operations)
+
+    state.commit_candidate(private, publication, state_bundle, public_bundle)
+    state.publish_committed(private, public, publication)
+
+    inrelease = operations.index("public:write:dists/dev/InRelease")
+    release = operations.index("public:write:dists/dev/Release")
+    release_gpg = operations.index("public:write:dists/dev/Release.gpg")
+    latest = operations.index("state:write:latest.json")
+    public_writes = [
+        index
+        for index, operation in enumerate(operations)
+        if operation.startswith("public:write:")
+    ]
+    release_writes = {release, release_gpg, inrelease}
+    data_writes = [index for index in public_writes if index not in release_writes]
+    assert all(index < release and index < release_gpg for index in data_writes)
+    assert all(index < inrelease for index in public_writes if index != inrelease)
+    assert release < inrelease
+    assert release_gpg < inrelease
+    assert inrelease < latest
+
+
+@pytest.mark.parametrize(
+    "failed_key",
+    (
+        "vonk-forge-dev-archive-keyring.gpg",
+        (
+            "pool/main/v/vonk-forge-agent/"
+            "vonk-forge-agent_0.1.0~dev.1786300000+g0123456789ab_arm64.deb"
+        ),
+        "dists/dev/Release",
+        "dists/dev/Release.gpg",
+        "dists/dev/InRelease",
+    ),
+)
+def test_public_failure_before_or_at_inrelease_never_advances_latest(
+    tmp_path: Path, failed_key: str
+) -> None:
+    state = load_state_module()
+    publication = receipt()
+    state_bundle, public_bundle = bundles(tmp_path, publication)
+    operations: list[str] = []
+    private = FakeR2("state", operations)
+    public = FakeR2("public", operations, fail_once={failed_key})
+    state.commit_candidate(private, publication, state_bundle, public_bundle)
+
+    with pytest.raises(OSError, match="injected R2 failure"):
+        state.publish_committed(private, public, publication)
+
+    assert "latest.json" not in private.objects
+    assert "state:write:latest.json" not in operations
 
 
 def test_equal_replay_publishes_persisted_public_bytes_without_regeneration(
