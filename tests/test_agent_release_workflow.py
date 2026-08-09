@@ -245,7 +245,25 @@ def test_reusable_agent_package_build_uploads_one_immutable_release_set() -> Non
     assert "path: dist/*" in text
 
 
-def test_manual_agent_workflow_calls_the_development_package_builder() -> None:
+def test_development_agent_workflow_runs_only_for_exact_main_sources() -> None:
+    text = WORKFLOW.read_text()
+
+    assert "  push:\n    branches: [main]" in text
+    dispatch = text.split("  workflow_dispatch:", 1)[1].split("\n\npermissions:", 1)[0]
+    assert "inputs:" not in dispatch
+    assert "version:" not in dispatch
+    assert text.count("fetch-depth: 0") == 2
+    assert text.count("git fetch --no-tags --prune origin") == 2
+    assert text.count('test "$GITHUB_REF" = "refs/heads/main"') == 2
+    assert text.count('test "$GITHUB_SHA" = "$main_sha"') == 2
+    assert text.index("Verify exact current main tip") < text.index(
+        "Derive immutable development package metadata"
+    )
+    assert "verify-main-for-apt:" in text
+    assert "needs: [build-test-sign]" in text
+
+
+def test_development_agent_workflow_calls_both_reusable_channel_boundaries() -> None:
     text = WORKFLOW.read_text()
 
     assert "uses: ./.github/workflows/agent-package-build.yml" in text
@@ -254,6 +272,11 @@ def test_manual_agent_workflow_calls_the_development_package_builder() -> None:
     assert "artifact-metadata: write" in text
     assert "attestations: write" in text
     assert "id-token: write" in text
+    assert "uses: ./.github/workflows/agent-apt-publish.yml" in text
+    assert "environment: apt-development" in text
+    assert "source_sha: ${{ github.sha }}" in text
+    assert "needs: [package-metadata, build-test-sign, verify-main-for-apt]" in text
+    assert "artifact_name: ${{ needs.build-test-sign.outputs.artifact_name }}" in text
     assert "secrets:" not in text
     for forbidden in (
         "scripts/build-agent-deb",
@@ -403,10 +426,16 @@ def test_release_actions_are_commit_pinned_and_secrets_are_environment_scoped() 
     assert "id-token: write" in package_text
 
 
-def test_manual_agent_validation_does_not_own_apt_publication() -> None:
+def test_development_agent_workflow_has_no_production_authority() -> None:
     text = WORKFLOW.read_text()
-    assert "publish-apt" not in text
+
+    assert "publish-apt:" in text
     assert "apt-release" not in text
+    assert "agent-release" not in text
+    assert "channel: stable" not in text
+    assert "distribution: stable" not in text
+    assert "gh release" not in text
+    assert "actions/create-release" not in text
     assert "contents: write" not in text
 
 

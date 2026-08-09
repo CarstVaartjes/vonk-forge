@@ -15,6 +15,9 @@ def _copy(tmp_path: Path) -> Path:
     target = tmp_path / "repo"
     for path in (
         ".github/workflows/ci.yml",
+        ".github/workflows/agent-release.yml",
+        ".github/workflows/agent-package-build.yml",
+        ".github/workflows/agent-apt-publish.yml",
         ".github/workflows/dev-images.yml",
         ".github/workflows/workload-artifacts.yml",
         ".github/release-allowed-signers",
@@ -72,6 +75,9 @@ def _copy(tmp_path: Path) -> Path:
         "scripts/build-platform-manifest",
         "scripts/collect-platform-artifact-evidence",
         "scripts/container-release-metadata",
+        "scripts/agent-package-metadata",
+        "scripts/agent-apt-metadata",
+        "scripts/agent-apt-state",
         "scripts/dev-image-acceptance",
         "scripts/dev-image-metadata",
         "scripts/promote-image-aliases",
@@ -189,6 +195,40 @@ def test_supply_chain_manifest_binds_workload_artifact_publication_contract(
     candidate = repository / path
     candidate.write_bytes(candidate.read_bytes() + b"drift\n")
 
+    result = subprocess.run(
+        [SCRIPT, "--root", repository, "--json"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "manifest" in " ".join(json.loads(result.stdout)["errors"]).lower()
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        ".github/workflows/agent-release.yml",
+        ".github/workflows/agent-package-build.yml",
+        ".github/workflows/agent-apt-publish.yml",
+        "scripts/agent-package-metadata",
+        "scripts/agent-apt-metadata",
+        "scripts/agent-apt-state",
+    ),
+)
+def test_supply_chain_manifest_binds_agent_package_channel_authority(
+    tmp_path: Path,
+    path: str,
+) -> None:
+    repository = _copy(tmp_path)
+    manifest = json.loads(
+        (repository / "inventory/sbom/manifest.json").read_bytes()
+    )
+    assert path in manifest["inputs"]
+
+    candidate = repository / path
+    candidate.write_bytes(candidate.read_bytes() + b"\n# authority drift\n")
     result = subprocess.run(
         [SCRIPT, "--root", repository, "--json"],
         capture_output=True,
