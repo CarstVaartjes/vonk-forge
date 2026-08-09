@@ -103,6 +103,20 @@ def bundles(tmp_path: Path, publication: dict[str, str]) -> tuple[bytes, bytes]:
     )
 
 
+def without_bundle_member(raw: bytes, missing_name: str) -> bytes:
+    output = io.BytesIO()
+    with (
+        tarfile.open(fileobj=io.BytesIO(raw), mode="r:gz") as source,
+        tarfile.open(fileobj=output, mode="w:gz") as target,
+    ):
+        for member in source.getmembers():
+            if member.name == missing_name:
+                continue
+            stream = source.extractfile(member) if member.isfile() else None
+            target.addfile(member, stream)
+    return output.getvalue()
+
+
 def test_partial_immutable_objects_are_completable_and_conflicts_fail(
     tmp_path: Path,
 ) -> None:
@@ -314,6 +328,8 @@ def test_equal_replay_publishes_persisted_public_bytes_without_regeneration(
 
     regenerated = tmp_path / "regenerated/public"
     (regenerated / "dists/dev").mkdir(parents=True)
+    (regenerated / "dists/dev/Release").write_bytes(b"release metadata at t2")
+    (regenerated / "dists/dev/Release.gpg").write_bytes(b"detached signature at t2")
     (regenerated / "dists/dev/InRelease").write_bytes(b"signed-at-t2")
     (regenerated / "vonk-forge-dev-archive-keyring.gpg").write_bytes(b"public key")
     package = regenerated / "pool/main/v/vonk-forge-agent" / publication["package"]
@@ -356,6 +372,28 @@ def test_public_bundle_binds_the_exact_verified_package_hash(tmp_path: Path) -> 
 
     with pytest.raises(state.StateError, match="public package hash"):
         bundles(tmp_path, publication)
+
+
+@pytest.mark.parametrize(
+    "missing_name",
+    (
+        "public/dists/dev/Release",
+        "public/dists/dev/Release.gpg",
+    ),
+)
+def test_public_bundle_requires_exact_release_metadata_objects(
+    tmp_path: Path, missing_name: str
+) -> None:
+    state = load_state_module()
+    publication = receipt()
+    _, public_bundle = bundles(tmp_path, publication)
+
+    with pytest.raises(state.StateError, match="public bundle is incomplete"):
+        state.validate_bundle(
+            without_bundle_member(public_bundle, missing_name),
+            "public",
+            publication,
+        )
 
 
 @pytest.mark.parametrize(
