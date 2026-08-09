@@ -299,7 +299,9 @@ def expected(root: Path) -> tuple[dict[str, bytes], bytes, dict[str, object]]:
     input_paths = (
         "pyproject.toml",
         ".github/workflows/ci.yml",
+        ".github/workflows/dev-images.yml",
         ".github/workflows/workload-artifacts.yml",
+        ".github/release-allowed-signers",
         ".github/dependabot.yml",
         "schemas/control-deployment-bundle.schema.json",
         "schemas/platform-update-manifest.schema.json",
@@ -314,6 +316,7 @@ def expected(root: Path) -> tuple[dict[str, bytes], bytes, dict[str, object]]:
         "agent_protocol/uv.lock", "control/pyproject.toml", "control/uv.lock",
         "bin/vonk-control-offline",
         "control/src/vonk_control/offline.py",
+        "control/src/vonk_control/dev_init.py",
         "control/src/vonk_control/generation_launch.py",
         "control/src/vonk_control/host_backup.py",
         "control/src/vonk_control/host_commands.py",
@@ -322,6 +325,7 @@ def expected(root: Path) -> tuple[dict[str, bytes], bytes, dict[str, object]]:
         "control/src/vonk_control/upgrade.py",
         ".dockerignore", "control/web/package-lock.json", "control/Dockerfile",
         "deploy/compose/compose.yaml", "deploy/compose/images.lock.json",
+        "deploy/compose/compose.dev.images.yaml",
         "deploy/compose/Caddyfile", "deploy/compose/caddy/entrypoint.sh",
         "deploy/compose/compose.builtin-ca.yaml",
         "deploy/compose/compose.step-ca.yaml",
@@ -351,12 +355,17 @@ def expected(root: Path) -> tuple[dict[str, bytes], bytes, dict[str, object]]:
         "scripts/build-platform-manifest",
         "scripts/collect-platform-artifact-evidence",
         "scripts/container-release-metadata",
+        "scripts/dev-image-acceptance",
+        "scripts/dev-image-metadata",
+        "scripts/promote-image-aliases",
+        "scripts/render-dev-compose",
         "scripts/platform-release-authority",
         "scripts/publish-platform-target",
         "scripts/refuse-existing-image-version",
         "scripts/validate-container-release-digests",
         "scripts/verify-platform-release",
         "scripts/verify-public-image-inputs",
+        "scripts/verify-dev-image-secrets",
         "scripts/verify-supply-chain",
         "scripts/workload-artifact-metadata",
         "src/cluster_profiles/update_trust.py",
@@ -465,7 +474,7 @@ def image_errors(root: Path) -> list[str]:
         errors.append("hermes digest-pinned build base is absent from Hermes Dockerfile")
     if "ARG NODE_IMAGE" not in dockerfile or "ARG PYTHON_IMAGE" not in dockerfile:
         errors.append("control build bases are not explicit locked arguments")
-    if "FROM runtime AS worker" not in dockerfile or "FROM runtime AS api" not in dockerfile:
+    if "FROM scratch AS worker" not in dockerfile or "FROM scratch AS api" not in dockerfile:
         errors.append("control API and worker image targets are not isolated")
     if (
         "COPY control/pyproject.toml ./" not in dockerfile

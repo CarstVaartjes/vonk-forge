@@ -28,9 +28,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("release metadata is invalid", file=sys.stderr)
         return 64
     print(f"version={ref_name[1:]}")
+    print(f"image_version_tag={ref_name}")
     print(f"commit_tag=sha-{commit}")
-    for name, image in PACKAGES:
+    print(f"dev_tag=dev-sha-{commit}")
+    print("latest_alias=latest")
+    for name, image in PACKAGES[:2]:
         print(f"{name}={image}")
+    for name, image in PACKAGES[:2]:
+        print(f"{name.removesuffix('_image')}_dev_source={image}:dev-sha-{commit}")
+    print(f"{PACKAGES[2][0]}={PACKAGES[2][1]}")
     print(f"deployment_bundle_repository={DEPLOYMENT_BUNDLE_REPOSITORY}")
     print("platform_channel=stable")
     return 0

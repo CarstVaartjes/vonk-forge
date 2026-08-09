@@ -9,7 +9,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/dev-image-metadata"
-ALIAS_SCRIPT = ROOT / "scripts/promote-dev-aliases"
+ALIAS_SCRIPT = ROOT / "scripts/promote-image-aliases"
 WORKFLOW = ROOT / ".github/workflows/dev-images.yml"
 SHA = "0123456789abcdef0123456789abcdef01234567"
 DIGEST_A = "sha256:" + "a" * 64
@@ -96,6 +96,7 @@ def _promote_aliases(
     log: Path,
     *,
     failures: str = "",
+    alias: str = "dev",
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         (
@@ -104,7 +105,7 @@ def _promote_aliases(
             DIGEST_A,
             "ghcr.io/carstvaartjes/vonk-forge-worker",
             DIGEST_B,
-            "dev",
+            alias,
         ),
         cwd=ROOT,
         env={
@@ -194,6 +195,19 @@ def test_alias_reconciliation_rolls_forward_an_initial_partial_state(
         "worker": DIGEST_B,
     }
     assert log.read_text(encoding="utf-8").count("copy ") == 1
+
+
+def test_same_reconciliation_contract_applies_to_latest(tmp_path: Path) -> None:
+    fake_bin, state, log = _fake_skopeo(tmp_path)
+
+    result = _promote_aliases(fake_bin, state, log, alias="latest")
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(state.read_text(encoding="utf-8")) == {
+        "api": DIGEST_A,
+        "worker": DIGEST_B,
+    }
+    assert all(":latest" in line for line in log.read_text().splitlines())
 
 
 def test_alias_failure_restores_an_established_pair(tmp_path: Path) -> None:
@@ -338,7 +352,7 @@ def test_dev_alias_is_the_last_mutation_and_latest_is_never_published() -> None:
     assert text.index("Upload Compose artifact") < text.index(
         "Advance accepted development aliases"
     )
-    assert "scripts/promote-dev-aliases" in alias
+    assert "scripts/promote-image-aliases" in alias
     assert '"$API_IMAGE" "$API_DIGEST"' in alias
     assert '"$WORKER_IMAGE" "$WORKER_DIGEST" "$DEV_ALIAS"' in alias
     assert "skopeo inspect" in alias_helper

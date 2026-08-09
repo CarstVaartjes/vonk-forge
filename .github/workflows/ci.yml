@@ -261,15 +261,41 @@ jobs:
       contents: read
     outputs:
       version: ${{ steps.release.outputs.version }}
+      image_version_tag: ${{ steps.release.outputs.image_version_tag }}
       commit_tag: ${{ steps.release.outputs.commit_tag }}
+      dev_tag: ${{ steps.release.outputs.dev_tag }}
+      latest_alias: ${{ steps.release.outputs.latest_alias }}
       api_image: ${{ steps.release.outputs.api_image }}
       worker_image: ${{ steps.release.outputs.worker_image }}
+      api_dev_source: ${{ steps.release.outputs.api_dev_source }}
+      worker_dev_source: ${{ steps.release.outputs.worker_dev_source }}
       hermes_image: ${{ steps.release.outputs.hermes_image }}
       deployment_bundle_repository: ${{ steps.release.outputs.deployment_bundle_repository }}
       platform_channel: ${{ steps.release.outputs.platform_channel }}
     steps:
       - name: Check out tagged commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify signed accepted release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --force --no-tags origin \
+            +refs/heads/main:refs/remotes/origin/main
+          git fetch --force --tags origin
+          tag_ref="refs/tags/$GITHUB_REF_NAME"
+          [[ $(git cat-file -t "$tag_ref") == tag ]]
+          allowed_signers="$RUNNER_TEMP/release-allowed-signers"
+          git show refs/remotes/origin/main:.github/release-allowed-signers \
+            > "$allowed_signers"
+          test -s "$allowed_signers"
+          git -c gpg.format=ssh \
+            -c gpg.ssh.allowedSignersFile="$allowed_signers" \
+            verify-tag "$tag_ref"
+          [[ $(git rev-list -n 1 "$tag_ref") == "$GITHUB_SHA" ]]
+          git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main
       - name: Validate release metadata
         id: release
         run: >-
@@ -468,6 +494,12 @@ jobs:
           enable-cache: true
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      - name: Install Skopeo from Ubuntu
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends skopeo
       - name: Log in to GHCR
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
@@ -478,55 +510,115 @@ jobs:
         shell: bash
         env:
           RELEASE_VERSION: ${{ needs.release-metadata.outputs.version }}
-          CONTROL_API_IMAGE: ${{ needs.release-metadata.outputs.api_image }}
-          CONTROL_WORKER_IMAGE: ${{ needs.release-metadata.outputs.worker_image }}
           HERMES_AGENT_IMAGE: ${{ needs.release-metadata.outputs.hermes_image }}
         run: |
           scripts/refuse-existing-image-version \
             "$RELEASE_VERSION" \
-            "$CONTROL_API_IMAGE" \
-            "$CONTROL_WORKER_IMAGE" \
             "$HERMES_AGENT_IMAGE"
-      - name: Build and push API image
+      - name: Promote accepted API image
         id: api
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        with:
-          context: .
-          file: control/Dockerfile
-          target: api
-          platforms: linux/amd64
-          push: true
-          sbom: true
-          provenance: mode=max
-          tags: |
-            ${{ needs.release-metadata.outputs.api_image }}:${{ needs.release-metadata.outputs.version }}
-            ${{ needs.release-metadata.outputs.api_image }}:${{ needs.release-metadata.outputs.commit_tag }}
-            ${{ needs.release-metadata.outputs.api_image }}:latest
-          labels: |
-            org.opencontainers.image.title=vonk-forge-api
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ needs.release-metadata.outputs.version }}
-      - name: Build and push worker image
+        shell: bash
+        env:
+          API_IMAGE: ${{ needs.release-metadata.outputs.api_image }}
+          DEV_SOURCE: ${{ needs.release-metadata.outputs.api_dev_source }}
+          IMAGE_VERSION_TAG: ${{ needs.release-metadata.outputs.image_version_tag }}
+        run: |
+          set -euo pipefail
+          digest=$(skopeo inspect --format '{{.Digest}}' "docker://$DEV_SOURCE")
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          skopeo inspect --config "docker://$API_IMAGE@$digest" \
+            | jq -e --arg revision "$GITHUB_SHA" \
+              --arg source "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+              '(.config.Labels["org.opencontainers.image.revision"] == $revision)
+               and (.config.Labels["org.opencontainers.image.source"] == $source)' \
+              >/dev/null
+          docker buildx imagetools inspect "$API_IMAGE@$digest" \
+            --format '{{ json .Provenance }}' \
+            | jq -e --arg revision "$GITHUB_SHA" \
+              '([.. | objects | select(
+                  ((.predicateType? // "") | startswith("https://slsa.dev/provenance/"))
+                  or (((.SLSA?.buildType? // "") | length) > 0)
+                  or (((.buildDefinition?.buildType? // "") | length) > 0)
+                )] | length > 0)
+               and ([.. | strings | select(. == $revision)] | length > 0)' \
+              >/dev/null
+          docker buildx imagetools inspect "$API_IMAGE@$digest" \
+            --format '{{ json .SBOM }}' \
+            | jq -e '[.. | objects | select(
+                .SPDXID? == "SPDXRef-DOCUMENT"
+                and ((.spdxVersion? // "") | startswith("SPDX-"))
+              )] | length > 0' >/dev/null
+          inspect_error="$RUNNER_TEMP/api-version-inspect-error"
+          if observed=$(skopeo inspect --format '{{.Digest}}' \
+            "docker://$API_IMAGE:$IMAGE_VERSION_TAG" 2>"$inspect_error"); then
+            if [[ "$observed" != "$digest" ]]; then
+              echo "refusing to overwrite immutable API release tag" >&2
+              exit 1
+            fi
+          else
+            if ! grep -Eiq 'manifest unknown|name unknown|not found' \
+              "$inspect_error"; then
+              echo "API release tag lookup failed" >&2
+              exit 1
+            fi
+            docker buildx imagetools create \
+              --tag "$API_IMAGE:$IMAGE_VERSION_TAG" "$API_IMAGE@$digest"
+          fi
+          [[ $(skopeo inspect --format '{{.Digest}}' \
+            "docker://$API_IMAGE:$IMAGE_VERSION_TAG") == "$digest" ]]
+          printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+      - name: Promote accepted worker image
         id: worker
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        with:
-          context: .
-          file: control/Dockerfile
-          target: worker
-          platforms: linux/amd64
-          push: true
-          sbom: true
-          provenance: mode=max
-          tags: |
-            ${{ needs.release-metadata.outputs.worker_image }}:${{ needs.release-metadata.outputs.version }}
-            ${{ needs.release-metadata.outputs.worker_image }}:${{ needs.release-metadata.outputs.commit_tag }}
-            ${{ needs.release-metadata.outputs.worker_image }}:latest
-          labels: |
-            org.opencontainers.image.title=vonk-forge-worker
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ needs.release-metadata.outputs.version }}
+        shell: bash
+        env:
+          DEV_SOURCE: ${{ needs.release-metadata.outputs.worker_dev_source }}
+          IMAGE_VERSION_TAG: ${{ needs.release-metadata.outputs.image_version_tag }}
+          WORKER_IMAGE: ${{ needs.release-metadata.outputs.worker_image }}
+        run: |
+          set -euo pipefail
+          digest=$(skopeo inspect --format '{{.Digest}}' "docker://$DEV_SOURCE")
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          skopeo inspect --config "docker://$WORKER_IMAGE@$digest" \
+            | jq -e --arg revision "$GITHUB_SHA" \
+              --arg source "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+              '(.config.Labels["org.opencontainers.image.revision"] == $revision)
+               and (.config.Labels["org.opencontainers.image.source"] == $source)' \
+              >/dev/null
+          docker buildx imagetools inspect "$WORKER_IMAGE@$digest" \
+            --format '{{ json .Provenance }}' \
+            | jq -e --arg revision "$GITHUB_SHA" \
+              '([.. | objects | select(
+                  ((.predicateType? // "") | startswith("https://slsa.dev/provenance/"))
+                  or (((.SLSA?.buildType? // "") | length) > 0)
+                  or (((.buildDefinition?.buildType? // "") | length) > 0)
+                )] | length > 0)
+               and ([.. | strings | select(. == $revision)] | length > 0)' \
+              >/dev/null
+          docker buildx imagetools inspect "$WORKER_IMAGE@$digest" \
+            --format '{{ json .SBOM }}' \
+            | jq -e '[.. | objects | select(
+                .SPDXID? == "SPDXRef-DOCUMENT"
+                and ((.spdxVersion? // "") | startswith("SPDX-"))
+              )] | length > 0' >/dev/null
+          inspect_error="$RUNNER_TEMP/worker-version-inspect-error"
+          if observed=$(skopeo inspect --format '{{.Digest}}' \
+            "docker://$WORKER_IMAGE:$IMAGE_VERSION_TAG" 2>"$inspect_error"); then
+            if [[ "$observed" != "$digest" ]]; then
+              echo "refusing to overwrite immutable worker release tag" >&2
+              exit 1
+            fi
+          else
+            if ! grep -Eiq 'manifest unknown|name unknown|not found' \
+              "$inspect_error"; then
+              echo "worker release tag lookup failed" >&2
+              exit 1
+            fi
+            docker buildx imagetools create \
+              --tag "$WORKER_IMAGE:$IMAGE_VERSION_TAG" "$WORKER_IMAGE@$digest"
+          fi
+          [[ $(skopeo inspect --format '{{.Digest}}' \
+            "docker://$WORKER_IMAGE:$IMAGE_VERSION_TAG") == "$digest" ]]
+          printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
       - name: Build and push Hermes image
         id: hermes
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
@@ -553,8 +645,8 @@ jobs:
           {
             echo '```dotenv'
             printf '%s\n' \
-              "CONTROL_API_IMAGE=${{ needs.release-metadata.outputs.api_image }}:${{ needs.release-metadata.outputs.version }}@${{ steps.api.outputs.digest }}" \
-              "CONTROL_WORKER_IMAGE=${{ needs.release-metadata.outputs.worker_image }}:${{ needs.release-metadata.outputs.version }}@${{ steps.worker.outputs.digest }}" \
+              "CONTROL_API_IMAGE=${{ needs.release-metadata.outputs.api_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.api.outputs.digest }}" \
+              "CONTROL_WORKER_IMAGE=${{ needs.release-metadata.outputs.worker_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.worker.outputs.digest }}" \
               "HERMES_AGENT_IMAGE=${{ needs.release-metadata.outputs.hermes_image }}:${{ needs.release-metadata.outputs.version }}@${{ steps.hermes.outputs.digest }}"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
@@ -589,20 +681,23 @@ jobs:
               api)
                 repository="${{ needs.release-metadata.outputs.api_image }}"
                 digest="${{ steps.api.outputs.digest }}"
+                image_tag="${{ needs.release-metadata.outputs.image_version_tag }}"
                 locator=control.images.api
                 ;;
               worker)
                 repository="${{ needs.release-metadata.outputs.worker_image }}"
                 digest="${{ steps.worker.outputs.digest }}"
+                image_tag="${{ needs.release-metadata.outputs.image_version_tag }}"
                 locator=control.images.worker
                 ;;
               hermes)
                 repository="${{ needs.release-metadata.outputs.hermes_image }}"
                 digest="${{ steps.hermes.outputs.digest }}"
+                image_tag="$RELEASE_VERSION"
                 locator=control.assets.hermes
                 ;;
             esac
-            image="${repository}:${RELEASE_VERSION}@${digest}"
+            image="${repository}:${image_tag}@${digest}"
             release_reference="${repository}@${digest}"
             docker buildx imagetools inspect "$image" --raw \
               > "release-output/${artifact}-manifest.json"
@@ -772,8 +867,8 @@ jobs:
           path: release-output/agent-package
       - name: Create digest-pinned image environment
         env:
-          CONTROL_API_IMAGE: ${{ needs.release-metadata.outputs.api_image }}:${{ needs.release-metadata.outputs.version }}
-          CONTROL_WORKER_IMAGE: ${{ needs.release-metadata.outputs.worker_image }}:${{ needs.release-metadata.outputs.version }}
+          CONTROL_API_IMAGE: ${{ needs.release-metadata.outputs.api_image }}:${{ needs.release-metadata.outputs.image_version_tag }}
+          CONTROL_WORKER_IMAGE: ${{ needs.release-metadata.outputs.worker_image }}:${{ needs.release-metadata.outputs.image_version_tag }}
           HERMES_AGENT_IMAGE: ${{ needs.release-metadata.outputs.hermes_image }}:${{ needs.release-metadata.outputs.version }}
           CONTROL_API_DIGEST: ${{ needs.publish-images.outputs.api_digest }}
           CONTROL_WORKER_DIGEST: ${{ needs.publish-images.outputs.worker_digest }}
@@ -806,6 +901,59 @@ jobs:
           --generate-notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  advance-production-aliases:
+    name: Advance accepted production image aliases
+    needs: [release-metadata, publish-images, release-manifest]
+    if: needs.release-manifest.result == 'success'
+    runs-on: ubuntu-latest
+    environment: platform-release
+    concurrency:
+      group: vonk-forge-production-alias
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out release tag history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Refuse a superseded production tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --force --tags origin
+          newest_tag=$(git tag --list 'v*' \
+            | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' \
+            | sort -V | tail -n 1)
+          [[ -n "$newest_tag" && "$newest_tag" == "$GITHUB_REF_NAME" ]]
+      - name: Install Skopeo from Ubuntu
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends skopeo
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Advance verified latest aliases
+        shell: bash
+        env:
+          API_DIGEST: ${{ needs.publish-images.outputs.api_digest }}
+          API_IMAGE: ${{ needs.release-metadata.outputs.api_image }}
+          LATEST_ALIAS: ${{ needs.release-metadata.outputs.latest_alias }}
+          WORKER_DIGEST: ${{ needs.publish-images.outputs.worker_digest }}
+          WORKER_IMAGE: ${{ needs.release-metadata.outputs.worker_image }}
+        run: |
+          set -euo pipefail
+          scripts/promote-image-aliases \
+            "$API_IMAGE" "$API_DIGEST" \
+            "$WORKER_IMAGE" "$WORKER_DIGEST" "$LATEST_ALIAS"
 
   publish-apt:
     name: Publish the verified agent package to apt

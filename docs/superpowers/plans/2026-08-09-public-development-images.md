@@ -316,7 +316,7 @@ git commit -S -m "test: exercise image-only development stack"
 **Files:**
 - Create: `.github/workflows/dev-images.yml`
 - Create: `scripts/dev-image-metadata`
-- Create: `scripts/promote-dev-aliases`
+- Create: `scripts/promote-image-aliases`
 - Create: `scripts/tests/test_dev_image_workflow.py`
 
 **Interfaces:**
@@ -375,7 +375,7 @@ Expected: all tests and metadata validation pass.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add .github/workflows/dev-images.yml scripts/dev-image-metadata scripts/promote-dev-aliases scripts/tests/test_dev_image_workflow.py
+git add .github/workflows/dev-images.yml scripts/dev-image-metadata scripts/promote-image-aliases scripts/tests/test_dev_image_workflow.py
 git commit -S -m "ci: publish accepted main development images"
 ```
 
