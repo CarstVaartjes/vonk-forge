@@ -34,6 +34,7 @@ def patch_for(root: Path, text: str) -> bytes:
 
 def test_repository_code_host_creates_signed_commit_without_checkout_mutation(tmp_path: Path) -> None:
     root, key = repository(tmp_path)
+    git(root, "config", "gpg.ssh.program", "false")
     base = git(root, "rev-parse", "HEAD")
     patch = patch_for(root, "schema_version = 2\n# reviewed\n")
     host = RepositoryCodeHost(root, signing_key=key, lock_path=tmp_path / "git.lock")

@@ -102,7 +102,8 @@ class RepositoryCodeHost:
                 self._git(
                     "-c", "user.name=Vonk Forge Control",
                     "-c", "user.email=control@vonk-forge.invalid",
-                    "-c", "gpg.format=ssh", "-c", f"user.signingKey={self._key}",
+                    "-c", "gpg.format=ssh", "-c", "gpg.ssh.program=ssh-keygen",
+                    "-c", f"user.signingKey={self._key}",
                     "commit", "-S", "-m", message, cwd=worktree,
                 )
                 commit = self._git("rev-parse", "HEAD", cwd=worktree).decode().strip()
