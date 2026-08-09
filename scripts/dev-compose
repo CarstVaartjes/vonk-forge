@@ -1,11 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
+unset VONK_DEV_ORIGIN_DIR
 
 repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 development_root="$repository_root/.dev"
-if [[ -z ${VONK_DEV_SECRETS_DIR:-} || -z ${VONK_DEV_ORIGIN_DIR:-} ]]; then
-  mkdir -p "$development_root"
-  chmod 700 "$development_root"
+origin_dir="$development_root/vonk-forge-origin.git"
+owner_marker="$development_root/.vonk-forge-origin.owner"
+owner_marker_content=$'vonk-forge-dev-origin-v1\n'
+current_uid=$(id -u)
+
+if [[ ! -e "$development_root" ]]; then
+  mkdir -m 700 "$development_root"
+fi
+if [[ ! -d "$development_root" ]] \
+  || [[ $(stat -c %u "$development_root") != "$current_uid" ]] \
+  || [[ $(stat -c %a "$development_root") != 700 ]]; then
+  echo "development wrapper ownership or mode is unsafe" >&2
+  exit 1
 fi
 secrets_dir=${VONK_DEV_SECRETS_DIR:-"$repository_root/.dev/vonk-forge-secrets"}
 mkdir -p "$secrets_dir"
@@ -29,16 +41,30 @@ if [[ ! -e "$secrets_dir/git-signing-key" ]]; then
 fi
 
 expected_commit=$(git -C "$repository_root" rev-parse --verify 'HEAD^{commit}')
-origin_dir=${VONK_DEV_ORIGIN_DIR:-"$development_root/vonk-forge-origin.git"}
-if [[ -L "$origin_dir" ]]; then
-  echo "development origin must not be a symlink" >&2
+if [[ ! -e "$origin_dir" && ! -e "$owner_marker" ]]; then
+  git init --bare -q "$origin_dir"
+  if ! (set -o noclobber; printf '%s' "$owner_marker_content" > "$owner_marker") 2>/dev/null; then
+    echo "development origin ownership marker cannot be created safely" >&2
+    exit 1
+  fi
+  chmod 600 "$owner_marker"
+elif [[ ! -e "$origin_dir" || ! -e "$owner_marker" ]]; then
+  echo "development origin ownership marker is missing or inconsistent" >&2
   exit 1
 fi
-if [[ ! -e "$origin_dir" ]]; then
-  git init --bare -q "$origin_dir"
-elif [[ ! -d "$origin_dir" ]] \
+if [[ ! -d "$origin_dir" ]] \
+  || [[ $(stat -c %u "$origin_dir") != "$current_uid" ]] \
+  || [[ $(stat -c %a "$origin_dir") != 700 ]] \
   || [[ $(git --git-dir="$origin_dir" rev-parse --is-bare-repository 2>/dev/null) != true ]]; then
-  echo "development origin is not a bare Git repository" >&2
+  echo "development origin is not an owned bare Git repository" >&2
+  exit 1
+fi
+if [[ ! -f "$owner_marker" ]] \
+  || [[ $(stat -c %u "$owner_marker") != "$current_uid" ]] \
+  || [[ $(stat -c %a "$owner_marker") != 600 ]] \
+  || [[ $(stat -c %h "$owner_marker") != 1 ]] \
+  || ! cmp -s "$owner_marker" <(printf '%s' "$owner_marker_content"); then
+  echo "development origin ownership marker is unsafe" >&2
   exit 1
 fi
 git --git-dir="$origin_dir" fetch -q --no-tags "$repository_root" "$expected_commit"
@@ -50,7 +76,6 @@ if [[ "$#" -eq 0 ]]; then
 fi
 export VONK_DEV_SECRETS_DIR="$secrets_dir"
 export VONK_DEV_EXPECTED_COMMIT="$expected_commit"
-export VONK_DEV_ORIGIN_DIR="$origin_dir"
 exec docker compose \
   --project-name vonk-forge-dev \
   --file "$repository_root/deploy/compose/compose.dev.yaml" \
