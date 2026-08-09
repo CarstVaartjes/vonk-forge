@@ -123,12 +123,22 @@ jobs:
           key_path="$RUNNER_TEMP/vonk-agent-release.pem"
           install -m 0600 /dev/null "$key_path"
           printf '%s' "$RELEASE_PRIVATE_KEY" > "$key_path"
+          public_der="$RUNNER_TEMP/vonk-agent-release-public.der"
+          trap 'rm -f "$public_der"' EXIT
+          install -m 0600 /dev/null "$public_der"
+          openssl pkey -in "$key_path" -pubout -outform DER \
+            > "$public_der" 2>/dev/null
+          test "$(stat -c %s "$public_der")" = 44
+          prefix=$(head -c 12 "$public_der" | od -An -v -tx1 | tr -d ' \n')
+          test "$prefix" = 302a300506032b6570032100
           fingerprint=$(
-            openssl pkey -in "$key_path" -pubout -outform DER 2>/dev/null \
+            tail -c 32 "$public_der" \
               | sha256sum \
               | cut -d' ' -f1
           )
           test "$fingerprint" = "$EXPECTED_FINGERPRINT"
+          rm -f "$public_der"
+          trap - EXIT
 
       - name: Build package twice reproducibly
         shell: bash
