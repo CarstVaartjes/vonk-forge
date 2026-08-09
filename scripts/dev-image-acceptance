@@ -119,7 +119,11 @@ for line in sys.stdin:
         print("[redacted]")
         inside_key = not ends_key
         continue
-    if password in line or re.search(r"password|token|secret|private key|signing key", line, re.I):
+    if password in line or re.search(
+        r"password|token|secret|private key|signing key|authorization|cookie|session|credential|\bbearer\b",
+        line,
+        re.I,
+    ):
         print("[redacted]")
     else:
         sanitized = re.sub(
@@ -277,9 +281,11 @@ assert_running() {
 }
 
 assert_runtime_boundaries() {
-  local api_container
+  local api_container worker_container
   api_container=$(service_container control-api)
-  docker inspect --format '{{json .Mounts}}' "$api_container" | python3 -c '
+  worker_container=$(service_container control-worker)
+  for service_container_id in "$api_container" "$worker_container"; do
+    docker inspect --format '{{json .Mounts}}' "$service_container_id" | python3 -c '
 import json
 import sys
 
@@ -288,12 +294,13 @@ for mount in json.load(sys.stdin):
     if mount["Destination"] == "/repository" and (
         mount["Type"] == "bind" or mount.get("Source") == repository_root
     ):
-        raise SystemExit("control-api has an unsafe repository bind mount")
+        raise SystemExit("runtime service has an unsafe repository bind mount")
 ' "$repository_root"
+  done
   compose exec -T control-api sh -ec \
-    'test -r /run/secrets/git-signing-key && test ! -e /run/secrets/worker-api-token'
+    'test -r /run/secrets/git-signing-key && test -r /run/secrets/admin-grant-private-key && test ! -e /run/secrets/worker-api-token'
   compose exec -T control-worker sh -ec \
-    'test -r /run/secrets/worker-api-token && test ! -e /run/secrets/git-signing-key'
+    'test -r /run/secrets/worker-api-token && test ! -e /run/secrets/git-signing-key && test ! -e /run/secrets/admin-grant-private-key'
 }
 
 repository_commit() {
