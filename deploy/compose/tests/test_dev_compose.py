@@ -207,6 +207,9 @@ def _fake_docker(tmp_path: Path) -> Path:
         "touch \"$VONK_TEST_CAPTURE_DIR/environment\"\n"
         "printf '%s\\n' \"$@\" > \"$VONK_TEST_CAPTURE_DIR/arguments\"\n"
         "if [[ \"${1:-}\" == image ]]; then\n"
+        "  if [[ \"${VONK_TEST_IMAGE_INSPECT_EXIT:-0}\" -ne 0 ]]; then\n"
+        "    exit \"$VONK_TEST_IMAGE_INSPECT_EXIT\"\n"
+        "  fi\n"
         "  case \"${*: -1}\" in\n"
         "    *api*) printf 'sha256:%064d\\n' 0 ;;\n"
         "    *worker*) printf 'sha256:%064d\\n' 1 ;;\n"
@@ -259,6 +262,7 @@ def _run_dev_compose(
     capture: Path,
     *arguments: str,
     docker_exit: int = 0,
+    image_inspect_exit: int = 0,
 ) -> subprocess.CompletedProcess[str]:
     environment = os.environ | {
         "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
@@ -266,6 +270,7 @@ def _run_dev_compose(
         "VONK_DEV_ORIGIN_DIR": str(capture / "ignored-origin.git"),
         "VONK_TEST_CAPTURE_DIR": str(capture),
         "VONK_TEST_DOCKER_EXIT": str(docker_exit),
+        "VONK_TEST_IMAGE_INSPECT_EXIT": str(image_inspect_exit),
     }
     return subprocess.run(
         (str(local_script), *arguments),
@@ -390,6 +395,29 @@ def test_dev_compose_script_removes_its_render_workspace_after_docker_failure(
     )
     assert result.returncode == 37
     assert not project_directory.exists()
+
+
+def test_dev_compose_down_does_not_depend_on_local_image_tags(tmp_path: Path) -> None:
+    repository, local_script = _script_repository(tmp_path)
+    secrets = _existing_secrets(tmp_path)
+    fake_bin = _fake_docker(tmp_path)
+    capture = tmp_path / "capture"
+    capture.mkdir()
+
+    result = _run_dev_compose(
+        repository,
+        local_script,
+        fake_bin,
+        secrets,
+        capture,
+        "down",
+        "--volumes",
+        image_inspect_exit=91,
+    )
+
+    assert result.returncode == 0
+    compose_arguments = _captured_compose_arguments(capture)
+    assert compose_arguments[-2:] == ["down", "--volumes"]
 
 
 def test_dev_compose_script_rejects_a_symlinked_development_directory(

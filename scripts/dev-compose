@@ -66,8 +66,13 @@ sed \
   "$template" > "$workspace/docker-compose.yml"
 ln -s "$secrets_dir" "$workspace/secrets"
 
-api_id=$(docker image inspect --format '{{.Id}}' "$api_image")
-worker_id=$(docker image inspect --format '{{.Id}}' "$worker_image")
+if [[ "$1" == down ]]; then
+  api_id="sha256:$(printf '%064d' 0)"
+  worker_id="sha256:$(printf '%064d' 1)"
+else
+  api_id=$(docker image inspect --format '{{.Id}}' "$api_image")
+  worker_id=$(docker image inspect --format '{{.Id}}' "$worker_image")
+fi
 [[ "$api_id" =~ ^sha256:[0-9a-f]{64}$ && "$worker_id" =~ ^sha256:[0-9a-f]{64}$ ]] || {
   printf '%s\n' 'local development images did not provide immutable IDs' >&2
   exit 2
