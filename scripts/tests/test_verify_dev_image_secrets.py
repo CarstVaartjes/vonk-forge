@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import importlib.machinery
+import importlib.util
 import shutil
 import subprocess
 import uuid
@@ -46,6 +48,15 @@ def _scan(*images: str) -> subprocess.CompletedProcess[str]:
         text=True,
         capture_output=True,
     )
+
+
+def _scanner_module():
+    loader = importlib.machinery.SourceFileLoader("verify_dev_image_secrets", str(SCANNER))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
 
 
 @pytest.fixture
@@ -116,6 +127,24 @@ def test_scanner_allows_only_documented_secret_file_paths(image_factory) -> None
     assert result.returncode == 0, result.stderr
 
 
+def test_scanner_rejects_split_secret_command_arguments() -> None:
+    scanner = _scanner_module()
+
+    with pytest.raises(scanner.ScanFailure, match="command authority"):
+        scanner._check_metadata(
+            {
+                "Config": {
+                    "User": "10001:10001",
+                    "Env": [],
+                    "Labels": {},
+                    "Entrypoint": ["--password", "do-not-print"],
+                    "Cmd": None,
+                }
+            },
+            [],
+        )
+
+
 @pytest.mark.parametrize(
     ("path", "content"),
     (
@@ -152,6 +181,7 @@ def test_scanner_rejects_forbidden_files_without_disclosing_contents(
         "FROM alpine:3.22\nARG BUILD_SECRET=do-not-print\nRUN echo $BUILD_SECRET >/dev/null\nCOPY . /scan/\nUSER 10001:10001\n",
         "FROM scratch\nCOPY . /scan/\nLABEL org.example.token=do-not-print\nUSER 10001:10001\n",
         "FROM scratch\nCOPY . /scan/\nENTRYPOINT [\"--password=do-not-print\"]\nUSER 10001:10001\n",
+        "FROM scratch\nCOPY . /scan/\nENTRYPOINT [\"--password\", \"do-not-print\"]\nUSER 10001:10001\n",
     ),
 )
 def test_scanner_rejects_secret_authority_metadata_without_value_leaks(
