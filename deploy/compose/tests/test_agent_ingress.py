@@ -169,6 +169,7 @@ def _settings_result(rendered: dict, tmp_path: Path) -> subprocess.CompletedProc
         "VONK_AGENT_INTERMEDIATE_KEY_FILE": "test-builtin-key\n",
         "VONK_AGENT_PROXY_AUTH_FILE": "A" * 30 + "_-\r\n",
         "VONK_WORKER_API_TOKEN_FILE": "W" * 32 + "\n",
+        "VONK_MANAGEMENT_CIDRS_FILE": "10.0.0.0/24\n",
         "VONK_ADMIN_GRANT_PRIVATE_KEY_FILE": "test-admin-grant-private-key\n",
         "VONK_PACKAGE_HELPER_GRANT_PRIVATE_KEY_FILE": "test-package-grant-key\n",
         "VONK_PACKAGE_HELPER_RECEIPT_PRIVATE_KEY_FILE": "test-package-receipt-key\n",
@@ -200,6 +201,35 @@ def _settings_result(rendered: dict, tmp_path: Path) -> subprocess.CompletedProc
         timeout=30,
         check=False,
     )
+
+
+def test_development_image_compose_enables_complete_builtin_agent_settings(
+    tmp_path: Path,
+) -> None:
+    rendered = _rendered("compose.dev.images.yaml")
+    services = rendered["services"]
+    api = services["control-api"]
+    caddy = services["caddy"]
+
+    result = _settings_result(rendered, tmp_path / "settings")
+    assert result.returncode == 0, result.stderr
+    provider, proxy_auth, management, direct_fabric = result.stdout.splitlines()
+    assert provider == "builtin"
+    assert proxy_auth == "A" * 30 + "_-"
+    assert management == "10.0.0.0/24"
+    assert direct_fabric == ""
+
+    assert api["environment"]["VONK_AGENT_RUNTIME"] == "enabled"
+    assert api["environment"]["VONK_AGENT_BUILTIN_CA_BOOTSTRAP"] == "1"
+    assert api["environment"]["VONK_MANAGEMENT_CIDRS_FILE"] == (
+        "/run/secrets/management-cidrs"
+    )
+    assert set(caddy["networks"]) == {"application"}
+    assert set(api["networks"]) == {"application", "data"}
+    assert caddy["depends_on"]["control-api"] == {
+        "condition": "service_healthy",
+        "required": True,
+    }
 
 
 def test_caddy_adapts_three_sni_boundaries_for_admin_enrollment_and_mtls_agents() -> None:

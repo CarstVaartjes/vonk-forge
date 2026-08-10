@@ -16,6 +16,14 @@ SECRETS_HELPER = ROOT / "scripts/dev-compose-secrets.py"
 EXPECTED_COMMIT = "a" * 40
 DEV_API_IMAGE = "vonk-forge-dev/control-api@sha256:" + "0" * 64
 DEV_WORKER_IMAGE = "vonk-forge-dev/control-worker@sha256:" + "1" * 64
+CADDY_IMAGE = (
+    "caddy:2.11.4@sha256:"
+    "844f60b64e4724a5aa8245e019dace0d3f199f7433ce6c57676cb30a920dbad9"
+)
+LITELLM_IMAGE = (
+    "ghcr.io/berriai/litellm:v1.83.14-stable@sha256:"
+    "c81eb79cd4333c6cfe374c0ec929110fd23f0ee5f7fd198855a6fbddc77b83ba"
+)
 
 
 def _rendered(tmp_path: Path) -> dict[str, object]:
@@ -120,6 +128,222 @@ def test_dev_compose_initializes_identity_before_api_and_worker(tmp_path: Path) 
 
 def _volumes_by_target(service: dict[str, object]) -> dict[str, dict[str, object]]:
     return {volume["target"]: volume for volume in service.get("volumes", [])}
+
+
+def test_image_template_hardens_caddy_as_the_only_lan_listener() -> None:
+    rendered = _rendered_image_template()
+    services = rendered["services"]
+    caddy = services["caddy"]
+
+    assert caddy["image"] == CADDY_IMAGE
+    assert caddy["pull_policy"] == "always"
+    assert caddy["user"] == "10000:10000"
+    assert caddy["read_only"] is True
+    assert caddy["cap_drop"] == ["ALL"]
+    assert caddy["security_opt"] == ["no-new-privileges:true"]
+    assert set(caddy["tmpfs"]) == {"/config", "/data", "/tmp"}
+    assert caddy["entrypoint"] == [
+        "/bin/sh",
+        "/usr/local/bin/vonk-caddy-entrypoint",
+    ]
+    assert caddy["environment"] == {
+        "VONK_AGENT_ENROLL_HOSTNAME": "enroll.vonk-forge.lan",
+        "VONK_AGENT_HOSTNAME": "agents.vonk-forge.lan",
+        "VONK_BACKEND_PORT": "8443",
+    }
+    assert caddy["ports"] == [
+        {
+            "mode": "ingress",
+            "published": "8443",
+            "protocol": "tcp",
+            "target": 8443,
+        }
+    ]
+    assert set(caddy["networks"]) == {"application"}
+    assert caddy["healthcheck"] == {
+        "test": ["CMD-SHELL", "test -r /tmp/vonk-agent-proxy-auth.caddy"],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 12,
+    }
+    assert caddy["depends_on"] == {
+        "control-api": {
+            "condition": "service_healthy",
+            "required": True,
+        },
+        "dev-init": {
+            "condition": "service_completed_successfully",
+            "required": True,
+        },
+    }
+
+    volumes = _volumes_by_target(caddy)
+    assert set(volumes) == {
+        "/etc/caddy/Caddyfile",
+        "/run/secrets",
+        "/usr/local/bin/vonk-caddy-entrypoint",
+    }
+    assert volumes["/run/secrets"] == {
+        "type": "volume",
+        "source": "dev-caddy-secrets",
+        "target": "/run/secrets",
+        "read_only": True,
+        "volume": {},
+    }
+    for target, subpath in {
+        "/etc/caddy/Caddyfile": "Caddyfile",
+        "/usr/local/bin/vonk-caddy-entrypoint": "caddy-entrypoint.sh",
+    }.items():
+        assert volumes[target] == {
+            "type": "volume",
+            "source": "dev-runtime-config",
+            "target": target,
+            "read_only": True,
+            "volume": {"subpath": subpath},
+        }
+
+    listeners = {
+        name: service["ports"]
+        for name, service in services.items()
+        if service.get("ports")
+    }
+    assert set(listeners) == {"caddy", "control-api"}
+    assert listeners["control-api"] == [
+        {
+            "host_ip": "127.0.0.1",
+            "mode": "ingress",
+            "published": "8080",
+            "protocol": "tcp",
+            "target": 8000,
+        }
+    ]
+    assert all(
+        port.get("host_ip") == "127.0.0.1"
+        for name, ports in listeners.items()
+        if name != "caddy"
+        for port in ports
+    )
+
+
+def test_image_template_runs_acknowledged_litellm_only_on_internal_networks() -> None:
+    rendered = _rendered_image_template()
+    services = rendered["services"]
+    litellm = services["litellm"]
+
+    assert litellm["image"] == LITELLM_IMAGE
+    assert litellm["pull_policy"] == "always"
+    assert litellm["user"] == "10002:10001"
+    assert litellm["read_only"] is True
+    assert litellm["cap_drop"] == ["ALL"]
+    assert litellm["security_opt"] == ["no-new-privileges:true"]
+    assert litellm["tmpfs"] == ["/tmp"]
+    assert litellm["entrypoint"] == ["/app/vonk-entrypoint"]
+    assert litellm["environment"] == {
+        "DISABLE_ADMIN_UI": "False",
+        "LITELLM_UI_PATH": "/tmp/litellm-ui",
+        "SERVER_ROOT_PATH": "/litellm",
+        "STORE_MODEL_IN_DB": "False",
+    }
+    assert set(litellm["networks"]) == {"application", "data"}
+    assert rendered["networks"]["application"]["internal"] is True
+    assert rendered["networks"]["data"]["internal"] is True
+    assert litellm.get("ports", []) == []
+    assert litellm["healthcheck"] == {
+        "test": [
+            "CMD",
+            "python",
+            "-c",
+            "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=3)",
+        ],
+        "interval": "15s",
+        "timeout": "5s",
+        "retries": 10,
+    }
+    assert litellm["depends_on"] == {
+        "dev-init": {
+            "condition": "service_completed_successfully",
+            "required": True,
+        },
+        "dev-supervisor-init": {
+            "condition": "service_completed_successfully",
+            "required": True,
+        },
+        "postgres": {"condition": "service_healthy", "required": True},
+    }
+
+    volumes = _volumes_by_target(litellm)
+    assert set(volumes) == {
+        "/app/bootstrap-config.json",
+        "/app/config-supervisor.py",
+        "/app/vonk-entrypoint",
+        "/routes",
+        "/run/secrets",
+        "/supervisor",
+    }
+    for target, subpath in {
+        "/app/bootstrap-config.json": "litellm-bootstrap.json",
+        "/app/config-supervisor.py": "litellm-supervisor.py",
+        "/app/vonk-entrypoint": "litellm-entrypoint.sh",
+    }.items():
+        assert volumes[target] == {
+            "type": "volume",
+            "source": "dev-runtime-config",
+            "target": target,
+            "read_only": True,
+            "volume": {"subpath": subpath},
+        }
+    assert volumes["/run/secrets"] == {
+        "type": "volume",
+        "source": "dev-litellm-secrets",
+        "target": "/run/secrets",
+        "read_only": True,
+        "volume": {},
+    }
+    assert volumes["/routes"]["source"].endswith("dev-route-publications")
+    assert volumes["/routes"]["read_only"] is True
+    assert volumes["/supervisor"]["source"].endswith("dev-supervisor-state")
+    assert volumes["/supervisor"].get("read_only", False) is False
+
+
+def test_image_template_enables_only_the_explicit_builtin_agent_authority() -> None:
+    services = _rendered_image_template()["services"]
+    api = services["control-api"]
+    worker = services["control-worker"]
+
+    expected_environment = {
+        "VONK_AGENT_RUNTIME": "enabled",
+        "VONK_AGENT_CA_PROVIDER": "builtin",
+        "VONK_AGENT_BUILTIN_CA_BOOTSTRAP": "1",
+        "VONK_MANAGEMENT_CIDRS_FILE": "/run/secrets/management-cidrs",
+        "VONK_DEPLOYMENT_BRANCH": "deploy",
+        "VONK_AGENT_CLIENT_CA_FILE": "/run/secrets/agent-ca-certificate",
+        "VONK_AGENT_INTERMEDIATE_CERTIFICATE_FILE": "/run/secrets/agent-ca-certificate",
+        "VONK_AGENT_INTERMEDIATE_KEY_FILE": "/run/secrets/agent-ca-key",
+        "VONK_AGENT_PROXY_AUTH_FILE": "/run/secrets/agent-proxy-auth",
+        "VONK_WORKER_API_TOKEN_FILE": "/run/secrets/worker-api-token",
+    }
+    assert expected_environment.items() <= api["environment"].items()
+    assert worker["environment"]["VONK_DEPLOYMENT_BRANCH"] == "deploy"
+    assert "VONK_MANAGEMENT_CIDRS_FILE" not in worker["environment"]
+
+    api_secrets = {
+        (secret["source"], secret["target"])
+        for secret in api.get("secrets", [])
+    }
+    assert api_secrets == {
+        ("management-cidrs", "/run/secrets/management-cidrs")
+    }
+
+    api_volumes = _volumes_by_target(api)
+    worker_volumes = _volumes_by_target(worker)
+    assert api_volumes["/routes"]["read_only"] is True
+    assert api_volumes["/supervisor"]["read_only"] is True
+    assert worker_volumes["/routes"].get("read_only", False) is False
+    assert worker_volumes["/supervisor"]["read_only"] is True
+    assert worker["depends_on"]["litellm"] == {
+        "condition": "service_healthy",
+        "required": True,
+    }
 
 
 def test_dev_compose_runs_packaged_initializer_with_disjoint_runtime_authority(

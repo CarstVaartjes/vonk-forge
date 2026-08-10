@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -10,6 +11,152 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
 HELPER = ROOT / "scripts/dev-compose-secrets.py"
+IMAGE_TEMPLATE = ROOT / "deploy/compose/compose.dev.images.yaml"
+
+
+def _rendered_image_template() -> dict[str, object]:
+    result = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "-f",
+            str(IMAGE_TEMPLATE),
+            "config",
+            "--format",
+            "json",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return json.loads(result.stdout)
+
+
+def _volumes_by_target(service: dict[str, object]) -> dict[str, dict[str, object]]:
+    return {volume["target"]: volume for volume in service.get("volumes", [])}
+
+
+def test_image_template_stages_exact_disjoint_runtime_secret_volumes() -> None:
+    rendered = _rendered_image_template()
+    services = rendered["services"]
+    initializer = services["dev-init"]
+
+    expected_environment = {
+        "VONK_DEV_API_SECRET_ROOT": "/api-secrets",
+        "VONK_DEV_CADDY_SECRET_ROOT": "/caddy-secrets",
+        "VONK_DEV_LITELLM_SECRET_ROOT": "/litellm-secrets",
+        "VONK_DEV_MIGRATE_SECRET_ROOT": "/migrate-secrets",
+        "VONK_DEV_RUNTIME_CONFIG_ROOT": "/runtime-config",
+        "VONK_DEV_WORKER_SECRET_ROOT": "/worker-secrets",
+    }
+    assert expected_environment.items() <= initializer["environment"].items()
+    init_volumes = _volumes_by_target(initializer)
+    expected_roots = {
+        "/api-secrets": "dev-api-secrets",
+        "/caddy-secrets": "dev-caddy-secrets",
+        "/litellm-secrets": "dev-litellm-secrets",
+        "/migrate-secrets": "dev-migrate-secrets",
+        "/runtime-config": "dev-runtime-config",
+        "/worker-secrets": "dev-worker-secrets",
+    }
+    assert {
+        target: volume["source"].removeprefix("vonk-forge-dev_")
+        for target, volume in init_volumes.items()
+        if target in expected_roots
+    } == expected_roots
+    assert all(
+        not init_volumes[target].get("read_only", False)
+        for target in expected_roots
+    )
+    assert set(rendered["volumes"]) >= set(expected_roots.values())
+
+    source_secrets = {
+        (secret["source"], secret["target"])
+        for secret in initializer["secrets"]
+    }
+    assert source_secrets == {
+        (name, f"/host-secrets/{name}")
+        for name in {
+            "agent-ca-certificate",
+            "agent-ca-key",
+            "agent-proxy-auth",
+            "controller-ca",
+            "controller-server-certificate",
+            "controller-server-key",
+            "database-url",
+            "git-signing-key",
+            "litellm-master-key",
+            "litellm-upstream-key",
+            "management-cidrs",
+        }
+    }
+
+
+def test_image_template_keeps_private_authority_with_its_exact_service() -> None:
+    services = _rendered_image_template()["services"]
+
+    volume_consumers: dict[str, set[str]] = {}
+    secret_consumers: dict[str, set[str]] = {}
+    for service_name, service in services.items():
+        for volume in service.get("volumes", []):
+            if volume["type"] == "volume":
+                source = volume["source"].removeprefix("vonk-forge-dev_")
+                volume_consumers.setdefault(source, set()).add(service_name)
+        for secret in service.get("secrets", []):
+            secret_consumers.setdefault(secret["source"], set()).add(service_name)
+
+    assert volume_consumers["dev-api-secrets"] == {"control-api", "dev-init"}
+    assert volume_consumers["dev-worker-secrets"] == {"control-worker", "dev-init"}
+    assert volume_consumers["dev-migrate-secrets"] == {"dev-init", "migrate"}
+    assert volume_consumers["dev-caddy-secrets"] == {"caddy", "dev-init"}
+    assert volume_consumers["dev-litellm-secrets"] == {"dev-init", "litellm"}
+    assert secret_consumers["agent-ca-key"] == {"dev-init"}
+    assert secret_consumers["controller-server-key"] == {"dev-init"}
+    assert secret_consumers["litellm-master-key"] == {"dev-init"}
+    assert secret_consumers["litellm-upstream-key"] == {"dev-init"}
+    assert secret_consumers["management-cidrs"] == {"control-api", "dev-init"}
+
+    for service_name, service in services.items():
+        environment = service.get("environment", {})
+        assert "LITELLM_MASTER_KEY" not in environment
+        assert "LITELLM_UPSTREAM_KEY" not in environment
+        assert "LITELLM_DATABASE_URL" not in environment
+        assert "VONK_AGENT_CA_KEY" not in environment
+        assert "VONK_CONTROLLER_SERVER_KEY" not in environment
+
+
+def test_image_template_hands_acknowledgement_volume_to_litellm_only() -> None:
+    services = _rendered_image_template()["services"]
+    initializer = services["dev-supervisor-init"]
+
+    assert initializer["user"] == "0:0"
+    assert initializer["network_mode"] == "none"
+    assert initializer["read_only"] is True
+    assert initializer["cap_drop"] == ["ALL"]
+    assert initializer["cap_add"] == ["CHOWN"]
+    assert initializer["security_opt"] == ["no-new-privileges:true"]
+    assert initializer["depends_on"] == {
+        "dev-init": {
+            "condition": "service_completed_successfully",
+            "required": True,
+        }
+    }
+    assert initializer["command"][-1].count("os.chown('/supervisor',10002,10001)") == 1
+    volumes = _volumes_by_target(initializer)
+    assert set(volumes) == {"/supervisor"}
+    assert volumes["/supervisor"]["source"].endswith("dev-supervisor-state")
+    assert volumes["/supervisor"].get("read_only", False) is False
+
+    writers = set()
+    readers = set()
+    for service_name in ("control-api", "control-worker", "litellm"):
+        supervisor = _volumes_by_target(services[service_name])["/supervisor"]
+        if supervisor.get("read_only", False):
+            readers.add(service_name)
+        else:
+            writers.add(service_name)
+    assert readers == {"control-api", "control-worker"}
+    assert writers == {"litellm"}
 
 
 @pytest.fixture
