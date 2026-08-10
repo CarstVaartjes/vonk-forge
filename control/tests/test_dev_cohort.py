@@ -303,7 +303,7 @@ def test_matching_identities_produce_one_canonical_selected_cohort_document() ->
         worker_identity_digest=expected_worker_identity_digest,
         api_image=f"development.invalid/vonk-forge-api@{expected_api_identity_digest}",
         worker_image=f"development.invalid/vonk-forge-worker@{expected_worker_identity_digest}",
-        generation_id="dev-" + expected_generation_hash[:24],
+        generation_id="gen-" + expected_release_digest.removeprefix("sha256:")[:24],
         start_nonce=hashlib.sha256(
             f"vonk-forge:development-start:{expected_generation_hash}".encode("ascii")
         ).hexdigest(),
@@ -315,7 +315,8 @@ def test_matching_identities_produce_one_canonical_selected_cohort_document() ->
         "worker_identity_digest": expected_worker_identity_digest,
         "api_image": f"development.invalid/vonk-forge-api@{expected_api_identity_digest}",
         "worker_image": f"development.invalid/vonk-forge-worker@{expected_worker_identity_digest}",
-        "generation_id": "dev-" + expected_generation_hash[:24],
+        "generation_id": "gen-"
+        + expected_release_digest.removeprefix("sha256:")[:24],
         "start_nonce": hashlib.sha256(
             f"vonk-forge:development-start:{expected_generation_hash}".encode("ascii")
         ).hexdigest(),
@@ -375,7 +376,6 @@ def test_selected_cohort_rejects_coordinated_identity_digest_tampering() -> None
         **document,
         "api_identity_digest": forged_api_digest,
         "api_image": f"development.invalid/vonk-forge-api@{forged_api_digest}",
-        "generation_id": "dev-" + forged_generation_hash[:24],
         "start_nonce": hashlib.sha256(
             f"vonk-forge:development-start:{forged_generation_hash}".encode("ascii")
         ).hexdigest(),

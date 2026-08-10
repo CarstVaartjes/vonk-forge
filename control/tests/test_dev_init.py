@@ -1025,6 +1025,9 @@ def test_main_derives_mutable_repository_and_projection_identity_from_selected_c
         (paths["identity"] / "active.json").read_text(encoding="ascii")
     )
     generation = projection["selection"]["generation"]
+    assert selected.generation_id == (
+        "gen-" + selected.release_digest.removeprefix("sha256:")[:24]
+    )
     assert generation["generation_id"] == selected.generation_id
     assert generation["release_digest"] == selected.release_digest
     assert generation["build_digest"] == selected.build_digest

@@ -74,7 +74,7 @@ _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _IMAGE = re.compile(r"development\.invalid/vonk-forge-(api|worker)@sha256:[0-9a-f]{64}\Z")
 _SEMVER = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
 _REVISION = re.compile(r"[0-9]{4}_[a-z0-9_]+\Z")
-_GENERATION_ID = re.compile(r"dev-[0-9a-f]{24}\Z")
+_GENERATION_ID = re.compile(r"gen-[0-9a-f]{24}\Z")
 _NONCE = re.compile(r"[0-9a-f]{64}\Z")
 _MAX_JSON_BYTES = 16 * 1024
 _MAX_COHORT_FILE_BYTES = 64 * 1024
@@ -329,6 +329,10 @@ def _release_digest(common: dict[str, object]) -> str:
     return "sha256:" + hashlib.sha256(canonical_json(common)).hexdigest()
 
 
+def _generation_id(release_digest: str) -> str:
+    return "gen-" + release_digest.removeprefix("sha256:")[:24]
+
+
 def _generation_hash(
     common: dict[str, object], api_identity_digest: str, worker_identity_digest: str
 ) -> str:
@@ -555,18 +559,19 @@ class SelectedDevelopmentCohort:
         generation_hash = _generation_hash(
             common, expected_api_digest, expected_worker_digest
         )
+        expected_release_digest = _release_digest(common)
         if (
             _DIGEST.fullmatch(self.release_digest) is None
             or _DIGEST.fullmatch(self.api_identity_digest) is None
             or _DIGEST.fullmatch(self.worker_identity_digest) is None
-            or self.release_digest != _release_digest(common)
+            or self.release_digest != expected_release_digest
             or self.api_image
             != f"development.invalid/vonk-forge-api@{self.api_identity_digest}"
             or self.worker_image
             != f"development.invalid/vonk-forge-worker@{self.worker_identity_digest}"
             or _IMAGE.fullmatch(self.api_image) is None
             or _IMAGE.fullmatch(self.worker_image) is None
-            or self.generation_id != "dev-" + generation_hash[:24]
+            or self.generation_id != _generation_id(expected_release_digest)
             or _GENERATION_ID.fullmatch(self.generation_id) is None
             or self.start_nonce != _start_nonce(generation_hash)
             or _NONCE.fullmatch(self.start_nonce) is None
@@ -647,6 +652,7 @@ def verify_cohort(
     api_digest = cohort.api.identity_digest
     worker_digest = cohort.worker.identity_digest
     generation_hash = _generation_hash(common, api_digest, worker_digest)
+    release_digest = _release_digest(common)
     return SelectedDevelopmentCohort(
         schema_version=cohort.api.schema_version,
         source_repository=cohort.api.source_repository,
@@ -657,12 +663,12 @@ def verify_cohort(
         protocol_minimum=cohort.api.protocol_minimum,
         protocol_maximum=cohort.api.protocol_maximum,
         build_digest=cohort.api.build_digest,
-        release_digest=_release_digest(common),
+        release_digest=release_digest,
         api_identity_digest=api_digest,
         worker_identity_digest=worker_digest,
         api_image=f"development.invalid/vonk-forge-api@{api_digest}",
         worker_image=f"development.invalid/vonk-forge-worker@{worker_digest}",
-        generation_id="dev-" + generation_hash[:24],
+        generation_id=_generation_id(release_digest),
         start_nonce=_start_nonce(generation_hash),
     )
 

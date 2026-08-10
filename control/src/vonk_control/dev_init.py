@@ -21,6 +21,7 @@ from .dev_cohort import (
     SelectedDevelopmentCohort,
     require_selected_cohort,
 )
+from .host_state import HostOperationPlan, SelectionReceipt
 
 _COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 _IMAGE = re.compile(r"[^\s]{1,1900}@sha256:[0-9a-f]{64}\Z")
@@ -902,46 +903,35 @@ def _development_generation_identity() -> DevelopmentGenerationIdentity:
 
 
 def _active_projection(identity: DevelopmentGenerationIdentity) -> bytes:
-    # Development cohort IDs are intentionally distinct from TUF-selected host
-    # operation IDs, so build their receipt-shaped projection without widening
-    # HostOperationPlan or GenerationReceipt validation.
     target_sha256 = identity.release_digest.removeprefix("sha256:")
     target_name = (
         f"platform/releases/{identity.platform_version}/{target_sha256}.json"
     )
-    generation = {
-        "api_image": identity.api_image,
-        "build_digest": identity.build_digest,
-        "database_revision": identity.database_revision,
-        "deployment_bundle_digest": "sha256:" + "3" * 64,
-        "generation_id": identity.generation_id,
-        "platform_target_name": target_name,
-        "platform_target_sha256": target_sha256,
-        "platform_version": identity.platform_version,
-        "receipt_kind": "generation",
-        "release_digest": identity.release_digest,
-        "schema_version": 1,
-        "tuf_targets_version": 1,
-        "worker_image": identity.worker_image,
-    }
-    generation_raw = _canonical(generation)
-    selection = {
-        "generation": generation,
-        "generation_receipt_sha256": hashlib.sha256(generation_raw).hexdigest(),
-        "operation_id": "dev-compose",
-        "plan_digest": "sha256:" + "2" * 64,
-        "previous_generation": None,
-        "receipt_kind": "selection",
-        "schema_version": 1,
-    }
-    selection_raw = _canonical(selection)
+    plan = HostOperationPlan(
+        operation_id="dev-compose",
+        plan_digest="sha256:" + "2" * 64,
+        generation_id=identity.generation_id,
+        platform_target_name=target_name,
+        platform_target_sha256=target_sha256,
+        tuf_targets_version=1,
+        release_digest=identity.release_digest,
+        build_digest=identity.build_digest,
+        platform_version=identity.platform_version,
+        deployment_bundle_digest="sha256:" + "3" * 64,
+        api_image=identity.api_image,
+        worker_image=identity.worker_image,
+        database_revision=identity.database_revision,
+    )
+    selection = SelectionReceipt.from_plan(plan, previous_generation=None)
+    generation_raw = _canonical(selection.generation.document())
+    selection_raw = _canonical(selection.document())
     return _canonical(
         {
             "generation_receipt_sha256": hashlib.sha256(generation_raw).hexdigest(),
             "projection_kind": "active",
             "projection_sequence": 1,
             "schema_version": 1,
-            "selection": selection,
+            "selection": selection.document(),
             "selection_receipt_sha256": hashlib.sha256(selection_raw).hexdigest(),
         }
     )

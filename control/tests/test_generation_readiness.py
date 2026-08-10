@@ -16,6 +16,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_control import dev_cohort, dev_init
 from vonk_control.api import (
+    DirectoryIdentityProjectionSource,
     GenerationProcessIdentity,
     GenerationReadinessError,
     GenerationReadinessService,
@@ -681,7 +682,7 @@ def test_directory_projection_source_rejects_active_receipt_digest_mismatch(
         source.load_active()
 
 
-def test_cohort_derived_api_and_worker_identities_match_development_active_projection(
+def test_cohort_derived_api_and_worker_identities_match_strict_active_projection_reader(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -702,12 +703,15 @@ def test_cohort_derived_api_and_worker_identities_match_development_active_proje
         database_revision=api_settings.database_revision,
         start_nonce=api_settings.start_nonce,
     )
-    projection = json.loads((identity_root / "active.json").read_bytes())
+    projections = DirectoryIdentityProjectionSource(
+        identity_root,
+        expected_owner=os.geteuid(),
+    )
     sessions = _sessions(tmp_path)
     service = GenerationReadinessService(
         sessions,
         api_identity,
-        Projections(active=projection),
+        projections,
         clock=lambda: NOW,
         database_revision=lambda: selected.database_revision,
         heartbeat_maximum_age_seconds=15,
@@ -735,7 +739,7 @@ def test_cohort_derived_api_and_worker_identities_match_development_active_proje
     monkeypatch.setenv("VONK_CONTROL_PROCESS_ROLE", "worker")
     worker_settings = GenerationStartupSettings.from_env_and_secrets()
     WorkerSelectedIdentityVerifier(
-        Projections(active=projection),
+        projections,
         generation_id=worker_settings.generation_id,
         release_digest=worker_settings.release_digest,
         build_digest=worker_settings.build_digest,
