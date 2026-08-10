@@ -166,6 +166,7 @@ runs:
         PACKAGE_SHA256: ${{ steps.package.outputs.package_sha256 }}
         RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ inputs.r2_access_key_id }}
         RCLONE_CONFIG_R2_ENDPOINT: https://${{ inputs.r2_account_id }}.r2.cloudflarestorage.com
+        RCLONE_CONFIG_R2_NO_CHECK_BUCKET: "true"
         RCLONE_CONFIG_R2_PROVIDER: Cloudflare
         RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ inputs.r2_secret_access_key }}
         RCLONE_CONFIG_R2_TYPE: s3
@@ -388,6 +389,7 @@ runs:
         PACKAGE_SHA256: ${{ steps.package.outputs.package_sha256 }}
         RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ inputs.r2_access_key_id }}
         RCLONE_CONFIG_R2_ENDPOINT: https://${{ inputs.r2_account_id }}.r2.cloudflarestorage.com
+        RCLONE_CONFIG_R2_NO_CHECK_BUCKET: "true"
         RCLONE_CONFIG_R2_PROVIDER: Cloudflare
         RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ inputs.r2_secret_access_key }}
         RCLONE_CONFIG_R2_TYPE: s3
@@ -440,6 +442,7 @@ runs:
         PACKAGE_SHA256: ${{ steps.package.outputs.package_sha256 }}
         RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ inputs.r2_access_key_id }}
         RCLONE_CONFIG_R2_ENDPOINT: https://${{ inputs.r2_account_id }}.r2.cloudflarestorage.com
+        RCLONE_CONFIG_R2_NO_CHECK_BUCKET: "true"
         RCLONE_CONFIG_R2_PROVIDER: Cloudflare
         RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ inputs.r2_secret_access_key }}
         RCLONE_CONFIG_R2_TYPE: s3
