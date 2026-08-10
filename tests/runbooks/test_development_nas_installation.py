@@ -53,25 +53,36 @@ def test_development_nas_runbook_keeps_pull_only_runtime_constraints() -> None:
     assert "does not clone\nthis repository" in text
 
 
-def test_development_nas_runbook_documents_only_runtime_secret_inputs() -> None:
+def test_normal_install_and_update_path_is_ui_only_before_guarded_recovery() -> None:
     text = RUNBOOK.read_text()
+    assert "## Advanced guarded recovery" in text
+    normal_path, guarded_recovery = text.split(
+        "## Advanced guarded recovery", maxsplit=1
+    )
+
+    for marker in (
+        "```bash",
+        "```shell",
+        "```powershell",
+        "sudo ",
+        "ssh.exe ",
+        "`ssh-keygen`",
+    ):
+        assert marker not in normal_path
+    assert "docker compose -f " not in normal_path
+    assert "```bash" in guarded_recovery
+
+
+def test_development_nas_runbook_documents_only_runtime_secret_inputs() -> None:
+    text = _normalized_text(RUNBOOK)
 
     for name in ("postgres-password", "database-url", "git-signing-key"):
         assert name in text
-    assert "openssl rand -hex 32" in text
-    assert "ssh-keygen -q -t ed25519 -N ''" in text
-    assert "refusing to overwrite %s" in text
-    assert "chmod 0400" in text
-    assert "chown 999:999" in text
-    assert "chown 10001:10001" in text
+    assert "64 lowercase hexadecimal characters followed by one newline" in text
+    assert "postgresql+psycopg://control:<postgres-password>@postgres:5432/control" in text
+    assert "unencrypted Ed25519 OpenSSH private key" in text
+    assert "SMB share or NAS file manager" in text
     assert "Windows ACLs on an SMB drive do not establish" in text
-    assert "must\nnot write directly to SMB" in text
-    assert "$LASTEXITCODE -ne 0" in text
-    assert (
-        "Copy-Item -LiteralPath $tempKey -Destination $stagedKey -ErrorAction Stop"
-        in text
-    )
-    assert "[IO.File]::Move($stagedKey, $key)" in text
     assert "Never commit a backup" in text
 
 

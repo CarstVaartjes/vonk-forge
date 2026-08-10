@@ -67,57 +67,30 @@ commit. Download the artifact named
 project directory. Do not edit the first-party image references or add digests:
 the mutable `:dev` channel is intentionally selected when the Docker UI pulls.
 
-Before copying it to the NAS, check only non-secret properties:
+In the NAS file manager, confirm that the artifact is named
+`docker-compose.yml` and that the project UI identifies it as a Compose file;
+do not edit image references, add a digest, or add a build section. Both GHCR
+packages must be public. A pull-only NAS needs no registry login. If the Docker
+UI requests credentials, stop and correct package visibility instead of
+installing a GitHub token on the NAS.
 
-```bash
-grep -E 'ghcr.io/carstvaartjes/vonk-forge-(api|worker):dev$' docker-compose.yml
-test "$(grep -c '^[[:space:]]*build:' docker-compose.yml)" -eq 0
-```
+## Create and copy the three NAS secret files
 
-Both GHCR packages must be public. A pull-only NAS needs no registry login. If
-a pull requests credentials, stop and correct the package visibility instead
-of installing a GitHub token on the NAS.
+Use the NAS SMB share or NAS file manager to create `secrets/` in the same
+project directory as `docker-compose.yml`, then copy the following exact files
+into it. Create regular files, not folders or shortcuts; use UTF-8 without a
+BOM and end each text value with one newline. Do not open values in the Docker
+UI or put them in the Compose file.
 
-## Preferred: generate secrets directly on the NAS
+| File | Exact content rule |
+|---|---|
+| `postgres-password` | 64 lowercase hexadecimal characters followed by one newline. |
+| `database-url` | `postgresql+psycopg://control:<postgres-password>@postgres:5432/control` followed by one newline, where `<postgres-password>` is the exact value in `postgres-password`. |
+| `git-signing-key` | One unencrypted Ed25519 OpenSSH private key followed by one newline; the initializer has no interactive passphrase input. |
 
-SSH to the NAS and set `project_dir` to its local filesystem path, not an SMB
-UNC path. The example path is intentionally generic; obtain the real project
-path from the NAS storage UI.
-
-```bash
-project_dir=/volume1/docker/vonk-forge
-sudo install -d -m 0700 -o root -g root "$project_dir/secrets"
-sudo sh -s -- "$project_dir" <<'SH'
-set -eu
-umask 077
-secret_dir=$1/secrets
-for name in postgres-password database-url git-signing-key git-signing-key.pub; do
-  if [ -e "$secret_dir/$name" ] || [ -L "$secret_dir/$name" ]; then
-    printf 'refusing to overwrite %s\n' "$secret_dir/$name" >&2
-    exit 1
-  fi
-done
-postgres_password=$(openssl rand -hex 32)
-printf '%s\n' "$postgres_password" > "$secret_dir/postgres-password"
-printf 'postgresql+psycopg://control:%s@postgres:5432/control\n' \
-  "$postgres_password" > "$secret_dir/database-url"
-ssh-keygen -q -t ed25519 -N '' \
-  -C vonk-forge-development-git-signing \
-  -f "$secret_dir/git-signing-key"
-rm -f -- "$secret_dir/git-signing-key.pub"
-chown 999:999 "$secret_dir/postgres-password"
-chown 10001:10001 "$secret_dir/database-url"
-chown root:root "$secret_dir/git-signing-key"
-chmod 0400 "$secret_dir/postgres-password" \
-  "$secret_dir/database-url" "$secret_dir/git-signing-key"
-unset postgres_password
-SH
-```
-
-The generated password is hexadecimal, so it can be placed in the URL without
-percent encoding. Do not substitute a password containing URL punctuation
-unless it is percent-encoded correctly. The Git key must have no passphrase:
-the noninteractive initializer has no agent or passphrase input.
+Do not overwrite existing secret files during a normal redeploy. If an SMB
+client created the files, safely eject/disconnect the share after copying and
+use the NAS file manager to confirm only the three expected names appear.
 
 The numeric owners match the pinned images: PostgreSQL is UID/GID `999`, while
 the API and migration run as `10001:10001`. Docker implementations differ in
@@ -125,113 +98,30 @@ how bind-backed Compose secrets expose ownership; these owners and mode `0400`
 are the restrictive compatible host settings. The Docker daemon must be able
 to traverse the root-owned `0700` secret directory.
 
-Validate existence, size, ownership, and mode without printing content:
-
-```bash
-project_dir=/volume1/docker/vonk-forge
-for name in postgres-password database-url git-signing-key; do
-  sudo test -f "$project_dir/secrets/$name"
-  sudo test -s "$project_dir/secrets/$name"
-  sudo stat -c '%n uid=%u gid=%g mode=%a bytes=%s' \
-    "$project_dir/secrets/$name"
-done
-```
-
 Expected owners are `999:999`, `10001:10001`, and `0:0`, respectively; every
 mode is `400`. File sizes are safe to display. Never use `cat`, `Get-Content`,
-or a screenshot that reveals values. `docker compose config` prints file paths
-and operational configuration, not these files' contents; use `config -q` when
-you only need validation so that metadata is not copied into diagnostics.
+or a screenshot that reveals values. Confirm the names, presence, and file
+sizes through the NAS file manager; do not copy configuration output into
+diagnostics.
 
-## Alternative: create files from Windows and copy over SMB
+## SMB/file-manager preparation
 
-Direct NAS generation is preferable because the private key never crosses the
-network. If only the SMB share is initially available, this PowerShell flow
-creates UTF-8 files without a BOM and does not put the generated password in
-command history. Replace `Z:\vonk-forge` if the share uses another drive.
+Use an SMB client only to copy the three already-prepared files into
+`secrets/`. Generate password and private-key material through the
+organization's approved secret-management process rather than by pasting a
+command into a client terminal. The SMB client must create regular files with
+the exact names and content rules above; it must not create a public key,
+temporary copy, or duplicate filename in the project directory.
 
-```powershell
-$ErrorActionPreference = 'Stop'
-$project = 'Z:\vonk-forge'
-$secretDir = Join-Path $project 'secrets'
-New-Item -ItemType Directory -Force -Path $secretDir | Out-Null
-$secretNames = 'postgres-password', 'database-url', 'git-signing-key'
-foreach ($name in $secretNames) {
-  $destination = Join-Path $secretDir $name
-  if (Test-Path -LiteralPath $destination) {
-    throw "Refusing to overwrite $destination"
-  }
-}
-
-$bytes = New-Object byte[] 32
-$rng = [Security.Cryptography.RandomNumberGenerator]::Create()
-$rng.GetBytes($bytes)
-$rng.Dispose()
-$postgresPassword = -join ($bytes | ForEach-Object { $_.ToString('x2') })
-$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-[IO.File]::WriteAllText(
-  (Join-Path $secretDir 'postgres-password'),
-  "$postgresPassword`n",
-  $utf8NoBom
-)
-[IO.File]::WriteAllText(
-  (Join-Path $secretDir 'database-url'),
-  "postgresql+psycopg://control:${postgresPassword}@postgres:5432/control`n",
-  $utf8NoBom
-)
-$postgresPassword = $null
-[Array]::Clear($bytes, 0, $bytes.Length)
-
-$key = Join-Path $secretDir 'git-signing-key'
-$keyTempDir = Join-Path ([IO.Path]::GetTempPath()) `
-  ("vonk-forge-key-" + [Guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory -Path $keyTempDir | Out-Null
-$tempKey = Join-Path $keyTempDir 'git-signing-key'
-$stagedKey = Join-Path $secretDir `
-  ('.git-signing-key.' + [Guid]::NewGuid().ToString('N') + '.tmp')
-try {
-  & "$env:WINDIR\System32\OpenSSH\ssh-keygen.exe" `
-    -q -t ed25519 -C vonk-forge-development-git-signing -f $tempKey
-  if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $tempKey)) {
-    throw "ssh-keygen failed with exit code $LASTEXITCODE"
-  }
-  Copy-Item -LiteralPath $tempKey -Destination $stagedKey -ErrorAction Stop
-  if (-not (Test-Path -LiteralPath $stagedKey) -or
-      (Get-Item -LiteralPath $stagedKey).Length -ne
-      (Get-Item -LiteralPath $tempKey).Length) {
-    throw 'SMB private-key copy did not verify'
-  }
-  [IO.File]::Move($stagedKey, $key)
-} finally {
-  if (Test-Path -LiteralPath $stagedKey) {
-    Remove-Item -LiteralPath $stagedKey -Force -ErrorAction Stop
-  }
-  Remove-Item -LiteralPath $keyTempDir -Recurse -Force -ErrorAction Stop
-}
-```
-
-`ssh-keygen` prompts twice for a passphrase; press Enter at both prompts so the
-runtime key is unencrypted. Do not pass an empty `-N` through Windows
-PowerShell 5: its native argument handling is inconsistent and caused the
-earlier key-generation failures. The key is generated on the protected local
-temporary filesystem and only then copied as a regular file; `ssh-keygen` must
-not write directly to SMB. Prompt deletion of the temporary directory reduces
-exposure, but it is not guaranteed secure erasure on SSDs, snapshots, or
-managed Windows storage.
+Obtain the unencrypted private key through the approved secret-management
+process, then copy it as a regular file from protected local storage. SMB is a
+copy path, not a secret-generation environment; its ordinary cleanup does not
+guarantee secure erasure from snapshots or managed Windows storage.
 
 Windows ACLs on an SMB drive do not establish the Linux numeric ownership used
-inside containers. After copying, run this mandatory NAS-shell step:
-
-```bash
-project_dir=/volume1/docker/vonk-forge
-sudo chown root:root "$project_dir/secrets"
-sudo chmod 0700 "$project_dir/secrets"
-sudo chown 999:999 "$project_dir/secrets/postgres-password"
-sudo chown 10001:10001 "$project_dir/secrets/database-url"
-sudo chown root:root "$project_dir/secrets/git-signing-key"
-sudo chmod 0400 "$project_dir/secrets/postgres-password" \
-  "$project_dir/secrets/database-url" "$project_dir/secrets/git-signing-key"
-```
+inside containers. Use the NAS administration interface's file-permission
+controls to apply the ownership and modes above before deploying; do not use a
+Docker-project action to change secret-file permissions.
 
 ## Create and redeploy the Compose project
 
@@ -251,15 +141,9 @@ After the UI reports the deployment, inspect the job and container status in
 this order: the API and worker cohort reporters, the cohort gate, `dev-init`,
 `migrate`, then PostgreSQL and the long-running API and worker. The reporters,
 gate, `dev-init`, and `migrate` must complete successfully before the
-long-running services become healthy. The API binds only to NAS loopback. From
-Windows, use a trusted SSH forward rather than widening the Compose listener:
-
-```powershell
-ssh.exe -L 8080:127.0.0.1:8080 your-nas-account@your-nas-host
-```
-
-Then open `http://127.0.0.1:8080` on Windows while the SSH session remains
-connected.
+long-running services become healthy. The API binds only to NAS loopback; use
+your organization's approved trusted access path rather than widening the
+Compose listener.
 
 ## Update after an accepted development publication
 
@@ -295,6 +179,12 @@ state, repository, and the generated API, migration, and worker secret
 projections.
 Never treat a repository-volume
 reset as a database or runtime-state rollback.
+
+## Advanced guarded recovery
+
+The following shell procedure is for the explicitly documented,
+schema-compatible repository-only recovery case. Do not use it for normal
+installation, updates, or an incompatible migration.
 
 For a documented repository-only rollback, discover the actual volume name
 from the running API before stopping the project. This remains correct if a NAS
