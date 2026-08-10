@@ -93,13 +93,13 @@ pub enum EnrollmentOutcome {
 
 pub async fn pair(
     config: &AgentConfig,
-    controller: &Url,
+    enrollment: &Url,
     token: &str,
     ca_sha256: &str,
     evidence: EnrollmentEvidence,
 ) -> Result<EnrollmentOutcome, PairingError> {
     validate_token(token)?;
-    if controller != &config.controller_url || ca_sha256 != config.ca_sha256 {
+    if enrollment != &config.enrollment_url || ca_sha256 != config.ca_sha256 {
         return Err(PairingError::CaPin);
     }
     let ca_metadata = fs::symlink_metadata(&config.ca_path)?;
@@ -134,7 +134,7 @@ pub async fn pair(
         .timeout(Duration::from_secs(30))
         .build()?;
     let csr = std::str::from_utf8(&pending.csr_pem).map_err(|_| PairingError::Response)?;
-    let endpoint = controller
+    let endpoint = enrollment
         .join("/agent/v1/enroll")
         .map_err(|_| PairingError::Response)?;
     let response = client

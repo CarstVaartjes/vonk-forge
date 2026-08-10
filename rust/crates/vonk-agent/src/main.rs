@@ -40,7 +40,7 @@ enum Command {
     },
     Pair {
         #[arg(long)]
-        controller: Url,
+        enrollment: Url,
         #[arg(long)]
         ca_sha256: String,
         #[arg(long, default_value_t = false)]
@@ -61,7 +61,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("imported {imported} terminal Python receipts");
         }
         Command::Pair {
-            controller,
+            enrollment,
             ca_sha256,
             token_stdin,
         } => {
@@ -72,7 +72,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             io::stdin().take(4096).read_to_string(&mut token)?;
             let executable = std::env::current_exe()?;
             let evidence = collect_evidence(&executable)?;
-            match pair(&config, &controller, token.trim(), &ca_sha256, evidence).await? {
+            match pair(&config, &enrollment, token.trim(), &ca_sha256, evidence).await? {
                 EnrollmentOutcome::Pending(pending) => {
                     println!("pairing {} is {}", pending.id, pending.state);
                 }

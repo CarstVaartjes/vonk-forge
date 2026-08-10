@@ -168,6 +168,58 @@ def signing_key_id(private_key: Path, tmp_path: Path) -> str:
     return json.loads(result.stdout)["key_id"]
 
 
+def test_built_agent_package_contains_each_origin_once(tmp_path: Path) -> None:
+    binaries = tmp_path / "binaries"
+    binaries.mkdir()
+    for name in ("vonk-agent", "vonk-agent-helper", "vonk-agent-supervisor"):
+        raw = bytearray(256)
+        raw[:16] = b"\x7fELF\x02\x01\x01" + bytes(9)
+        struct.pack_into("<H", raw, 18, 183)
+        (binaries / name).write_bytes(raw)
+        (binaries / name).chmod(0o555)
+    private_key = tmp_path / "release.pem"
+    generate_private_key(private_key, "ED25519")
+    output = tmp_path / "dist"
+
+    built = subprocess.run(
+        [
+            ROOT / "scripts/build-agent-deb",
+            "--version",
+            "0.1.0",
+            "--release-private-key",
+            private_key,
+            "--binaries-dir",
+            binaries,
+            "--source-date-epoch",
+            "1786060800",
+            "--output-dir",
+            output,
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert built.returncode == 0, built.stderr
+    payload = tmp_path / "payload"
+    extracted = subprocess.run(
+        [
+            "/usr/bin/dpkg-deb",
+            "--extract",
+            output / "vonk-forge-agent_0.1.0_arm64.deb",
+            payload,
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert extracted.returncode == 0, extracted.stderr
+
+    config = (payload / "etc/vonk-forge-agent/agent.toml").read_text()
+    assert config.count('enrollment_url = "https://enroll.vonkforge.invalid/"') == 1
+    assert config.count('controller_url = "https://controller.vonkforge.invalid/"') == 1
+
+
 def test_agent_package_action_has_a_strict_input_and_output_boundary() -> None:
     text = PACKAGE_WORKFLOW.read_text()
 
