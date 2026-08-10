@@ -570,6 +570,23 @@ def test_initialize_repository_rejects_a_tampered_deployment_base(
         initialize_repository(destination, repository_url, expected)
 
 
+def test_initialize_repository_rejects_deployment_base_older_than_merge_base(
+    tmp_path: Path, local_acceptance: None
+) -> None:
+    _origin_path, publisher, repository_url, older = _origin(tmp_path)
+    accepted = _commit(publisher, "accepted.txt", "accepted baseline\n")
+    _git(publisher, "push", "-q", "origin", "main")
+    destination = tmp_path / "repository"
+    initialize_repository(destination, repository_url, accepted)
+    _git(destination, "config", "user.email", "operator@example.invalid")
+    _git(destination, "config", "user.name", "Operator")
+    _commit(destination, "local.txt", "local deployment commit\n")
+    _git(destination, "update-ref", "refs/vonk/deploy-base", older, accepted)
+
+    with pytest.raises(DevInitError, match="deployment base.*merge-base"):
+        initialize_repository(destination, repository_url, accepted)
+
+
 def test_initialize_repository_rejects_a_rollback_commit(
     tmp_path: Path, local_acceptance: None
 ) -> None:

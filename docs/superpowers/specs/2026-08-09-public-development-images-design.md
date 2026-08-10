@@ -130,9 +130,11 @@ non-symlink Git repository with a clean worktree checked out on `deploy`,
 fetches public `origin/main` without credentials, and verifies that the expected
 commit is reachable from that ref. Local `main` is the last accepted GitHub
 baseline and must be an ancestor of the new expected commit. The durable
-`refs/vonk/deploy-base` must be an ancestor of both accepted `main` and current
-`deploy`; this preserves the ancestry boundary even after accepted `main`
-advances independently. When `deploy` still equals the durable deployment base,
+`refs/vonk/deploy-base` must equal Git's merge-base of accepted `main` and
+current `deploy`, not merely any shared ancestor; this exact fork-point
+invariant preserves the ancestry boundary without allowing a tampered base to
+widen future accepted deployment histories after `main` advances independently.
+When `deploy` still equals the durable deployment base,
 `dev-init` atomically compare-and-swaps `main`, `deploy`, and the deployment base
 to the expected commit, then resets the clean checked-out worktree. When
 development-direct operation has added signed local commits, it atomically
