@@ -20,6 +20,47 @@ PRIVATE_KEY_TEXT = PRIVATE_KEY_BLOCK.decode()
 SOURCE_COMMIT = "0123456789abcdef0123456789abcdef01234567"
 OTHER_COMMIT = "fedcba9876543210fedcba9876543210fedcba98"
 SOURCE_REPOSITORY = "https://github.com/CarstVaartjes/vonk-forge"
+OTHER_REPOSITORY = "https://github.com/example/fork"
+BUILD_DIGEST = "sha256:417d194fbdb2ae0359258796aed4b84f4a15466697774f633bf6c0ca94b10c5d"
+
+
+def _embedded_identity_document(**overrides: object) -> dict[str, object]:
+    document: dict[str, object] = {
+        "build_digest": BUILD_DIGEST,
+        "channel": "development",
+        "database_revision": "0020_recipe_catalog_bridge",
+        "image_role": "api",
+        "platform_version": "0.1.0",
+        "protocol_maximum": 2,
+        "protocol_minimum": 1,
+        "schema_version": 1,
+        "source_commit": SOURCE_COMMIT,
+        "source_repository": SOURCE_REPOSITORY,
+    }
+    document.update(overrides)
+    return document
+
+
+def _canonical_identity_output(**overrides: object) -> str:
+    return (
+        json.dumps(
+            _embedded_identity_document(**overrides),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n"
+    )
+
+
+def _accepted_image_inspection() -> dict[str, object]:
+    return {
+        "Config": {
+            "Labels": {
+                "org.opencontainers.image.revision": SOURCE_COMMIT,
+                "org.opencontainers.image.source": SOURCE_REPOSITORY,
+            }
+        }
+    }
 
 
 @pytest.fixture
@@ -82,6 +123,32 @@ def _scanner_module():
     module = importlib.util.module_from_spec(spec)
     loader.exec_module(module)
     return module
+
+
+def _assert_embedded_identity_output_rejected(
+    monkeypatch: pytest.MonkeyPatch, output: str
+) -> None:
+    scanner = _scanner_module()
+    commands: list[tuple[str, ...]] = []
+
+    def fake_run(arguments):
+        command = tuple(arguments)
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, output, "")
+
+    monkeypatch.setattr(scanner, "_run", fake_run)
+
+    with pytest.raises(scanner.ScanFailure, match="identity verification failed"):
+        scanner._verify_image_identity(
+            "vonk-forge-api:accepted-labels",
+            _accepted_image_inspection(),
+            expected_role="api",
+            expected_commit=SOURCE_COMMIT,
+            expected_repository=SOURCE_REPOSITORY,
+        )
+
+    assert len(commands) == 1
+    assert commands[0][:3] == ("docker", "run", "--rm")
 
 
 @pytest.fixture(scope="module")
@@ -734,34 +801,19 @@ def test_scanner_acceptance_verifies_both_embedded_identities(
     assert result.stderr == ""
 
 
-@pytest.mark.parametrize(
-    ("api_role", "worker_role", "commit", "repository"),
-    (
-        ("worker", "api", SOURCE_COMMIT, SOURCE_REPOSITORY),
-        ("api", "worker", OTHER_COMMIT, SOURCE_REPOSITORY),
-        ("api", "worker", SOURCE_COMMIT, "https://github.com/example/fork"),
-    ),
-    ids=("swapped-roles", "wrong-commit", "wrong-repository"),
-)
-def test_scanner_acceptance_rejects_identity_authority_mismatches(
+def test_scanner_acceptance_rejects_swapped_embedded_roles(
     local_development_images,
-    api_role: str,
-    worker_role: str,
-    commit: str,
-    repository: str,
 ) -> None:
     result = _accept(
-        local_development_images[api_role],
-        local_development_images[worker_role],
-        commit=commit,
-        repository=repository,
+        local_development_images["worker"],
+        local_development_images["api"],
     )
 
     assert result.returncode == 1
     assert "identity verification failed" in result.stderr
 
 
-def test_scanner_acceptance_rejects_embedded_commit_label_mismatch(
+def test_scanner_acceptance_rejects_oci_revision_authority_mismatch(
     local_development_images,
     mislabeled_api_image: str,
 ) -> None:
@@ -769,6 +821,35 @@ def test_scanner_acceptance_rejects_embedded_commit_label_mismatch(
 
     assert result.returncode == 1
     assert "identity verification failed" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("source_commit", OTHER_COMMIT),
+        ("source_repository", OTHER_REPOSITORY),
+    ),
+    ids=("commit", "repository"),
+)
+def test_scanner_rejects_embedded_identity_mismatch_after_authority_labels_match(
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    value: str,
+) -> None:
+    _assert_embedded_identity_output_rejected(
+        monkeypatch,
+        _canonical_identity_output(**{field: value}),
+    )
+
+
+def test_scanner_rejects_noncanonical_embedded_identity_bytes_after_labels_match(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    noncanonical = (
+        json.dumps(_embedded_identity_document(), indent=2, sort_keys=True) + "\n"
+    )
+
+    _assert_embedded_identity_output_rejected(monkeypatch, noncanonical)
 
 
 def test_scanner_command_is_executable() -> None:
