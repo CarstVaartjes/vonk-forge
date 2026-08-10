@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Verify release authority and newest-release selection while alias rollback is
+# still armed in promote-image-aliases.
+set -euo pipefail
+
+invalid() {
+  printf '%s\n' 'production alias postcondition is invalid' >&2
+  exit 64
+}
+
+[[ "$#" -eq 3 ]] || invalid
+readonly target_tag=$1 target_tag_oid=$2 target_commit=$3
+[[ "$target_tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || invalid
+[[ "$target_tag_oid" =~ ^[0-9a-f]{40}$ ]] || invalid
+[[ "$target_commit" =~ ^[0-9a-f]{40}$ ]] || invalid
+: "${GITHUB_API_URL:?}" "${GITHUB_REPOSITORY:?}" "${RUNNER_TEMP:?}"
+
+scripts/verify-release-tag-authority "$target_tag" "$target_tag_oid" "$target_commit"
+observed_releases="$RUNNER_TEMP/observed-releases.json"
+printf '[]\n' > "$observed_releases"
+for page in $(seq 1 10); do
+  page_json="$RUNNER_TEMP/observed-releases-$page.json"
+  merged_json="$RUNNER_TEMP/observed-releases-merged.json"
+  curl --fail --silent --show-error --location \
+    --proto '=https' --proto-redir '=https' --tlsv1.2 \
+    --header 'Accept: application/vnd.github+json' \
+    --header 'X-GitHub-Api-Version: 2022-11-28' \
+    "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases?per_page=100&page=$page" \
+    > "$page_json"
+  jq -e 'type == "array"' "$page_json" >/dev/null
+  jq -s '.[0] + .[1]' "$observed_releases" "$page_json" > "$merged_json"
+  mv "$merged_json" "$observed_releases"
+  [[ $(jq 'length' "$page_json") -eq 100 ]] || break
+done
+mapfile -t observed_tags < <(
+  jq -r '.[] | select((.draft | not) and (.prerelease | not) and (.immutable == true)) | .tag_name' \
+    "$observed_releases" \
+    | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' \
+    | sort -Vr
+)
+test "${observed_tags[0]:-}" = "$target_tag"

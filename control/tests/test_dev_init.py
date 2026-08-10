@@ -448,6 +448,46 @@ def test_initialize_repository_fast_forwards_accepted_and_deploy_refs_together(
     assert _git(destination, "status", "--porcelain=v1", "--untracked-files=all") == ""
 
 
+def test_initialize_repository_fails_closed_after_reset_interrupt_and_allows_verified_recovery(
+    tmp_path: Path, local_acceptance: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _origin_path, publisher, repository_url, initial = _origin(tmp_path)
+    destination = tmp_path / "repository"
+    initialize_repository(destination, repository_url, initial)
+    _git(destination, "branch", "operator-notes", initial)
+    expected = _commit(publisher, "new.txt", "next\n")
+    _git(publisher, "push", "-q", "origin", "main")
+    real_git = dev_init._git
+
+    def interrupt_reset(
+        root: Path | None,
+        arguments: tuple[str, ...],
+        **kwargs: object,
+    ) -> str:
+        if arguments == ("reset", "--hard", expected):
+            raise DevInitError("injected reset interruption")
+        return real_git(root, arguments, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(dev_init, "_git", interrupt_reset)
+    with pytest.raises(DevInitError, match="injected reset interruption"):
+        initialize_repository(destination, repository_url, expected)
+
+    assert _git(destination, "rev-parse", "main") == expected
+    assert _git(destination, "rev-parse", "deploy") == expected
+    assert _git(destination, "rev-parse", "refs/vonk/deploy-base") == expected
+    assert _git(destination, "rev-parse", "operator-notes") == initial
+    assert _git(destination, "status", "--porcelain=v1", "--untracked-files=all")
+
+    monkeypatch.setattr(dev_init, "_git", real_git)
+    with pytest.raises(DevInitError, match="worktree must be clean"):
+        initialize_repository(destination, repository_url, expected)
+
+    _git(destination, "reset", "--hard", expected)
+    assert _git(destination, "status", "--porcelain=v1", "--untracked-files=all") == ""
+    initialize_repository(destination, repository_url, expected)
+    assert _git(destination, "rev-parse", "operator-notes") == initial
+
+
 def test_initialize_repository_preserves_clean_local_deploy_commits_across_acceptance(
     tmp_path: Path, local_acceptance: None
 ) -> None:

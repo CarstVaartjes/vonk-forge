@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# Create or repair one immutable public release without replacing divergent
+# release metadata or assets.
+set -euo pipefail
+umask 077
+
+invalid() {
+  printf '%s\n' 'GitHub release reconciliation is invalid' >&2
+  exit 64
+}
+
+[[ "$#" -ge 5 ]] || invalid
+readonly repository=$1 tag=$2 source_sha=$3 title=$4
+shift 4
+[[ "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || invalid
+[[ "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || invalid
+[[ "$source_sha" =~ ^[0-9a-f]{40}$ ]] || invalid
+[[ "$title" == "Vonk Forge ${tag#v}" ]] || invalid
+assets=("$@")
+(( "${#assets[@]}" > 0 )) || invalid
+
+declare -A expected=()
+for asset in "${assets[@]}"; do
+  [[ -f "$asset" && ! -L "$asset" ]] || invalid
+  name=${asset##*/}
+  [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]{0,239}$ ]] || invalid
+  [[ -z ${expected[$name]+x} ]] || invalid
+  expected["$name"]=$asset
+done
+
+readonly scratch=$(mktemp -d /tmp/vonk-github-release.XXXXXXXXXX)
+[[ "$scratch" =~ ^/tmp/vonk-github-release\.[A-Za-z0-9]{10}$ && -d "$scratch" && ! -L "$scratch" ]] || {
+  printf '%s\n' 'GitHub release scratch path is unsafe' >&2
+  exit 1
+}
+cleanup() { rm -rf -- "$scratch"; }
+trap cleanup EXIT INT TERM
+
+release_json="$scratch/release.json"
+if gh release view "$tag" --repo "$repository" \
+  --json tagName,targetCommitish,isDraft,isPrerelease,name,assets \
+  >"$release_json" 2>"$scratch/view-error"; then
+  jq -e --arg tag "$tag" --arg source "$source_sha" --arg title "$title" \
+    '(.tagName == $tag) and (.targetCommitish == $source)
+     and (.name == $title) and (.isPrerelease == false)' "$release_json" >/dev/null
+elif grep -Fqx 'release not found' "$scratch/view-error"; then
+  gh release create "$tag" --repo "$repository" --verify-tag \
+    --target "$source_sha" --title "$title" --draft --generate-notes
+  printf '%s\n' \
+    '{"tagName":"new","targetCommitish":"new","name":"new","isDraft":true,"isPrerelease":false,"assets":[]}' \
+    > "$release_json"
+else
+  printf '%s\n' 'unable to inspect existing GitHub release' >&2
+  exit 1
+fi
+
+mapfile -t observed < <(jq -r '.assets[]?.name' "$release_json" | LC_ALL=C sort)
+for name in "${observed[@]}"; do
+  [[ -n ${expected[$name]+x} ]] || {
+    printf 'unexpected release asset: %s\n' "$name" >&2
+    exit 1
+  }
+done
+
+missing=()
+for name in "${!expected[@]}"; do
+  if printf '%s\n' "${observed[@]}" | grep -Fqx -- "$name"; then
+    download="$scratch/$name"
+    gh release download "$tag" --repo "$repository" -p "$name" -D "$scratch"
+    cmp --silent -- "${expected[$name]}" "$download" || {
+      printf 'conflicting release asset: %s\n' "$name" >&2
+      exit 1
+    }
+  else
+    missing+=("${expected[$name]}")
+  fi
+done
+if (( "${#missing[@]}" )); then
+  gh release upload "$tag" "${missing[@]}" --repo "$repository"
+fi
+gh release edit "$tag" --repo "$repository" --draft=false

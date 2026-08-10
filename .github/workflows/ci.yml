@@ -369,14 +369,6 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends skopeo
-      - name: Refuse an existing release version
-        shell: bash
-        env:
-          RELEASE_VERSION: ${{ needs.release-metadata.outputs.version }}
-          HERMES_AGENT_IMAGE: ${{ needs.release-metadata.outputs.hermes_image }}
-        run: |
-          scripts/refuse-existing-image-version \
-            "$RELEASE_VERSION" "$HERMES_AGENT_IMAGE"
       - name: Validate accepted API image
         id: api
         shell: bash
@@ -497,7 +489,9 @@ jobs:
       group: vonk-forge-container-publication-${{ needs.release-metadata.outputs.version }}
       cancel-in-progress: false
     permissions:
+      attestations: write
       contents: read
+      id-token: write
       packages: write
     outputs:
       api_digest: ${{ steps.api.outputs.digest }}
@@ -617,14 +611,18 @@ jobs:
           [[ $(skopeo inspect --format '{{.Digest}}' \
             "docker://$WORKER_IMAGE:$IMAGE_VERSION_TAG") == "$DIGEST" ]]
           printf 'digest=%s\n' "$DIGEST" >> "$GITHUB_OUTPUT"
-      - name: Recheck the immutable Hermes version
+      - name: Reconcile existing Hermes release image
+        id: existing-hermes
         shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ needs.release-metadata.outputs.version }}
           HERMES_AGENT_IMAGE: ${{ needs.release-metadata.outputs.hermes_image }}
         run: |
-          scripts/refuse-existing-image-version \
-            "$RELEASE_VERSION" "$HERMES_AGENT_IMAGE"
+          scripts/reconcile-hermes-release-image \
+            "$HERMES_AGENT_IMAGE" "$RELEASE_VERSION" "$GITHUB_SHA" \
+            "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "$GITHUB_REPOSITORY" \
+            "refs/tags/$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
       - name: Revalidate release authority before Hermes publication
         shell: bash
         env:
@@ -637,7 +635,8 @@ jobs:
             "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
 
       - name: Build and push Hermes image
-        id: hermes
+        id: hermes-build
+        if: steps.existing-hermes.outputs.exists != 'true'
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: deploy/compose/hermes-agent
@@ -655,6 +654,24 @@ jobs:
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ needs.release-metadata.outputs.version }}
+      - name: Attest Hermes release provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ needs.release-metadata.outputs.hermes_image }}
+          subject-digest: ${{ steps.existing-hermes.outputs.digest || steps.hermes-build.outputs.digest }}
+          push-to-registry: true
+      - name: Verify and record Hermes release image
+        id: hermes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.release-metadata.outputs.version }}
+          HERMES_AGENT_IMAGE: ${{ needs.release-metadata.outputs.hermes_image }}
+        run: |
+          scripts/reconcile-hermes-release-image \
+            "$HERMES_AGENT_IMAGE" "$RELEASE_VERSION" "$GITHUB_SHA" \
+            "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "$GITHUB_REPOSITORY" \
+            "refs/tags/$GITHUB_REF_NAME" --require-attestation >> "$GITHUB_OUTPUT"
       - name: Write digest-pinned image summary
         shell: bash
         run: |
@@ -956,6 +973,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PACKAGE: ${{ needs.build-agent-package.outputs.package }}
+          SOURCE_SHA: ${{ github.sha }}
           VERSION: ${{ needs.build-agent-package.outputs.version }}
         run: |
           set -euo pipefail
@@ -985,7 +1003,9 @@ jobs:
           for asset in "${release_assets[@]}"; do
             [[ -f "$asset" && ! -L "$asset" ]]
           done
-          gh release create "$GITHUB_REF_NAME" \
+          scripts/reconcile-github-release \
+            "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" "$SOURCE_SHA" \
+            "Vonk Forge $VERSION" \
             vonk-forge-images.env vonk-forge-images.env.sha256 \
             release-output/control-deployment-descriptor.json \
             release-output/docker-compose.production.yml \
@@ -993,11 +1013,7 @@ jobs:
             release-output/vonk-forge-host-updater.tar.sha256 \
             release-output/platform-release.json \
             release-output/platform-publication.json \
-            "${release_assets[@]}" \
-            --repo "$GITHUB_REPOSITORY" \
-            --verify-tag \
-            --title "Vonk Forge $VERSION" \
-            --generate-notes
+            "${release_assets[@]}"
 
   advance-production-aliases:
     name: Advance accepted production image aliases
@@ -1272,36 +1288,9 @@ jobs:
           scripts/promote-image-aliases \
             "$API_IMAGE" "$API_DIGEST" \
             "$WORKER_IMAGE" "$WORKER_DIGEST" "$LATEST_ALIAS" \
-            "$HERMES_IMAGE" "$HERMES_DIGEST"
-          scripts/verify-release-tag-authority \
+            "$HERMES_IMAGE" "$HERMES_DIGEST" \
+            --postcondition scripts/verify-production-alias-postconditions \
             "$TARGET_TAG" "$TARGET_TAG_OID" "$TARGET_COMMIT"
-          observed_releases="$RUNNER_TEMP/observed-releases.json"
-          printf '[]\n' > "$observed_releases"
-          for page in $(seq 1 10); do
-            page_json="$RUNNER_TEMP/observed-releases-$page.json"
-            merged_json="$RUNNER_TEMP/observed-releases-merged.json"
-            curl --fail --silent --show-error --location \
-              --proto '=https' --proto-redir '=https' --tlsv1.2 \
-              --header 'Accept: application/vnd.github+json' \
-              --header 'X-GitHub-Api-Version: 2022-11-28' \
-              "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases?per_page=100&page=$page" \
-              > "$page_json"
-            jq -e 'type == "array"' "$page_json" >/dev/null
-            jq -s '.[0] + .[1]' "$observed_releases" "$page_json" \
-              > "$merged_json"
-            mv "$merged_json" "$observed_releases"
-            [[ $(jq 'length' "$page_json") -eq 100 ]] || break
-          done
-          mapfile -t observed_tags < <(
-            jq -r '.[] | select(
-              (.draft | not) and (.prerelease | not) and
-              (.immutable == true)
-            ) | .tag_name' "$observed_releases" \
-              | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' \
-              | sort -Vr
-          )
-          observed_tag=${observed_tags[0]:-}
-          test "$observed_tag" = "$TARGET_TAG"
 
   publish-apt:
     name: Publish the verified agent package to apt

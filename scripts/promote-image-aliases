@@ -6,12 +6,24 @@ umask 077
 
 usage() {
   printf '%s\n' \
-    'usage: promote-image-aliases API_IMAGE API_DIGEST WORKER_IMAGE WORKER_DIGEST dev|latest [HERMES_IMAGE HERMES_DIGEST]' \
+    'usage: promote-image-aliases API_IMAGE API_DIGEST WORKER_IMAGE WORKER_DIGEST dev|latest [HERMES_IMAGE HERMES_DIGEST] [--postcondition COMMAND [ARG...]]' \
     >&2
   exit 64
 }
 
-[[ "$#" -eq 5 || "$#" -eq 7 ]] || usage
+arguments=("$@")
+boundary=${#arguments[@]}
+for index in "${!arguments[@]}"; do
+  if [[ "${arguments[$index]}" == --postcondition ]]; then
+    boundary=$index
+    break
+  fi
+done
+base_arguments=("${arguments[@]:0:boundary}")
+postcondition=("${arguments[@]:boundary + 1}")
+(( "${#postcondition[@]}" > 0 || boundary == "${#arguments[@]}" )) || usage
+(( boundary == 5 || boundary == 7 )) || usage
+set -- "${base_arguments[@]}"
 readonly api_image=$1 api_digest=$2 worker_image=$3 worker_digest=$4 alias=$5
 [[ "$api_image" == ghcr.io/carstvaartjes/vonk-forge-api ]] || usage
 [[ "$worker_image" == ghcr.io/carstvaartjes/vonk-forge-worker ]] || usage
@@ -78,6 +90,20 @@ set_alias() {
   return 1
 }
 
+delete_alias() {
+  local role=$1 image=$2 attempt observed
+  observed=$(inspect_alias "$role" "$image") || return 1
+  [[ -z "$observed" ]] && return 0
+  for attempt in 1 2 3; do
+    if skopeo delete "docker://$image:$alias" >/dev/null 2>&1; then
+      observed=$(inspect_alias "$role" "$image") || continue
+      [[ -z "$observed" ]] && return 0
+    fi
+  done
+  printf '%s %s alias could not be removed\n' "$role" "$alias" >&2
+  return 1
+}
+
 finish() {
   local status=$? rollback_failed=0 index previous
   trap - EXIT INT TERM
@@ -87,6 +113,9 @@ finish() {
       previous=${previous_digests[$index]:-}
       if [[ "$previous" =~ ^sha256:[0-9a-f]{64}$ ]]; then
         set_alias "${roles[$index]}" "${images[$index]}" "$previous" \
+          || rollback_failed=1
+      else
+        delete_alias "${roles[$index]}" "${images[$index]}" \
           || rollback_failed=1
       fi
     done
@@ -114,6 +143,9 @@ promotion_started=1
 for index in "${!roles[@]}"; do
   set_alias "${roles[$index]}" "${images[$index]}" "${digests[$index]}"
 done
+if (( "${#postcondition[@]}" )); then
+  "${postcondition[@]}"
+fi
 promotion_complete=1
 
 printf '%s aliases match the authoritative immutable set\n' "$alias"

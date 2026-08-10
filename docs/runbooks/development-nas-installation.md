@@ -46,11 +46,13 @@ The three operator-owned inputs have narrow purposes:
 | File | Consumer | Purpose |
 |---|---|---|
 | `postgres-password` | PostgreSQL only | Password for the development `control` database role. |
-| `database-url` | initializer and migration, then separate API/worker projections | Matching SQLAlchemy URL for that role. |
+| `database-url` | initializer, migration, then separate API/worker projections | Matching SQLAlchemy URL for that role. |
 | `git-signing-key` | initializer, then API projection only | Unencrypted Ed25519 SSH private key for development Git signing. |
 
 On first start, `dev-init` generates an admin-grant private key and a separate
-worker API token. Those values remain in distinct Docker named volumes. They
+worker API token. It projects secrets into three distinct named volumes: API
+gets the database URL, signing key, and admin-grant key; migration gets only
+the database URL; worker gets the database URL and worker token. Those values
 are not host files, image contents, CI inputs, Compose environment values, or
 worker/API-shared authority.
 
@@ -265,12 +267,17 @@ connected.
 ## Updating to a newer accepted main commit
 
 Download the newer workflow artifact and replace only `docker-compose.yml`.
-Pull/redeploy the project without deleting secrets or volumes. On each start,
-`dev-init` fetches public `origin/main`, verifies the artifact's exact commit,
-and fast-forwards the named-volume checkout only when the existing local
-`main` is its ancestor. Other local refs are preserved. A dirty checkout,
-rollback, changed origin, missing commit, or non-fast-forward transition fails
-closed.
+Pull/redeploy the project without deleting secrets or volumes. The repository
+volume has two deliberately separate branches: `main` is the accepted
+origin-tracking baseline from public `origin/main`, while `deploy` is the
+mutable runtime branch used for locally signed development changes.
+`refs/vonk/deploy-base` is the exact merge-base between those branches. On each
+start, `dev-init` fetches public `origin/main`, verifies the artifact's exact
+accepted commit, and updates `main`; it advances `deploy` and
+`refs/vonk/deploy-base` together only when `deploy` still equals that base.
+Other local refs are preserved. A dirty checkout, rollback, changed origin,
+missing commit, non-fast-forward accepted baseline, or merge-base not exactly
+equal to `refs/vonk/deploy-base` fails closed.
 
 Moving aliases can be temporarily inconsistent if a cross-repository GHCR
 update is interrupted; the workflow repairs them by rerunning its failed
@@ -282,8 +289,8 @@ newer migration. Therefore, roll back only to a commit explicitly documented
 as database-backward-compatible, or restore every stateful volume and all
 secret files from one matching recovery point. That includes PostgreSQL,
 identity, control state, route publications, supervisor state, repository, and
-the generated API/worker secret projections. Never treat a repository-volume
-reset as a database or runtime-state rollback.
+the generated API, migration, and worker secret projections. Never treat a
+repository-volume reset as a database or runtime-state rollback.
 
 For a documented repository-only rollback, discover the actual volume name
 from the running API before stopping the project. This remains correct if a NAS
@@ -317,6 +324,29 @@ This is destructive to local branches and unpushed changes in that one volume.
 Do not use `down --volumes`. A rollback that requires database state must use a
 tested, matching backup rather than ad hoc volume deletion.
 
+### Recovery after an interrupted repository reset
+
+`dev-init` atomically advances `main`, `deploy`, and `refs/vonk/deploy-base`
+before resetting the worktree. A host or container interruption in that narrow
+interval can leave those refs at the accepted commit while checked-out files
+remain old. The next start intentionally fails because the worktree is not
+clean; it will not guess which files are safe to discard.
+
+Recover only when the expected commit is known from the pinned Compose file or
+its workflow artifact. Stop the project and enter the repository volume with
+an operator shell. Before changing anything, verify that `HEAD` is `deploy`,
+that `main`, `deploy`, and `refs/vonk/deploy-base` all resolve to that exact
+40-character expected commit, that the worktree contains no operator edits to
+preserve, and that the remote is the public repository. If any result is
+ambiguous, restore the repository volume from its backup instead.
+
+After recording those checks in the incident notes, explicitly run
+`git reset --hard <expected-commit>` on `deploy`, then verify
+`git status --porcelain=v1 --untracked-files=all` is empty. Restart the stack;
+`dev-init` will recheck origin, refs, merge-base, and the exact artifact
+commit. Do not move one ref alone, delete `.git`, or use this repository reset
+as a substitute for restoring PostgreSQL or generated-secret state.
+
 ## Rotation and recovery
 
 - To rotate the Git signing key, generate a replacement as a temporary file in
@@ -337,10 +367,11 @@ tested, matching backup rather than ad hoc volume deletion.
 
 Back up the three host secret files and every named volume needed for continuity
 to encrypted, access-controlled storage. The repository volume can be cloned
-again from public GitHub, but local refs and signed changes exist only in its
+again from public GitHub, but local `deploy` history, `main`,
+`refs/vonk/deploy-base`, other local refs, and signed changes exist only in its
 backup until pushed. PostgreSQL is authoritative for development catalog data.
-The API/worker secret projections contain generated private authority and must
-be protected like the host secret files.
+The API, migration, and worker secret projections contain generated private
+authority and must be protected like the host secret files.
 
 Never commit a backup, place it in the Compose directory, upload it as a GitHub
 Actions artifact, or copy it into an image. Restores must keep the PostgreSQL
