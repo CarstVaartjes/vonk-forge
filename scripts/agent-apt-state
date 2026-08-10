@@ -35,6 +35,7 @@ CHANNELS = {
 COMMIT_RE = re.compile(r"^versions/([^/]+)/commit\.json$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+BY_HASH_DIGEST_LENGTHS = {"MD5Sum": 32, "SHA1": 40, "SHA256": 64, "SHA512": 128}
 MAX_BUNDLE_BYTES = 1024 * 1024 * 1024
 MAX_MEMBER_BYTES = 512 * 1024 * 1024
 
@@ -225,6 +226,43 @@ def _tar_info(name: str, *, directory: bool, size: int = 0) -> tarfile.TarInfo:
     return member
 
 
+def _is_aptly_by_hash_alias(
+    path: Path, root: Path, receipt: dict[str, str]
+) -> bool:
+    try:
+        relative = path.relative_to(root)
+    except ValueError:
+        return False
+    parts = relative.parts
+    if len(parts) < 5 or parts[:2] != ("dists", receipt["distribution"]):
+        return False
+    try:
+        by_hash_index = parts.index("by-hash", 2)
+    except ValueError:
+        return False
+    if by_hash_index != len(parts) - 3:
+        return False
+    algorithm, alias = parts[-2:]
+    digest_length = BY_HASH_DIGEST_LENGTHS.get(algorithm)
+    if (
+        digest_length is None
+        or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]*", alias) is None
+        or re.fullmatch(rf"[0-9a-f]{{{digest_length}}}", alias) is not None
+    ):
+        return False
+    try:
+        parent = path.parent.resolve(strict=True)
+        target = path.resolve(strict=True)
+    except (OSError, RuntimeError):
+        return False
+    return (
+        target.parent == parent
+        and target.is_file()
+        and not target.is_symlink()
+        and re.fullmatch(rf"[0-9a-f]{{{digest_length}}}", target.name) is not None
+    )
+
+
 def build_bundle(root: Path, kind: str, publication: dict[str, str]) -> bytes:
     receipt = _validate_receipt(publication)
     expected_name = "aptly" if kind == "state" else "public"
@@ -239,7 +277,11 @@ def build_bundle(root: Path, kind: str, publication: dict[str, str]) -> bytes:
         tarfile.open(fileobj=compressed, mode="w") as archive,
     ):
         for path in entries:
-            if path.is_symlink() or not (path.is_dir() or path.is_file()):
+            if path.is_symlink():
+                if kind == "public" and _is_aptly_by_hash_alias(path, root, receipt):
+                    continue
+                raise StateError("bundle source is unsafe")
+            if not (path.is_dir() or path.is_file()):
                 raise StateError("bundle source is unsafe")
             name = expected_name
             if path != root:

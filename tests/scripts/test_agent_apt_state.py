@@ -396,6 +396,40 @@ def test_public_bundle_requires_exact_release_metadata_objects(
         )
 
 
+def test_public_bundle_excludes_valid_aptly_by_hash_aliases(tmp_path: Path) -> None:
+    state = load_state_module()
+    publication = receipt()
+    bundles(tmp_path, publication)
+    index = tmp_path / "public/dists/dev/main/binary-arm64/Packages"
+    digest = hashlib.sha256(index.read_bytes()).hexdigest()
+    by_hash = index.parent / "by-hash/SHA256"
+    by_hash.mkdir(parents=True)
+    digest_index = by_hash / digest
+    digest_index.write_bytes(index.read_bytes())
+    alias = by_hash / "Packages"
+    alias.symlink_to(digest_index)
+
+    raw = state.build_bundle(tmp_path / "public", "public", publication)
+    validated = state.validate_bundle(raw, "public", publication)
+
+    assert f"public/{digest_index.relative_to(tmp_path / 'public')}" in validated.files
+    assert f"public/{alias.relative_to(tmp_path / 'public')}" not in validated.files
+
+
+def test_public_bundle_rejects_by_hash_alias_outside_its_digest_directory(
+    tmp_path: Path,
+) -> None:
+    state = load_state_module()
+    publication = receipt()
+    bundles(tmp_path, publication)
+    by_hash = tmp_path / "public/dists/dev/main/binary-arm64/by-hash/SHA256"
+    by_hash.mkdir(parents=True)
+    (by_hash / "Packages").symlink_to(tmp_path / "public/dists/dev/Release")
+
+    with pytest.raises(state.StateError, match="bundle source is unsafe"):
+        state.build_bundle(tmp_path / "public", "public", publication)
+
+
 @pytest.mark.parametrize(
     "names",
     (
