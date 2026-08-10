@@ -167,8 +167,8 @@ jobs:
       - name: Run focused web package workflow
         run: npm test --prefix control/web -- --run src/pages/packages.test.tsx
 
-  catalog-runtime:
-    name: Catalog and service suites
+  control-suite:
+    name: Complete control suite
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -180,16 +180,55 @@ jobs:
           version: "0.12.1"
           python-version: "3.12"
           enable-cache: true
-      - name: Install locked admin web dependencies
-        run: npm ci --prefix control/web
       - name: Run complete control suite
-        run: uv run --project control --frozen --with-editable . pytest control/tests -q
+        run: uv run --python 3.12 --project control --frozen --with-editable . --with pytest-xdist==3.8.0 pytest control/tests -q -n auto --dist loadfile
+
+  agent-suite:
+    name: Complete Python agent suite
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.1"
+          python-version: "3.12"
+          enable-cache: true
       - name: Run complete Python agent suite
         run: uv run --project agent --frozen pytest agent/tests -q
+
+  web-suite:
+    name: Complete admin web suite
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install locked admin web dependencies
+        run: npm ci --prefix control/web
       - name: Run complete admin web suite
         run: npm test --prefix control/web -- --run
       - name: Build admin web application
         run: npm run build --prefix control/web
+
+  catalog-runtime:
+    name: Catalog and service suites
+    needs: [control-suite, agent-suite, web-suite]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every complete service suite
+        env:
+          CONTROL_RESULT: ${{ needs.control-suite.result }}
+          AGENT_RESULT: ${{ needs.agent-suite.result }}
+          WEB_RESULT: ${{ needs.web-suite.result }}
+        run: |
+          test "$CONTROL_RESULT" = success
+          test "$AGENT_RESULT" = success
+          test "$WEB_RESULT" = success
 
   workload-package-evidence:
     name: Workload package acceptance evidence
