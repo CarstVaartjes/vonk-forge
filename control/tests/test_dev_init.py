@@ -738,6 +738,39 @@ def _visible_bytes(root: Path) -> set[bytes]:
     return {path.read_bytes() for path in root.iterdir() if path.is_file()}
 
 
+def _simulate_root_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    metadata: dict[Path, tuple[int, int, int]],
+) -> list[tuple[Path, int, int]]:
+    real_fstat = dev_init.os.fstat
+    ownership: list[tuple[Path, int, int]] = []
+
+    def root_metadata(descriptor: int) -> os.stat_result:
+        actual = real_fstat(descriptor)
+        try:
+            path = Path(os.readlink(f"/proc/self/fd/{descriptor}"))
+        except OSError:
+            return actual
+        override = metadata.get(path)
+        if override is None:
+            return actual
+        uid, gid, mode = override
+        values = list(actual)
+        values[0] = (actual.st_mode & ~0o7777) | mode
+        values[4] = uid
+        values[5] = gid
+        return os.stat_result(values)
+
+    def record_chown(descriptor: int, uid: int, gid: int) -> None:
+        path = Path(os.readlink(f"/proc/self/fd/{descriptor}"))
+        ownership.append((path, uid, gid))
+
+    monkeypatch.setattr(dev_init.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(dev_init.os, "fstat", root_metadata)
+    monkeypatch.setattr(dev_init.os, "fchown", record_chown)
+    return ownership
+
+
 def test_stage_runtime_secrets_projects_exact_disjoint_service_authority(
     tmp_path: Path,
 ) -> None:
@@ -1140,6 +1173,7 @@ def test_stage_runtime_secrets_does_not_clear_canonical_credentials(
     stage_runtime_secrets(source, *roots)
     admin = (roots[0] / "admin-grant-private-key").read_bytes()
     worker = (roots[2] / "worker-api-token").read_bytes()
+    worker_metadata = (roots[2] / "worker-api-token").stat()
 
     def fail_clear(_parent: int) -> None:
         raise AssertionError("projection clearing must not be used")
@@ -1150,6 +1184,71 @@ def test_stage_runtime_secrets_does_not_clear_canonical_credentials(
     assert (roots[0] / "admin-grant-private-key").read_bytes() == admin
     assert (roots[2] / "worker-api-token").read_bytes() == worker
     assert (roots[0] / "worker-api-token").read_bytes() == worker
+    worker_after = (roots[2] / "worker-api-token").stat()
+    assert (worker_after.st_dev, worker_after.st_ino) == (
+        worker_metadata.st_dev,
+        worker_metadata.st_ino,
+    )
+
+
+def test_stage_runtime_secrets_never_stages_the_worker_canonical_on_rerun(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = _secret_source(tmp_path / "source")
+    roots = [tmp_path / name for name in ("api", "migrate", "worker", "caddy", "litellm")]
+    stage_runtime_secrets(source, *roots)
+    worker_token = roots[2] / "worker-api-token"
+    canonical_before = worker_token.stat()
+    operations: list[tuple[str, Path]] = []
+    real_open = dev_init.os.open
+    real_replace = dev_init.os.replace
+
+    def record_open(
+        path: str | os.PathLike[str],
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        if (
+            dir_fd is not None
+            and flags & os.O_CREAT
+            and os.fspath(path).startswith(".worker-api-token.")
+        ):
+            parent = Path(os.readlink(f"/proc/self/fd/{dir_fd}"))
+            operations.append(("temporary", parent))
+        return real_open(path, flags, mode, dir_fd=dir_fd)
+
+    def record_replace(
+        source_name: str | os.PathLike[str],
+        target_name: str | os.PathLike[str],
+        *,
+        src_dir_fd: int | None = None,
+        dst_dir_fd: int | None = None,
+    ) -> None:
+        if os.fspath(target_name) == "worker-api-token":
+            assert src_dir_fd is not None and dst_dir_fd == src_dir_fd
+            parent = Path(os.readlink(f"/proc/self/fd/{src_dir_fd}"))
+            operations.append(("replace", parent))
+        real_replace(
+            source_name,
+            target_name,
+            src_dir_fd=src_dir_fd,
+            dst_dir_fd=dst_dir_fd,
+        )
+
+    monkeypatch.setattr(dev_init.os, "open", record_open)
+    monkeypatch.setattr(dev_init.os, "replace", record_replace)
+    stage_runtime_secrets(source, *roots)
+
+    canonical_after = worker_token.stat()
+    assert (canonical_after.st_dev, canonical_after.st_ino) == (
+        canonical_before.st_dev,
+        canonical_before.st_ino,
+    )
+    assert [operation for operation in operations if operation[1] == roots[2]] == []
+    assert ("temporary", roots[0]) in operations
+    assert ("replace", roots[0]) in operations
 
 
 @pytest.mark.parametrize(
@@ -1172,6 +1271,7 @@ def test_stage_runtime_secrets_faults_preserve_canonical_credentials_and_token_c
     stage_runtime_secrets(source, *roots)
     admin = (roots[0] / "admin-grant-private-key").read_bytes()
     worker = (roots[2] / "worker-api-token").read_bytes()
+    worker_metadata = (roots[2] / "worker-api-token").stat()
     (source / "database-url").write_bytes(
         b"postgresql://vonk:replacement@postgres/vonk\n"
     )
@@ -1190,6 +1290,7 @@ def test_stage_runtime_secrets_faults_preserve_canonical_credentials_and_token_c
             and not triggered
         ) or (
             boundary != "directory-fsync"
+            and descriptor_path.parent == roots[0]
             and descriptor_path.name.startswith(".worker-api-token.")
         )
         if selected:
@@ -1204,7 +1305,129 @@ def test_stage_runtime_secrets_faults_preserve_canonical_credentials_and_token_c
     assert (roots[0] / "admin-grant-private-key").read_bytes() == admin
     assert (roots[2] / "worker-api-token").read_bytes() == worker
     assert (roots[0] / "worker-api-token").read_bytes() == worker
+    worker_after = (roots[2] / "worker-api-token").stat()
+    assert (worker_after.st_dev, worker_after.st_ino) == (
+        worker_metadata.st_dev,
+        worker_metadata.st_ino,
+    )
+    assert triggered is True
     assert all(stat.S_IMODE(root.stat().st_mode) == 0o550 for root in roots)
+
+
+def test_stage_runtime_secrets_initializes_pristine_docker_volume_roots(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = _secret_source(tmp_path / "source")
+    roots = [tmp_path / name for name in ("api", "migrate", "worker", "caddy", "litellm")]
+    for root in roots:
+        root.mkdir(mode=0o755)
+    ownership = _simulate_root_metadata(
+        monkeypatch,
+        {root: (0, 0, 0o755) for root in roots},
+    )
+
+    stage_runtime_secrets(source, *roots)
+
+    expected_owners = {
+        roots[0]: (10001, 10001),
+        roots[1]: (10001, 10001),
+        roots[2]: (10001, 10001),
+        roots[3]: (10000, 10000),
+        roots[4]: (10002, 10001),
+    }
+    root_chowns = {
+        path: (uid, gid)
+        for path, uid, gid in ownership
+        if path in expected_owners
+    }
+    assert root_chowns == expected_owners
+    assert all(stat.S_IMODE(root.stat().st_mode) == 0o550 for root in roots)
+    assert (roots[2] / "worker-api-token").is_file()
+    assert (roots[0] / "worker-api-token").read_bytes() == (
+        roots[2] / "worker-api-token"
+    ).read_bytes()
+
+
+def test_stage_runtime_secrets_rejects_mixed_pristine_and_unsafe_roots_without_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = _secret_source(tmp_path / "source")
+    roots = [tmp_path / name for name in ("api", "migrate", "worker", "caddy", "litellm")]
+    for root in (roots[0], roots[1], roots[3], roots[4]):
+        root.mkdir(mode=0o755)
+    ownership = _simulate_root_metadata(
+        monkeypatch,
+        {
+            roots[0]: (0, 0, 0o755),
+            roots[1]: (0, 0, 0o750),
+            roots[3]: (0, 0, 0o755),
+            roots[4]: (0, 0, 0o755),
+        },
+    )
+
+    with pytest.raises(DevInitError, match="migration projection root"):
+        stage_runtime_secrets(source, *roots)
+
+    assert ownership == []
+    assert not roots[2].exists()
+    assert all(
+        stat.S_IMODE(root.stat().st_mode) == 0o755
+        for root in (roots[0], roots[1], roots[3], roots[4])
+    )
+    assert all(not any(root.iterdir()) for root in (roots[0], roots[1], roots[3], roots[4]))
+
+
+@pytest.mark.parametrize("name", ("database-url", "unexpected-authority"))
+def test_stage_runtime_secrets_rejects_nonempty_docker_volume_roots_without_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    source = _secret_source(tmp_path / "source")
+    roots = [tmp_path / item for item in ("api", "migrate", "worker", "caddy", "litellm")]
+    for root in roots:
+        root.mkdir(mode=0o755)
+    existing = roots[0] / name
+    existing.write_bytes(b"operator-owned\n")
+    ownership = _simulate_root_metadata(
+        monkeypatch,
+        {root: (0, 0, 0o755) for root in roots},
+    )
+
+    with pytest.raises(DevInitError, match="API projection root"):
+        stage_runtime_secrets(source, *roots)
+
+    assert ownership == []
+    assert existing.read_bytes() == b"operator-owned\n"
+    assert stat.S_IMODE(roots[0].stat().st_mode) == 0o755
+
+
+@pytest.mark.parametrize(
+    ("uid", "gid", "mode"),
+    ((1, 0, 0o755), (0, 1, 0o755), (0, 0, 0o750), (0, 0, 0o775)),
+)
+def test_stage_runtime_secrets_rejects_wrong_pristine_root_metadata(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    uid: int,
+    gid: int,
+    mode: int,
+) -> None:
+    source = _secret_source(tmp_path / "source")
+    roots = [tmp_path / name for name in ("api", "migrate", "worker", "caddy", "litellm")]
+    for root in roots:
+        root.mkdir(mode=0o755)
+    ownership = _simulate_root_metadata(
+        monkeypatch,
+        {
+            root: ((uid, gid, mode) if root == roots[0] else (0, 0, 0o755))
+            for root in roots
+        },
+    )
+
+    with pytest.raises(DevInitError, match="API projection root"):
+        stage_runtime_secrets(source, *roots)
+
+    assert ownership == []
+    assert all(stat.S_IMODE(root.stat().st_mode) == 0o755 for root in roots)
 
 
 @pytest.mark.parametrize(

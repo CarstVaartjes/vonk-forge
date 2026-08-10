@@ -667,7 +667,7 @@ def _validate_projection_directory(
     uid: int,
     gid: int,
     created: bool,
-) -> None:
+) -> bool:
     try:
         metadata = os.fstat(parent)
         expected_uid, expected_gid = _projection_identity(uid, gid)
@@ -677,12 +677,21 @@ def _validate_projection_directory(
         if created:
             if names:
                 raise DevInitError(f"{label} projection root is unsafe")
-            return
-        if (
-            metadata.st_uid != expected_uid
-            or metadata.st_gid != expected_gid
-            or stat.S_IMODE(metadata.st_mode) != 0o550
-        ):
+            return True
+        managed = (
+            metadata.st_uid == expected_uid
+            and metadata.st_gid == expected_gid
+            and stat.S_IMODE(metadata.st_mode) == 0o550
+        )
+        if names and not managed:
+            raise DevInitError(f"{label} projection root is unsafe")
+        if not names and not managed:
+            if (
+                metadata.st_uid == 0
+                and metadata.st_gid == 0
+                and stat.S_IMODE(metadata.st_mode) == 0o755
+            ):
+                return True
             raise DevInitError(f"{label} projection root is unsafe")
         allowed = _PROJECTION_FILES[label]
         for name in names:
@@ -698,6 +707,7 @@ def _validate_projection_directory(
                 or not 0 < entry.st_size <= _MAX_SECRET_BYTES
             ):
                 raise DevInitError(f"{label} projection entry is unsafe")
+        return False
     except DevInitError:
         raise
     except OSError as error:
@@ -705,11 +715,11 @@ def _validate_projection_directory(
 
 
 def _prepare_projection_directory(
-    parent: int, *, uid: int, gid: int, created: bool
+    parent: int, *, uid: int, gid: int, initialize: bool
 ) -> None:
     try:
         uid, gid = _projection_identity(uid, gid)
-        if created:
+        if initialize:
             os.fchown(parent, uid, gid)
         os.fchmod(parent, 0o700)
     except OSError as error:
@@ -1003,15 +1013,18 @@ def stage_runtime_secrets(
             raise DevInitError(
                 "development secret projections must be physically distinct"
             )
+        initialize_roots: list[bool] = []
         for (descriptor, created), (_root, label, uid, gid) in zip(
             complete, roots, strict=True
         ):
-            _validate_projection_directory(
-                descriptor,
-                label=label,
-                uid=uid,
-                gid=gid,
-                created=created,
+            initialize_roots.append(
+                _validate_projection_directory(
+                    descriptor,
+                    label=label,
+                    uid=uid,
+                    gid=gid,
+                    created=created,
+                )
             )
 
         api, migrate, worker, caddy, litellm = descriptors
@@ -1030,15 +1043,23 @@ def stage_runtime_secrets(
 
         prepared: list[int] = []
         try:
-            for (descriptor, created), (_root, _label, uid, gid) in zip(
-                complete, roots, strict=True
+            for (descriptor, _created), initialize, (
+                _root,
+                _label,
+                uid,
+                gid,
+            ) in zip(
+                complete,
+                initialize_roots,
+                roots,
+                strict=True,
             ):
                 prepared.append(descriptor)
                 _prepare_projection_directory(
                     descriptor,
                     uid=uid,
                     gid=gid,
-                    created=created,
+                    initialize=initialize,
                 )
 
             if not admin_present:
@@ -1082,17 +1103,13 @@ def stage_runtime_secrets(
                 uid=_API_UID,
                 gid=_API_GID,
             )
-            for name, content in (
-                ("database-url", database_url),
-                ("worker-api-token", worker_token),
-            ):
-                _write_projection_secret(
-                    worker,
-                    name,
-                    content,
-                    uid=_API_UID,
-                    gid=_API_GID,
-                )
+            _write_projection_secret(
+                worker,
+                "database-url",
+                database_url,
+                uid=_API_UID,
+                gid=_API_GID,
+            )
             for name, content in (
                 ("controller-server-certificate", controller_server_certificate),
                 ("controller-server-key", controller_server_key),
