@@ -117,8 +117,9 @@ There is no dedicated init image. The API package exposes
 public GitHub repository at the exact 40-character commit embedded in the
 generated Compose file into a NAS-local `dev-repository` named volume, records
 that accepted GitHub commit on local `main`, checks out a separate mutable
-`deploy` branch at the same commit, verifies both refs, and assigns the checkout
-to UID/GID 10001. The generated Compose file sets
+`deploy` branch at the same commit, and records that common ancestry in the
+durable internal ref `refs/vonk/deploy-base`. It verifies all three refs and
+assigns the checkout to UID/GID 10001. The generated Compose file sets
 `VONK_DEPLOYMENT_BRANCH=deploy` for API and worker, and passes
 `VONK_DEV_EXPECTED_COMMIT=<40-character-main-commit>` only to `dev-init`.
 Initial deployment therefore requires outbound HTTPS access to public GitHub
@@ -128,17 +129,24 @@ On every subsequent start, `dev-init` validates that the existing checkout is a
 non-symlink Git repository with a clean worktree checked out on `deploy`,
 fetches public `origin/main` without credentials, and verifies that the expected
 commit is reachable from that ref. Local `main` is the last accepted GitHub
-baseline and must be an ancestor of the new expected commit. Local `deploy`
-must descend from that previous baseline. `dev-init` advances only local `main`
-to the expected commit with a compare-and-swap. When `deploy` still equals the
-previous baseline it is fast-forwarded with the clean worktree to the expected
-commit; when development-direct operation has added signed local commits,
-`deploy` and its worktree remain unchanged. This makes restarts idempotent and
-lets accepted source advance without discarding NAS-local development history.
-Other local branches and refs are preserved. A dirty worktree, divergent
-accepted baseline, missing expected commit, changed origin URL, or attempted
-silent rollback fails initialization; an intentional rollback requires
-explicitly recreating only the development repository volume.
+baseline and must be an ancestor of the new expected commit. The durable
+`refs/vonk/deploy-base` must be an ancestor of both accepted `main` and current
+`deploy`; this preserves the ancestry boundary even after accepted `main`
+advances independently. When `deploy` still equals the durable deployment base,
+`dev-init` atomically compare-and-swaps `main`, `deploy`, and the deployment base
+to the expected commit, then resets the clean checked-out worktree. When
+development-direct operation has added signed local commits, it atomically
+compare-and-swaps only `main` while verifying that `deploy` and the deployment
+base retain their expected old values; `deploy`, its worktree, and the durable
+base remain unchanged across same-commit restarts and later accepted updates.
+An interruption can therefore leave either the complete old ref set or the
+complete new ref set, never a partially advanced ref set; interruption after
+the ref transaction but before worktree reset remains fail-closed and is
+recoverable by explicitly resetting the deployment checkout. Other local branches
+and refs are preserved. A dirty worktree, divergent accepted baseline, missing
+or tampered deployment base, missing expected commit, changed origin URL, or
+attempted silent rollback fails initialization; an intentional rollback
+requires explicitly recreating only the development repository volume.
 
 It also initializes synthetic development identity/state and stages runtime
 credentials before exiting successfully. API and worker cannot start until it

@@ -21,6 +21,8 @@ _COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 _IMAGE = re.compile(r"[^\s]{1,1900}@sha256:[0-9a-f]{64}\Z")
 _WORKER_TOKEN = re.compile(rb"[A-Za-z0-9_-]{43}\Z")
 _PUBLIC_REPOSITORY_URL = "https://github.com/CarstVaartjes/vonk-forge.git"
+_DEPLOYMENT_BASE_REF = "refs/vonk/deploy-base"
+_ZERO_COMMIT = "0" * 40
 _API_UID = 10001
 _API_GID = 10001
 _GIT_UID = 65534
@@ -88,6 +90,7 @@ def _git(
     *,
     action: str,
     local_origin: bool,
+    standard_input: str | None = None,
 ) -> str:
     command = (
         "git",
@@ -104,7 +107,8 @@ def _git(
     try:
         result = subprocess.run(
             command,
-            stdin=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL if standard_input is None else None,
+            input=standard_input,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             env=_git_environment(),
@@ -118,6 +122,33 @@ def _git(
     if result.returncode != 0:
         raise DevInitError(f"Git could not {action}")
     return result.stdout.strip()
+
+
+def _compare_and_swap_refs(
+    root: Path,
+    updates: tuple[tuple[str, str, str], ...],
+    *,
+    preserved: tuple[tuple[str, str], ...] = (),
+    action: str,
+    local_origin: bool,
+) -> None:
+    commands = ["start"]
+    commands.extend(
+        f"update {reference} {new_commit} {old_commit}"
+        for reference, new_commit, old_commit in updates
+    )
+    commands.extend(
+        f"verify {reference} {expected_commit}"
+        for reference, expected_commit in preserved
+    )
+    commands.extend(("prepare", "commit", ""))
+    _git(
+        root,
+        ("update-ref", "--stdin"),
+        action=action,
+        local_origin=local_origin,
+        standard_input="\n".join(commands),
+    )
 
 
 def _commit(value: str) -> str:
@@ -265,15 +296,19 @@ def _initialize_fresh_repository(
         local_origin=local_origin,
     )
     _commit(accepted)
-    _git(
+    _compare_and_swap_refs(
         root,
-        ("update-ref", "refs/heads/main", expected_commit, accepted),
-        action="compare-and-swap development repository main",
+        (
+            ("refs/heads/main", expected_commit, accepted),
+            ("refs/heads/deploy", expected_commit, _ZERO_COMMIT),
+            (_DEPLOYMENT_BASE_REF, expected_commit, _ZERO_COMMIT),
+        ),
+        action="initialize development repository refs",
         local_origin=local_origin,
     )
     _git(
         root,
-        ("checkout", "--force", "-B", "deploy", expected_commit),
+        ("checkout", "--force", "deploy"),
         action="check out development repository deploy",
         local_origin=local_origin,
     )
@@ -340,6 +375,13 @@ def _initialize_existing_repository(
         local_origin=local_origin,
     )
     _commit(deployed)
+    deployment_base = _git(
+        root,
+        ("rev-parse", "--verify", f"{_DEPLOYMENT_BASE_REF}^{{commit}}"),
+        action="read development repository deployment base",
+        local_origin=local_origin,
+    )
+    _commit(deployment_base)
     _git(
         root,
         ("fetch", "--no-tags", "origin", "+refs/heads/main:refs/remotes/origin/main"),
@@ -350,28 +392,42 @@ def _initialize_existing_repository(
         raise DevInitError("expected development commit is not reachable from origin/main")
     if not _is_ancestor(root, accepted, expected_commit, local_origin=local_origin):
         raise DevInitError("development repository accepted baseline is divergent")
-    if not _is_ancestor(root, accepted, deployed, local_origin=local_origin):
+    if not _is_ancestor(root, deployment_base, accepted, local_origin=local_origin):
+        raise DevInitError(
+            "development repository deployment base does not precede "
+            "the accepted baseline"
+        )
+    if not _is_ancestor(root, deployment_base, deployed, local_origin=local_origin):
         raise DevInitError(
             "development repository deployment branch does not descend "
-            "from the accepted baseline"
+            "from the deployment base"
         )
-    _git(
-        root,
-        ("update-ref", "refs/heads/main", expected_commit, accepted),
-        action="compare-and-swap development repository main",
-        local_origin=local_origin,
-    )
-    if deployed == accepted:
-        _git(
+    if deployed == deployment_base:
+        _compare_and_swap_refs(
             root,
-            ("update-ref", "refs/heads/deploy", expected_commit, deployed),
-            action="compare-and-swap development repository deploy",
+            (
+                ("refs/heads/main", expected_commit, accepted),
+                ("refs/heads/deploy", expected_commit, deployed),
+                (_DEPLOYMENT_BASE_REF, expected_commit, deployment_base),
+            ),
+            action="advance development repository refs",
             local_origin=local_origin,
         )
         _git(
             root,
             ("reset", "--hard", expected_commit),
             action="reset development repository worktree",
+            local_origin=local_origin,
+        )
+    else:
+        _compare_and_swap_refs(
+            root,
+            (("refs/heads/main", expected_commit, accepted),),
+            preserved=(
+                ("refs/heads/deploy", deployed),
+                (_DEPLOYMENT_BASE_REF, deployment_base),
+            ),
+            action="advance development repository main",
             local_origin=local_origin,
         )
 
