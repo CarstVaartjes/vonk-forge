@@ -9,6 +9,7 @@ from enum import StrEnum
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from .dev_cohort import DevelopmentCohortError, require_selected_cohort
 from .presence import ManagementAddressPolicy, PresenceError
 
 
@@ -24,6 +25,15 @@ class StartupMode(StrEnum):
 
 
 _AGENT_PROXY_AUTH_PATTERN = re.compile(rb"[A-Za-z0-9_-]{32,}\Z")
+_GENERATION_IDENTITY_ENVIRONMENT = (
+    "VONK_CONTROL_GENERATION_ID",
+    "VONK_DATABASE_REVISION",
+    "VONK_PLATFORM_VERSION",
+    "VONK_PLATFORM_RELEASE_DIGEST",
+    "VONK_PLATFORM_BUILD_DIGEST",
+    "VONK_CONTROL_PROCESS_IMAGE",
+    "VONK_CONTROL_START_NONCE",
+)
 
 
 def _secret(name: str, *, production: bool) -> str:
@@ -129,13 +139,50 @@ class GenerationStartupSettings:
             raise SettingsError(
                 "VONK_CONTROL_OPERATION_ID is forbidden in selected mode"
             )
-        generation_id = os.environ.get("VONK_CONTROL_GENERATION_ID", "")
-        database_revision = os.environ.get("VONK_DATABASE_REVISION", "")
-        version = os.environ.get("VONK_PLATFORM_VERSION", "")
-        release = os.environ.get("VONK_PLATFORM_RELEASE_DIGEST", "")
-        build = os.environ.get("VONK_PLATFORM_BUILD_DIGEST", "")
-        image = os.environ.get("VONK_CONTROL_PROCESS_IMAGE", "")
-        nonce = os.environ.get("VONK_CONTROL_START_NONCE", "")
+        selected_name = "VONK_DEV_SELECTED_COHORT_FILE"
+        if selected_name in os.environ:
+            if deployment_mode != "development":
+                raise SettingsError(
+                    "VONK_DEV_SELECTED_COHORT_FILE is development-only"
+                )
+            if startup_mode is not StartupMode.SELECTED:
+                raise SettingsError(
+                    "development selected cohort requires selected startup mode"
+                )
+            if any(name in os.environ for name in _GENERATION_IDENTITY_ENVIRONMENT):
+                raise SettingsError(
+                    "explicit generation identity cannot be combined with "
+                    "VONK_DEV_SELECTED_COHORT_FILE"
+                )
+            role = os.environ.get("VONK_CONTROL_PROCESS_ROLE", "")
+            if role not in {"api", "worker"}:
+                raise SettingsError(
+                    "VONK_CONTROL_PROCESS_ROLE must be api or worker"
+                )
+            selected_path = os.environ.get(selected_name, "")
+            if not selected_path:
+                raise SettingsError(f"{selected_name} is required")
+            try:
+                selected = require_selected_cohort(Path(selected_path), role)
+            except DevelopmentCohortError as error:
+                raise SettingsError(
+                    "development selected cohort is invalid"
+                ) from error
+            generation_id = selected.generation_id
+            database_revision = selected.database_revision
+            version = selected.platform_version
+            release = selected.release_digest
+            build = selected.build_digest
+            image = selected.api_image if role == "api" else selected.worker_image
+            nonce = selected.start_nonce
+        else:
+            generation_id = os.environ.get("VONK_CONTROL_GENERATION_ID", "")
+            database_revision = os.environ.get("VONK_DATABASE_REVISION", "")
+            version = os.environ.get("VONK_PLATFORM_VERSION", "")
+            release = os.environ.get("VONK_PLATFORM_RELEASE_DIGEST", "")
+            build = os.environ.get("VONK_PLATFORM_BUILD_DIGEST", "")
+            image = os.environ.get("VONK_CONTROL_PROCESS_IMAGE", "")
+            nonce = os.environ.get("VONK_CONTROL_START_NONCE", "")
         if re.fullmatch(
             r"[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?", generation_id
         ) is None:

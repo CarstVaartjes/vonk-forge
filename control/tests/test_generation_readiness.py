@@ -3,10 +3,18 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import runpy
+import subprocess
+import warnings
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker
+from vonk_control import dev_cohort, dev_init
 from vonk_control.api import (
     GenerationProcessIdentity,
     GenerationReadinessError,
@@ -15,17 +23,18 @@ from vonk_control.api import (
     install_selected_generation_readiness,
     production_app,
 )
+from vonk_control.dev_cohort import build_identity, verify_cohort
 from vonk_control.models import Base, ControlProcessHeartbeat
-from vonk_control.settings import StartupMode
+from vonk_control.settings import (
+    GenerationStartupSettings,
+    SettingsError,
+    StartupMode,
+)
 from vonk_control.worker import (
     Worker,
     WorkerHeartbeatRecorder,
     WorkerSelectedIdentityVerifier,
 )
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import sessionmaker
 
 SHA_A = "a" * 64
 SHA_B = "b" * 64
@@ -33,6 +42,64 @@ GEN_A = f"gen-{SHA_A[:24]}"
 GEN_B = f"gen-{'d' * 24}"
 START_NONCE = "c" * 64
 NOW = datetime(2026, 8, 6, 10, tzinfo=UTC)
+
+
+def _development_cohort_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    selected_commit: str = "e" * 40,
+    embedded_commit: str | None = None,
+    embedded_role: str = "api",
+):
+    selected = verify_cohort(
+        [
+            build_identity(role="api", source_commit=selected_commit),
+            build_identity(role="worker", source_commit=selected_commit),
+        ]
+    )
+    cohort_root = tmp_path / "cohort"
+    cohort_root.mkdir()
+    selected_path = cohort_root / "selected.json"
+    selected_path.write_bytes(selected.to_bytes())
+    embedded_path = tmp_path / "development-image-identity.json"
+    embedded_path.write_bytes(
+        build_identity(
+            role=embedded_role,
+            source_commit=embedded_commit or selected_commit,
+        ).to_bytes()
+    )
+    monkeypatch.setattr(
+        dev_cohort,
+        "DEVELOPMENT_IMAGE_IDENTITY_PATH",
+        embedded_path,
+    )
+    identity_root = tmp_path / "identity"
+    identity_root.mkdir()
+    active = identity_root / "active.json"
+    active.write_bytes(
+        dev_init._active_projection(
+            dev_init._selected_generation_identity(selected)
+        )
+    )
+    active.chmod(0o444)
+    monkeypatch.setenv("VONK_DEPLOYMENT_MODE", "development")
+    monkeypatch.setenv("VONK_CONTROL_STARTUP_MODE", "selected")
+    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
+    monkeypatch.delenv("VONK_DATABASE_URL_FILE", raising=False)
+    monkeypatch.setenv("VONK_CONTROL_IDENTITY_ROOT", str(identity_root))
+    monkeypatch.setenv("VONK_DEV_SELECTED_COHORT_FILE", str(selected_path))
+    for name in (
+        "VONK_CONTROL_GENERATION_ID",
+        "VONK_PLATFORM_RELEASE_DIGEST",
+        "VONK_PLATFORM_BUILD_DIGEST",
+        "VONK_PLATFORM_VERSION",
+        "VONK_CONTROL_PROCESS_IMAGE",
+        "VONK_DATABASE_REVISION",
+        "VONK_CONTROL_START_NONCE",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    return selected, identity_root, selected_path
 
 
 def _identity(
@@ -612,3 +679,169 @@ def test_directory_projection_source_rejects_active_receipt_digest_mismatch(
 
     with pytest.raises(GenerationReadinessError, match="receipt digest"):
         source.load_active()
+
+
+def test_cohort_derived_api_and_worker_identities_match_development_active_projection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    selected, identity_root, _selected_path = _development_cohort_runtime(
+        tmp_path,
+        monkeypatch,
+    )
+    monkeypatch.setenv("VONK_CONTROL_PROCESS_ROLE", "api")
+    api_settings = GenerationStartupSettings.from_env_and_secrets()
+    api_identity = GenerationProcessIdentity(
+        startup_mode=api_settings.startup_mode,
+        operation_id=api_settings.operation_id,
+        generation_id=api_settings.generation_id,
+        release_digest=api_settings.release_digest,
+        build_digest=api_settings.build_digest,
+        platform_version=api_settings.platform_version,
+        process_image=api_settings.process_image,
+        database_revision=api_settings.database_revision,
+        start_nonce=api_settings.start_nonce,
+    )
+    projection = json.loads((identity_root / "active.json").read_bytes())
+    sessions = _sessions(tmp_path)
+    service = GenerationReadinessService(
+        sessions,
+        api_identity,
+        Projections(active=projection),
+        clock=lambda: NOW,
+        database_revision=lambda: selected.database_revision,
+        heartbeat_maximum_age_seconds=15,
+    )
+    with sessions.begin() as session:
+        session.add(
+            ControlProcessHeartbeat(
+                process_kind="worker",
+                generation_id=selected.generation_id,
+                release_digest=selected.release_digest,
+                build_digest=selected.build_digest,
+                start_nonce=selected.start_nonce,
+                loop_sequence=1,
+                completed_at=NOW,
+            )
+        )
+
+    response = service.selected(selected.generation_id, selected.start_nonce)
+
+    assert response["status"] == "ready"
+    embedded_path = dev_cohort.DEVELOPMENT_IMAGE_IDENTITY_PATH
+    embedded_path.write_bytes(
+        build_identity(role="worker", source_commit=selected.source_commit).to_bytes()
+    )
+    monkeypatch.setenv("VONK_CONTROL_PROCESS_ROLE", "worker")
+    worker_settings = GenerationStartupSettings.from_env_and_secrets()
+    WorkerSelectedIdentityVerifier(
+        Projections(active=projection),
+        generation_id=worker_settings.generation_id,
+        release_digest=worker_settings.release_digest,
+        build_digest=worker_settings.build_digest,
+        platform_version=worker_settings.platform_version,
+        process_image=worker_settings.process_image,
+        database_revision=worker_settings.database_revision,
+    ).verify()
+
+
+def test_tampered_cohort_fails_before_api_application_construction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _selected, _identity_root, selected_path = _development_cohort_runtime(
+        tmp_path,
+        monkeypatch,
+    )
+    document = json.loads(selected_path.read_bytes())
+    document["source_commit"] = "f" * 40
+    selected_path.write_text(
+        json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n"
+    )
+    monkeypatch.setenv("VONK_CONTROL_PROCESS_ROLE", "api")
+    from vonk_control import db as db_module
+
+    constructed: list[str] = []
+    monkeypatch.setattr(
+        db_module,
+        "build_engine",
+        lambda *_args, **_kwargs: constructed.append("database engine"),
+    )
+
+    with pytest.raises(SettingsError, match="selected cohort"):
+        production_app()
+
+    assert constructed == []
+
+
+def test_stale_cohort_fails_before_worker_startup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _development_cohort_runtime(
+        tmp_path,
+        monkeypatch,
+        selected_commit="f" * 40,
+        embedded_commit="e" * 40,
+        embedded_role="worker",
+    )
+    monkeypatch.setenv("VONK_CONTROL_PROCESS_ROLE", "worker")
+    monkeypatch.setenv("VONK_WORKER_API_TOKEN", "worker-token-abcdefghijklmnopqrstuvwxyz012345")
+    from vonk_control import db as db_module
+
+    started: list[str] = []
+    monkeypatch.setattr(
+        db_module,
+        "build_engine",
+        lambda *_args, **_kwargs: started.append("database engine"),
+    )
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        with pytest.raises(SettingsError, match="selected cohort"):
+            runpy.run_module("vonk_control.worker", run_name="__main__")
+
+    assert started == []
+
+
+def test_mutable_compose_supplies_only_cohort_path_and_role_for_dynamic_identity() -> None:
+    root = Path(__file__).resolve().parents[2]
+    result = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "-f",
+            str(root / "deploy/compose/compose.dev.images.yaml"),
+            "config",
+            "--format",
+            "json",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    services = json.loads(result.stdout)["services"]
+    dynamic_names = {
+        "VONK_CONTROL_GENERATION_ID",
+        "VONK_PLATFORM_RELEASE_DIGEST",
+        "VONK_PLATFORM_BUILD_DIGEST",
+        "VONK_PLATFORM_VERSION",
+        "VONK_CONTROL_PROCESS_IMAGE",
+        "VONK_DATABASE_REVISION",
+        "VONK_CONTROL_START_NONCE",
+    }
+    for service_name, role in (("control-api", "api"), ("control-worker", "worker")):
+        environment = services[service_name]["environment"]
+        assert environment["VONK_DEV_SELECTED_COHORT_FILE"] == (
+            "/cohort/selected.json"
+        )
+        assert environment["VONK_CONTROL_PROCESS_ROLE"] == role
+        assert dynamic_names.isdisjoint(environment)
+
+    initializer = services["dev-init"]["environment"]
+    assert initializer["VONK_DEV_SELECTED_COHORT_FILE"] == "/cohort/selected.json"
+    assert {
+        "VONK_DEV_EXPECTED_COMMIT",
+        "VONK_DEV_API_IMAGE",
+        "VONK_DEV_WORKER_IMAGE",
+    }.isdisjoint(initializer)

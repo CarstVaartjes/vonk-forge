@@ -3,12 +3,6 @@ name: vonk-forge-dev
 x-dev-generation: &dev-generation
   VONK_DEPLOYMENT_MODE: development
   VONK_CONTROL_STARTUP_MODE: selected
-  VONK_CONTROL_GENERATION_ID: gen-000000000000000000000000
-  VONK_DATABASE_REVISION: 0020_recipe_catalog_bridge
-  VONK_PLATFORM_VERSION: 0.1.0
-  VONK_PLATFORM_RELEASE_DIGEST: sha256:0000000000000000000000000000000000000000000000000000000000000000
-  VONK_PLATFORM_BUILD_DIGEST: sha256:1111111111111111111111111111111111111111111111111111111111111111
-  VONK_CONTROL_START_NONCE: "4444444444444444444444444444444444444444444444444444444444444444"
   VONK_CONTROL_IDENTITY_ROOT: /control-identity
   VONK_DATABASE_URL_FILE: /run/secrets/database-url
   VONK_REPOSITORY_PATH: /repository
@@ -97,13 +91,11 @@ services:
     command: [python, -m, vonk_control.dev_init]
     environment:
       VONK_CONTROL_IDENTITY_ROOT: /control-identity
-      VONK_DEV_API_IMAGE: *api-image
       VONK_DEV_API_SECRET_ROOT: /api-secrets
       VONK_DEV_MIGRATE_SECRET_ROOT: /migrate-secrets
       VONK_DEV_REPOSITORY_URL: https://github.com/CarstVaartjes/vonk-forge.git
       VONK_DEV_SECRET_SOURCE_ROOT: /host-secrets
       VONK_DEV_WORKER_SECRET_ROOT: /worker-secrets
-      VONK_DEV_WORKER_IMAGE: *worker-image
       VONK_DEV_SELECTED_COHORT_FILE: /cohort/selected.json
       VONK_REPOSITORY_PATH: /repository
       VONK_ROUTE_ROOT: /routes
@@ -170,7 +162,7 @@ services:
     tmpfs: [/run/vonk-signer, /tmp]
     environment:
       <<: *dev-generation
-      VONK_CONTROL_PROCESS_IMAGE: *worker-image
+      VONK_CONTROL_PROCESS_ROLE: worker
       VONK_INTERNAL_API_URL: http://control-api:8000
       VONK_DEV_SELECTED_COHORT_FILE: /cohort/selected.json
       VONK_WORKER_API_TOKEN_FILE: /run/secrets/worker-api-token
@@ -197,7 +189,7 @@ services:
     tmpfs: [/run/vonk-workload-signer, /tmp]
     environment:
       <<: *dev-generation
-      VONK_CONTROL_PROCESS_IMAGE: *api-image
+      VONK_CONTROL_PROCESS_ROLE: api
       VONK_DEV_SELECTED_COHORT_FILE: /cohort/selected.json
       VONK_GIT_SIGNING_KEY_FILE: /run/secrets/git-signing-key
       VONK_ADMIN_GRANT_PRIVATE_KEY_FILE: /run/secrets/admin-grant-private-key

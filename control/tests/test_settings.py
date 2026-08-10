@@ -1,6 +1,8 @@
 from pathlib import Path
 
 import pytest
+from vonk_control import dev_cohort
+from vonk_control.dev_cohort import build_identity, verify_cohort
 from vonk_control.settings import (
     GenerationStartupSettings,
     Settings,
@@ -11,6 +13,58 @@ from vonk_control.settings import (
 
 GENERATION_SHA_A = "a" * 64
 GENERATION_SHA_B = "b" * 64
+GENERATION_VARIABLES = (
+    "VONK_CONTROL_GENERATION_ID",
+    "VONK_PLATFORM_RELEASE_DIGEST",
+    "VONK_PLATFORM_BUILD_DIGEST",
+    "VONK_PLATFORM_VERSION",
+    "VONK_CONTROL_PROCESS_IMAGE",
+    "VONK_DATABASE_REVISION",
+    "VONK_CONTROL_START_NONCE",
+)
+
+
+def _cohort_environment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    role: str,
+    selected_commit: str = "d" * 40,
+    embedded_commit: str | None = None,
+    embedded_role: str | None = None,
+):
+    selected = verify_cohort(
+        [
+            build_identity(role="api", source_commit=selected_commit),
+            build_identity(role="worker", source_commit=selected_commit),
+        ]
+    )
+    cohort_root = tmp_path / "cohort"
+    cohort_root.mkdir()
+    selected_path = cohort_root / "selected.json"
+    selected_path.write_bytes(selected.to_bytes())
+    identity_path = tmp_path / "development-image-identity.json"
+    identity_path.write_bytes(
+        build_identity(
+            role=embedded_role or role,
+            source_commit=embedded_commit or selected_commit,
+        ).to_bytes()
+    )
+    monkeypatch.setattr(
+        dev_cohort,
+        "DEVELOPMENT_IMAGE_IDENTITY_PATH",
+        identity_path,
+    )
+    monkeypatch.setenv("VONK_DEPLOYMENT_MODE", "development")
+    monkeypatch.setenv("VONK_CONTROL_STARTUP_MODE", "selected")
+    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
+    monkeypatch.delenv("VONK_DATABASE_URL_FILE", raising=False)
+    monkeypatch.setenv("VONK_CONTROL_IDENTITY_ROOT", str(tmp_path / "identity"))
+    monkeypatch.setenv("VONK_DEV_SELECTED_COHORT_FILE", str(selected_path))
+    monkeypatch.setenv("VONK_CONTROL_PROCESS_ROLE", role)
+    for name in GENERATION_VARIABLES:
+        monkeypatch.delenv(name, raising=False)
+    return selected
 
 
 def _valid_generation_environment(
@@ -102,6 +156,150 @@ def test_generation_startup_rejects_invalid_identity_environment(
     monkeypatch.setenv(environment_name, invalid_value)
 
     with pytest.raises(SettingsError, match=message):
+        GenerationStartupSettings.from_env_and_secrets()
+
+
+@pytest.mark.parametrize("deployment_mode", ("test", "production"))
+@pytest.mark.parametrize("missing_name", GENERATION_VARIABLES)
+def test_production_and_test_generation_startup_still_require_explicit_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    deployment_mode: str,
+    missing_name: str,
+) -> None:
+    _valid_generation_environment(
+        tmp_path,
+        monkeypatch,
+        mode=StartupMode.SELECTED,
+    )
+    monkeypatch.setenv("VONK_DEPLOYMENT_MODE", deployment_mode)
+    if deployment_mode == "production":
+        database = tmp_path / "database-url"
+        database.write_text("postgresql://db/control\n")
+        monkeypatch.setenv("VONK_DATABASE_URL_FILE", str(database))
+        monkeypatch.delenv("VONK_DATABASE_URL", raising=False)
+    monkeypatch.delenv(missing_name)
+
+    with pytest.raises(SettingsError, match=missing_name):
+        GenerationStartupSettings.from_env_and_secrets()
+
+
+def test_development_without_a_cohort_keeps_explicit_local_source_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _valid_generation_environment(
+        tmp_path,
+        monkeypatch,
+        mode=StartupMode.SELECTED,
+    )
+    monkeypatch.setenv("VONK_DEPLOYMENT_MODE", "development")
+    monkeypatch.delenv("VONK_DEV_SELECTED_COHORT_FILE", raising=False)
+
+    settings = GenerationStartupSettings.from_env_and_secrets()
+
+    assert settings.generation_id == "gen-a"
+    assert settings.process_image == (
+        f"ghcr.io/example/control-api@sha256:{GENERATION_SHA_A}"
+    )
+
+
+@pytest.mark.parametrize("role", ("api", "worker"))
+def test_development_generation_startup_derives_role_identity_from_verified_cohort(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    role: str,
+) -> None:
+    selected = _cohort_environment(
+        tmp_path,
+        monkeypatch,
+        role=role,
+    )
+
+    settings = GenerationStartupSettings.from_env_and_secrets()
+
+    assert settings.generation_id == selected.generation_id
+    assert settings.release_digest == selected.release_digest
+    assert settings.build_digest == selected.build_digest
+    assert settings.platform_version == selected.platform_version
+    assert settings.database_revision == selected.database_revision
+    assert settings.start_nonce == selected.start_nonce
+    assert settings.process_image == (
+        selected.api_image if role == "api" else selected.worker_image
+    )
+
+
+@pytest.mark.parametrize(
+    ("role", "embedded_role", "message"),
+    (
+        ("", "api", "VONK_CONTROL_PROCESS_ROLE"),
+        ("signer", "api", "VONK_CONTROL_PROCESS_ROLE"),
+        ("worker", "api", "selected cohort"),
+    ),
+    ids=("missing", "invalid", "embedded-role-mismatch"),
+)
+def test_cohort_generation_startup_requires_matching_api_or_worker_role(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    role: str,
+    embedded_role: str,
+    message: str,
+) -> None:
+    _cohort_environment(
+        tmp_path,
+        monkeypatch,
+        role=role or "api",
+        embedded_role=embedded_role,
+    )
+    if role:
+        monkeypatch.setenv("VONK_CONTROL_PROCESS_ROLE", role)
+    else:
+        monkeypatch.delenv("VONK_CONTROL_PROCESS_ROLE")
+
+    with pytest.raises(SettingsError, match=message):
+        GenerationStartupSettings.from_env_and_secrets()
+
+
+def test_cohort_generation_startup_requires_selected_startup_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _cohort_environment(tmp_path, monkeypatch, role="api")
+    monkeypatch.setenv("VONK_CONTROL_STARTUP_MODE", "preselection")
+    monkeypatch.setenv("VONK_CONTROL_OPERATION_ID", "operation-1")
+
+    with pytest.raises(SettingsError, match="selected startup mode"):
+        GenerationStartupSettings.from_env_and_secrets()
+
+
+@pytest.mark.parametrize("explicit_name", GENERATION_VARIABLES)
+def test_cohort_generation_startup_rejects_every_explicit_identity_variable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    explicit_name: str,
+) -> None:
+    _cohort_environment(tmp_path, monkeypatch, role="api")
+    monkeypatch.setenv(explicit_name, "explicit-conflict")
+
+    with pytest.raises(SettingsError, match="cannot be combined"):
+        GenerationStartupSettings.from_env_and_secrets()
+
+
+@pytest.mark.parametrize("deployment_mode", ("test", "production"))
+def test_non_development_generation_startup_rejects_cohort_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    deployment_mode: str,
+) -> None:
+    _cohort_environment(tmp_path, monkeypatch, role="api")
+    monkeypatch.setenv("VONK_DEPLOYMENT_MODE", deployment_mode)
+    if deployment_mode == "production":
+        database = tmp_path / "database-url"
+        database.write_text("postgresql://db/control\n")
+        monkeypatch.setenv("VONK_DATABASE_URL_FILE", str(database))
+        monkeypatch.delenv("VONK_DATABASE_URL", raising=False)
+
+    with pytest.raises(SettingsError, match="development"):
         GenerationStartupSettings.from_env_and_secrets()
 
 
