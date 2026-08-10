@@ -351,7 +351,7 @@ class Settings:
         direct_fabric_cidrs = os.environ.get(
             "VONK_DIRECT_FABRIC_CIDRS", ""
         ).strip()
-        if mode == "production" and not management_cidrs:
+        if (mode == "production" or agent_enabled) and not management_cidrs:
             raise SettingsError("VONK_MANAGEMENT_CIDRS is required in production")
         if not management_cidrs and direct_fabric_cidrs:
             raise SettingsError(

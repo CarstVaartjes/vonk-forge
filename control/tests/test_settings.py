@@ -435,6 +435,17 @@ def test_agent_tuf_target_root_default_is_not_concatenated(monkeypatch) -> None:
     assert settings.agent_tuf_target_root == Path("/state/agent-tuf/targets")
 
 
+def test_development_defaults_agent_runtime_to_disabled(monkeypatch) -> None:
+    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
+    monkeypatch.delenv("VONK_AGENT_RUNTIME", raising=False)
+
+    settings = Settings.from_env_and_secrets()
+
+    assert settings.agent_runtime == "disabled"
+    assert settings.agent_proxy_auth == b""
+    assert settings.worker_api_token == b""
+
+
 def _configure_agent_authority(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -554,6 +565,25 @@ def test_agent_authority_mode_runtime_provider_matrix(
         assert settings.agent_intermediate_key_path == paths[
             "VONK_AGENT_INTERMEDIATE_KEY_FILE"
         ]
+
+
+def test_enabled_development_agent_authority_requires_management_cidrs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_agent_authority(
+        tmp_path,
+        monkeypatch,
+        mode="development",
+        provider="builtin",
+    )
+    monkeypatch.delenv("VONK_MANAGEMENT_CIDRS")
+    monkeypatch.setenv("VONK_AGENT_RUNTIME", "enabled")
+    monkeypatch.setenv("VONK_AGENT_CA_PROVIDER", "builtin")
+    monkeypatch.setenv("VONK_AGENT_BUILTIN_CA_BOOTSTRAP", "1")
+
+    with pytest.raises(SettingsError, match="VONK_MANAGEMENT_CIDRS"):
+        Settings.from_env_and_secrets()
 
 
 def test_production_agent_runtime_requires_management_networks(
