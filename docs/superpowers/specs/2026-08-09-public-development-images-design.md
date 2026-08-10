@@ -115,24 +115,30 @@ There is no dedicated init image. The API package exposes
 
 `dev-init` runs as root only for named-volume ownership setup. It clones the
 public GitHub repository at the exact 40-character commit embedded in the
-generated Compose file into a NAS-local `dev-repository` named volume, checks
-out local `main`, verifies the commit, and assigns the checkout to UID/GID
-10001. The generated Compose file sets `VONK_DEPLOYMENT_BRANCH=main` for API and
-worker, and passes `VONK_DEV_EXPECTED_COMMIT=<40-character-main-commit>` only to
-`dev-init`. Initial deployment therefore requires outbound HTTPS access to
-public GitHub as well as GHCR.
+generated Compose file into a NAS-local `dev-repository` named volume, records
+that accepted GitHub commit on local `main`, checks out a separate mutable
+`deploy` branch at the same commit, verifies both refs, and assigns the checkout
+to UID/GID 10001. The generated Compose file sets
+`VONK_DEPLOYMENT_BRANCH=deploy` for API and worker, and passes
+`VONK_DEV_EXPECTED_COMMIT=<40-character-main-commit>` only to `dev-init`.
+Initial deployment therefore requires outbound HTTPS access to public GitHub
+as well as GHCR.
 
 On every subsequent start, `dev-init` validates that the existing checkout is a
-non-symlink Git repository with a clean worktree, fetches public `origin/main`
-without credentials, and verifies that the expected commit is reachable from
-that ref. If local `main` already equals the expected commit, initialization is
-idempotent. If local `main` is an ancestor of the expected commit, `dev-init`
-updates only `refs/heads/main` with a compare-and-swap and resets the clean
-checked-out `main` worktree to that commit. Other local branches and refs are
-preserved. A dirty worktree, non-fast-forward transition, missing expected
-commit, changed origin URL, or attempted silent rollback fails initialization;
-an intentional rollback requires explicitly recreating only the development
-repository volume.
+non-symlink Git repository with a clean worktree checked out on `deploy`,
+fetches public `origin/main` without credentials, and verifies that the expected
+commit is reachable from that ref. Local `main` is the last accepted GitHub
+baseline and must be an ancestor of the new expected commit. Local `deploy`
+must descend from that previous baseline. `dev-init` advances only local `main`
+to the expected commit with a compare-and-swap. When `deploy` still equals the
+previous baseline it is fast-forwarded with the clean worktree to the expected
+commit; when development-direct operation has added signed local commits,
+`deploy` and its worktree remain unchanged. This makes restarts idempotent and
+lets accepted source advance without discarding NAS-local development history.
+Other local branches and refs are preserved. A dirty worktree, divergent
+accepted baseline, missing expected commit, changed origin URL, or attempted
+silent rollback fails initialization; an intentional rollback requires
+explicitly recreating only the development repository volume.
 
 It also initializes synthetic development identity/state and stages runtime
 credentials before exiting successfully. API and worker cannot start until it
@@ -151,21 +157,27 @@ layers. Compose declares each file separately and mounts it read-only only into
 the services that need it:
 
 - `postgres-password` is consumed only by PostgreSQL.
-- `database-url` is consumed by `dev-init` and projected read-only for migration.
+- `database-url` is consumed only by `dev-init`, which copies it into the API
+  projection with UID/GID 10001 ownership for migration and API use.
 - `git-signing-key` is consumed by `dev-init` for the API runtime projection.
 
-`dev-init` writes two disjoint named-volume projections because API and worker
-currently share UID 10001 and filesystem modes alone cannot isolate them:
+`dev-init` writes three disjoint named-volume projections because API, migration,
+and worker currently share UID 10001 and filesystem modes alone cannot isolate
+them:
 
 - `dev-api-secrets` contains the database URL, Git signing key, and generated
   admin private key. Only `control-api` mounts it, read-only.
+- `dev-migrate-secrets` contains only a separate database URL copy. Only
+  `migrate` mounts it, read-only.
 - `dev-worker-secrets` contains a separate database URL copy and generated
   worker API token. Only `control-worker` mounts it, read-only.
 
-Migration receives only the database URL through its own read-only Compose
-secret mount. Neither API nor worker mounts the other service's projection, and
-the shared `dev-runtime-secrets` volume is removed. Secret contents are never
-written to logs, Compose output, manifests, workflow summaries, or image labels.
+Migration mounts only `dev-migrate-secrets` after `dev-init` completes, so its
+UID 10001 process can read the staged database URL without making the NAS source
+file group- or world-readable or exposing API signing authority. No runtime
+service mounts another service's projection, and the shared
+`dev-runtime-secrets` volume is removed. Secret contents are never written to
+logs, Compose output, manifests, workflow summaries, or image labels.
 
 ## Development and production separation
 

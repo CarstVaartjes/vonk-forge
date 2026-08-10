@@ -19,7 +19,7 @@ Compose artifact remains digest locked.
 
 | Source | Package version | Immutable evidence | Moving discovery channel |
 | --- | --- | --- | --- |
-| Exact accepted `main` tip | `X.Y.Z~dev.<commit-epoch>+g<sha12>` | GitHub Actions artifact, checksum, SBOM, provenance, Sigstore bundle, GitHub attestations | apt distribution `dev` |
+| Exact accepted `main` tip | `X.Y.Z~dev.<workflow-run-number>+g<sha12>` | GitHub Actions artifact, checksum, SBOM, provenance, Sigstore bundle, GitHub attestations | apt distribution `dev` |
 | Trusted annotated tag `vX.Y.Z` reachable from `main` | `X.Y.Z` | GitHub Release assets, checksum, SBOM, provenance, Sigstore bundle, GitHub attestations | apt distribution `stable` |
 
 `X.Y.Z` is the canonical workspace version in `Cargo.toml`. The root, control,
@@ -29,6 +29,14 @@ version, so a node may move from a development candidate to its final release
 without a downgrade override. Main must advance the workspace version before
 publishing development builds for the next release line.
 
+The dedicated development release workflow's GitHub `run_number` is the
+monotonic ordering authority. GitHub increments it for each new run of that
+workflow and preserves it across reruns, so later accepted publications cannot
+sort below earlier ones because of equal or decreasing commit timestamps or SHA
+lexical order. The workflow file keeps a stable identity; replacing it with a
+new workflow requires an explicit version-sequence migration. No local command
+derives, reserves, or publishes an official release number.
+
 Package filenames and apt metadata are the only channel discovery mechanism.
 There is no mutable `.deb` filename and no package called `latest` or `dev`.
 
@@ -37,8 +45,11 @@ There is no mutable `.deb` filename and no package called `latest` or `dev`.
 `.github/workflows/agent-release.yml` runs on pushes to `main` and may be run
 manually only against `refs/heads/main`. Both triggers fetch `origin/main` and
 fail unless `GITHUB_SHA` is its exact current tip. The workflow derives the
-canonical development version from committed source metadata; it does not
-accept an operator-supplied version.
+canonical development version from committed source metadata plus its own
+`github.run_number`; it does not accept an operator-supplied version. Reusable
+build validation receives that Actions-owned sequence explicitly and checks the
+same metadata. Local helpers may validate or test an explicitly supplied
+fixture sequence, but they cannot select or publish an official version.
 
 The native Ubuntu 24.04 ARM64 job:
 
@@ -111,6 +122,13 @@ immutable release-version paths plus `latest`. Exact publication retries reuse
 an existing trusted snapshot; a different package under an existing immutable
 snapshot/version is rejected.
 
+The initial publication of each apt suite enables Acquire-By-Hash. Immutable
+`by-hash/SHA256` index objects are uploaded before signed release metadata is
+switched, and subsequent aptly snapshot switches preserve that setting. Clients
+that fetched the previous `InRelease` can therefore continue fetching its exact
+indexes while a new publication is being installed, instead of observing a
+named-index hash mismatch.
+
 ## Failure and ordering behavior
 
 All publication is fail closed:
@@ -121,6 +139,8 @@ All publication is fail closed:
 - package bytes are verified before any apt signing key or R2 credential is
   materialized;
 - public indexes are signed and locally verified before upload;
+- public release metadata requires `Acquire-By-Hash: yes`, and every referenced
+  immutable by-hash index exists before upload;
 - the public apt tree is copied before the new private `latest` state pointer;
 - immutable private state is written before `latest`;
 - development and production failures cannot mutate the other channel's state;
@@ -133,8 +153,10 @@ All publication is fail closed:
 Repository tests parse both workflows and execute package metadata/version
 helpers against valid and adversarial inputs. Package tests cover canonical
 development versions, malformed versions, tag/workspace mismatch, Debian
-ordering, exact-main enforcement, secret and permission boundaries, apt-state
-isolation, immutable artifact naming, and channel-specific keyrings.
+ordering by Actions-owned sequence even when timestamps or SHAs regress,
+exact-main enforcement, secret and permission boundaries, apt-state isolation,
+Acquire-By-Hash publication, immutable artifact naming, and channel-specific
+keyrings.
 
 The decisive CI acceptance remains a native ARM64 package build followed by
 fresh install, offline reinstall, upgrade, downgrade rejection, configuration
