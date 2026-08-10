@@ -84,6 +84,7 @@ def test_catalog_runtime_suites_run_in_parallel_with_stable_aggregate() -> None:
     assert "pytest --collect-only -q control/tests" in control
     assert "awk '/^tests\\/.*::/'" in control
     assert "position % SHARD_TOTAL == SHARD_INDEX" in control
+    assert 'shard_tests+=("control/${control_tests[$position]}")' in control
     assert '"${shard_tests[@]}"' in control
     assert "pytest-xdist==3.8.0" in control
     assert "pytest -q -n auto --dist loadfile" in control

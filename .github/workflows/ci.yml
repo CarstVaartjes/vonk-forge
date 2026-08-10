@@ -206,7 +206,7 @@ jobs:
           shard_tests=()
           for position in "${!control_tests[@]}"; do
             if ((position % SHARD_TOTAL == SHARD_INDEX)); then
-              shard_tests+=("${control_tests[$position]}")
+              shard_tests+=("control/${control_tests[$position]}")
             fi
           done
           ((${#shard_tests[@]} > 0))
