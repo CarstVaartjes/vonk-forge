@@ -682,6 +682,17 @@ def test_reusable_apt_publisher_uses_manifest_last_exact_replay_protocol() -> No
         assert removed not in text
 
 
+def test_reusable_apt_publisher_supports_bucket_scoped_r2_tokens() -> None:
+    text = apt_workflow()
+    remote_count = text.count("RCLONE_CONFIG_R2_TYPE: s3")
+    no_bucket_check_count = text.count(
+        'RCLONE_CONFIG_R2_NO_CHECK_BUCKET: "true"'
+    )
+
+    assert remote_count == 3
+    assert no_bucket_check_count == remote_count
+
+
 def test_release_actions_are_commit_pinned_and_secrets_are_environment_scoped() -> None:
     agent_text = WORKFLOW.read_text()
     unified_text = UNIFIED_WORKFLOW.read_text()
