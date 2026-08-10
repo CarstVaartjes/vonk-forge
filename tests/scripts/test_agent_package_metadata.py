@@ -41,21 +41,21 @@ def metadata_workspace(tmp_path: Path) -> Path:
 
 
 def test_development_metadata_emits_canonical_debian_outputs() -> None:
-    result = run_metadata("development", "branch", "main", SHA, "1786300000")
+    result = run_metadata("development", "branch", "main", SHA, "417")
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [
-        "version=0.1.0~dev.1786300000+g0123456789ab",
-        "next_version=0.1.0~dev.1786300001+g0123456789ab",
-        "package=vonk-forge-agent_0.1.0~dev.1786300000+g0123456789ab_arm64.deb",
+        "version=0.1.0~dev.417+g0123456789ab",
+        "next_version=0.1.0~dev.418+g0123456789ab",
+        "package=vonk-forge-agent_0.1.0~dev.417+g0123456789ab_arm64.deb",
         f"artifact_name=vonk-agent-development-{SHA}",
         "channel=dev",
-        "snapshot=dev-0.1.0~dev.1786300000+g0123456789ab",
+        "snapshot=dev-0.1.0~dev.417+g0123456789ab",
     ]
 
 
 def test_production_metadata_emits_canonical_stable_outputs() -> None:
-    result = run_metadata("production", "tag", "v0.1.0", SHA, "1786300000")
+    result = run_metadata("production", "tag", "v0.1.0", SHA, "0")
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [
@@ -69,24 +69,28 @@ def test_production_metadata_emits_canonical_stable_outputs() -> None:
 
 
 @pytest.mark.parametrize(
-    ("channel", "ref_type", "ref_name", "sha", "epoch"),
+    ("channel", "ref_type", "ref_name", "sha", "sequence"),
     (
-        ("development", "tag", "main", SHA, "1786300000"),
-        ("development", "branch", "release", SHA, "1786300000"),
-        ("production", "branch", "v0.1.0", SHA, "1786300000"),
-        ("production", "tag", "0.1.0", SHA, "1786300000"),
-        ("production", "tag", "v0.1.1", SHA, "1786300000"),
-        ("development", "branch", "main", SHA.upper(), "1786300000"),
-        ("development", "branch", "main", SHA[:-1], "1786300000"),
+        ("development", "tag", "main", SHA, "417"),
+        ("development", "branch", "release", SHA, "417"),
+        ("production", "branch", "v0.1.0", SHA, "0"),
+        ("production", "tag", "0.1.0", SHA, "0"),
+        ("production", "tag", "v0.1.1", SHA, "0"),
+        ("development", "branch", "main", SHA.upper(), "417"),
+        ("development", "branch", "main", SHA[:-1], "417"),
+        ("development", "branch", "main", SHA, "0"),
         ("development", "branch", "main", SHA, "-1"),
-        ("development", "branch", "main", SHA, "4102444800"),
-        ("development", "branch", "main", SHA, "not-an-epoch"),
+        ("development", "branch", "main", SHA, "0417"),
+        ("development", "branch", "main", SHA, "not-a-sequence"),
+        ("development", "branch", "main", SHA, "9999999999999999999"),
+        ("development", "branch", "main", SHA, "10000000000000000000"),
+        ("production", "tag", "v0.1.0", SHA, "417"),
     ),
 )
 def test_metadata_rejects_noncanonical_release_inputs(
-    channel: str, ref_type: str, ref_name: str, sha: str, epoch: str
+    channel: str, ref_type: str, ref_name: str, sha: str, sequence: str
 ) -> None:
-    result = run_metadata(channel, ref_type, ref_name, sha, epoch)
+    result = run_metadata(channel, ref_type, ref_name, sha, sequence)
 
     assert result.returncode == 64
     assert result.stdout == ""
@@ -98,7 +102,9 @@ def test_metadata_rejects_mismatched_workspace_versions(tmp_path: Path) -> None:
     agent_project = workspace / "agent/pyproject.toml"
     agent_project.write_text(agent_project.read_text().replace('version = "0.1.0"', 'version = "0.1.1"'))
 
-    result = run_metadata("production", "tag", "v0.1.0", SHA, "1786300000", root=workspace)
+    result = run_metadata(
+        "production", "tag", "v0.1.0", SHA, "0", root=workspace
+    )
 
     assert result.returncode == 64
     assert result.stdout == ""
@@ -106,8 +112,7 @@ def test_metadata_rejects_mismatched_workspace_versions(tmp_path: Path) -> None:
 
 
 def test_debian_ordering_promotes_development_to_final() -> None:
-    current = "0.1.0~dev.1786300000+g0123456789ab"
-    next_version = "0.1.0~dev.1786300001+g0123456789ab"
+    current = "0.1.0~dev.417+g0123456789ab"
 
     lower = subprocess.run(
         ["/usr/bin/dpkg", "--compare-versions", current, "lt", "0.1.0"],
@@ -116,7 +121,7 @@ def test_debian_ordering_promotes_development_to_final() -> None:
         text=True,
     )
     higher = subprocess.run(
-        ["/usr/bin/dpkg", "--compare-versions", next_version, "gt", current],
+        ["/usr/bin/dpkg", "--compare-versions", "0.1.0", "gt", current],
         check=False,
         capture_output=True,
         text=True,
@@ -124,3 +129,21 @@ def test_debian_ordering_promotes_development_to_final() -> None:
 
     assert lower.returncode == 0, lower.stderr
     assert higher.returncode == 0, higher.stderr
+
+
+def test_debian_ordering_uses_publication_sequence_before_sha() -> None:
+    earlier = run_metadata("development", "branch", "main", "f" * 40, "417")
+    later = run_metadata("development", "branch", "main", "0" * 40, "418")
+
+    assert earlier.returncode == 0, earlier.stderr
+    assert later.returncode == 0, later.stderr
+    earlier_version = earlier.stdout.splitlines()[0].removeprefix("version=")
+    later_version = later.stdout.splitlines()[0].removeprefix("version=")
+    ordered = subprocess.run(
+        ["/usr/bin/dpkg", "--compare-versions", later_version, "gt", earlier_version],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert ordered.returncode == 0, ordered.stderr

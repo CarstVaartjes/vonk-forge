@@ -18,8 +18,6 @@ SEMVER = r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
 SEMVER_RE = re.compile(rf"^{SEMVER}$")
 TAG_RE = re.compile(rf"^v({SEMVER})$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-EPOCH_RE = re.compile(r"^(?:0|[1-9][0-9]*)$")
-MAX_EPOCH = 4_102_444_800
 
 
 def workspace_version() -> str:
@@ -41,13 +39,17 @@ def workspace_version() -> str:
     return versions[0]
 
 
-def parse_epoch(value: str, *, reserve_next: bool = False) -> int:
-    if EPOCH_RE.fullmatch(value) is None:
-        raise ValueError("epoch is invalid")
-    epoch = int(value)
-    if epoch > MAX_EPOCH or (reserve_next and epoch == MAX_EPOCH):
-        raise ValueError("epoch is invalid")
-    return epoch
+def publication_sequence(release: str, value: str) -> int:
+    if release == "production":
+        if value != "0":
+            raise ValueError("publication sequence is invalid")
+        return 0
+    if re.fullmatch(r"[1-9][0-9]{0,18}", value) is None:
+        raise ValueError("publication sequence is invalid")
+    sequence = int(value)
+    if sequence >= 9_999_999_999_999_999_999:
+        raise ValueError("publication sequence is invalid")
+    return sequence
 
 
 def stable_next_version(version: str) -> str:
@@ -58,16 +60,16 @@ def stable_next_version(version: str) -> str:
 def metadata(arguments: Sequence[str]) -> list[str]:
     if len(arguments) != 5:
         raise ValueError("metadata arguments are invalid")
-    release, ref_type, ref_name, sha, epoch_text = arguments
+    release, ref_type, ref_name, sha, sequence_text = arguments
     if SHA_RE.fullmatch(sha) is None:
         raise ValueError("source SHA is invalid")
-    epoch = parse_epoch(epoch_text, reserve_next=release == "development")
+    sequence = publication_sequence(release, sequence_text)
     version = workspace_version()
     if release == "development":
         if (ref_type, ref_name) != ("branch", "main"):
             raise ValueError("development source is invalid")
-        package_version = f"{version}~dev.{epoch}+g{sha[:12]}"
-        next_version = f"{version}~dev.{epoch + 1}+g{sha[:12]}"
+        package_version = f"{version}~dev.{sequence}+g{sha[:12]}"
+        next_version = f"{version}~dev.{sequence + 1}+g{sha[:12]}"
         artifact_name = f"vonk-agent-development-{sha}"
         channel = "dev"
     elif release == "production":

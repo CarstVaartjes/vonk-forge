@@ -6,6 +6,9 @@ on:
       channel:
         required: true
         type: string
+      publication_sequence:
+        required: true
+        type: string
       version:
         required: true
         type: string
@@ -80,15 +83,18 @@ jobs:
           CHANNEL: ${{ inputs.channel }}
           PACKAGE: ${{ inputs.package }}
           PACKAGE_ENVIRONMENT: ${{ inputs.environment }}
+          PUBLICATION_SEQUENCE: ${{ inputs.publication_sequence }}
           NEXT_VERSION: ${{ inputs.next_version }}
           VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
           case "${CHANNEL}:${PACKAGE_ENVIRONMENT}" in
             dev:agent-development)
+              test "$PUBLICATION_SEQUENCE" = "$GITHUB_RUN_NUMBER"
               release=development
               ;;
             stable:agent-release)
+              test "$PUBLICATION_SEQUENCE" = 0
               release=production
               ;;
             *)
@@ -96,11 +102,10 @@ jobs:
               exit 64
               ;;
           esac
-          epoch=$(git show -s --format=%ct "$GITHUB_SHA")
           expected=$(
             scripts/agent-package-metadata \
               "$release" "$GITHUB_REF_TYPE" "$GITHUB_REF_NAME" \
-              "$GITHUB_SHA" "$epoch"
+              "$GITHUB_SHA" "$PUBLICATION_SEQUENCE"
           )
           actual=$(printf '%s\n' \
             "version=$VERSION" \

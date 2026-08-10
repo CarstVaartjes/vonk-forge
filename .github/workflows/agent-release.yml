@@ -43,12 +43,14 @@ jobs:
       - name: Derive immutable development package metadata
         id: metadata
         shell: bash
+        env:
+          PUBLICATION_SEQUENCE: ${{ github.run_number }}
         run: |
           set -euo pipefail
-          epoch=$(git show -s --format=%ct "$GITHUB_SHA")
+          test "$PUBLICATION_SEQUENCE" = "$GITHUB_RUN_NUMBER"
           scripts/agent-package-metadata \
             development "$GITHUB_REF_TYPE" "$GITHUB_REF_NAME" \
-            "$GITHUB_SHA" "$epoch" \
+            "$GITHUB_SHA" "$PUBLICATION_SEQUENCE" \
             >> "$GITHUB_OUTPUT"
 
   build-test-sign:
@@ -58,6 +60,7 @@ jobs:
     uses: ./.github/workflows/agent-package-build.yml
     with:
       channel: ${{ needs.package-metadata.outputs.channel }}
+      publication_sequence: ${{ github.run_number }}
       version: ${{ needs.package-metadata.outputs.version }}
       next_version: ${{ needs.package-metadata.outputs.next_version }}
       package: ${{ needs.package-metadata.outputs.package }}
