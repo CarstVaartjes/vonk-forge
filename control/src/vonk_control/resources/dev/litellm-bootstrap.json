@@ -1,0 +1,1 @@
+{"general_settings":{"database_url":"os.environ/LITELLM_DATABASE_URL","disable_admin_ui":false,"master_key":"os.environ/LITELLM_MASTER_KEY","store_model_in_db":false},"litellm_settings":{"drop_params":true,"failure_callback":[],"set_verbose":false,"success_callback":[]},"model_list":[],"router_settings":{"enable_pre_call_checks":true,"routing_strategy":"simple-shuffle"}}

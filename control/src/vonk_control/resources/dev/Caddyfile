@@ -1,0 +1,72 @@
+{
+	admin off
+	auto_https disable_redirects
+}
+
+(agent_edge_guards) {
+	request_body {
+		max_size 1MB
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+}
+
+https://{$VONK_AGENT_ENROLL_HOSTNAME}:{$VONK_BACKEND_PORT} {
+	import agent_edge_guards
+	tls /run/secrets/controller-server-certificate /run/secrets/controller-server-key
+
+	@managed remote_ip {$VONK_MANAGEMENT_CIDRS}
+	@enrollment {
+		method POST
+		path /agent/v1/enroll
+	}
+	handle @managed {
+		handle @enrollment {
+			reverse_proxy control-api:8000 {
+				header_up -X-Vonk-Agent-*
+			}
+		}
+		respond 404
+	}
+	respond 403
+}
+
+https://{$VONK_AGENT_HOSTNAME}:{$VONK_BACKEND_PORT} {
+	import agent_edge_guards
+	tls /run/secrets/controller-server-certificate /run/secrets/controller-server-key {
+		client_auth {
+			trust_pool file /run/secrets/agent-ca-certificate
+			mode require_and_verify
+		}
+	}
+	map {tls_client_subject} {vonk_agent_node} {
+		~^CN=(spk_[0-9a-f]{32})$ "${1}"
+		default ""
+	}
+
+	@managed remote_ip {$VONK_MANAGEMENT_CIDRS}
+	@agent_api {
+		path /agent/v1/*
+		not path /agent/v1/enroll
+	}
+	handle @managed {
+		handle @agent_api {
+			reverse_proxy control-api:8000 {
+				header_up -X-Vonk-Agent-*
+				header_up X-Vonk-Agent-Node {vonk_agent_node}
+				header_up X-Vonk-Agent-Serial {tls_client_serial}
+				header_up X-Vonk-Agent-Fingerprint {tls_client_fingerprint}
+				header_up X-Vonk-Agent-Verified "1"
+				import /tmp/vonk-agent-proxy-auth.caddy
+				header_up X-Vonk-Agent-Source {http.request.remote.host}
+			}
+		}
+		respond 404
+	}
+	respond 403
+}

@@ -11,7 +11,7 @@ import stat
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
@@ -21,6 +21,7 @@ from .dev_cohort import (
     SelectedDevelopmentCohort,
     require_selected_cohort,
 )
+from .dev_runtime_assets import stage_development_assets
 from .host_state import HostOperationPlan, SelectionReceipt
 
 _COMMIT = re.compile(r"[0-9a-f]{40}\Z")
@@ -31,6 +32,10 @@ _DEPLOYMENT_BASE_REF = "refs/vonk/deploy-base"
 _ZERO_COMMIT = "0" * 40
 _API_UID = 10001
 _API_GID = 10001
+_CADDY_UID = 10000
+_CADDY_GID = 10000
+_LITELLM_UID = 10002
+_LITELLM_GID = 10001
 _GIT_UID = 65534
 _GIT_GID = 65534
 _MAX_SECRET_BYTES = 64 * 1024
@@ -577,6 +582,12 @@ def _service_identity() -> tuple[int, int]:
     return os.geteuid(), os.getegid()
 
 
+def _projection_identity(uid: int, gid: int) -> tuple[int, int]:
+    if os.geteuid() == 0:
+        return uid, gid
+    return os.geteuid(), os.getegid()
+
+
 def _projection_path(root: Path, *, label: str) -> tuple[str, ...]:
     if root.anchor != "/" or len(root.parts) < 2 or any(
         part in {"", ".", ".."} for part in root.parts[1:]
@@ -610,9 +621,9 @@ def _open_projection_directory(root: Path, *, label: str) -> int:
         raise DevInitError(f"{label} projection component is unsafe") from error
 
 
-def _prepare_projection_directory(parent: int) -> None:
+def _prepare_projection_directory(parent: int, *, uid: int, gid: int) -> None:
     try:
-        uid, gid = _service_identity()
+        uid, gid = _projection_identity(uid, gid)
         os.fchown(parent, uid, gid)
         os.fchmod(parent, 0o700)
     except OSError as error:
@@ -631,7 +642,13 @@ def _clear_projection(parent: int) -> None:
         raise DevInitError("development secret projection cannot be cleared") from error
 
 
-def _read_generated_credential(parent: int, name: str) -> bytes | None:
+def _read_generated_credential(
+    parent: int,
+    name: str,
+    *,
+    uid: int,
+    gid: int,
+) -> bytes | None:
     try:
         descriptor = os.open(
             name,
@@ -644,7 +661,7 @@ def _read_generated_credential(parent: int, name: str) -> bytes | None:
         raise DevInitError(f"generated credential {name} is unsafe") from error
     try:
         before = os.fstat(descriptor)
-        uid, gid = _service_identity()
+        uid, gid = _projection_identity(uid, gid)
         if (
             not stat.S_ISREG(before.st_mode)
             or before.st_nlink != 1
@@ -686,7 +703,12 @@ def _read_generated_credential(parent: int, name: str) -> bytes | None:
 
 def _admin_credential(parent: int) -> bytes:
     name = "admin-grant-private-key"
-    content = _read_generated_credential(parent, name)
+    content = _read_generated_credential(
+        parent,
+        name,
+        uid=_API_UID,
+        gid=_API_GID,
+    )
     if content is None:
         return ed25519.Ed25519PrivateKey.generate().private_bytes(
             serialization.Encoding.PEM,
@@ -704,7 +726,12 @@ def _admin_credential(parent: int) -> bytes:
 
 def _worker_credential(parent: int) -> bytes:
     name = "worker-api-token"
-    content = _read_generated_credential(parent, name)
+    content = _read_generated_credential(
+        parent,
+        name,
+        uid=_API_UID,
+        gid=_API_GID,
+    )
     if content is None:
         return secrets.token_urlsafe(32).encode("ascii")
     if _WORKER_TOKEN.fullmatch(content) is None:
@@ -720,7 +747,14 @@ def _seal_projection(parent: int) -> None:
         raise DevInitError("development secret projection cannot be sealed") from error
 
 
-def _write_projection_secret(parent: int, name: str, content: bytes) -> None:
+def _write_projection_secret(
+    parent: int,
+    name: str,
+    content: bytes,
+    *,
+    uid: int,
+    gid: int,
+) -> None:
     temporary = f".{name}.{secrets.token_hex(12)}.new"
     descriptor = -1
     try:
@@ -740,7 +774,7 @@ def _write_projection_secret(parent: int, name: str, content: bytes) -> None:
             if written <= 0:
                 raise DevInitError("development secret write was incomplete")
             offset += written
-        uid, gid = _service_identity()
+        uid, gid = _projection_identity(uid, gid)
         os.fchown(descriptor, uid, gid)
         os.fchmod(descriptor, 0o400)
         os.fsync(descriptor)
@@ -771,73 +805,152 @@ def _are_distinct_projection_roots(*roots: tuple[Path, str]) -> bool:
     return True
 
 
+def _litellm_database_url(database_url: bytes) -> bytes:
+    try:
+        value = database_url.decode("utf-8").strip()
+    except UnicodeDecodeError as error:
+        raise DevInitError("development database URL is invalid") from error
+    parsed = urlsplit(value)
+    if (
+        parsed.scheme not in {"postgresql", "postgresql+psycopg"}
+        or not parsed.hostname
+        or parsed.path in {"", "/"}
+        or parsed.fragment
+        or any(character.isspace() for character in value)
+    ):
+        raise DevInitError("development database URL is invalid")
+    return (
+        urlunsplit(("postgresql", parsed.netloc, parsed.path, parsed.query, ""))
+        + "\n"
+    ).encode("utf-8")
+
+
 def stage_runtime_secrets(
     source: Path,
     api_root: Path,
     migrate_root: Path,
     worker_root: Path,
+    caddy_root: Path,
+    litellm_root: Path,
 ) -> None:
-    """Stage three disjoint, service-owned runtime-secret projections."""
+    """Stage five disjoint, service-owned runtime-secret projections."""
     source = Path(source)
-    api_root = Path(api_root)
-    migrate_root = Path(migrate_root)
-    worker_root = Path(worker_root)
+    roots = (
+        (Path(api_root), "API", _API_UID, _API_GID),
+        (Path(migrate_root), "migration", _API_UID, _API_GID),
+        (Path(worker_root), "worker", _API_UID, _API_GID),
+        (Path(caddy_root), "Caddy", _CADDY_UID, _CADDY_GID),
+        (Path(litellm_root), "LiteLLM", _LITELLM_UID, _LITELLM_GID),
+    )
     _directory(source, label="development secret source")
     if not _are_distinct_projection_roots(
-        (api_root, "API"),
-        (migrate_root, "migration"),
-        (worker_root, "worker"),
+        *((root, label) for root, label, _uid, _gid in roots)
     ):
         raise DevInitError("development secret projections must be distinct")
+
     database_url = _read_source_secret(source, "database-url")
     signing_key = _read_source_secret(source, "git-signing-key")
-    api = _open_projection_directory(api_root, label="API")
-    migrate = -1
-    worker = -1
+    agent_ca_certificate = _read_source_secret(source, "agent-ca-certificate")
+    agent_ca_key = _read_source_secret(source, "agent-ca-key")
+    agent_proxy_auth = _read_source_secret(source, "agent-proxy-auth")
+    _read_source_secret(source, "controller-ca")
+    controller_server_certificate = _read_source_secret(
+        source, "controller-server-certificate"
+    )
+    controller_server_key = _read_source_secret(source, "controller-server-key")
+    litellm_master_key = _read_source_secret(source, "litellm-master-key")
+    litellm_upstream_key = _read_source_secret(source, "litellm-upstream-key")
+    management_cidrs = _read_source_secret(source, "management-cidrs")
+    litellm_database_url = _litellm_database_url(database_url)
+
+    descriptors: list[int] = []
     try:
-        migrate = _open_projection_directory(migrate_root, label="migration")
-        worker = _open_projection_directory(worker_root, label="worker")
-        api_identity = os.fstat(api)
-        migrate_identity = os.fstat(migrate)
-        worker_identity = os.fstat(worker)
+        for root, label, _uid, _gid in roots:
+            descriptors.append(_open_projection_directory(root, label=label))
         identities = {
-            (api_identity.st_dev, api_identity.st_ino),
-            (migrate_identity.st_dev, migrate_identity.st_ino),
-            (worker_identity.st_dev, worker_identity.st_ino),
+            (metadata.st_dev, metadata.st_ino)
+            for metadata in (os.fstat(descriptor) for descriptor in descriptors)
         }
-        if len(identities) != 3:
+        if len(identities) != len(descriptors):
             raise DevInitError(
                 "development secret projections must be physically distinct"
             )
-        _prepare_projection_directory(api)
-        _prepare_projection_directory(migrate)
-        _prepare_projection_directory(worker)
+        for descriptor, (_root, _label, uid, gid) in zip(
+            descriptors, roots, strict=True
+        ):
+            _prepare_projection_directory(descriptor, uid=uid, gid=gid)
+
+        api, migrate, worker, caddy, litellm = descriptors
         admin_key = _admin_credential(api)
         worker_token = _worker_credential(worker)
-        _clear_projection(api)
-        _clear_projection(migrate)
-        _clear_projection(worker)
+        for descriptor in descriptors:
+            _clear_projection(descriptor)
+
         for name, content in (
             ("database-url", database_url),
             ("git-signing-key", signing_key),
             ("admin-grant-private-key", admin_key),
+            ("worker-api-token", worker_token),
+            ("agent-ca-certificate", agent_ca_certificate),
+            ("agent-ca-key", agent_ca_key),
+            ("agent-proxy-auth", agent_proxy_auth),
         ):
-            _write_projection_secret(api, name, content)
-        _write_projection_secret(migrate, "database-url", database_url)
+            _write_projection_secret(
+                api,
+                name,
+                content,
+                uid=_API_UID,
+                gid=_API_GID,
+            )
+        _write_projection_secret(
+            migrate,
+            "database-url",
+            database_url,
+            uid=_API_UID,
+            gid=_API_GID,
+        )
         for name, content in (
             ("database-url", database_url),
             ("worker-api-token", worker_token),
         ):
-            _write_projection_secret(worker, name, content)
-        _seal_projection(api)
-        _seal_projection(migrate)
-        _seal_projection(worker)
+            _write_projection_secret(
+                worker,
+                name,
+                content,
+                uid=_API_UID,
+                gid=_API_GID,
+            )
+        for name, content in (
+            ("controller-server-certificate", controller_server_certificate),
+            ("controller-server-key", controller_server_key),
+            ("agent-ca-certificate", agent_ca_certificate),
+            ("agent-proxy-auth", agent_proxy_auth),
+            ("management-cidrs", management_cidrs),
+        ):
+            _write_projection_secret(
+                caddy,
+                name,
+                content,
+                uid=_CADDY_UID,
+                gid=_CADDY_GID,
+            )
+        for name, content in (
+            ("litellm-master-key", litellm_master_key),
+            ("litellm-upstream-key", litellm_upstream_key),
+            ("litellm-database-url", litellm_database_url),
+        ):
+            _write_projection_secret(
+                litellm,
+                name,
+                content,
+                uid=_LITELLM_UID,
+                gid=_LITELLM_GID,
+            )
+        for descriptor in descriptors:
+            _seal_projection(descriptor)
     finally:
-        os.close(api)
-        if migrate >= 0:
-            os.close(migrate)
-        if worker >= 0:
-            os.close(worker)
+        for descriptor in descriptors:
+            os.close(descriptor)
 
 
 def _pinned_generation_identity(
@@ -1009,6 +1122,9 @@ def main() -> int:
     api_secret_root = Path(_required_environment("VONK_DEV_API_SECRET_ROOT"))
     migrate_secret_root = Path(_required_environment("VONK_DEV_MIGRATE_SECRET_ROOT"))
     worker_secret_root = Path(_required_environment("VONK_DEV_WORKER_SECRET_ROOT"))
+    caddy_secret_root = Path(_required_environment("VONK_DEV_CADDY_SECRET_ROOT"))
+    litellm_secret_root = Path(_required_environment("VONK_DEV_LITELLM_SECRET_ROOT"))
+    runtime_config_root = Path(_required_environment("VONK_DEV_RUNTIME_CONFIG_ROOT"))
     generation = _development_generation_identity()
     initialize_repository(
         repository_path,
@@ -1020,7 +1136,10 @@ def main() -> int:
         api_secret_root,
         migrate_secret_root,
         worker_secret_root,
+        caddy_secret_root,
+        litellm_secret_root,
     )
+    stage_development_assets("vonk_control.resources.dev", runtime_config_root)
     identity_root = Path(os.environ.get("VONK_CONTROL_IDENTITY_ROOT", "/control-identity"))
     _write_active_projection(identity_root, generation)
     uid, gid = _service_identity()
