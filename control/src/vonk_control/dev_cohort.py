@@ -112,7 +112,7 @@ def _load_canonical_object(raw: bytes, *, label: str) -> dict[str, object]:
         document = json.loads(raw, object_pairs_hook=no_duplicates)
     except DevelopmentCohortError:
         raise
-    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as error:
         raise DevelopmentCohortError(
             f"development {label} identity is malformed"
         ) from error
@@ -275,6 +275,23 @@ def _common_identity_document(identity: DevelopmentImageIdentity) -> dict[str, o
         "protocol_maximum": identity.protocol_maximum,
         "build_digest": identity.build_digest,
     }
+
+
+def _identity_from_common(
+    common: dict[str, object], *, image_role: str
+) -> DevelopmentImageIdentity:
+    return DevelopmentImageIdentity(
+        schema_version=_as_int(common, "schema_version", label="selected"),
+        source_repository=_as_str(common, "source_repository", label="selected"),
+        source_commit=_as_str(common, "source_commit", label="selected"),
+        channel=_as_str(common, "channel", label="selected"),
+        platform_version=_as_str(common, "platform_version", label="selected"),
+        build_digest=_as_str(common, "build_digest", label="selected"),
+        database_revision=_as_str(common, "database_revision", label="selected"),
+        protocol_minimum=_as_int(common, "protocol_minimum", label="selected"),
+        protocol_maximum=_as_int(common, "protocol_maximum", label="selected"),
+        image_role=image_role,
+    )
 
 
 def _validate_common_document(document: dict[str, object], *, label: str) -> None:
@@ -461,8 +478,21 @@ class SelectedDevelopmentCohort:
             raise DevelopmentCohortError(
                 "development selected cohort metadata is invalid"
             ) from error
+        expected_api_digest = _identity_from_common(
+            common, image_role="api"
+        ).identity_digest
+        expected_worker_digest = _identity_from_common(
+            common, image_role="worker"
+        ).identity_digest
+        if (
+            self.api_identity_digest != expected_api_digest
+            or self.worker_identity_digest != expected_worker_digest
+        ):
+            raise DevelopmentCohortError(
+                "development selected cohort identity digest is invalid"
+            )
         generation_hash = _generation_hash(
-            common, self.api_identity_digest, self.worker_identity_digest
+            common, expected_api_digest, expected_worker_digest
         )
         if (
             _DIGEST.fullmatch(self.release_digest) is None

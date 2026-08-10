@@ -111,6 +111,7 @@ def test_identity_parser_accepts_only_the_canonical_development_identity() -> No
         + b'","database_revision":"0020_recipe_catalog_bridge","protocol_minimum":1,'
         + b'"protocol_maximum":2,"image_role":"api"}\n'),
         ("oversized", b" " * 17000),
+        ("hostile integer", b'{"schema_version":' + b"1" * 5000 + b"}\n"),
     ),
 )
 def test_identity_parser_rejects_untrusted_json_encodings(
@@ -337,3 +338,45 @@ def test_selected_cohort_round_trips_and_rejects_tampered_canonical_documents() 
         SelectedDevelopmentCohort.from_bytes(
             json.dumps(document, sort_keys=True).encode("ascii")
         )
+
+
+def test_selected_cohort_rejects_coordinated_identity_digest_tampering() -> None:
+    selected = verify_cohort(
+        [
+            build_identity(role="api", source_commit=COMMIT),
+            build_identity(role="worker", source_commit=COMMIT),
+        ]
+    )
+    document = selected.to_document()
+    common = {
+        "build_digest": document["build_digest"],
+        "channel": document["channel"],
+        "database_revision": document["database_revision"],
+        "platform_version": document["platform_version"],
+        "protocol_maximum": document["protocol_maximum"],
+        "protocol_minimum": document["protocol_minimum"],
+        "schema_version": document["schema_version"],
+        "source_commit": document["source_commit"],
+        "source_repository": document["source_repository"],
+    }
+    forged_api_digest = "sha256:" + "f" * 64
+    forged_generation_seed = {
+        "api_identity_digest": forged_api_digest,
+        "common": common,
+        "worker_identity_digest": document["worker_identity_digest"],
+    }
+    forged_generation_hash = hashlib.sha256(
+        _canonical_for_expected(forged_generation_seed)
+    ).hexdigest()
+    tampered = {
+        **document,
+        "api_identity_digest": forged_api_digest,
+        "api_image": f"development.invalid/vonk-forge-api@{forged_api_digest}",
+        "generation_id": "dev-" + forged_generation_hash[:24],
+        "start_nonce": hashlib.sha256(
+            f"vonk-forge:development-start:{forged_generation_hash}".encode("ascii")
+        ).hexdigest(),
+    }
+
+    with pytest.raises(DevelopmentCohortError, match="selected"):
+        SelectedDevelopmentCohort.from_bytes(canonical_json(tampered))
