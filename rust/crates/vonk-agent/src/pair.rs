@@ -31,6 +31,8 @@ pub enum PairingError {
     CaInvalid,
     #[error("controller CA fingerprint does not match the configured pin")]
     CaPin,
+    #[error("agent configuration has no enrollment URL")]
+    EnrollmentConfig,
     #[error("pairing token is invalid")]
     Token,
     #[error("pairing request failed")]
@@ -99,7 +101,11 @@ pub async fn pair(
     evidence: EnrollmentEvidence,
 ) -> Result<EnrollmentOutcome, PairingError> {
     validate_token(token)?;
-    if enrollment != &config.enrollment_url || ca_sha256 != config.ca_sha256 {
+    let configured_enrollment = config
+        .enrollment_url
+        .as_ref()
+        .ok_or(PairingError::EnrollmentConfig)?;
+    if enrollment != configured_enrollment || ca_sha256 != config.ca_sha256 {
         return Err(PairingError::CaPin);
     }
     let ca_metadata = fs::symlink_metadata(&config.ca_path)?;

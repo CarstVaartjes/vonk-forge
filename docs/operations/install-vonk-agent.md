@@ -45,7 +45,7 @@ the long-running agent. Because `vonk-agent` is a package-dedicated account,
 installation removes only that account's `/etc/subuid` and `/etc/subgid`
 mappings if an earlier prerelease or host policy created them.
 
-Copy the CA and edit the four bootstrap values:
+Copy the CA and edit the bootstrap configuration:
 
 ```bash
 sudo install -o root -g vonk-agent -m 0640 controller-ca.pem \
@@ -53,8 +53,19 @@ sudo install -o root -g vonk-agent -m 0640 controller-ca.pem \
 sudoedit /etc/vonk-forge-agent/agent.toml
 ```
 
-Set `controller_url`, `ca_sha256`, and the controller-created `node_id`.
-Keep `data_dir` at `/var/lib/vonk-forge-agent`.
+Set both HTTPS root origins explicitly:
+
+```toml
+enrollment_url = "https://enroll.example.internal/"
+controller_url = "https://agents.example.internal/"
+```
+
+`enrollment_url` is used only by `pair`; `controller_url` is used only after
+certificate issuance by the authenticated service. Also set `ca_sha256` and
+the controller-created `node_id`; keep `data_dir` at
+`/var/lib/vonk-forge-agent`. An upgraded, already-paired agent can continue to
+run with its preserved legacy conffile, but an administrator must add
+`enrollment_url` before any future pairing or recovery enrollment.
 
 In the admin interface, create a new-node pairing grant for that node. Supply
 the one-use token through standard input so it never appears in shell history:
@@ -62,7 +73,7 @@ the one-use token through standard input so it never appears in shell history:
 ```bash
 sudo -u vonk-agent -- \
   /var/lib/vonk-forge/supervisor/current/vonk-agent pair \
-  --controller https://agents.example.internal/ \
+  --enrollment https://enroll.example.internal/ \
   --ca-sha256 REPLACE_WITH_64_LOWERCASE_HEX \
   --token-stdin < /run/secrets/vonk-enrollment-token
 ```
