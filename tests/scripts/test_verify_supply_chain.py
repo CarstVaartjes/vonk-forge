@@ -16,8 +16,8 @@ def _copy(tmp_path: Path) -> Path:
     for path in (
         ".github/workflows/ci.yml",
         ".github/workflows/agent-release.yml",
-        ".github/workflows/agent-package-build.yml",
-        ".github/workflows/agent-apt-publish.yml",
+        ".github/actions/agent-package-build/action.yml",
+        ".github/actions/agent-apt-publish/action.yml",
         ".github/workflows/dev-images.yml",
         ".github/workflows/workload-artifacts.yml",
         ".github/release-allowed-signers",
@@ -211,8 +211,8 @@ def test_supply_chain_manifest_binds_workload_artifact_publication_contract(
     "path",
     (
         ".github/workflows/agent-release.yml",
-        ".github/workflows/agent-package-build.yml",
-        ".github/workflows/agent-apt-publish.yml",
+        ".github/actions/agent-package-build/action.yml",
+        ".github/actions/agent-apt-publish/action.yml",
         "scripts/agent-package-metadata",
         "scripts/agent-apt-metadata",
         "scripts/agent-apt-state",

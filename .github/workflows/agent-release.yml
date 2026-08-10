@@ -57,36 +57,74 @@ jobs:
     name: Build, lifecycle-test, and sign ARM64 package
     if: needs.package-metadata.result == 'success'
     needs: [package-metadata]
-    uses: ./.github/workflows/agent-package-build.yml
-    with:
-      channel: ${{ needs.package-metadata.outputs.channel }}
-      publication_sequence: ${{ github.run_number }}
-      version: ${{ needs.package-metadata.outputs.version }}
-      next_version: ${{ needs.package-metadata.outputs.next_version }}
-      package: ${{ needs.package-metadata.outputs.package }}
-      artifact_name: ${{ needs.package-metadata.outputs.artifact_name }}
-      environment: agent-development
-      source_sha: ${{ github.sha }}
-      tag_name: ''
-      tag_oid: ''
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    environment: agent-development
     permissions:
       artifact-metadata: write
       attestations: write
       contents: read
       id-token: write
+    outputs:
+      version: ${{ steps.package.outputs.version }}
+      package: ${{ steps.package.outputs.package }}
+      artifact_name: ${{ steps.package.outputs.artifact_name }}
+    steps:
+      - name: Check out exact package source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Build, lifecycle-test, and attest ARM64 package
+        id: package
+        uses: ./.github/actions/agent-package-build
+        with:
+          channel: ${{ needs.package-metadata.outputs.channel }}
+          publication_sequence: ${{ github.run_number }}
+          version: ${{ needs.package-metadata.outputs.version }}
+          next_version: ${{ needs.package-metadata.outputs.next_version }}
+          package: ${{ needs.package-metadata.outputs.package }}
+          artifact_name: ${{ needs.package-metadata.outputs.artifact_name }}
+          environment: agent-development
+          source_sha: ${{ github.sha }}
+          tag_name: ''
+          tag_oid: ''
+          expected_fingerprint: ${{ vars.VONK_AGENT_RELEASE_KEY_FINGERPRINT }}
+          release_private_key: ${{ secrets.VONK_AGENT_RELEASE_PRIVATE_KEY }}
 
   publish-apt:
     name: Publish accepted development package to apt dev
     needs: [package-metadata, build-test-sign]
-    uses: ./.github/workflows/agent-apt-publish.yml
-    with:
-      channel: ${{ needs.package-metadata.outputs.channel }}
-      version: ${{ needs.build-test-sign.outputs.version }}
-      package: ${{ needs.build-test-sign.outputs.package }}
-      artifact_name: ${{ needs.build-test-sign.outputs.artifact_name }}
-      environment: apt-development
-      source_sha: ${{ github.sha }}
-      tag_name: ''
-      tag_oid: ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: apt-development
+    concurrency:
+      group: vonk-forge-agent-apt-dev
+      cancel-in-progress: false
     permissions:
       contents: read
+    steps:
+      - name: Check out apt publication tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Publish accepted development package
+        uses: ./.github/actions/agent-apt-publish
+        with:
+          channel: ${{ needs.package-metadata.outputs.channel }}
+          version: ${{ needs.build-test-sign.outputs.version }}
+          package: ${{ needs.build-test-sign.outputs.package }}
+          artifact_name: ${{ needs.build-test-sign.outputs.artifact_name }}
+          environment: apt-development
+          source_sha: ${{ github.sha }}
+          tag_name: ''
+          tag_oid: ''
+          apt_gpg_passphrase: ${{ secrets.APT_GPG_PASSPHRASE }}
+          apt_repository_gpg_fingerprint: ${{ vars.APT_REPOSITORY_GPG_FINGERPRINT }}
+          apt_repository_gpg_private_key: ${{ secrets.APT_REPOSITORY_GPG_PRIVATE_KEY }}
+          r2_access_key_id: ${{ secrets.R2_ACCESS_KEY_ID }}
+          r2_account_id: ${{ secrets.R2_ACCOUNT_ID }}
+          r2_secret_access_key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          r2_apt_public_bucket: ${{ vars.R2_APT_PUBLIC_BUCKET }}
+          r2_apt_state_bucket: ${{ vars.R2_APT_STATE_BUCKET }}

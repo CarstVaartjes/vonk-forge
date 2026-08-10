@@ -325,23 +325,40 @@ jobs:
     name: Build and attest the release agent package
     if: needs.release-metadata.result == 'success'
     needs: [release-metadata]
-    uses: ./.github/workflows/agent-package-build.yml
-    with:
-      channel: stable
-      publication_sequence: '0'
-      version: ${{ needs.release-metadata.outputs.version }}
-      next_version: ${{ needs.release-metadata.outputs.next_version }}
-      package: ${{ needs.release-metadata.outputs.package }}
-      artifact_name: ${{ needs.release-metadata.outputs.artifact_name }}
-      environment: agent-release
-      source_sha: ${{ github.sha }}
-      tag_name: ${{ github.ref_name }}
-      tag_oid: ${{ needs.release-metadata.outputs.tag_oid }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    environment: agent-release
     permissions:
       artifact-metadata: write
       attestations: write
       contents: read
       id-token: write
+    outputs:
+      version: ${{ steps.package.outputs.version }}
+      package: ${{ steps.package.outputs.package }}
+      artifact_name: ${{ steps.package.outputs.artifact_name }}
+    steps:
+      - name: Check out exact package source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Build and attest the release agent package
+        id: package
+        uses: ./.github/actions/agent-package-build
+        with:
+          channel: stable
+          publication_sequence: '0'
+          version: ${{ needs.release-metadata.outputs.version }}
+          next_version: ${{ needs.release-metadata.outputs.next_version }}
+          package: ${{ needs.release-metadata.outputs.package }}
+          artifact_name: ${{ needs.release-metadata.outputs.artifact_name }}
+          environment: agent-release
+          source_sha: ${{ github.sha }}
+          tag_name: ${{ github.ref_name }}
+          tag_oid: ${{ needs.release-metadata.outputs.tag_oid }}
+          expected_fingerprint: ${{ vars.VONK_AGENT_RELEASE_KEY_FINGERPRINT }}
+          release_private_key: ${{ secrets.VONK_AGENT_RELEASE_PRIVATE_KEY }}
   validate-release-images:
     name: Validate accepted release images
     needs: [lint, generated-clients, test, release-metadata, build-agent-package]
@@ -1297,15 +1314,36 @@ jobs:
     name: Publish the verified agent package to apt
     needs: [release-metadata, build-agent-package, release-manifest]
     if: needs.release-manifest.result == 'success'
-    uses: ./.github/workflows/agent-apt-publish.yml
-    with:
-      channel: stable
-      version: ${{ needs.build-agent-package.outputs.version }}
-      package: ${{ needs.build-agent-package.outputs.package }}
-      artifact_name: ${{ needs.build-agent-package.outputs.artifact_name }}
-      environment: apt-release
-      source_sha: ${{ github.sha }}
-      tag_name: ${{ github.ref_name }}
-      tag_oid: ${{ needs.release-metadata.outputs.tag_oid }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: apt-release
+    concurrency:
+      group: vonk-forge-agent-apt-stable
+      cancel-in-progress: false
     permissions:
       contents: read
+    steps:
+      - name: Check out apt publication tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Publish the verified agent package
+        uses: ./.github/actions/agent-apt-publish
+        with:
+          channel: stable
+          version: ${{ needs.build-agent-package.outputs.version }}
+          package: ${{ needs.build-agent-package.outputs.package }}
+          artifact_name: ${{ needs.build-agent-package.outputs.artifact_name }}
+          environment: apt-release
+          source_sha: ${{ github.sha }}
+          tag_name: ${{ github.ref_name }}
+          tag_oid: ${{ needs.release-metadata.outputs.tag_oid }}
+          apt_gpg_passphrase: ${{ secrets.APT_GPG_PASSPHRASE }}
+          apt_repository_gpg_fingerprint: ${{ vars.APT_REPOSITORY_GPG_FINGERPRINT }}
+          apt_repository_gpg_private_key: ${{ secrets.APT_REPOSITORY_GPG_PRIVATE_KEY }}
+          r2_access_key_id: ${{ secrets.R2_ACCESS_KEY_ID }}
+          r2_account_id: ${{ secrets.R2_ACCOUNT_ID }}
+          r2_secret_access_key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          r2_apt_public_bucket: ${{ vars.R2_APT_PUBLIC_BUCKET }}
+          r2_apt_state_bucket: ${{ vars.R2_APT_STATE_BUCKET }}

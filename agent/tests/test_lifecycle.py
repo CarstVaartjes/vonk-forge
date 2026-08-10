@@ -183,9 +183,9 @@ class HeartbeatControl(FakeControl):
         self.heartbeat_thread_ids: list[int] = []
 
     def heartbeat(self, progress: AgentProgress) -> AgentDirective:
-        active = self._state.recover_active()
-        assert active is not None
-        assert active.claim.fence == progress.fence
+        record = self._state.recover_active() or self._state.recover_pending()
+        assert record is not None
+        assert record.claim.fence == progress.fence
         response = AgentDirective(
             schema_version=progress.schema_version,
             job_id=progress.job_id,

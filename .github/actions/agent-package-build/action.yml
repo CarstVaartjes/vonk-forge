@@ -1,0 +1,450 @@
+name: Native agent package acceptance
+description: Build, lifecycle-test, sign, attest, and upload one accepted package
+
+inputs:
+  channel:
+    description: Package channel, dev or stable
+    required: true
+  publication_sequence:
+    description: Monotonic development publication sequence or zero for stable
+    required: true
+  version:
+    description: Exact Debian package version
+    required: true
+  next_version:
+    description: Next version used by lifecycle upgrade checks
+    required: true
+  package:
+    description: Exact Debian package filename
+    required: true
+  artifact_name:
+    description: Immutable GitHub Actions artifact name
+    required: true
+  environment:
+    description: Literal protected environment selected by the caller job
+    required: true
+  source_sha:
+    description: Exact accepted source commit
+    required: true
+  tag_name:
+    description: Production tag name or empty for development
+    required: true
+  tag_oid:
+    description: Verified production tag object or empty for development
+    required: true
+  expected_fingerprint:
+    description: SHA-256 fingerprint of the trusted Ed25519 public key
+    required: true
+  release_private_key:
+    description: Environment-scoped Ed25519 package signing private key
+    required: true
+
+outputs:
+  version:
+    description: Accepted Debian package version
+    value: ${{ steps.accepted.outputs.version }}
+  package:
+    description: Accepted Debian package filename
+    value: ${{ steps.accepted.outputs.package }}
+  artifact_name:
+    description: Immutable Actions artifact name
+    value: ${{ steps.accepted.outputs.artifact_name }}
+
+runs:
+  using: composite
+  steps:
+
+    - name: Install uv and Python
+      uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      with:
+        version: "0.12.1"
+        python-version: "3.12"
+        enable-cache: true
+
+    - name: Validate package metadata and environment
+      id: accepted
+      shell: bash
+      env:
+        ARTIFACT_NAME: ${{ inputs.artifact_name }}
+        CHANNEL: ${{ inputs.channel }}
+        PACKAGE: ${{ inputs.package }}
+        PACKAGE_ENVIRONMENT: ${{ inputs.environment }}
+        PUBLICATION_SEQUENCE: ${{ inputs.publication_sequence }}
+        NEXT_VERSION: ${{ inputs.next_version }}
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        case "${CHANNEL}:${PACKAGE_ENVIRONMENT}" in
+          dev:agent-development)
+            test "$PUBLICATION_SEQUENCE" = "$GITHUB_RUN_NUMBER"
+            release=development
+            ;;
+          stable:agent-release)
+            test "$PUBLICATION_SEQUENCE" = 0
+            release=production
+            ;;
+          *)
+            echo "agent package channel and environment do not match" >&2
+            exit 64
+            ;;
+        esac
+        expected=$(
+          scripts/agent-package-metadata \
+            "$release" "$GITHUB_REF_TYPE" "$GITHUB_REF_NAME" \
+            "$GITHUB_SHA" "$PUBLICATION_SEQUENCE"
+        )
+        actual=$(printf '%s\n' \
+          "version=$VERSION" \
+          "next_version=$NEXT_VERSION" \
+          "package=$PACKAGE" \
+          "artifact_name=$ARTIFACT_NAME" \
+          "channel=$CHANNEL" \
+          "snapshot=$CHANNEL-$VERSION")
+        test "$actual" = "$expected"
+        printf 'version=%s\npackage=%s\nartifact_name=%s\n' \
+          "$VERSION" "$PACKAGE" "$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
+
+    - name: Install pinned Rust toolchain
+      shell: bash
+      run: |
+        set -euo pipefail
+        test "$(uname -m)" = aarch64
+        rustup set profile minimal
+        rustup toolchain install 1.97.1 --component clippy,rustfmt
+        rustup default 1.97.1
+
+    - name: Revalidate protected package source authority
+      shell: bash
+      env:
+        CHANNEL: ${{ inputs.channel }}
+        SOURCE_SHA: ${{ inputs.source_sha }}
+        TAG_NAME: ${{ inputs.tag_name }}
+        TAG_OID: ${{ inputs.tag_oid }}
+      run: |
+        set -euo pipefail
+        [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+        test "$SOURCE_SHA" = "$GITHUB_SHA"
+        case "$CHANNEL" in
+          dev)
+            test -z "$TAG_NAME" && test -z "$TAG_OID"
+            test "$GITHUB_REF" = refs/heads/main
+            git fetch --force --no-tags origin \
+              +refs/heads/main:refs/remotes/origin/main
+            test "$SOURCE_SHA" = \
+              "$(git rev-parse --verify refs/remotes/origin/main^{commit})"
+            ;;
+          stable)
+            scripts/verify-release-tag-authority \
+              "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
+            ;;
+          *)
+            exit 64
+            ;;
+        esac
+
+    - name: Materialize and verify protected agent key
+      shell: bash
+      env:
+        EXPECTED_FINGERPRINT: ${{ inputs.expected_fingerprint }}
+        RELEASE_PRIVATE_KEY: ${{ inputs.release_private_key }}
+      run: |
+        set -euo pipefail
+        test -n "$RELEASE_PRIVATE_KEY"
+        [[ "$EXPECTED_FINGERPRINT" =~ ^[0-9a-f]{64}$ ]]
+        key_path="$RUNNER_TEMP/vonk-agent-release.pem"
+        install -m 0600 /dev/null "$key_path"
+        printf '%s' "$RELEASE_PRIVATE_KEY" > "$key_path"
+        public_der="$RUNNER_TEMP/vonk-agent-release-public.der"
+        trap 'rm -f "$public_der"' EXIT
+        install -m 0600 /dev/null "$public_der"
+        openssl pkey -in "$key_path" -pubout -outform DER \
+          > "$public_der" 2>/dev/null
+        test "$(stat -c %s "$public_der")" = 44
+        prefix=$(head -c 12 "$public_der" | od -An -v -tx1 | tr -d ' \n')
+        test "$prefix" = 302a300506032b6570032100
+        fingerprint=$(
+          tail -c 32 "$public_der" \
+            | sha256sum \
+            | cut -d' ' -f1
+        )
+        test "$fingerprint" = "$EXPECTED_FINGERPRINT"
+        rm -f "$public_der"
+        trap - EXIT
+
+    - name: Build package twice reproducibly
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+        VONK_SOURCE_REVISION: ${{ github.sha }}
+        VONK_SOURCE_REPOSITORY: ${{ github.server_url }}/${{ github.repository }}
+      run: |
+        set -euo pipefail
+        epoch=$(git show -s --format=%ct "$GITHUB_SHA")
+        scripts/build-agent-deb \
+          --version "$VERSION" \
+          --release-private-key "$RUNNER_TEMP/vonk-agent-release.pem" \
+          --source-date-epoch "$epoch" \
+          --output-dir dist
+        scripts/build-agent-deb \
+          --version "$VERSION" \
+          --release-private-key "$RUNNER_TEMP/vonk-agent-release.pem" \
+          --binaries-dir target/aarch64-unknown-linux-gnu/release \
+          --source-date-epoch "$epoch" \
+          --output-dir reproducible
+        cmp --silent \
+          "dist/vonk-forge-agent_${VERSION}_arm64.deb" \
+          "reproducible/vonk-forge-agent_${VERSION}_arm64.deb"
+        scripts/verify-agent-deb --json \
+          "dist/vonk-forge-agent_${VERSION}_arm64.deb"
+
+    - name: Run Rust and packaging security gates
+      shell: bash
+      run: |
+        set -euo pipefail
+        cargo fmt --all --check
+        cargo clippy --workspace --all-targets --locked -- -D warnings
+        cargo test --workspace --locked
+        uvx --from pytest==9.1.1 pytest -q \
+          tests/scripts/test_agent_deb.py \
+          tests/acceptance/test_rust_agent_parity.py
+        scripts/verify-agent-systemd --json \
+          | tee dist/vonk-forge-systemd-security.json
+
+    - name: Test fresh, offline, upgrade, downgrade, remove lifecycle
+      shell: bash
+      env:
+        NEXT_VERSION: ${{ inputs.next_version }}
+        VERSION: ${{ inputs.version }}
+        VONK_SOURCE_REVISION: ${{ github.sha }}
+        VONK_SOURCE_REPOSITORY: ${{ github.server_url }}/${{ github.repository }}
+      run: |
+        set -euo pipefail
+        trap 'echo "lifecycle check failed at line ${LINENO}: ${BASH_COMMAND}" >&2' ERR
+        sudo apt-get update
+        sudo apt-get install --no-install-recommends -y \
+          fuse-overlayfs podman slirp4netns
+        package="dist/vonk-forge-agent_${VERSION}_arm64.deb"
+        sudo env SYSTEMD_OFFLINE=1 dpkg -i "$package"
+        getent passwd vonk-agent >/dev/null
+        test "$(stat -c %a /var/lib/vonk-forge-agent)" = 700
+        current_target=$(sudo readlink /var/lib/vonk-forge/supervisor/current)
+        test "$(basename "$current_target")" = a
+        sudo install -d -o vonk-agent -g vonk-agent -m 0700 \
+          /run/vonk-forge-agent
+        sudo install -d -o vonk-agent -g vonk-agent -m 0700 \
+          /var/lib/vonk-forge-agent/.config
+        sudo -H -u vonk-agent env \
+          -u SUDO_USER -u SUDO_UID -u SUDO_GID \
+          HOME=/var/lib/vonk-forge-agent \
+          XDG_DATA_HOME=/var/lib/vonk-forge-agent \
+          XDG_CONFIG_HOME=/var/lib/vonk-forge-agent/.config \
+          XDG_RUNTIME_DIR=/run/vonk-forge-agent \
+          CONTAINERS_STORAGE_CONF=/etc/vonk-forge-agent/containers-storage.conf \
+          sh -c 'cd / && exec podman info --format "{{.Host.Security.Rootless}}"' \
+          | grep -Fx true >/dev/null
+        printf '\n# lifecycle-preserved\n' \
+          | sudo tee -a /etc/vonk-forge-agent/agent.toml >/dev/null
+        sudo install -o vonk-agent -g vonk-agent -m 0600 /dev/null \
+          /var/lib/vonk-forge-agent/lifecycle-preserved
+
+        epoch=$(git show -s --format=%ct "$GITHUB_SHA")
+        scripts/build-agent-deb \
+          --version "$NEXT_VERSION" \
+          --release-private-key "$RUNNER_TEMP/vonk-agent-release.pem" \
+          --binaries-dir target/aarch64-unknown-linux-gnu/release \
+          --source-date-epoch "$epoch" \
+          --output-dir lifecycle
+        rm -f "$RUNNER_TEMP/vonk-agent-release.pem"
+        test ! -e "$RUNNER_TEMP/vonk-agent-release.pem"
+        sudo env SYSTEMD_OFFLINE=1 dpkg -i \
+          "lifecycle/vonk-forge-agent_${NEXT_VERSION}_arm64.deb"
+        grep -Fx '# lifecycle-preserved' \
+          /etc/vonk-forge-agent/agent.toml >/dev/null
+        test -x /var/lib/vonk-forge/slots/b/vonk-agent
+        test "$(basename "$(sudo readlink /var/lib/vonk-forge/supervisor/current)")" = a
+
+        downgrade_log=$RUNNER_TEMP/downgrade.log
+        if sudo env SYSTEMD_OFFLINE=1 dpkg -i "$package" \
+          >"$downgrade_log" 2>&1; then
+          echo "downgrade unexpectedly succeeded" >&2
+          exit 1
+        fi
+        grep -F 'refusing downgrade' "$downgrade_log" >/dev/null
+        echo "refused downgrade"
+
+        sudo env SYSTEMD_OFFLINE=1 dpkg --remove vonk-forge-agent
+        test -f /etc/vonk-forge-agent/agent.toml
+        sudo test -f /var/lib/vonk-forge-agent/lifecycle-preserved
+        sudo env SYSTEMD_OFFLINE=1 dpkg -i \
+          "lifecycle/vonk-forge-agent_${NEXT_VERSION}_arm64.deb"
+        grep -Fx '# lifecycle-preserved' \
+          /etc/vonk-forge-agent/agent.toml >/dev/null
+        sudo env SYSTEMD_OFFLINE=1 dpkg --remove vonk-forge-agent
+
+    - name: Remove protected agent key
+      if: ${{ always() }}
+      shell: bash
+      run: rm -f "$RUNNER_TEMP/vonk-agent-release.pem"
+
+    - name: Install Cosign
+      uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+    - name: Revalidate source before Sigstore publication
+      shell: bash
+      env:
+        CHANNEL: ${{ inputs.channel }}
+        SOURCE_SHA: ${{ inputs.source_sha }}
+        TAG_NAME: ${{ inputs.tag_name }}
+        TAG_OID: ${{ inputs.tag_oid }}
+      run: |
+        set -euo pipefail
+        [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+        test "$SOURCE_SHA" = "$GITHUB_SHA"
+        case "$CHANNEL" in
+          dev)
+            test -z "$TAG_NAME" && test -z "$TAG_OID"
+            test "$GITHUB_REF" = refs/heads/main
+            git fetch --force --no-tags origin \
+              +refs/heads/main:refs/remotes/origin/main
+            test "$SOURCE_SHA" = \
+              "$(git rev-parse --verify refs/remotes/origin/main^{commit})"
+            ;;
+          stable)
+            scripts/verify-release-tag-authority \
+              "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
+            ;;
+          *)
+            exit 64
+            ;;
+        esac
+
+    - name: Create and verify keyless package signature
+      shell: bash
+      env:
+        CHANNEL: ${{ inputs.channel }}
+        PACKAGE: ${{ inputs.package }}
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        cosign sign-blob --yes --bundle \
+          "dist/${PACKAGE}.sigstore.json" "dist/$PACKAGE"
+        case "$CHANNEL" in
+          dev)
+            identity="^https://github\.com/${GITHUB_REPOSITORY}/\.github/workflows/agent-release\.yml@refs/heads/main$"
+            ;;
+          stable)
+            identity="^https://github\.com/${GITHUB_REPOSITORY}/\.github/workflows/ci\.yml@refs/tags/v${VERSION//./\\.}$"
+            ;;
+        esac
+        cosign verify-blob \
+          --bundle "dist/${PACKAGE}.sigstore.json" \
+          --certificate-identity-regexp "$identity" \
+          --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+          "dist/$PACKAGE"
+
+    - name: Revalidate source before provenance attestation
+      shell: bash
+      env:
+        CHANNEL: ${{ inputs.channel }}
+        SOURCE_SHA: ${{ inputs.source_sha }}
+        TAG_NAME: ${{ inputs.tag_name }}
+        TAG_OID: ${{ inputs.tag_oid }}
+      run: |
+        set -euo pipefail
+        [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+        test "$SOURCE_SHA" = "$GITHUB_SHA"
+        case "$CHANNEL" in
+          dev)
+            test -z "$TAG_NAME" && test -z "$TAG_OID"
+            test "$GITHUB_REF" = refs/heads/main
+            git fetch --force --no-tags origin \
+              +refs/heads/main:refs/remotes/origin/main
+            test "$SOURCE_SHA" = \
+              "$(git rev-parse --verify refs/remotes/origin/main^{commit})"
+            ;;
+          stable)
+            scripts/verify-release-tag-authority \
+              "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
+            ;;
+          *)
+            exit 64
+            ;;
+        esac
+
+    - name: Attest package provenance
+      uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+      with:
+        subject-path: dist/${{ inputs.package }}
+
+    - name: Revalidate source before SBOM attestation
+      shell: bash
+      env:
+        CHANNEL: ${{ inputs.channel }}
+        SOURCE_SHA: ${{ inputs.source_sha }}
+        TAG_NAME: ${{ inputs.tag_name }}
+        TAG_OID: ${{ inputs.tag_oid }}
+      run: |
+        set -euo pipefail
+        [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+        test "$SOURCE_SHA" = "$GITHUB_SHA"
+        case "$CHANNEL" in
+          dev)
+            test -z "$TAG_NAME" && test -z "$TAG_OID"
+            test "$GITHUB_REF" = refs/heads/main
+            git fetch --force --no-tags origin \
+              +refs/heads/main:refs/remotes/origin/main
+            test "$SOURCE_SHA" = \
+              "$(git rev-parse --verify refs/remotes/origin/main^{commit})"
+            ;;
+          stable)
+            scripts/verify-release-tag-authority \
+              "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
+            ;;
+          *)
+            exit 64
+            ;;
+        esac
+
+    - name: Attest package SBOM
+      uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+      with:
+        subject-path: dist/${{ inputs.package }}
+        sbom-path: dist/vonk-forge-agent_${{ inputs.version }}_arm64.sbom.spdx.json
+
+    - name: Revalidate source before artifact publication
+      shell: bash
+      env:
+        CHANNEL: ${{ inputs.channel }}
+        SOURCE_SHA: ${{ inputs.source_sha }}
+        TAG_NAME: ${{ inputs.tag_name }}
+        TAG_OID: ${{ inputs.tag_oid }}
+      run: |
+        set -euo pipefail
+        [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+        test "$SOURCE_SHA" = "$GITHUB_SHA"
+        case "$CHANNEL" in
+          dev)
+            test -z "$TAG_NAME" && test -z "$TAG_OID"
+            test "$GITHUB_REF" = refs/heads/main
+            git fetch --force --no-tags origin \
+              +refs/heads/main:refs/remotes/origin/main
+            test "$SOURCE_SHA" = \
+              "$(git rev-parse --verify refs/remotes/origin/main^{commit})"
+            ;;
+          stable)
+            scripts/verify-release-tag-authority \
+              "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
+            ;;
+          *)
+            exit 64
+            ;;
+        esac
+
+    - name: Upload exact package release set
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: ${{ inputs.artifact_name }}
+        if-no-files-found: error
+        overwrite: false
+        retention-days: 30
+        path: dist/*
