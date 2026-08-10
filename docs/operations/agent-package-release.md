@@ -52,10 +52,10 @@ deployment branch/tag rules and required reviewers appropriate to their
 authority. Repository-level secrets are not a substitute for environment
 secrets.
 
-The reusable package and apt workflows bind these secrets directly from their
-literal job environments. Their callers pass only non-secret metadata; do not
-add optional `workflow_call` secret declarations, because an omitted caller
-value shadows the environment secret with an empty value.
+The package and apt jobs bind these secrets directly from their literal job
+environments and pass them only to repository-owned composite actions. Do not
+move either secret-bearing job behind `workflow_call`: GitHub does not make the
+caller's environment secrets available across that reusable-job boundary.
 
 ### `agent-development`
 
@@ -307,11 +307,11 @@ cd agent-package
 sha256sum --check vonk-forge-agent_*_arm64.deb.sha256
 gh attestation verify vonk-forge-agent_*_arm64.deb \
   --repo CarstVaartjes/vonk-forge \
-  --signer-workflow CarstVaartjes/vonk-forge/.github/workflows/agent-package-build.yml \
+  --signer-workflow CarstVaartjes/vonk-forge/.github/workflows/agent-release.yml \
   --source-digest "$SOURCE_SHA" --source-ref refs/heads/main
 cosign verify-blob \
   --bundle vonk-forge-agent_*_arm64.deb.sigstore.json \
-  --certificate-identity-regexp '^https://github.com/CarstVaartjes/vonk-forge/.github/workflows/agent-package-build.yml@refs/heads/main$' \
+  --certificate-identity-regexp '^https://github.com/CarstVaartjes/vonk-forge/.github/workflows/agent-release.yml@refs/heads/main$' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   vonk-forge-agent_*_arm64.deb
 ```
@@ -333,11 +333,11 @@ cd "release-$VERSION"
 sha256sum --check "vonk-forge-agent_${VERSION}_arm64.deb.sha256"
 gh attestation verify "vonk-forge-agent_${VERSION}_arm64.deb" \
   --repo CarstVaartjes/vonk-forge \
-  --signer-workflow CarstVaartjes/vonk-forge/.github/workflows/agent-package-build.yml \
+  --signer-workflow CarstVaartjes/vonk-forge/.github/workflows/ci.yml \
   --source-ref "refs/tags/$TAG"
 cosign verify-blob \
   --bundle "vonk-forge-agent_${VERSION}_arm64.deb.sigstore.json" \
-  --certificate-identity-regexp "^https://github.com/CarstVaartjes/vonk-forge/.github/workflows/agent-package-build\\.yml@refs/tags/${TAG}$" \
+  --certificate-identity-regexp "^https://github.com/CarstVaartjes/vonk-forge/.github/workflows/ci\\.yml@refs/tags/${TAG}$" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   "vonk-forge-agent_${VERSION}_arm64.deb"
 ```

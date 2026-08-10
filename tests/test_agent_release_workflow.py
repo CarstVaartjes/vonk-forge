@@ -11,26 +11,14 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github/workflows/agent-release.yml"
 UNIFIED_WORKFLOW = ROOT / ".github/workflows/ci.yml"
-PACKAGE_WORKFLOW = ROOT / ".github/workflows/agent-package-build.yml"
-APT_WORKFLOW = ROOT / ".github/workflows/agent-apt-publish.yml"
+PACKAGE_WORKFLOW = ROOT / ".github/actions/agent-package-build/action.yml"
+APT_WORKFLOW = ROOT / ".github/actions/agent-apt-publish/action.yml"
 APT_STATE = ROOT / "scripts/agent-apt-state"
 
-EXPECTED_CALL_OUTPUTS = {
-    "version": (
-        "${{ jobs.build.outputs.version || jobs.build-release.outputs.version }}"
-    ),
-    "package": (
-        "${{ jobs.build.outputs.package || jobs.build-release.outputs.package }}"
-    ),
-    "artifact_name": (
-        "${{ jobs.build.outputs.artifact_name || "
-        "jobs.build-release.outputs.artifact_name }}"
-    ),
-}
-EXPECTED_BUILD_OUTPUTS = {
-    "version": "${{ inputs.version }}",
-    "package": "${{ inputs.package }}",
-    "artifact_name": "${{ inputs.artifact_name }}",
+EXPECTED_ACTION_OUTPUTS = {
+    "version": "${{ steps.accepted.outputs.version }}",
+    "package": "${{ steps.accepted.outputs.package }}",
+    "artifact_name": "${{ steps.accepted.outputs.artifact_name }}",
 }
 
 
@@ -50,6 +38,8 @@ def workflow_action_pin_errors(root: Path) -> dict[str, list[str]]:
     workflows = (
         *root.glob(".github/workflows/*.yml"),
         *root.glob(".github/workflows/*.yaml"),
+        *root.glob(".github/actions/**/action.yml"),
+        *root.glob(".github/actions/**/action.yaml"),
     )
     for path in sorted(workflows):
         invalid = invalid_external_action_refs(path.read_text())
@@ -58,43 +48,16 @@ def workflow_action_pin_errors(root: Path) -> dict[str, list[str]]:
     return errors
 
 
-def reusable_output_mappings(text: str) -> tuple[dict[str, str], dict[str, str]]:
-    call_outputs = text.split("    outputs:\n", 1)[1].split("\npermissions:\n", 1)[0]
-    actual_call_outputs: dict[str, str] = {}
-    current_output = ""
-    for line in call_outputs.splitlines():
-        output_name = re.fullmatch(
-            r"      ([A-Za-z_][A-Za-z0-9_-]*):",
-            line,
-        )
-        if output_name is not None:
-            current_output = output_name.group(1)
-        elif current_output and line.startswith("        value: "):
-            actual_call_outputs[current_output] = line.removeprefix("        value: ")
-
-    build_outputs = text.split("    outputs:\n", 2)[2].split("    steps:", 1)[0]
-    actual_build_outputs = dict(
-        re.findall(
-            r"^      ([A-Za-z_][A-Za-z0-9_-]*): (.+)$",
-            build_outputs,
-            re.MULTILINE,
-        )
-    )
-    return actual_call_outputs, actual_build_outputs
-
-
-def assert_exact_reusable_output_mappings(text: str) -> None:
-    call_outputs, build_outputs = reusable_output_mappings(text)
-    assert call_outputs == EXPECTED_CALL_OUTPUTS
-    assert build_outputs == EXPECTED_BUILD_OUTPUTS
-
-
 def workflow_step(text: str, step_name: str) -> str:
     lines = text.splitlines()
-    step_start = lines.index(f"      - name: {step_name}")
+    marker = next(
+        line for line in lines if line.strip() == f"- name: {step_name}"
+    )
+    indent = len(marker) - len(marker.lstrip())
+    step_start = lines.index(marker)
     step_lines: list[str] = []
     for line in lines[step_start:]:
-        if line.startswith("      - name: ") and step_lines:
+        if line.startswith(f"{' ' * indent}- name: ") and step_lines:
             break
         step_lines.append(line)
     return "\n".join(step_lines)
@@ -102,13 +65,19 @@ def workflow_step(text: str, step_name: str) -> str:
 
 def workflow_step_run(text: str, step_name: str) -> str:
     lines = text.splitlines()
-    step_start = lines.index(f"      - name: {step_name}")
-    run_start = lines.index("        run: |", step_start) + 1
+    marker = next(
+        line for line in lines if line.strip() == f"- name: {step_name}"
+    )
+    indent = len(marker) - len(marker.lstrip())
+    step_start = lines.index(marker)
+    run_marker = f"{' ' * (indent + 2)}run: |"
+    run_start = lines.index(run_marker, step_start) + 1
+    content_indent = indent + 4
     run_lines: list[str] = []
     for line in lines[run_start:]:
-        if line and not line.startswith("          "):
+        if line and not line.startswith(" " * content_indent):
             break
-        run_lines.append(line[10:] if line else "")
+        run_lines.append(line[content_indent:] if line else "")
     return "\n".join(run_lines)
 
 
@@ -125,14 +94,7 @@ def apt_workflow() -> str:
 
 
 def apt_step(step_name: str) -> str:
-    lines = apt_workflow().splitlines()
-    step_start = lines.index(f"      - name: {step_name}")
-    step_lines: list[str] = []
-    for line in lines[step_start:]:
-        if line.startswith("      - name: ") and step_lines:
-            break
-        step_lines.append(line)
-    return "\n".join(step_lines)
+    return workflow_step(apt_workflow(), step_name)
 
 
 def generate_private_key(path: Path, algorithm: str) -> None:
@@ -206,10 +168,10 @@ def signing_key_id(private_key: Path, tmp_path: Path) -> str:
     return json.loads(result.stdout)["key_id"]
 
 
-def test_reusable_agent_package_build_has_a_strict_call_boundary() -> None:
+def test_agent_package_action_has_a_strict_input_and_output_boundary() -> None:
     text = PACKAGE_WORKFLOW.read_text()
 
-    assert "workflow_call:" in text
+    assert "using: composite" in text
     for input_name in (
         "channel",
         "publication_sequence",
@@ -221,91 +183,26 @@ def test_reusable_agent_package_build_has_a_strict_call_boundary() -> None:
         "source_sha",
         "tag_name",
         "tag_oid",
+        "expected_fingerprint",
+        "release_private_key",
     ):
-        assert f"      {input_name}:\n        required: true\n        type: string" in text
-    assert_exact_reusable_output_mappings(text)
-    assert "runs-on: ubuntu-24.04-arm" in text
-    development, production = text.split("\n  build-release:\n", 1)
-    assert (
-        "if: inputs.channel != 'stable' || inputs.environment != 'agent-release'"
-        in development
-    )
-    assert "environment: agent-development" in development
-    assert "steps: &agent_package_steps" in development
-    assert (
-        "if: inputs.channel == 'stable' && inputs.environment == 'agent-release'"
-        in production
-    )
-    assert "environment: agent-release" in production
-    assert "steps: *agent_package_steps" in production
-    assert "environment: ${{ inputs.environment }}" not in text
-    release_outputs = production.split("    outputs:\n", 1)[1].split(
-        "    steps:", 1
-    )[0]
-    assert dict(
-        re.findall(
-            r"^      ([A-Za-z_][A-Za-z0-9_-]*): (.+)$",
-            release_outputs,
+        assert re.search(
+            rf"^  {input_name}:\n    description: .+\n    required: true$",
+            text,
             re.MULTILINE,
         )
-    ) == EXPECTED_BUILD_OUTPUTS
-    assert "timeout-minutes: 45" in text
-    workflow_call = text.split("\npermissions:", 1)[0]
-    assert "    secrets:\n" not in workflow_call
-
-
-def test_reusable_output_parser_accepts_every_valid_identifier_shape() -> None:
-    fixture = """\
-on:
-  workflow_call:
-    outputs:
-      Release2:
-        value: call-release
-      _private:
-        value: call-private
-      release-id:
-        value: call-hyphen
-permissions:
-  contents: read
-jobs:
-  build:
-    outputs:
-      Release2: build-release
-      _private: build-private
-      release-id: build-hyphen
-    steps:
-      - run: true
-"""
-
-    assert reusable_output_mappings(fixture) == (
-        {
-            "Release2": "call-release",
-            "_private": "call-private",
-            "release-id": "call-hyphen",
-        },
-        {
-            "Release2": "build-release",
-            "_private": "build-private",
-            "release-id": "build-hyphen",
-        },
-    )
-
-
-def test_exact_reusable_output_guard_rejects_digit_and_hyphen_extras() -> None:
-    text = PACKAGE_WORKFLOW.read_text()
-
-    for extra in ("release2", "release-id"):
-        mutated = text.replace(
-            "    outputs:\n      version:\n",
-            "    outputs:\n"
-            f"      {extra}:\n"
-            "        description: Unexpected output\n"
-            "        value: ${{ jobs.build.outputs.version }}\n"
-            "      version:\n",
-            1,
+    action_outputs = text.split("\noutputs:\n", 1)[1].split("\nruns:\n", 1)[0]
+    assert dict(
+        re.findall(
+            r"^  ([A-Za-z_][A-Za-z0-9_-]*):\n"
+            r"    description: .+\n"
+            r"    value: (.+)$",
+            action_outputs,
+            re.MULTILINE,
         )
-        with pytest.raises(AssertionError):
-            assert_exact_reusable_output_mappings(mutated)
+    ) == EXPECTED_ACTION_OUTPUTS
+    assert "secrets." not in text
+    assert "vars." not in text
 
 
 def test_reusable_agent_package_build_validates_authority_before_key_use() -> None:
@@ -325,8 +222,8 @@ def test_reusable_agent_package_build_validates_authority_before_key_use() -> No
     assert "dev:agent-development" in text
     assert "stable:agent-release" in text
     assert "scripts/agent-package-metadata" in text
-    assert "VONK_AGENT_RELEASE_PRIVATE_KEY" in text
-    assert "VONK_AGENT_RELEASE_KEY_FINGERPRINT" in text
+    assert "RELEASE_PRIVATE_KEY: ${{ inputs.release_private_key }}" in text
+    assert "EXPECTED_FINGERPRINT: ${{ inputs.expected_fingerprint }}" in text
     assert "openssl pkey" in text
     assert "-pubout -outform DER" in text
     assert "sha256sum" in text
@@ -399,12 +296,12 @@ def test_reusable_agent_package_build_preserves_acceptance_gates() -> None:
     assert "actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6" in text
     assert "sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6" in text
     assert "cosign sign-blob --yes --bundle" in text
-    assert "agent-package-build\\.yml@refs/heads/main" in text
-    assert "agent-package-build\\.yml@refs/tags/v" in text
+    assert "agent-release\\.yml@refs/heads/main" in text
+    assert "ci\\.yml@refs/tags/v" in text
 
 
 def assert_agent_key_cleanup_contract(text: str) -> None:
-    step_names = re.findall(r"^      - name: (.+)$", text, re.MULTILINE)
+    step_names = re.findall(r"^\s+- name: (.+)$", text, re.MULTILINE)
     lifecycle_name = "Test fresh, offline, upgrade, downgrade, remove lifecycle"
     lifecycle_index = step_names.index(lifecycle_name)
     fallback_name = "Remove protected agent key"
@@ -429,7 +326,7 @@ def assert_agent_key_cleanup_contract(text: str) -> None:
         '  "lifecycle/vonk-forge-agent_${NEXT_VERSION}_arm64.deb"'
     )
     assert immediate_cleanup in fallback
-    assert fallback.splitlines()[1] == "        if: ${{ always() }}"
+    assert fallback.splitlines()[1].strip() == "if: ${{ always() }}"
     assert step_names[lifecycle_index : lifecycle_index + 3] == [
         lifecycle_name,
         fallback_name,
@@ -445,8 +342,11 @@ def test_agent_key_is_removed_immediately_after_final_use_with_always_fallback()
 def test_agent_key_cleanup_guard_rejects_fallback_before_lifecycle() -> None:
     text = PACKAGE_WORKFLOW.read_text()
     fallback = workflow_step(text, "Remove protected agent key").rstrip()
-    lifecycle_marker = (
-        "      - name: Test fresh, offline, upgrade, downgrade, remove lifecycle"
+    lifecycle_marker = next(
+        line
+        for line in text.splitlines()
+        if line.strip()
+        == "- name: Test fresh, offline, upgrade, downgrade, remove lifecycle"
     )
     mutated = text.replace(f"{fallback}\n\n", "", 1).replace(
         lifecycle_marker,
@@ -480,7 +380,7 @@ def test_stable_sigstore_identity_renders_the_exact_version() -> None:
 
     assert result.stdout == (
         "^https://github\\.com/example/vonk/\\.github/workflows/"
-        "agent-package-build\\.yml@refs/tags/v1\\.2\\.3$\n"
+        "ci\\.yml@refs/tags/v1\\.2\\.3$\n"
     )
 
 
@@ -496,15 +396,16 @@ def test_reusable_agent_package_build_uploads_one_immutable_release_set() -> Non
 
 def test_development_agent_workflow_runs_only_for_exact_main_sources() -> None:
     text = WORKFLOW.read_text()
+    metadata = text.split("\n  build-test-sign:\n", 1)[0]
 
     assert "  push:\n    branches: [main]" in text
     dispatch = text.split("  workflow_dispatch:", 1)[1].split("\n\npermissions:", 1)[0]
     assert "inputs:" not in dispatch
     assert "version:" not in dispatch
-    assert text.count("fetch-depth: 0") == 1
-    assert text.count("git fetch --no-tags --prune origin") == 1
-    assert text.count('test "$GITHUB_REF" = "refs/heads/main"') == 1
-    assert text.count('test "$GITHUB_SHA" = "$main_sha"') == 1
+    assert metadata.count("fetch-depth: 0") == 1
+    assert metadata.count("git fetch --no-tags --prune origin") == 1
+    assert metadata.count('test "$GITHUB_REF" = "refs/heads/main"') == 1
+    assert metadata.count('test "$GITHUB_SHA" = "$main_sha"') == 1
     assert text.index("Verify exact current main tip") < text.index(
         "Derive immutable development package metadata"
     )
@@ -521,27 +422,29 @@ def test_development_metadata_uses_actions_publication_sequence() -> None:
     assert re.search(r"git show(?: -s)? --format=%ct", metadata) is None
 
 
-def test_development_agent_workflow_calls_both_reusable_channel_boundaries() -> None:
+def test_development_agent_workflow_binds_both_literal_environment_boundaries() -> None:
     text = WORKFLOW.read_text()
 
-    assert "uses: ./.github/workflows/agent-package-build.yml" in text
+    assert "uses: ./.github/actions/agent-package-build" in text
     assert "channel: ${{ needs.package-metadata.outputs.channel }}" in text
     assert "publication_sequence: ${{ github.run_number }}" in text
     assert "environment: agent-development" in text
     assert "artifact-metadata: write" in text
     assert "attestations: write" in text
     assert "id-token: write" in text
-    assert "uses: ./.github/workflows/agent-apt-publish.yml" in text
+    assert "uses: ./.github/actions/agent-apt-publish" in text
     assert "environment: apt-development" in text
     assert "source_sha: ${{ github.sha }}" in text
     assert "tag_name: ''" in text
     assert "tag_oid: ''" in text
     assert "needs: [package-metadata, build-test-sign]" in text
     assert "artifact_name: ${{ needs.build-test-sign.outputs.artifact_name }}" in text
+    assert "release_private_key: ${{ secrets.VONK_AGENT_RELEASE_PRIVATE_KEY }}" in text
+    assert "apt_gpg_passphrase: ${{ secrets.APT_GPG_PASSPHRASE }}" in text
+    assert "r2_access_key_id: ${{ secrets.R2_ACCESS_KEY_ID }}" in text
     assert "secrets:" not in text
     for forbidden in (
         "scripts/build-agent-deb",
-        "VONK_AGENT_RELEASE_PRIVATE_KEY",
         "dpkg -i",
         "cosign sign-blob",
     ):
@@ -564,10 +467,10 @@ def test_commit_timestamps_only_seed_reproducible_package_bytes() -> None:
         assert '--source-date-epoch "$epoch"' in step
 
 
-def test_reusable_apt_publisher_has_a_strict_channel_boundary() -> None:
+def test_apt_publish_action_has_a_strict_channel_boundary() -> None:
     text = apt_workflow()
 
-    assert "workflow_call:" in text
+    assert "using: composite" in text
     for input_name in (
         "channel",
         "version",
@@ -577,40 +480,34 @@ def test_reusable_apt_publisher_has_a_strict_channel_boundary() -> None:
         "source_sha",
         "tag_name",
         "tag_oid",
+        "apt_gpg_passphrase",
+        "apt_repository_gpg_fingerprint",
+        "apt_repository_gpg_private_key",
+        "r2_access_key_id",
+        "r2_account_id",
+        "r2_secret_access_key",
+        "r2_apt_public_bucket",
+        "r2_apt_state_bucket",
     ):
-        assert f"      {input_name}:\n        required: true\n        type: string" in text
+        assert re.search(
+            rf"^  {input_name}:\n    description: .+\n    required: true$",
+            text,
+            re.MULTILINE,
+        )
     for forbidden in ("repository:", "distribution:", "keyring:", "state_prefix:"):
-        assert f"      {forbidden}" not in text.split("    inputs:", 1)[1].split(
-            "permissions:", 1
+        assert f"  {forbidden}" not in text.split("\ninputs:\n", 1)[1].split(
+            "\nruns:\n", 1
         )[0]
     assert "dev:apt-development" in text
     assert "stable:apt-release" in text
-    development, production = text.split("\n  publish-release:\n", 1)
-    assert (
-        "if: inputs.channel != 'stable' || inputs.environment != 'apt-release'"
-        in development
-    )
+    assert "secrets." not in text
+    assert "vars." not in text
+    development = WORKFLOW.read_text()
+    production = UNIFIED_WORKFLOW.read_text()
     assert "environment: apt-development" in development
-    assert "steps: &agent_apt_publish_steps" in development
-    assert (
-        "if: inputs.channel == 'stable' && inputs.environment == 'apt-release'"
-        in production
-    )
     assert "environment: apt-release" in production
-    assert "steps: *agent_apt_publish_steps" in production
-    assert "environment: ${{ inputs.environment }}" not in text
-    assert "group: vonk-forge-agent-apt-${{ inputs.channel }}" in text
-    assert "cancel-in-progress: false" in text
-    workflow_call = text.split("\npermissions:", 1)[0]
-    assert "    secrets:\n" not in workflow_call
-    for secret_name in (
-        "APT_GPG_PASSPHRASE",
-        "APT_REPOSITORY_GPG_PRIVATE_KEY",
-        "R2_ACCESS_KEY_ID",
-        "R2_ACCOUNT_ID",
-        "R2_SECRET_ACCESS_KEY",
-    ):
-        assert secret_name not in workflow_call
+    assert "group: vonk-forge-agent-apt-dev" in development
+    assert "group: vonk-forge-agent-apt-stable" in production
 
 
 def test_reusable_apt_publisher_verifies_package_before_credentials() -> None:
@@ -637,13 +534,13 @@ def test_reusable_apt_publisher_verifies_package_before_credentials() -> None:
 def test_reusable_apt_publisher_rechecks_dev_authority_inside_protected_job() -> None:
     text = apt_workflow()
     authority = apt_step("Reverify accepted development source authority")
-    step_names = re.findall(r"^      - name: (.+)$", text, re.MULTILINE)
+    step_names = re.findall(r"^\s+- name: (.+)$", text, re.MULTILINE)
     authority_index = step_names.index(
         "Reverify accepted development source authority"
     )
 
-    assert "environment: apt-development" in text
-    assert "environment: apt-release" in text
+    assert "environment: apt-development" in WORKFLOW.read_text()
+    assert "environment: apt-release" in UNIFIED_WORKFLOW.read_text()
     assert "CALLER_SHA: ${{ github.sha }}" in authority
     assert "CHANNEL: ${{ inputs.channel }}" in authority
     assert "SOURCE_SHA: ${{ inputs.source_sha }}" in authority
@@ -790,7 +687,8 @@ def test_release_actions_are_commit_pinned_and_secrets_are_environment_scoped() 
     unified_text = UNIFIED_WORKFLOW.read_text()
     package_text = PACKAGE_WORKFLOW.read_text()
     apt_text = APT_WORKFLOW.read_text()
-    assert "uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" in package_text
+    assert "uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" in agent_text
+    assert "uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" in unified_text
     assert (
         "uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
         in package_text
@@ -810,11 +708,12 @@ def test_release_actions_are_commit_pinned_and_secrets_are_environment_scoped() 
             bad_reference
         ]
     assert invalid_external_action_refs(
-        "uses: ./.github/workflows/agent-package-build.yml\n"
+        "uses: ./.github/actions/agent-package-build\n"
     ) == []
     assert "permissions:\n  contents: read" in agent_text
     assert "contents: write" in unified_text
-    assert "id-token: write" in package_text
+    assert "id-token: write" in agent_text
+    assert "id-token: write" in unified_text
 
 
 def test_action_pin_guard_scans_yaml_and_keeps_local_calls_exempt(

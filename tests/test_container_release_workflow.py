@@ -5,7 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github/workflows/ci.yml"
-APT_WORKFLOW = ROOT / ".github/workflows/agent-apt-publish.yml"
+APT_WORKFLOW = ROOT / ".github/actions/agent-apt-publish/action.yml"
 ALLOWED_SIGNERS = ROOT / ".github/release-allowed-signers"
 
 
@@ -197,7 +197,6 @@ def test_alias_reconciliation_binds_selected_release_to_signed_tag_revision() ->
 
 def test_production_release_retries_reconcile_immutable_outputs_before_completion() -> None:
     publisher = job("publish-images")
-    manifest = job("release-manifest")
     release = workflow_step("release-manifest", "Create public GitHub Release")
     aliases = workflow_step(
         "advance-production-aliases",
@@ -228,11 +227,6 @@ def test_alias_uses_only_attested_immutable_release_assets_before_parsing() -> N
         "advance-production-aliases",
         "Bind release digests to selected source revision and evidence",
     )
-    reconcile = workflow_step(
-        "advance-production-aliases",
-        "Reconcile the newest completed production release",
-    )
-
     assert "(.immutable == true)" in selection
     postconditions = (ROOT / "scripts/verify-production-alias-postconditions").read_text()
     assert "(.immutable == true)" in postconditions
@@ -386,7 +380,7 @@ def test_tag_release_builds_agent_package_from_same_release_metadata() -> None:
     metadata = workflow_step("release-metadata", "Validate release metadata")
 
     assert "needs: [release-metadata]" in package
-    assert "uses: ./.github/workflows/agent-package-build.yml" in package
+    assert "uses: ./.github/actions/agent-package-build" in package
     assert "scripts/agent-package-metadata" in metadata
     assert "production \"$GITHUB_REF_TYPE\" \"$GITHUB_REF_NAME\"" in metadata
     assert '"$GITHUB_SHA" 0' in metadata
@@ -402,10 +396,10 @@ def test_tag_release_builds_agent_package_from_same_release_metadata() -> None:
     assert "artifact-metadata: write" in package
     assert "attestations: write" in package
     assert "id-token: write" in package
+    assert "release_private_key: ${{ secrets.VONK_AGENT_RELEASE_PRIVATE_KEY }}" in package
     assert "secrets:" not in package
     for forbidden in (
         "scripts/build-agent-deb",
-        "VONK_AGENT_RELEASE_PRIVATE_KEY",
         "dpkg -i",
         "cosign sign-blob",
     ):
@@ -439,7 +433,7 @@ def test_apt_publication_consumes_the_unified_release_artifact() -> None:
 
     assert "needs: [release-metadata, build-agent-package, release-manifest]" in apt
     assert "if: needs.release-manifest.result == 'success'" in apt
-    assert "uses: ./.github/workflows/agent-apt-publish.yml" in apt
+    assert "uses: ./.github/actions/agent-apt-publish" in apt
     assert "channel: stable" in apt
     assert "version: ${{ needs.build-agent-package.outputs.version }}" in apt
     assert "package: ${{ needs.build-agent-package.outputs.package }}" in apt
@@ -452,10 +446,13 @@ def test_apt_publication_consumes_the_unified_release_artifact() -> None:
     assert "contents: write" not in apt
     assert "id-token: write" not in apt
     assert "secrets:" not in apt
+    for required in (
+        "r2_apt_public_bucket: ${{ vars.R2_APT_PUBLIC_BUCKET }}",
+        "r2_apt_state_bucket: ${{ vars.R2_APT_STATE_BUCKET }}",
+        "apt_repository_gpg_private_key: ${{ secrets.APT_REPOSITORY_GPG_PRIVATE_KEY }}",
+    ):
+        assert required in apt
     for forbidden in (
-        "R2_APT_PUBLIC_BUCKET",
-        "R2_APT_STATE_BUCKET",
-        "APT_REPOSITORY_GPG_PRIVATE_KEY",
         "scripts/verify-agent-deb",
         "aptly ",
         "rclone ",

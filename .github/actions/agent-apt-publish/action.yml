@@ -1,0 +1,463 @@
+name: Isolated agent apt publication
+description: Verify and publish one accepted agent package to an isolated apt channel
+
+inputs:
+  channel:
+    description: Apt channel, dev or stable
+    required: true
+  version:
+    description: Exact accepted Debian package version
+    required: true
+  package:
+    description: Exact accepted Debian package filename
+    required: true
+  artifact_name:
+    description: Immutable accepted package artifact name
+    required: true
+  environment:
+    description: Literal protected environment selected by the caller job
+    required: true
+  source_sha:
+    description: Exact accepted source commit
+    required: true
+  tag_name:
+    description: Production tag name or empty for development
+    required: true
+  tag_oid:
+    description: Verified production tag object or empty for development
+    required: true
+  apt_gpg_passphrase:
+    description: Environment-scoped apt signing key passphrase
+    required: true
+  apt_repository_gpg_fingerprint:
+    description: Expected complete apt signing key fingerprint
+    required: true
+  apt_repository_gpg_private_key:
+    description: Environment-scoped encrypted apt signing private key
+    required: true
+  r2_access_key_id:
+    description: Environment-scoped Cloudflare R2 access key ID
+    required: true
+  r2_account_id:
+    description: Cloudflare account ID for the isolated R2 endpoint
+    required: true
+  r2_secret_access_key:
+    description: Environment-scoped Cloudflare R2 secret access key
+    required: true
+  r2_apt_public_bucket:
+    description: Public R2 bucket containing apt channel trees
+    required: true
+  r2_apt_state_bucket:
+    description: Private R2 bucket containing isolated aptly state
+    required: true
+
+runs:
+  using: composite
+  steps:
+
+    - name: Download accepted package artifact
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      with:
+        name: ${{ inputs.artifact_name }}
+        path: dist
+
+    - name: Verify exact downloaded package
+      id: package
+      shell: bash
+      env:
+        CHANNEL: ${{ inputs.channel }}
+        PACKAGE: ${{ inputs.package }}
+        PACKAGE_ENVIRONMENT: ${{ inputs.environment }}
+        SOURCE_SHA: ${{ inputs.source_sha }}
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        case "${CHANNEL}:${PACKAGE_ENVIRONMENT}" in
+          dev:apt-development|stable:apt-release)
+            ;;
+          *)
+            echo "agent apt channel and environment do not match" >&2
+            exit 64
+            ;;
+        esac
+        [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+        expected_package="vonk-forge-agent_${VERSION}_arm64.deb"
+        test "$PACKAGE" = "$expected_package"
+        test -f "dist/$PACKAGE" && test ! -L "dist/$PACKAGE"
+        test -f "dist/${PACKAGE}.sha256" && test ! -L "dist/${PACKAGE}.sha256"
+        metadata=$(scripts/agent-apt-metadata "$CHANNEL" "$VERSION")
+        while IFS='=' read -r name value; do
+          case "$name" in
+            repository|distribution|public_prefix|keyring|snapshot|state_prefix)
+              printf '%s=%s\n' "$name" "$value" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "unexpected apt metadata" >&2
+              exit 64
+              ;;
+          esac
+        done <<< "$metadata"
+        verification=$(scripts/verify-agent-deb --json "dist/$PACKAGE")
+        jq -e \
+          --arg version "$VERSION" \
+          '.ok == true and .version == $version and
+           .package == "vonk-forge-agent" and .architecture == "arm64"' \
+          <<< "$verification" >/dev/null
+        test "$(dpkg-deb --field "dist/$PACKAGE" Version)" = "$VERSION"
+        evidence_dir="$RUNNER_TEMP/agent-package-evidence"
+        install -d -m 0700 "$evidence_dir"
+        dpkg-deb --extract "dist/$PACKAGE" "$evidence_dir"
+        jq -e \
+          --arg source_sha "$SOURCE_SHA" \
+          '.predicate.buildDefinition.resolvedDependencies | length == 1 and
+           .[0].digest.gitCommit == $source_sha' \
+          "$evidence_dir/usr/share/doc/vonk-forge-agent/provenance.json" \
+          >/dev/null
+        package_sha256=$(sha256sum "dist/$PACKAGE" | cut -d' ' -f1)
+        test "$package_sha256" = "$(jq -r .sha256 <<< "$verification")"
+        printf 'package_sha256=%s\n' "$package_sha256" >> "$GITHUB_OUTPUT"
+
+    - name: Install apt repository tooling
+      shell: bash
+      run: |
+        set -euo pipefail
+        sudo apt-get update
+        sudo apt-get install --no-install-recommends -y aptly gnupg rclone
+
+    - name: Reverify accepted development source authority
+      shell: bash
+      env:
+        CALLER_SHA: ${{ github.sha }}
+        CHANNEL: ${{ inputs.channel }}
+        SOURCE_SHA: ${{ inputs.source_sha }}
+        TAG_NAME: ${{ inputs.tag_name }}
+        TAG_OID: ${{ inputs.tag_oid }}
+      run: |
+        set -euo pipefail
+        [[ "$CALLER_SHA" =~ ^[0-9a-f]{40}$ ]]
+        [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+        test "$SOURCE_SHA" = "$CALLER_SHA"
+        case "$CHANNEL" in
+          dev)
+            test -z "$TAG_NAME" && test -z "$TAG_OID"
+            test "$GITHUB_REF" = "refs/heads/main"
+            git fetch --no-tags --prune origin \
+              +refs/heads/main:refs/remotes/origin/main
+            main_sha=$(git rev-parse --verify refs/remotes/origin/main^{commit})
+            test "$SOURCE_SHA" = "$main_sha"
+            ;;
+          stable)
+            scripts/verify-release-tag-authority \
+              "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
+            ;;
+          *)
+            echo "unsupported agent apt channel" >&2
+            exit 64
+            ;;
+        esac
+
+    - name: Prepare committed or recoverable private state
+      id: state
+      shell: bash
+      env:
+        CHANNEL: ${{ inputs.channel }}
+        DISTRIBUTION: ${{ steps.package.outputs.distribution }}
+        PACKAGE: ${{ inputs.package }}
+        PACKAGE_SHA256: ${{ steps.package.outputs.package_sha256 }}
+        RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ inputs.r2_access_key_id }}
+        RCLONE_CONFIG_R2_ENDPOINT: https://${{ inputs.r2_account_id }}.r2.cloudflarestorage.com
+        RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+        RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ inputs.r2_secret_access_key }}
+        RCLONE_CONFIG_R2_TYPE: s3
+        R2_APT_STATE_BUCKET: ${{ inputs.r2_apt_state_bucket }}
+        SNAPSHOT: ${{ steps.package.outputs.snapshot }}
+        SOURCE_SHA: ${{ inputs.source_sha }}
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        scripts/agent-apt-state prepare \
+          --work-dir "$RUNNER_TEMP/agent-apt-publication" \
+          >> "$GITHUB_OUTPUT"
+
+    - name: Revalidate source before apt signing key
+      shell: bash
+      env:
+        CALLER_SHA: ${{ github.sha }}
+        CHANNEL: ${{ inputs.channel }}
+        SOURCE_SHA: ${{ inputs.source_sha }}
+        TAG_NAME: ${{ inputs.tag_name }}
+        TAG_OID: ${{ inputs.tag_oid }}
+      run: |
+        set -euo pipefail
+        [[ "$CALLER_SHA" =~ ^[0-9a-f]{40}$ ]]
+        [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+        test "$SOURCE_SHA" = "$CALLER_SHA"
+        case "$CHANNEL" in
+          dev)
+            test -z "$TAG_NAME" && test -z "$TAG_OID"
+            test "$GITHUB_REF" = refs/heads/main
+            git fetch --force --no-tags origin \
+              +refs/heads/main:refs/remotes/origin/main
+            test "$SOURCE_SHA" = \
+              "$(git rev-parse --verify refs/remotes/origin/main^{commit})"
+            ;;
+          stable)
+            scripts/verify-release-tag-authority \
+              "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
+            ;;
+          *)
+            exit 64
+            ;;
+        esac
+
+    - name: Materialize and verify apt signing key
+      if: steps.state.outputs.needs_generation == 'true'
+      id: signing
+      shell: bash
+      env:
+        APT_GPG_PASSPHRASE: ${{ inputs.apt_gpg_passphrase }}
+        APT_REPOSITORY_GPG_FINGERPRINT: ${{ inputs.apt_repository_gpg_fingerprint }}
+        APT_REPOSITORY_GPG_PRIVATE_KEY: ${{ inputs.apt_repository_gpg_private_key }}
+      run: |
+        set -euo pipefail
+        test -n "$APT_REPOSITORY_GPG_PRIVATE_KEY"
+        test -n "$APT_GPG_PASSPHRASE"
+        [[ "$APT_REPOSITORY_GPG_FINGERPRINT" =~ ^[0-9A-F]{40}$ ]]
+        key_path="$RUNNER_TEMP/apt-repository-key.asc"
+        passphrase_path="$RUNNER_TEMP/apt-repository-passphrase"
+        install -m 0600 /dev/null "$key_path"
+        install -m 0600 /dev/null "$passphrase_path"
+        printf '%s' "$APT_REPOSITORY_GPG_PRIVATE_KEY" > "$key_path"
+        printf '%s' "$APT_GPG_PASSPHRASE" > "$passphrase_path"
+        export GNUPGHOME="$RUNNER_TEMP/gnupg"
+        install -d -m 0700 "$GNUPGHOME"
+        gpg --batch --import "$key_path"
+        secret_listing=$(gpg --batch --with-colons --list-secret-keys)
+        sec_count=$(awk -F: '$1 == "sec" { count++ } END { print count+0 }' \
+          <<< "$secret_listing")
+        test "$sec_count" = 1
+        fingerprint=$(awk -F: '
+          $1 == "sec" { primary=1; next }
+          primary && $1 == "fpr" { print $10; exit }
+        ' <<< "$secret_listing")
+        test "$fingerprint" = "$APT_REPOSITORY_GPG_FINGERPRINT"
+        printf 'fingerprint=%s\n' "$fingerprint" >> "$GITHUB_OUTPUT"
+
+    - name: Generate missing aptly state or public tree
+      if: steps.state.outputs.needs_generation == 'true'
+      shell: bash
+      env:
+        DISTRIBUTION: ${{ steps.package.outputs.distribution }}
+        FINGERPRINT: ${{ steps.signing.outputs.fingerprint }}
+        HAS_STATE: ${{ steps.state.outputs.has_state }}
+        KEYRING: ${{ steps.package.outputs.keyring }}
+        PACKAGE: ${{ inputs.package }}
+        REPOSITORY: ${{ steps.package.outputs.repository }}
+        RESTORED: ${{ steps.state.outputs.restored }}
+        SNAPSHOT: ${{ steps.package.outputs.snapshot }}
+      run: |
+        set -euo pipefail
+        export GNUPGHOME="$RUNNER_TEMP/gnupg"
+        work="$RUNNER_TEMP/agent-apt-publication"
+        install -d -m 0755 "$work/public"
+        config="$RUNNER_TEMP/aptly.conf"
+        jq -n \
+          --arg root "$work/aptly" \
+          --arg publish "$work/public" \
+          '{rootDir:$root, architectures:["arm64"],
+            dependencyFollowSuggests:false, dependencyFollowRecommends:false,
+            FileSystemPublishEndpoints:{r2:{rootDir:$publish,linkMethod:"copy"}}}' \
+          > "$config"
+        if [[ "$HAS_STATE" != true ]]; then
+          if [[ "$RESTORED" != true ]]; then
+            aptly -config="$config" repo create \
+              -distribution="$DISTRIBUTION" -component=main "$REPOSITORY"
+          fi
+          aptly -config="$config" repo add "$REPOSITORY" "dist/$PACKAGE"
+          aptly -config="$config" snapshot create "$SNAPSHOT" \
+            from repo "$REPOSITORY"
+        fi
+        common=(
+          -batch
+          -passphrase-file="$RUNNER_TEMP/apt-repository-passphrase"
+          -gpg-key="$FINGERPRINT"
+        )
+        if [[ "$RESTORED" == true ]]; then
+          aptly -config="$config" publish switch "${common[@]}" \
+            "$DISTRIBUTION" filesystem:r2: "$SNAPSHOT"
+        else
+          aptly -config="$config" publish snapshot "${common[@]}" \
+            -acquire-by-hash -architectures=arm64 -distribution="$DISTRIBUTION" \
+            -component=main \
+            "$SNAPSHOT" filesystem:r2:
+        fi
+        distribution_root="$work/public/dists/$DISTRIBUTION"
+        inrelease="$distribution_root/InRelease"
+        test -s "$inrelease"
+        keyring_path="$work/public/$KEYRING"
+        gpg --batch --export "$FINGERPRINT" > "$keyring_path"
+        test -s "$keyring_path"
+        chmod 0644 "$keyring_path"
+        gpgv --keyring "$keyring_path" "$inrelease"
+        release="$distribution_root/Release"
+        test -s "$release"
+        grep -Fqx "Acquire-By-Hash: yes" "$release"
+        checked_indexes=0
+        index_entries=$( \
+          awk '
+            /^SHA256:$/ { in_sha256=1; next }
+            in_sha256 && /^[^[:space:]]/ { exit }
+            in_sha256 && NF {
+              if (NF != 3) {
+                print "malformed SHA256 entry" > "/dev/stderr"
+                exit 64
+              }
+              if ($3 ~ /(^|\/)Packages(\.[^\/]+)?$/) {
+                print $1 "\t" $2 "\t" $3
+              }
+            }
+          ' "$release"
+        )
+        if [[ -n "$index_entries" ]]; then
+          while IFS=$'\t' read -r digest size relative_name; do
+            [[ "$digest" =~ ^[0-9a-f]{64}$ ]]
+            [[ "$size" =~ ^[0-9]+$ ]]
+            [[ "$relative_name" =~ ^([A-Za-z0-9][A-Za-z0-9._+-]*/)*Packages(\.[A-Za-z0-9][A-Za-z0-9._+-]*)?$ ]]
+            index_path="$distribution_root/$relative_name"
+            by_hash_index="$(dirname "$index_path")/by-hash/SHA256/$digest"
+            test -f "$by_hash_index" && test ! -L "$by_hash_index"
+            test "$(stat -c %s -- "$by_hash_index")" = "$size"
+            test "$(sha256sum -- "$by_hash_index" | cut -d' ' -f1)" = "$digest"
+            checked_indexes=$((checked_indexes + 1))
+          done <<< "$index_entries"
+        fi
+        test "$checked_indexes" -gt 0
+
+    - name: Build any missing immutable bundles
+      shell: bash
+      env:
+        CHANNEL: ${{ inputs.channel }}
+        DISTRIBUTION: ${{ steps.package.outputs.distribution }}
+        PACKAGE: ${{ inputs.package }}
+        PACKAGE_SHA256: ${{ steps.package.outputs.package_sha256 }}
+        SNAPSHOT: ${{ steps.package.outputs.snapshot }}
+        SOURCE_SHA: ${{ inputs.source_sha }}
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        scripts/agent-apt-state bundle \
+          --work-dir "$RUNNER_TEMP/agent-apt-publication"
+
+    - name: Revalidate source before apt state commit
+      shell: bash
+      env:
+        CALLER_SHA: ${{ github.sha }}
+        CHANNEL: ${{ inputs.channel }}
+        SOURCE_SHA: ${{ inputs.source_sha }}
+        TAG_NAME: ${{ inputs.tag_name }}
+        TAG_OID: ${{ inputs.tag_oid }}
+      run: |
+        set -euo pipefail
+        [[ "$CALLER_SHA" =~ ^[0-9a-f]{40}$ ]]
+        [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+        test "$SOURCE_SHA" = "$CALLER_SHA"
+        case "$CHANNEL" in
+          dev)
+            test -z "$TAG_NAME" && test -z "$TAG_OID"
+            test "$GITHUB_REF" = refs/heads/main
+            git fetch --force --no-tags origin \
+              +refs/heads/main:refs/remotes/origin/main
+            test "$SOURCE_SHA" = \
+              "$(git rev-parse --verify refs/remotes/origin/main^{commit})"
+            ;;
+          stable)
+            scripts/verify-release-tag-authority \
+              "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
+            ;;
+          *)
+            exit 64
+            ;;
+        esac
+
+    - name: Commit immutable publication manifest
+      shell: bash
+      env:
+        CHANNEL: ${{ inputs.channel }}
+        DISTRIBUTION: ${{ steps.package.outputs.distribution }}
+        PACKAGE: ${{ inputs.package }}
+        PACKAGE_SHA256: ${{ steps.package.outputs.package_sha256 }}
+        RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ inputs.r2_access_key_id }}
+        RCLONE_CONFIG_R2_ENDPOINT: https://${{ inputs.r2_account_id }}.r2.cloudflarestorage.com
+        RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+        RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ inputs.r2_secret_access_key }}
+        RCLONE_CONFIG_R2_TYPE: s3
+        R2_APT_STATE_BUCKET: ${{ inputs.r2_apt_state_bucket }}
+        SNAPSHOT: ${{ steps.package.outputs.snapshot }}
+        SOURCE_SHA: ${{ inputs.source_sha }}
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        scripts/agent-apt-state commit \
+          --work-dir "$RUNNER_TEMP/agent-apt-publication"
+
+    - name: Revalidate source before apt public commit
+      shell: bash
+      env:
+        CALLER_SHA: ${{ github.sha }}
+        CHANNEL: ${{ inputs.channel }}
+        SOURCE_SHA: ${{ inputs.source_sha }}
+        TAG_NAME: ${{ inputs.tag_name }}
+        TAG_OID: ${{ inputs.tag_oid }}
+      run: |
+        set -euo pipefail
+        [[ "$CALLER_SHA" =~ ^[0-9a-f]{40}$ ]]
+        [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+        test "$SOURCE_SHA" = "$CALLER_SHA"
+        case "$CHANNEL" in
+          dev)
+            test -z "$TAG_NAME" && test -z "$TAG_OID"
+            test "$GITHUB_REF" = refs/heads/main
+            git fetch --force --no-tags origin \
+              +refs/heads/main:refs/remotes/origin/main
+            test "$SOURCE_SHA" = \
+              "$(git rev-parse --verify refs/remotes/origin/main^{commit})"
+            ;;
+          stable)
+            scripts/verify-release-tag-authority \
+              "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
+            ;;
+          *)
+            exit 64
+            ;;
+        esac
+
+    - name: Publish exact committed public tree and latest pointer
+      shell: bash
+      env:
+        CHANNEL: ${{ inputs.channel }}
+        DISTRIBUTION: ${{ steps.package.outputs.distribution }}
+        PACKAGE: ${{ inputs.package }}
+        PACKAGE_SHA256: ${{ steps.package.outputs.package_sha256 }}
+        RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ inputs.r2_access_key_id }}
+        RCLONE_CONFIG_R2_ENDPOINT: https://${{ inputs.r2_account_id }}.r2.cloudflarestorage.com
+        RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+        RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ inputs.r2_secret_access_key }}
+        RCLONE_CONFIG_R2_TYPE: s3
+        R2_APT_PUBLIC_BUCKET: ${{ inputs.r2_apt_public_bucket }}
+        R2_APT_STATE_BUCKET: ${{ inputs.r2_apt_state_bucket }}
+        SNAPSHOT: ${{ steps.package.outputs.snapshot }}
+        SOURCE_SHA: ${{ inputs.source_sha }}
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        scripts/agent-apt-state publish
+        printf 'Published %s version %s from %s to https://packages.vonkforge.ai/\n' \
+          "$CHANNEL" "$VERSION" "$SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Remove apt credentials
+      if: always()
+      shell: bash
+      run: |
+        rm -f \
+          "$RUNNER_TEMP/apt-repository-key.asc" \
+          "$RUNNER_TEMP/apt-repository-passphrase"
