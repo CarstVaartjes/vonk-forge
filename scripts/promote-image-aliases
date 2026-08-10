@@ -53,6 +53,7 @@ readonly scratch=$(mktemp -d /tmp/vonk-image-alias-promotion.XXXXXXXXXX)
 
 promotion_started=0
 promotion_complete=0
+rollback_complete=1
 previous_digests=()
 
 inspect_alias() {
@@ -90,20 +91,6 @@ set_alias() {
   return 1
 }
 
-delete_alias() {
-  local role=$1 image=$2 attempt observed
-  observed=$(inspect_alias "$role" "$image") || return 1
-  [[ -z "$observed" ]] && return 0
-  for attempt in 1 2 3; do
-    if skopeo delete "docker://$image:$alias" >/dev/null 2>&1; then
-      observed=$(inspect_alias "$role" "$image") || continue
-      [[ -z "$observed" ]] && return 0
-    fi
-  done
-  printf '%s %s alias could not be removed\n' "$role" "$alias" >&2
-  return 1
-}
-
 finish() {
   local status=$? rollback_failed=0 index previous
   trap - EXIT INT TERM
@@ -113,9 +100,6 @@ finish() {
       previous=${previous_digests[$index]:-}
       if [[ "$previous" =~ ^sha256:[0-9a-f]{64}$ ]]; then
         set_alias "${roles[$index]}" "${images[$index]}" "$previous" \
-          || rollback_failed=1
-      else
-        delete_alias "${roles[$index]}" "${images[$index]}" \
           || rollback_failed=1
       fi
     done
@@ -139,6 +123,20 @@ trap 'exit 143' TERM
 for index in "${!roles[@]}"; do
   previous_digests+=("$(inspect_alias "${roles[$index]}" "${images[$index]}")")
 done
+for index in "${!roles[@]}"; do
+  if [[ ! "${previous_digests[$index]}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+    rollback_complete=0
+  fi
+done
+# A missing alias cannot be removed safely with skopeo: deleting a tag resolves
+# it to a manifest digest and can remove immutable tags that share that digest.
+# For a first/partial publication, run the failure-prone authority check before
+# any mutation. Established alias sets retain the stronger post-mutation check
+# with rollback armed below.
+if [[ "$rollback_complete" -eq 0 && "${#postcondition[@]}" -gt 0 ]]; then
+  "${postcondition[@]}"
+  postcondition=()
+fi
 promotion_started=1
 for index in "${!roles[@]}"; do
   set_alias "${roles[$index]}" "${images[$index]}" "${digests[$index]}"

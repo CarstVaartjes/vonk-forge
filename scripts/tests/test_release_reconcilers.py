@@ -135,14 +135,22 @@ def _github_tool(tmp_path: Path) -> tuple[Path, Path]:
         "if command == 'download':\n"
         " name=args[args.index('-p')+1]; destination=Path(args[args.index('-D')+1]); destination.mkdir(exist_ok=True)\n"
         " (destination/name).write_bytes(base64.b64decode(state['assets'][name]))\n"
-        "if command == 'edit': state['isDraft']=False\n"
+        "if command == 'edit':\n"
+        " if not state['isDraft'] and os.environ.get('VONK_REJECT_PUBLISHED_EDIT'):\n"
+        "  print('published release is immutable', file=sys.stderr); raise SystemExit(91)\n"
+        " state['isDraft']=False\n"
         "state_path.write_text(json.dumps(state)+'\\n')\n",
     )
     return tools, state
 
 
 def _run_release(
-    tools: Path, state: Path, assets: tuple[Path, ...], *, view_error: str = ""
+    tools: Path,
+    state: Path,
+    assets: tuple[Path, ...],
+    *,
+    view_error: str = "",
+    reject_published_edit: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         (str(RELEASE), REPOSITORY, "v1.2.3", SHA, "Vonk Forge 1.2.3", *map(str, assets)),
@@ -151,6 +159,7 @@ def _run_release(
             "PATH": f"{tools}:{os.environ['PATH']}",
             "VONK_RELEASE_STATE": str(state),
             "VONK_RELEASE_VIEW_ERROR": view_error,
+            "VONK_REJECT_PUBLISHED_EDIT": "1" if reject_published_edit else "",
         },
         check=False,
         capture_output=True,
@@ -208,6 +217,32 @@ def test_github_release_reconciler_rejects_a_conflicting_existing_asset(
 
     assert result.returncode != 0
     assert "conflicting release asset" in result.stderr
+
+
+def test_github_release_reconciler_replays_a_published_release_without_editing_it(
+    tmp_path: Path,
+) -> None:
+    tools, state = _github_tool(tmp_path)
+    asset = tmp_path / "one.txt"
+    asset.write_bytes(b"expected\n")
+    state.write_text(
+        json.dumps(
+            {
+                "tagName": "v1.2.3",
+                "targetCommitish": SHA,
+                "name": "Vonk Forge 1.2.3",
+                "isDraft": False,
+                "isPrerelease": False,
+                "assets": {"one.txt": base64.b64encode(b"expected\n").decode()},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = _run_release(tools, state, (asset,), reject_published_edit=True)
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_github_release_reconciler_fails_closed_on_an_unknown_lookup_error(

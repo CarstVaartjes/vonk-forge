@@ -55,6 +55,11 @@ else
 fi
 
 mapfile -t observed < <(jq -r '.assets[]?.name' "$release_json" | LC_ALL=C sort)
+release_draft=$(jq -r '.isDraft' "$release_json")
+[[ "$release_draft" == true || "$release_draft" == false ]] || {
+  printf '%s\n' 'GitHub release draft state is invalid' >&2
+  exit 1
+}
 for name in "${observed[@]}"; do
   [[ -n ${expected[$name]+x} ]] || {
     printf 'unexpected release asset: %s\n' "$name" >&2
@@ -76,6 +81,12 @@ for name in "${!expected[@]}"; do
   fi
 done
 if (( "${#missing[@]}" )); then
+  [[ "$release_draft" == true ]] || {
+    printf '%s\n' 'published release is missing expected assets' >&2
+    exit 1
+  }
   gh release upload "$tag" "${missing[@]}" --repo "$repository"
 fi
-gh release edit "$tag" --repo "$repository" --draft=false
+if [[ "$release_draft" == true ]]; then
+  gh release edit "$tag" --repo "$repository" --draft=false
+fi
