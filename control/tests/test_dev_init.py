@@ -66,6 +66,7 @@ def test_initialize_repository_clones_accepted_main_and_checks_out_deploy(
     assert _git(destination, "symbolic-ref", "--short", "HEAD") == "deploy"
     assert _git(destination, "rev-parse", "main") == expected
     assert _git(destination, "rev-parse", "deploy") == expected
+    assert _git(destination, "rev-parse", "refs/vonk/deploy-base") == expected
     assert _git(destination, "remote", "get-url", "origin") == repository_url
 
 
@@ -87,6 +88,7 @@ def test_initialize_repository_clones_into_an_existing_empty_mountpoint(
 
     assert _git(destination, "rev-parse", "main") == expected
     assert _git(destination, "rev-parse", "deploy") == expected
+    assert _git(destination, "rev-parse", "refs/vonk/deploy-base") == expected
     assert _git(destination, "symbolic-ref", "--short", "HEAD") == "deploy"
 
 
@@ -440,6 +442,7 @@ def test_initialize_repository_fast_forwards_accepted_and_deploy_refs_together(
 
     assert _git(destination, "rev-parse", "main") == expected
     assert _git(destination, "rev-parse", "deploy") == expected
+    assert _git(destination, "rev-parse", "refs/vonk/deploy-base") == expected
     assert _git(destination, "symbolic-ref", "--short", "HEAD") == "deploy"
     assert _git(destination, "rev-parse", "operator-notes") == initial
     assert _git(destination, "status", "--porcelain=v1", "--untracked-files=all") == ""
@@ -459,6 +462,7 @@ def test_initialize_repository_preserves_clean_local_deploy_commits_across_accep
 
     assert _git(destination, "rev-parse", "main") == accepted_a
     assert _git(destination, "rev-parse", "deploy") == deployed_local
+    assert _git(destination, "rev-parse", "refs/vonk/deploy-base") == accepted_a
     accepted_b = _commit(publisher, "remote.txt", "next accepted commit\n")
     _git(publisher, "push", "-q", "origin", "main")
 
@@ -466,6 +470,26 @@ def test_initialize_repository_preserves_clean_local_deploy_commits_across_accep
 
     assert _git(destination, "rev-parse", "main") == accepted_b
     assert _git(destination, "rev-parse", "deploy") == deployed_local
+    assert _git(destination, "rev-parse", "refs/vonk/deploy-base") == accepted_a
+    assert _git(destination, "symbolic-ref", "--short", "HEAD") == "deploy"
+    assert (destination / "local.txt").read_text(encoding="utf-8") == (
+        "signed NAS-local change\n"
+    )
+    assert _git(destination, "status", "--porcelain=v1", "--untracked-files=all") == ""
+
+    initialize_repository(destination, repository_url, accepted_b)
+
+    assert _git(destination, "rev-parse", "main") == accepted_b
+    assert _git(destination, "rev-parse", "deploy") == deployed_local
+    assert _git(destination, "rev-parse", "refs/vonk/deploy-base") == accepted_a
+    accepted_c = _commit(publisher, "later.txt", "later accepted commit\n")
+    _git(publisher, "push", "-q", "origin", "main")
+
+    initialize_repository(destination, repository_url, accepted_c)
+
+    assert _git(destination, "rev-parse", "main") == accepted_c
+    assert _git(destination, "rev-parse", "deploy") == deployed_local
+    assert _git(destination, "rev-parse", "refs/vonk/deploy-base") == accepted_a
     assert _git(destination, "symbolic-ref", "--short", "HEAD") == "deploy"
     assert (destination / "local.txt").read_text(encoding="utf-8") == (
         "signed NAS-local change\n"
@@ -500,7 +524,7 @@ def test_initialize_repository_rejects_changed_origin_dirty_and_divergent_accept
         initialize_repository(destination, repository_url, expected)
 
 
-def test_initialize_repository_rejects_deploy_that_does_not_descend_from_accepted_main(
+def test_initialize_repository_rejects_deploy_that_does_not_descend_from_deployment_base(
     tmp_path: Path, local_acceptance: None
 ) -> None:
     _origin_path, publisher, repository_url, accepted = _origin(tmp_path)
@@ -520,6 +544,29 @@ def test_initialize_repository_rejects_deploy_that_does_not_descend_from_accepte
     _git(destination, "update-ref", "refs/heads/deploy", unrelated)
 
     with pytest.raises(DevInitError, match="deployment branch does not descend"):
+        initialize_repository(destination, repository_url, expected)
+
+
+def test_initialize_repository_rejects_a_tampered_deployment_base(
+    tmp_path: Path, local_acceptance: None
+) -> None:
+    _origin_path, publisher, repository_url, accepted = _origin(tmp_path)
+    destination = tmp_path / "repository"
+    initialize_repository(destination, repository_url, accepted)
+    expected = _commit(publisher, "remote.txt", "remote\n")
+    _git(publisher, "push", "-q", "origin", "main")
+    _git(destination, "config", "user.email", "operator@example.invalid")
+    _git(destination, "config", "user.name", "Operator")
+    unrelated = _git(
+        destination,
+        "commit-tree",
+        f"{accepted}^{{tree}}",
+        "-m",
+        "tampered deployment base",
+    )
+    _git(destination, "update-ref", "refs/vonk/deploy-base", unrelated)
+
+    with pytest.raises(DevInitError, match="deployment base"):
         initialize_repository(destination, repository_url, expected)
 
 
