@@ -294,8 +294,8 @@ def test_rendered_compose_is_image_only_and_has_exact_runtime_boundaries(
     assert services["dev-init"]["environment"]["VONK_DEV_EXPECTED_COMMIT"] == COMMIT
     assert services["dev-init"]["environment"]["VONK_DEV_API_IMAGE"] == API_IMAGE
     assert services["dev-init"]["environment"]["VONK_DEV_WORKER_IMAGE"] == WORKER_IMAGE
-    assert services["control-api"]["environment"]["VONK_DEPLOYMENT_BRANCH"] == "main"
-    assert services["control-worker"]["environment"]["VONK_DEPLOYMENT_BRANCH"] == "main"
+    assert services["control-api"]["environment"]["VONK_DEPLOYMENT_BRANCH"] == "deploy"
+    assert services["control-worker"]["environment"]["VONK_DEPLOYMENT_BRANCH"] == "deploy"
 
     volumes = {
         service_name: {volume["target"]: volume for volume in service.get("volumes", [])}
@@ -310,10 +310,19 @@ def test_rendered_compose_is_image_only_and_has_exact_runtime_boundaries(
     )
     assert {secret["source"] for secret in services["postgres"]["secrets"]} == {"postgres-password"}
     assert {secret["source"] for secret in services["dev-init"]["secrets"]} == {"database-url", "git-signing-key"}
-    assert {secret["source"] for secret in services["migrate"]["secrets"]} == {"database-url"}
+    assert services["migrate"].get("secrets", []) == []
     assert "secrets" not in services["control-api"]
     assert "secrets" not in services["control-worker"]
     assert volumes["control-api"]["/run/secrets"]["source"].endswith("dev-api-secrets")
+    init_migrate_secrets = volumes["dev-init"]["/migrate-secrets"]
+    migrate_secrets = volumes["migrate"]["/run/secrets"]
+    assert init_migrate_secrets["type"] == "volume"
+    assert migrate_secrets["type"] == "volume"
+    assert migrate_secrets["source"] == init_migrate_secrets["source"]
+    assert migrate_secrets["source"].endswith("dev-migrate-secrets")
+    assert migrate_secrets["read_only"] is True
+    assert migrate_secrets["source"] != volumes["control-api"]["/run/secrets"]["source"]
+    assert migrate_secrets["source"] != volumes["control-worker"]["/run/secrets"]["source"]
     assert volumes["control-worker"]["/run/secrets"]["source"].endswith("dev-worker-secrets")
 
 
