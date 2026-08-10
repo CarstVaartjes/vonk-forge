@@ -16,9 +16,16 @@ APT_WORKFLOW = ROOT / ".github/workflows/agent-apt-publish.yml"
 APT_STATE = ROOT / "scripts/agent-apt-state"
 
 EXPECTED_CALL_OUTPUTS = {
-    "version": "${{ jobs.build.outputs.version }}",
-    "package": "${{ jobs.build.outputs.package }}",
-    "artifact_name": "${{ jobs.build.outputs.artifact_name }}",
+    "version": (
+        "${{ jobs.build.outputs.version || jobs.build-release.outputs.version }}"
+    ),
+    "package": (
+        "${{ jobs.build.outputs.package || jobs.build-release.outputs.package }}"
+    ),
+    "artifact_name": (
+        "${{ jobs.build.outputs.artifact_name || "
+        "jobs.build-release.outputs.artifact_name }}"
+    ),
 }
 EXPECTED_BUILD_OUTPUTS = {
     "version": "${{ inputs.version }}",
@@ -65,7 +72,7 @@ def reusable_output_mappings(text: str) -> tuple[dict[str, str], dict[str, str]]
         elif current_output and line.startswith("        value: "):
             actual_call_outputs[current_output] = line.removeprefix("        value: ")
 
-    build_outputs = text.split("    outputs:\n", 2)[2].split("    steps:\n", 1)[0]
+    build_outputs = text.split("    outputs:\n", 2)[2].split("    steps:", 1)[0]
     actual_build_outputs = dict(
         re.findall(
             r"^      ([A-Za-z_][A-Za-z0-9_-]*): (.+)$",
@@ -218,7 +225,30 @@ def test_reusable_agent_package_build_has_a_strict_call_boundary() -> None:
         assert f"      {input_name}:\n        required: true\n        type: string" in text
     assert_exact_reusable_output_mappings(text)
     assert "runs-on: ubuntu-24.04-arm" in text
-    assert "environment: ${{ inputs.environment }}" in text
+    development, production = text.split("\n  build-release:\n", 1)
+    assert (
+        "if: inputs.channel != 'stable' || inputs.environment != 'agent-release'"
+        in development
+    )
+    assert "environment: agent-development" in development
+    assert "steps: &agent_package_steps" in development
+    assert (
+        "if: inputs.channel == 'stable' && inputs.environment == 'agent-release'"
+        in production
+    )
+    assert "environment: agent-release" in production
+    assert "steps: *agent_package_steps" in production
+    assert "environment: ${{ inputs.environment }}" not in text
+    release_outputs = production.split("    outputs:\n", 1)[1].split(
+        "    steps:", 1
+    )[0]
+    assert dict(
+        re.findall(
+            r"^      ([A-Za-z_][A-Za-z0-9_-]*): (.+)$",
+            release_outputs,
+            re.MULTILINE,
+        )
+    ) == EXPECTED_BUILD_OUTPUTS
     assert "timeout-minutes: 45" in text
     assert (
         "    secrets:\n"
@@ -558,7 +588,20 @@ def test_reusable_apt_publisher_has_a_strict_channel_boundary() -> None:
         )[0]
     assert "dev:apt-development" in text
     assert "stable:apt-release" in text
-    assert "environment: ${{ inputs.environment }}" in text
+    development, production = text.split("\n  publish-release:\n", 1)
+    assert (
+        "if: inputs.channel != 'stable' || inputs.environment != 'apt-release'"
+        in development
+    )
+    assert "environment: apt-development" in development
+    assert "steps: &agent_apt_publish_steps" in development
+    assert (
+        "if: inputs.channel == 'stable' && inputs.environment == 'apt-release'"
+        in production
+    )
+    assert "environment: apt-release" in production
+    assert "steps: *agent_apt_publish_steps" in production
+    assert "environment: ${{ inputs.environment }}" not in text
     assert "group: vonk-forge-agent-apt-${{ inputs.channel }}" in text
     assert "cancel-in-progress: false" in text
     for secret_name in (
@@ -600,7 +643,8 @@ def test_reusable_apt_publisher_rechecks_dev_authority_inside_protected_job() ->
         "Reverify accepted development source authority"
     )
 
-    assert "environment: ${{ inputs.environment }}" in text
+    assert "environment: apt-development" in text
+    assert "environment: apt-release" in text
     assert "CALLER_SHA: ${{ github.sha }}" in authority
     assert "CHANNEL: ${{ inputs.channel }}" in authority
     assert "SOURCE_SHA: ${{ inputs.source_sha }}" in authority

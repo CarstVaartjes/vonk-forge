@@ -45,15 +45,16 @@ permissions:
 jobs:
   publish:
     name: Publish verified package to isolated apt channel
+    if: inputs.channel != 'stable' || inputs.environment != 'apt-release'
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    environment: ${{ inputs.environment }}
+    environment: apt-development
     concurrency:
       group: vonk-forge-agent-apt-${{ inputs.channel }}
       cancel-in-progress: false
     permissions:
       contents: read
-    steps:
+    steps: &agent_apt_publish_steps
       - name: Check out apt publication tooling
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -466,3 +467,16 @@ jobs:
           rm -f \
             "$RUNNER_TEMP/apt-repository-key.asc" \
             "$RUNNER_TEMP/apt-repository-passphrase"
+
+  publish-release:
+    name: Publish verified package to isolated stable apt channel
+    if: inputs.channel == 'stable' && inputs.environment == 'apt-release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: apt-release
+    concurrency:
+      group: vonk-forge-agent-apt-${{ inputs.channel }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    steps: *agent_apt_publish_steps

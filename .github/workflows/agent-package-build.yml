@@ -39,13 +39,13 @@ on:
     outputs:
       version:
         description: Accepted Debian package version
-        value: ${{ jobs.build.outputs.version }}
+        value: ${{ jobs.build.outputs.version || jobs.build-release.outputs.version }}
       package:
         description: Accepted Debian package filename
-        value: ${{ jobs.build.outputs.package }}
+        value: ${{ jobs.build.outputs.package || jobs.build-release.outputs.package }}
       artifact_name:
         description: Immutable Actions artifact name
-        value: ${{ jobs.build.outputs.artifact_name }}
+        value: ${{ jobs.build.outputs.artifact_name || jobs.build-release.outputs.artifact_name }}
 
 permissions:
   contents: read
@@ -53,9 +53,10 @@ permissions:
 jobs:
   build:
     name: Build, lifecycle-test, and attest ARM64 package
+    if: inputs.channel != 'stable' || inputs.environment != 'agent-release'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
-    environment: ${{ inputs.environment }}
+    environment: agent-development
     permissions:
       artifact-metadata: write
       attestations: write
@@ -65,7 +66,7 @@ jobs:
       version: ${{ inputs.version }}
       package: ${{ inputs.package }}
       artifact_name: ${{ inputs.artifact_name }}
-    steps:
+    steps: &agent_package_steps
       - name: Check out exact package source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -463,3 +464,20 @@ jobs:
           overwrite: false
           retention-days: 30
           path: dist/*
+
+  build-release:
+    name: Build, lifecycle-test, and attest ARM64 release package
+    if: inputs.channel == 'stable' && inputs.environment == 'agent-release'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    environment: agent-release
+    permissions:
+      artifact-metadata: write
+      attestations: write
+      contents: read
+      id-token: write
+    outputs:
+      version: ${{ inputs.version }}
+      package: ${{ inputs.package }}
+      artifact_name: ${{ inputs.artifact_name }}
+    steps: *agent_package_steps
