@@ -2,24 +2,55 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNBOOK = ROOT / "docs/runbooks/development-nas-installation.md"
+COMPOSE_README = ROOT / "deploy/compose/README.md"
 
 
-def test_development_nas_runbook_defines_pull_only_immutable_install() -> None:
+def _normalized_text(path: Path) -> str:
+    return " ".join(path.read_text().split())
+
+
+def test_development_nas_runbook_leads_with_the_mutable_two_item_project() -> None:
+    text = _normalized_text(RUNBOOK)
+
+    assert "Its contents must be exactly:" in text
+    assert "├── docker-compose.yml" in text
+    assert "└── secrets/" in text
+    assert "docker-compose.dev.yml` as the bare mutable `:dev`" in text
+    assert "pull/redeploy the unchanged `docker-compose.yml`" in text
+    assert "not restart" in text
+
+
+def test_development_nas_runbook_explains_mixed_cohort_retry_before_migration() -> None:
+    text = _normalized_text(RUNBOOK)
+
+    assert "mixed pull" in text
+    assert "cohort gate exits" in text
+    assert "before `migrate`" in text
+    assert "Do not delete `secrets/` or named volumes" in text
+
+
+def test_production_channel_uses_the_trusted_host_updater_and_latest_is_evaluation_only() -> None:
+    text = _normalized_text(COMPOSE_README)
+
+    assert "signed `stable` channel through the trusted host updater" in text
+    assert "`:latest` is evaluation/discovery only" in text
+
+
+def test_pinned_rollback_requires_schema_compatible_repository_reset_or_full_state_restore() -> None:
+    text = _normalized_text(RUNBOOK)
+
+    assert "repository-volume reset only" in text
+    assert "target schema is compatible" in text
+    assert "matching full-state restore" in text
+    assert "clean development reinstall" in text
+
+
+def test_development_nas_runbook_keeps_pull_only_runtime_constraints() -> None:
     text = RUNBOOK.read_text()
 
-    for name in (
-        "docker-compose.dev.yml",
-        "docker-compose.production.yml",
-        "docker-compose.pinned.yml",
-    ):
-        assert name in text
-    assert "docker-compose.yml" in text
-    assert "dev-sha-<commit>@sha256:<digest>" in text
-    assert "docker compose -f docker-compose.yml pull" in text
-    assert "docker compose -f docker-compose.yml up -d --wait" in text
-    assert "There is no build context" in text
+    assert "there is no build context" in text
     assert "registry login" in text
-    assert "Neither `dev` nor `latest`\nis deployment authority" in text
+    assert "does not clone\nthis repository" in text
 
 
 def test_development_nas_runbook_documents_only_runtime_secret_inputs() -> None:
@@ -46,13 +77,14 @@ def test_development_nas_runbook_documents_only_runtime_secret_inputs() -> None:
 
 def test_rollback_discovers_volume_and_requires_matching_database_state() -> None:
     text = RUNBOOK.read_text()
+    normalized = _normalized_text(RUNBOOK)
 
     assert "docker compose -f docker-compose.yml ps -q control-api" in text
     assert "com.docker.compose.volume" in text
     assert "Type the exact volume name to confirm" in text
     assert "set -eu\ncd /volume1/docker/vonk-forge" in text
     assert "Never treat a repository-volume\nreset as a database or runtime-state rollback" in text
-    assert "identity, control state, route publications, supervisor state" in text
+    assert "identity, control state, route publications, supervisor state" in normalized
     assert "docker volume rm vonk-forge-dev_dev-repository" not in text
 
 
