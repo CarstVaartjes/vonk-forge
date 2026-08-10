@@ -644,6 +644,15 @@ def test_reusable_apt_publisher_preserves_immutable_receipts_and_ordering() -> N
     assert "VONK_AGENT_RELEASE_PRIVATE_KEY" not in text
 
 
+def test_reusable_apt_publisher_enables_and_verifies_by_hash_indexes() -> None:
+    local = apt_step("Generate missing aptly state or public tree")
+
+    assert "-acquire-by-hash" in local
+    assert "Acquire-By-Hash: yes" in local
+    assert "by-hash/SHA256" in local
+    assert local.index("publish snapshot") < local.index("Acquire-By-Hash: yes")
+
+
 def test_reusable_apt_publisher_uses_manifest_last_exact_replay_protocol() -> None:
     text = apt_workflow()
     prepare = apt_step("Prepare committed or recoverable private state")
