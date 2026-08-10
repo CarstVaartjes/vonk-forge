@@ -21,6 +21,7 @@ _DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 _READ_FLAGS = os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC
 _WRITE_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
 _MAX_FILE_BYTES = 2 * 1024 * 1024
+_UNSAFE_LOCAL_FILESYSTEMS = frozenset({"9p", "cifs", "drvfs", "smb3"})
 _HOST_LABEL = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?")
 _PUBLISHED_SECRET_NAMES = frozenset(
     {
@@ -342,7 +343,22 @@ def publish_project(
     compose_source = _read_regular(source_compose, private=False)
     compose = _render_compose(compose_source, enroll=enroll, agent=agent)
 
-    local_root = Path(tempfile.mkdtemp(prefix="vonk-forge-project-"))
+    local_parent = Path(tempfile.gettempdir())
+    try:
+        local_parent_metadata = local_parent.lstat()
+    except OSError as error:
+        raise ProjectPublicationError(
+            "local staging root cannot be inspected"
+        ) from error
+    if (
+        not stat.S_ISDIR(local_parent_metadata.st_mode)
+        or _filesystem_type(local_parent) in _UNSAFE_LOCAL_FILESYSTEMS
+    ):
+        raise ProjectPublicationError("project staging root must be local storage")
+    # Destination storage may intentionally be SMB; identify it so this
+    # distinction remains explicit and testable, but do not reject its type.
+    _filesystem_type(destination)
+    local_root = Path(tempfile.mkdtemp(prefix="vonk-forge-project-", dir=local_parent))
     os.chmod(local_root, 0o700)
     try:
         local_compose = local_root / "docker-compose.yml"

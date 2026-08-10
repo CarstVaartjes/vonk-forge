@@ -255,7 +255,13 @@ def test_permits_copy_to_mounted_destination_but_not_generation_there(
     secrets_dir = _prepare_source_secrets(tmp_path)
     project = _load_project_module()
     destination = tmp_path / "mounted-nas"
-    monkeypatch.setattr(project, "_filesystem_type", lambda _path: "cifs")
+    inspected: list[Path] = []
+
+    def filesystem_type(path: Path) -> str:
+        inspected.append(path)
+        return "cifs" if path == destination else "ext4"
+
+    monkeypatch.setattr(project, "_filesystem_type", filesystem_type)
 
     project.publish_project(
         source_compose=SOURCE_COMPOSE,
@@ -269,6 +275,39 @@ def test_permits_copy_to_mounted_destination_but_not_generation_there(
     )
 
     assert _project_listing(destination) == EXPECTED_PROJECT_FILES
+    assert destination in inspected
+
+
+def test_rejects_nonlocal_project_staging_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secrets_dir = _prepare_source_secrets(tmp_path)
+    project = _load_project_module()
+    destination = tmp_path / "nas-project"
+    remote_temporary = tmp_path / "remote-temporary"
+    remote_temporary.mkdir(mode=0o700)
+    monkeypatch.setattr(project.tempfile, "gettempdir", lambda: str(remote_temporary))
+    monkeypatch.setattr(
+        project,
+        "_filesystem_type",
+        lambda path: "cifs" if path == remote_temporary else "ext4",
+    )
+
+    with pytest.raises(project.ProjectPublicationError):
+        project.publish_project(
+            source_compose=SOURCE_COMPOSE,
+            secrets_dir=secrets_dir,
+            destination=destination,
+            nas_address=NAS_ADDRESS,
+            management_cidrs=MANAGEMENT_CIDRS,
+            enroll_hostname=ENROLL_HOSTNAME,
+            agent_hostname=AGENT_HOSTNAME,
+            registry_hostname=REGISTRY_HOSTNAME,
+        )
+
+    assert not destination.exists()
+    assert list(remote_temporary.iterdir()) == []
 
 
 def test_rejects_invalid_project_inputs(tmp_path: Path) -> None:

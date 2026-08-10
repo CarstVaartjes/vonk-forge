@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import datetime as dt
 import importlib.util
 import os
 import re
@@ -17,6 +18,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PrivateKey,
     Ed25519PublicKey,
 )
+from cryptography.x509.oid import NameOID
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "dev-runtime-secrets.py"
@@ -333,6 +335,62 @@ def test_rejects_hardlinked_existing_secret_before_generating_more(
     assert result.returncode == 1
     assert result.stdout == ""
     assert sorted(path.name for path in secrets_dir.iterdir()) == ["postgres-password"]
+
+
+def test_rejects_existing_agent_ca_not_signed_by_its_declared_key(
+    tmp_path: Path,
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    created = _run_generator(secrets_dir)
+    assert created.returncode == 0, created.stderr
+    original = _certificate(secrets_dir / "agent-ca-certificate")
+    agent_key = _private_key(secrets_dir / "agent-ca-key")
+    assert isinstance(agent_key, Ed25519PrivateKey)
+    attacker_key = Ed25519PrivateKey.generate()
+    now = dt.datetime.now(dt.UTC)
+    tampered = (
+        x509.CertificateBuilder()
+        .subject_name(original.subject)
+        .issuer_name(original.subject)
+        .public_key(agent_key.public_key())
+        .serial_number(original.serial_number)
+        .not_valid_before(now - dt.timedelta(minutes=5))
+        .not_valid_after(now + dt.timedelta(days=3650))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+        .add_extension(
+            x509.KeyUsage(
+                digital_signature=True,
+                content_commitment=False,
+                key_encipherment=False,
+                data_encipherment=False,
+                key_agreement=False,
+                key_cert_sign=True,
+                crl_sign=True,
+                encipher_only=None,
+                decipher_only=None,
+            ),
+            critical=True,
+        )
+        .add_extension(
+            x509.SubjectKeyIdentifier.from_public_key(agent_key.public_key()),
+            critical=False,
+        )
+        .sign(attacker_key, algorithm=None)
+    )
+    (secrets_dir / "agent-ca-certificate").write_bytes(
+        tampered.public_bytes(serialization.Encoding.PEM)
+    )
+
+    reused = _run_generator(secrets_dir)
+
+    assert reused.returncode == 1
+    assert reused.stdout == ""
+    assert "PRIVATE" not in reused.stderr
+    assert original.subject == x509.Name(
+        [x509.NameAttribute(NameOID.COMMON_NAME, "Vonk Forge Development Agent CA")]
+    )
 
 
 def test_rejects_windows_or_smb_filesystem_for_generation(

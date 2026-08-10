@@ -449,10 +449,43 @@ def _validate_bundle(
         raise RuntimeSecretError(
             "development secret bundle key relationships are invalid"
         )
+
+    expected_agent_subject = x509.Name(
+        [x509.NameAttribute(NameOID.COMMON_NAME, "Vonk Forge Development Agent CA")]
+    )
+    expected_controller_subject = x509.Name(
+        [
+            x509.NameAttribute(
+                NameOID.COMMON_NAME, "Vonk Forge Development Controller CA"
+            )
+        ]
+    )
+    expected_server_subject = x509.Name(
+        [x509.NameAttribute(NameOID.COMMON_NAME, "Vonk Forge Development Controller")]
+    )
     try:
+        agent_public.verify(agent_ca.signature, agent_ca.tbs_certificate_bytes)
+        controller_public.verify(
+            controller_ca.signature, controller_ca.tbs_certificate_bytes
+        )
         controller_public.verify(server.signature, server.tbs_certificate_bytes)
-        basic = agent_ca.extensions.get_extension_for_class(x509.BasicConstraints).value
-        usage = agent_ca.extensions.get_extension_for_class(x509.KeyUsage).value
+        agent_basic = agent_ca.extensions.get_extension_for_class(
+            x509.BasicConstraints
+        ).value
+        controller_basic = controller_ca.extensions.get_extension_for_class(
+            x509.BasicConstraints
+        ).value
+        server_basic = server.extensions.get_extension_for_class(
+            x509.BasicConstraints
+        ).value
+        agent_usage = agent_ca.extensions.get_extension_for_class(x509.KeyUsage).value
+        controller_usage = controller_ca.extensions.get_extension_for_class(
+            x509.KeyUsage
+        ).value
+        server_usage = server.extensions.get_extension_for_class(x509.KeyUsage).value
+        server_extended_usage = server.extensions.get_extension_for_class(
+            x509.ExtendedKeyUsage
+        ).value
         sans = server.extensions.get_extension_for_class(
             x509.SubjectAlternativeName
         ).value
@@ -460,12 +493,31 @@ def _validate_bundle(
         raise RuntimeSecretError(
             "development secret certificate constraints are invalid"
         ) from error
+    now = dt.datetime.now(dt.UTC)
     if (
-        basic != x509.BasicConstraints(ca=True, path_length=0)
-        or not usage.key_cert_sign
-        or not usage.crl_sign
+        agent_ca.subject != expected_agent_subject
+        or agent_ca.issuer != agent_ca.subject
+        or controller_ca.subject != expected_controller_subject
+        or controller_ca.issuer != controller_ca.subject
+        or server.subject != expected_server_subject
+        or agent_basic != x509.BasicConstraints(ca=True, path_length=0)
+        or controller_basic != x509.BasicConstraints(ca=True, path_length=0)
+        or server_basic != x509.BasicConstraints(ca=False, path_length=None)
+        or not agent_usage.key_cert_sign
+        or not agent_usage.crl_sign
+        or not controller_usage.key_cert_sign
+        or not controller_usage.crl_sign
+        or server_usage.key_cert_sign
+        or server_usage.crl_sign
+        or not server_usage.digital_signature
+        or set(server_extended_usage) != {ExtendedKeyUsageOID.SERVER_AUTH}
         or set(sans.get_values_for_type(x509.DNSName))
         != {enroll_hostname, agent_hostname, registry_hostname}
+        or not agent_ca.not_valid_before_utc <= now <= agent_ca.not_valid_after_utc
+        or not controller_ca.not_valid_before_utc
+        <= now
+        <= controller_ca.not_valid_after_utc
+        or not server.not_valid_before_utc <= now <= server.not_valid_after_utc
     ):
         raise RuntimeSecretError(
             "development secret certificate constraints are invalid"
