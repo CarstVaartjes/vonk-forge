@@ -52,6 +52,11 @@ deployment branch/tag rules and required reviewers appropriate to their
 authority. Repository-level secrets are not a substitute for environment
 secrets.
 
+The reusable package and apt workflows bind these secrets directly from their
+literal job environments. Their callers pass only non-secret metadata; do not
+add optional `workflow_call` secret declarations, because an omitted caller
+value shadows the environment secret with an empty value.
+
 ### `agent-development`
 
 Allow only `main`. Configure:
