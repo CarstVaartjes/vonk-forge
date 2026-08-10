@@ -625,44 +625,61 @@ def _write_projection_secret(parent: int, name: str, content: bytes) -> None:
             pass
 
 
-def _is_distinct_projection_roots(api_root: Path, worker_root: Path) -> bool:
-    _projection_path(api_root, label="API")
-    _projection_path(worker_root, label="worker")
-    api = api_root
-    worker = worker_root
-    return not (
-        api == worker or api.is_relative_to(worker) or worker.is_relative_to(api)
-    )
+def _are_distinct_projection_roots(*roots: tuple[Path, str]) -> bool:
+    for root, label in roots:
+        _projection_path(root, label=label)
+    for index, (root, _label) in enumerate(roots):
+        for other, _other_label in roots[index + 1 :]:
+            if root == other or root.is_relative_to(other) or other.is_relative_to(root):
+                return False
+    return True
 
 
-def stage_runtime_secrets(source: Path, api_root: Path, worker_root: Path) -> None:
-    """Stage two disjoint, service-owned runtime-secret projections."""
+def stage_runtime_secrets(
+    source: Path,
+    api_root: Path,
+    migrate_root: Path,
+    worker_root: Path,
+) -> None:
+    """Stage three disjoint, service-owned runtime-secret projections."""
     source = Path(source)
     api_root = Path(api_root)
+    migrate_root = Path(migrate_root)
     worker_root = Path(worker_root)
     _directory(source, label="development secret source")
-    if not _is_distinct_projection_roots(api_root, worker_root):
+    if not _are_distinct_projection_roots(
+        (api_root, "API"),
+        (migrate_root, "migration"),
+        (worker_root, "worker"),
+    ):
         raise DevInitError("development secret projections must be distinct")
     database_url = _read_source_secret(source, "database-url")
     signing_key = _read_source_secret(source, "git-signing-key")
     api = _open_projection_directory(api_root, label="API")
+    migrate = -1
     worker = -1
     try:
+        migrate = _open_projection_directory(migrate_root, label="migration")
         worker = _open_projection_directory(worker_root, label="worker")
         api_identity = os.fstat(api)
+        migrate_identity = os.fstat(migrate)
         worker_identity = os.fstat(worker)
-        if (api_identity.st_dev, api_identity.st_ino) == (
-            worker_identity.st_dev,
-            worker_identity.st_ino,
-        ):
+        identities = {
+            (api_identity.st_dev, api_identity.st_ino),
+            (migrate_identity.st_dev, migrate_identity.st_ino),
+            (worker_identity.st_dev, worker_identity.st_ino),
+        }
+        if len(identities) != 3:
             raise DevInitError(
                 "development secret projections must be physically distinct"
             )
         _prepare_projection_directory(api)
+        _prepare_projection_directory(migrate)
         _prepare_projection_directory(worker)
         admin_key = _admin_credential(api)
         worker_token = _worker_credential(worker)
         _clear_projection(api)
+        _clear_projection(migrate)
         _clear_projection(worker)
         for name, content in (
             ("database-url", database_url),
@@ -670,15 +687,19 @@ def stage_runtime_secrets(source: Path, api_root: Path, worker_root: Path) -> No
             ("admin-grant-private-key", admin_key),
         ):
             _write_projection_secret(api, name, content)
+        _write_projection_secret(migrate, "database-url", database_url)
         for name, content in (
             ("database-url", database_url),
             ("worker-api-token", worker_token),
         ):
             _write_projection_secret(worker, name, content)
         _seal_projection(api)
+        _seal_projection(migrate)
         _seal_projection(worker)
     finally:
         os.close(api)
+        if migrate >= 0:
+            os.close(migrate)
         if worker >= 0:
             os.close(worker)
 
@@ -785,6 +806,7 @@ def main() -> int:
     expected_commit = _required_environment("VONK_DEV_EXPECTED_COMMIT")
     secret_source = Path(_required_environment("VONK_DEV_SECRET_SOURCE_ROOT"))
     api_secret_root = Path(_required_environment("VONK_DEV_API_SECRET_ROOT"))
+    migrate_secret_root = Path(_required_environment("VONK_DEV_MIGRATE_SECRET_ROOT"))
     worker_secret_root = Path(_required_environment("VONK_DEV_WORKER_SECRET_ROOT"))
     api_image = _required_image_environment("VONK_DEV_API_IMAGE")
     worker_image = _required_image_environment("VONK_DEV_WORKER_IMAGE")
@@ -796,6 +818,7 @@ def main() -> int:
     stage_runtime_secrets(
         secret_source,
         api_secret_root,
+        migrate_secret_root,
         worker_secret_root,
     )
     identity_root = Path(os.environ.get("VONK_CONTROL_IDENTITY_ROOT", "/control-identity"))

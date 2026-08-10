@@ -51,7 +51,8 @@ services:
         command.upgrade(config, 'head')
     environment:
       VONK_DEPLOYMENT_MODE: development
-    secrets: [database-url]
+    volumes:
+      - dev-migrate-secrets:/run/secrets:ro
     depends_on:
       postgres: {condition: service_healthy}
       dev-init: {condition: service_completed_successfully}
@@ -71,6 +72,7 @@ services:
       VONK_DEV_API_SECRET_ROOT: /api-secrets
       VONK_DEV_EXPECTED_COMMIT: "${VONK_DEV_EXPECTED_COMMIT:?run scripts/dev-compose first}"
       VONK_DEV_LOCAL_ACCEPTANCE: "1"
+      VONK_DEV_MIGRATE_SECRET_ROOT: /migrate-secrets
       VONK_DEV_REPOSITORY_URL: file:///source-origin
       VONK_DEV_SECRET_SOURCE_ROOT: /host-secrets
       VONK_DEV_WORKER_SECRET_ROOT: /worker-secrets
@@ -83,6 +85,7 @@ services:
       - ${VONK_DEV_ORIGIN_DIR:?internal wrapper}:/source-origin:ro
       - dev-repository:/repository
       - dev-api-secrets:/api-secrets
+      - dev-migrate-secrets:/migrate-secrets
       - dev-worker-secrets:/worker-secrets
       - dev-control-identity:/control-identity
       - dev-control-state:/state
@@ -176,4 +179,5 @@ volumes:
   dev-supervisor-state: {}
   dev-repository: {}
   dev-api-secrets: {}
+  dev-migrate-secrets: {}
   dev-worker-secrets: {}
