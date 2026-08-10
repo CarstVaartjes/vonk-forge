@@ -81,6 +81,7 @@ def _copy(tmp_path: Path) -> Path:
         "scripts/dev-image-acceptance",
         "scripts/dev-image-metadata",
         "scripts/promote-image-aliases",
+        "scripts/verify-release-tag-authority",
         "scripts/render-dev-compose",
         "scripts/render-production-compose",
         "scripts/platform-release-authority",

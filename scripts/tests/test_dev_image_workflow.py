@@ -325,6 +325,8 @@ def test_workflow_is_main_only_publication_without_repository_secrets() -> None:
     assert text.count("${{ secrets.") == 1
     assert "refs/remotes/origin/main" in _step(text, "Verify exact main tip")
     assert '"$GITHUB_REF" "$GITHUB_SHA"' in _step(text, "Verify exact main tip")
+    checkout = _step(text, "Check out full main history")
+    assert "persist-credentials: false" in checkout
 
 
 def test_workflow_builds_scans_and_accepts_oci_archives_before_login() -> None:
