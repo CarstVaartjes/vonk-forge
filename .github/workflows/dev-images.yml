@@ -231,7 +231,7 @@ jobs:
               skopeo copy --all --preserve-digests \
                 --digestfile "$digest_file" \
                 "oci-archive:$archive" \
-                "docker://$image:${IMMUTABLE_TAG}"
+                "docker://$image:${IMMUTABLE_TAG}" >&2
               pushed=$(tr -d '\r\n' < "$digest_file")
               if [[ "$pushed" != "$expected" ]]; then
                 echo "immutable $role image digest changed during publication" >&2

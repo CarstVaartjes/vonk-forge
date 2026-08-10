@@ -5,6 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github/workflows/ci.yml"
+DEV_WORKFLOW = ROOT / ".github/workflows/dev-images.yml"
 APT_WORKFLOW = ROOT / ".github/actions/agent-apt-publish/action.yml"
 ALLOWED_SIGNERS = ROOT / ".github/release-allowed-signers"
 
@@ -57,6 +58,18 @@ def step_block(job_name: str, step_name: str, key: str) -> list[str]:
     return block_lines
 
 
+def development_step_run(step_name: str) -> str:
+    lines = DEV_WORKFLOW.read_text().splitlines()
+    step_start = lines.index(f"      - name: {step_name}")
+    run_start = lines.index("        run: |", step_start) + 1
+    run_lines: list[str] = []
+    for line in lines[run_start:]:
+        if line and not line.startswith("          "):
+            break
+        run_lines.append(line[10:] if line else "")
+    return "\n".join(run_lines)
+
+
 def release_expressions() -> dict[str, str]:
     digest = f"sha256:{'a' * 64}"
     return {
@@ -69,6 +82,81 @@ def release_expressions() -> dict[str, str]:
         "${{ needs.publish-images.outputs.worker_digest }}": digest,
         "${{ needs.publish-images.outputs.hermes_digest }}": digest,
     }
+
+
+def test_development_image_publication_keeps_copy_progress_out_of_outputs(
+    tmp_path: Path,
+) -> None:
+    digest = f"sha256:{'a' * 64}"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    skopeo = fake_bin / "skopeo"
+    skopeo.write_text(
+        f"""#!/usr/bin/env bash
+set -euo pipefail
+command=$1
+shift
+case "$command" in
+  inspect)
+    if [[ "${{1:-}}" == --raw ]]; then
+      printf '{{"schemaVersion":2}}\\n'
+      exit 0
+    fi
+    printf 'manifest unknown\\n' >&2
+    exit 1
+    ;;
+  manifest-digest)
+    printf '%s\\n' '{digest}'
+    ;;
+  copy)
+    digest_file=
+    while (( $# )); do
+      if [[ "$1" == --digestfile ]]; then
+        digest_file=$2
+        shift 2
+      else
+        shift
+      fi
+    done
+    printf 'Copying 2 images generated from 2 images in list\\n'
+    printf '%s\\n' '{digest}' > "$digest_file"
+    ;;
+  *)
+    exit 64
+    ;;
+esac
+"""
+    )
+    skopeo.chmod(0o755)
+    output = tmp_path / "github-output"
+    accepted = tmp_path / "accepted"
+    accepted.mkdir()
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            development_step_run("Publish immutable tested images"),
+        ],
+        cwd=ROOT,
+        env={
+            **os.environ,
+            "API_IMAGE": "ghcr.io/example/api",
+            "GITHUB_OUTPUT": str(output),
+            "IMMUTABLE_TAG": "dev-sha-" + "b" * 40,
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+            "RUNNER_TEMP": str(tmp_path),
+            "WORKER_IMAGE": "ghcr.io/example/worker",
+        },
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert output.read_text().splitlines() == [
+        f"api_digest={digest}",
+        f"worker_digest={digest}",
+    ]
 
 
 def rendered_step_run(job_name: str, step_name: str) -> str:
