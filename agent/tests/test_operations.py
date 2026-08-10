@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
-from vonk_agent.deadlines import MonotonicDeadline
+from vonk_agent.deadlines import DeadlineBindingError, MonotonicDeadline
 from vonk_agent.operations import (
     InspectionDisposition,
     OperationContext,
@@ -136,6 +136,16 @@ def claim(
         payload=body,
         deadline=deadline or datetime.now(UTC) + timedelta(minutes=1),
     )
+
+
+def _reject_deadline_binding(monkeypatch: pytest.MonkeyPatch) -> None:
+    def reject(
+        _cls: type[MonotonicDeadline],
+        _value: datetime | MonotonicDeadline,
+    ) -> MonotonicDeadline:
+        raise DeadlineBindingError("deadline has elapsed")
+
+    monkeypatch.setattr(MonotonicDeadline, "bind", classmethod(reject))
 
 
 class NeverProbe:
@@ -547,16 +557,18 @@ def test_success_is_canonical_persisted_and_replayed_without_recollection(tmp_pa
     assert probe.deadlines[0].wall_deadline == request.deadline
 
 
-def test_terminal_result_replays_after_deadline_without_local_execution(tmp_path) -> None:
+def test_terminal_result_replays_after_deadline_without_local_execution(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     probe = RecordingProbe()
     operation_context = OperationContext(
         node_id=NODE_ID,
         state=AgentStateStore(tmp_path / "state"),
         probe=probe,
     )
-    request = claim(deadline=datetime.now(UTC) + timedelta(milliseconds=30))
+    request = claim()
     first = OperationRegistry().execute(request, operation_context)
-    time.sleep(0.04)
+    _reject_deadline_binding(monkeypatch)
 
     replay = OperationRegistry().execute(request, operation_context)
 
@@ -565,11 +577,11 @@ def test_terminal_result_replays_after_deadline_without_local_execution(tmp_path
     assert len(probe.deadlines) == 1
 
 def test_acknowledged_terminal_result_inspects_and_replays_after_restart_and_expiry(
-    tmp_path,
+    tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     state_root = tmp_path / "state"
     probe = RecordingProbe()
-    request = claim(deadline=datetime.now(UTC) + timedelta(milliseconds=30))
+    request = claim()
     first_context = OperationContext(
         node_id=NODE_ID,
         state=AgentStateStore(state_root),
@@ -577,7 +589,7 @@ def test_acknowledged_terminal_result_inspects_and_replays_after_restart_and_exp
     )
     first = OperationRegistry().execute(request, first_context)
     first_context.state.acknowledge(first.result)
-    time.sleep(0.04)
+    _reject_deadline_binding(monkeypatch)
     restarted = OperationContext(
         node_id=NODE_ID,
         state=AgentStateStore(state_root),
