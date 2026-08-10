@@ -231,6 +231,130 @@ def test_image_template_uses_the_database_only_migration_projection() -> None:
     )
 
 
+def test_image_template_gates_mutation_on_one_ordered_fail_closed_cohort() -> None:
+    rendered = _rendered_image_template()
+    services = rendered["services"]
+    gate_names = (
+        "dev-cohort-reset",
+        "dev-api-cohort",
+        "dev-worker-cohort",
+        "dev-cohort-verify",
+    )
+
+    assert services["dev-cohort-reset"]["user"] == "0:0"
+    assert services["dev-api-cohort"]["user"] == "10001:10001"
+    assert services["dev-worker-cohort"]["user"] == "10001:10001"
+    assert services["dev-cohort-verify"]["user"] == "10001:10001"
+    assert services["dev-api-cohort"]["depends_on"] == {
+        "dev-cohort-reset": {
+            "condition": "service_completed_successfully",
+            "required": True,
+        }
+    }
+    assert services["dev-worker-cohort"]["depends_on"] == {
+        "dev-api-cohort": {
+            "condition": "service_completed_successfully",
+            "required": True,
+        }
+    }
+    assert services["dev-cohort-verify"]["depends_on"] == {
+        "dev-worker-cohort": {
+            "condition": "service_completed_successfully",
+            "required": True,
+        }
+    }
+    for service_name in ("dev-init", "migrate"):
+        assert services[service_name]["depends_on"]["dev-cohort-verify"][
+            "condition"
+        ] == "service_completed_successfully"
+
+    for service_name in gate_names:
+        service = services[service_name]
+        assert service["network_mode"] == "none"
+        assert service.get("secrets", []) == []
+        assert service.get("environment", {}) == {}
+        assert service.get("restart") == "no"
+
+
+def test_image_template_limits_cohort_volume_and_mutable_image_authority() -> None:
+    rendered = _rendered_image_template()
+    services = rendered["services"]
+    gate_names = {
+        "dev-cohort-reset",
+        "dev-api-cohort",
+        "dev-worker-cohort",
+        "dev-cohort-verify",
+    }
+    consumers = {"dev-init", "migrate", "control-api", "control-worker"}
+    api_services = {
+        "dev-cohort-reset",
+        "dev-api-cohort",
+        "dev-cohort-verify",
+        "dev-init",
+        "migrate",
+        "control-api",
+    }
+    worker_services = {"dev-worker-cohort", "control-worker"}
+
+    assert set(rendered["volumes"]) >= {"dev-image-cohort"}
+    cohort_sources = set()
+    forbidden_targets = {
+        "/host-secrets",
+        "/run/secrets",
+        "/repository",
+        "/state",
+        "/control-identity",
+        "/var/run/docker.sock",
+        "/run/docker.sock",
+    }
+    for service_name in gate_names | consumers:
+        cohort = _volumes_by_target(services[service_name])["/cohort"]
+        cohort_sources.add(cohort["source"])
+        assert cohort.get("read_only", False) is (service_name in consumers)
+    assert len(cohort_sources) == 1
+    assert next(iter(cohort_sources)).endswith("dev-image-cohort")
+
+    for service_name in gate_names:
+        volumes = _volumes_by_target(services[service_name])
+        assert set(volumes) == {"/cohort"}
+        assert forbidden_targets.isdisjoint(volumes)
+        assert all("docker.sock" not in volume["source"] for volume in volumes.values())
+
+    for service_name in api_services | worker_services:
+        assert services[service_name]["pull_policy"] == "always"
+    api_image = services["control-api"]["image"]
+    worker_image = services["control-worker"]["image"]
+    assert all(services[name]["image"] == api_image for name in api_services)
+    assert all(services[name]["image"] == worker_image for name in worker_services)
+
+
+def test_image_template_uses_selected_cohort_without_a_mutable_commit_literal() -> None:
+    services = _rendered_image_template()["services"]
+    selected_path = "/cohort/selected.json"
+
+    for service_name in ("dev-init", "migrate", "control-api", "control-worker"):
+        environment = services[service_name]["environment"]
+        assert environment["VONK_DEV_SELECTED_COHORT_FILE"] == selected_path
+        assert "VONK_DEV_EXPECTED_COMMIT" not in environment
+
+    assert services["migrate"]["command"][:6] == [
+        "python",
+        "-m",
+        "vonk_control.dev_cohort",
+        "run-selected",
+        "--role",
+        "api",
+    ]
+    assert services["migrate"]["command"][6] == "--"
+    assert services["postgres"]["image"].startswith("postgres:18.3@sha256:")
+    assert services["postgres"]["secrets"] == [
+        {
+            "source": "postgres-password",
+            "target": "/run/secrets/postgres-password",
+        }
+    ]
+
+
 def _script_repository(tmp_path: Path) -> tuple[Path, Path]:
     repository = tmp_path / "repository"
     local_script = repository / "scripts/dev-compose"

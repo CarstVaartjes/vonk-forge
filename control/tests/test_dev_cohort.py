@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import stat
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from vonk_control import dev_cohort
 from vonk_control.dev_cohort import (
     DEVELOPMENT_IMAGE_IDENTITY_PATH,
     DEVELOPMENT_SOURCE_REPOSITORY,
@@ -380,3 +383,296 @@ def test_selected_cohort_rejects_coordinated_identity_digest_tampering() -> None
 
     with pytest.raises(DevelopmentCohortError, match="selected"):
         SelectedDevelopmentCohort.from_bytes(canonical_json(tampered))
+
+
+def _embedded_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    role: str,
+    source_commit: str = COMMIT,
+) -> Path:
+    path = tmp_path / f"embedded-{role}-{source_commit}.json"
+    path.write_bytes(build_identity(role=role, source_commit=source_commit).to_bytes())
+    path.chmod(0o444)
+    monkeypatch.setattr(dev_cohort, "DEVELOPMENT_IMAGE_IDENTITY_PATH", path)
+    return path
+
+
+def _allow_test_reset(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, int]]:
+    ownership: list[tuple[int, int]] = []
+    monkeypatch.setattr(os, "geteuid", lambda: 0)
+    monkeypatch.setattr(
+        os,
+        "fchown",
+        lambda _descriptor, uid, gid: ownership.append((uid, gid)),
+    )
+    return ownership
+
+
+def test_reset_cohort_root_is_root_only_and_requires_a_normalized_absolute_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "cohort"
+    root.mkdir()
+    monkeypatch.setattr(os, "geteuid", lambda: 10001)
+
+    with pytest.raises(DevelopmentCohortError, match="root"):
+        dev_cohort.reset_cohort_root(root)
+
+    _allow_test_reset(monkeypatch)
+    with pytest.raises(DevelopmentCohortError, match="absolute"):
+        dev_cohort.reset_cohort_root(Path("cohort"))
+    with pytest.raises(DevelopmentCohortError, match="normalized"):
+        dev_cohort.reset_cohort_root(Path(f"{root}/../cohort"))
+
+
+def test_reset_cohort_root_clears_only_safe_lifecycle_files_and_sets_ownership(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "cohort"
+    root.mkdir(mode=0o755)
+    for name in ("api.json", "worker.json", "selected.json"):
+        (root / name).write_text("old\n", encoding="utf-8")
+    ownership = _allow_test_reset(monkeypatch)
+
+    dev_cohort.reset_cohort_root(root)
+
+    assert list(root.iterdir()) == []
+    assert stat.S_IMODE(root.stat().st_mode) == 0o700
+    assert ownership == [(10001, 10001)]
+
+
+@pytest.mark.parametrize("unsafe_kind", ("symlink", "directory", "unexpected"))
+def test_reset_cohort_root_rejects_unsafe_volume_contents_without_following_them(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    unsafe_kind: str,
+) -> None:
+    root = tmp_path / "cohort"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.write_text("preserve\n", encoding="utf-8")
+    if unsafe_kind == "symlink":
+        (root / "api.json").symlink_to(outside)
+    elif unsafe_kind == "directory":
+        (root / "selected.json").mkdir()
+    else:
+        (root / "operator-owned").write_text("preserve\n", encoding="utf-8")
+    _allow_test_reset(monkeypatch)
+
+    with pytest.raises(DevelopmentCohortError, match="unsafe"):
+        dev_cohort.reset_cohort_root(root)
+
+    assert outside.read_text(encoding="utf-8") == "preserve\n"
+    assert len(list(root.iterdir())) == 1
+
+
+def test_reset_cohort_root_rejects_symlink_traversal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    actual = tmp_path / "actual"
+    actual.mkdir()
+    link = tmp_path / "cohort"
+    link.symlink_to(actual, target_is_directory=True)
+    _allow_test_reset(monkeypatch)
+
+    with pytest.raises(DevelopmentCohortError, match="unsafe"):
+        dev_cohort.reset_cohort_root(link)
+
+
+def test_report_identity_publishes_only_the_verified_role_and_refuses_replacement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "cohort"
+    root.mkdir(mode=0o700)
+    identity_path = _embedded_identity(monkeypatch, tmp_path, role="api")
+
+    reported = dev_cohort.report_identity(root, "api")
+
+    target = root / "api.json"
+    assert reported == read_identity(identity_path, expected_role="api")
+    assert target.read_bytes() == identity_path.read_bytes()
+    assert stat.S_IMODE(target.stat().st_mode) == 0o444
+    assert {path.name for path in root.iterdir()} == {"api.json"}
+    with pytest.raises(DevelopmentCohortError, match="exists"):
+        dev_cohort.report_identity(root, "api")
+
+    target.unlink()
+    outside = tmp_path / "outside-report"
+    outside.write_text("preserve\n", encoding="utf-8")
+    target.symlink_to(outside)
+    with pytest.raises(DevelopmentCohortError, match="exists"):
+        dev_cohort.report_identity(root, "api")
+    assert outside.read_text(encoding="utf-8") == "preserve\n"
+
+
+def test_report_identity_rejects_an_embedded_identity_for_another_role(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "cohort"
+    root.mkdir(mode=0o700)
+    _embedded_identity(monkeypatch, tmp_path, role="worker")
+
+    with pytest.raises(DevelopmentCohortError, match="role"):
+        dev_cohort.report_identity(root, "api")
+    assert list(root.iterdir()) == []
+
+
+def _write_report(root: Path, role: str, source_commit: str = COMMIT) -> None:
+    path = root / f"{role}.json"
+    path.write_bytes(build_identity(role=role, source_commit=source_commit).to_bytes())
+    path.chmod(0o444)
+
+
+def test_select_cohort_requires_exact_reports_and_atomically_publishes_read_only_selection(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "cohort"
+    root.mkdir(mode=0o700)
+    _write_report(root, "api")
+    _write_report(root, "worker")
+
+    selected = dev_cohort.select_cohort(root)
+
+    target = root / "selected.json"
+    assert target.read_bytes() == selected.to_bytes()
+    assert stat.S_IMODE(target.stat().st_mode) == 0o444
+    assert {path.name for path in root.iterdir()} == {
+        "api.json",
+        "worker.json",
+        "selected.json",
+    }
+
+
+@pytest.mark.parametrize("failure", ("missing", "extra", "symlink", "oversized"))
+def test_select_cohort_rejects_incomplete_or_unsafe_report_sets(
+    tmp_path: Path, failure: str
+) -> None:
+    root = tmp_path / "cohort"
+    root.mkdir(mode=0o700)
+    _write_report(root, "api")
+    _write_report(root, "worker")
+    if failure == "missing":
+        (root / "worker.json").unlink()
+    elif failure == "extra":
+        (root / "unexpected.json").write_text("{}\n", encoding="utf-8")
+    elif failure == "symlink":
+        (root / "worker.json").unlink()
+        (root / "worker.json").symlink_to(root / "api.json")
+    else:
+        (root / "worker.json").chmod(0o644)
+        (root / "worker.json").write_bytes(b"x" * (64 * 1024 + 1))
+
+    with pytest.raises(DevelopmentCohortError):
+        dev_cohort.select_cohort(root)
+    assert not (root / "selected.json").exists()
+
+
+def test_select_cohort_rejects_a_report_that_changes_while_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "cohort"
+    root.mkdir(mode=0o700)
+    _write_report(root, "api")
+    _write_report(root, "worker")
+    (root / "api.json").chmod(0o644)
+    real_read = os.read
+    changed = False
+
+    def changing_read(descriptor: int, size: int) -> bytes:
+        nonlocal changed
+        chunk = real_read(descriptor, size)
+        if chunk and not changed:
+            changed = True
+            with (root / "api.json").open("ab") as stream:
+                stream.write(b"x")
+        return chunk
+
+    monkeypatch.setattr(os, "read", changing_read)
+
+    with pytest.raises(DevelopmentCohortError, match="changed"):
+        dev_cohort.select_cohort(root)
+    assert not (root / "selected.json").exists()
+
+
+def test_require_selected_cohort_binds_selection_to_the_current_image(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "cohort"
+    root.mkdir(mode=0o700)
+    _write_report(root, "api")
+    _write_report(root, "worker")
+    selected = dev_cohort.select_cohort(root)
+    _embedded_identity(monkeypatch, tmp_path, role="api")
+
+    assert dev_cohort.require_selected_cohort(root / "selected.json", "api") == selected
+
+    _embedded_identity(
+        monkeypatch,
+        tmp_path,
+        role="api",
+        source_commit=OTHER_COMMIT,
+    )
+    with pytest.raises(DevelopmentCohortError, match="current image"):
+        dev_cohort.require_selected_cohort(root / "selected.json", "api")
+
+
+def test_run_selected_cli_executes_only_after_current_image_verification(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "cohort"
+    root.mkdir(mode=0o700)
+    _write_report(root, "api")
+    _write_report(root, "worker")
+    dev_cohort.select_cohort(root)
+    monkeypatch.setenv("VONK_DEV_SELECTED_COHORT_FILE", str(root / "selected.json"))
+    executed: list[tuple[str, list[str]]] = []
+
+    def capture_exec(file: str, arguments: list[str]) -> None:
+        executed.append((file, arguments))
+        raise RuntimeError("process replacement captured")
+
+    monkeypatch.setattr(os, "execvp", capture_exec)
+    _embedded_identity(
+        monkeypatch,
+        tmp_path,
+        role="api",
+        source_commit=OTHER_COMMIT,
+    )
+    with pytest.raises(DevelopmentCohortError, match="current image"):
+        dev_cohort.main(["run-selected", "--role", "api", "--", "echo", "ready"])
+    assert executed == []
+
+    _embedded_identity(monkeypatch, tmp_path, role="api")
+    with pytest.raises(RuntimeError, match="captured"):
+        dev_cohort.main(["run-selected", "--role", "api", "--", "echo", "ready"])
+    assert executed == [("echo", ["echo", "ready"])]
+
+
+def test_cli_exposes_build_reset_report_and_verify_lifecycle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsysbinary: pytest.CaptureFixture[bytes],
+) -> None:
+    assert (
+        dev_cohort.main(
+            ["build-identity", "--role", "api", "--source-commit", COMMIT]
+        )
+        == 0
+    )
+    assert capsysbinary.readouterr().out == build_identity(
+        role="api", source_commit=COMMIT
+    ).to_bytes()
+
+    root = tmp_path / "cohort"
+    root.mkdir()
+    _allow_test_reset(monkeypatch)
+    assert dev_cohort.main(["reset", str(root)]) == 0
+
+    _embedded_identity(monkeypatch, tmp_path, role="api")
+    assert dev_cohort.main(["report", str(root), "--role", "api"]) == 0
+    _embedded_identity(monkeypatch, tmp_path, role="worker")
+    assert dev_cohort.main(["report", str(root), "--role", "worker"]) == 0
+    assert dev_cohort.main(["verify", str(root)]) == 0
+    assert (root / "selected.json").is_file()

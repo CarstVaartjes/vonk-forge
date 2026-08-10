@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import os
 import re
+import secrets
 import stat
+import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Sequence
 
 DEVELOPMENT_IMAGE_IDENTITY_PATH = Path(
     "/usr/local/share/vonk-forge/development-image-identity.json"
@@ -73,6 +77,16 @@ _REVISION = re.compile(r"[0-9]{4}_[a-z0-9_]+\Z")
 _GENERATION_ID = re.compile(r"dev-[0-9a-f]{24}\Z")
 _NONCE = re.compile(r"[0-9a-f]{64}\Z")
 _MAX_JSON_BYTES = 16 * 1024
+_MAX_COHORT_FILE_BYTES = 64 * 1024
+_COHORT_ROLES = frozenset({"api", "worker"})
+_COHORT_LIFECYCLE_FILES = frozenset({"api.json", "worker.json", "selected.json"})
+_COHORT_TEMPORARY_FILE = re.compile(
+    r"\.(api|worker|selected)\.json\.[0-9a-f]{32}\.tmp\Z"
+)
+_COHORT_UID = 10001
+_COHORT_GID = 10001
+_DIRECTORY_MODE = 0o700
+_PUBLISHED_MODE = 0o444
 
 
 class DevelopmentCohortError(ValueError):
@@ -359,11 +373,64 @@ def build_identity(*, role: str, source_commit: str) -> DevelopmentImageIdentity
     )
 
 
-def _read_stable_regular_file(path: Path, *, label: str) -> bytes:
+def _normalized_absolute_path(path: Path, *, label: str) -> str:
+    value = os.fspath(path)
+    if not isinstance(value, str) or not os.path.isabs(value):
+        raise DevelopmentCohortError(f"development {label} path must be absolute")
+    if os.path.normpath(value) != value:
+        raise DevelopmentCohortError(f"development {label} path must be normalized")
+    return value
+
+
+def _open_absolute_directory(path: Path, *, label: str) -> int:
+    value = _normalized_absolute_path(path, label=label)
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    descriptor = -1
+    try:
+        descriptor = os.open("/", flags)
+        for component in Path(value).parts[1:]:
+            next_descriptor = os.open(component, flags, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = next_descriptor
+        return descriptor
+    except OSError as error:
+        if descriptor >= 0:
+            os.close(descriptor)
+        raise DevelopmentCohortError(
+            f"development {label} directory is unsafe"
+        ) from error
+
+
+def _open_parent(path: Path, *, label: str) -> tuple[int, str]:
+    value = _normalized_absolute_path(path, label=label)
+    parent, name = os.path.split(value)
+    if not name or name in {".", ".."}:
+        raise DevelopmentCohortError(f"development {label} path is unsafe")
+    return _open_absolute_directory(Path(parent), label=label), name
+
+
+def _stable_file_fingerprint(metadata: os.stat_result) -> tuple[int, ...]:
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_mode,
+        metadata.st_uid,
+        metadata.st_gid,
+        metadata.st_nlink,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+        metadata.st_ctime_ns,
+    )
+
+
+def _read_stable_regular_file_at(
+    directory_descriptor: int, name: str, *, label: str
+) -> bytes:
     try:
         descriptor = os.open(
-            path,
+            name,
             os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC,
+            dir_fd=directory_descriptor,
         )
     except OSError as error:
         raise DevelopmentCohortError(f"development {label} identity source is unsafe") from error
@@ -372,42 +439,24 @@ def _read_stable_regular_file(path: Path, *, label: str) -> bytes:
         if (
             not stat.S_ISREG(before.st_mode)
             or before.st_nlink != 1
-            or not 0 < before.st_size <= _MAX_JSON_BYTES
+            or not 0 < before.st_size <= _MAX_COHORT_FILE_BYTES
         ):
             raise DevelopmentCohortError(
                 f"development {label} identity source is unsafe"
             )
         content = bytearray()
-        while len(content) <= _MAX_JSON_BYTES:
+        while len(content) <= _MAX_COHORT_FILE_BYTES:
             chunk = os.read(
                 descriptor,
-                min(4096, _MAX_JSON_BYTES + 1 - len(content)),
+                min(4096, _MAX_COHORT_FILE_BYTES + 1 - len(content)),
             )
             if not chunk:
                 break
             content.extend(chunk)
         after = os.fstat(descriptor)
-        if len(content) != before.st_size or (
-            before.st_dev,
-            before.st_ino,
-            before.st_mode,
-            before.st_uid,
-            before.st_gid,
-            before.st_nlink,
-            before.st_size,
-            before.st_mtime_ns,
-            before.st_ctime_ns,
-        ) != (
-            after.st_dev,
-            after.st_ino,
-            after.st_mode,
-            after.st_uid,
-            after.st_gid,
-            after.st_nlink,
-            after.st_size,
-            after.st_mtime_ns,
-            after.st_ctime_ns,
-        ):
+        if len(content) != before.st_size or _stable_file_fingerprint(
+            before
+        ) != _stable_file_fingerprint(after):
             raise DevelopmentCohortError(
                 f"development {label} identity changed while read"
             )
@@ -418,6 +467,18 @@ def _read_stable_regular_file(path: Path, *, label: str) -> bytes:
         ) from error
     finally:
         os.close(descriptor)
+
+
+def _read_stable_regular_file(path: Path, *, label: str) -> bytes:
+    directory_descriptor, name = _open_parent(path, label=label)
+    try:
+        return _read_stable_regular_file_at(
+            directory_descriptor,
+            name,
+            label=label,
+        )
+    finally:
+        os.close(directory_descriptor)
 
 
 def read_identity(path: Path, *, expected_role: str) -> DevelopmentImageIdentity:
@@ -604,3 +665,345 @@ def verify_cohort(
         generation_id="dev-" + generation_hash[:24],
         start_nonce=_start_nonce(generation_hash),
     )
+
+
+def _cohort_root_descriptor(root: Path) -> int:
+    return _open_absolute_directory(Path(root), label="cohort")
+
+
+def _validate_role(role: str) -> str:
+    if role not in _COHORT_ROLES:
+        raise DevelopmentCohortError("development cohort role is invalid")
+    return role
+
+
+def _entry_metadata(directory_descriptor: int, name: str) -> os.stat_result | None:
+    try:
+        return os.stat(name, dir_fd=directory_descriptor, follow_symlinks=False)
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        raise DevelopmentCohortError("development cohort entry is unsafe") from error
+
+
+def reset_cohort_root(path: Path) -> None:
+    """Clear a dedicated cohort volume and give it to the unprivileged jobs."""
+    if os.geteuid() != 0:
+        raise DevelopmentCohortError("development cohort reset requires root")
+    root = Path(path)
+    _normalized_absolute_path(root, label="cohort")
+    descriptor = _cohort_root_descriptor(root)
+    try:
+        names = os.listdir(descriptor)
+        metadata: dict[str, os.stat_result] = {}
+        for name in names:
+            if (
+                name not in _COHORT_LIFECYCLE_FILES
+                and _COHORT_TEMPORARY_FILE.fullmatch(name) is None
+            ):
+                raise DevelopmentCohortError(
+                    "development cohort volume contains unsafe entries"
+                )
+            entry = _entry_metadata(descriptor, name)
+            if entry is None or not stat.S_ISREG(entry.st_mode) or entry.st_nlink != 1:
+                raise DevelopmentCohortError(
+                    "development cohort volume contains unsafe entries"
+                )
+            metadata[name] = entry
+
+        for name, expected in metadata.items():
+            current = _entry_metadata(descriptor, name)
+            if current is None or _stable_file_fingerprint(
+                current
+            ) != _stable_file_fingerprint(expected):
+                raise DevelopmentCohortError(
+                    "development cohort volume changed during reset"
+                )
+            os.unlink(name, dir_fd=descriptor)
+        os.fchown(descriptor, _COHORT_UID, _COHORT_GID)
+        os.fchmod(descriptor, _DIRECTORY_MODE)
+        os.fsync(descriptor)
+    except DevelopmentCohortError:
+        raise
+    except OSError as error:
+        raise DevelopmentCohortError("development cohort reset failed") from error
+    finally:
+        os.close(descriptor)
+
+
+def _write_all(descriptor: int, content: bytes) -> None:
+    written = 0
+    while written < len(content):
+        count = os.write(descriptor, content[written:])
+        if count <= 0:
+            raise OSError("short cohort file write")
+        written += count
+
+
+def _unlink_if_same(
+    directory_descriptor: int,
+    name: str,
+    expected: os.stat_result,
+) -> None:
+    current = _entry_metadata(directory_descriptor, name)
+    if current is not None and _stable_file_fingerprint(
+        current
+    ) == _stable_file_fingerprint(expected):
+        os.unlink(name, dir_fd=directory_descriptor)
+
+
+def _publish_new_file(
+    directory_descriptor: int,
+    name: str,
+    content: bytes,
+    *,
+    label: str,
+) -> None:
+    if not 0 < len(content) <= _MAX_COHORT_FILE_BYTES:
+        raise DevelopmentCohortError(f"development {label} size is invalid")
+    temporary_name = f".{name}.{secrets.token_hex(16)}.tmp"
+    reservation_descriptor = -1
+    temporary_descriptor = -1
+    reservation: os.stat_result | None = None
+    try:
+        reservation_descriptor = os.open(
+            name,
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_EXCL
+            | os.O_NOFOLLOW
+            | os.O_CLOEXEC,
+            0,
+            dir_fd=directory_descriptor,
+        )
+        reservation = os.fstat(reservation_descriptor)
+        os.close(reservation_descriptor)
+        reservation_descriptor = -1
+
+        temporary_descriptor = os.open(
+            temporary_name,
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_EXCL
+            | os.O_NOFOLLOW
+            | os.O_CLOEXEC,
+            0o600,
+            dir_fd=directory_descriptor,
+        )
+        _write_all(temporary_descriptor, content)
+        os.fchmod(temporary_descriptor, _PUBLISHED_MODE)
+        os.fsync(temporary_descriptor)
+        temporary_metadata = os.fstat(temporary_descriptor)
+        if (
+            not stat.S_ISREG(temporary_metadata.st_mode)
+            or temporary_metadata.st_nlink != 1
+            or temporary_metadata.st_size != len(content)
+            or stat.S_IMODE(temporary_metadata.st_mode) != _PUBLISHED_MODE
+        ):
+            raise DevelopmentCohortError(
+                f"development {label} temporary file is unsafe"
+            )
+        os.close(temporary_descriptor)
+        temporary_descriptor = -1
+
+        current_reservation = _entry_metadata(directory_descriptor, name)
+        if (
+            reservation is None
+            or current_reservation is None
+            or _stable_file_fingerprint(current_reservation)
+            != _stable_file_fingerprint(reservation)
+        ):
+            raise DevelopmentCohortError(
+                f"development {label} destination changed"
+            )
+        os.replace(
+            temporary_name,
+            name,
+            src_dir_fd=directory_descriptor,
+            dst_dir_fd=directory_descriptor,
+        )
+        os.fsync(directory_descriptor)
+        published = _entry_metadata(directory_descriptor, name)
+        if (
+            published is None
+            or not stat.S_ISREG(published.st_mode)
+            or published.st_nlink != 1
+            or published.st_size != len(content)
+            or stat.S_IMODE(published.st_mode) != _PUBLISHED_MODE
+        ):
+            raise DevelopmentCohortError(
+                f"development {label} publication is unsafe"
+            )
+    except FileExistsError as error:
+        raise DevelopmentCohortError(
+            f"development {label} destination already exists"
+        ) from error
+    except DevelopmentCohortError:
+        raise
+    except OSError as error:
+        raise DevelopmentCohortError(f"development {label} cannot be written") from error
+    finally:
+        if reservation_descriptor >= 0:
+            os.close(reservation_descriptor)
+        if temporary_descriptor >= 0:
+            os.close(temporary_descriptor)
+        temporary = _entry_metadata(directory_descriptor, temporary_name)
+        if temporary is not None and stat.S_ISREG(temporary.st_mode):
+            _unlink_if_same(directory_descriptor, temporary_name, temporary)
+        if reservation is not None:
+            _unlink_if_same(directory_descriptor, name, reservation)
+
+
+def report_identity(root: Path, role: str) -> DevelopmentImageIdentity:
+    """Publish this image's fixed embedded identity into the cohort volume."""
+    expected_role = _validate_role(role)
+    identity = read_identity(
+        DEVELOPMENT_IMAGE_IDENTITY_PATH,
+        expected_role=expected_role,
+    )
+    descriptor = _cohort_root_descriptor(Path(root))
+    try:
+        _publish_new_file(
+            descriptor,
+            f"{expected_role}.json",
+            identity.to_bytes(),
+            label=f"{expected_role} report",
+        )
+    finally:
+        os.close(descriptor)
+    return identity
+
+
+def select_cohort(root: Path) -> SelectedDevelopmentCohort:
+    """Verify the exact API/worker report set and publish its selection."""
+    descriptor = _cohort_root_descriptor(Path(root))
+    try:
+        if set(os.listdir(descriptor)) != {"api.json", "worker.json"}:
+            raise DevelopmentCohortError(
+                "development cohort requires exactly api and worker reports"
+            )
+        identities = [
+            DevelopmentImageIdentity.from_bytes(
+                _read_stable_regular_file_at(
+                    descriptor,
+                    f"{role}.json",
+                    label=f"{role} report",
+                ),
+                expected_role=role,
+            )
+            for role in ("api", "worker")
+        ]
+        selected = verify_cohort(identities)
+        if set(os.listdir(descriptor)) != {"api.json", "worker.json"}:
+            raise DevelopmentCohortError(
+                "development cohort changed during verification"
+            )
+        _publish_new_file(
+            descriptor,
+            "selected.json",
+            selected.to_bytes(),
+            label="selected cohort",
+        )
+        return selected
+    finally:
+        os.close(descriptor)
+
+
+def require_selected_cohort(
+    path: Path, role: str
+) -> SelectedDevelopmentCohort:
+    """Require a selected cohort to contain this image's embedded identity."""
+    expected_role = _validate_role(role)
+    selected = SelectedDevelopmentCohort.from_bytes(
+        _read_stable_regular_file(Path(path), label="selected cohort")
+    )
+    current = read_identity(
+        DEVELOPMENT_IMAGE_IDENTITY_PATH,
+        expected_role=expected_role,
+    )
+    expected = _identity_from_common(
+        selected.common_document(),
+        image_role=expected_role,
+    )
+    expected_digest = (
+        selected.api_identity_digest
+        if expected_role == "api"
+        else selected.worker_identity_digest
+    )
+    if current != expected or current.identity_digest != expected_digest:
+        raise DevelopmentCohortError(
+            "development selected cohort does not match the current image"
+        )
+    return selected
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Verify mutable development image cohorts"
+    )
+    commands = parser.add_subparsers(dest="command_name", required=True)
+
+    identity = commands.add_parser("build-identity")
+    identity.add_argument("--role", choices=sorted(_COHORT_ROLES), required=True)
+    identity.add_argument("--source-commit", required=True)
+
+    reset = commands.add_parser("reset")
+    reset.add_argument("root", nargs="?", type=Path, default=Path("/cohort"))
+
+    report = commands.add_parser("report")
+    report.add_argument("root", nargs="?", type=Path, default=Path("/cohort"))
+    report.add_argument("--role", choices=sorted(_COHORT_ROLES), required=True)
+
+    verify = commands.add_parser("verify")
+    verify.add_argument("root", nargs="?", type=Path, default=Path("/cohort"))
+
+    run = commands.add_parser("run-selected")
+    run.add_argument("--role", choices=sorted(_COHORT_ROLES), required=True)
+    run.add_argument("program", nargs=argparse.REMAINDER)
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    arguments = _parser().parse_args(argv)
+    if arguments.command_name == "build-identity":
+        sys.stdout.buffer.write(
+            build_identity(
+                role=arguments.role,
+                source_commit=arguments.source_commit,
+            ).to_bytes()
+        )
+        sys.stdout.buffer.flush()
+        return 0
+    if arguments.command_name == "reset":
+        reset_cohort_root(arguments.root)
+        return 0
+    if arguments.command_name == "report":
+        report_identity(arguments.root, arguments.role)
+        return 0
+    if arguments.command_name == "verify":
+        select_cohort(arguments.root)
+        return 0
+    if arguments.command_name == "run-selected":
+        program = list(arguments.program)
+        if program[:1] == ["--"]:
+            program = program[1:]
+        if not program:
+            raise DevelopmentCohortError(
+                "development selected cohort command is required"
+            )
+        selected_path = os.environ.get("VONK_DEV_SELECTED_COHORT_FILE")
+        if not selected_path:
+            raise DevelopmentCohortError(
+                "VONK_DEV_SELECTED_COHORT_FILE is required"
+            )
+        require_selected_cohort(Path(selected_path), arguments.role)
+        os.execvp(program[0], program)
+        raise AssertionError("os.execvp returned unexpectedly")
+    raise AssertionError("unreachable development cohort command")
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except DevelopmentCohortError as error:
+        raise SystemExit(str(error)) from error
