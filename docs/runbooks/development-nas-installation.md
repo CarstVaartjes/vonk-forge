@@ -289,8 +289,9 @@ newer migration. Therefore, roll back only to a commit explicitly documented
 as database-backward-compatible, or restore every stateful volume and all
 secret files from one matching recovery point. That includes PostgreSQL,
 identity, control state, route publications, supervisor state, repository, and
-the generated API, migration, and worker secret projections. Never treat a
-repository-volume reset as a database or runtime-state rollback.
+the generated API, migration, and worker secret projections.
+Never treat a repository-volume
+reset as a database or runtime-state rollback.
 
 For a documented repository-only rollback, discover the actual volume name
 from the running API before stopping the project. This remains correct if a NAS
