@@ -54,7 +54,7 @@ def local_acceptance(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("VONK_DEV_LOCAL_ACCEPTANCE", "1")
 
 
-def test_initialize_repository_clones_main_at_the_expected_commit(
+def test_initialize_repository_clones_accepted_main_and_checks_out_deploy(
     tmp_path: Path, local_acceptance: None
 ) -> None:
     _origin_path, _publisher, repository_url, expected = _origin(tmp_path)
@@ -63,8 +63,9 @@ def test_initialize_repository_clones_main_at_the_expected_commit(
     initialize_repository(destination, repository_url, expected)
 
     assert _git(destination, "status", "--porcelain=v1", "--untracked-files=all") == ""
-    assert _git(destination, "symbolic-ref", "--short", "HEAD") == "main"
+    assert _git(destination, "symbolic-ref", "--short", "HEAD") == "deploy"
     assert _git(destination, "rev-parse", "main") == expected
+    assert _git(destination, "rev-parse", "deploy") == expected
     assert _git(destination, "remote", "get-url", "origin") == repository_url
 
 
@@ -85,6 +86,8 @@ def test_initialize_repository_clones_into_an_existing_empty_mountpoint(
     initialize_repository(destination, repository_url, expected)
 
     assert _git(destination, "rev-parse", "main") == expected
+    assert _git(destination, "rev-parse", "deploy") == expected
+    assert _git(destination, "symbolic-ref", "--short", "HEAD") == "deploy"
 
 
 def test_all_git_subprocesses_drop_root_credentials_and_use_a_sanitized_environment(
@@ -423,7 +426,7 @@ def test_public_origin_policy_accepts_only_the_canonical_repository_url(
         dev_init._origin_is_allowed("https://github.com/CarstVaartjes/other.git")
 
 
-def test_initialize_repository_fast_forwards_main_and_preserves_other_refs(
+def test_initialize_repository_fast_forwards_accepted_and_deploy_refs_together(
     tmp_path: Path, local_acceptance: None
 ) -> None:
     _origin_path, publisher, repository_url, initial = _origin(tmp_path)
@@ -436,11 +439,41 @@ def test_initialize_repository_fast_forwards_main_and_preserves_other_refs(
     initialize_repository(destination, repository_url, expected)
 
     assert _git(destination, "rev-parse", "main") == expected
+    assert _git(destination, "rev-parse", "deploy") == expected
+    assert _git(destination, "symbolic-ref", "--short", "HEAD") == "deploy"
     assert _git(destination, "rev-parse", "operator-notes") == initial
     assert _git(destination, "status", "--porcelain=v1", "--untracked-files=all") == ""
 
 
-def test_initialize_repository_rejects_changed_origin_dirty_and_non_fast_forward_updates(
+def test_initialize_repository_preserves_clean_local_deploy_commits_across_acceptance(
+    tmp_path: Path, local_acceptance: None
+) -> None:
+    _origin_path, publisher, repository_url, accepted_a = _origin(tmp_path)
+    destination = tmp_path / "repository"
+    initialize_repository(destination, repository_url, accepted_a)
+    _git(destination, "config", "user.email", "operator@example.invalid")
+    _git(destination, "config", "user.name", "Operator")
+    deployed_local = _commit(destination, "local.txt", "signed NAS-local change\n")
+
+    initialize_repository(destination, repository_url, accepted_a)
+
+    assert _git(destination, "rev-parse", "main") == accepted_a
+    assert _git(destination, "rev-parse", "deploy") == deployed_local
+    accepted_b = _commit(publisher, "remote.txt", "next accepted commit\n")
+    _git(publisher, "push", "-q", "origin", "main")
+
+    initialize_repository(destination, repository_url, accepted_b)
+
+    assert _git(destination, "rev-parse", "main") == accepted_b
+    assert _git(destination, "rev-parse", "deploy") == deployed_local
+    assert _git(destination, "symbolic-ref", "--short", "HEAD") == "deploy"
+    assert (destination / "local.txt").read_text(encoding="utf-8") == (
+        "signed NAS-local change\n"
+    )
+    assert _git(destination, "status", "--porcelain=v1", "--untracked-files=all") == ""
+
+
+def test_initialize_repository_rejects_changed_origin_dirty_and_divergent_accepted_main(
     tmp_path: Path, local_acceptance: None
 ) -> None:
     _origin_path, publisher, repository_url, initial = _origin(tmp_path)
@@ -461,8 +494,32 @@ def test_initialize_repository_rejects_changed_origin_dirty_and_non_fast_forward
     _git(publisher, "push", "-q", "origin", "main")
     _git(destination, "config", "user.email", "operator@example.invalid")
     _git(destination, "config", "user.name", "Operator")
-    _commit(destination, "local.txt", "local\n")
-    with pytest.raises(DevInitError, match="fast-forward"):
+    divergent = _commit(destination, "local.txt", "local\n")
+    _git(destination, "update-ref", "refs/heads/main", divergent)
+    with pytest.raises(DevInitError, match="accepted baseline is divergent"):
+        initialize_repository(destination, repository_url, expected)
+
+
+def test_initialize_repository_rejects_deploy_that_does_not_descend_from_accepted_main(
+    tmp_path: Path, local_acceptance: None
+) -> None:
+    _origin_path, publisher, repository_url, accepted = _origin(tmp_path)
+    destination = tmp_path / "repository"
+    initialize_repository(destination, repository_url, accepted)
+    expected = _commit(publisher, "remote.txt", "remote\n")
+    _git(publisher, "push", "-q", "origin", "main")
+    _git(destination, "config", "user.email", "operator@example.invalid")
+    _git(destination, "config", "user.name", "Operator")
+    unrelated = _git(
+        destination,
+        "commit-tree",
+        f"{accepted}^{{tree}}",
+        "-m",
+        "unrelated deployment history",
+    )
+    _git(destination, "update-ref", "refs/heads/deploy", unrelated)
+
+    with pytest.raises(DevInitError, match="deployment branch does not descend"):
         initialize_repository(destination, repository_url, expected)
 
 
@@ -476,7 +533,7 @@ def test_initialize_repository_rejects_a_rollback_commit(
     _git(publisher, "push", "-q", "origin", "main")
     initialize_repository(destination, repository_url, expected)
 
-    with pytest.raises(DevInitError, match="fast-forward"):
+    with pytest.raises(DevInitError, match="accepted baseline is divergent"):
         initialize_repository(destination, repository_url, initial)
 
 

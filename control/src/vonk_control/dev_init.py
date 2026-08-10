@@ -258,10 +258,23 @@ def _initialize_fresh_repository(
     )
     if not _is_ancestor(root, expected_commit, "refs/remotes/origin/main", local_origin=local_origin):
         raise DevInitError("expected development commit is not reachable from origin/main")
+    accepted = _git(
+        root,
+        ("rev-parse", "--verify", "refs/heads/main^{commit}"),
+        action="read development repository main",
+        local_origin=local_origin,
+    )
+    _commit(accepted)
     _git(
         root,
-        ("checkout", "--force", "-B", "main", expected_commit),
-        action="check out development repository main",
+        ("update-ref", "refs/heads/main", expected_commit, accepted),
+        action="compare-and-swap development repository main",
+        local_origin=local_origin,
+    )
+    _git(
+        root,
+        ("checkout", "--force", "-B", "deploy", expected_commit),
+        action="check out development repository deploy",
         local_origin=local_origin,
     )
 
@@ -311,15 +324,22 @@ def _initialize_existing_repository(
         action="read development repository branch",
         local_origin=local_origin,
     )
-    if branch != "main":
-        raise DevInitError("development repository must check out main")
-    current = _git(
+    if branch != "deploy":
+        raise DevInitError("development repository must check out deploy")
+    accepted = _git(
         root,
         ("rev-parse", "--verify", "refs/heads/main^{commit}"),
         action="read development repository main",
         local_origin=local_origin,
     )
-    _commit(current)
+    _commit(accepted)
+    deployed = _git(
+        root,
+        ("rev-parse", "--verify", "refs/heads/deploy^{commit}"),
+        action="read development repository deploy",
+        local_origin=local_origin,
+    )
+    _commit(deployed)
     _git(
         root,
         ("fetch", "--no-tags", "origin", "+refs/heads/main:refs/remotes/origin/main"),
@@ -328,24 +348,36 @@ def _initialize_existing_repository(
     )
     if not _is_ancestor(root, expected_commit, "refs/remotes/origin/main", local_origin=local_origin):
         raise DevInitError("expected development commit is not reachable from origin/main")
-    if not _is_ancestor(root, current, expected_commit, local_origin=local_origin):
-        raise DevInitError("development repository update is not a fast-forward")
+    if not _is_ancestor(root, accepted, expected_commit, local_origin=local_origin):
+        raise DevInitError("development repository accepted baseline is divergent")
+    if not _is_ancestor(root, accepted, deployed, local_origin=local_origin):
+        raise DevInitError(
+            "development repository deployment branch does not descend "
+            "from the accepted baseline"
+        )
     _git(
         root,
-        ("update-ref", "refs/heads/main", expected_commit, current),
+        ("update-ref", "refs/heads/main", expected_commit, accepted),
         action="compare-and-swap development repository main",
         local_origin=local_origin,
     )
-    _git(
-        root,
-        ("reset", "--hard", expected_commit),
-        action="reset development repository worktree",
-        local_origin=local_origin,
-    )
+    if deployed == accepted:
+        _git(
+            root,
+            ("update-ref", "refs/heads/deploy", expected_commit, deployed),
+            action="compare-and-swap development repository deploy",
+            local_origin=local_origin,
+        )
+        _git(
+            root,
+            ("reset", "--hard", expected_commit),
+            action="reset development repository worktree",
+            local_origin=local_origin,
+        )
 
 
 def initialize_repository(root: Path, repository_url: str, expected_commit: str) -> None:
-    """Clone or fast-forward one clean NAS-local checkout of public ``main``."""
+    """Advance accepted ``main`` while preserving one clean local ``deploy``."""
     root = Path(root)
     expected_commit = _commit(expected_commit)
     local_origin = _origin_is_allowed(repository_url)
@@ -375,6 +407,13 @@ def initialize_repository(root: Path, repository_url: str, expected_commit: str)
                 root, repository_url, expected_commit, local_origin=local_origin
             )
         _repository_is_clean(root, local_origin=local_origin)
+        if _git(
+            root,
+            ("symbolic-ref", "--quiet", "--short", "HEAD"),
+            action="verify development repository branch",
+            local_origin=local_origin,
+        ) != "deploy":
+            raise DevInitError("development repository must check out deploy")
         if _git(
             root,
             ("rev-parse", "--verify", "refs/heads/main^{commit}"),
