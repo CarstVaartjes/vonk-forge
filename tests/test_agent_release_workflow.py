@@ -82,8 +82,8 @@ def assert_exact_reusable_output_mappings(text: str) -> None:
     assert build_outputs == EXPECTED_BUILD_OUTPUTS
 
 
-def package_step(step_name: str) -> str:
-    lines = PACKAGE_WORKFLOW.read_text().splitlines()
+def workflow_step(text: str, step_name: str) -> str:
+    lines = text.splitlines()
     step_start = lines.index(f"      - name: {step_name}")
     step_lines: list[str] = []
     for line in lines[step_start:]:
@@ -93,8 +93,8 @@ def package_step(step_name: str) -> str:
     return "\n".join(step_lines)
 
 
-def package_step_run(step_name: str) -> str:
-    lines = PACKAGE_WORKFLOW.read_text().splitlines()
+def workflow_step_run(text: str, step_name: str) -> str:
+    lines = text.splitlines()
     step_start = lines.index(f"      - name: {step_name}")
     run_start = lines.index("        run: |", step_start) + 1
     run_lines: list[str] = []
@@ -103,6 +103,14 @@ def package_step_run(step_name: str) -> str:
             break
         run_lines.append(line[10:] if line else "")
     return "\n".join(run_lines)
+
+
+def package_step(step_name: str) -> str:
+    return workflow_step(PACKAGE_WORKFLOW.read_text(), step_name)
+
+
+def package_step_run(step_name: str) -> str:
+    return workflow_step_run(PACKAGE_WORKFLOW.read_text(), step_name)
 
 
 def apt_workflow() -> str:
@@ -342,16 +350,20 @@ def test_reusable_agent_package_build_preserves_acceptance_gates() -> None:
     assert "agent-package-build\\.yml@refs/tags/v" in text
 
 
-def test_agent_key_is_removed_immediately_after_final_use_with_always_fallback() -> None:
-    text = PACKAGE_WORKFLOW.read_text()
-    lifecycle = package_step_run(
-        "Test fresh, offline, upgrade, downgrade, remove lifecycle"
+def assert_agent_key_cleanup_contract(text: str) -> None:
+    step_names = re.findall(r"^      - name: (.+)$", text, re.MULTILINE)
+    lifecycle_name = "Test fresh, offline, upgrade, downgrade, remove lifecycle"
+    lifecycle_index = step_names.index(lifecycle_name)
+    fallback_name = "Remove protected agent key"
+    cosign_name = "Install Cosign"
+    lifecycle = workflow_step_run(
+        text,
+        lifecycle_name,
     )
     lifecycle_lines = lifecycle.splitlines()
     final_build = lifecycle_lines.index("  --output-dir lifecycle")
     immediate_cleanup = 'rm -f "$RUNNER_TEMP/vonk-agent-release.pem"'
-    fallback = package_step("Remove protected agent key")
-    cosign = text.index("Install Cosign")
+    fallback = workflow_step(text, fallback_name)
 
     assert lifecycle_lines[final_build + 1] == immediate_cleanup
     assert lifecycle_lines[final_build + 2] == (
@@ -364,9 +376,33 @@ def test_agent_key_is_removed_immediately_after_final_use_with_always_fallback()
         '  "lifecycle/vonk-forge-agent_${NEXT_VERSION}_arm64.deb"'
     )
     assert immediate_cleanup in fallback
-    assert "if: ${{ always() }}" in fallback
-    assert text.index("Remove protected agent key") < cosign
+    assert fallback.splitlines()[1] == "        if: ${{ always() }}"
+    assert step_names[lifecycle_index : lifecycle_index + 3] == [
+        lifecycle_name,
+        fallback_name,
+        cosign_name,
+    ]
     assert text.count(immediate_cleanup) == 2
+
+
+def test_agent_key_is_removed_immediately_after_final_use_with_always_fallback() -> None:
+    assert_agent_key_cleanup_contract(PACKAGE_WORKFLOW.read_text())
+
+
+def test_agent_key_cleanup_guard_rejects_fallback_before_lifecycle() -> None:
+    text = PACKAGE_WORKFLOW.read_text()
+    fallback = workflow_step(text, "Remove protected agent key").rstrip()
+    lifecycle_marker = (
+        "      - name: Test fresh, offline, upgrade, downgrade, remove lifecycle"
+    )
+    mutated = text.replace(f"{fallback}\n\n", "", 1).replace(
+        lifecycle_marker,
+        f"{fallback}\n\n{lifecycle_marker}",
+        1,
+    )
+
+    with pytest.raises(AssertionError):
+        assert_agent_key_cleanup_contract(mutated)
 
 
 def test_stable_sigstore_identity_renders_the_exact_version() -> None:
