@@ -205,6 +205,7 @@ def test_reusable_agent_package_build_has_a_strict_call_boundary() -> None:
     assert "workflow_call:" in text
     for input_name in (
         "channel",
+        "publication_sequence",
         "version",
         "next_version",
         "package",
@@ -297,6 +298,16 @@ def test_reusable_agent_package_build_validates_authority_before_key_use() -> No
     assert "openssl pkey" in text
     assert "-pubout -outform DER" in text
     assert "sha256sum" in text
+
+
+def test_reusable_agent_package_build_validates_publication_authority() -> None:
+    validation = package_step("Validate package metadata and environment")
+
+    assert "PUBLICATION_SEQUENCE: ${{ inputs.publication_sequence }}" in validation
+    assert 'test "$PUBLICATION_SEQUENCE" = "$GITHUB_RUN_NUMBER"' in validation
+    assert 'test "$PUBLICATION_SEQUENCE" = 0' in validation
+    assert '"$GITHUB_SHA" "$PUBLICATION_SEQUENCE"' in validation
+    assert re.search(r"git show(?: -s)? --format=%ct", validation) is None
 
 
 def test_prebuild_authority_rejects_non_ed25519_with_matching_spki_hash(
@@ -468,11 +479,22 @@ def test_development_agent_workflow_runs_only_for_exact_main_sources() -> None:
     assert "verify-main-for-apt:" not in text
 
 
+def test_development_metadata_uses_actions_publication_sequence() -> None:
+    text = WORKFLOW.read_text()
+    metadata = workflow_step(text, "Derive immutable development package metadata")
+
+    assert "PUBLICATION_SEQUENCE: ${{ github.run_number }}" in metadata
+    assert 'test "$PUBLICATION_SEQUENCE" = "$GITHUB_RUN_NUMBER"' in metadata
+    assert '"$GITHUB_SHA" "$PUBLICATION_SEQUENCE"' in metadata
+    assert re.search(r"git show(?: -s)? --format=%ct", metadata) is None
+
+
 def test_development_agent_workflow_calls_both_reusable_channel_boundaries() -> None:
     text = WORKFLOW.read_text()
 
     assert "uses: ./.github/workflows/agent-package-build.yml" in text
     assert "channel: ${{ needs.package-metadata.outputs.channel }}" in text
+    assert "publication_sequence: ${{ github.run_number }}" in text
     assert "environment: agent-development" in text
     assert "artifact-metadata: write" in text
     assert "attestations: write" in text
@@ -492,6 +514,22 @@ def test_development_agent_workflow_calls_both_reusable_channel_boundaries() -> 
         "cosign sign-blob",
     ):
         assert forbidden not in text
+
+
+def test_commit_timestamps_only_seed_reproducible_package_bytes() -> None:
+    timestamp = re.compile(r"git show(?: -s)? --format=%ct")
+    package_text = PACKAGE_WORKFLOW.read_text()
+    allowed_steps = (
+        package_step("Build package twice reproducibly"),
+        package_step("Test fresh, offline, upgrade, downgrade, remove lifecycle"),
+    )
+
+    assert timestamp.findall(WORKFLOW.read_text()) == []
+    assert timestamp.findall(UNIFIED_WORKFLOW.read_text()) == []
+    assert len(timestamp.findall(package_text)) == 2
+    for step in allowed_steps:
+        assert len(timestamp.findall(step)) == 1
+        assert '--source-date-epoch "$epoch"' in step
 
 
 def test_reusable_apt_publisher_has_a_strict_channel_boundary() -> None:

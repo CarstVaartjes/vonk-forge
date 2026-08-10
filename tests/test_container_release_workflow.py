@@ -366,7 +366,10 @@ def test_tag_release_builds_agent_package_from_same_release_metadata() -> None:
     assert "uses: ./.github/workflows/agent-package-build.yml" in package
     assert "scripts/agent-package-metadata" in metadata
     assert "production \"$GITHUB_REF_TYPE\" \"$GITHUB_REF_NAME\"" in metadata
+    assert '"$GITHUB_SHA" 0' in metadata
+    assert re.search(r"git show(?: -s)? --format=%ct", metadata) is None
     assert "channel: stable" in package
+    assert "publication_sequence: '0'" in package
     for input_name in ("version", "next_version", "package", "artifact_name"):
         assert (
             f"{input_name}: ${{{{ needs.release-metadata.outputs.{input_name} }}}}"

@@ -316,10 +316,9 @@ jobs:
           scripts/container-release-metadata \
             "$GITHUB_REF_TYPE" "$GITHUB_REF_NAME" "$GITHUB_SHA" \
             >> "$GITHUB_OUTPUT"
-          epoch=$(git show -s --format=%ct "$GITHUB_SHA")
           scripts/agent-package-metadata \
             production "$GITHUB_REF_TYPE" "$GITHUB_REF_NAME" \
-            "$GITHUB_SHA" "$epoch" \
+            "$GITHUB_SHA" 0 \
             >> "$GITHUB_OUTPUT"
 
   build-agent-package:
@@ -329,6 +328,7 @@ jobs:
     uses: ./.github/workflows/agent-package-build.yml
     with:
       channel: stable
+      publication_sequence: '0'
       version: ${{ needs.release-metadata.outputs.version }}
       next_version: ${{ needs.release-metadata.outputs.next_version }}
       package: ${{ needs.release-metadata.outputs.package }}
