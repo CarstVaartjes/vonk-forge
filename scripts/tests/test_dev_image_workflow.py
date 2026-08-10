@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -11,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/dev-image-metadata"
 ALIAS_SCRIPT = ROOT / "scripts/promote-image-aliases"
 WORKFLOW = ROOT / ".github/workflows/dev-images.yml"
+DOCKERFILE = ROOT / "control/Dockerfile"
 SHA = "0123456789abcdef0123456789abcdef01234567"
 DIGEST_A = "sha256:" + "a" * 64
 DIGEST_B = "sha256:" + "b" * 64
@@ -31,6 +33,19 @@ def _metadata(*arguments: str) -> subprocess.CompletedProcess[str]:
 
 def _workflow() -> str:
     return WORKFLOW.read_text(encoding="utf-8")
+
+
+def _dockerfile() -> str:
+    return DOCKERFILE.read_text(encoding="utf-8")
+
+
+def _docker_stage(text: str, name: str) -> str:
+    marker = re.compile(rf"^FROM .+ AS {re.escape(name)}$", re.MULTILINE)
+    match = marker.search(text)
+    assert match is not None
+    following = re.search(r"^FROM ", text[match.end() :], re.MULTILINE)
+    end = len(text) if following is None else match.end() + following.start()
+    return text[match.start() : end]
 
 
 def _step(text: str, name: str) -> str:
@@ -406,7 +421,8 @@ def test_workflow_builds_scans_and_accepts_oci_archives_before_login() -> None:
     assert "type=oci" in build
     assert "--sbom=true" in build
     assert "--provenance=mode=max" in build
-    assert "--build-arg" not in build
+    assert build.count('--build-arg VONK_DEV_SOURCE_COMMIT="$GITHUB_SHA"') == 2
+    assert build.count("--build-arg") == 2
     assert "--secret" not in build
     assert "skopeo copy" in load
     assert "oci-archive:" in load
@@ -420,11 +436,43 @@ def test_workflow_builds_scans_and_accepts_oci_archives_before_login() -> None:
         "Scan and accept image-only stack"
     )
     assert "scripts/verify-dev-image-secrets" in accept
+    assert '--expected-commit "$GITHUB_SHA"' in accept
+    assert (
+        '--expected-repository "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"'
+        in accept
+    )
     assert "scripts/dev-image-acceptance" in accept
     assert text.index("Scan and accept image-only stack") < text.index("Log in to GHCR")
     assert "Upload accepted OCI archives" in text
     assert "needs: [build-and-accept]" in text
     assert "Download accepted OCI archives" in text
+
+
+def test_development_dockerfile_embeds_role_identity_without_authority_build_args() -> None:
+    text = _dockerfile()
+    zero_commit = "0" * 40
+
+    assert f"ARG VONK_DEV_SOURCE_COMMIT={zero_commit}" in text
+    for role in ("api", "worker"):
+        stage = _docker_stage(text, f"{role}-root")
+        target = _docker_stage(text, role)
+        assert "ARG VONK_DEV_SOURCE_COMMIT" in stage
+        assert "vonk_control.dev_cohort" in stage
+        assert "DEVELOPMENT_IMAGE_IDENTITY_PATH" in stage
+        assert "build_identity" in stage
+        assert f'"{role}"' in stage
+        assert f"COPY --from={role}-root / /" in target
+
+    argument_names = {
+        line.split("=", 1)[0].split()[1]
+        for line in text.splitlines()
+        if line.startswith("ARG ")
+    }
+    assert not any(
+        marker in name.lower()
+        for name in argument_names
+        for marker in ("credential", "password", "secret", "token", "key")
+    )
 
 
 def test_workflow_publishes_tested_archives_then_renders_immutable_compose() -> None:

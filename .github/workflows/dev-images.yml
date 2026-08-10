@@ -94,6 +94,7 @@ jobs:
             --output "type=oci,dest=$api_archive" \
             --sbom=true \
             --provenance=mode=max \
+            --build-arg VONK_DEV_SOURCE_COMMIT="$GITHUB_SHA" \
             "${common_labels[@]}" \
             .
           docker buildx build \
@@ -103,6 +104,7 @@ jobs:
             --output "type=oci,dest=$worker_archive" \
             --sbom=true \
             --provenance=mode=max \
+            --build-arg VONK_DEV_SOURCE_COMMIT="$GITHUB_SHA" \
             "${common_labels[@]}" \
             .
 
@@ -136,6 +138,8 @@ jobs:
         run: |
           set -euo pipefail
           scripts/verify-dev-image-secrets \
+            --expected-commit "$GITHUB_SHA" \
+            --expected-repository "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
             vonk-forge-api:dev-local vonk-forge-worker:dev-local
           scripts/dev-image-acceptance \
             --api-image vonk-forge-api:dev-local \
