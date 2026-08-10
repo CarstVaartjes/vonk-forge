@@ -70,15 +70,28 @@ def test_pr_smoke_does_not_reintroduce_a_second_os_matrix() -> None:
     assert workflow.count("runs-on: ubuntu-latest") >= 4
 
 
-def test_catalog_runtime_job_runs_complete_local_service_suites() -> None:
+def test_catalog_runtime_suites_run_in_parallel_with_stable_aggregate() -> None:
     workflow = (ROOT / ".github/workflows/ci.yml").read_text()
-    job = "\n".join(_workflow_job_lines(workflow, "catalog-runtime"))
+    control = "\n".join(_workflow_job_lines(workflow, "control-suite"))
+    agent = "\n".join(_workflow_job_lines(workflow, "agent-suite"))
+    web = "\n".join(_workflow_job_lines(workflow, "web-suite"))
+    aggregate = "\n".join(_workflow_job_lines(workflow, "catalog-runtime"))
 
-    assert "pytest control/tests -q" in job
-    assert "pytest agent/tests -q" in job
-    assert "npm test --prefix control/web -- --run" in job
-    assert "npm run build --prefix control/web" in job
-    assert "scripts/update-global-contracts" not in job
+    assert "pytest-xdist==3.8.0" in control
+    assert "pytest control/tests -q -n auto --dist loadfile" in control
+    assert "--python 3.12" in control
+    assert "pytest agent/tests -q" in agent
+    assert "pytest-xdist" not in agent
+    assert " -n " not in agent
+    assert "npm test --prefix control/web -- --run" in web
+    assert "npm run build --prefix control/web" in web
+    assert "name: Catalog and service suites" in aggregate
+    assert "needs: [control-suite, agent-suite, web-suite]" in aggregate
+    assert "if: always()" in aggregate
+    assert "needs.control-suite.result" in aggregate
+    assert "needs.agent-suite.result" in aggregate
+    assert "needs.web-suite.result" in aggregate
+    assert "scripts/update-global-contracts" not in workflow
 
 
 def test_agent_simulator_preserves_exact_non_linux_boundaries() -> None:
