@@ -31,6 +31,60 @@ def load_state_module() -> ModuleType:
     return module
 
 
+def test_rclone_failure_reports_sanitized_provider_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = load_state_module()
+    secrets = {
+        "RCLONE_CONFIG_R2_ACCESS_KEY_ID": "example-access-key",
+        "RCLONE_CONFIG_R2_SECRET_ACCESS_KEY": "example-secret-key",
+        "RCLONE_CONFIG_R2_ENDPOINT": (
+            "https://example-account.r2.cloudflarestorage.com"
+        ),
+    }
+    for name, value in secrets.items():
+        monkeypatch.setenv(name, value)
+    stderr = (
+        "request failed for https://url-user:url-password@example.invalid/object"
+        "?signature=query-secret: AccessDenied "
+        + " ".join(secrets.values())
+    ).encode()
+    monkeypatch.setattr(
+        state.subprocess,
+        "run",
+        lambda *args, **kwargs: state.subprocess.CompletedProcess(
+            args[0], 3, stdout=b"", stderr=stderr
+        ),
+    )
+
+    with pytest.raises(state.StateError) as raised:
+        state.RcloneStore("valid-bucket")._run(
+            "write", ["copyto", "source", "target"]
+        )
+
+    message = str(raised.value)
+    assert "write failed with exit code 3" in message
+    assert "AccessDenied" in message
+    for value in (*secrets.values(), "url-user", "url-password", "query-secret"):
+        assert value not in message
+
+
+def test_rclone_failure_without_stderr_reports_operation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = load_state_module()
+    monkeypatch.setattr(
+        state.subprocess,
+        "run",
+        lambda *args, **kwargs: state.subprocess.CompletedProcess(
+            args[0], 9, stdout=b"", stderr=b""
+        ),
+    )
+
+    with pytest.raises(state.StateError, match="read failed with exit code 9$"):
+        state.RcloneStore("valid-bucket")._run("read", ["cat", "target"])
+
+
 class FakeR2:
     def __init__(
         self,
