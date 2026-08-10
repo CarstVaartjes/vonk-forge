@@ -342,6 +342,67 @@ def test_management_networks_are_explicit_and_policy_validated(monkeypatch) -> N
         Settings.from_env_and_secrets()
 
 
+def test_management_networks_load_from_a_protected_file(tmp_path: Path, monkeypatch) -> None:
+    management = tmp_path / "management-cidrs"
+    management.write_text("10.0.0.0/24,2001:db8:42::/64\n")
+    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
+    monkeypatch.setenv("VONK_MANAGEMENT_CIDRS_FILE", str(management))
+
+    settings = Settings.from_env_and_secrets()
+
+    assert settings.management_cidrs == "10.0.0.0/24,2001:db8:42::/64"
+
+
+def test_management_networks_reject_env_and_file_sources_together(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    management = tmp_path / "management-cidrs"
+    management.write_text("10.0.0.0/24\n")
+    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
+    monkeypatch.setenv("VONK_MANAGEMENT_CIDRS", "10.0.0.0/24")
+    monkeypatch.setenv("VONK_MANAGEMENT_CIDRS_FILE", str(management))
+
+    with pytest.raises(SettingsError, match="cannot be combined"):
+        Settings.from_env_and_secrets()
+
+
+def test_management_networks_reject_symlink_file(tmp_path: Path, monkeypatch) -> None:
+    management = tmp_path / "management-cidrs"
+    management.write_text("10.0.0.0/24\n")
+    link = tmp_path / "management-cidrs-link"
+    link.symlink_to(management)
+    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
+    monkeypatch.setenv("VONK_MANAGEMENT_CIDRS_FILE", str(link))
+
+    with pytest.raises(SettingsError, match="regular non-symlink"):
+        Settings.from_env_and_secrets()
+
+
+def test_management_networks_reject_empty_file(tmp_path: Path, monkeypatch) -> None:
+    management = tmp_path / "management-cidrs"
+    management.write_text("\n")
+    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
+    monkeypatch.setenv("VONK_MANAGEMENT_CIDRS_FILE", str(management))
+
+    with pytest.raises(SettingsError, match="must not be empty"):
+        Settings.from_env_and_secrets()
+
+
+def test_management_network_file_rejects_overlap_with_direct_fabric(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    management = tmp_path / "management-cidrs"
+    management.write_text("10.0.0.240/28\n")
+    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
+    monkeypatch.setenv("VONK_MANAGEMENT_CIDRS_FILE", str(management))
+    monkeypatch.setenv("VONK_DIRECT_FABRIC_CIDRS", "10.0.0.240/28")
+
+    with pytest.raises(SettingsError, match="fully forbidden"):
+        Settings.from_env_and_secrets()
+
+
 def test_platform_tuf_roots_are_explicit_absolute_nonoverlapping_paths(
     tmp_path: Path,
     monkeypatch,
@@ -364,6 +425,135 @@ def test_platform_tuf_roots_are_explicit_absolute_nonoverlapping_paths(
     monkeypatch.setenv("VONK_AGENT_TUF_TARGET_ROOT", str(metadata / "nested"))
     with pytest.raises(SettingsError, match="distinct"):
         Settings.from_env_and_secrets()
+
+
+def test_agent_tuf_target_root_default_is_not_concatenated(monkeypatch) -> None:
+    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
+
+    settings = Settings.from_env_and_secrets()
+
+    assert settings.agent_tuf_target_root == Path("/state/agent-tuf/targets")
+
+
+def _configure_agent_authority(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    mode: str,
+    provider: str,
+) -> dict[str, Path]:
+    secret_values = {
+        "VONK_DATABASE_URL_FILE": "postgresql://db/control\n",
+        "VONK_TOKEN_SIGNING_KEY_FILE": "k" * 32,
+        "VONK_METRICS_TOKEN_FILE": "m" * 16,
+        "VONK_GIT_SIGNING_KEY_FILE": "git-key",
+        "VONK_ADMIN_GRANT_PRIVATE_KEY_FILE": "admin-grant-key",
+        "VONK_AGENT_CLIENT_CA_FILE": "client-ca",
+        "VONK_AGENT_INTERMEDIATE_CERTIFICATE_FILE": "intermediate-certificate",
+        "VONK_AGENT_INTERMEDIATE_KEY_FILE": "built-in-key",
+        "VONK_AGENT_CA_CREDENTIAL_FILE": "provider-credential",
+        "VONK_AGENT_CA_PROVISIONER_PUBLIC_JWK_FILE": "provider-public-jwk",
+        "VONK_AGENT_CA_ROOT_FILE": "root-certificate",
+        "VONK_AGENT_PROXY_AUTH_FILE": "p" * 32,
+        "VONK_WORKER_API_TOKEN_FILE": "w" * 32,
+    }
+    paths: dict[str, Path] = {}
+    for name, value in secret_values.items():
+        path = tmp_path / name
+        path.write_text(value)
+        paths[name] = path
+    monkeypatch.setenv("VONK_DEPLOYMENT_MODE", mode)
+    monkeypatch.setenv("VONK_MANAGEMENT_CIDRS", "10.0.0.0/24")
+    if mode == "production":
+        for name in (
+            "VONK_DATABASE_URL_FILE",
+            "VONK_TOKEN_SIGNING_KEY_FILE",
+            "VONK_METRICS_TOKEN_FILE",
+            "VONK_GIT_SIGNING_KEY_FILE",
+            "VONK_ADMIN_GRANT_PRIVATE_KEY_FILE",
+        ):
+            monkeypatch.setenv(name, str(paths[name]))
+    else:
+        monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
+    if provider == "builtin":
+        for name in (
+            "VONK_AGENT_CLIENT_CA_FILE",
+            "VONK_AGENT_INTERMEDIATE_CERTIFICATE_FILE",
+            "VONK_AGENT_INTERMEDIATE_KEY_FILE",
+            "VONK_AGENT_PROXY_AUTH_FILE",
+            "VONK_WORKER_API_TOKEN_FILE",
+        ):
+            monkeypatch.setenv(name, str(paths[name]))
+    elif provider == "step-ca":
+        for name in (
+            "VONK_AGENT_CLIENT_CA_FILE",
+            "VONK_AGENT_INTERMEDIATE_CERTIFICATE_FILE",
+            "VONK_AGENT_CA_CREDENTIAL_FILE",
+            "VONK_AGENT_CA_PROVISIONER_PUBLIC_JWK_FILE",
+            "VONK_AGENT_CA_ROOT_FILE",
+            "VONK_AGENT_PROXY_AUTH_FILE",
+            "VONK_WORKER_API_TOKEN_FILE",
+        ):
+            monkeypatch.setenv(name, str(paths[name]))
+        monkeypatch.setenv("VONK_AGENT_CA_URL", "https://step-ca:9000")
+        monkeypatch.setenv("VONK_AGENT_CA_PROVISIONER_NAME", "vonk-forge-agent")
+        monkeypatch.setenv("VONK_AGENT_CA_PROVISIONER_KID", "test-kid")
+    return paths
+
+
+@pytest.mark.parametrize(
+    ("mode", "runtime", "provider", "bootstrap", "accepted"),
+    [
+        ("development", "disabled", "", "", True),
+        ("development", "enabled", "builtin", "1", True),
+        ("development", "enabled", "step-ca", "", False),
+        ("development", "enabled", "", "", False),
+        ("production", "enabled", "step-ca", "", True),
+        ("production", "enabled", "builtin", "1", True),
+        ("production", "enabled", "", "", False),
+    ],
+)
+def test_agent_authority_mode_runtime_provider_matrix(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+    runtime: str,
+    provider: str,
+    bootstrap: str,
+    accepted: bool,
+) -> None:
+    paths = _configure_agent_authority(
+        tmp_path,
+        monkeypatch,
+        mode=mode,
+        provider=provider,
+    )
+    monkeypatch.setenv("VONK_AGENT_RUNTIME", runtime)
+    if provider:
+        monkeypatch.setenv("VONK_AGENT_CA_PROVIDER", provider)
+    if bootstrap:
+        monkeypatch.setenv("VONK_AGENT_BUILTIN_CA_BOOTSTRAP", bootstrap)
+
+    if not accepted:
+        with pytest.raises(SettingsError):
+            Settings.from_env_and_secrets()
+        return
+
+    settings = Settings.from_env_and_secrets()
+
+    assert settings.agent_runtime == runtime
+    if runtime == "disabled":
+        assert settings.agent_proxy_auth == b""
+        assert settings.worker_api_token == b""
+        return
+    assert settings.agent_client_ca == b"client-ca"
+    assert settings.agent_intermediate_certificate == b"intermediate-certificate"
+    assert settings.agent_proxy_auth == b"p" * 32
+    assert settings.worker_api_token == b"w" * 32
+    if provider == "builtin":
+        assert settings.agent_intermediate_key_path == paths[
+            "VONK_AGENT_INTERMEDIATE_KEY_FILE"
+        ]
 
 
 def test_production_agent_runtime_requires_management_networks(
@@ -520,6 +710,7 @@ def test_agent_ca_provider_rejects_other_provider_settings(
     conflicting_environment: dict[str, str],
 ) -> None:
     monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
+    monkeypatch.setenv("VONK_DEPLOYMENT_MODE", "test")
     monkeypatch.setenv("VONK_AGENT_CA_PROVIDER", provider)
     if provider == "builtin":
         monkeypatch.setenv("VONK_AGENT_BUILTIN_CA_BOOTSTRAP", "1")

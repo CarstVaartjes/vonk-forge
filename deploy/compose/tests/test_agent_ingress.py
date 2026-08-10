@@ -525,6 +525,9 @@ def test_each_provider_overlay_passes_application_settings_guard(tmp_path: Path)
         ("compose.builtin-ca.yaml", "builtin"),
     ):
         rendered = _rendered("compose.yaml", overlay)
+        environment = rendered["services"]["control-api"]["environment"]
+        assert environment["VONK_DEPLOYMENT_MODE"] == "production"
+        assert environment["VONK_AGENT_RUNTIME"] == "enabled"
         result = _settings_result(rendered, tmp_path / provider)
         assert result.returncode == 0, result.stderr
         assert result.stdout.splitlines() == [
