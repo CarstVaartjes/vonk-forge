@@ -117,6 +117,20 @@ jobs:
             "oci-archive:$RUNNER_TEMP/vonk-forge-worker.oci.tar" \
             docker-daemon:vonk-forge-worker:dev-local
 
+      - name: Preload pinned runtime dependency
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t postgres_images < <(
+            sed -nE \
+              's/^[[:space:]]+image:[[:space:]]+(postgres:[^[:space:]]+)$/\1/p' \
+              deploy/compose/compose.dev.images.yaml
+          )
+          test "${#postgres_images[@]}" = 1
+          postgres_image=${postgres_images[0]}
+          [[ "$postgres_image" =~ ^postgres:[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$ ]]
+          docker pull "$postgres_image"
+
       - name: Scan and accept image-only stack
         shell: bash
         run: |

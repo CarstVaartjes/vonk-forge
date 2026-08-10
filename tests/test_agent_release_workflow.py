@@ -220,6 +220,11 @@ def test_reusable_agent_package_build_has_a_strict_call_boundary() -> None:
     assert "runs-on: ubuntu-24.04-arm" in text
     assert "environment: ${{ inputs.environment }}" in text
     assert "timeout-minutes: 45" in text
+    assert (
+        "    secrets:\n"
+        "      VONK_AGENT_RELEASE_PRIVATE_KEY:\n"
+        "        required: false"
+    ) in text
 
 
 def test_reusable_output_parser_accepts_every_valid_identifier_shape() -> None:
@@ -556,6 +561,14 @@ def test_reusable_apt_publisher_has_a_strict_channel_boundary() -> None:
     assert "environment: ${{ inputs.environment }}" in text
     assert "group: vonk-forge-agent-apt-${{ inputs.channel }}" in text
     assert "cancel-in-progress: false" in text
+    for secret_name in (
+        "APT_GPG_PASSPHRASE",
+        "APT_REPOSITORY_GPG_PRIVATE_KEY",
+        "R2_ACCESS_KEY_ID",
+        "R2_ACCOUNT_ID",
+        "R2_SECRET_ACCESS_KEY",
+    ):
+        assert f"      {secret_name}:\n        required: false" in text
 
 
 def test_reusable_apt_publisher_verifies_package_before_credentials() -> None:
