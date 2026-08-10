@@ -106,11 +106,14 @@ manifest checks against those immutable images. Only after every image and the
 Compose artifacts pass does it advance each public `:dev` alias.
 
 The production workflow follows the same build-first shape for a trusted
-annotated, SSH-signed release tag reachable from `main`. It builds and verifies
-immutable versioned images, the agent package, platform manifest, deployment
-bundle, and release evidence before advancing both the signed `stable` channel
-and the informational `:latest` aliases. A failed or partial release
-must advance neither.
+annotated, SSH-signed release tag reachable from `main`. It publishes the
+immutable TUF target, then completes immutable versioned images, the agent
+package, platform manifest, deployment bundle, and public release evidence
+before advancing the signed `stable` channel. Only after `stable` succeeds does
+it reconcile the informational `:latest` aliases. A failure before complete
+release evidence advances neither channel; a later `:latest` failure can leave
+only the non-authoritative evaluation aliases stale and is repaired by the
+serialized reconciliation job.
 
 Development aliases in separate GHCR repositories cannot move in one registry
 transaction. Publication ordering reduces the window but does not pretend it
@@ -201,7 +204,7 @@ the persisted repository baseline beyond cohort A, `dev-init` deliberately
 rejects pinned A as a non-fast-forward accepted baseline. Recovery to A is
 allowed only when A is explicitly documented as database-backward-compatible
 and the operator performs the guarded repository-volume reset in the
-[development NAS installation runbook](../../runbooks/development-nas-installation.md#updating-to-a-newer-accepted-main-commit).
+[development NAS installation runbook](../../runbooks/development-nas-installation.md#advanced-guarded-recovery).
 The operator must discover and verify the actual Compose repository volume,
 confirm its labels and exact expected commit, stop the project, delete only
 that repository volume, and restart with pinned A. The reset discards local

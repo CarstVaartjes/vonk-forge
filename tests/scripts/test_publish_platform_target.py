@@ -413,6 +413,66 @@ def test_split_publication_keeps_oidc_out_of_oci_upload(
     )
 
 
+def test_target_only_publication_never_advances_the_channel(
+    tmp_path: Path, canonical_bundle: bytes
+) -> None:
+    release_path, bundle_path, _, _ = _write_release(tmp_path, canonical_bundle)
+    env, log = _fake_publishers(tmp_path)
+
+    result = _run(
+        "publish-target",
+        "--manifest",
+        str(release_path),
+        "--bundle",
+        str(bundle_path),
+        env=env,
+    )
+
+    assert result.returncode == 0, result.stderr
+    receipt = json.loads(result.stdout)
+    assert "tuf_targets_version" in receipt
+    assert "channel" not in receipt
+    entries = [json.loads(line) for line in log.read_text().splitlines()]
+    assert [entry["name"] for entry in entries] == ["tuf-publisher"]
+
+
+def test_channel_only_publication_consumes_the_exact_target_receipt(
+    tmp_path: Path, canonical_bundle: bytes
+) -> None:
+    release_path, bundle_path, _, _ = _write_release(tmp_path, canonical_bundle)
+    env, log = _fake_publishers(tmp_path)
+    target = _run(
+        "publish-target",
+        "--manifest",
+        str(release_path),
+        "--bundle",
+        str(bundle_path),
+        env=env,
+    )
+    assert target.returncode == 0, target.stderr
+    receipt = tmp_path / "target-receipt.json"
+    receipt.write_text(target.stdout, encoding="utf-8")
+    log.unlink()
+
+    channel = _run(
+        "publish-channel",
+        "--manifest",
+        str(release_path),
+        "--target-receipt",
+        str(receipt),
+        "--channel",
+        "stable",
+        env=env,
+    )
+
+    assert channel.returncode == 0, channel.stderr
+    published = json.loads(channel.stdout)
+    assert published["channel"] == "stable"
+    assert published["target_name"] == json.loads(target.stdout)["target_name"]
+    entries = [json.loads(line) for line in log.read_text().splitlines()]
+    assert [entry["name"] for entry in entries] == ["channel-publisher"]
+
+
 def test_bundle_descriptor_mismatch_fails_before_any_publication(
     tmp_path: Path, canonical_bundle: bytes
 ) -> None:

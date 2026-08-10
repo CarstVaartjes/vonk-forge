@@ -111,10 +111,26 @@ def test_rollback_discovers_volume_and_requires_matching_database_state() -> Non
     assert "docker compose -f docker-compose.yml ps -q control-api" in text
     assert "com.docker.compose.volume" in text
     assert "Type the exact volume name to confirm" in text
-    assert "set -eu\ncd /volume1/docker/vonk-forge" in text
+    assert "set -euo pipefail\ncd /volume1/docker/vonk-forge" in text
     assert "Never treat a repository-volume\nreset as a database or runtime-state rollback" in text
     assert "identity, control state, route publications, supervisor state" in normalized
     assert "docker volume rm vonk-forge-dev_dev-repository" not in text
+    assert "replace `docker-compose.yml` with that exact pinned artifact" in normalized
+    assert "expected_commit=REPLACE_WITH_PINNED_40_CHARACTER_COMMIT" in text
+    assert "docker compose -f docker-compose.yml config --images" in text
+    assert "git -C /repository rev-parse refs/heads/main" in text
+    assert "git -C /repository merge-base --is-ancestor" in text
+    assert "dev-sha-$expected_commit@sha256:" in text
+
+
+def test_design_recovery_link_targets_the_guarded_runbook_section() -> None:
+    design = (
+        ROOT
+        / "docs/superpowers/specs/2026-08-10-mutable-compose-channels-design.md"
+    ).read_text()
+
+    assert "development-nas-installation.md#advanced-guarded-recovery" in design
+    assert "#updating-to-a-newer-accepted-main-commit" not in design
 
 
 def test_operator_entry_points_link_to_development_nas_runbook() -> None:

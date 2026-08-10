@@ -187,15 +187,53 @@ The following shell procedure is for the explicitly documented,
 schema-compatible repository-only recovery case. Do not use it for normal
 installation, updates, or an incompatible migration.
 
+Download `docker-compose.pinned.yml` from the accepted workflow artifact for
+the target cohort, verify its workflow commit and immutable image digests, and
+replace `docker-compose.yml` with that exact pinned artifact before running the
+procedure. Merely keeping the pinned file elsewhere does not select it. Record
+the pinned 40-character commit as `expected_commit`; the checks below refuse a
+mutable tag, a different pinned commit, or a target that is not in the current
+repository history.
+
 For a documented repository-only rollback, discover the actual volume name
 from the running API before stopping the project. This remains correct if a NAS
 UI changes the Compose project name:
 
 ```bash
-set -eu
+set -euo pipefail
 cd /volume1/docker/vonk-forge
+expected_commit=REPLACE_WITH_PINNED_40_CHARACTER_COMMIT
+[[ "$expected_commit" =~ ^[0-9a-f]{40}$ ]]
+mapfile -t selected_images < <(
+  sudo docker compose -f docker-compose.yml config --images
+)
+selected_first_party=0
+for image in "${selected_images[@]}"; do
+  case "$image" in
+    ghcr.io/carstvaartjes/vonk-forge-api:dev-sha-$expected_commit@sha256:*|\
+    ghcr.io/carstvaartjes/vonk-forge-worker:dev-sha-$expected_commit@sha256:*)
+      [[ "$image" =~ @sha256:[0-9a-f]{64}$ ]]
+      selected_first_party=$((selected_first_party + 1))
+      ;;
+    ghcr.io/carstvaartjes/vonk-forge-api:*|\
+    ghcr.io/carstvaartjes/vonk-forge-worker:*)
+      echo 'refusing a mutable or mismatched first-party image' >&2
+      exit 1
+      ;;
+  esac
+done
+test "$selected_first_party" -eq 2
 api_container=$(sudo docker compose -f docker-compose.yml ps -q control-api)
 test -n "$api_container"
+current_commit=$(sudo docker exec "$api_container" \
+  git -C /repository rev-parse refs/heads/main)
+[[ "$current_commit" =~ ^[0-9a-f]{40}$ ]]
+test "$current_commit" != "$expected_commit"
+sudo docker exec "$api_container" \
+  git -C /repository cat-file -e "$expected_commit^{commit}"
+sudo docker exec "$api_container" \
+  git -C /repository merge-base --is-ancestor \
+    "$expected_commit" "$current_commit"
 repository_volume=$(sudo docker inspect "$api_container" --format \
   '{{range .Mounts}}{{if eq .Destination "/repository"}}{{.Name}}{{end}}{{end}}')
 test -n "$repository_volume"
@@ -216,8 +254,11 @@ sudo docker compose -f docker-compose.yml up -d --wait
 ```
 
 This is destructive to local branches and unpushed changes in that one volume.
-Do not use `down --volumes`. A rollback that requires database state must use a
-tested, matching backup rather than ad hoc volume deletion.
+The restart still uses the already-selected pinned `docker-compose.yml`; after
+it becomes healthy, confirm the repository `main` ref equals
+`expected_commit`. Do not use `down --volumes`. A rollback that requires
+database state must use a tested, matching backup rather than ad hoc volume
+deletion.
 
 ### Recovery after an interrupted repository reset
 
