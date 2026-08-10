@@ -494,6 +494,32 @@ def _validate_bundle(
             "development secret certificate constraints are invalid"
         ) from error
     now = dt.datetime.now(dt.UTC)
+
+    def usage_values(usage: x509.KeyUsage) -> tuple[bool | None, ...]:
+        return (
+            usage.digital_signature,
+            usage.content_commitment,
+            usage.key_encipherment,
+            usage.data_encipherment,
+            usage.key_agreement,
+            usage.key_cert_sign,
+            usage.crl_sign,
+            usage.encipher_only if usage.key_agreement else None,
+            usage.decipher_only if usage.key_agreement else None,
+        )
+
+    expected_ca_usage = (True, False, False, False, False, True, True, None, None)
+    expected_server_usage = (
+        True,
+        False,
+        False,
+        False,
+        False,
+        False,
+        False,
+        None,
+        None,
+    )
     if (
         agent_ca.subject != expected_agent_subject
         or agent_ca.issuer != agent_ca.subject
@@ -503,13 +529,9 @@ def _validate_bundle(
         or agent_basic != x509.BasicConstraints(ca=True, path_length=0)
         or controller_basic != x509.BasicConstraints(ca=True, path_length=0)
         or server_basic != x509.BasicConstraints(ca=False, path_length=None)
-        or not agent_usage.key_cert_sign
-        or not agent_usage.crl_sign
-        or not controller_usage.key_cert_sign
-        or not controller_usage.crl_sign
-        or server_usage.key_cert_sign
-        or server_usage.crl_sign
-        or not server_usage.digital_signature
+        or usage_values(agent_usage) != expected_ca_usage
+        or usage_values(controller_usage) != expected_ca_usage
+        or usage_values(server_usage) != expected_server_usage
         or set(server_extended_usage) != {ExtendedKeyUsageOID.SERVER_AUTH}
         or set(sans.get_values_for_type(x509.DNSName))
         != {enroll_hostname, agent_hostname, registry_hostname}

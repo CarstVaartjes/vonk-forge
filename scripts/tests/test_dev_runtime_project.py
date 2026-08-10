@@ -291,7 +291,7 @@ def test_rejects_nonlocal_project_staging_root(
     monkeypatch.setattr(
         project,
         "_filesystem_type",
-        lambda path: "cifs" if path == remote_temporary else "ext4",
+        lambda path: "nfs4" if path == remote_temporary else "ext4",
     )
 
     with pytest.raises(project.ProjectPublicationError):
@@ -308,6 +308,42 @@ def test_rejects_nonlocal_project_staging_root(
 
     assert not destination.exists()
     assert list(remote_temporary.iterdir()) == []
+
+
+def test_revalidates_created_local_staging_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secrets_dir = _prepare_source_secrets(tmp_path)
+    project = _load_project_module()
+    destination = tmp_path / "nas-project"
+    temporary = tmp_path / "temporary"
+    temporary.mkdir(mode=0o700)
+    monkeypatch.setattr(project.tempfile, "gettempdir", lambda: str(temporary))
+
+    def filesystem_type(path: Path) -> str:
+        if path == temporary:
+            return "ext4"
+        if path.parent == temporary:
+            return "nfs4"
+        return "ext4"
+
+    monkeypatch.setattr(project, "_filesystem_type", filesystem_type)
+
+    with pytest.raises(project.ProjectPublicationError):
+        project.publish_project(
+            source_compose=SOURCE_COMPOSE,
+            secrets_dir=secrets_dir,
+            destination=destination,
+            nas_address=NAS_ADDRESS,
+            management_cidrs=MANAGEMENT_CIDRS,
+            enroll_hostname=ENROLL_HOSTNAME,
+            agent_hostname=AGENT_HOSTNAME,
+            registry_hostname=REGISTRY_HOSTNAME,
+        )
+
+    assert not destination.exists()
+    assert list(temporary.iterdir()) == []
 
 
 def test_rejects_invalid_project_inputs(tmp_path: Path) -> None:

@@ -21,7 +21,23 @@ _DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 _READ_FLAGS = os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC
 _WRITE_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
 _MAX_FILE_BYTES = 2 * 1024 * 1024
-_UNSAFE_LOCAL_FILESYSTEMS = frozenset({"9p", "cifs", "drvfs", "smb3"})
+_LOCAL_STAGING_FILESYSTEMS = frozenset(
+    {
+        "btrfs",
+        "ext2",
+        "ext3",
+        "ext4",
+        "f2fs",
+        "overlay",
+        "ramfs",
+        "tmpfs",
+        "xfs",
+        "zfs",
+    }
+)
+_DESTINATION_FILESYSTEMS = _LOCAL_STAGING_FILESYSTEMS | frozenset(
+    {"9p", "cifs", "drvfs", "fuse.sshfs", "fuseblk", "nfs", "nfs4", "smb3"}
+)
 _HOST_LABEL = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?")
 _PUBLISHED_SECRET_NAMES = frozenset(
     {
@@ -303,6 +319,30 @@ def _remove_hidden_temporaries(destination: Path) -> None:
                     child.unlink(missing_ok=True)
 
 
+def _validate_local_staging_directory(path: Path) -> tuple[int, int]:
+    descriptor = -1
+    try:
+        listed = path.lstat()
+        descriptor = os.open(path, _DIRECTORY_FLAGS)
+        opened = os.fstat(descriptor)
+        if (
+            (listed.st_dev, listed.st_ino) != (opened.st_dev, opened.st_ino)
+            or not stat.S_ISDIR(opened.st_mode)
+            or opened.st_uid != os.geteuid()
+            or stat.S_IMODE(opened.st_mode) != 0o700
+            or _filesystem_type(path) not in _LOCAL_STAGING_FILESYSTEMS
+        ):
+            raise ProjectPublicationError("project staging directory is unsafe")
+        return (opened.st_dev, opened.st_ino)
+    except OSError as error:
+        raise ProjectPublicationError(
+            "project staging directory cannot be opened safely"
+        ) from error
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
 def publish_project(
     *,
     source_compose: Path,
@@ -352,21 +392,23 @@ def publish_project(
         ) from error
     if (
         not stat.S_ISDIR(local_parent_metadata.st_mode)
-        or _filesystem_type(local_parent) in _UNSAFE_LOCAL_FILESYSTEMS
+        or _filesystem_type(local_parent) not in _LOCAL_STAGING_FILESYSTEMS
     ):
         raise ProjectPublicationError("project staging root must be local storage")
-    # Destination storage may intentionally be SMB; identify it so this
-    # distinction remains explicit and testable, but do not reject its type.
-    _filesystem_type(destination)
+    if _filesystem_type(destination) not in _DESTINATION_FILESYSTEMS:
+        raise ProjectPublicationError("project destination filesystem is unsupported")
     local_root = Path(tempfile.mkdtemp(prefix="vonk-forge-project-", dir=local_parent))
     os.chmod(local_root, 0o700)
     try:
+        staging_identity = _validate_local_staging_directory(local_root)
         local_compose = local_root / "docker-compose.yml"
         local_secrets = local_root / "secrets"
         local_secrets.mkdir(mode=0o700)
         _write_verified(local_compose, compose, 0o600)
         for name in sorted(_PUBLISHED_SECRET_NAMES):
             _write_verified(local_secrets / name, source_bundle[name], 0o600)
+        if _validate_local_staging_directory(local_root) != staging_identity:
+            raise ProjectPublicationError("project staging directory changed")
 
         secret_destination, _created = _validate_destination(destination)
         suffix = secrets.token_hex(16)

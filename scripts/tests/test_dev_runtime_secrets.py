@@ -18,7 +18,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PrivateKey,
     Ed25519PublicKey,
 )
-from cryptography.x509.oid import NameOID
+from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "dev-runtime-secrets.py"
@@ -391,6 +391,81 @@ def test_rejects_existing_agent_ca_not_signed_by_its_declared_key(
     assert original.subject == x509.Name(
         [x509.NameAttribute(NameOID.COMMON_NAME, "Vonk Forge Development Agent CA")]
     )
+
+
+def test_rejects_existing_server_certificate_with_extra_key_usage(
+    tmp_path: Path,
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    created = _run_generator(secrets_dir)
+    assert created.returncode == 0, created.stderr
+    runtime = _load_module()
+    controller_key = Ed25519PrivateKey.generate()
+    controller_ca = runtime._ca_certificate(
+        "Vonk Forge Development Controller CA", controller_key
+    )
+    server_key = _private_key(secrets_dir / "controller-server-key")
+    assert isinstance(server_key, Ed25519PrivateKey)
+    now = dt.datetime.now(dt.UTC)
+    server = (
+        x509.CertificateBuilder()
+        .subject_name(
+            x509.Name(
+                [
+                    x509.NameAttribute(
+                        NameOID.COMMON_NAME, "Vonk Forge Development Controller"
+                    )
+                ]
+            )
+        )
+        .issuer_name(controller_ca.subject)
+        .public_key(server_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - dt.timedelta(minutes=5))
+        .not_valid_after(now + dt.timedelta(days=825))
+        .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+        .add_extension(
+            x509.KeyUsage(
+                digital_signature=True,
+                content_commitment=False,
+                key_encipherment=True,
+                data_encipherment=False,
+                key_agreement=False,
+                key_cert_sign=False,
+                crl_sign=False,
+                encipher_only=None,
+                decipher_only=None,
+            ),
+            critical=True,
+        )
+        .add_extension(
+            x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False
+        )
+        .add_extension(
+            x509.SubjectAlternativeName(
+                [
+                    x509.DNSName(ENROLL_HOSTNAME),
+                    x509.DNSName(AGENT_HOSTNAME),
+                    x509.DNSName(REGISTRY_HOSTNAME),
+                ]
+            ),
+            critical=False,
+        )
+        .sign(controller_key, algorithm=None)
+    )
+    (secrets_dir / "controller-ca").write_bytes(
+        controller_ca.public_bytes(serialization.Encoding.PEM)
+    )
+    (secrets_dir / "controller-server-certificate").write_bytes(
+        server.public_bytes(serialization.Encoding.PEM)
+    )
+
+    reused = _run_generator(secrets_dir)
+
+    assert reused.returncode == 1
+    assert reused.stdout == ""
 
 
 def test_rejects_windows_or_smb_filesystem_for_generation(
