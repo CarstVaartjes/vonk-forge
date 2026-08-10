@@ -742,10 +742,12 @@ def test_development_targets_are_scannable_nonroot_and_have_only_required_git_to
             images["worker"],
             "python",
             "-c",
-            "import shutil; from pathlib import Path; "
-            "assert not shutil.which('ssh') and not shutil.which('ssh-keygen'); "
-            "assert not shutil.which('docker'); "
-            "assert not Path('/var/run/docker.sock').exists()",
+            (
+                "import shutil; from pathlib import Path; "
+                "assert not shutil.which('ssh') and not shutil.which('ssh-keygen'); "
+                "assert not shutil.which('docker'); "
+                "assert not Path('/var/run/docker.sock').exists()"
+            ),
         ),
         check=False,
     )
