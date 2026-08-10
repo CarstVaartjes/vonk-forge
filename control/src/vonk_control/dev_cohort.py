@@ -10,9 +10,9 @@ import re
 import secrets
 import stat
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
 
 DEVELOPMENT_IMAGE_IDENTITY_PATH = Path(
     "/usr/local/share/vonk-forge/development-image-identity.json"
@@ -97,10 +97,16 @@ def canonical_json(value: object) -> bytes:
     """Return the canonical ASCII JSON encoding used for public identities."""
     try:
         return (
-            json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+            json.dumps(
+                value,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+                allow_nan=False,
+            )
             + "\n"
         ).encode("ascii")
-    except (TypeError, UnicodeEncodeError) as error:
+    except (TypeError, UnicodeEncodeError, ValueError) as error:
         raise DevelopmentCohortError("development identity is not canonical JSON") from error
 
 

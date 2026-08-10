@@ -68,6 +68,12 @@ def _identity_bytes(**overrides: object) -> bytes:
     return canonical_json(_identity_document(**overrides))
 
 
+@pytest.mark.parametrize("non_finite", (float("nan"), float("inf"), float("-inf")))
+def test_canonical_json_rejects_non_finite_numbers(non_finite: float) -> None:
+    with pytest.raises(DevelopmentCohortError, match="not canonical JSON"):
+        canonical_json({"value": non_finite})
+
+
 def test_identity_parser_accepts_only_the_canonical_development_identity() -> None:
     raw = _identity_bytes()
 
