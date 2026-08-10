@@ -281,16 +281,51 @@ jobs:
               "$DISTRIBUTION" filesystem:r2: "$SNAPSHOT"
           else
             aptly -config="$config" publish snapshot "${common[@]}" \
-              -architectures=arm64 -distribution="$DISTRIBUTION" -component=main \
+              -acquire-by-hash -architectures=arm64 -distribution="$DISTRIBUTION" \
+              -component=main \
               "$SNAPSHOT" filesystem:r2:
           fi
-          inrelease="$work/public/dists/${DISTRIBUTION}/InRelease"
+          distribution_root="$work/public/dists/$DISTRIBUTION"
+          inrelease="$distribution_root/InRelease"
           test -s "$inrelease"
           keyring_path="$work/public/$KEYRING"
           gpg --batch --export "$FINGERPRINT" > "$keyring_path"
           test -s "$keyring_path"
           chmod 0644 "$keyring_path"
           gpgv --keyring "$keyring_path" "$inrelease"
+          release="$distribution_root/Release"
+          test -s "$release"
+          grep -Fqx "Acquire-By-Hash: yes" "$release"
+          checked_indexes=0
+          index_entries=$( \
+            awk '
+              /^SHA256:$/ { in_sha256=1; next }
+              in_sha256 && /^[^[:space:]]/ { exit }
+              in_sha256 && NF {
+                if (NF != 3) {
+                  print "malformed SHA256 entry" > "/dev/stderr"
+                  exit 64
+                }
+                if ($3 ~ /(^|\/)Packages(\.[^\/]+)?$/) {
+                  print $1 "\t" $2 "\t" $3
+                }
+              }
+            ' "$release"
+          )
+          if [[ -n "$index_entries" ]]; then
+            while IFS=$'\t' read -r digest size relative_name; do
+              [[ "$digest" =~ ^[0-9a-f]{64}$ ]]
+              [[ "$size" =~ ^[0-9]+$ ]]
+              [[ "$relative_name" =~ ^([A-Za-z0-9][A-Za-z0-9._+-]*/)*Packages(\.[A-Za-z0-9][A-Za-z0-9._+-]*)?$ ]]
+              index_path="$distribution_root/$relative_name"
+              by_hash_index="$(dirname "$index_path")/by-hash/SHA256/$digest"
+              test -f "$by_hash_index" && test ! -L "$by_hash_index"
+              test "$(stat -c %s -- "$by_hash_index")" = "$size"
+              test "$(sha256sum -- "$by_hash_index" | cut -d' ' -f1)" = "$digest"
+              checked_indexes=$((checked_indexes + 1))
+            done <<< "$index_entries"
+          fi
+          test "$checked_indexes" -gt 0
 
       - name: Build any missing immutable bundles
         shell: bash
