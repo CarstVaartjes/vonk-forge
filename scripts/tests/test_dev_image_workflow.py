@@ -397,6 +397,7 @@ def test_workflow_builds_scans_and_accepts_oci_archives_before_login() -> None:
     text = _workflow()
     build = _step(text, "Build exact OCI archives")
     load = _step(text, "Load tested images without pulling")
+    preload = _step(text, "Preload pinned runtime dependency")
     accept = _step(text, "Scan and accept image-only stack")
 
     assert "docker buildx build" in build
@@ -411,6 +412,13 @@ def test_workflow_builds_scans_and_accepts_oci_archives_before_login() -> None:
     assert "oci-archive:" in load
     assert "docker-daemon:vonk-forge-api:dev-local" in load
     assert "docker-daemon:vonk-forge-worker:dev-local" in load
+    assert "deploy/compose/compose.dev.images.yaml" in preload
+    assert "^postgres:" in preload
+    assert "@sha256:[0-9a-f]{64}$" in preload
+    assert 'docker pull "$postgres_image"' in preload
+    assert text.index("Preload pinned runtime dependency") < text.index(
+        "Scan and accept image-only stack"
+    )
     assert "scripts/verify-dev-image-secrets" in accept
     assert "scripts/dev-image-acceptance" in accept
     assert text.index("Scan and accept image-only stack") < text.index("Log in to GHCR")
