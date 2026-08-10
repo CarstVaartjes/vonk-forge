@@ -142,7 +142,32 @@ if [ -z "$management_cidrs" ]; then
 fi
 export VONK_MANAGEMENT_CIDRS=$management_cidrs
 
+runtime_root=/run/vonk-caddy
+runtime_caddy=$runtime_root/caddy
+if [ -L "$runtime_root" ] || [ ! -d "$runtime_root" ] || [ ! -w "$runtime_root" ]; then
+  printf 'Vonk Forge Caddy runtime directory is unavailable\n' >&2
+  exit 1
+fi
+if [ "$(stat -c '%u:%g:%a' "$runtime_root")" != "10000:10000:700" ]; then
+  printf 'Vonk Forge Caddy runtime directory is unsafe\n' >&2
+  exit 1
+fi
+if [ -L /usr/bin/caddy ] || [ ! -f /usr/bin/caddy ] || [ ! -x /usr/bin/caddy ]; then
+  printf 'Vonk Forge Caddy image binary is unavailable\n' >&2
+  exit 1
+fi
+if [ -L "$runtime_caddy" ] || { [ -e "$runtime_caddy" ] && [ ! -f "$runtime_caddy" ]; }; then
+  printf 'Vonk Forge Caddy runtime binary target is unsafe\n' >&2
+  exit 1
+fi
+runtime_temporary=$(mktemp "$runtime_root/.caddy.XXXXXX")
+trap 'rm -f "$runtime_temporary"' EXIT HUP INT TERM
+cp /usr/bin/caddy "$runtime_temporary"
+chmod 0500 "$runtime_temporary"
+mv -f "$runtime_temporary" "$runtime_caddy"
+trap - EXIT HUP INT TERM
+
 if [ "$#" -eq 0 ]; then
-  set -- caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+  set -- "$runtime_caddy" run --config /etc/caddy/Caddyfile --adapter caddyfile
 fi
 exec "$@"

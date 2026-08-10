@@ -337,7 +337,11 @@ services:
         read_only: true
         volume: {subpath: caddy-entrypoint.sh}
       - dev-caddy-secrets:/run/secrets:ro
-    tmpfs: [/config, /data, /tmp]
+    tmpfs:
+      - /config
+      - /data
+      - /run/vonk-caddy:rw,exec,mode=0700,uid=10000,gid=10000
+      - /tmp
     entrypoint: [/bin/sh, /usr/local/bin/vonk-caddy-entrypoint]
     environment:
       VONK_AGENT_ENROLL_HOSTNAME: enroll.vonk-forge.lan
@@ -348,7 +352,7 @@ services:
       control-api: {condition: service_healthy}
       dev-init: {condition: service_completed_successfully}
     healthcheck:
-      test: [CMD-SHELL, "test -r /tmp/vonk-agent-proxy-auth.caddy"]
+      test: [CMD, wget, -q, --spider, -T, "3", http://127.0.0.1:2019/healthz]
       interval: 10s
       timeout: 5s
       retries: 12

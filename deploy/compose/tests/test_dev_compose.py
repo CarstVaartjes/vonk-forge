@@ -141,7 +141,12 @@ def test_image_template_hardens_caddy_as_the_only_lan_listener() -> None:
     assert caddy["read_only"] is True
     assert caddy["cap_drop"] == ["ALL"]
     assert caddy["security_opt"] == ["no-new-privileges:true"]
-    assert set(caddy["tmpfs"]) == {"/config", "/data", "/tmp"}
+    assert set(caddy["tmpfs"]) == {
+        "/config",
+        "/data",
+        "/run/vonk-caddy:rw,exec,mode=0700,uid=10000,gid=10000",
+        "/tmp",
+    }
     assert caddy["entrypoint"] == [
         "/bin/sh",
         "/usr/local/bin/vonk-caddy-entrypoint",
@@ -161,7 +166,15 @@ def test_image_template_hardens_caddy_as_the_only_lan_listener() -> None:
     ]
     assert set(caddy["networks"]) == {"application"}
     assert caddy["healthcheck"] == {
-        "test": ["CMD-SHELL", "test -r /tmp/vonk-agent-proxy-auth.caddy"],
+        "test": [
+            "CMD",
+            "wget",
+            "-q",
+            "--spider",
+            "-T",
+            "3",
+            "http://127.0.0.1:2019/healthz",
+        ],
         "interval": "10s",
         "timeout": "5s",
         "retries": 12,
@@ -223,6 +236,37 @@ def test_image_template_hardens_caddy_as_the_only_lan_listener() -> None:
         if name != "caddy"
         for port in ports
     )
+
+
+def test_pinned_caddy_image_provides_the_configured_http_probe() -> None:
+    result = subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--user",
+            "10000:10000",
+            "--read-only",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges:true",
+            "--entrypoint",
+            "/bin/sh",
+            CADDY_IMAGE,
+            "-c",
+            "command -v wget && wget --help",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[0] == "/usr/bin/wget"
+    assert "--spider" in result.stdout + result.stderr
+    assert "-T SEC" in result.stdout + result.stderr
 
 
 def test_image_template_runs_acknowledged_litellm_only_on_internal_networks() -> None:

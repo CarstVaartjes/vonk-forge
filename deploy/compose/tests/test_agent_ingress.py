@@ -5,6 +5,13 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
+DEV_CADDYFILE = (
+    ROOT / "control/src/vonk_control/resources/dev/Caddyfile"
+)
+DEV_CADDY_IMAGE = (
+    "caddy:2.11.4@sha256:"
+    "844f60b64e4724a5aa8245e019dace0d3f199f7433ce6c57676cb30a920dbad9"
+)
 
 
 def _environment() -> dict[str, str]:
@@ -119,6 +126,53 @@ def _server_on_port(adapted: dict, port: int) -> dict:
     )
 
 
+def _adapted_development_caddy() -> dict:
+    result = subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "-i",
+            "--user",
+            "10000:10000",
+            "--read-only",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges:true",
+            "--tmpfs",
+            "/tmp:rw,mode=1777",
+            "--tmpfs",
+            "/run/vonk-caddy:rw,exec,mode=0700,uid=10000,gid=10000",
+            "-e",
+            "VONK_AGENT_ENROLL_HOSTNAME=enroll.test.example",
+            "-e",
+            "VONK_AGENT_HOSTNAME=agents.test.example",
+            "-e",
+            "VONK_BACKEND_PORT=8443",
+            "-e",
+            "VONK_MANAGEMENT_CIDRS=10.0.0.0/24",
+            "--entrypoint",
+            "/bin/sh",
+            DEV_CADDY_IMAGE,
+            "-c",
+            (
+                "printf '%s\\n' 'header_up X-Vonk-Agent-Proxy-Auth test' "
+                ">/tmp/vonk-agent-proxy-auth.caddy; "
+                "cp /usr/bin/caddy /run/vonk-caddy/caddy; "
+                "chmod 0500 /run/vonk-caddy/caddy; "
+                "exec /run/vonk-caddy/caddy adapt --config - --adapter caddyfile"
+            ),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        input=DEV_CADDYFILE.read_text(encoding="utf-8"),
+        timeout=30,
+    )
+    return json.loads(result.stdout)
+
+
 def _entrypoint_result(
     environment: dict[str, str],
     secret_source: str | None = None,
@@ -230,6 +284,52 @@ def test_development_image_compose_enables_complete_builtin_agent_settings(
         "condition": "service_healthy",
         "required": True,
     }
+
+
+def test_development_caddy_health_listener_is_exact_and_loopback_only() -> None:
+    adapted = _adapted_development_caddy()
+    health = _server_on_port(adapted, 2019)
+
+    assert health["listen"] == ["127.0.0.1:2019"]
+    assert health["routes"] == [
+        {
+            "match": [{"host": ["127.0.0.1"]}],
+            "handle": [
+                {
+                    "handler": "subroute",
+                    "routes": [
+                        {
+                            "handle": [
+                                {"handler": "static_response", "status_code": 200}
+                            ],
+                            "match": [{"path": ["/healthz"]}],
+                        },
+                        {
+                            "handle": [
+                                {"handler": "static_response", "status_code": 404}
+                            ]
+                        },
+                    ],
+                }
+            ],
+            "terminal": True,
+        }
+    ]
+    assert "tls_connection_policies" not in health
+    serialized = json.dumps(health, sort_keys=True)
+    assert "reverse_proxy" not in serialized
+    assert "control-api:8000" not in serialized
+    assert "/agent/" not in serialized
+
+    listeners = {
+        listener
+        for server in adapted["apps"]["http"]["servers"].values()
+        for listener in server.get("listen", [])
+    }
+    assert "127.0.0.1:2019" in listeners
+    assert ":2019" not in listeners
+    assert "0.0.0.0:2019" not in listeners
+    assert "[::]:2019" not in listeners
 
 
 def test_caddy_adapts_three_sni_boundaries_for_admin_enrollment_and_mtls_agents() -> None:

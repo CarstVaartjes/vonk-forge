@@ -327,7 +327,7 @@ def test_stage_development_assets_rejects_oversize_resource_before_reading(
     assert not (tmp_path / "runtime-config").exists()
 
 
-def test_caddy_entrypoint_stages_proxy_fragment_as_uid_10000(
+def test_caddy_entrypoint_stages_runtime_files_as_uid_10000(
     tmp_path: Path,
 ) -> None:
     if shutil.which("docker") is None:
@@ -357,6 +357,8 @@ def test_caddy_entrypoint_stages_proxy_fragment_as_uid_10000(
             "10000:10000",
             "--tmpfs",
             "/tmp:rw,mode=1777",
+            "--tmpfs",
+            "/run/vonk-caddy:rw,exec,mode=0700,uid=10000,gid=10000",
             "--mount",
             f"type=bind,src={entrypoint},dst=/entrypoint.sh,readonly",
             "--mount",
@@ -374,7 +376,9 @@ def test_caddy_entrypoint_stages_proxy_fragment_as_uid_10000(
             (
                 "exec /bin/sh /entrypoint.sh /bin/sh -c '"
                 "test \"$(stat -c %a /tmp/vonk-agent-proxy-auth.caddy)\" = 400 "
-                "&& test \"$(wc -l < /tmp/vonk-agent-proxy-auth.caddy)\" = 1'"
+                "&& test \"$(wc -l < /tmp/vonk-agent-proxy-auth.caddy)\" = 1 "
+                "&& test \"$(stat -c %a /run/vonk-caddy/caddy)\" = 500 "
+                "&& /run/vonk-caddy/caddy version >/dev/null'"
             ),
         ),
         stdin=subprocess.DEVNULL,
