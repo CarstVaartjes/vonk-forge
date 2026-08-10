@@ -50,6 +50,24 @@ def _rendered(tmp_path: Path) -> dict[str, object]:
     return json.loads(result.stdout)
 
 
+def _rendered_image_template() -> dict[str, object]:
+    result = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "-f",
+            str(IMAGE_TEMPLATE),
+            "config",
+            "--format",
+            "json",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return json.loads(result.stdout)
+
+
 def test_dev_compose_builds_local_control_services_without_release_images(
     tmp_path: Path,
 ) -> None:
@@ -119,6 +137,7 @@ def test_dev_compose_runs_packaged_initializer_with_disjoint_runtime_authority(
         "VONK_DEV_API_IMAGE": DEV_API_IMAGE,
         "VONK_DEV_EXPECTED_COMMIT": EXPECTED_COMMIT,
         "VONK_DEV_LOCAL_ACCEPTANCE": "1",
+        "VONK_DEV_MIGRATE_SECRET_ROOT": "/migrate-secrets",
         "VONK_DEV_REPOSITORY_URL": "file:///source-origin",
         "VONK_DEV_SECRET_SOURCE_ROOT": "/host-secrets",
         "VONK_DEV_WORKER_SECRET_ROOT": "/worker-secrets",
@@ -137,6 +156,9 @@ def test_dev_compose_runs_packaged_initializer_with_disjoint_runtime_authority(
     assert "/host-secrets" not in init_volumes
     assert init_volumes["/repository"]["type"] == "volume"
     assert init_volumes["/api-secrets"]["type"] == "volume"
+    assert init_volumes["/migrate-secrets"]["source"].endswith(
+        "dev-migrate-secrets"
+    )
     assert init_volumes["/worker-secrets"]["type"] == "volume"
     assert {
         (secret["source"], secret["target"])
@@ -150,6 +172,7 @@ def test_dev_compose_runs_packaged_initializer_with_disjoint_runtime_authority(
     }
 
     api_volumes = _volumes_by_target(services["control-api"])
+    migrate_volumes = _volumes_by_target(services["migrate"])
     worker_volumes = _volumes_by_target(services["control-worker"])
     assert api_volumes["/repository"]["type"] == "volume"
     assert api_volumes["/repository"].get("read_only", False) is False
@@ -159,16 +182,49 @@ def test_dev_compose_runs_packaged_initializer_with_disjoint_runtime_authority(
     assert worker_volumes["/run/secrets"]["source"].endswith(
         "dev-worker-secrets"
     )
+    assert migrate_volumes["/run/secrets"]["source"].endswith(
+        "dev-migrate-secrets"
+    )
+    assert migrate_volumes["/run/secrets"]["read_only"] is True
     assert api_volumes["/run/secrets"]["source"] != worker_volumes["/run/secrets"][
         "source"
     ]
+    assert migrate_volumes["/run/secrets"]["source"] != api_volumes["/run/secrets"][
+        "source"
+    ]
+    assert migrate_volumes["/run/secrets"]["source"] != worker_volumes[
+        "/run/secrets"
+    ]["source"]
     assert services["control-api"]["environment"]["VONK_DEPLOYMENT_BRANCH"] == "main"
     assert services["control-worker"]["environment"]["VONK_DEPLOYMENT_BRANCH"] == (
         "main"
     )
-    assert {secret["source"] for secret in services["migrate"]["secrets"]} == {
-        "database-url"
-    }
+    assert services["migrate"].get("secrets", []) == []
+
+
+def test_image_template_uses_the_database_only_migration_projection() -> None:
+    services = _rendered_image_template()["services"]
+    initializer = services["dev-init"]
+    init_volumes = _volumes_by_target(initializer)
+    migrate_volumes = _volumes_by_target(services["migrate"])
+    api_volumes = _volumes_by_target(services["control-api"])
+    worker_volumes = _volumes_by_target(services["control-worker"])
+
+    assert initializer["environment"]["VONK_DEV_MIGRATE_SECRET_ROOT"] == "/migrate-secrets"
+    assert init_volumes["/migrate-secrets"]["source"].endswith(
+        "dev-migrate-secrets"
+    )
+    assert migrate_volumes["/run/secrets"]["source"].endswith(
+        "dev-migrate-secrets"
+    )
+    assert migrate_volumes["/run/secrets"]["read_only"] is True
+    assert services["migrate"].get("secrets", []) == []
+    assert migrate_volumes["/run/secrets"]["source"] != api_volumes["/run/secrets"][
+        "source"
+    ]
+    assert migrate_volumes["/run/secrets"]["source"] != worker_volumes[
+        "/run/secrets"
+    ]["source"]
 
 
 def _script_repository(tmp_path: Path) -> tuple[Path, Path]:

@@ -490,9 +490,10 @@ def _secret_source(root: Path) -> Path:
 def test_stage_runtime_secrets_creates_disjoint_service_projections(tmp_path: Path) -> None:
     source = _secret_source(tmp_path / "source")
     api_root = tmp_path / "api"
+    migrate_root = tmp_path / "migrate"
     worker_root = tmp_path / "worker"
 
-    stage_runtime_secrets(source, api_root, worker_root)
+    stage_runtime_secrets(source, api_root, migrate_root, worker_root)
 
     assert {path.name for path in api_root.iterdir()} == {
         "admin-grant-private-key",
@@ -503,6 +504,10 @@ def test_stage_runtime_secrets_creates_disjoint_service_projections(tmp_path: Pa
         "database-url",
         "worker-api-token",
     }
+    assert {path.name for path in migrate_root.iterdir()} == {"database-url"}
+    assert (migrate_root / "database-url").read_bytes() == (
+        b"postgresql://vonk:secret@postgres/vonk\n"
+    )
     assert (api_root / "database-url").read_bytes() == (
         b"postgresql://vonk:secret@postgres/vonk\n"
     )
@@ -515,6 +520,9 @@ def test_stage_runtime_secrets_creates_disjoint_service_projections(tmp_path: Pa
     assert stat.S_IMODE((api_root / "admin-grant-private-key").stat().st_mode) == 0o400
     assert stat.S_IMODE((worker_root / "worker-api-token").stat().st_mode) == 0o400
     assert not (api_root / "worker-api-token").exists()
+    assert not (migrate_root / "git-signing-key").exists()
+    assert not (migrate_root / "admin-grant-private-key").exists()
+    assert not (migrate_root / "worker-api-token").exists()
     assert not (worker_root / "git-signing-key").exists()
     assert not (worker_root / "admin-grant-private-key").exists()
 
@@ -528,7 +536,9 @@ def test_stage_runtime_secrets_rejects_symlink_inputs_and_projection_roots(
     (source / "database-url").symlink_to(source / "database-url.real")
 
     with pytest.raises(DevInitError, match="source"):
-        stage_runtime_secrets(source, tmp_path / "api", tmp_path / "worker")
+        stage_runtime_secrets(
+            source, tmp_path / "api", tmp_path / "migrate", tmp_path / "worker"
+        )
 
     source = _secret_source(tmp_path / "safe-source")
     actual_api = tmp_path / "actual-api"
@@ -536,7 +546,7 @@ def test_stage_runtime_secrets_rejects_symlink_inputs_and_projection_roots(
     api_root = tmp_path / "api"
     api_root.symlink_to(actual_api, target_is_directory=True)
     with pytest.raises(DevInitError, match="projection"):
-        stage_runtime_secrets(source, api_root, tmp_path / "worker")
+        stage_runtime_secrets(source, api_root, tmp_path / "migrate", tmp_path / "worker")
 
 
 def test_stage_runtime_secrets_rejects_parent_symlink_aliases_before_mutation(
@@ -553,8 +563,13 @@ def test_stage_runtime_secrets_rejects_parent_symlink_aliases_before_mutation(
     alias_parent = tmp_path / "alias-parent"
     alias_parent.symlink_to(actual_parent, target_is_directory=True)
 
-    with pytest.raises(DevInitError, match="projection"):
-        stage_runtime_secrets(source, shared, alias_parent / "shared")
+    for api_root, migrate_root, worker_root in (
+        (shared, alias_parent / "shared", tmp_path / "worker"),
+        (shared, tmp_path / "migrate", alias_parent / "shared"),
+        (tmp_path / "api", shared, alias_parent / "shared"),
+    ):
+        with pytest.raises(DevInitError, match="projection"):
+            stage_runtime_secrets(source, api_root, migrate_root, worker_root)
 
     after = shared.stat()
     assert sentinel.read_bytes() == b"preserve-me\n"
@@ -570,9 +585,12 @@ def test_stage_runtime_secrets_requires_absolute_projection_paths(
     monkeypatch.chdir(tmp_path)
 
     with pytest.raises(DevInitError, match="absolute"):
-        stage_runtime_secrets(source, Path("api"), tmp_path / "worker")
+        stage_runtime_secrets(
+            source, Path("api"), tmp_path / "migrate", tmp_path / "worker"
+        )
 
     assert not (tmp_path / "api").exists()
+    assert not (tmp_path / "migrate").exists()
     assert not (tmp_path / "worker").exists()
 
 
@@ -585,14 +603,15 @@ def test_stage_runtime_secrets_rejects_symlinked_parent_components(
     linked_parent = tmp_path / "linked-parent"
     linked_parent.symlink_to(actual_parent, target_is_directory=True)
 
-    with pytest.raises(DevInitError, match="projection"):
-        stage_runtime_secrets(
-            source,
-            tmp_path / "api",
-            linked_parent / "worker",
-        )
+    for api_root, migrate_root, worker_root in (
+        (linked_parent / "api", tmp_path / "migrate", tmp_path / "worker"),
+        (tmp_path / "api", linked_parent / "migrate", tmp_path / "worker"),
+        (tmp_path / "api", tmp_path / "migrate", linked_parent / "worker"),
+    ):
+        with pytest.raises(DevInitError, match="projection"):
+            stage_runtime_secrets(source, api_root, migrate_root, worker_root)
 
-    assert not (actual_parent / "worker").exists()
+    assert not any(actual_parent.iterdir())
 
 
 def test_stage_runtime_secrets_preserves_generated_credentials_and_refreshes_inputs(
@@ -600,8 +619,9 @@ def test_stage_runtime_secrets_preserves_generated_credentials_and_refreshes_inp
 ) -> None:
     source = _secret_source(tmp_path / "source")
     api_root = tmp_path / "api"
+    migrate_root = tmp_path / "migrate"
     worker_root = tmp_path / "worker"
-    stage_runtime_secrets(source, api_root, worker_root)
+    stage_runtime_secrets(source, api_root, migrate_root, worker_root)
     admin_key = (api_root / "admin-grant-private-key").read_bytes()
     worker_token = (worker_root / "worker-api-token").read_bytes()
     (source / "database-url").write_bytes(
@@ -609,11 +629,13 @@ def test_stage_runtime_secrets_preserves_generated_credentials_and_refreshes_inp
     )
     (source / "git-signing-key").write_bytes(b"replacement-signing-key\n")
     api_root.chmod(0o700)
+    migrate_root.chmod(0o700)
     worker_root.chmod(0o700)
     (api_root / "unexpected-api-authority").write_bytes(b"remove\n")
+    (migrate_root / "unexpected-migrate-authority").write_bytes(b"remove\n")
     (worker_root / "unexpected-worker-authority").write_bytes(b"remove\n")
 
-    stage_runtime_secrets(source, api_root, worker_root)
+    stage_runtime_secrets(source, api_root, migrate_root, worker_root)
 
     assert (api_root / "admin-grant-private-key").read_bytes() == admin_key
     assert (worker_root / "worker-api-token").read_bytes() == worker_token
@@ -621,6 +643,9 @@ def test_stage_runtime_secrets_preserves_generated_credentials_and_refreshes_inp
         b"postgresql://vonk:replacement@postgres/vonk\n"
     )
     assert (worker_root / "database-url").read_bytes() == (
+        b"postgresql://vonk:replacement@postgres/vonk\n"
+    )
+    assert (migrate_root / "database-url").read_bytes() == (
         b"postgresql://vonk:replacement@postgres/vonk\n"
     )
     assert (api_root / "git-signing-key").read_bytes() == b"replacement-signing-key\n"
@@ -633,6 +658,7 @@ def test_stage_runtime_secrets_preserves_generated_credentials_and_refreshes_inp
         "database-url",
         "worker-api-token",
     }
+    assert {path.name for path in migrate_root.iterdir()} == {"database-url"}
 
 
 @pytest.mark.parametrize(
@@ -647,8 +673,9 @@ def test_stage_runtime_secrets_rejects_malformed_generated_credentials(
 ) -> None:
     source = _secret_source(tmp_path / "source")
     api_root = tmp_path / "api"
+    migrate_root = tmp_path / "migrate"
     worker_root = tmp_path / "worker"
-    stage_runtime_secrets(source, api_root, worker_root)
+    stage_runtime_secrets(source, api_root, migrate_root, worker_root)
     root = api_root if projection == "api" else worker_root
     root.chmod(0o700)
     target = root / name
@@ -657,7 +684,7 @@ def test_stage_runtime_secrets_rejects_malformed_generated_credentials(
     target.chmod(0o400)
 
     with pytest.raises(DevInitError, match="generated credential"):
-        stage_runtime_secrets(source, api_root, worker_root)
+        stage_runtime_secrets(source, api_root, migrate_root, worker_root)
 
     assert target.read_bytes() == malformed
 
@@ -674,8 +701,9 @@ def test_stage_runtime_secrets_rejects_symlinked_generated_credentials(
 ) -> None:
     source = _secret_source(tmp_path / "source")
     api_root = tmp_path / "api"
+    migrate_root = tmp_path / "migrate"
     worker_root = tmp_path / "worker"
-    stage_runtime_secrets(source, api_root, worker_root)
+    stage_runtime_secrets(source, api_root, migrate_root, worker_root)
     root = api_root if projection == "api" else worker_root
     root.chmod(0o700)
     target = root / name
@@ -685,7 +713,7 @@ def test_stage_runtime_secrets_rejects_symlinked_generated_credentials(
     target.symlink_to(outside)
 
     with pytest.raises(DevInitError, match="generated credential"):
-        stage_runtime_secrets(source, api_root, worker_root)
+        stage_runtime_secrets(source, api_root, migrate_root, worker_root)
 
     assert target.is_symlink()
     assert outside.read_bytes() == b"must-not-be-read-or-replaced\n"
@@ -698,6 +726,7 @@ def test_main_initializes_repository_synthetic_state_and_runtime_secrets(
     source = _secret_source(tmp_path / "source")
     repository = tmp_path / "repository"
     api_root = tmp_path / "api"
+    migrate_root = tmp_path / "migrate"
     worker_root = tmp_path / "worker"
     identity = tmp_path / "identity"
     state = tmp_path / "state"
@@ -708,6 +737,7 @@ def test_main_initializes_repository_synthetic_state_and_runtime_secrets(
     monkeypatch.setenv("VONK_REPOSITORY_PATH", str(repository))
     monkeypatch.setenv("VONK_DEV_SECRET_SOURCE_ROOT", str(source))
     monkeypatch.setenv("VONK_DEV_API_SECRET_ROOT", str(api_root))
+    monkeypatch.setenv("VONK_DEV_MIGRATE_SECRET_ROOT", str(migrate_root))
     monkeypatch.setenv("VONK_DEV_WORKER_SECRET_ROOT", str(worker_root))
     monkeypatch.setenv("VONK_DEV_API_IMAGE", API_IMAGE)
     monkeypatch.setenv("VONK_DEV_WORKER_IMAGE", WORKER_IMAGE)
@@ -724,6 +754,7 @@ def test_main_initializes_repository_synthetic_state_and_runtime_secrets(
     assert generation["api_image"] == API_IMAGE
     assert generation["worker_image"] == WORKER_IMAGE
     assert (api_root / "admin-grant-private-key").is_file()
+    assert (migrate_root / "database-url").is_file()
     assert (worker_root / "worker-api-token").is_file()
     assert all(path.is_dir() for path in (state, routes, supervisor))
 
@@ -739,9 +770,10 @@ def test_main_preflights_all_required_environment_before_cloning(
     monkeypatch.setenv("VONK_REPOSITORY_PATH", str(repository))
     monkeypatch.setenv("VONK_DEV_SECRET_SOURCE_ROOT", str(source))
     monkeypatch.setenv("VONK_DEV_API_SECRET_ROOT", str(tmp_path / "api"))
-    monkeypatch.delenv("VONK_DEV_WORKER_SECRET_ROOT", raising=False)
+    monkeypatch.setenv("VONK_DEV_WORKER_SECRET_ROOT", str(tmp_path / "worker"))
+    monkeypatch.delenv("VONK_DEV_MIGRATE_SECRET_ROOT", raising=False)
 
-    with pytest.raises(DevInitError, match="VONK_DEV_WORKER_SECRET_ROOT is required"):
+    with pytest.raises(DevInitError, match="VONK_DEV_MIGRATE_SECRET_ROOT is required"):
         main()
 
     assert not repository.exists()
@@ -757,6 +789,7 @@ def test_main_rejects_an_unpinned_process_image_before_cloning(
     monkeypatch.setenv("VONK_REPOSITORY_PATH", str(repository))
     monkeypatch.setenv("VONK_DEV_SECRET_SOURCE_ROOT", str(tmp_path / "source"))
     monkeypatch.setenv("VONK_DEV_API_SECRET_ROOT", str(tmp_path / "api"))
+    monkeypatch.setenv("VONK_DEV_MIGRATE_SECRET_ROOT", str(tmp_path / "migrate"))
     monkeypatch.setenv("VONK_DEV_WORKER_SECRET_ROOT", str(tmp_path / "worker"))
     monkeypatch.setenv("VONK_DEV_API_IMAGE", "vonk-forge-api:dev-local")
     monkeypatch.setenv("VONK_DEV_WORKER_IMAGE", WORKER_IMAGE)
