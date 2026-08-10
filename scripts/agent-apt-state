@@ -38,6 +38,11 @@ SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 BY_HASH_DIGEST_LENGTHS = {"MD5Sum": 32, "SHA1": 40, "SHA256": 64, "SHA512": 128}
 MAX_BUNDLE_BYTES = 1024 * 1024 * 1024
 MAX_MEMBER_BYTES = 512 * 1024 * 1024
+RCLONE_SECRET_ENVIRONMENT = (
+    "RCLONE_CONFIG_R2_ACCESS_KEY_ID",
+    "RCLONE_CONFIG_R2_SECRET_ACCESS_KEY",
+    "RCLONE_CONFIG_R2_ENDPOINT",
+)
 
 
 class StateError(RuntimeError):
@@ -551,7 +556,13 @@ class RcloneStore:
             raise StateError("object store bucket is invalid")
         self.remote = f"r2:{bucket}"
 
-    def _run(self, arguments: list[str], *, input_raw: bytes | None = None) -> bytes:
+    def _run(
+        self,
+        operation: str,
+        arguments: list[str],
+        *,
+        input_raw: bytes | None = None,
+    ) -> bytes:
         completed = subprocess.run(
             ["rclone", *arguments],
             input=input_raw,
@@ -559,7 +570,14 @@ class RcloneStore:
             capture_output=True,
         )
         if completed.returncode != 0:
-            raise StateError("object store operation failed")
+            message = (
+                f"object store {operation} failed with exit code "
+                f"{completed.returncode}"
+            )
+            detail = _sanitize_rclone_error(completed.stderr)
+            if detail:
+                message = f"{message}: {detail}"
+            raise StateError(message)
         return completed.stdout
 
     def list(self, prefix: str) -> list[str]:
@@ -570,6 +588,7 @@ class RcloneStore:
             parent = clean.rsplit("/", 1)[0] if "/" in clean else ""
         remote = self.remote if not parent else f"{self.remote}/{parent}"
         output = self._run(
+            "list",
             ["lsf", remote, "--recursive", "--files-only", "--order-by", "name"]
         )
         names = output.decode("utf-8").splitlines()
@@ -577,13 +596,33 @@ class RcloneStore:
         return sorted(key for key in keys if key.startswith(prefix))
 
     def read(self, key: str) -> bytes:
-        return self._run(["cat", f"{self.remote}/{key}"])
+        return self._run("read", ["cat", f"{self.remote}/{key}"])
 
     def write(self, key: str, data: bytes) -> None:
         with tempfile.NamedTemporaryFile(prefix="agent-apt-object-") as temporary:
             temporary.write(data)
             temporary.flush()
-            self._run(["copyto", temporary.name, f"{self.remote}/{key}"])
+            self._run("write", ["copyto", temporary.name, f"{self.remote}/{key}"])
+
+
+def _sanitize_rclone_error(raw: bytes) -> str:
+    message = raw.decode("utf-8", errors="replace")
+    for name in RCLONE_SECRET_ENVIRONMENT:
+        secret = os.environ.get(name, "")
+        if secret:
+            message = message.replace(secret, "[redacted]")
+    message = re.sub(
+        r"(?i)\b(https?://)[^\s/@]+@",
+        r"\1[redacted]@",
+        message,
+    )
+    message = re.sub(
+        r"(?i)(https?://[^\s?#]+)[?#][^\s]*",
+        r"\1?[redacted]",
+        message,
+    )
+    lines = [line.strip() for line in message.splitlines() if line.strip()]
+    return lines[-1][:512] if lines else ""
 
 
 def _receipt_from_environment() -> dict[str, str]:
