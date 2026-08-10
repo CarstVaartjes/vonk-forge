@@ -1,11 +1,16 @@
 # GPU node agent package channels
 
 Vonk Forge publishes one reproducible ARM64 Debian package through two explicit
-channels. An accepted exact `main` tip produces
-`X.Y.Z~dev.<commit-epoch>+g<sha12>` and advances apt distribution `dev`. A
-trusted annotated, SSH-signed `vX.Y.Z` tag reachable from `main` produces
-`X.Y.Z`, attaches the accepted package evidence to that tag's GitHub Release,
-and then advances apt distribution `stable`.
+channels. An accepted exact `main` tip published by the dedicated development
+GitHub Actions workflow produces
+`X.Y.Z~dev.<workflow-run-number>+g<sha12>` and advances apt distribution `dev`.
+The workflow supplies its monotonic `github.run_number` as the official
+publication sequence; reruns of the same workflow run retain that number.
+Local tooling may validate an explicitly supplied fixture sequence, but cannot
+select or publish an official sequence. A trusted annotated, SSH-signed
+`vX.Y.Z` tag reachable from `main` produces `X.Y.Z`, attaches the accepted
+package evidence to that tag's GitHub Release, and then advances apt
+distribution `stable`.
 
 There is no mutable `.deb` called `dev` or `latest`. Development Actions
 artifacts are named with the full source commit; production files are immutable
@@ -258,10 +263,10 @@ sudo apt update
 sudo apt install --only-upgrade vonk-forge-agent
 ```
 
-Debian orders `X.Y.Z~dev.<epoch>+g<sha12>` before `X.Y.Z`, so moving from a
-development build for a release line to that final release is an upgrade.
-Newer development epochs sort after older epochs. Confirm a proposed ordering
-when needed:
+Debian orders `X.Y.Z~dev.<workflow-run-number>+g<sha12>` before `X.Y.Z`, so
+moving from a development build for a release line to that final release is an
+upgrade. Newer development workflow run numbers sort after older workflow run
+numbers. Confirm a proposed ordering when needed:
 
 ```bash
 dpkg --compare-versions "$CANDIDATE_VERSION" gt "$INSTALLED_VERSION"
