@@ -314,10 +314,15 @@ def test_rendered_compose_is_image_only_and_has_exact_runtime_boundaries(
     assert "secrets" not in services["control-api"]
     assert "secrets" not in services["control-worker"]
     assert volumes["control-api"]["/run/secrets"]["source"].endswith("dev-api-secrets")
-    assert volumes["migrate"]["/run/secrets"]["source"].endswith(
-        "dev-migrate-secrets"
-    )
-    assert volumes["migrate"]["/run/secrets"]["read_only"] is True
+    init_migrate_secrets = volumes["dev-init"]["/migrate-secrets"]
+    migrate_secrets = volumes["migrate"]["/run/secrets"]
+    assert init_migrate_secrets["type"] == "volume"
+    assert migrate_secrets["type"] == "volume"
+    assert migrate_secrets["source"] == init_migrate_secrets["source"]
+    assert migrate_secrets["source"].endswith("dev-migrate-secrets")
+    assert migrate_secrets["read_only"] is True
+    assert migrate_secrets["source"] != volumes["control-api"]["/run/secrets"]["source"]
+    assert migrate_secrets["source"] != volumes["control-worker"]["/run/secrets"]["source"]
     assert volumes["control-worker"]["/run/secrets"]["source"].endswith("dev-worker-secrets")
 
 
