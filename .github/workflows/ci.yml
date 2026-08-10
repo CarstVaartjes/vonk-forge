@@ -1032,10 +1032,6 @@ jobs:
       - name: Select newest completed signed release
         id: target
         shell: bash
-        env:
-          API_IMAGE: ${{ needs.release-metadata.outputs.api_image }}
-          HERMES_IMAGE: ${{ needs.release-metadata.outputs.hermes_image }}
-          WORKER_IMAGE: ${{ needs.release-metadata.outputs.worker_image }}
         run: |
           set -euo pipefail
           releases_json="$RUNNER_TEMP/completed-releases.json"
@@ -1060,7 +1056,8 @@ jobs:
           git fetch --force --tags origin
           mapfile -t release_tags < <(
             jq -r '.[] | select(
-              (.draft | not) and (.prerelease | not)
+              (.draft | not) and (.prerelease | not) and
+              (.immutable == true)
             ) | .tag_name' "$releases_json" \
               | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' \
               | sort -Vr
@@ -1092,13 +1089,15 @@ jobs:
           scripts/verify-release-tag-authority \
             "$target_tag" "$target_tag_oid" "$target_commit"
 
-          evidence_dir=$(mktemp -d \
-            "$RUNNER_TEMP/vonk-production-alias.XXXXXXXXXX")
-          trap 'rm -rf -- "$evidence_dir"' EXIT
+          evidence_dir="$RUNNER_TEMP/vonk-production-alias-evidence"
+          test ! -e "$evidence_dir"
+          install -d -m 0700 "$evidence_dir"
           for asset in vonk-forge-images.env vonk-forge-images.env.sha256; do
             mapfile -t asset_urls < <(
               jq -r --arg tag "$target_tag" --arg asset "$asset" '
-                [.[] | select(.tag_name == $tag)] as $releases
+                [.[] | select(
+                  .tag_name == $tag and .immutable == true
+                )] as $releases
                 | if ($releases | length) == 1 then
                     $releases[0].assets[] | select(.name == $asset)
                     | .browser_download_url
@@ -1110,49 +1109,10 @@ jobs:
               --proto '=https' --proto-redir '=https' --tlsv1.2 \
               "${asset_urls[0]}" --output "$evidence_dir/$asset"
           done
-          mapfile -t checksum_lines \
-            < "$evidence_dir/vonk-forge-images.env.sha256"
-          [[ "${#checksum_lines[@]}" -eq 1 ]]
-          read -r expected_hash expected_name <<<"${checksum_lines[0]}"
-          [[ "$expected_hash" =~ ^[0-9a-f]{64}$ ]]
-          [[ "$expected_name" == vonk-forge-images.env ]]
-          actual_hash=$(sha256sum "$evidence_dir/vonk-forge-images.env")
-          [[ "${actual_hash%% *}" == "$expected_hash" ]]
-          declare -A release_images=()
-          while IFS='=' read -r key value; do
-            [[ -n "$key" && -n "$value" ]]
-            [[ -z "${release_images[$key]+present}" ]]
-            case "$key" in
-              CONTROL_API_IMAGE|CONTROL_WORKER_IMAGE|HERMES_AGENT_IMAGE)
-                release_images["$key"]=$value
-                ;;
-              *)
-                exit 1
-                ;;
-            esac
-          done < "$evidence_dir/vonk-forge-images.env"
-          [[ "${#release_images[@]}" -eq 3 ]]
-          target_version=${target_tag#v}
-          api_reference=${release_images[CONTROL_API_IMAGE]}
-          worker_reference=${release_images[CONTROL_WORKER_IMAGE]}
-          hermes_reference=${release_images[HERMES_AGENT_IMAGE]}
-          [[ "$api_reference" == "$API_IMAGE:$target_tag@"sha256:* ]]
-          [[ "$worker_reference" == "$WORKER_IMAGE:$target_tag@"sha256:* ]]
-          [[ "$hermes_reference" == "$HERMES_IMAGE:$target_version@"sha256:* ]]
-          api_digest=${api_reference##*@}
-          worker_digest=${worker_reference##*@}
-          hermes_digest=${hermes_reference##*@}
-          [[ "$api_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-          [[ "$worker_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-          [[ "$hermes_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
           printf '%s\n' \
             "target_tag=$target_tag" \
             "target_tag_oid=$target_tag_oid" \
             "target_commit=$target_commit" \
-            "target_version=$target_version" \
-            "api_digest=$api_digest" \
-            "worker_digest=$worker_digest" \
-            "hermes_digest=$hermes_digest" \
             >> "$GITHUB_OUTPUT"
 
       - name: Revalidate selected authority before evidence credentials
@@ -1167,30 +1127,76 @@ jobs:
             "$TARGET_TAG" "$TARGET_TAG_OID" "$TARGET_COMMIT"
 
       - name: Bind release digests to selected source revision and evidence
+        id: evidence
         shell: bash
         env:
-          API_DIGEST: ${{ steps.target.outputs.api_digest }}
           API_IMAGE: ${{ needs.release-metadata.outputs.api_image }}
+          EVIDENCE_DIR: ${{ runner.temp }}/vonk-production-alias-evidence
           GH_TOKEN: ${{ github.token }}
-          HERMES_DIGEST: ${{ steps.target.outputs.hermes_digest }}
           HERMES_IMAGE: ${{ needs.release-metadata.outputs.hermes_image }}
           TARGET_COMMIT: ${{ steps.target.outputs.target_commit }}
           TARGET_TAG: ${{ steps.target.outputs.target_tag }}
-          TARGET_VERSION: ${{ steps.target.outputs.target_version }}
-          WORKER_DIGEST: ${{ steps.target.outputs.worker_digest }}
           WORKER_IMAGE: ${{ needs.release-metadata.outputs.worker_image }}
         run: |
           set -euo pipefail
+          gh release verify "$TARGET_TAG" \
+            --repo "$GITHUB_REPOSITORY" >/dev/null
+          for asset in vonk-forge-images.env vonk-forge-images.env.sha256; do
+            test -f "$EVIDENCE_DIR/$asset" && test ! -L "$EVIDENCE_DIR/$asset"
+          done
+          gh release verify-asset "$TARGET_TAG" \
+            "$EVIDENCE_DIR/vonk-forge-images.env" \
+            --repo "$GITHUB_REPOSITORY" >/dev/null
+          gh release verify-asset "$TARGET_TAG" \
+            "$EVIDENCE_DIR/vonk-forge-images.env.sha256" \
+            --repo "$GITHUB_REPOSITORY" >/dev/null
+
+          mapfile -t checksum_lines \
+            < "$EVIDENCE_DIR/vonk-forge-images.env.sha256"
+          [[ "${#checksum_lines[@]}" -eq 1 ]]
+          read -r expected_hash expected_name <<<"${checksum_lines[0]}"
+          [[ "$expected_hash" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$expected_name" == vonk-forge-images.env ]]
+          actual_hash=$(sha256sum "$EVIDENCE_DIR/vonk-forge-images.env")
+          [[ "${actual_hash%% *}" == "$expected_hash" ]]
+          declare -A release_images=()
+          while IFS='=' read -r key value; do
+            [[ -n "$key" && -n "$value" ]]
+            [[ -z "${release_images[$key]+present}" ]]
+            case "$key" in
+              CONTROL_API_IMAGE|CONTROL_WORKER_IMAGE|HERMES_AGENT_IMAGE)
+                release_images["$key"]=$value
+                ;;
+              *)
+                exit 1
+                ;;
+            esac
+          done < "$EVIDENCE_DIR/vonk-forge-images.env"
+          [[ "${#release_images[@]}" -eq 3 ]]
+          target_version=${TARGET_TAG#v}
+          api_reference=${release_images[CONTROL_API_IMAGE]}
+          worker_reference=${release_images[CONTROL_WORKER_IMAGE]}
+          hermes_reference=${release_images[HERMES_AGENT_IMAGE]}
+          [[ "$api_reference" == "$API_IMAGE:$TARGET_TAG@"sha256:* ]]
+          [[ "$worker_reference" == "$WORKER_IMAGE:$TARGET_TAG@"sha256:* ]]
+          [[ "$hermes_reference" == "$HERMES_IMAGE:$target_version@"sha256:* ]]
+          api_digest=${api_reference##*@}
+          worker_digest=${worker_reference##*@}
+          hermes_digest=${hermes_reference##*@}
+          [[ "$api_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$worker_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$hermes_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+
           for role in api worker hermes; do
             case "$role" in
               api)
-                image=$API_IMAGE; digest=$API_DIGEST; tag=$TARGET_TAG
+                image=$API_IMAGE; digest=$api_digest; tag=$TARGET_TAG
                 ;;
               worker)
-                image=$WORKER_IMAGE; digest=$WORKER_DIGEST; tag=$TARGET_TAG
+                image=$WORKER_IMAGE; digest=$worker_digest; tag=$TARGET_TAG
                 ;;
               hermes)
-                image=$HERMES_IMAGE; digest=$HERMES_DIGEST; tag=$TARGET_VERSION
+                image=$HERMES_IMAGE; digest=$hermes_digest; tag=$target_version
                 ;;
             esac
             [[ $(skopeo inspect --format '{{.Digest}}' \
@@ -1207,11 +1213,19 @@ jobs:
             if [[ "$role" != hermes ]]; then
               gh attestation verify "oci://$image@$digest" \
                 --repo "$GITHUB_REPOSITORY" \
-                --signer-workflow dev-images.yml \
+                --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/dev-images.yml" \
+                --signer-digest "$TARGET_COMMIT" \
                 --source-digest "$TARGET_COMMIT" \
-                --source-ref refs/heads/main >/dev/null
+                --source-ref refs/heads/main \
+                --deny-self-hosted-runners >/dev/null
             fi
           done
+          printf '%s\n' \
+            "target_version=$target_version" \
+            "api_digest=$api_digest" \
+            "worker_digest=$worker_digest" \
+            "hermes_digest=$hermes_digest" \
+            >> "$GITHUB_OUTPUT"
 
       - name: Revalidate selected authority before registry authentication
         shell: bash
@@ -1234,16 +1248,16 @@ jobs:
       - name: Reconcile the newest completed production release
         shell: bash
         env:
-          API_DIGEST: ${{ steps.target.outputs.api_digest }}
+          API_DIGEST: ${{ steps.evidence.outputs.api_digest }}
           API_IMAGE: ${{ needs.release-metadata.outputs.api_image }}
-          HERMES_DIGEST: ${{ steps.target.outputs.hermes_digest }}
+          HERMES_DIGEST: ${{ steps.evidence.outputs.hermes_digest }}
           HERMES_IMAGE: ${{ needs.release-metadata.outputs.hermes_image }}
           LATEST_ALIAS: ${{ needs.release-metadata.outputs.latest_alias }}
           TARGET_COMMIT: ${{ steps.target.outputs.target_commit }}
           TARGET_TAG: ${{ steps.target.outputs.target_tag }}
           TARGET_TAG_OID: ${{ steps.target.outputs.target_tag_oid }}
-          TARGET_VERSION: ${{ steps.target.outputs.target_version }}
-          WORKER_DIGEST: ${{ steps.target.outputs.worker_digest }}
+          TARGET_VERSION: ${{ steps.evidence.outputs.target_version }}
+          WORKER_DIGEST: ${{ steps.evidence.outputs.worker_digest }}
           WORKER_IMAGE: ${{ needs.release-metadata.outputs.worker_image }}
         run: |
           set -euo pipefail
@@ -1280,7 +1294,8 @@ jobs:
           done
           mapfile -t observed_tags < <(
             jq -r '.[] | select(
-              (.draft | not) and (.prerelease | not)
+              (.draft | not) and (.prerelease | not) and
+              (.immutable == true)
             ) | .tag_name' "$observed_releases" \
               | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' \
               | sort -Vr
