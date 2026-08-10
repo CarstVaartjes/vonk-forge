@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# Reuse a release Hermes image only when its immutable evidence is exactly
+# bound to the accepted signed release source.
+set -euo pipefail
+
+invalid() {
+  printf '%s\n' 'Hermes release image reconciliation is invalid' >&2
+  exit 64
+}
+
+[[ "$#" -eq 6 || ( "$#" -eq 7 && "$7" == --require-attestation ) ]] || invalid
+readonly image=$1 version=$2 source_sha=$3 source_url=$4 repository=$5 source_ref=$6
+readonly require_attestation=${7:-}
+[[ "$image" == ghcr.io/carstvaartjes/vonk-forge-hermes ]] || invalid
+[[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || invalid
+[[ "$source_sha" =~ ^[0-9a-f]{40}$ ]] || invalid
+[[ "$source_url" == "https://github.com/${repository}" ]] || invalid
+[[ "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || invalid
+[[ "$source_ref" == "refs/tags/v${version}" ]] || invalid
+
+readonly reference="docker://${image}:${version}"
+readonly scratch=$(mktemp -d /tmp/vonk-hermes-release.XXXXXXXXXX)
+[[ "$scratch" =~ ^/tmp/vonk-hermes-release\.[A-Za-z0-9]{10}$ && -d "$scratch" && ! -L "$scratch" ]] || {
+  printf '%s\n' 'Hermes release scratch path is unsafe' >&2
+  exit 1
+}
+cleanup() { rm -rf -- "$scratch"; }
+trap cleanup EXIT INT TERM
+
+inspect_error="$scratch/inspect-error"
+if ! digest=$(skopeo inspect --format '{{.Digest}}' "$reference" 2>"$inspect_error"); then
+  if grep -Eiq 'manifest unknown|name unknown|not found' "$inspect_error"; then
+    printf '%s\n' 'exists=false'
+    exit 0
+  fi
+  printf '%s\n' 'unable to inspect Hermes release image' >&2
+  exit 1
+fi
+[[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+  printf '%s\n' 'Hermes release image digest is invalid' >&2
+  exit 1
+}
+
+skopeo inspect --config "docker://${image}@${digest}" \
+  | jq -e --arg revision "$source_sha" --arg source "$source_url" --arg version "$version" \
+    '(.config.Labels["org.opencontainers.image.revision"] == $revision)
+     and (.config.Labels["org.opencontainers.image.source"] == $source)
+     and (.config.Labels["org.opencontainers.image.version"] == $version)' \
+    >/dev/null
+docker buildx imagetools inspect "${image}@${digest}" --format '{{ json .Provenance }}' \
+  | jq -e --arg revision "$source_sha" \
+    '([.. | objects | select(
+        ((.predicateType? // "") | startswith("https://slsa.dev/provenance/"))
+        or (((.SLSA?.buildType? // "") | length) > 0)
+        or (((.buildDefinition?.buildType? // "") | length) > 0)
+      )] | length > 0)
+     and ([.. | strings | select(. == $revision)] | length > 0)' \
+    >/dev/null
+if [[ "$require_attestation" == --require-attestation ]]; then
+  gh attestation verify "oci://${image}@${digest}" \
+    --repo "$repository" \
+    --signer-workflow "$repository/.github/workflows/ci.yml" \
+    --signer-digest "$source_sha" \
+    --source-digest "$source_sha" \
+    --source-ref "$source_ref" \
+    --deny-self-hosted-runners \
+    --format json >/dev/null
+fi
+
+printf '%s\n' 'exists=true' "digest=$digest"

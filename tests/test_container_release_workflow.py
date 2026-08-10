@@ -190,7 +190,29 @@ def test_alias_reconciliation_binds_selected_release_to_signed_tag_revision() ->
     assert "scripts/promote-image-aliases" in alias
     promotion = alias.index("scripts/promote-image-aliases")
     assert alias.rfind("scripts/verify-release-tag-authority", 0, promotion) >= 0
-    assert alias.find("scripts/verify-release-tag-authority", promotion) >= 0
+    postconditions = (ROOT / "scripts/verify-production-alias-postconditions").read_text()
+    assert "scripts/verify-production-alias-postconditions" in alias
+    assert "scripts/verify-release-tag-authority" in postconditions
+
+
+def test_production_release_retries_reconcile_immutable_outputs_before_completion() -> None:
+    publisher = job("publish-images")
+    manifest = job("release-manifest")
+    release = workflow_step("release-manifest", "Create public GitHub Release")
+    aliases = workflow_step(
+        "advance-production-aliases",
+        "Reconcile the newest completed production release",
+    )
+
+    assert "Reconcile existing Hermes release image" in publisher
+    assert "Verify and record Hermes release image" in publisher
+    assert "scripts/reconcile-hermes-release-image" in publisher
+    assert "Attest Hermes release provenance" in publisher
+    assert "refuse-existing-image-version" not in publisher
+    assert "scripts/reconcile-github-release" in release
+    assert "SOURCE_SHA: ${{ github.sha }}" in release
+    assert "--postcondition" in aliases
+    assert "scripts/verify-production-alias-postconditions" in aliases
 
 
 def test_alias_uses_only_attested_immutable_release_assets_before_parsing() -> None:
@@ -212,7 +234,8 @@ def test_alias_uses_only_attested_immutable_release_assets_before_parsing() -> N
     )
 
     assert "(.immutable == true)" in selection
-    assert "(.immutable == true)" in reconcile
+    postconditions = (ROOT / "scripts/verify-production-alias-postconditions").read_text()
+    assert "(.immutable == true)" in postconditions
     assert "gh release verify \"$TARGET_TAG\"" in evidence
     assert evidence.count("gh release verify-asset") == 2
     for asset in ("vonk-forge-images.env", "vonk-forge-images.env.sha256"):
@@ -248,7 +271,7 @@ def test_tag_release_builds_and_publishes_exact_platform_target() -> None:
     ):
         assert f"- name: {step}" in publisher
     assert "environment: platform-release" in publisher
-    assert "id-token: write" not in publisher
+    assert "id-token: write" in publisher
     build = workflow_step("publish-images", "Build canonical platform release")
     assert "scripts/render-production-compose" in build
     assert "docker-compose.production.yml" in build
@@ -274,7 +297,7 @@ def test_oidc_authority_is_isolated_from_image_and_bundle_builds() -> None:
     builder = job("publish-images")
     authority = job("publish-platform-target")
 
-    assert "id-token: write" not in builder
+    assert "id-token: write" in builder
     assert "packages: write" in builder
     assert "needs: [publish-images, release-metadata]" in authority
     assert "environment: platform-release" in authority
@@ -291,7 +314,7 @@ def test_host_updater_has_a_separate_minimal_provenance_attestation_job() -> Non
     attestor = job("attest-host-updater")
     release = job("release-manifest")
 
-    assert "attestations: write" not in builder
+    assert "attestations: write" in builder
     assert "packages: write" not in attestor
     assert (
         "permissions:\n      contents: read\n      id-token: write\n      attestations: write"
@@ -408,7 +431,7 @@ def test_tag_release_attaches_agent_package_to_public_release() -> None:
     ):
         assert asset in release
     assert "refusing unexpected agent package release asset" in release
-    assert "gh release create" in release
+    assert "scripts/reconcile-github-release" in release
 
 
 def test_apt_publication_consumes_the_unified_release_artifact() -> None:
@@ -462,7 +485,10 @@ def test_publisher_needs_every_ci_gate_and_alone_can_write_packages() -> None:
         in publisher
     )
     assert "packages: write" not in validator
-    assert "permissions:\n      contents: read\n      packages: write" in publisher
+    assert (
+        "permissions:\n      attestations: write\n      contents: read\n"
+        "      id-token: write\n      packages: write" in publisher
+    )
     assert "packages: write" not in metadata
     assert "packages: write" not in manifest
     assert "permissions:\n      contents: write" in manifest
@@ -586,68 +612,27 @@ def test_hermes_build_keeps_its_existing_release_tags() -> None:
         f"{image}:${{{{ needs.release-metadata.outputs.version }}}}",
         f"{image}:${{{{ needs.release-metadata.outputs.commit_tag }}}}",
     ]
-    assert "scripts/refuse-existing-image-version" in workflow_step(
-        "publish-images", "Recheck the immutable Hermes version"
+    reconciliation = workflow_step(
+        "publish-images", "Reconcile existing Hermes release image"
     )
+    verification = workflow_step(
+        "publish-images", "Verify and record Hermes release image"
+    )
+    assert "scripts/reconcile-hermes-release-image" in reconciliation
+    assert "scripts/reconcile-hermes-release-image" in verification
+    assert "--require-attestation" in verification
+    assert "if: steps.existing-hermes.outputs.exists" not in workflow_step(
+        "publish-images", "Attest Hermes release provenance"
+    )
+    assert "gh attestation verify" in (ROOT / "scripts/reconcile-hermes-release-image").read_text()
 
 
-def test_existing_version_guard_allows_only_known_absence(
-    tmp_path: Path,
-) -> None:
-    assert "scripts/refuse-existing-image-version" in workflow_step(
-        "validate-release-images", "Refuse an existing release version"
-    )
-    guard = workflow_step(
-        "validate-release-images", "Refuse an existing release version"
-    )
-    assert "CONTROL_API_IMAGE" not in guard
-    assert "CONTROL_WORKER_IMAGE" not in guard
+def test_hermes_release_reuse_is_the_only_existing_version_path() -> None:
+    publisher = job("publish-images")
 
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
-    docker = fake_bin / "docker"
-    docker.write_text(
-        "#!/usr/bin/env bash\n"
-        "set -euo pipefail\n"
-        "case $DOCKER_MODE in\n"
-        '  absent) echo "ERROR: $4: not found" >&2; exit 1 ;;\n'
-        "  existing) exit 0 ;;\n"
-        "  registry-error) echo 'ERROR: registry returned 503' >&2; exit 1 ;;\n"
-        "  mixed-error) printf 'ERROR: %s: not found\\nERROR: registry returned 503\\n' \"$4\" >&2; exit 1 ;;\n"
-        "esac\n"
-    )
-    docker.chmod(0o755)
-    script = rendered_step_run(
-        "validate-release-images", "Refuse an existing release version"
-    )
-    environment = {
-        **os.environ,
-        "PATH": f"{fake_bin}:{os.environ['PATH']}",
-        "RELEASE_VERSION": "1.2.3",
-        "IMAGE_VERSION_TAG": "v1.2.3",
-        "CONTROL_API_IMAGE": "ghcr.io/example/api",
-        "CONTROL_WORKER_IMAGE": "ghcr.io/example/worker",
-        "HERMES_AGENT_IMAGE": "ghcr.io/example/hermes",
-    }
-
-    results = {
-        mode: subprocess.run(
-            ["bash", "-c", f"set -euo pipefail\n{script}"],
-            cwd=ROOT,
-            env={**environment, "DOCKER_MODE": mode},
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        for mode in ("absent", "existing", "registry-error", "mixed-error")
-    }
-
-    assert results["absent"].returncode == 0, results["absent"].stderr
-    assert results["existing"].returncode != 0
-    assert results["registry-error"].returncode != 0
-    assert results["mixed-error"].returncode != 0
-    assert "registry returned 503" not in results["registry-error"].stderr
-    assert "registry returned 503" not in results["mixed-error"].stderr
+    assert "scripts/refuse-existing-image-version" not in publisher
+    assert "Reconcile existing Hermes release image" in publisher
+    assert "Attest Hermes release provenance" in publisher
 
 
 def test_latest_alias_advances_only_after_release_evidence() -> None:
@@ -806,5 +791,5 @@ def test_final_job_creates_checksum_protected_public_release_asset() -> None:
     )
     assert "vonk-forge-images.env" in text
     assert "sha256sum" in text
-    assert "gh release create" in text
+    assert "scripts/reconcile-github-release" in text
     assert "GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}" in text

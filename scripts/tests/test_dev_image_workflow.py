@@ -84,6 +84,10 @@ def _fake_skopeo(tmp_path: Path) -> tuple[Path, Path, Path]:
         "    state[role]=digest\n"
         "    state_path.write_text(json.dumps(state)+'\\n')\n"
         "    raise SystemExit(0)\n"
+        "if args[0] == 'delete':\n"
+        "    state.pop(role, None)\n"
+        "    state_path.write_text(json.dumps(state)+'\\n')\n"
+        "    raise SystemExit(0)\n"
         "raise SystemExit(97)\n",
         encoding="utf-8",
     )
@@ -99,6 +103,7 @@ def _promote_aliases(
     failures: str = "",
     alias: str = "dev",
     include_hermes: bool = False,
+    postcondition: tuple[str, ...] = (),
 ) -> subprocess.CompletedProcess[str]:
     arguments = [
         str(ALIAS_SCRIPT),
@@ -110,6 +115,8 @@ def _promote_aliases(
     ]
     if include_hermes:
         arguments.extend(("ghcr.io/carstvaartjes/vonk-forge-hermes", DIGEST_C))
+    if postcondition:
+        arguments.extend(("--postcondition", *postcondition))
     return subprocess.run(
         arguments,
         cwd=ROOT,
@@ -284,6 +291,28 @@ def test_alias_failure_is_red_when_rollback_cannot_converge(tmp_path: Path) -> N
     assert "could not be restored" in result.stderr
 
 
+def test_postcondition_failure_restores_the_complete_prior_alias_set(
+    tmp_path: Path,
+) -> None:
+    fake_bin, state, log = _fake_skopeo(tmp_path)
+    postcondition = fake_bin / "postcondition"
+    postcondition.write_text("#!/usr/bin/env bash\nexit 23\n", encoding="utf-8")
+    postcondition.chmod(0o755)
+
+    result = _promote_aliases(
+        fake_bin,
+        state,
+        log,
+        alias="latest",
+        include_hermes=True,
+        postcondition=(str(postcondition),),
+    )
+
+    assert result.returncode != 0
+    assert json.loads(state.read_text(encoding="utf-8")) == {}
+    assert "not advanced as a set" in result.stderr
+
+
 def test_failed_first_publication_is_repairable_by_failed_job_rerun(
     tmp_path: Path,
 ) -> None:
@@ -295,7 +324,7 @@ def test_failed_first_publication_is_repairable_by_failed_job_rerun(
     repaired = _promote_aliases(fake_bin, state, log)
 
     assert failed.returncode != 0
-    assert partial == {"api": DIGEST_A}
+    assert partial == {}
     assert repaired.returncode == 0, repaired.stderr
     assert json.loads(state.read_text(encoding="utf-8")) == {
         "api": DIGEST_A,

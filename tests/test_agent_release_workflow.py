@@ -685,7 +685,17 @@ def test_reusable_apt_publisher_preserves_immutable_receipts_and_ordering() -> N
 def test_reusable_apt_publisher_enables_and_verifies_by_hash_indexes() -> None:
     local = apt_step("Generate missing aptly state or public tree")
 
-    assert "-acquire-by-hash" in local
+    snapshot = re.search(
+        r'aptly -config="\$config" publish snapshot.*?filesystem:r2:', local, re.DOTALL
+    )
+    switch = re.search(
+        r'aptly -config="\$config" publish switch.*?"\$SNAPSHOT"', local, re.DOTALL
+    )
+
+    assert snapshot is not None
+    assert switch is not None
+    assert "-acquire-by-hash" in snapshot.group()
+    assert "-acquire-by-hash" not in switch.group()
     assert "Acquire-By-Hash: yes" in local
     assert "by-hash/SHA256" in local
     assert local.index("publish snapshot") < local.index("Acquire-By-Hash: yes")
