@@ -12,7 +12,7 @@ x-dev-generation: &dev-generation
   VONK_CONTROL_IDENTITY_ROOT: /control-identity
   VONK_DATABASE_URL_FILE: /run/secrets/database-url
   VONK_REPOSITORY_PATH: /repository
-  VONK_DEPLOYMENT_BRANCH: main
+  VONK_DEPLOYMENT_BRANCH: deploy
   VONK_STATE_PATH: /state
   VONK_AGENT_RUNTIME: disabled
   VONK_MANAGEMENT_CIDRS: 127.0.0.1/32

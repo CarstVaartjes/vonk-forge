@@ -195,9 +195,9 @@ def test_dev_compose_runs_packaged_initializer_with_disjoint_runtime_authority(
     assert migrate_volumes["/run/secrets"]["source"] != worker_volumes[
         "/run/secrets"
     ]["source"]
-    assert services["control-api"]["environment"]["VONK_DEPLOYMENT_BRANCH"] == "main"
+    assert services["control-api"]["environment"]["VONK_DEPLOYMENT_BRANCH"] == "deploy"
     assert services["control-worker"]["environment"]["VONK_DEPLOYMENT_BRANCH"] == (
-        "main"
+        "deploy"
     )
     assert services["migrate"].get("secrets", []) == []
 
@@ -225,6 +225,10 @@ def test_image_template_uses_the_database_only_migration_projection() -> None:
     assert migrate_volumes["/run/secrets"]["source"] != worker_volumes[
         "/run/secrets"
     ]["source"]
+    assert services["control-api"]["environment"]["VONK_DEPLOYMENT_BRANCH"] == "deploy"
+    assert services["control-worker"]["environment"]["VONK_DEPLOYMENT_BRANCH"] == (
+        "deploy"
+    )
 
 
 def _script_repository(tmp_path: Path) -> tuple[Path, Path]:
