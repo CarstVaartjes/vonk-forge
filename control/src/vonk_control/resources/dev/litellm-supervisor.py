@@ -53,16 +53,22 @@ _MARKER_FIELDS = {
 }
 _MANIFEST_FIELDS = _MARKER_FIELDS - {"directory", "manifest_sha256"}
 _MAXIMUM_SECRET_BYTES = 64 * 1024
+_MAXIMUM_CONFIG_BYTES = 128 * 1024
+_MASTER_MARKER = "os.environ/LITELLM_MASTER_KEY"
+_UPSTREAM_MARKER = "os.environ/LITELLM_UPSTREAM_KEY"
+_DATABASE_MARKER = "os.environ/LITELLM_DATABASE_URL"
 
 
 class ActiveRequest:
     def __init__(
         self,
-        config: Path,
+        config_bytes: bytes,
+        config_sha256: str,
         marker: dict[str, object],
         activation_sha256: str,
     ) -> None:
-        self.config = config
+        self.config_bytes = config_bytes
+        self.config_sha256 = config_sha256
         self.marker = marker
         self.activation_sha256 = activation_sha256
 
@@ -83,8 +89,58 @@ def _encoded(value: dict[str, object]) -> bytes:
     return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
 
-def _digest(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+def _digest(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()
+
+
+def _read_exact_file(path: Path, *, maximum_bytes: int) -> bytes:
+    descriptor = -1
+    try:
+        descriptor = os.open(
+            path,
+            os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC,
+        )
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_nlink != 1
+            or not 0 < before.st_size <= maximum_bytes
+        ):
+            raise RuntimeError("LiteLLM selected config is unsafe")
+        content = bytearray()
+        while len(content) <= maximum_bytes:
+            chunk = os.read(
+                descriptor,
+                min(4096, maximum_bytes + 1 - len(content)),
+            )
+            if not chunk:
+                break
+            content.extend(chunk)
+        after = os.fstat(descriptor)
+        identity = (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_mtime_ns,
+            before.st_ctime_ns,
+        )
+        updated_identity = (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+            after.st_ctime_ns,
+        )
+        if len(content) != before.st_size or identity != updated_identity:
+            raise RuntimeError("LiteLLM selected config changed while read")
+        return bytes(content)
+    except RuntimeError:
+        raise
+    except OSError as error:
+        raise RuntimeError("LiteLLM selected config is unsafe") from error
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
 
 
 def _read_secret(path: Path) -> str:
@@ -140,38 +196,140 @@ def _read_secret(path: Path) -> str:
             os.close(descriptor)
 
 
-def _resolve_file_secrets(value: object, secrets: dict[str, str]) -> object:
+def _marker_paths(value: object, path: tuple[object, ...] = ()) -> dict[str, set[tuple[object, ...]]]:
+    found = {marker: set() for marker in SECRET_FILES}
     if isinstance(value, str):
-        return secrets.get(value, value)
+        if value in found:
+            found[value].add(path)
+        return found
+    children: list[tuple[object, object]] = []
     if isinstance(value, list):
-        return [_resolve_file_secrets(item, secrets) for item in value]
-    if isinstance(value, dict):
-        return {
-            key: _resolve_file_secrets(item, secrets)
-            for key, item in value.items()
-        }
-    return value
+        children = list(enumerate(value))
+    elif isinstance(value, dict):
+        children = list(value.items())
+    for key, item in children:
+        nested = _marker_paths(item, path + (key,))
+        for marker, paths in nested.items():
+            found[marker].update(paths)
+    return found
+
+
+def _validated_config_document(content: bytes) -> dict[str, object]:
+    try:
+        document = json.loads(content)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise RuntimeError("LiteLLM selected config is invalid") from error
+    if not isinstance(document, dict) or content != _encoded(document):
+        raise RuntimeError("LiteLLM selected config is invalid")
+    if set(document) != {
+        "general_settings",
+        "litellm_settings",
+        "model_list",
+        "router_settings",
+    }:
+        raise RuntimeError("LiteLLM selected config is invalid")
+    general = document.get("general_settings")
+    if not isinstance(general, dict) or general != {
+        "database_url": _DATABASE_MARKER,
+        "disable_admin_ui": False,
+        "master_key": _MASTER_MARKER,
+        "store_model_in_db": False,
+    }:
+        raise RuntimeError("LiteLLM selected config is invalid")
+    if document.get("litellm_settings") != {
+        "drop_params": True,
+        "failure_callback": [],
+        "set_verbose": False,
+        "success_callback": [],
+    }:
+        raise RuntimeError("LiteLLM selected config is invalid")
+    router = document.get("router_settings")
+    basic_router = {
+        "enable_pre_call_checks": True,
+        "routing_strategy": "simple-shuffle",
+    }
+    deployment_router = {
+        **basic_router,
+        "allowed_fails": 0,
+        "num_retries": 1,
+        "retry_policy": {
+            "AuthenticationErrorRetries": 0,
+            "BadRequestErrorRetries": 0,
+            "ContentPolicyViolationErrorRetries": 0,
+            "RateLimitErrorRetries": 1,
+            "TimeoutErrorRetries": 1,
+        },
+    }
+    if router not in (basic_router, deployment_router):
+        raise RuntimeError("LiteLLM selected config is invalid")
+    models = document.get("model_list")
+    if not isinstance(models, list):
+        raise RuntimeError("LiteLLM selected config is invalid")  # noqa: TRY004
+    expected_upstream_paths: set[tuple[object, ...]] = set()
+    for index, model in enumerate(models):
+        if not isinstance(model, dict) or set(model) != {"model_name", "litellm_params"}:
+            raise RuntimeError("LiteLLM selected config is invalid")
+        if not isinstance(model.get("model_name"), str) or not model["model_name"]:
+            raise RuntimeError("LiteLLM selected config is invalid")
+        parameters = model.get("litellm_params")
+        if not isinstance(parameters, dict) or set(parameters) not in (
+            {"api_base", "api_key", "model", "rpm", "tpm"},
+            {"api_base", "api_key", "model", "order", "rpm", "tpm"},
+        ):
+            raise RuntimeError("LiteLLM selected config is invalid")
+        if (
+            parameters.get("api_key") != _UPSTREAM_MARKER
+            or not isinstance(parameters.get("api_base"), str)
+            or not parameters["api_base"]
+            or not isinstance(parameters.get("model"), str)
+            or not parameters["model"]
+            or any(
+                isinstance(parameters.get(field), bool)
+                or not isinstance(parameters.get(field), int)
+                or parameters[field] < 1
+                for field in ("rpm", "tpm")
+            )
+            or (
+                "order" in parameters
+                and (
+                    isinstance(parameters["order"], bool)
+                    or not isinstance(parameters["order"], int)
+                    or parameters["order"] < 1
+                )
+            )
+        ):
+            raise RuntimeError("LiteLLM selected config is invalid")
+        expected_upstream_paths.add(("model_list", index, "litellm_params", "api_key"))
+    paths = _marker_paths(document)
+    if (
+        paths[_MASTER_MARKER] != {("general_settings", "master_key")}
+        or paths[_DATABASE_MARKER] != {("general_settings", "database_url")}
+        or paths[_UPSTREAM_MARKER] != expected_upstream_paths
+    ):
+        raise RuntimeError("LiteLLM selected config is invalid")
+    return document
 
 
 def _materialize_config(
-    source: Path,
+    source: bytes,
     *,
     destination: Path = EFFECTIVE_CONFIG,
 ) -> Path:
-    if source.is_symlink() or not source.is_file():
-        raise RuntimeError("LiteLLM selected config is unsafe")
-    try:
-        source_content = source.read_bytes()
-        document = json.loads(source_content)
-    except (OSError, json.JSONDecodeError) as error:
-        raise RuntimeError("LiteLLM selected config is invalid") from error
-    if not isinstance(document, dict):
-        raise RuntimeError("LiteLLM selected config is invalid")
+    document = _validated_config_document(source)
     secret_values = {
         marker: _read_secret(path) for marker, path in SECRET_FILES.items()
     }
-    resolved = _resolve_file_secrets(document, secret_values)
-    content = _encoded(resolved)
+    general = document["general_settings"]
+    models = document["model_list"]
+    assert isinstance(general, dict) and isinstance(models, list)
+    general["master_key"] = secret_values[_MASTER_MARKER]
+    general["database_url"] = secret_values[_DATABASE_MARKER]
+    for model in models:
+        assert isinstance(model, dict)
+        parameters = model["litellm_params"]
+        assert isinstance(parameters, dict)
+        parameters["api_key"] = secret_values[_UPSTREAM_MARKER]
+    content = _encoded(document)
     parent = destination.parent
     if parent.is_symlink() or not parent.is_dir() or destination.is_symlink():
         raise RuntimeError("LiteLLM effective config path is unsafe")
@@ -275,49 +433,56 @@ def _active_request(*, now: datetime) -> ActiveRequest | None:
     routes = directory / "routes.json"
     config = directory / "litellm.json"
     if any(
-        path.is_symlink() or not path.is_file() for path in (manifest, routes, config)
+        path.is_symlink() or not path.is_file() for path in (manifest, routes)
     ):
         return None
     try:
         exact_manifest = {field: marker[field] for field in _MANIFEST_FIELDS}
-        config_document = json.loads(config.read_bytes())
-    except (OSError, KeyError, json.JSONDecodeError):
+        manifest_content = manifest.read_bytes()
+        routes_content = routes.read_bytes()
+        config_content = _read_exact_file(
+            config,
+            maximum_bytes=_MAXIMUM_CONFIG_BYTES,
+        )
+        config_document = _validated_config_document(config_content)
+    except (OSError, KeyError, RuntimeError):
         return None
     if (
-        manifest.read_bytes() != _encoded(exact_manifest)
-        or _digest(manifest) != manifest_digest
-        or _digest(routes) != marker["routes_sha256"]
-        or _digest(config) != marker["litellm_sha256"]
-        or not isinstance(config_document, dict)
-        or not isinstance(config_document.get("model_list"), list)
+        manifest_content != _encoded(exact_manifest)
+        or _digest(manifest_content) != manifest_digest
+        or _digest(routes_content) != marker["routes_sha256"]
+        or _digest(config_content) != marker["litellm_sha256"]
         or (marker["state"] == "maintenance" and config_document["model_list"] != [])
     ):
         return None
     return ActiveRequest(
-        config=config,
+        config_bytes=config_content,
+        config_sha256=_digest(config_content),
         marker=marker,
         activation_sha256=hashlib.sha256(activation_content).hexdigest(),
     )
 
 
-def _active_config(*, now: datetime) -> Path | None:
+def _active_config(*, now: datetime) -> bytes | None:
     request = _active_request(now=now)
-    return None if request is None else request.config
+    return None if request is None else request.config_bytes
 
 
-def _selected(*, now: datetime | None = None) -> Path:
+def _selected(*, now: datetime | None = None) -> bytes:
     active = _active_config(now=now or datetime.now(UTC))
     if active is not None:
         return active
-    if BOOTSTRAP.is_symlink() or not BOOTSTRAP.is_file():
-        raise RuntimeError("LiteLLM bootstrap config is unavailable")
     try:
-        document = json.loads(BOOTSTRAP.read_bytes())
-    except (OSError, json.JSONDecodeError) as error:
+        content = _read_exact_file(
+            BOOTSTRAP,
+            maximum_bytes=_MAXIMUM_CONFIG_BYTES,
+        )
+        document = _validated_config_document(content)
+    except RuntimeError as error:
         raise RuntimeError("LiteLLM bootstrap config is invalid") from error
-    if not isinstance(document, dict) or document.get("model_list") != []:
+    if document["model_list"] != []:
         raise RuntimeError("LiteLLM bootstrap config must be empty")
-    return BOOTSTRAP
+    return content
 
 
 def _atomic_write(target: Path, content: bytes) -> None:
@@ -426,7 +591,7 @@ def main() -> int:
     signal.signal(signal.SIGTERM, request_stop)
     signal.signal(signal.SIGINT, request_stop)
     request = _active_request(now=datetime.now(UTC))
-    selected = request.config if request is not None else _selected()
+    selected = request.config_bytes if request is not None else _selected()
     while not stopping:
         active_digest = _digest(selected)
         effective_config = _materialize_config(selected)
@@ -455,7 +620,7 @@ def main() -> int:
             time.sleep(POLL_SECONDS)
             candidate_request = _active_request(now=datetime.now(UTC))
             candidate = (
-                candidate_request.config
+                candidate_request.config_bytes
                 if candidate_request is not None
                 else _selected()
             )

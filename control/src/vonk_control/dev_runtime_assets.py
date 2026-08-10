@@ -54,18 +54,7 @@ def _resource_path(resource: Traversable) -> Path | None:
 def _read_resource(resource: Traversable, *, name: str, limit: int) -> bytes:
     path = _resource_path(resource)
     if path is None:
-        is_symlink = getattr(resource, "is_symlink", lambda: False)
-        if is_symlink() or not resource.is_file():
-            raise DevelopmentAssetError(f"development asset {name} is unsafe")
-        try:
-            content = resource.read_bytes()
-        except OSError as error:
-            raise DevelopmentAssetError(
-                f"development asset {name} cannot be read"
-            ) from error
-        if not 0 < len(content) <= limit:
-            raise DevelopmentAssetError(f"development asset {name} is unsafe")
-        return content
+        raise DevelopmentAssetError(f"development asset {name} is unsafe")
 
     descriptor = -1
     try:

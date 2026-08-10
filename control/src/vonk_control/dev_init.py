@@ -39,6 +39,33 @@ _LITELLM_GID = 10001
 _GIT_UID = 65534
 _GIT_GID = 65534
 _MAX_SECRET_BYTES = 64 * 1024
+_PROJECTION_FILES = {
+    "API": frozenset(
+        {
+            "database-url",
+            "git-signing-key",
+            "admin-grant-private-key",
+            "worker-api-token",
+            "agent-ca-certificate",
+            "agent-ca-key",
+            "agent-proxy-auth",
+        }
+    ),
+    "migration": frozenset({"database-url"}),
+    "worker": frozenset({"database-url", "worker-api-token"}),
+    "Caddy": frozenset(
+        {
+            "controller-server-certificate",
+            "controller-server-key",
+            "agent-ca-certificate",
+            "agent-proxy-auth",
+            "management-cidrs",
+        }
+    ),
+    "LiteLLM": frozenset(
+        {"litellm-master-key", "litellm-upstream-key", "litellm-database-url"}
+    ),
+}
 _TARGET_SHA256 = "0" * 64
 _BUILD_DIGEST = "sha256:" + "1" * 64
 _VERSION = "0.1.0"
@@ -596,7 +623,12 @@ def _projection_path(root: Path, *, label: str) -> tuple[str, ...]:
     return root.parts[1:]
 
 
-def _open_projection_directory(root: Path, *, label: str) -> int:
+def _open_projection_directory(
+    root: Path,
+    *,
+    label: str,
+    create: bool,
+) -> tuple[int, bool] | None:
     components = _projection_path(root, label=label)
     flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
     try:
@@ -604,42 +636,84 @@ def _open_projection_directory(root: Path, *, label: str) -> int:
     except OSError as error:
         raise DevInitError(f"{label} projection root is unsafe") from error
     try:
-        for component in components:
+        final_created = False
+        for index, component in enumerate(components):
             try:
                 child = os.open(component, flags, dir_fd=current)
             except FileNotFoundError:
+                if not create:
+                    os.close(current)
+                    return None
                 try:
                     os.mkdir(component, 0o700, dir_fd=current)
+                    created = True
                 except FileExistsError:
-                    pass
+                    created = False
                 child = os.open(component, flags, dir_fd=current)
+                if index == len(components) - 1:
+                    final_created = created
             os.close(current)
             current = child
-        return current
+        return current, final_created
     except OSError as error:
         os.close(current)
         raise DevInitError(f"{label} projection component is unsafe") from error
 
 
-def _prepare_projection_directory(parent: int, *, uid: int, gid: int) -> None:
+def _validate_projection_directory(
+    parent: int,
+    *,
+    label: str,
+    uid: int,
+    gid: int,
+    created: bool,
+) -> None:
+    try:
+        metadata = os.fstat(parent)
+        expected_uid, expected_gid = _projection_identity(uid, gid)
+        if not stat.S_ISDIR(metadata.st_mode):
+            raise DevInitError(f"{label} projection root is unsafe")
+        names = os.listdir(parent)
+        if created:
+            if names:
+                raise DevInitError(f"{label} projection root is unsafe")
+            return
+        if (
+            metadata.st_uid != expected_uid
+            or metadata.st_gid != expected_gid
+            or stat.S_IMODE(metadata.st_mode) != 0o550
+        ):
+            raise DevInitError(f"{label} projection root is unsafe")
+        allowed = _PROJECTION_FILES[label]
+        for name in names:
+            if name not in allowed:
+                raise DevInitError(f"{label} projection entry is unsafe")
+            entry = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            if (
+                not stat.S_ISREG(entry.st_mode)
+                or entry.st_nlink != 1
+                or entry.st_uid != expected_uid
+                or entry.st_gid != expected_gid
+                or stat.S_IMODE(entry.st_mode) != 0o400
+                or not 0 < entry.st_size <= _MAX_SECRET_BYTES
+            ):
+                raise DevInitError(f"{label} projection entry is unsafe")
+    except DevInitError:
+        raise
+    except OSError as error:
+        raise DevInitError(f"{label} projection root is unsafe") from error
+
+
+def _prepare_projection_directory(
+    parent: int, *, uid: int, gid: int, created: bool
+) -> None:
     try:
         uid, gid = _projection_identity(uid, gid)
-        os.fchown(parent, uid, gid)
+        if created:
+            os.fchown(parent, uid, gid)
         os.fchmod(parent, 0o700)
     except OSError as error:
         raise DevInitError("development secret projection cannot be prepared") from error
-
-
-def _clear_projection(parent: int) -> None:
-    try:
-        names = os.listdir(parent)
-        for name in names:
-            metadata = os.stat(name, dir_fd=parent, follow_symlinks=False)
-            if stat.S_ISDIR(metadata.st_mode):
-                raise DevInitError("development secret projection contains a directory")
-            os.unlink(name, dir_fd=parent)
-    except OSError as error:
-        raise DevInitError("development secret projection cannot be cleared") from error
 
 
 def _read_generated_credential(
@@ -754,6 +828,7 @@ def _write_projection_secret(
     *,
     uid: int,
     gid: int,
+    replace: bool = True,
 ) -> None:
     temporary = f".{name}.{secrets.token_hex(12)}.new"
     descriptor = -1
@@ -780,7 +855,17 @@ def _write_projection_secret(
         os.fsync(descriptor)
         os.close(descriptor)
         descriptor = -1
-        os.replace(temporary, name, src_dir_fd=parent, dst_dir_fd=parent)
+        if replace:
+            os.replace(temporary, name, src_dir_fd=parent, dst_dir_fd=parent)
+        else:
+            os.link(
+                temporary,
+                name,
+                src_dir_fd=parent,
+                dst_dir_fd=parent,
+                follow_symlinks=False,
+            )
+            os.unlink(temporary, dir_fd=parent)
         os.fsync(parent)
     except DevInitError:
         raise
@@ -863,10 +948,53 @@ def stage_runtime_secrets(
     management_cidrs = _read_source_secret(source, "management-cidrs")
     litellm_database_url = _litellm_database_url(database_url)
 
-    descriptors: list[int] = []
+    opened: list[tuple[int, bool] | None] = []
     try:
         for root, label, _uid, _gid in roots:
-            descriptors.append(_open_projection_directory(root, label=label))
+            opened.append(
+                _open_projection_directory(root, label=label, create=False)
+            )
+        existing = [item for item in opened if item is not None]
+        existing_identities = {
+            (metadata.st_dev, metadata.st_ino)
+            for metadata in (
+                os.fstat(descriptor) for descriptor, _created in existing
+            )
+        }
+        if len(existing_identities) != len(existing):
+            raise DevInitError(
+                "development secret projections must be physically distinct"
+            )
+        for item, (_root, label, uid, gid) in zip(
+            opened, roots, strict=True
+        ):
+            if item is None:
+                continue
+            descriptor, created = item
+            _validate_projection_directory(
+                descriptor,
+                label=label,
+                uid=uid,
+                gid=gid,
+                created=created,
+            )
+
+        for index, (item, (root, label, _uid, _gid)) in enumerate(
+            zip(opened, roots, strict=True)
+        ):
+            if item is None:
+                created_item = _open_projection_directory(
+                    root,
+                    label=label,
+                    create=True,
+                )
+                if created_item is None:
+                    raise DevInitError(f"{label} projection root is unsafe")
+                opened[index] = created_item
+        complete = [item for item in opened if item is not None]
+        if len(complete) != len(roots):
+            raise DevInitError("development secret projection root is unsafe")
+        descriptors = [descriptor for descriptor, _created in complete]
         identities = {
             (metadata.st_dev, metadata.st_ino)
             for metadata in (os.fstat(descriptor) for descriptor in descriptors)
@@ -875,82 +1003,137 @@ def stage_runtime_secrets(
             raise DevInitError(
                 "development secret projections must be physically distinct"
             )
-        for descriptor, (_root, _label, uid, gid) in zip(
-            descriptors, roots, strict=True
+        for (descriptor, created), (_root, label, uid, gid) in zip(
+            complete, roots, strict=True
         ):
-            _prepare_projection_directory(descriptor, uid=uid, gid=gid)
+            _validate_projection_directory(
+                descriptor,
+                label=label,
+                uid=uid,
+                gid=gid,
+                created=created,
+            )
 
         api, migrate, worker, caddy, litellm = descriptors
+        admin_present = "admin-grant-private-key" in os.listdir(api)
+        worker_present = "worker-api-token" in os.listdir(worker)
         admin_key = _admin_credential(api)
         worker_token = _worker_credential(worker)
-        for descriptor in descriptors:
-            _clear_projection(descriptor)
-
-        for name, content in (
-            ("database-url", database_url),
-            ("git-signing-key", signing_key),
-            ("admin-grant-private-key", admin_key),
-            ("worker-api-token", worker_token),
-            ("agent-ca-certificate", agent_ca_certificate),
-            ("agent-ca-key", agent_ca_key),
-            ("agent-proxy-auth", agent_proxy_auth),
-        ):
-            _write_projection_secret(
-                api,
-                name,
-                content,
-                uid=_API_UID,
-                gid=_API_GID,
-            )
-        _write_projection_secret(
-            migrate,
-            "database-url",
-            database_url,
+        api_worker_token = _read_generated_credential(
+            api,
+            "worker-api-token",
             uid=_API_UID,
             gid=_API_GID,
         )
-        for name, content in (
-            ("database-url", database_url),
-            ("worker-api-token", worker_token),
-        ):
+        if api_worker_token is not None and api_worker_token != worker_token:
+            raise DevInitError("development worker credential projections diverge")
+
+        prepared: list[int] = []
+        try:
+            for (descriptor, created), (_root, _label, uid, gid) in zip(
+                complete, roots, strict=True
+            ):
+                prepared.append(descriptor)
+                _prepare_projection_directory(
+                    descriptor,
+                    uid=uid,
+                    gid=gid,
+                    created=created,
+                )
+
+            if not admin_present:
+                _write_projection_secret(
+                    api,
+                    "admin-grant-private-key",
+                    admin_key,
+                    uid=_API_UID,
+                    gid=_API_GID,
+                    replace=False,
+                )
+            if not worker_present:
+                _write_projection_secret(
+                    worker,
+                    "worker-api-token",
+                    worker_token,
+                    uid=_API_UID,
+                    gid=_API_GID,
+                    replace=False,
+                )
+
+            for name, content in (
+                ("database-url", database_url),
+                ("git-signing-key", signing_key),
+                ("worker-api-token", worker_token),
+                ("agent-ca-certificate", agent_ca_certificate),
+                ("agent-ca-key", agent_ca_key),
+                ("agent-proxy-auth", agent_proxy_auth),
+            ):
+                _write_projection_secret(
+                    api,
+                    name,
+                    content,
+                    uid=_API_UID,
+                    gid=_API_GID,
+                )
             _write_projection_secret(
-                worker,
-                name,
-                content,
+                migrate,
+                "database-url",
+                database_url,
                 uid=_API_UID,
                 gid=_API_GID,
             )
-        for name, content in (
-            ("controller-server-certificate", controller_server_certificate),
-            ("controller-server-key", controller_server_key),
-            ("agent-ca-certificate", agent_ca_certificate),
-            ("agent-proxy-auth", agent_proxy_auth),
-            ("management-cidrs", management_cidrs),
-        ):
-            _write_projection_secret(
-                caddy,
-                name,
-                content,
-                uid=_CADDY_UID,
-                gid=_CADDY_GID,
-            )
-        for name, content in (
-            ("litellm-master-key", litellm_master_key),
-            ("litellm-upstream-key", litellm_upstream_key),
-            ("litellm-database-url", litellm_database_url),
-        ):
-            _write_projection_secret(
-                litellm,
-                name,
-                content,
-                uid=_LITELLM_UID,
-                gid=_LITELLM_GID,
-            )
-        for descriptor in descriptors:
-            _seal_projection(descriptor)
+            for name, content in (
+                ("database-url", database_url),
+                ("worker-api-token", worker_token),
+            ):
+                _write_projection_secret(
+                    worker,
+                    name,
+                    content,
+                    uid=_API_UID,
+                    gid=_API_GID,
+                )
+            for name, content in (
+                ("controller-server-certificate", controller_server_certificate),
+                ("controller-server-key", controller_server_key),
+                ("agent-ca-certificate", agent_ca_certificate),
+                ("agent-proxy-auth", agent_proxy_auth),
+                ("management-cidrs", management_cidrs),
+            ):
+                _write_projection_secret(
+                    caddy,
+                    name,
+                    content,
+                    uid=_CADDY_UID,
+                    gid=_CADDY_GID,
+                )
+            for name, content in (
+                ("litellm-master-key", litellm_master_key),
+                ("litellm-upstream-key", litellm_upstream_key),
+                ("litellm-database-url", litellm_database_url),
+            ):
+                _write_projection_secret(
+                    litellm,
+                    name,
+                    content,
+                    uid=_LITELLM_UID,
+                    gid=_LITELLM_GID,
+                )
+        finally:
+            sealing_error: DevInitError | None = None
+            for descriptor in prepared:
+                try:
+                    _seal_projection(descriptor)
+                except DevInitError as error:
+                    if sealing_error is None:
+                        sealing_error = error
+            if sealing_error is not None:
+                raise sealing_error
     finally:
-        for descriptor in descriptors:
-            os.close(descriptor)
+        for item in opened:
+            if item is not None:
+                descriptor, _created = item
+                os.close(descriptor)
 
 
 def _pinned_generation_identity(

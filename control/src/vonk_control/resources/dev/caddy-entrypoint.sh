@@ -110,8 +110,8 @@ if [ -L "$proxy_header" ] || { [ -e "$proxy_header" ] && [ ! -f "$proxy_header" 
 fi
 temporary=$(mktemp /tmp/.vonk-agent-proxy-auth.XXXXXX)
 trap 'rm -f "$temporary"' EXIT HUP INT TERM
-chmod 0400 "$temporary"
 printf 'header_up X-Vonk-Agent-Proxy-Auth "%s"\n' "$proxy_auth" > "$temporary"
+chmod 0400 "$temporary"
 mv -f "$temporary" "$proxy_header"
 trap - EXIT HUP INT TERM
 unset proxy_auth proxy_auth_raw invalid_proxy_auth_bytes

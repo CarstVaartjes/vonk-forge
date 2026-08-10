@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import hashlib
 import importlib
 import importlib.resources
 import importlib.util
 import json
 import os
+import shutil
 import stat
+import subprocess
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-
 
 RESOURCE_PACKAGE = "vonk_control.resources.dev"
 EXPECTED_RESOURCES = {
@@ -35,6 +38,88 @@ def _litellm_supervisor():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _litellm_document(*, model_name: str = "chat") -> dict[str, object]:
+    models: list[dict[str, object]] = []
+    if model_name:
+        models.append(
+            {
+                "litellm_params": {
+                    "api_base": "http://10.0.0.2:8000/v1",
+                    "api_key": "os.environ/LITELLM_UPSTREAM_KEY",
+                    "model": f"openai/{model_name}",
+                    "rpm": 10,
+                    "tpm": 1000,
+                },
+                "model_name": model_name,
+            }
+        )
+    return {
+        "general_settings": {
+            "database_url": "os.environ/LITELLM_DATABASE_URL",
+            "disable_admin_ui": False,
+            "master_key": "os.environ/LITELLM_MASTER_KEY",
+            "store_model_in_db": False,
+        },
+        "litellm_settings": {
+            "drop_params": True,
+            "failure_callback": [],
+            "set_verbose": False,
+            "success_callback": [],
+        },
+        "model_list": models,
+        "router_settings": {
+            "enable_pre_call_checks": True,
+            "routing_strategy": "simple-shuffle",
+        },
+    }
+
+
+def _canonical_json(document: dict[str, object]) -> bytes:
+    return (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode()
+
+
+def _active_litellm_bundle(
+    supervisor: object,
+    tmp_path: Path,
+    config: bytes,
+    *,
+    now: datetime,
+) -> Path:
+    routes = b'{"routes":{"chat":{}},"state":"published"}\n'
+    manifest = {
+        "evidence_set_digest": "b" * 64,
+        "expires_at": (now + timedelta(seconds=120)).isoformat(),
+        "generation": 1,
+        "issued_at": (now - timedelta(seconds=1)).isoformat(),
+        "litellm_sha256": hashlib.sha256(config).hexdigest(),
+        "plan_digest": "a" * 64,
+        "reconciliation_id": "bb7aac18-edbf-4cc1-bafd-15e282557c53",
+        "routes_sha256": hashlib.sha256(routes).hexdigest(),
+        "schema_version": 1,
+        "state": "published",
+    }
+    manifest_content = _canonical_json(manifest)
+    manifest_sha = hashlib.sha256(manifest_content).hexdigest()
+    directory_name = f"00000001-{manifest_sha}"
+    root = tmp_path / "routes"
+    generation = root / "generations" / directory_name
+    generation.mkdir(parents=True)
+    (generation / "manifest.json").write_bytes(manifest_content)
+    (generation / "routes.json").write_bytes(routes)
+    selected = generation / "litellm.json"
+    selected.write_bytes(config)
+    activation = {
+        **manifest,
+        "directory": directory_name,
+        "manifest_sha256": manifest_sha,
+    }
+    (root / "activation.json").write_bytes(_canonical_json(activation))
+    supervisor.ROOT = root
+    supervisor.ACTIVATION = root / "activation.json"
+    supervisor.GENERATIONS = root / "generations"
+    return selected
 
 
 def test_development_resources_are_complete_bounded_regular_files() -> None:
@@ -192,6 +277,117 @@ def test_stage_development_assets_rejects_a_symlink_package_resource(
     assert outside.read_bytes() == b"do-not-stage\n"
 
 
+def test_stage_development_assets_rejects_non_filesystem_resources_without_reading(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime_assets = _runtime_assets()
+
+    class NonFilesystemResource:
+        def joinpath(self, _name: str) -> NonFilesystemResource:
+            return self
+
+        def read_bytes(self) -> bytes:
+            raise AssertionError("non-filesystem resource must not be read")
+
+    monkeypatch.setattr(
+        runtime_assets.resources,
+        "files",
+        lambda _package: NonFilesystemResource(),
+    )
+
+    with pytest.raises(runtime_assets.DevelopmentAssetError, match="unsafe"):
+        runtime_assets.stage_development_assets(
+            "custom.provider",
+            tmp_path / "runtime-config",
+        )
+
+
+def test_stage_development_assets_rejects_oversize_resource_before_reading(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime_assets = _runtime_assets()
+    package_root = tmp_path / "oversize_assets"
+    package_root.mkdir()
+    (package_root / "__init__.py").write_bytes(b"")
+    for name in EXPECTED_RESOURCES:
+        (package_root / name).write_bytes(
+            b"x" * (MAXIMUM_RESOURCE_BYTES + 1)
+            if name == "Caddyfile"
+            else f"safe-{name}\n".encode()
+        )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    importlib.invalidate_caches()
+
+    with pytest.raises(runtime_assets.DevelopmentAssetError, match="unsafe"):
+        runtime_assets.stage_development_assets(
+            "oversize_assets",
+            tmp_path / "runtime-config",
+        )
+
+    assert not (tmp_path / "runtime-config").exists()
+
+
+def test_caddy_entrypoint_stages_proxy_fragment_as_uid_10000(
+    tmp_path: Path,
+) -> None:
+    if shutil.which("docker") is None:
+        pytest.skip("Docker is required for the non-root Caddy entrypoint test")
+    package = importlib.resources.files(RESOURCE_PACKAGE)
+    entrypoint = Path(os.fspath(package.joinpath("caddy-entrypoint.sh")))
+    secrets_root = tmp_path / "secrets"
+    secrets_root.mkdir(mode=0o755)
+    required = {
+        "controller-server-certificate": b"certificate\n",
+        "controller-server-key": b"private-key\n",
+        "agent-ca-certificate": b"agent-ca\n",
+        "agent-proxy-auth": b"A" * 43 + b"\n",
+        "management-cidrs": b"192.0.2.0/24\n",
+    }
+    for name, content in required.items():
+        target = secrets_root / name
+        target.write_bytes(content)
+        target.chmod(0o444)
+
+    result = subprocess.run(
+        (
+            "docker",
+            "run",
+            "--rm",
+            "--user",
+            "10000:10000",
+            "--tmpfs",
+            "/tmp:rw,mode=1777",
+            "--mount",
+            f"type=bind,src={entrypoint},dst=/entrypoint.sh,readonly",
+            "--mount",
+            f"type=bind,src={secrets_root},dst=/run/secrets,readonly",
+            "--env",
+            "VONK_AGENT_ENROLL_HOSTNAME=enroll.test",
+            "--env",
+            "VONK_AGENT_HOSTNAME=agent.test",
+            "--env",
+            "VONK_BACKEND_PORT=8443",
+            "--entrypoint",
+            "/bin/sh",
+            "caddy:2.10.2@sha256:c3d7ee5d2b11f9dc54f947f68a734c84e9c9666c92c88a7f30b9cba5da182adb",
+            "-c",
+            (
+                "exec /bin/sh /entrypoint.sh /bin/sh -c '"
+                "test \"$(stat -c %a /tmp/vonk-agent-proxy-auth.caddy)\" = 400 "
+                "&& test \"$(wc -l < /tmp/vonk-agent-proxy-auth.caddy)\" = 1'"
+            ),
+        ),
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=False,
+        timeout=30,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "A" * 32 not in result.stdout + result.stderr
+
+
 def test_litellm_supervisor_materializes_file_secrets_without_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -209,25 +405,7 @@ def test_litellm_supervisor_materializes_file_secrets_without_environment(
         path.write_text(value + "\n", encoding="utf-8")
         secret_paths[marker] = path
         monkeypatch.setenv(marker.removeprefix("os.environ/"), "environment-leak")
-    source = tmp_path / "source.json"
-    source.write_text(
-        json.dumps(
-            {
-                "general_settings": {
-                    "database_url": "os.environ/LITELLM_DATABASE_URL",
-                    "master_key": "os.environ/LITELLM_MASTER_KEY",
-                },
-                "model_list": [
-                    {
-                        "litellm_params": {
-                            "api_key": "os.environ/LITELLM_UPSTREAM_KEY"
-                        }
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
+    source = _canonical_json(_litellm_document())
     destination = tmp_path / "effective.json"
     monkeypatch.setattr(supervisor, "SECRET_FILES", secret_paths)
 
@@ -237,7 +415,9 @@ def test_litellm_supervisor_materializes_file_secrets_without_environment(
     document = json.loads(destination.read_bytes())
     assert document["general_settings"] == {
         "database_url": secret_values["os.environ/LITELLM_DATABASE_URL"],
+        "disable_admin_ui": False,
         "master_key": secret_values["os.environ/LITELLM_MASTER_KEY"],
+        "store_model_in_db": False,
     }
     assert document["model_list"][0]["litellm_params"]["api_key"] == (
         secret_values["os.environ/LITELLM_UPSTREAM_KEY"]
@@ -247,3 +427,87 @@ def test_litellm_supervisor_materializes_file_secrets_without_environment(
         os.environ[name.removeprefix("os.environ/")] == "environment-leak"
         for name in secret_values
     )
+
+
+@pytest.mark.parametrize(
+    ("marker", "fault"),
+    (
+        ("os.environ/LITELLM_MASTER_KEY", "wrong-position"),
+        ("os.environ/LITELLM_MASTER_KEY", "duplicate"),
+        ("os.environ/LITELLM_DATABASE_URL", "wrong-position"),
+        ("os.environ/LITELLM_DATABASE_URL", "duplicate"),
+        ("os.environ/LITELLM_UPSTREAM_KEY", "wrong-position"),
+        ("os.environ/LITELLM_UPSTREAM_KEY", "duplicate"),
+    ),
+)
+def test_litellm_supervisor_rejects_privileged_markers_outside_exact_schema_positions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, marker: str, fault: str
+) -> None:
+    supervisor = _litellm_supervisor()
+    document = _litellm_document()
+    router = document["router_settings"]
+    assert isinstance(router, dict)
+    if fault == "wrong-position":
+        general = document["general_settings"]
+        models = document["model_list"]
+        assert isinstance(general, dict)
+        assert isinstance(models, list) and isinstance(models[0], dict)
+        if marker == "os.environ/LITELLM_MASTER_KEY":
+            general["master_key"] = "literal-master-key"
+            router["routing_strategy"] = marker
+        elif marker == "os.environ/LITELLM_DATABASE_URL":
+            general["database_url"] = "postgresql://literal/database"
+            router["routing_strategy"] = marker
+        else:
+            parameters = models[0]["litellm_params"]
+            assert isinstance(parameters, dict)
+            parameters["api_key"] = "literal-upstream-key"
+            models[0]["model_name"] = marker
+    else:
+        router["duplicate_privileged_marker"] = marker
+    monkeypatch.setattr(
+        supervisor,
+        "_read_secret",
+        lambda _path: (_ for _ in ()).throw(AssertionError("must validate first")),
+    )
+
+    with pytest.raises(RuntimeError, match="selected config is invalid"):
+        supervisor._materialize_config(
+            _canonical_json(document),
+            destination=tmp_path / "effective.json",
+        )
+
+
+def test_litellm_supervisor_materializes_the_exact_verified_bytes_after_path_swap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    supervisor = _litellm_supervisor()
+    now = datetime(2026, 8, 10, 12, 0, tzinfo=UTC)
+    verified = _canonical_json(_litellm_document(model_name="verified"))
+    selected = _active_litellm_bundle(
+        supervisor,
+        tmp_path,
+        verified,
+        now=now,
+    )
+    secret_values = {
+        "os.environ/LITELLM_MASTER_KEY": "master-file-sentinel",
+        "os.environ/LITELLM_UPSTREAM_KEY": "upstream-file-sentinel",
+        "os.environ/LITELLM_DATABASE_URL": "postgresql://db/control",
+    }
+    secret_paths: dict[str, Path] = {}
+    for marker, value in secret_values.items():
+        path = tmp_path / hashlib.sha256(marker.encode()).hexdigest()
+        path.write_text(value + "\n", encoding="utf-8")
+        secret_paths[marker] = path
+    monkeypatch.setattr(supervisor, "SECRET_FILES", secret_paths)
+
+    request = supervisor._active_request(now=now)
+    assert request is not None
+    selected.write_bytes(_canonical_json(_litellm_document(model_name="swapped")))
+    destination = tmp_path / "effective.json"
+    supervisor._materialize_config(request.config_bytes, destination=destination)
+
+    effective = json.loads(destination.read_bytes())
+    assert effective["model_list"][0]["model_name"] == "verified"
+    assert request.config_sha256 == hashlib.sha256(verified).hexdigest()
