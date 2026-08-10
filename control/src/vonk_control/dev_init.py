@@ -9,12 +9,18 @@ import re
 import secrets
 import stat
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 
+from .dev_cohort import (
+    DevelopmentCohortError,
+    SelectedDevelopmentCohort,
+    require_selected_cohort,
+)
 from .host_state import HostOperationPlan, SelectionReceipt
 
 _COMMIT = re.compile(r"[0-9a-f]{40}\Z")
@@ -37,6 +43,20 @@ _GIT_HOME = "/nonexistent/vonk-control"
 
 class DevInitError(RuntimeError):
     """The development runtime cannot be initialized safely."""
+
+
+@dataclass(frozen=True)
+class DevelopmentGenerationIdentity:
+    """One verified development generation used for repository and state setup."""
+
+    expected_commit: str
+    generation_id: str
+    release_digest: str
+    build_digest: str
+    platform_version: str
+    api_image: str
+    worker_image: str
+    database_revision: str
 
 
 def _git_environment() -> dict[str, str]:
@@ -820,22 +840,87 @@ def stage_runtime_secrets(
             os.close(worker)
 
 
-def _active_projection(api_image: str, worker_image: str) -> bytes:
-    target_name = f"platform/releases/{_VERSION}/{_TARGET_SHA256}.json"
-    plan = HostOperationPlan(
-        operation_id="dev-compose",
-        plan_digest="sha256:" + "2" * 64,
+def _pinned_generation_identity(
+    expected_commit: str,
+    api_image: str,
+    worker_image: str,
+) -> DevelopmentGenerationIdentity:
+    """Adapt the established local/pinned inputs to one generation identity."""
+    return DevelopmentGenerationIdentity(
+        expected_commit=_commit(expected_commit),
         generation_id="gen-" + _TARGET_SHA256[:24],
-        platform_target_name=target_name,
-        platform_target_sha256=_TARGET_SHA256,
-        tuf_targets_version=1,
         release_digest="sha256:" + _TARGET_SHA256,
         build_digest=_BUILD_DIGEST,
         platform_version=_VERSION,
-        deployment_bundle_digest="sha256:" + "3" * 64,
         api_image=api_image,
         worker_image=worker_image,
         database_revision=_DATABASE_REVISION,
+    )
+
+
+def _selected_generation_identity(
+    selected: SelectedDevelopmentCohort,
+) -> DevelopmentGenerationIdentity:
+    return DevelopmentGenerationIdentity(
+        expected_commit=selected.source_commit,
+        generation_id=selected.generation_id,
+        release_digest=selected.release_digest,
+        build_digest=selected.build_digest,
+        platform_version=selected.platform_version,
+        api_image=selected.api_image,
+        worker_image=selected.worker_image,
+        database_revision=selected.database_revision,
+    )
+
+
+def _development_generation_identity() -> DevelopmentGenerationIdentity:
+    selected_name = "VONK_DEV_SELECTED_COHORT_FILE"
+    pinned_names = (
+        "VONK_DEV_EXPECTED_COMMIT",
+        "VONK_DEV_API_IMAGE",
+        "VONK_DEV_WORKER_IMAGE",
+    )
+    selected_present = selected_name in os.environ
+    pinned_present = tuple(name in os.environ for name in pinned_names)
+    if selected_present:
+        if any(pinned_present):
+            raise DevInitError("development identity inputs cannot be combined")
+        try:
+            selected = require_selected_cohort(
+                Path(_required_environment(selected_name)),
+                "api",
+            )
+        except DevelopmentCohortError as error:
+            raise DevInitError("development selected cohort is invalid") from error
+        return _selected_generation_identity(selected)
+    if not all(pinned_present):
+        raise DevInitError("development identity input is missing or incomplete")
+    return _pinned_generation_identity(
+        _required_environment(pinned_names[0]),
+        _required_image_environment(pinned_names[1]),
+        _required_image_environment(pinned_names[2]),
+    )
+
+
+def _active_projection(identity: DevelopmentGenerationIdentity) -> bytes:
+    target_sha256 = identity.release_digest.removeprefix("sha256:")
+    target_name = (
+        f"platform/releases/{identity.platform_version}/{target_sha256}.json"
+    )
+    plan = HostOperationPlan(
+        operation_id="dev-compose",
+        plan_digest="sha256:" + "2" * 64,
+        generation_id=identity.generation_id,
+        platform_target_name=target_name,
+        platform_target_sha256=target_sha256,
+        tuf_targets_version=1,
+        release_digest=identity.release_digest,
+        build_digest=identity.build_digest,
+        platform_version=identity.platform_version,
+        deployment_bundle_digest="sha256:" + "3" * 64,
+        api_image=identity.api_image,
+        worker_image=identity.worker_image,
+        database_revision=identity.database_revision,
     )
     selection = SelectionReceipt.from_plan(plan, previous_generation=None)
     generation_raw = _canonical(selection.generation.document())
@@ -864,7 +949,8 @@ def _initialize_directory(path: Path, *, mode: int, uid: int, gid: int) -> None:
 
 
 def _write_active_projection(
-    identity_root: Path, api_image: str, worker_image: str
+    identity_root: Path,
+    identity: DevelopmentGenerationIdentity,
 ) -> None:
     _initialize_directory(identity_root, mode=0o755, uid=0, gid=0)
     destination = identity_root / "active.json"
@@ -876,7 +962,7 @@ def _write_active_projection(
             os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
             0o600,
         )
-        content = _active_projection(api_image, worker_image)
+        content = _active_projection(identity)
         offset = 0
         while offset < len(content):
             written = os.write(descriptor, content[offset:])
@@ -919,17 +1005,15 @@ def main() -> int:
     """Initialize repository, synthetic state, and disjoint runtime authority."""
     repository_path = Path(_required_environment("VONK_REPOSITORY_PATH"))
     repository_url = _required_environment("VONK_DEV_REPOSITORY_URL")
-    expected_commit = _required_environment("VONK_DEV_EXPECTED_COMMIT")
     secret_source = Path(_required_environment("VONK_DEV_SECRET_SOURCE_ROOT"))
     api_secret_root = Path(_required_environment("VONK_DEV_API_SECRET_ROOT"))
     migrate_secret_root = Path(_required_environment("VONK_DEV_MIGRATE_SECRET_ROOT"))
     worker_secret_root = Path(_required_environment("VONK_DEV_WORKER_SECRET_ROOT"))
-    api_image = _required_image_environment("VONK_DEV_API_IMAGE")
-    worker_image = _required_image_environment("VONK_DEV_WORKER_IMAGE")
+    generation = _development_generation_identity()
     initialize_repository(
         repository_path,
         repository_url,
-        expected_commit,
+        generation.expected_commit,
     )
     stage_runtime_secrets(
         secret_source,
@@ -938,7 +1022,7 @@ def main() -> int:
         worker_secret_root,
     )
     identity_root = Path(os.environ.get("VONK_CONTROL_IDENTITY_ROOT", "/control-identity"))
-    _write_active_projection(identity_root, api_image, worker_image)
+    _write_active_projection(identity_root, generation)
     uid, gid = _service_identity()
     for name, default in (
         ("VONK_STATE_PATH", "/state"),

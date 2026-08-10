@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# Run the complete development image lifecycle without building, pulling, or
-# publishing images.  This command is intentionally destructive only within a
-# randomly named, temporary Compose project.
+# Run the complete development image lifecycle without publishing accepted
+# images. This command is intentionally destructive only within a randomized
+# temporary Compose project and an acceptance-only local registry namespace.
 set -euo pipefail
 umask 077
 
 readonly repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 readonly template="$repository_root/deploy/compose/compose.dev.images.yaml"
 readonly scanner="$repository_root/scripts/verify-dev-image-secrets"
+readonly expected_repository="https://github.com/CarstVaartjes/vonk-forge"
 readonly temporary_prefix="/tmp/vonk-forge-dev-acceptance."
 
 api_image=
@@ -16,12 +17,37 @@ expected_commit=
 acceptance_root=
 compose_file=
 override_file=
+pinned_file=
 origin_dir=
 project_name=
 port=
-api_process_image=
-worker_process_image=
+previous_commit=
+fixture_build_dir=
+registry_container=
+registry_endpoint=
+registry_scope=
+registry_port=
+active_compose_file=
+api_mutable_alias=
+worker_mutable_alias=
+api_image_a_tag=
+worker_image_a_tag=
+api_image_b_tag=
+worker_image_b_tag=
+api_image_a_ref=
+worker_image_a_ref=
+api_image_b_ref=
+worker_image_b_ref=
+api_image_a_id=
+worker_image_a_id=
+api_image_b_id=
+worker_image_b_id=
+api_identity_a=
+worker_identity_a=
+api_identity_b=
+worker_identity_b=
 compose_started=0
+registry_started=0
 
 die() {
   printf '%s\n' "$*" >&2
@@ -74,10 +100,20 @@ validate_image() {
 validate_image "$api_image" api
 validate_image "$worker_image" worker
 
+worktree_status=$(git -C "$repository_root" status --porcelain=v1 --untracked-files=all) \
+  || die "repository worktree status is unavailable"
+[[ -z "$worktree_status" ]] \
+  || die "repository worktree must be clean for image acceptance"
+local_head=$(git -C "$repository_root" rev-parse --verify 'HEAD^{commit}') \
+  || die "repository HEAD is required for image acceptance"
+[[ "$expected_commit" == "$local_head" ]] \
+  || die "commit must equal repository HEAD for image acceptance"
 local_main=$(git -C "$repository_root" rev-parse --verify 'refs/heads/main^{commit}') \
   || die "local main branch is required for image acceptance"
 [[ "$expected_commit" == "$local_main" ]] \
   || die "commit must equal the local main tip for image acceptance"
+previous_commit=$(git -C "$repository_root" rev-parse --verify "${expected_commit}^") \
+  || die "the accepted commit must have a previous cohort fixture"
 
 make_temporary_workspace() {
   local candidate suffix
@@ -87,16 +123,24 @@ make_temporary_workspace() {
     || die "temporary workspace is not a trusted acceptance path"
   acceptance_root=$candidate
   compose_file="$acceptance_root/docker-compose.yml"
+  active_compose_file=$compose_file
   override_file="$acceptance_root/docker-compose.acceptance.yaml"
+  pinned_file="$acceptance_root/docker-compose.pinned.yaml"
   origin_dir="$acceptance_root/source-origin.git"
+  fixture_build_dir="$acceptance_root/image-fixture"
+  api_identity_a="$acceptance_root/api-identity-a.json"
+  worker_identity_a="$acceptance_root/worker-identity-a.json"
+  api_identity_b="$acceptance_root/api-identity-b.json"
+  worker_identity_b="$acceptance_root/worker-identity-b.json"
   suffix=$(printf '%s' "${candidate##*.}" | tr '[:upper:]' '[:lower:]')
   project_name="vonk-forge-accept-$suffix"
+  registry_container="$project_name-registry"
 }
 
 compose() {
   env -u COMPOSE_FILE -u COMPOSE_PROJECT_NAME VONK_DEV_PORT="$port" \
     docker compose -p "$project_name" --project-directory "$acceptance_root" \
-      -f "$compose_file" -f "$override_file" "$@"
+      -f "$active_compose_file" -f "$override_file" "$@"
 }
 
 sanitize_diagnostics() {
@@ -147,9 +191,22 @@ cleanup() {
   if [[ "$status" -ne 0 && "$compose_started" -eq 1 ]]; then
     diagnostics
   fi
-  if [[ -n "$acceptance_root" && -n "$project_name" && -n "$compose_file" ]]; then
+  if [[ -n "$acceptance_root" && -n "$project_name" && -n "$active_compose_file" ]]; then
     compose down --volumes --remove-orphans >/dev/null 2>&1
   fi
+  if [[ "$registry_started" -eq 1 && -n "$registry_container" ]]; then
+    docker rm --force "$registry_container" >/dev/null 2>&1 || true
+  fi
+  for fixture_image in \
+    "$api_mutable_alias" "$worker_mutable_alias" \
+    "$api_image_a_ref" "$worker_image_a_ref" \
+    "$api_image_b_ref" "$worker_image_b_ref" \
+    "$api_image_a_tag" "$worker_image_a_tag" \
+    "$api_image_b_tag" "$worker_image_b_tag"; do
+    if [[ -n "$fixture_image" ]]; then
+      docker image rm "$fixture_image" >/dev/null 2>&1 || true
+    fi
+  done
   if [[ -n "$origin_dir" && -d "$origin_dir" && ! -L "$origin_dir" ]]; then
     docker run --rm --user 0:0 --volume "$origin_dir:/source-origin" \
       "$api_image" chown -R "$(id -u):$(id -g)" /source-origin >/dev/null 2>&1 || true
@@ -177,6 +234,7 @@ git --git-dir="$origin_dir" symbolic-ref HEAD refs/heads/main
 chmod -R a+rX "$origin_dir"
 
 render_acceptance_compose() {
+  local destination=$1 api_reference=$2 worker_reference=$3
   [[ -f "$template" && ! -L "$template" ]] || die "development image template is unavailable"
   [[ $(grep -o '__VONK_API_IMAGE__' "$template" | wc -l) -eq 1 ]] \
     || die "development image template has an invalid API token"
@@ -185,61 +243,175 @@ render_acceptance_compose() {
   [[ $(grep -o '__VONK_EXPECTED_COMMIT__' "$template" | wc -l) -eq 1 ]] \
     || die "development image template has an invalid commit token"
   sed \
-    -e "s|__VONK_API_IMAGE__|$api_image|" \
-    -e "s|__VONK_WORKER_IMAGE__|$worker_image|" \
-    -e "s|__VONK_EXPECTED_COMMIT__|$expected_commit|" \
-    "$template" > "$compose_file"
+    -e "s|__VONK_API_IMAGE__|$api_reference|" \
+    -e "s|__VONK_WORKER_IMAGE__|$worker_reference|" \
+    -e '/^# Compatibility input for the current pinned renderer\./,/^x-pinned-expected-commit: "__VONK_EXPECTED_COMMIT__"$/d' \
+    "$template" > "$destination"
+}
+
+render_acceptance_override() {
   cat > "$override_file" <<EOF
 services:
   dev-init:
     environment:
       VONK_DEV_LOCAL_ACCEPTANCE: "1"
-      VONK_DEV_API_IMAGE: $api_process_image
       VONK_DEV_REPOSITORY_URL: file:///source-origin
-      VONK_DEV_WORKER_IMAGE: $worker_process_image
     volumes:
       - $origin_dir:/source-origin:ro
-  control-api:
-    environment:
-      VONK_CONTROL_PROCESS_IMAGE: $api_process_image
-  control-worker:
-    environment:
-      VONK_CONTROL_PROCESS_IMAGE: $worker_process_image
 EOF
+}
+
+write_fixture_identity() {
+  local role=$1 commit=$2 destination=$3 image temporary
+  if [[ "$role" == api ]]; then
+    image=$api_image
+  else
+    image=$worker_image
+  fi
+  temporary="$destination.tmp"
+  docker run --rm "$image" python -m vonk_control.dev_cohort build-identity \
+    --role "$role" --source-commit "$commit" > "$temporary"
+  [[ -s "$temporary" ]] || die "$role cohort fixture identity is empty"
+  chmod 0444 "$temporary"
+  mv -f -- "$temporary" "$destination"
+}
+
+build_acceptance_image() {
+  local base_image=$1 identity=$2 commit=$3 destination=$4
+  install -m 0444 "$identity" "$fixture_build_dir/development-image-identity.json"
+  docker build --pull=false \
+    --build-arg "BASE_IMAGE=$base_image" \
+    --label "io.vonk-forge.acceptance.fixture=true" \
+    --label "org.opencontainers.image.source=https://development.invalid/$project_name" \
+    --label "org.opencontainers.image.revision=$commit" \
+    --tag "$destination" "$fixture_build_dir"
+}
+
+immutable_registry_ref() {
+  local image_tag=$1 repository reference digest
+  repository=${image_tag%:*}
+  while IFS= read -r reference; do
+    [[ "${reference%@*}" == "$repository" ]] || continue
+    digest=${reference#*@}
+    if [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+      printf '%s\n' "$reference"
+      return
+    fi
+  done < <(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$image_tag")
+  die "acceptance fixture push did not produce an immutable registry reference"
+}
+
+move_mutable_alias() {
+  local source_ref=$1 alias=$2
+  docker tag "$source_ref" "$alias"
+  docker push "$alias" >/dev/null
+  # Force the unchanged Compose graph to resolve and pull the moved registry
+  # alias rather than reusing the tag operation's local name.
+  docker image rm "$alias" >/dev/null
+}
+
+image_id() {
+  local image=$1 observed
+  observed=$(docker image inspect --format '{{.Id}}' "$image")
+  [[ "$observed" =~ ^sha256:[0-9a-f]{64}$ ]] || die "fixture image ID is invalid"
+  printf '%s\n' "$observed"
 }
 
 # The cleanup trap is installed before this first Docker operation.  It is
 # deliberately after all input/path validation, so invalid requests never
 # create or remove Docker resources.
 [[ -x "$scanner" ]] || die "development image scanner is unavailable"
-"$scanner" "$api_image" "$worker_image"
-if [[ "$api_image" == "vonk-forge-api:dev-local" ]]; then
-  api_process_image="vonk-forge-api@$(docker image inspect --format '{{.Id}}' "$api_image")"
-else
-  api_process_image=$api_image
-fi
-if [[ "$worker_image" == "vonk-forge-worker:dev-local" ]]; then
-  worker_process_image="vonk-forge-worker@$(docker image inspect --format '{{.Id}}' "$worker_image")"
-else
-  worker_process_image=$worker_image
-fi
-[[ "$api_process_image" =~ @sha256:[0-9a-f]{64}$ && "$worker_process_image" =~ @sha256:[0-9a-f]{64}$ ]] \
-  || die "development images did not provide immutable identities"
+"$scanner" \
+  --expected-commit "$expected_commit" \
+  --expected-repository "$expected_repository" \
+  "$api_image" "$worker_image"
 # Git runs inside dev-init as its isolated UID.  Give that UID ownership of
 # this disposable, acceptance-only bare origin without touching the checkout.
 docker run --rm --user 0:0 --volume "$origin_dir:/source-origin" \
   "$api_image" chown -R 65534:65534 /source-origin
 
-render_acceptance_compose
+# The accepted inputs remain the scanner/source-authority subjects. Everything
+# below is an acceptance-only derivative under a randomized local namespace;
+# no fixture reference is an accepted or publishable artifact.
+write_fixture_identity api "$previous_commit" "$api_identity_a"
+write_fixture_identity worker "$previous_commit" "$worker_identity_a"
+write_fixture_identity api "$expected_commit" "$api_identity_b"
+write_fixture_identity worker "$expected_commit" "$worker_identity_b"
 
-port=$(python3 - <<'PY'
+read -r port registry_port < <(python3 - <<'PY'
 import socket
 
-with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+ports = []
+listeners = []
+for _ in range(2):
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.bind(("127.0.0.1", 0))
-    print(listener.getsockname()[1])
+    listeners.append(listener)
+    ports.append(str(listener.getsockname()[1]))
+print(" ".join(ports))
+for listener in listeners:
+    listener.close()
 PY
 )
+
+registry_endpoint="127.0.0.1:$registry_port"
+registry_scope="$registry_endpoint/$project_name"
+api_mutable_alias="$registry_scope/vonk-forge-api:dev"
+worker_mutable_alias="$registry_scope/vonk-forge-worker:dev"
+api_image_a_tag="$registry_scope/vonk-forge-api:cohort-a"
+worker_image_a_tag="$registry_scope/vonk-forge-worker:cohort-a"
+api_image_b_tag="$registry_scope/vonk-forge-api:cohort-b"
+worker_image_b_tag="$registry_scope/vonk-forge-worker:cohort-b"
+
+mkdir -m 0700 "$fixture_build_dir"
+cat > "$fixture_build_dir/Dockerfile" <<'EOF'
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+COPY --chmod=0444 development-image-identity.json /usr/local/share/vonk-forge/development-image-identity.json
+EOF
+
+build_acceptance_image "$api_image" "$api_identity_a" "$previous_commit" "$api_image_a_tag"
+build_acceptance_image "$worker_image" "$worker_identity_a" "$previous_commit" "$worker_image_a_tag"
+build_acceptance_image "$api_image" "$api_identity_b" "$expected_commit" "$api_image_b_tag"
+build_acceptance_image "$worker_image" "$worker_identity_b" "$expected_commit" "$worker_image_b_tag"
+
+docker run --detach --name "$registry_container" \
+  --publish "127.0.0.1:$registry_port:5000" \
+  registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373 \
+  >/dev/null
+registry_started=1
+registry_ready=0
+for _ in {1..50}; do
+  if curl --fail --silent --show-error "http://$registry_endpoint/v2/" >/dev/null; then
+    registry_ready=1
+    break
+  fi
+  sleep 0.1
+done
+[[ "$registry_ready" -eq 1 ]] || die "temporary acceptance registry did not become ready"
+
+for fixture_tag in \
+  "$api_image_a_tag" "$worker_image_a_tag" \
+  "$api_image_b_tag" "$worker_image_b_tag"; do
+  docker push "$fixture_tag" >/dev/null
+done
+api_image_a_ref=$(immutable_registry_ref "$api_image_a_tag")
+worker_image_a_ref=$(immutable_registry_ref "$worker_image_a_tag")
+api_image_b_ref=$(immutable_registry_ref "$api_image_b_tag")
+worker_image_b_ref=$(immutable_registry_ref "$worker_image_b_tag")
+api_image_a_id=$(image_id "$api_image_a_ref")
+worker_image_a_id=$(image_id "$worker_image_a_ref")
+api_image_b_id=$(image_id "$api_image_b_ref")
+worker_image_b_id=$(image_id "$worker_image_b_ref")
+[[ "$api_image_a_id" != "$api_image_b_id" ]] \
+  || die "API acceptance cohorts do not have distinct image IDs"
+[[ "$worker_image_a_id" != "$worker_image_b_id" ]] \
+  || die "worker acceptance cohorts do not have distinct image IDs"
+
+render_acceptance_compose "$compose_file" "$api_mutable_alias" "$worker_mutable_alias"
+render_acceptance_compose "$pinned_file" "$api_image_a_ref" "$worker_image_a_ref"
+render_acceptance_override
+active_compose_file=$compose_file
 
 secrets_dir="$acceptance_root/secrets"
 mkdir -m 0700 "$secrets_dir"
@@ -280,6 +452,36 @@ assert_running() {
   [[ "$state" == 'running 0' ]] || die "$service is not running"
 }
 
+assert_running_image() {
+  local service=$1 expected_image_id=$2 container observed_image_id
+  container=$(service_container "$service")
+  observed_image_id=$(docker inspect --format '{{.Image}}' "$container")
+  [[ "$observed_image_id" == "$expected_image_id" ]] \
+    || die "$service did not start from the expected acceptance image ID"
+}
+
+assert_exited_with_failure() {
+  local service=$1 container state
+  container=$(service_container "$service")
+  state=$(docker inspect --format '{{.State.Status}} {{.State.ExitCode}}' "$container")
+  [[ "$state" =~ ^exited\ [1-9][0-9]*$ ]] || die "$service did not fail as expected"
+}
+
+assert_service_never_started() {
+  local service=$1 container state
+  container=$(compose ps -aq "$service")
+  [[ -z "$container" ]] && return
+  state=$(docker inspect --format '{{.State.Status}} {{.State.ExitCode}}' "$container")
+  [[ "$state" == 'created 0' ]] || die "$service ran during rejected rollback"
+}
+
+assert_cohort_gate_succeeded() {
+  assert_exited_successfully dev-cohort-reset
+  assert_exited_successfully dev-api-cohort
+  assert_exited_successfully dev-worker-cohort
+  assert_exited_successfully dev-cohort-verify
+}
+
 assert_runtime_boundaries() {
   local api_container worker_container
   api_container=$(service_container control-api)
@@ -307,41 +509,194 @@ repository_commit() {
   compose exec -T control-api git -C /repository rev-parse refs/heads/main
 }
 
-identity_fingerprint() {
-  compose exec -T control-api sh -ec \
-    'find /control-identity -type f -print0 | sort -z | xargs -0 -r sha256sum | sha256sum'
-}
-
 database_identity() {
   compose exec -T postgres psql --username control --dbname control --tuples-only \
     --no-align --command 'select oid from pg_database where datname = current_database()'
 }
 
+image_database_revision() {
+  local image=$1
+  docker run --rm --network=none "$image" python -c '
+from vonk_control.dev_cohort import DEVELOPMENT_IMAGE_IDENTITY_PATH, read_identity
+print(read_identity(DEVELOPMENT_IMAGE_IDENTITY_PATH, expected_role="api").database_revision)
+'
+}
+
+assert_repository_only_reset_compatible() {
+  local target_image=$1 target_revision current_revision
+  target_revision=$(image_database_revision "$target_image")
+  current_revision=$(image_database_revision "$api_image_b_ref")
+  [[ -n "$target_revision" && "$target_revision" == "$current_revision" ]] \
+    || die "incompatible schemas require a matching full-state restore; repository-only reset is forbidden"
+}
+
+volume_for_mount() {
+  local service=$1 destination=$2 container
+  container=$(service_container "$service")
+  docker inspect --format '{{json .Mounts}}' "$container" | python3 -c '
+import json
+import sys
+
+destination = sys.argv[1]
+matches = [
+    mount.get("Name") or mount.get("Source")
+    for mount in json.load(sys.stdin)
+    if mount.get("Destination") == destination and mount.get("Type") == "volume"
+]
+if len(matches) != 1 or not matches[0]:
+    raise SystemExit("expected exactly one named volume mount")
+print(matches[0])
+' "$destination"
+}
+
+verify_project_volume() {
+  local service=$1 destination=$2 logical_name=$3 volume labels expected_volume
+  volume=$(volume_for_mount "$service" "$destination")
+  expected_volume="${project_name}_${logical_name}"
+  [[ "$volume" == "$expected_volume" ]] || die "refusing an unexpected project volume"
+  labels=$(docker volume inspect --format \
+    '{{index .Labels "com.docker.compose.volume"}} {{index .Labels "com.docker.compose.project"}}' \
+    "$volume")
+  [[ "$labels" == "$logical_name $project_name" ]] \
+    || die "refusing a volume without exact randomized project labels"
+  printf '%s\n' "$volume"
+}
+
+assert_volume_exists() {
+  local volume=$1
+  docker volume inspect "$volume" >/dev/null
+}
+
+assert_project_volume_exists() {
+  local logical_name=$1 volume labels
+  volume="${project_name}_${logical_name}"
+  assert_volume_exists "$volume"
+  labels=$(docker volume inspect --format \
+    '{{index .Labels "com.docker.compose.volume"}} {{index .Labels "com.docker.compose.project"}}' \
+    "$volume")
+  [[ "$labels" == "$logical_name $project_name" ]] \
+    || die "retained state volume lost its project identity"
+}
+
+pull_first_party_aliases() {
+  compose pull --policy always \
+    dev-cohort-reset dev-api-cohort dev-worker-cohort dev-cohort-verify \
+    dev-init migrate control-api control-worker
+}
+
+# A deliberately mixed API-current/worker-previous pair uses two distinct
+# image IDs and must fail before either stateful one-shot service is created.
+move_mutable_alias "$api_image_b_ref" "$api_mutable_alias"
+move_mutable_alias "$worker_image_a_ref" "$worker_mutable_alias"
+pull_first_party_aliases
+compose_started=1
+if compose up --wait --pull never dev-cohort-verify; then
+  die "mixed development image cohort was accepted"
+fi
+if [[ -n $(compose ps --all --services dev-init migrate) ]]; then
+  die "mixed development image cohort reached initializer or migration"
+fi
+compose down --volumes --remove-orphans >/dev/null
+compose_started=0
+
+# Start cohort A through the randomized mutable aliases.
+move_mutable_alias "$api_image_a_ref" "$api_mutable_alias"
+move_mutable_alias "$worker_image_a_ref" "$worker_mutable_alias"
+pull_first_party_aliases
 compose_started=1
 compose up --wait --pull never
+assert_cohort_gate_succeeded
 assert_exited_successfully dev-init
 assert_exited_successfully migrate
 assert_running postgres
 assert_running control-worker
 assert_running control-api
+assert_running_image control-api "$api_image_a_id"
+assert_running_image control-worker "$worker_image_a_id"
 curl --fail --silent --show-error "http://127.0.0.1:$port/api/v1/readyz" >/dev/null
-[[ $(repository_commit) == "$expected_commit" ]] || die "repository main does not match the accepted commit"
+[[ $(repository_commit) == "$previous_commit" ]] || die "cohort A repository commit was not selected"
 assert_runtime_boundaries
-before_identity=$(identity_fingerprint)
-[[ -n "$before_identity" ]] || die "development identity volume is empty"
 before_database=$(database_identity)
 [[ -n "$before_database" ]] || die "PostgreSQL database identity is unavailable"
 
-compose restart control-api control-worker
-compose up --wait --pull never
+# Move both local registry aliases to cohort B and force a pull/redeploy of the
+# byte-for-byte unchanged mutable Compose graph.
+compose_graph=$(sha256sum "$compose_file" "$override_file")
+move_mutable_alias "$api_image_b_ref" "$api_mutable_alias"
+move_mutable_alias "$worker_image_b_ref" "$worker_mutable_alias"
+pull_first_party_aliases
+[[ $(sha256sum "$compose_file" "$override_file") == "$compose_graph" ]] \
+  || die "mutable Compose graph changed during cohort promotion"
+compose up --wait --pull never --force-recreate
+assert_cohort_gate_succeeded
+assert_exited_successfully dev-init
+assert_exited_successfully migrate
+assert_running postgres
 assert_running control-worker
 assert_running control-api
+assert_running_image control-api "$api_image_b_id"
+assert_running_image control-worker "$worker_image_b_id"
 curl --fail --silent --show-error "http://127.0.0.1:$port/api/v1/readyz" >/dev/null
-[[ $(repository_commit) == "$expected_commit" ]] || die "repository main did not persist across restart"
+[[ $(repository_commit) == "$expected_commit" ]] || die "cohort B repository commit was not selected"
 assert_runtime_boundaries
-[[ $(identity_fingerprint) == "$before_identity" ]] \
-  || die "development identity did not persist across restart"
 [[ $(database_identity) == "$before_database" ]] \
-  || die "PostgreSQL database identity did not persist across restart"
+  || die "PostgreSQL database identity did not persist across mutable redeploy"
+
+# Discover and verify the exact randomized project volumes while B is live.
+# The schema-compatible recovery below may remove only the repository volume.
+repository_volume=$(verify_project_volume control-api /repository dev-repository)
+postgres_volume=$(verify_project_volume postgres /var/lib/postgresql dev-postgres-data)
+state_volume=$(verify_project_volume control-api /state dev-control-state)
+
+# Pinned A uses the immutable local-registry refs, not mutable aliases. With
+# B's repository baseline preserved, dev-init must reject A before migration.
+active_compose_file=$pinned_file
+compose stop control-api control-worker >/dev/null
+compose rm --force --stop \
+  dev-cohort-reset dev-api-cohort dev-worker-cohort dev-cohort-verify \
+  dev-init migrate control-api control-worker >/dev/null
+if compose up --wait --pull never --force-recreate; then
+  die "pinned cohort A unexpectedly accepted cohort B's repository baseline"
+fi
+assert_exited_with_failure dev-init
+assert_service_never_started migrate
+rollback_logs=$(compose logs --no-color dev-init 2>&1 || true)
+[[ "$rollback_logs" == *"development repository accepted baseline is divergent"* ]] \
+  || die "pinned cohort A did not report the non-fast-forward repository baseline"
+
+# Repository-only reset is valid only for this schema-compatible fixture. An
+# incompatible revision requires one matching full-state restore instead.
+assert_repository_only_reset_compatible "$api_image_a_ref"
+compose down --remove-orphans >/dev/null
+compose_started=0
+docker volume rm -- "$repository_volume" >/dev/null
+assert_volume_exists "$postgres_volume"
+assert_volume_exists "$state_volume"
+for retained_volume in \
+  dev-postgres-data dev-image-cohort dev-control-identity dev-control-state \
+  dev-route-publications dev-supervisor-state dev-api-secrets \
+  dev-migrate-secrets dev-worker-secrets; do
+  assert_project_volume_exists "$retained_volume"
+done
+
+# With only the verified repository volume reset, immutable pinned A can start
+# while PostgreSQL and every other randomized project state volume persists.
+compose_started=1
+compose up --wait --pull never --force-recreate
+assert_cohort_gate_succeeded
+assert_exited_successfully dev-init
+assert_exited_successfully migrate
+assert_running postgres
+assert_running control-worker
+assert_running control-api
+assert_running_image control-api "$api_image_a_id"
+assert_running_image control-worker "$worker_image_a_id"
+[[ $(repository_commit) == "$previous_commit" ]] \
+  || die "pinned cohort A did not initialize its repository after reset"
+[[ $(database_identity) == "$before_database" ]] \
+  || die "PostgreSQL state did not persist across repository-only reset"
+assert_volume_exists "$postgres_volume"
+assert_volume_exists "$state_volume"
+assert_runtime_boundaries
 
 printf '%s\n' "development image acceptance passed"

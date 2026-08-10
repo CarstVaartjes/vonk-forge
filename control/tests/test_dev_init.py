@@ -7,7 +7,8 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from vonk_control import dev_init
+from vonk_control import dev_cohort, dev_init
+from vonk_control.dev_cohort import build_identity, verify_cohort
 from vonk_control.dev_init import (
     DevInitError,
     initialize_repository,
@@ -17,6 +18,71 @@ from vonk_control.dev_init import (
 
 API_IMAGE = "ghcr.io/example/vonk-forge-api@sha256:" + "a" * 64
 WORKER_IMAGE = "ghcr.io/example/vonk-forge-worker@sha256:" + "b" * 64
+
+
+def _selected_cohort(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    selected_commit: str,
+    embedded_commit: str | None = None,
+    embedded_role: str = "api",
+):
+    selected = verify_cohort(
+        [
+            build_identity(role="api", source_commit=selected_commit),
+            build_identity(role="worker", source_commit=selected_commit),
+        ]
+    )
+    selected_path = tmp_path / "cohort" / "selected.json"
+    selected_path.parent.mkdir()
+    selected_path.write_bytes(selected.to_bytes())
+    identity_path = tmp_path / "development-image-identity.json"
+    identity_path.write_bytes(
+        build_identity(
+            role=embedded_role,
+            source_commit=embedded_commit or selected_commit,
+        ).to_bytes()
+    )
+    monkeypatch.setattr(
+        dev_cohort,
+        "DEVELOPMENT_IMAGE_IDENTITY_PATH",
+        identity_path,
+    )
+    return selected_path, selected
+
+
+def _set_main_environment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    repository_url: str,
+) -> dict[str, Path]:
+    paths = {
+        "repository": tmp_path / "repository",
+        "source": tmp_path / "source",
+        "api": tmp_path / "api",
+        "migrate": tmp_path / "migrate",
+        "worker": tmp_path / "worker",
+        "identity": tmp_path / "identity",
+        "state": tmp_path / "state",
+        "routes": tmp_path / "routes",
+        "supervisor": tmp_path / "supervisor",
+    }
+    for name, value in (
+        ("VONK_DEV_REPOSITORY_URL", repository_url),
+        ("VONK_REPOSITORY_PATH", str(paths["repository"])),
+        ("VONK_DEV_SECRET_SOURCE_ROOT", str(paths["source"])),
+        ("VONK_DEV_API_SECRET_ROOT", str(paths["api"])),
+        ("VONK_DEV_MIGRATE_SECRET_ROOT", str(paths["migrate"])),
+        ("VONK_DEV_WORKER_SECRET_ROOT", str(paths["worker"])),
+        ("VONK_CONTROL_IDENTITY_ROOT", str(paths["identity"])),
+        ("VONK_STATE_PATH", str(paths["state"])),
+        ("VONK_ROUTE_ROOT", str(paths["routes"])),
+        ("VONK_SUPERVISOR_ROOT", str(paths["supervisor"])),
+    ):
+        monkeypatch.setenv(name, value)
+    return paths
 
 
 def _git(root: Path, *arguments: str) -> str:
@@ -920,6 +986,171 @@ def test_main_initializes_repository_synthetic_state_and_runtime_secrets(
     assert all(path.is_dir() for path in (state, routes, supervisor))
 
 
+def test_main_derives_mutable_repository_and_projection_identity_from_selected_cohort(
+    tmp_path: Path,
+    local_acceptance: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _origin_path, publisher, repository_url, initial = _origin(tmp_path)
+    paths = _set_main_environment(
+        tmp_path,
+        monkeypatch,
+        repository_url=repository_url,
+    )
+    paths["source"] = _secret_source(paths["source"])
+    initialize_repository(paths["repository"], repository_url, initial)
+    _git(paths["repository"], "config", "user.email", "test@example.invalid")
+    _git(paths["repository"], "config", "user.name", "Test")
+    local_deploy = _commit(paths["repository"], "local.txt", "preserve me\n")
+    selected_commit = _commit(publisher, "next.txt", "accepted next\n")
+    _git(publisher, "push", "-q", "origin", "main")
+    selected_path, selected = _selected_cohort(
+        tmp_path,
+        monkeypatch,
+        selected_commit=selected_commit,
+    )
+    monkeypatch.setenv("VONK_DEV_SELECTED_COHORT_FILE", str(selected_path))
+    for name in (
+        "VONK_DEV_EXPECTED_COMMIT",
+        "VONK_DEV_API_IMAGE",
+        "VONK_DEV_WORKER_IMAGE",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    assert main() == 0
+
+    assert _git(paths["repository"], "rev-parse", "main") == selected_commit
+    assert _git(paths["repository"], "rev-parse", "deploy") == local_deploy
+    projection = json.loads(
+        (paths["identity"] / "active.json").read_text(encoding="ascii")
+    )
+    generation = projection["selection"]["generation"]
+    assert selected.generation_id == (
+        "gen-" + selected.release_digest.removeprefix("sha256:")[:24]
+    )
+    assert generation["generation_id"] == selected.generation_id
+    assert generation["release_digest"] == selected.release_digest
+    assert generation["build_digest"] == selected.build_digest
+    assert generation["platform_version"] == selected.platform_version
+    assert generation["database_revision"] == selected.database_revision
+    assert generation["api_image"] == selected.api_image
+    assert generation["worker_image"] == selected.worker_image
+
+
+@pytest.mark.parametrize(
+    "explicit_names",
+    (
+        (),
+        ("VONK_DEV_EXPECTED_COMMIT",),
+        (
+            "VONK_DEV_EXPECTED_COMMIT",
+            "VONK_DEV_API_IMAGE",
+            "VONK_DEV_WORKER_IMAGE",
+        ),
+    ),
+    ids=("missing", "partial-pinned", "mixed"),
+)
+def test_main_rejects_missing_partial_or_mixed_development_identity_inputs_before_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    explicit_names: tuple[str, ...],
+) -> None:
+    paths = _set_main_environment(
+        tmp_path,
+        monkeypatch,
+        repository_url="https://github.com/CarstVaartjes/vonk-forge.git",
+    )
+    selected_path, _selected = _selected_cohort(
+        tmp_path,
+        monkeypatch,
+        selected_commit="a" * 40,
+    )
+    values = {
+        "VONK_DEV_EXPECTED_COMMIT": "a" * 40,
+        "VONK_DEV_API_IMAGE": API_IMAGE,
+        "VONK_DEV_WORKER_IMAGE": WORKER_IMAGE,
+    }
+    for name in values:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.delenv("VONK_DEV_SELECTED_COHORT_FILE", raising=False)
+    for name in explicit_names:
+        monkeypatch.setenv(name, values[name])
+    if len(explicit_names) == 3:
+        monkeypatch.setenv("VONK_DEV_SELECTED_COHORT_FILE", str(selected_path))
+
+    with pytest.raises(DevInitError, match="identity input"):
+        main()
+
+    assert not any(paths[name].exists() for name in ("repository", "state", "routes"))
+
+
+@pytest.mark.parametrize(
+    ("selected_commit", "embedded_commit", "embedded_role", "malformed"),
+    (
+        ("a" * 40, "a" * 40, "api", True),
+        ("b" * 40, "a" * 40, "api", False),
+        ("a" * 40, "a" * 40, "worker", False),
+    ),
+    ids=("malformed", "stale", "role-mismatch"),
+)
+def test_main_verifies_mutable_cohort_before_repository_secrets_or_state_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    selected_commit: str,
+    embedded_commit: str,
+    embedded_role: str,
+    malformed: bool,
+) -> None:
+    paths = _set_main_environment(
+        tmp_path,
+        monkeypatch,
+        repository_url="https://github.com/CarstVaartjes/vonk-forge.git",
+    )
+    selected_path, _selected = _selected_cohort(
+        tmp_path,
+        monkeypatch,
+        selected_commit=selected_commit,
+        embedded_commit=embedded_commit,
+        embedded_role=embedded_role,
+    )
+    if malformed:
+        selected_path.write_bytes(b"{}\n")
+    monkeypatch.setenv("VONK_DEV_SELECTED_COHORT_FILE", str(selected_path))
+    for name in (
+        "VONK_DEV_EXPECTED_COMMIT",
+        "VONK_DEV_API_IMAGE",
+        "VONK_DEV_WORKER_IMAGE",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    mutations: list[str] = []
+    monkeypatch.setattr(
+        dev_init,
+        "initialize_repository",
+        lambda *_args: mutations.append("repository"),
+    )
+    monkeypatch.setattr(
+        dev_init,
+        "stage_runtime_secrets",
+        lambda *_args: mutations.append("secrets"),
+    )
+    monkeypatch.setattr(
+        dev_init,
+        "_write_active_projection",
+        lambda *_args: mutations.append("identity"),
+    )
+    monkeypatch.setattr(
+        dev_init,
+        "_initialize_directory",
+        lambda *_args, **_kwargs: mutations.append("state"),
+    )
+
+    with pytest.raises(DevInitError, match="selected cohort"):
+        main()
+
+    assert mutations == []
+    assert not any(paths[name].exists() for name in ("repository", "state", "routes"))
+
+
 def test_main_preflights_all_required_environment_before_cloning(
     tmp_path: Path, local_acceptance: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -972,7 +1203,12 @@ def test_active_projection_retries_partial_writes(
     monkeypatch.setattr(dev_init.os, "write", partial_write)
     identity = tmp_path / "identity"
 
-    dev_init._write_active_projection(identity, API_IMAGE, WORKER_IMAGE)
+    generation = dev_init._pinned_generation_identity(
+        "a" * 40,
+        API_IMAGE,
+        WORKER_IMAGE,
+    )
+    dev_init._write_active_projection(identity, generation)
 
     raw = (identity / "active.json").read_bytes()
     assert raw.endswith(b"\n")

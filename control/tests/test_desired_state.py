@@ -12,6 +12,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.desired_state import (
@@ -37,8 +39,6 @@ from vonk_control.route_runtime import (
     RouteBundleRequest,
     endpoint_evidence_digest,
 )
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 NOW = datetime(2026, 8, 5, 12, 0, tzinfo=UTC)
 DEFINITION_HASH = "d" * 64
@@ -55,7 +55,7 @@ AGENT_CAPABILITIES = ("node.probe", *REQUIRED_CAPABILITIES)
 
 def _git(root: Path, *arguments: str) -> str:
     return subprocess.run(
-        ["git", "-C", str(root), *arguments],
+        ["git", "-c", "commit.gpgsign=false", "-C", str(root), *arguments],
         check=True,
         capture_output=True,
         text=True,

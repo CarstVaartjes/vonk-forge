@@ -168,9 +168,17 @@ jobs:
         run: npm test --prefix control/web -- --run src/pages/packages.test.tsx
 
   control-suite:
-    name: Complete control suite
+    name: Complete control suite (${{ matrix.shard.label }})
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard:
+          - {index: 0, label: 1-of-4}
+          - {index: 1, label: 2-of-4}
+          - {index: 2, label: 3-of-4}
+          - {index: 3, label: 4-of-4}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -181,7 +189,30 @@ jobs:
           python-version: "3.12"
           enable-cache: true
       - name: Run complete control suite
-        run: uv run --python 3.12 --project control --frozen --with-editable . --with pytest-xdist==3.8.0 pytest control/tests -q -n auto --dist loadfile
+        shell: bash
+        env:
+          SHARD_INDEX: ${{ matrix.shard.index }}
+          SHARD_TOTAL: 4
+        run: |
+          set -euo pipefail
+          collection=$(mktemp)
+          trap 'rm -f "$collection"' EXIT
+          uv run --python 3.12 --project control --frozen --with-editable . \
+            pytest --collect-only -q control/tests > "$collection"
+          mapfile -t control_tests < <(
+            awk '/^tests\/.*::/' "$collection"
+          )
+          ((${#control_tests[@]} >= SHARD_TOTAL))
+          shard_tests=()
+          for position in "${!control_tests[@]}"; do
+            if ((position % SHARD_TOTAL == SHARD_INDEX)); then
+              shard_tests+=("control/${control_tests[$position]}")
+            fi
+          done
+          ((${#shard_tests[@]} > 0))
+          uv run --python 3.12 --project control --frozen --with-editable . \
+            --with pytest-xdist==3.8.0 pytest -q -n auto --dist loadfile \
+            "${shard_tests[@]}"
 
   agent-suite:
     name: Complete Python agent suite
@@ -955,14 +986,11 @@ jobs:
           VONK_PLATFORM_AUTHORITY_URL: ${{ vars.VONK_PLATFORM_AUTHORITY_URL }}
           VONK_PLATFORM_AUTHORITY_AUDIENCE: ${{ vars.VONK_PLATFORM_AUTHORITY_AUDIENCE }}
           VONK_PLATFORM_TUF_PUBLISHER_BIN: ${{ github.workspace }}/scripts/platform-release-authority
-          VONK_PLATFORM_CHANNEL_PUBLISHER_BIN: ${{ github.workspace }}/scripts/platform-release-authority
-          PLATFORM_CHANNEL: ${{ needs.release-metadata.outputs.platform_channel }}
         run: |
           set -euo pipefail
-          uv run --frozen scripts/publish-platform-target publish-authority \
+          uv run --frozen scripts/publish-platform-target publish-target \
             --manifest release-output/platform-release.json \
             --bundle release-output/control-deployment.tar \
-            --channel "$PLATFORM_CHANNEL" \
             > release-output/platform-publication.json
       - name: Upload platform authority evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1073,7 +1101,7 @@ jobs:
             "${release_assets[@]}"
 
   advance-production-aliases:
-    name: Advance accepted production image aliases
+    name: Advance accepted production channels
     needs: [release-metadata, release-manifest]
     if: needs.release-manifest.result == 'success'
     runs-on: ubuntu-latest
@@ -1087,6 +1115,7 @@ jobs:
     permissions:
       attestations: read
       contents: read
+      id-token: write
       packages: write
     steps:
       - name: Check out accepted alias tooling
@@ -1165,7 +1194,11 @@ jobs:
           evidence_dir="$RUNNER_TEMP/vonk-production-alias-evidence"
           test ! -e "$evidence_dir"
           install -d -m 0700 "$evidence_dir"
-          for asset in vonk-forge-images.env vonk-forge-images.env.sha256; do
+          for asset in \
+            vonk-forge-images.env \
+            vonk-forge-images.env.sha256 \
+            platform-release.json \
+            platform-publication.json; do
             mapfile -t asset_urls < <(
               jq -r --arg tag "$target_tag" --arg asset "$asset" '
                 [.[] | select(
@@ -1214,15 +1247,16 @@ jobs:
           set -euo pipefail
           gh release verify "$TARGET_TAG" \
             --repo "$GITHUB_REPOSITORY" >/dev/null
-          for asset in vonk-forge-images.env vonk-forge-images.env.sha256; do
+          for asset in \
+            vonk-forge-images.env \
+            vonk-forge-images.env.sha256 \
+            platform-release.json \
+            platform-publication.json; do
             test -f "$EVIDENCE_DIR/$asset" && test ! -L "$EVIDENCE_DIR/$asset"
+            gh release verify-asset "$TARGET_TAG" \
+              "$EVIDENCE_DIR/$asset" \
+              --repo "$GITHUB_REPOSITORY" >/dev/null
           done
-          gh release verify-asset "$TARGET_TAG" \
-            "$EVIDENCE_DIR/vonk-forge-images.env" \
-            --repo "$GITHUB_REPOSITORY" >/dev/null
-          gh release verify-asset "$TARGET_TAG" \
-            "$EVIDENCE_DIR/vonk-forge-images.env.sha256" \
-            --repo "$GITHUB_REPOSITORY" >/dev/null
 
           mapfile -t checksum_lines \
             < "$EVIDENCE_DIR/vonk-forge-images.env.sha256"
@@ -1299,6 +1333,27 @@ jobs:
             "worker_digest=$worker_digest" \
             "hermes_digest=$hermes_digest" \
             >> "$GITHUB_OUTPUT"
+
+      - name: Advance signed stable channel from complete release evidence
+        shell: bash
+        env:
+          EVIDENCE_DIR: ${{ runner.temp }}/vonk-production-alias-evidence
+          PLATFORM_CHANNEL: ${{ needs.release-metadata.outputs.platform_channel }}
+          TARGET_COMMIT: ${{ steps.target.outputs.target_commit }}
+          TARGET_TAG: ${{ steps.target.outputs.target_tag }}
+          TARGET_TAG_OID: ${{ steps.target.outputs.target_tag_oid }}
+          VONK_PLATFORM_AUTHORITY_URL: ${{ vars.VONK_PLATFORM_AUTHORITY_URL }}
+          VONK_PLATFORM_AUTHORITY_AUDIENCE: ${{ vars.VONK_PLATFORM_AUTHORITY_AUDIENCE }}
+          VONK_PLATFORM_CHANNEL_PUBLISHER_BIN: ${{ github.workspace }}/scripts/platform-release-authority
+        run: |
+          set -euo pipefail
+          scripts/verify-release-tag-authority \
+            "$TARGET_TAG" "$TARGET_TAG_OID" "$TARGET_COMMIT"
+          uv run --frozen scripts/publish-platform-target publish-channel \
+            --manifest "$EVIDENCE_DIR/platform-release.json" \
+            --target-receipt "$EVIDENCE_DIR/platform-publication.json" \
+            --channel "$PLATFORM_CHANNEL" \
+            > "$EVIDENCE_DIR/platform-channel-publication.json"
 
       - name: Revalidate selected authority before registry authentication
         shell: bash

@@ -321,7 +321,8 @@ def _publish(
     args: argparse.Namespace,
     *,
     publish_bundle: bool = True,
-    publish_authority: bool = True,
+    publish_target: bool = True,
+    publish_channel: bool = True,
 ) -> dict[str, object]:
     if _CHANNEL.fullmatch(args.channel) is None or args.channel == "latest":
         raise PublicationError("discovery channel is invalid")
@@ -366,9 +367,10 @@ def _publish(
         if publish_bundle:
             oras = _tool("VONK_PLATFORM_ORAS_BIN")
             tools.append(oras)
-        if publish_authority:
+        if publish_target:
             tuf_publisher = _tool("VONK_PLATFORM_TUF_PUBLISHER_BIN")
             tools.append(tuf_publisher)
+        if publish_channel:
             channel_publisher = _tool("VONK_PLATFORM_CHANNEL_PUBLISHER_BIN")
             tools.append(channel_publisher)
         with tempfile.TemporaryDirectory(prefix="vonk-platform-publication-") as temporary:
@@ -425,8 +427,8 @@ def _publish(
                     environment=_ORAS_ENVIRONMENT,
                 )
 
-            if publish_authority:
-                assert tuf_publisher is not None and channel_publisher is not None
+            if publish_target:
+                assert tuf_publisher is not None
                 tuf_command: list[object] = [
                     "publish-target",
                     "--target-name",
@@ -463,6 +465,8 @@ def _publish(
                     )
                 targets_version = tuf_receipt["targets_version"]
 
+            if publish_channel:
+                assert publish_target and channel_publisher is not None
                 channel_document = {
                     "channel": args.channel,
                     "discovery_only": True,
@@ -511,15 +515,114 @@ def _publish(
         "target_name": target_name,
         "target_sha256": target_sha256,
     }
-    if publish_authority:
+    if publish_target:
+        result["tuf_targets_version"] = targets_version
+    if publish_channel:
         result.update(
             {
                 "channel": args.channel,
                 "channel_document_sha256": channel_sha256,
-                "tuf_targets_version": targets_version,
             }
         )
     return result
+
+
+def _publish_channel(args: argparse.Namespace) -> dict[str, object]:
+    if _CHANNEL.fullmatch(args.channel) is None or args.channel == "latest":
+        raise PublicationError("discovery channel is invalid")
+    release_raw = _read_regular(
+        args.manifest, limit=_MAX_RELEASE_BYTES, label="platform manifest"
+    )
+    receipt_raw = _read_regular(
+        args.target_receipt,
+        limit=_MAX_RECEIPT_BYTES,
+        label="target publication receipt",
+    )
+    try:
+        release = PlatformRelease.from_bytes(release_raw)
+        release_document = json.loads(release_raw)
+        receipt = json.loads(receipt_raw)
+    except (PlatformReleaseError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise PublicationError("channel publication input is invalid") from error
+    if (
+        release_raw != _canonical(release_document)
+        or not isinstance(receipt, dict)
+        or receipt_raw != _canonical(receipt)
+    ):
+        raise PublicationError("channel publication input must use canonical bytes")
+    target_sha256 = _sha256(release_raw)
+    target_name = (
+        f"platform/releases/{release.platform_version}/{target_sha256}.json"
+    )
+    try:
+        release.validate_target_identity(target_name, target_sha256)
+    except PlatformReleaseError as error:
+        raise PublicationError("platform target identity is invalid") from error
+    targets_version = receipt.get("tuf_targets_version")
+    if (
+        set(receipt)
+        != {
+            "bundle",
+            "schema_version",
+            "target_name",
+            "target_sha256",
+            "tuf_targets_version",
+        }
+        or receipt.get("schema_version") != 1
+        or receipt.get("bundle") != _bundle_dict(release.deployment_bundle)
+        or receipt.get("target_name") != target_name
+        or receipt.get("target_sha256") != target_sha256
+        or type(targets_version) is not int
+        or targets_version < 1
+    ):
+        raise PublicationError("target publication receipt does not match manifest")
+
+    channel_document = {
+        "channel": args.channel,
+        "discovery_only": True,
+        "schema_version": 1,
+        "target_name": target_name,
+        "target_sha256": target_sha256,
+        "tuf_targets_version": targets_version,
+    }
+    channel_raw = _canonical(channel_document)
+    with tempfile.TemporaryDirectory(prefix="vonk-platform-channel-") as temporary:
+        channel_path = Path(temporary) / "platform-channel.json"
+        channel_path.write_bytes(channel_raw)
+        os.chmod(channel_path, 0o400)
+        publisher = _tool("VONK_PLATFORM_CHANNEL_PUBLISHER_BIN")
+        try:
+            channel_receipt = _run(
+                publisher,
+                (
+                    "publish-channel",
+                    "--channel",
+                    args.channel,
+                    "--document",
+                    channel_path,
+                ),
+                environment=_AUTHORITY_ENVIRONMENT,
+                receipt=True,
+            )
+        finally:
+            publisher.close()
+    channel_sha256 = _sha256(channel_raw)
+    expected_receipt = {
+        "channel": args.channel,
+        "document_sha256": channel_sha256,
+        "target_name": target_name,
+        "target_sha256": target_sha256,
+    }
+    if any(channel_receipt.get(key) != value for key, value in expected_receipt.items()):
+        raise PublicationError("channel publication receipt does not match request")
+    return {
+        "channel": args.channel,
+        "channel_document_sha256": channel_sha256,
+        "schema_version": 1,
+        "target_name": target_name,
+        "target_sha256": target_sha256,
+        "tuf_targets_version": targets_version,
+    }
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -540,6 +643,14 @@ def _parser() -> argparse.ArgumentParser:
     publish_authority.add_argument("--manifest", required=True, type=Path)
     publish_authority.add_argument("--bundle", required=True, type=Path)
     publish_authority.add_argument("--channel", default="stable")
+    publish_target = subcommands.add_parser("publish-target")
+    publish_target.add_argument("--manifest", required=True, type=Path)
+    publish_target.add_argument("--bundle", required=True, type=Path)
+    publish_target.add_argument("--channel", default="stable")
+    publish_channel = subcommands.add_parser("publish-channel")
+    publish_channel.add_argument("--manifest", required=True, type=Path)
+    publish_channel.add_argument("--target-receipt", required=True, type=Path)
+    publish_channel.add_argument("--channel", default="stable")
     return parser
 
 
@@ -554,7 +665,11 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "publish":
             result = _publish(args)
         elif args.command == "publish-bundle":
-            result = _publish(args, publish_authority=False)
+            result = _publish(args, publish_target=False, publish_channel=False)
+        elif args.command == "publish-target":
+            result = _publish(args, publish_bundle=False, publish_channel=False)
+        elif args.command == "publish-channel":
+            result = _publish_channel(args)
         else:
             result = _publish(args, publish_bundle=False)
     except PublicationError as error:

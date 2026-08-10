@@ -3,12 +3,6 @@ name: vonk-forge-dev
 x-dev-generation: &dev-generation
   VONK_DEPLOYMENT_MODE: development
   VONK_CONTROL_STARTUP_MODE: selected
-  VONK_CONTROL_GENERATION_ID: gen-000000000000000000000000
-  VONK_DATABASE_REVISION: 0020_recipe_catalog_bridge
-  VONK_PLATFORM_VERSION: 0.1.0
-  VONK_PLATFORM_RELEASE_DIGEST: sha256:0000000000000000000000000000000000000000000000000000000000000000
-  VONK_PLATFORM_BUILD_DIGEST: sha256:1111111111111111111111111111111111111111111111111111111111111111
-  VONK_CONTROL_START_NONCE: "4444444444444444444444444444444444444444444444444444444444444444"
   VONK_CONTROL_IDENTITY_ROOT: /control-identity
   VONK_DATABASE_URL_FILE: /run/secrets/database-url
   VONK_REPOSITORY_PATH: /repository
@@ -20,6 +14,9 @@ x-dev-generation: &dev-generation
 
 x-api-image: &api-image __VONK_API_IMAGE__
 x-worker-image: &worker-image __VONK_WORKER_IMAGE__
+# Compatibility input for the current pinned renderer. Task 5 must retain this
+# token only for pinned output and omit it entirely from mutable output.
+x-pinned-expected-commit: "__VONK_EXPECTED_COMMIT__"
 
 services:
   postgres:
@@ -37,20 +34,69 @@ services:
       timeout: 3s
       retries: 20
 
+  dev-cohort-reset:
+    image: *api-image
+    pull_policy: always
+    user: "0:0"
+    read_only: true
+    command: [python, -m, vonk_control.dev_cohort, reset, /cohort]
+    volumes:
+      - dev-image-cohort:/cohort
+    network_mode: none
+    restart: "no"
+
+  dev-api-cohort:
+    image: *api-image
+    pull_policy: always
+    user: "10001:10001"
+    read_only: true
+    command: [python, -m, vonk_control.dev_cohort, report, /cohort, --role, api]
+    volumes:
+      - dev-image-cohort:/cohort
+    network_mode: none
+    depends_on:
+      dev-cohort-reset: {condition: service_completed_successfully}
+    restart: "no"
+
+  dev-worker-cohort:
+    image: *worker-image
+    pull_policy: always
+    user: "10001:10001"
+    read_only: true
+    command: [python, -m, vonk_control.dev_cohort, report, /cohort, --role, worker]
+    volumes:
+      - dev-image-cohort:/cohort
+    network_mode: none
+    depends_on:
+      dev-api-cohort: {condition: service_completed_successfully}
+    restart: "no"
+
+  dev-cohort-verify:
+    image: *api-image
+    pull_policy: always
+    user: "10001:10001"
+    read_only: true
+    command: [python, -m, vonk_control.dev_cohort, verify, /cohort]
+    volumes:
+      - dev-image-cohort:/cohort
+    network_mode: none
+    depends_on:
+      dev-worker-cohort: {condition: service_completed_successfully}
+    restart: "no"
+
   dev-init:
     image: *api-image
+    pull_policy: always
     user: "0:0"
     command: [python, -m, vonk_control.dev_init]
     environment:
       VONK_CONTROL_IDENTITY_ROOT: /control-identity
-      VONK_DEV_API_IMAGE: *api-image
       VONK_DEV_API_SECRET_ROOT: /api-secrets
-      VONK_DEV_EXPECTED_COMMIT: __VONK_EXPECTED_COMMIT__
       VONK_DEV_MIGRATE_SECRET_ROOT: /migrate-secrets
       VONK_DEV_REPOSITORY_URL: https://github.com/CarstVaartjes/vonk-forge.git
       VONK_DEV_SECRET_SOURCE_ROOT: /host-secrets
       VONK_DEV_WORKER_SECRET_ROOT: /worker-secrets
-      VONK_DEV_WORKER_IMAGE: *worker-image
+      VONK_DEV_SELECTED_COHORT_FILE: /cohort/selected.json
       VONK_REPOSITORY_PATH: /repository
       VONK_ROUTE_ROOT: /routes
       VONK_STATE_PATH: /state
@@ -64,16 +110,27 @@ services:
       - dev-control-state:/state
       - dev-route-publications:/routes
       - dev-supervisor-state:/supervisor
+      - dev-image-cohort:/cohort:ro
     secrets:
       - source: database-url
         target: /host-secrets/database-url
       - source: git-signing-key
         target: /host-secrets/git-signing-key
+    depends_on:
+      dev-cohort-verify: {condition: service_completed_successfully}
     restart: "no"
 
   migrate:
     image: *api-image
+    pull_policy: always
     command:
+      - python
+      - -m
+      - vonk_control.dev_cohort
+      - run-selected
+      - --role
+      - api
+      - --
       - python
       - -c
       - >-
@@ -85,24 +142,29 @@ services:
         command.upgrade(config, 'head')
     environment:
       VONK_DEPLOYMENT_MODE: development
+      VONK_DEV_SELECTED_COHORT_FILE: /cohort/selected.json
     volumes:
       - dev-migrate-secrets:/run/secrets:ro
+      - dev-image-cohort:/cohort:ro
     depends_on:
       postgres: {condition: service_healthy}
       dev-init: {condition: service_completed_successfully}
+      dev-cohort-verify: {condition: service_completed_successfully}
     networks: [data]
     restart: "no"
 
   control-worker:
     image: *worker-image
+    pull_policy: always
     command: [python, -m, vonk_control.worker]
     user: "10001:10001"
     read_only: true
     tmpfs: [/run/vonk-signer, /tmp]
     environment:
       <<: *dev-generation
-      VONK_CONTROL_PROCESS_IMAGE: *worker-image
+      VONK_CONTROL_PROCESS_ROLE: worker
       VONK_INTERNAL_API_URL: http://control-api:8000
+      VONK_DEV_SELECTED_COHORT_FILE: /cohort/selected.json
       VONK_WORKER_API_TOKEN_FILE: /run/secrets/worker-api-token
     volumes:
       - dev-repository:/repository:ro
@@ -111,6 +173,7 @@ services:
       - dev-route-publications:/routes
       - dev-supervisor-state:/supervisor
       - dev-worker-secrets:/run/secrets:ro
+      - dev-image-cohort:/cohort:ro
     networks: [application, data]
     depends_on:
       postgres: {condition: service_healthy}
@@ -119,13 +182,15 @@ services:
 
   control-api:
     image: *api-image
+    pull_policy: always
     command: [python, -m, vonk_control.api]
     user: "10001:10001"
     read_only: true
     tmpfs: [/run/vonk-workload-signer, /tmp]
     environment:
       <<: *dev-generation
-      VONK_CONTROL_PROCESS_IMAGE: *api-image
+      VONK_CONTROL_PROCESS_ROLE: api
+      VONK_DEV_SELECTED_COHORT_FILE: /cohort/selected.json
       VONK_GIT_SIGNING_KEY_FILE: /run/secrets/git-signing-key
       VONK_ADMIN_GRANT_PRIVATE_KEY_FILE: /run/secrets/admin-grant-private-key
     volumes:
@@ -135,6 +200,7 @@ services:
       - dev-route-publications:/routes
       - dev-supervisor-state:/supervisor
       - dev-api-secrets:/run/secrets:ro
+      - dev-image-cohort:/cohort:ro
     networks: [application, data]
     ports: ["127.0.0.1:${VONK_DEV_PORT:-8080}:8000"]
     depends_on:
@@ -162,6 +228,7 @@ secrets:
 
 volumes:
   dev-postgres-data: {}
+  dev-image-cohort: {}
   dev-control-identity: {}
   dev-control-state: {}
   dev-route-publications: {}

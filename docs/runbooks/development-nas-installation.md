@@ -1,32 +1,16 @@
 # Development NAS installation and runtime secrets
 
 This runbook installs the development control stack on a generic
-`linux/amd64` NAS with Docker Engine and the Compose plugin. The NAS pulls
-public images and imports one generated Compose file. It does not clone this
-repository into the project directory, build an image, or receive a
+`linux/amd64` NAS with Docker Engine and the Compose plugin, including the
+UGREEN Docker Project UI. The normal development deployment is an
+operator-chosen pull/redeploy of one unchanged Compose file; it does not clone
+this repository into the project directory, build an image, or receive a
 Dockerfile, build context, image archive, GitHub token, or production secret.
 
-The moving `dev` image tags are convenient for inspection. They are eventually
-consistent across the API and worker repositories. Neither `dev` nor `latest`
-is deployment authority. Every generated Compose file therefore includes a
-digest even when its readable tag is `dev` or `latest`.
+## Start with this two-item NAS project
 
-The publication workflows expose three clearly named files:
-
-| File | Published by | Graph and image reference |
-|---|---|---|
-| `docker-compose.dev.yml` | Accepted `main` workflow | Development graph with `dev@sha256:<digest>`. |
-| `docker-compose.production.yml` | Signed release workflow | Full production graph with `latest@sha256:<digest>`; use with the production deployment bundle and [production secret guide](../../deploy/compose/README.md#required-secret-file-paths). |
-| `docker-compose.pinned.yml` | Accepted `main` workflow | Development graph with immutable `dev-sha-<commit>@sha256:<digest>` references; recommended for this NAS installation. |
-
-The tag is descriptive; the digest is authoritative. This runbook installs the
-pinned development file. It does not install the production graph or its much
-larger production credential set.
-
-## Resulting project layout
-
-Choose one NAS-local project directory that is also the directory selected in
-the NAS Compose-project UI. Its contents must be exactly:
+Create one NAS-local project directory in the file manager, then select that
+directory when creating a Docker/Compose project. Its contents must be exactly:
 
 ```text
 vonk-forge/
@@ -37,9 +21,26 @@ vonk-forge/
     └── git-signing-key
 ```
 
-The Compose file is replaceable. Preserve `secrets/` and the Docker named
-volumes during normal updates. The project file contains secret file paths but
-no secret values.
+Copy only those three development secret files into `secrets/`; do not put a
+checkout, an image archive, or a production secret beside them. The Compose
+file is replaceable, while `secrets/` and Docker named volumes survive normal
+redeploys. The file contains secret *paths*, never secret values.
+
+The publication workflows expose three clearly named files:
+
+| File | Published by | Graph and image reference |
+|---|---|---|
+| `docker-compose.dev.yml` | Accepted `main` workflow | Development graph with bare mutable `:dev` references. This is the normal NAS artifact. |
+| `docker-compose.production.yml` | Signed release workflow | Full production graph selected only by the trusted host updater; use its production deployment bundle and [production secret guide](../../deploy/compose/README.md#required-secret-file-paths). |
+| `docker-compose.pinned.yml` | Accepted `main` workflow | Immutable development references for explicit reproduction or state-aware recovery. |
+
+For normal development, copy `docker-compose.dev.yml` as the bare mutable `:dev`
+artifact and rename it to `docker-compose.yml`. A moved tag does not change a
+running project: after a successful publication, pull/redeploy the unchanged
+`docker-compose.yml`, not restart containers and not replace the file. The
+pinned file is deliberately an exception for
+reproduction or recovery; this development guide never installs the production
+graph or its much larger production credential set.
 
 The three operator-owned inputs have narrow purposes:
 
@@ -56,65 +57,40 @@ the database URL; worker gets the database URL and worker token. Those values
 are not host files, image contents, CI inputs, Compose environment values, or
 worker/API-shared authority.
 
-## Obtain the immutable Compose artifact
+## Obtain the normal development artifact
 
 Open the successful `Development images` workflow run for the accepted `main`
 commit. Download the artifact named
 `vonk-forge-dev-compose-<40-character-commit>`. It contains
-`docker-compose.dev.yml` and `docker-compose.pinned.yml`. Select the pinned file
-and rename it to `docker-compose.yml` in the NAS project directory.
+`docker-compose.dev.yml` and `docker-compose.pinned.yml`. Select
+`docker-compose.dev.yml` and rename it to `docker-compose.yml` in the NAS
+project directory. Do not edit the first-party image references or add digests:
+the mutable `:dev` channel is intentionally selected when the Docker UI pulls.
 
-Before copying it to the NAS, check only non-secret properties:
+In the NAS file manager, confirm that the artifact is named
+`docker-compose.yml` and that the project UI identifies it as a Compose file;
+do not edit image references, add a digest, or add a build section. Both GHCR
+packages must be public. A pull-only NAS needs no registry login. If the Docker
+UI requests credentials, stop and correct package visibility instead of
+installing a GitHub token on the NAS.
 
-```bash
-grep -E 'ghcr.io/carstvaartjes/vonk-forge-(api|worker):dev-sha-[0-9a-f]{40}@sha256:[0-9a-f]{64}' docker-compose.yml
-test "$(grep -c '^[[:space:]]*build:' docker-compose.yml)" -eq 0
-```
+## Create and copy the three NAS secret files
 
-Both GHCR packages must be public. A pull-only NAS needs no registry login. If
-a pull requests credentials, stop and correct the package visibility instead
-of installing a GitHub token on the NAS.
+Use the NAS SMB share or NAS file manager to create `secrets/` in the same
+project directory as `docker-compose.yml`, then copy the following exact files
+into it. Create regular files, not folders or shortcuts; use UTF-8 without a
+BOM and end each text value with one newline. Do not open values in the Docker
+UI or put them in the Compose file.
 
-## Preferred: generate secrets directly on the NAS
+| File | Exact content rule |
+|---|---|
+| `postgres-password` | 64 lowercase hexadecimal characters followed by one newline. |
+| `database-url` | `postgresql+psycopg://control:<postgres-password>@postgres:5432/control` followed by one newline, where `<postgres-password>` is the exact value in `postgres-password`. |
+| `git-signing-key` | One unencrypted Ed25519 OpenSSH private key followed by one newline; the initializer has no interactive passphrase input. |
 
-SSH to the NAS and set `project_dir` to its local filesystem path, not an SMB
-UNC path. The example path is intentionally generic; obtain the real project
-path from the NAS storage UI.
-
-```bash
-project_dir=/volume1/docker/vonk-forge
-sudo install -d -m 0700 -o root -g root "$project_dir/secrets"
-sudo sh -s -- "$project_dir" <<'SH'
-set -eu
-umask 077
-secret_dir=$1/secrets
-for name in postgres-password database-url git-signing-key git-signing-key.pub; do
-  if [ -e "$secret_dir/$name" ] || [ -L "$secret_dir/$name" ]; then
-    printf 'refusing to overwrite %s\n' "$secret_dir/$name" >&2
-    exit 1
-  fi
-done
-postgres_password=$(openssl rand -hex 32)
-printf '%s\n' "$postgres_password" > "$secret_dir/postgres-password"
-printf 'postgresql+psycopg://control:%s@postgres:5432/control\n' \
-  "$postgres_password" > "$secret_dir/database-url"
-ssh-keygen -q -t ed25519 -N '' \
-  -C vonk-forge-development-git-signing \
-  -f "$secret_dir/git-signing-key"
-rm -f -- "$secret_dir/git-signing-key.pub"
-chown 999:999 "$secret_dir/postgres-password"
-chown 10001:10001 "$secret_dir/database-url"
-chown root:root "$secret_dir/git-signing-key"
-chmod 0400 "$secret_dir/postgres-password" \
-  "$secret_dir/database-url" "$secret_dir/git-signing-key"
-unset postgres_password
-SH
-```
-
-The generated password is hexadecimal, so it can be placed in the URL without
-percent encoding. Do not substitute a password containing URL punctuation
-unless it is percent-encoded correctly. The Git key must have no passphrase:
-the noninteractive initializer has no agent or passphrase input.
+Do not overwrite existing secret files during a normal redeploy. If an SMB
+client created the files, safely eject/disconnect the share after copying and
+use the NAS file manager to confirm only the three expected names appear.
 
 The numeric owners match the pinned images: PostgreSQL is UID/GID `999`, while
 the API and migration run as `10001:10001`. Docker implementations differ in
@@ -122,152 +98,59 @@ how bind-backed Compose secrets expose ownership; these owners and mode `0400`
 are the restrictive compatible host settings. The Docker daemon must be able
 to traverse the root-owned `0700` secret directory.
 
-Validate existence, size, ownership, and mode without printing content:
-
-```bash
-project_dir=/volume1/docker/vonk-forge
-for name in postgres-password database-url git-signing-key; do
-  sudo test -f "$project_dir/secrets/$name"
-  sudo test -s "$project_dir/secrets/$name"
-  sudo stat -c '%n uid=%u gid=%g mode=%a bytes=%s' \
-    "$project_dir/secrets/$name"
-done
-```
-
 Expected owners are `999:999`, `10001:10001`, and `0:0`, respectively; every
 mode is `400`. File sizes are safe to display. Never use `cat`, `Get-Content`,
-or a screenshot that reveals values. `docker compose config` prints file paths
-and operational configuration, not these files' contents; use `config -q` when
-you only need validation so that metadata is not copied into diagnostics.
+or a screenshot that reveals values. Confirm the names, presence, and file
+sizes through the NAS file manager; do not copy configuration output into
+diagnostics.
 
-## Alternative: create files from Windows and copy over SMB
+## SMB/file-manager preparation
 
-Direct NAS generation is preferable because the private key never crosses the
-network. If only the SMB share is initially available, this PowerShell flow
-creates UTF-8 files without a BOM and does not put the generated password in
-command history. Replace `Z:\vonk-forge` if the share uses another drive.
+Use an SMB client only to copy the three already-prepared files into
+`secrets/`. Generate password and private-key material through the
+organization's approved secret-management process rather than by pasting a
+command into a client terminal. The SMB client must create regular files with
+the exact names and content rules above; it must not create a public key,
+temporary copy, or duplicate filename in the project directory.
 
-```powershell
-$ErrorActionPreference = 'Stop'
-$project = 'Z:\vonk-forge'
-$secretDir = Join-Path $project 'secrets'
-New-Item -ItemType Directory -Force -Path $secretDir | Out-Null
-$secretNames = 'postgres-password', 'database-url', 'git-signing-key'
-foreach ($name in $secretNames) {
-  $destination = Join-Path $secretDir $name
-  if (Test-Path -LiteralPath $destination) {
-    throw "Refusing to overwrite $destination"
-  }
-}
-
-$bytes = New-Object byte[] 32
-$rng = [Security.Cryptography.RandomNumberGenerator]::Create()
-$rng.GetBytes($bytes)
-$rng.Dispose()
-$postgresPassword = -join ($bytes | ForEach-Object { $_.ToString('x2') })
-$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-[IO.File]::WriteAllText(
-  (Join-Path $secretDir 'postgres-password'),
-  "$postgresPassword`n",
-  $utf8NoBom
-)
-[IO.File]::WriteAllText(
-  (Join-Path $secretDir 'database-url'),
-  "postgresql+psycopg://control:${postgresPassword}@postgres:5432/control`n",
-  $utf8NoBom
-)
-$postgresPassword = $null
-[Array]::Clear($bytes, 0, $bytes.Length)
-
-$key = Join-Path $secretDir 'git-signing-key'
-$keyTempDir = Join-Path ([IO.Path]::GetTempPath()) `
-  ("vonk-forge-key-" + [Guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory -Path $keyTempDir | Out-Null
-$tempKey = Join-Path $keyTempDir 'git-signing-key'
-$stagedKey = Join-Path $secretDir `
-  ('.git-signing-key.' + [Guid]::NewGuid().ToString('N') + '.tmp')
-try {
-  & "$env:WINDIR\System32\OpenSSH\ssh-keygen.exe" `
-    -q -t ed25519 -C vonk-forge-development-git-signing -f $tempKey
-  if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $tempKey)) {
-    throw "ssh-keygen failed with exit code $LASTEXITCODE"
-  }
-  Copy-Item -LiteralPath $tempKey -Destination $stagedKey -ErrorAction Stop
-  if (-not (Test-Path -LiteralPath $stagedKey) -or
-      (Get-Item -LiteralPath $stagedKey).Length -ne
-      (Get-Item -LiteralPath $tempKey).Length) {
-    throw 'SMB private-key copy did not verify'
-  }
-  [IO.File]::Move($stagedKey, $key)
-} finally {
-  if (Test-Path -LiteralPath $stagedKey) {
-    Remove-Item -LiteralPath $stagedKey -Force -ErrorAction Stop
-  }
-  Remove-Item -LiteralPath $keyTempDir -Recurse -Force -ErrorAction Stop
-}
-```
-
-`ssh-keygen` prompts twice for a passphrase; press Enter at both prompts so the
-runtime key is unencrypted. Do not pass an empty `-N` through Windows
-PowerShell 5: its native argument handling is inconsistent and caused the
-earlier key-generation failures. The key is generated on the protected local
-temporary filesystem and only then copied as a regular file; `ssh-keygen` must
-not write directly to SMB. Prompt deletion of the temporary directory reduces
-exposure, but it is not guaranteed secure erasure on SSDs, snapshots, or
-managed Windows storage.
+Obtain the unencrypted private key through the approved secret-management
+process, then copy it as a regular file from protected local storage. SMB is a
+copy path, not a secret-generation environment; its ordinary cleanup does not
+guarantee secure erasure from snapshots or managed Windows storage.
 
 Windows ACLs on an SMB drive do not establish the Linux numeric ownership used
-inside containers. After copying, run this mandatory NAS-shell step:
+inside containers. Use the NAS administration interface's file-permission
+controls to apply the ownership and modes above before deploying; do not use a
+Docker-project action to change secret-file permissions.
 
-```bash
-project_dir=/volume1/docker/vonk-forge
-sudo chown root:root "$project_dir/secrets"
-sudo chmod 0700 "$project_dir/secrets"
-sudo chown 999:999 "$project_dir/secrets/postgres-password"
-sudo chown 10001:10001 "$project_dir/secrets/database-url"
-sudo chown root:root "$project_dir/secrets/git-signing-key"
-sudo chmod 0400 "$project_dir/secrets/postgres-password" \
-  "$project_dir/secrets/database-url" "$project_dir/secrets/git-signing-key"
-```
+## Create and redeploy the Compose project
 
-## Import and start the Compose project
+In a generic NAS Docker UI (UGREEN calls this a Docker Project):
 
-Copy `docker-compose.pinned.yml` to `<project_dir>/docker-compose.yml`; do not replace
-the directory and do not copy repository source beside it. In a generic NAS
-Docker UI:
+1. Create or import a project from the NAS-local `vonk-forge/` directory.
+2. Select `docker-compose.yml`; retain its relative `./secrets/...` paths.
+3. Verify that `secrets/` contains `postgres-password`, `database-url`, and
+   `git-signing-key`, without opening their contents in the UI.
+4. Choose **Pull** then **Redeploy** for the project. Do not choose build or
+   restart; there is no build context and restart cannot fetch a moved `:dev`
+   image.
+5. Keep every named volume. Do not choose a remove-volumes or clean-project
+   option during normal development.
 
-1. Create/import a Compose project from the existing project directory.
-2. Select `docker-compose.yml` and keep its relative `./secrets/...` paths.
-3. Choose pull/redeploy, not build. There is no build context.
-4. Preserve all named volumes on redeploy.
+After the UI reports the deployment, follow the two prerequisite lanes in the
+job and container status: the cohort reset, API and worker cohort reporters,
+and cohort verifier complete in one lane while PostgreSQL becomes healthy in
+the other. Only then may `dev-init` and `migrate` complete, followed by the
+long-running API and worker becoming healthy. A one-shot service that exits
+successfully is complete, not failed. The API binds only to NAS loopback; use
+your organization's approved trusted access path rather than widening the
+Compose listener.
 
-From a NAS shell, the equivalent first start is:
+## Update after an accepted development publication
 
-```bash
-cd /volume1/docker/vonk-forge
-sudo docker compose -f docker-compose.yml config -q
-sudo docker compose -f docker-compose.yml pull
-sudo docker compose -f docker-compose.yml up -d --wait
-sudo docker compose -f docker-compose.yml ps -a
-curl --fail --silent http://127.0.0.1:8080/api/v1/readyz >/dev/null
-```
-
-`dev-init` and `migrate` must show `exited (0)`. PostgreSQL, `control-worker`,
-and `control-api` must be running and healthy. The API binds only to NAS
-loopback. From Windows, use a trusted SSH forward rather than widening the
-Compose listener:
-
-```powershell
-ssh.exe -L 8080:127.0.0.1:8080 your-nas-account@your-nas-host
-```
-
-Then open `http://127.0.0.1:8080` on Windows while the SSH session remains
-connected.
-
-## Updating to a newer accepted main commit
-
-Download the newer workflow artifact and replace only `docker-compose.yml`.
-Pull/redeploy the project without deleting secrets or volumes. The repository
+Keep `docker-compose.yml` unchanged. In the NAS Docker UI, open the existing
+project and pull/redeploy it. Do not replace the Compose file, restart existing
+containers, delete `secrets/`, or delete named volumes. The repository
 volume has two deliberately separate branches: `main` is the accepted
 origin-tracking baseline from public `origin/main`, while `deploy` is the
 mutable runtime branch used for locally signed development changes.
@@ -279,29 +162,78 @@ Other local refs are preserved. A dirty checkout, rollback, changed origin,
 missing commit, non-fast-forward accepted baseline, or merge-base not exactly
 equal to `refs/vonk/deploy-base` fails closed.
 
-Moving aliases can be temporarily inconsistent if a cross-repository GHCR
-update is interrupted; the workflow repairs them by rerunning its failed
-publication job. This does not affect a downloaded Compose artifact because it
-pins both immutable digests.
+Moving aliases can be temporarily inconsistent because API and worker images
+are published from separate repositories. On a mixed pull, the cohort gate
+exits before `migrate`, so it prevents database migration and other stateful
+startup. Do not delete `secrets/` or named volumes. Wait for publication to
+finish, then pull/redeploy the same unchanged project again; if the published
+cohort is still mixed, use the pinned artifact only through the recovery path
+below.
 
-An older image may be incompatible with schema or data already written by a
-newer migration. Therefore, roll back only to a commit explicitly documented
-as database-backward-compatible, or restore every stateful volume and all
-secret files from one matching recovery point. That includes PostgreSQL,
-identity, control state, route publications, supervisor state, repository, and
-the generated API, migration, and worker secret projections.
+An older pinned image may be incompatible with schema or data already written
+by a newer migration. Use the guarded repository-volume reset only when the
+target schema is compatible. For an incompatible migration, use a matching
+full-state restore (or perform a clean development reinstall) with every
+stateful volume and all secret files from one matching recovery point. That
+includes PostgreSQL, identity, control state, route publications, supervisor
+state, repository, and the generated API, migration, and worker secret
+projections.
 Never treat a repository-volume
 reset as a database or runtime-state rollback.
+
+## Advanced guarded recovery
+
+The following shell procedure is for the explicitly documented,
+schema-compatible repository-only recovery case. Do not use it for normal
+installation, updates, or an incompatible migration.
+
+Download `docker-compose.pinned.yml` from the accepted workflow artifact for
+the target cohort, verify its workflow commit and immutable image digests, and
+replace `docker-compose.yml` with that exact pinned artifact before running the
+procedure. Merely keeping the pinned file elsewhere does not select it. Record
+the pinned 40-character commit as `expected_commit`; the checks below refuse a
+mutable tag, a different pinned commit, or a target that is not in the current
+repository history.
 
 For a documented repository-only rollback, discover the actual volume name
 from the running API before stopping the project. This remains correct if a NAS
 UI changes the Compose project name:
 
 ```bash
-set -eu
+set -euo pipefail
 cd /volume1/docker/vonk-forge
+expected_commit=REPLACE_WITH_PINNED_40_CHARACTER_COMMIT
+[[ "$expected_commit" =~ ^[0-9a-f]{40}$ ]]
+mapfile -t selected_images < <(
+  sudo docker compose -f docker-compose.yml config --images
+)
+selected_first_party=0
+for image in "${selected_images[@]}"; do
+  case "$image" in
+    ghcr.io/carstvaartjes/vonk-forge-api:dev-sha-$expected_commit@sha256:*|\
+    ghcr.io/carstvaartjes/vonk-forge-worker:dev-sha-$expected_commit@sha256:*)
+      [[ "$image" =~ @sha256:[0-9a-f]{64}$ ]]
+      selected_first_party=$((selected_first_party + 1))
+      ;;
+    ghcr.io/carstvaartjes/vonk-forge-api:*|\
+    ghcr.io/carstvaartjes/vonk-forge-worker:*)
+      echo 'refusing a mutable or mismatched first-party image' >&2
+      exit 1
+      ;;
+  esac
+done
+test "$selected_first_party" -eq 2
 api_container=$(sudo docker compose -f docker-compose.yml ps -q control-api)
 test -n "$api_container"
+current_commit=$(sudo docker exec "$api_container" \
+  git -C /repository rev-parse refs/heads/main)
+[[ "$current_commit" =~ ^[0-9a-f]{40}$ ]]
+test "$current_commit" != "$expected_commit"
+sudo docker exec "$api_container" \
+  git -C /repository cat-file -e "$expected_commit^{commit}"
+sudo docker exec "$api_container" \
+  git -C /repository merge-base --is-ancestor \
+    "$expected_commit" "$current_commit"
 repository_volume=$(sudo docker inspect "$api_container" --format \
   '{{range .Mounts}}{{if eq .Destination "/repository"}}{{.Name}}{{end}}{{end}}')
 test -n "$repository_volume"
@@ -322,8 +254,11 @@ sudo docker compose -f docker-compose.yml up -d --wait
 ```
 
 This is destructive to local branches and unpushed changes in that one volume.
-Do not use `down --volumes`. A rollback that requires database state must use a
-tested, matching backup rather than ad hoc volume deletion.
+The restart still uses the already-selected pinned `docker-compose.yml`; after
+it becomes healthy, confirm the repository `main` ref equals
+`expected_commit`. Do not use `down --volumes`. A rollback that requires
+database state must use a tested, matching backup rather than ad hoc volume
+deletion.
 
 ### Recovery after an interrupted repository reset
 

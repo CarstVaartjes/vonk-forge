@@ -18,12 +18,13 @@ global catalog is unavailable.
 
 Use the image-only development stack to try the control API, bundled web
 interface, PostgreSQL catalog, and worker on any Docker Compose-capable NAS.
-GitHub Actions builds and accepts the API and worker from `main`, publishes
-public immutable `dev-sha-*` images, and uploads digest-locked
-`docker-compose.dev.yml` and `docker-compose.pinned.yml` files. Signed releases
-publish `docker-compose.production.yml` from the full production graph. The NAS
-imports the pinned development file as `docker-compose.yml` and pulls the
-images; it never builds from a checkout or SMB share.
+GitHub Actions builds and accepts the API and worker from `main`, then publishes
+the bare mutable `:dev` `docker-compose.dev.yml` artifact. Copy it once as
+`docker-compose.yml`; normal development is a Docker-UI pull/redeploy of that
+unchanged file, never a checkout build, file replacement, or restart. Keep
+`docker-compose.pinned.yml` for explicit reproduction or state-aware recovery.
+Signed releases publish `docker-compose.production.yml` from the full production
+graph, but it is selected only through the production host updater.
 
 The complete NAS project contains only:
 
@@ -196,9 +197,10 @@ GPU node-restricted TCP 8443 backend.
 ## Select a complete platform release
 
 The protected release workflow publishes the deployment bundle first, then an
-immutable TUF target, and updates the `stable` discovery channel last. Copy the
-exact target name from signed channel metadata or the release evidence; do not
-turn the channel, a Git tag, or an OCI tag into an install target:
+immutable TUF target, and updates the signed `stable` channel last. Production
+selects the signed `stable` channel through the trusted host updater, which
+resolves it to one immutable TUF target. The operator never turns a channel, a
+Git tag, or an OCI tag into a Compose install target:
 
 ```text
 platform/releases/X.Y.Z/REPLACE_MANIFEST_SHA256.json
@@ -511,9 +513,10 @@ ghcr.io/carstvaartjes/vonk-forge-worker:latest
 ghcr.io/carstvaartjes/vonk-forge-hermes:latest
 ```
 
-`latest is evaluation-only`. Production must not use these aliases; it requires
-the version-and-digest references from one complete release asset. Docker does
-not continuously update running containers: changing `latest` remotely has no
-effect until an operator explicitly pulls and recreates containers. Evaluation
-users must still deliberately pull and recreate, and must not mistake that for
-a production update path.
+`:latest` is evaluation/discovery only. Production must not use these aliases;
+it requires the version-and-digest references selected from one complete release
+asset by the trusted host updater. Docker does not continuously update running
+containers: changing `latest` remotely has no effect until an operator
+explicitly pulls and recreates containers. Evaluation users must still
+deliberately pull and recreate, and must not mistake that for a production
+update path.

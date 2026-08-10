@@ -63,8 +63,10 @@ jobs:
             scripts/tests/test_dev_image_acceptance.py \
             scripts/tests/test_dev_image_workflow.py
           uv run --project control --frozen pytest -q \
+            control/tests/test_dev_cohort.py \
             control/tests/test_dev_init.py \
-            control/tests/test_generation_readiness.py
+            control/tests/test_generation_readiness.py \
+            control/tests/test_settings.py
           scripts/verify-public-image-inputs
 
       - name: Set up Docker Buildx
@@ -94,6 +96,7 @@ jobs:
             --output "type=oci,dest=$api_archive" \
             --sbom=true \
             --provenance=mode=max \
+            --build-arg VONK_DEV_SOURCE_COMMIT="$GITHUB_SHA" \
             "${common_labels[@]}" \
             .
           docker buildx build \
@@ -103,6 +106,7 @@ jobs:
             --output "type=oci,dest=$worker_archive" \
             --sbom=true \
             --provenance=mode=max \
+            --build-arg VONK_DEV_SOURCE_COMMIT="$GITHUB_SHA" \
             "${common_labels[@]}" \
             .
 
@@ -136,6 +140,8 @@ jobs:
         run: |
           set -euo pipefail
           scripts/verify-dev-image-secrets \
+            --expected-commit "$GITHUB_SHA" \
+            --expected-repository "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
             vonk-forge-api:dev-local vonk-forge-worker:dev-local
           scripts/dev-image-acceptance \
             --api-image vonk-forge-api:dev-local \
@@ -304,7 +310,7 @@ jobs:
           subject-digest: ${{ steps.publish.outputs.worker_digest }}
           push-to-registry: true
 
-      - name: Render digest-pinned Compose artifact
+      - name: Render development Compose artifacts
         shell: bash
         env:
           API_DIGEST: ${{ steps.publish.outputs.api_digest }}
@@ -322,9 +328,8 @@ jobs:
             --commit "$GITHUB_SHA"
           scripts/render-dev-compose \
             --output dist/docker-compose.dev.yml \
-            --api-image "$API_IMAGE:dev@${API_DIGEST}" \
-            --worker-image "$WORKER_IMAGE:dev@${WORKER_DIGEST}" \
-            --commit "$GITHUB_SHA" \
+            --api-image "$API_IMAGE:dev" \
+            --worker-image "$WORKER_IMAGE:dev" \
             --channel dev
           docker compose -f dist/docker-compose.pinned.yml config -q
           docker compose -f dist/docker-compose.dev.yml config -q

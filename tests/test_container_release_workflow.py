@@ -319,7 +319,14 @@ def test_alias_uses_only_attested_immutable_release_assets_before_parsing() -> N
     postconditions = (ROOT / "scripts/verify-production-alias-postconditions").read_text()
     assert "(.immutable == true)" in postconditions
     assert "gh release verify \"$TARGET_TAG\"" in evidence
-    assert evidence.count("gh release verify-asset") == 2
+    assert evidence.count("gh release verify-asset") == 1
+    for asset in (
+        "vonk-forge-images.env",
+        "vonk-forge-images.env.sha256",
+        "platform-release.json",
+        "platform-publication.json",
+    ):
+        assert asset in evidence
     for asset in ("vonk-forge-images.env", "vonk-forge-images.env.sha256"):
         assert f'"$EVIDENCE_DIR/{asset}"' in evidence
     release_verify = evidence.index('gh release verify "$TARGET_TAG"')
@@ -365,7 +372,9 @@ def test_tag_release_builds_and_publishes_exact_platform_target() -> None:
     publish = workflow_step(
         "publish-platform-target", "Publish immutable platform target"
     )
-    assert "scripts/publish-platform-target publish-authority" in publish
+    assert "scripts/publish-platform-target publish-target" in publish
+    assert "publish-authority" not in publish
+    assert "VONK_PLATFORM_CHANNEL_PUBLISHER_BIN" not in publish
     assert "scripts/platform-release-authority" in publish
     assert (
         "VONK_PLATFORM_AUTHORITY_URL: ${{ vars.VONK_PLATFORM_AUTHORITY_URL }}"
@@ -387,8 +396,26 @@ def test_oidc_authority_is_isolated_from_image_and_bundle_builds() -> None:
     assert "packages: write" not in authority
     assert "docker/build-push-action" not in authority
     assert "docker/login-action" not in authority
-    assert "scripts/publish-platform-target publish-authority" in authority
+    assert "scripts/publish-platform-target publish-target" in authority
+    assert "publish-authority" not in authority
     assert "scripts/publish-platform-target publish-bundle" in builder
+
+
+def test_stable_advances_only_after_complete_release_and_before_latest() -> None:
+    reconciliation = job("advance-production-aliases")
+    early = job("publish-platform-target")
+
+    assert "needs: [release-metadata, release-manifest]" in reconciliation
+    assert "if: needs.release-manifest.result == 'success'" in reconciliation
+    assert "scripts/publish-platform-target publish-channel" in reconciliation
+    assert "--channel \"$PLATFORM_CHANNEL\"" in reconciliation
+    assert "platform-release.json" in reconciliation
+    assert "platform-publication.json" in reconciliation
+    assert "id-token: write" in reconciliation
+    assert "publish-authority" not in early
+    assert reconciliation.index(
+        "Advance signed stable channel from complete release evidence"
+    ) < reconciliation.index("Log in to GHCR")
 
 
 def test_host_updater_has_a_separate_minimal_provenance_attestation_job() -> None:
@@ -585,7 +612,7 @@ def test_publisher_needs_every_ci_gate_and_alone_can_write_packages() -> None:
     alias = job("advance-production-aliases")
     assert (
         "permissions:\n      attestations: read\n      contents: read\n"
-        "      packages: write" in alias
+        "      id-token: write\n      packages: write" in alias
     )
     assert workflow().count("packages: write") == 2
     assert workflow().count("contents: write") == 1

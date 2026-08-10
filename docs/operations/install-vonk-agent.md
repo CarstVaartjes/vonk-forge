@@ -24,9 +24,13 @@ on the host. Images declaring another OCI user are rejected before install.
 
 ## Install
 
-Install the archive key and apt source as described in
-[agent package release operations](agent-package-release.md#consumer-installation),
-then run:
+Configuring one signed Vonk Forge apt channel is a one-time prerequisite on
+every GPU node. For nodes following accepted `main` builds, install the archive
+key and `dev` source with the complete verification block in
+[Install the `dev` channel](agent-package-release.md#install-the-dev-channel).
+Do not enable both `dev` and `stable` on the same node.
+
+After that one-time repository setup, install or upgrade the package normally:
 
 ```bash
 sudo apt update

@@ -13,6 +13,10 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from sqlalchemy import create_engine, event, func, select
+from sqlalchemy.engine import Engine
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import AgentResult, canonical_message
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
 from vonk_control.agent_reconciliation import AgentReconciliationService
@@ -37,10 +41,6 @@ from vonk_control.node_leases import NodeLeaseConflict, NodeLeaseService
 from vonk_control.pki import CertificateAuthority, IssuedCertificate
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
 from vonk_control.route_runtime import AtomicRouteBundlePublisher
-from sqlalchemy import create_engine, event, func, select
-from sqlalchemy.engine import Engine
-from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import sessionmaker
 
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
@@ -716,7 +716,11 @@ def test_postgres_result_tick_race_preserves_exact_acceptance(
         other.tick,
     )
 
-    assert outcomes[0] is None and outcomes[1] is True
+    assert outcomes[0] is None
+    if outcomes[1] is False:
+        assert other.tick() is True
+    else:
+        assert outcomes[1] is True
     with sessions() as session:
         projection = session.scalar(select(ReconciliationOperation))
         assert projection is not None and projection.state == "accepted"

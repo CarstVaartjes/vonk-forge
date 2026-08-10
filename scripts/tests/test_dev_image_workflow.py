@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -11,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/dev-image-metadata"
 ALIAS_SCRIPT = ROOT / "scripts/promote-image-aliases"
 WORKFLOW = ROOT / ".github/workflows/dev-images.yml"
+DOCKERFILE = ROOT / "control/Dockerfile"
 SHA = "0123456789abcdef0123456789abcdef01234567"
 DIGEST_A = "sha256:" + "a" * 64
 DIGEST_B = "sha256:" + "b" * 64
@@ -31,6 +33,26 @@ def _metadata(*arguments: str) -> subprocess.CompletedProcess[str]:
 
 def _workflow() -> str:
     return WORKFLOW.read_text(encoding="utf-8")
+
+
+def _dockerfile() -> str:
+    return DOCKERFILE.read_text(encoding="utf-8")
+
+
+def test_focused_publication_gate_covers_cohort_and_startup_settings() -> None:
+    step = _step(_workflow(), "Run focused source and Compose contracts")
+
+    assert "control/tests/test_dev_cohort.py" in step
+    assert "control/tests/test_settings.py" in step
+
+
+def _docker_stage(text: str, name: str) -> str:
+    marker = re.compile(rf"^FROM .+ AS {re.escape(name)}$", re.MULTILINE)
+    match = marker.search(text)
+    assert match is not None
+    following = re.search(r"^FROM ", text[match.end() :], re.MULTILINE)
+    end = len(text) if following is None else match.end() + following.start()
+    return text[match.start() : end]
 
 
 def _step(text: str, name: str) -> str:
@@ -406,7 +428,8 @@ def test_workflow_builds_scans_and_accepts_oci_archives_before_login() -> None:
     assert "type=oci" in build
     assert "--sbom=true" in build
     assert "--provenance=mode=max" in build
-    assert "--build-arg" not in build
+    assert build.count('--build-arg VONK_DEV_SOURCE_COMMIT="$GITHUB_SHA"') == 2
+    assert build.count("--build-arg") == 2
     assert "--secret" not in build
     assert "skopeo copy" in load
     assert "oci-archive:" in load
@@ -420,6 +443,11 @@ def test_workflow_builds_scans_and_accepts_oci_archives_before_login() -> None:
         "Scan and accept image-only stack"
     )
     assert "scripts/verify-dev-image-secrets" in accept
+    assert '--expected-commit "$GITHUB_SHA"' in accept
+    assert (
+        '--expected-repository "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"'
+        in accept
+    )
     assert "scripts/dev-image-acceptance" in accept
     assert text.index("Scan and accept image-only stack") < text.index("Log in to GHCR")
     assert "Upload accepted OCI archives" in text
@@ -427,11 +455,38 @@ def test_workflow_builds_scans_and_accepts_oci_archives_before_login() -> None:
     assert "Download accepted OCI archives" in text
 
 
-def test_workflow_publishes_tested_archives_then_renders_immutable_compose() -> None:
+def test_development_dockerfile_embeds_role_identity_without_authority_build_args() -> None:
+    text = _dockerfile()
+    zero_commit = "0" * 40
+
+    assert f"ARG VONK_DEV_SOURCE_COMMIT={zero_commit}" in text
+    for role in ("api", "worker"):
+        stage = _docker_stage(text, f"{role}-root")
+        target = _docker_stage(text, role)
+        assert "ARG VONK_DEV_SOURCE_COMMIT" in stage
+        assert "vonk_control.dev_cohort" in stage
+        assert "DEVELOPMENT_IMAGE_IDENTITY_PATH" in stage
+        assert "build_identity" in stage
+        assert f'"{role}"' in stage
+        assert f"COPY --from={role}-root / /" in target
+
+    argument_names = {
+        line.split("=", 1)[0].split()[1]
+        for line in text.splitlines()
+        if line.startswith("ARG ")
+    }
+    assert not any(
+        marker in name.lower()
+        for name in argument_names
+        for marker in ("credential", "password", "secret", "token", "key")
+    )
+
+
+def test_workflow_publishes_tested_archives_then_renders_both_compose_channels() -> None:
     text = _workflow()
     publish = _step(text, "Publish immutable tested images")
     verify = _step(text, "Verify immutable manifests and attestations")
-    render = _step(text, "Render digest-pinned Compose artifact")
+    render = _step(text, "Render development Compose artifacts")
     upload = _step(text, "Upload Compose artifact")
 
     assert "skopeo copy --all" in publish
@@ -453,11 +508,20 @@ def test_workflow_publishes_tested_archives_then_renders_immutable_compose() -> 
         assert "subject-digest:" in attestation
         assert "push-to-registry: true" in attestation
     assert "scripts/render-dev-compose" in render
-    assert ":${IMMUTABLE_TAG}@${API_DIGEST}" in render
-    assert ":${IMMUTABLE_TAG}@${WORKER_DIGEST}" in render
-    assert ":dev@${API_DIGEST}" in render
-    assert ":dev@${WORKER_DIGEST}" in render
-    assert "--channel dev" in render
+    pinned_render, mutable_render = render.split(
+        "scripts/render-dev-compose", maxsplit=2
+    )[1:]
+    assert ":${IMMUTABLE_TAG}@${API_DIGEST}" in pinned_render
+    assert ":${IMMUTABLE_TAG}@${WORKER_DIGEST}" in pinned_render
+    assert '--commit "$GITHUB_SHA"' in pinned_render
+    assert ":dev" not in pinned_render
+    assert '--api-image "$API_IMAGE:dev"' in mutable_render
+    assert '--worker-image "$WORKER_IMAGE:dev"' in mutable_render
+    assert "@${API_DIGEST}" not in mutable_render
+    assert "@${WORKER_DIGEST}" not in mutable_render
+    assert "--commit" not in mutable_render
+    assert "--channel dev" in mutable_render
+    assert render.count("docker compose -f dist/docker-compose.") == 2
     assert "dist/docker-compose.pinned.yml" in upload
     assert "dist/docker-compose.dev.yml" in upload
     assert "if-no-files-found: error" in upload
@@ -489,8 +553,10 @@ def test_dev_alias_is_the_last_mutation_and_latest_is_never_published() -> None:
     )
     assert ":latest" not in text
     assert "latest=" not in text
-    render = _step(text, "Render digest-pinned Compose artifact")
+    render = _step(text, "Render development Compose artifacts")
     assert "$DEV_ALIAS" not in render
+    publisher = _job(text, "publish-development-images")
+    assert publisher.rstrip().endswith('"$WORKER_IMAGE" "$WORKER_DIGEST" "$DEV_ALIAS"')
 
 
 def test_every_external_action_is_pinned_to_an_exact_commit() -> None:

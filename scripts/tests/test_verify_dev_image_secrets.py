@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
+import json
 import subprocess
 import uuid
 from pathlib import Path
@@ -16,6 +17,50 @@ PRIVATE_KEY_BLOCK = (
     b"-----END PRIVATE KEY-----\n"
 )
 PRIVATE_KEY_TEXT = PRIVATE_KEY_BLOCK.decode()
+SOURCE_COMMIT = "0123456789abcdef0123456789abcdef01234567"
+OTHER_COMMIT = "fedcba9876543210fedcba9876543210fedcba98"
+SOURCE_REPOSITORY = "https://github.com/CarstVaartjes/vonk-forge"
+OTHER_REPOSITORY = "https://github.com/example/fork"
+BUILD_DIGEST = "sha256:417d194fbdb2ae0359258796aed4b84f4a15466697774f633bf6c0ca94b10c5d"
+
+
+def _embedded_identity_document(**overrides: object) -> dict[str, object]:
+    document: dict[str, object] = {
+        "build_digest": BUILD_DIGEST,
+        "channel": "development",
+        "database_revision": "0020_recipe_catalog_bridge",
+        "image_role": "api",
+        "platform_version": "0.1.0",
+        "protocol_maximum": 2,
+        "protocol_minimum": 1,
+        "schema_version": 1,
+        "source_commit": SOURCE_COMMIT,
+        "source_repository": SOURCE_REPOSITORY,
+    }
+    document.update(overrides)
+    return document
+
+
+def _canonical_identity_output(**overrides: object) -> str:
+    return (
+        json.dumps(
+            _embedded_identity_document(**overrides),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n"
+    )
+
+
+def _accepted_image_inspection() -> dict[str, object]:
+    return {
+        "Config": {
+            "Labels": {
+                "org.opencontainers.image.revision": SOURCE_COMMIT,
+                "org.opencontainers.image.source": SOURCE_REPOSITORY,
+            }
+        }
+    }
 
 
 @pytest.fixture
@@ -54,6 +99,23 @@ def _scan(*images: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _accept(
+    api_image: str,
+    worker_image: str,
+    *,
+    commit: str = SOURCE_COMMIT,
+    repository: str = SOURCE_REPOSITORY,
+) -> subprocess.CompletedProcess[str]:
+    return _scan(
+        "--expected-commit",
+        commit,
+        "--expected-repository",
+        repository,
+        api_image,
+        worker_image,
+    )
+
+
 def _scanner_module():
     loader = importlib.machinery.SourceFileLoader("verify_dev_image_secrets", str(SCANNER))
     spec = importlib.util.spec_from_loader(loader.name, loader)
@@ -63,7 +125,33 @@ def _scanner_module():
     return module
 
 
-@pytest.fixture
+def _assert_embedded_identity_output_rejected(
+    monkeypatch: pytest.MonkeyPatch, output: str
+) -> None:
+    scanner = _scanner_module()
+    commands: list[tuple[str, ...]] = []
+
+    def fake_run(arguments):
+        command = tuple(arguments)
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, output, "")
+
+    monkeypatch.setattr(scanner, "_run", fake_run)
+
+    with pytest.raises(scanner.ScanFailure, match="identity verification failed"):
+        scanner._verify_image_identity(
+            "vonk-forge-api:accepted-labels",
+            _accepted_image_inspection(),
+            expected_role="api",
+            expected_commit=SOURCE_COMMIT,
+            expected_repository=SOURCE_REPOSITORY,
+        )
+
+    assert len(commands) == 1
+    assert commands[0][:3] == ("docker", "run", "--rm")
+
+
+@pytest.fixture(scope="module")
 def local_development_images():
     suffix = uuid.uuid4().hex
     images = {
@@ -80,6 +168,12 @@ def local_development_images():
                 str(ROOT / "control" / "Dockerfile"),
                 "--target",
                 target,
+                "--build-arg",
+                f"VONK_DEV_SOURCE_COMMIT={SOURCE_COMMIT}",
+                "--label",
+                f"org.opencontainers.image.source={SOURCE_REPOSITORY}",
+                "--label",
+                f"org.opencontainers.image.revision={SOURCE_COMMIT}",
                 "-t",
                 image,
                 str(ROOT),
@@ -89,6 +183,38 @@ def local_development_images():
     yield images
     for image in images.values():
         subprocess.run(("docker", "image", "rm", "--force", image), check=False, capture_output=True)
+
+
+@pytest.fixture(scope="module")
+def mislabeled_api_image():
+    image = f"vonk-forge-api:image-contract-mislabeled-{uuid.uuid4().hex}"
+    subprocess.run(
+        (
+            "docker",
+            "build",
+            "--quiet",
+            "-f",
+            str(ROOT / "control" / "Dockerfile"),
+            "--target",
+            "api",
+            "--build-arg",
+            f"VONK_DEV_SOURCE_COMMIT={SOURCE_COMMIT}",
+            "--label",
+            f"org.opencontainers.image.source={SOURCE_REPOSITORY}",
+            "--label",
+            f"org.opencontainers.image.revision={OTHER_COMMIT}",
+            "-t",
+            image,
+            str(ROOT),
+        ),
+        check=True,
+    )
+    yield image
+    subprocess.run(
+        ("docker", "image", "rm", "--force", image),
+        check=False,
+        capture_output=True,
+    )
 
 
 def test_scanner_accepts_clean_nonroot_images(image_factory) -> None:
@@ -616,12 +742,116 @@ def test_development_targets_are_scannable_nonroot_and_have_only_required_git_to
             images["worker"],
             "python",
             "-c",
-            "import shutil; assert not shutil.which('ssh') and not shutil.which('ssh-keygen')",
+            (
+                "import shutil; from pathlib import Path; "
+                "assert not shutil.which('ssh') and not shutil.which('ssh-keygen'); "
+                "assert not shutil.which('docker'); "
+                "assert not Path('/var/run/docker.sock').exists()"
+            ),
         ),
         check=False,
     )
     assert api_tools.returncode == 0
     assert worker_tools.returncode == 0
+
+
+def test_development_targets_embed_canonical_read_only_role_identity(
+    local_development_images,
+) -> None:
+    check = (
+        "import json, stat; "
+        "from vonk_control.dev_cohort import DEVELOPMENT_IMAGE_IDENTITY_PATH, read_identity; "
+        "identity=read_identity(DEVELOPMENT_IMAGE_IDENTITY_PATH, expected_role=__import__('sys').argv[1]); "
+        "assert identity.source_commit == __import__('sys').argv[2]; "
+        "assert identity.source_repository == __import__('sys').argv[3]; "
+        "assert stat.S_IMODE(DEVELOPMENT_IMAGE_IDENTITY_PATH.stat().st_mode) == 0o444; "
+        "print(json.dumps(identity.to_document(), sort_keys=True))"
+    )
+
+    for role, image in local_development_images.items():
+        result = subprocess.run(
+            (
+                "docker",
+                "run",
+                "--rm",
+                "--network=none",
+                "--read-only",
+                image,
+                "python",
+                "-c",
+                check,
+                role,
+                SOURCE_COMMIT,
+                SOURCE_REPOSITORY,
+            ),
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        assert json.loads(result.stdout)["image_role"] == role
+
+
+def test_scanner_acceptance_verifies_both_embedded_identities(
+    local_development_images,
+) -> None:
+    result = _accept(
+        local_development_images["api"], local_development_images["worker"]
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""
+    assert result.stderr == ""
+
+
+def test_scanner_acceptance_rejects_swapped_embedded_roles(
+    local_development_images,
+) -> None:
+    result = _accept(
+        local_development_images["worker"],
+        local_development_images["api"],
+    )
+
+    assert result.returncode == 1
+    assert "identity verification failed" in result.stderr
+
+
+def test_scanner_acceptance_rejects_oci_revision_authority_mismatch(
+    local_development_images,
+    mislabeled_api_image: str,
+) -> None:
+    result = _accept(mislabeled_api_image, local_development_images["worker"])
+
+    assert result.returncode == 1
+    assert "identity verification failed" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("source_commit", OTHER_COMMIT),
+        ("source_repository", OTHER_REPOSITORY),
+    ),
+    ids=("commit", "repository"),
+)
+def test_scanner_rejects_embedded_identity_mismatch_after_authority_labels_match(
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    value: str,
+) -> None:
+    _assert_embedded_identity_output_rejected(
+        monkeypatch,
+        _canonical_identity_output(**{field: value}),
+    )
+
+
+def test_scanner_rejects_noncanonical_embedded_identity_bytes_after_labels_match(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    noncanonical = (
+        json.dumps(_embedded_identity_document(), indent=2, sort_keys=True) + "\n"
+    )
+
+    _assert_embedded_identity_output_rejected(monkeypatch, noncanonical)
 
 
 def test_scanner_command_is_executable() -> None:

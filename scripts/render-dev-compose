@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render a public, digest-locked development Compose artifact."""
+"""Render a public mutable or digest-pinned development Compose artifact."""
 
 from __future__ import annotations
 
@@ -15,19 +15,25 @@ PUBLIC_IMAGES = {
     "api": "ghcr.io/carstvaartjes/vonk-forge-api",
     "worker": "ghcr.io/carstvaartjes/vonk-forge-worker",
 }
-IMAGE_PATTERN = re.compile(
+PINNED_IMAGE_PATTERN = re.compile(
     r"^(?P<repository>ghcr\.io/carstvaartjes/vonk-forge-(?P<role>api|worker))"
-    r":(?P<tag>dev|dev-sha-(?P<commit>[0-9a-f]{40}))"
+    r":dev-sha-(?P<commit>[0-9a-f]{40})"
     r"@sha256:(?P<digest>[0-9a-f]{64})$"
 )
 COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 UNRESOLVED_TOKEN = re.compile(r"__VONK_[A-Z0-9_]+__")
 ALLOWED_COMPOSE_INTERPOLATION = "${VONK_DEV_PORT:-8080}"
-TOKENS = {
+IMAGE_TOKENS = {
     "__VONK_API_IMAGE__": "api image",
     "__VONK_WORKER_IMAGE__": "worker image",
-    "__VONK_EXPECTED_COMMIT__": "expected commit",
 }
+COMMIT_TOKEN = "__VONK_EXPECTED_COMMIT__"
+PINNED_EXTENSION = f'x-pinned-expected-commit: "{COMMIT_TOKEN}"\n'
+PINNED_COMPATIBILITY_BLOCK = (
+    "# Compatibility input for the current pinned renderer. Task 5 must retain this\n"
+    "# token only for pinned output and omit it entirely from mutable output.\n"
+    f"{PINNED_EXTENSION}"
+)
 SYNTHETIC_SECRETS = {
     "postgres-password": "synthetic-postgres-password\n",
     "database-url": "postgresql+psycopg://control:synthetic@postgres:5432/control\n",
@@ -35,14 +41,17 @@ SYNTHETIC_SECRETS = {
 }
 
 
-def _validate_image(image: str, role: str, commit: str, channel: str) -> None:
-    match = IMAGE_PATTERN.fullmatch(image)
+def _validate_image(
+    image: str, role: str, commit: str | None, channel: str
+) -> None:
+    if channel == "dev":
+        if image != f"{PUBLIC_IMAGES[role]}:dev":
+            raise ValueError(f"{role} image must be the exact bare public :dev image")
+        return
+    match = PINNED_IMAGE_PATTERN.fullmatch(image)
     if match is None or match.group("repository") != PUBLIC_IMAGES[role]:
-        raise ValueError(f"{role} image must be a public digest-locked development image")
-    expected_tag = "dev" if channel == "dev" else f"dev-sha-{commit}"
-    if match.group("tag") != expected_tag:
-        raise ValueError(f"{role} image tag does not match the selected channel")
-    if channel == "pinned" and match.group("commit") != commit:
+        raise ValueError(f"{role} image must be a public digest-pinned development image")
+    if match.group("commit") != commit:
         raise ValueError(f"{role} image development tag must match the expected commit")
 
 
@@ -51,12 +60,16 @@ def _validate_inputs(
     output: Path,
     api_image: str,
     worker_image: str,
-    commit: str,
+    commit: str | None,
     channel: str,
 ) -> str:
     if channel not in {"dev", "pinned"}:
         raise ValueError("channel must be dev or pinned")
-    if not COMMIT_PATTERN.fullmatch(commit):
+    if channel == "dev" and commit is not None:
+        raise ValueError("expected commit is forbidden for the mutable dev channel")
+    if channel == "pinned" and (
+        commit is None or not COMMIT_PATTERN.fullmatch(commit)
+    ):
         raise ValueError("expected commit must be exactly 40 lowercase hexadecimal characters")
     if not template.is_file():
         raise ValueError("template must be an existing regular file")
@@ -71,18 +84,29 @@ def _validate_inputs(
     _validate_image(api_image, "api", commit, channel)
     _validate_image(worker_image, "worker", commit, channel)
     text = template.read_text(encoding="utf-8")
-    for token, label in TOKENS.items():
+    for token, label in IMAGE_TOKENS.items():
         if text.count(token) != 1:
             raise ValueError(f"template must contain the {label} token exactly once")
+    if (
+        text.count(COMMIT_TOKEN) != 1
+        or text.count(PINNED_EXTENSION) != 1
+        or text.count(PINNED_COMPATIBILITY_BLOCK) != 1
+    ):
+        raise ValueError("template must contain the expected commit token exactly once")
     return text
 
 
-def _render_template(text: str, api_image: str, worker_image: str, commit: str) -> str:
-    rendered = (
-        text.replace("__VONK_API_IMAGE__", api_image)
-        .replace("__VONK_WORKER_IMAGE__", worker_image)
-        .replace("__VONK_EXPECTED_COMMIT__", commit)
+def _render_template(
+    text: str,
+    api_image: str,
+    worker_image: str,
+    commit: str | None,
+    channel: str,
+) -> str:
+    rendered = text.replace("__VONK_API_IMAGE__", api_image).replace(
+        "__VONK_WORKER_IMAGE__", worker_image
     )
+    rendered = rendered.replace(PINNED_COMPATIBILITY_BLOCK, "", 1)
     if UNRESOLVED_TOKEN.search(rendered):
         raise ValueError("template contains unresolved __VONK_*__ token")
     if (
@@ -140,7 +164,7 @@ def render(
     output: Path,
     api_image: str,
     worker_image: str,
-    commit: str,
+    commit: str | None = None,
     *,
     channel: str = "pinned",
 ) -> None:
@@ -148,7 +172,9 @@ def render(
     template_text = _validate_inputs(
         template, output, api_image, worker_image, commit, channel
     )
-    rendered = _render_template(template_text, api_image, worker_image, commit)
+    rendered = _render_template(
+        template_text, api_image, worker_image, commit, channel
+    )
     publish_stage: Path | None = None
     validation_root: Path | None = None
     try:
@@ -195,7 +221,7 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--api-image", required=True)
     parser.add_argument("--worker-image", required=True)
-    parser.add_argument("--commit", required=True)
+    parser.add_argument("--commit")
     parser.add_argument("--channel", choices=("dev", "pinned"), default="pinned")
     return parser.parse_args()
 

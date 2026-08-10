@@ -158,6 +158,11 @@ revalidation for `InRelease`, `Release`, and `Packages*`.
 
 ## Install the `dev` channel
 
+This is the one-time repository prerequisite on every development GPU node;
+complete it before installing `vonk-forge-agent`. It does not depend on the NAS
+containers already running. Subsequent accepted packages use the same source
+and need only normal apt update/install or upgrade operations.
+
 Obtain the development apt fingerprint from an independently authenticated
 operator record, not from the same bucket as the key. Set it explicitly and
 require an exact match before installing the keyring:

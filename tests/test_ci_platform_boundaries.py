@@ -77,8 +77,17 @@ def test_catalog_runtime_suites_run_in_parallel_with_stable_aggregate() -> None:
     web = "\n".join(_workflow_job_lines(workflow, "web-suite"))
     aggregate = "\n".join(_workflow_job_lines(workflow, "catalog-runtime"))
 
+    assert "name: Complete control suite (${{ matrix.shard.label }})" in control
+    assert "fail-fast: false" in control
+    assert control.count("index:") == 4
+    assert "SHARD_TOTAL: 4" in control
+    assert "pytest --collect-only -q control/tests" in control
+    assert "awk '/^tests\\/.*::/'" in control
+    assert "position % SHARD_TOTAL == SHARD_INDEX" in control
+    assert 'shard_tests+=("control/${control_tests[$position]}")' in control
+    assert '"${shard_tests[@]}"' in control
     assert "pytest-xdist==3.8.0" in control
-    assert "pytest control/tests -q -n auto --dist loadfile" in control
+    assert "pytest -q -n auto --dist loadfile" in control
     assert "--python 3.12" in control
     assert "pytest agent/tests -q" in agent
     assert "pytest-xdist" not in agent
