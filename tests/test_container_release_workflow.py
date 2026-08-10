@@ -163,6 +163,10 @@ def test_each_protected_production_mutation_revalidates_exact_tag_authority() ->
 
 def test_alias_reconciliation_binds_selected_release_to_signed_tag_revision() -> None:
     alias = job("advance-production-aliases")
+    evidence = workflow_step(
+        "advance-production-aliases",
+        "Bind release digests to selected source revision and evidence",
+    )
 
     assert "attestations: read" in alias
     assert "tag_oid" in alias and "target_commit" in alias
@@ -173,12 +177,56 @@ def test_alias_reconciliation_binds_selected_release_to_signed_tag_revision() ->
     assert 'org.opencontainers.image.revision' in alias
     assert "docker buildx imagetools inspect" in alias
     assert ".Provenance" in alias
-    assert "gh attestation verify" in alias
-    assert '--source-digest "$TARGET_COMMIT"' in alias
+    assert "gh attestation verify" in evidence
+    assert (
+        '--signer-workflow '
+        '"$GITHUB_REPOSITORY/.github/workflows/dev-images.yml"' in evidence
+    )
+    assert "--signer-workflow dev-images.yml" not in evidence
+    assert '--signer-digest "$TARGET_COMMIT"' in evidence
+    assert '--source-digest "$TARGET_COMMIT"' in evidence
+    assert "--source-ref refs/heads/main" in evidence
+    assert "--deny-self-hosted-runners" in evidence
     assert "scripts/promote-image-aliases" in alias
     promotion = alias.index("scripts/promote-image-aliases")
     assert alias.rfind("scripts/verify-release-tag-authority", 0, promotion) >= 0
     assert alias.find("scripts/verify-release-tag-authority", promotion) >= 0
+
+
+def test_alias_uses_only_attested_immutable_release_assets_before_parsing() -> None:
+    alias = job("advance-production-aliases")
+    selection = workflow_step(
+        "advance-production-aliases", "Select newest completed signed release"
+    )
+    authority = workflow_step(
+        "advance-production-aliases",
+        "Revalidate selected authority before evidence credentials",
+    )
+    evidence = workflow_step(
+        "advance-production-aliases",
+        "Bind release digests to selected source revision and evidence",
+    )
+    reconcile = workflow_step(
+        "advance-production-aliases",
+        "Reconcile the newest completed production release",
+    )
+
+    assert "(.immutable == true)" in selection
+    assert "(.immutable == true)" in reconcile
+    assert "gh release verify \"$TARGET_TAG\"" in evidence
+    assert evidence.count("gh release verify-asset") == 2
+    for asset in ("vonk-forge-images.env", "vonk-forge-images.env.sha256"):
+        assert f'"$EVIDENCE_DIR/{asset}"' in evidence
+    release_verify = evidence.index('gh release verify "$TARGET_TAG"')
+    first_asset_verify = evidence.index("gh release verify-asset")
+    checksum_parse = evidence.index("mapfile -t checksum_lines")
+    evidence_parse = evidence.index("declare -A release_images")
+    assert release_verify < first_asset_verify < checksum_parse < evidence_parse
+    assert "sha256sum" in evidence
+    assert "GH_TOKEN: ${{ github.token }}" in evidence
+    assert alias.count("GH_TOKEN: ${{ github.token }}") == 1
+    assert "persist-credentials: false" in alias
+    assert alias.index(authority) < alias.index(evidence) < alias.index("Log in to GHCR")
 
 
 def test_release_signer_allowlist_contains_only_public_ssh_authority() -> None:
