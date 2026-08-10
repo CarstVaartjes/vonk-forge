@@ -51,7 +51,7 @@ def test_nas_compose_readme_is_the_complete_operator_entry_point() -> None:
         "ghcr.io/carstvaartjes/vonk-forge-hermes",
         "NAS_LAN_IP=10.0.0.2",
         "compose.step-ca.yaml",
-        "latest is evaluation-only",
+        "`:latest` is evaluation/discovery only",
         "Set package visibility to Public",
         "not the Docker bridge",
         "not the public WAN address",
