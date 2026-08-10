@@ -33,9 +33,6 @@ on:
       tag_oid:
         required: true
         type: string
-    secrets:
-      VONK_AGENT_RELEASE_PRIVATE_KEY:
-        required: false
     outputs:
       version:
         description: Accepted Debian package version

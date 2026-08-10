@@ -27,18 +27,6 @@ on:
       tag_oid:
         required: true
         type: string
-    secrets:
-      APT_GPG_PASSPHRASE:
-        required: false
-      APT_REPOSITORY_GPG_PRIVATE_KEY:
-        required: false
-      R2_ACCESS_KEY_ID:
-        required: false
-      R2_ACCOUNT_ID:
-        required: false
-      R2_SECRET_ACCESS_KEY:
-        required: false
-
 permissions:
   contents: read
 
