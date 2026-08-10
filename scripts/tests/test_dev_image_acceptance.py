@@ -32,6 +32,9 @@ def _fixture_repository(tmp_path: Path) -> Path:
     (repository / "README.md").write_text("fixture\n", encoding="utf-8")
     subprocess.run(("git", "-C", str(repository), "add", "."), check=True)
     subprocess.run(("git", "-C", str(repository), "commit", "-qm", "main fixture"), check=True)
+    (repository / "README.md").write_text("fixture update\n", encoding="utf-8")
+    subprocess.run(("git", "-C", str(repository), "add", "README.md"), check=True)
+    subprocess.run(("git", "-C", str(repository), "commit", "-qm", "main update fixture"), check=True)
     return repository
 
 
@@ -84,6 +87,7 @@ def _config_capturing_docker(tmp_path: Path) -> tuple[Path, Path]:
         "if [[ \"$1\" == create ]]; then printf '%s\\n' scanner-container; exit 0; fi\n"
         "if [[ \"$1\" == export ]]; then tar -cf - --files-from /dev/null; exit 0; fi\n"
         "if [[ \"$1\" == rm || \"$1\" == ps ]]; then exit 0; fi\n"
+        "if [[ \"$1\" == run ]]; then printf '%s\\n' '{}'; exit 0; fi\n"
         "if [[ \"$1\" == compose && \" $* \" == *' config '* ]]; then\n"
         "  number=0\n"
         "  while [[ \"$#\" -gt 0 ]]; do\n"
@@ -126,6 +130,7 @@ def _failing_up_docker(tmp_path: Path) -> tuple[Path, Path]:
         "if [[ \"$1\" == create ]]; then printf '%s\\n' scanner-container; exit 0; fi\n"
         "if [[ \"$1\" == export ]]; then tar -cf - --files-from /dev/null; exit 0; fi\n"
         "if [[ \"$1\" == rm || \"$1\" == ps ]]; then exit 0; fi\n"
+        "if [[ \"$1\" == run ]]; then printf '%s\\n' '{}'; exit 0; fi\n"
         "if [[ \"$1\" == compose && \" $* \" == *' logs '* ]]; then\n"
         "  printf '%s\\n' \\\n"
         "    'api | -----BEGIN OPENSSH PRIVATE KEY-----' \\\n"
@@ -165,7 +170,8 @@ def _successful_lifecycle_tools(tmp_path: Path) -> tuple[Path, Path]:
         "if [[ \"$1\" == history ]]; then exit 0; fi\n"
         "if [[ \"$1\" == create ]]; then printf '%s\\n' scanner-container; exit 0; fi\n"
         "if [[ \"$1\" == export ]]; then tar -cf - --files-from /dev/null; exit 0; fi\n"
-        "if [[ \"$1\" == rm || \"$1\" == run ]]; then exit 0; fi\n"
+        "if [[ \"$1\" == rm ]]; then exit 0; fi\n"
+        "if [[ \"$1\" == run ]]; then printf '%s\\n' '{}'; exit 0; fi\n"
         "if [[ \"$1\" == ps ]]; then exit 0; fi\n"
         "if [[ \"$1\" == inspect && \" $* \" == *'{{json .Mounts}}'* ]]; then\n"
         "  printf '%s\\n' '[{\"Destination\":\"/repository\",\"Type\":\"volume\",\"Source\":\"fixture-repository\"}]'\n"
@@ -173,7 +179,7 @@ def _successful_lifecycle_tools(tmp_path: Path) -> tuple[Path, Path]:
         "fi\n"
         "if [[ \"$1\" == inspect ]]; then\n"
         "  case \"${*: -1}\" in\n"
-        "    dev-init-id|migrate-id) printf '%s\\n' 'exited 0' ;;\n"
+        "    dev-*-id|migrate-id) printf '%s\\n' 'exited 0' ;;\n"
         "    *) printf '%s\\n' 'running 0' ;;\n"
         "  esac\n"
         "  exit 0\n"
@@ -184,12 +190,18 @@ def _successful_lifecycle_tools(tmp_path: Path) -> tuple[Path, Path]:
         "fi\n"
         "if [[ \"$1\" == compose && \" $* \" == *' exec '* ]]; then\n"
         "  case \" $* \" in\n"
-        "    *' git -C /repository rev-parse '*) printf '%s\\n' \"$VONK_TEST_COMMIT\" ;;\n"
+        "    *' git -C /repository rev-parse '*)\n"
+        "      if grep -q -- '--force-recreate' \"$VONK_TEST_DOCKER_LOG\"; then\n"
+        "        printf '%s\\n' \"$VONK_TEST_COMMIT\"\n"
+        "      else\n"
+        "        printf '%s\\n' \"$VONK_TEST_PREVIOUS_COMMIT\"\n"
+        "      fi ;;\n"
         "    *'find /control-identity'*) printf '%s\\n' identity-fingerprint ;;\n"
         "    *' psql '*) printf '%s\\n' 16384 ;;\n"
         "  esac\n"
         "  exit 0\n"
         "fi\n"
+        "if [[ \"$1\" == compose && \" $* \" == *' up '*dev-cohort-verify* ]]; then exit 50; fi\n"
         "if [[ \"$1\" == compose ]]; then exit 0; fi\n"
         "exit 97\n",
         encoding="utf-8",
@@ -377,11 +389,15 @@ def test_renders_local_origin_override_as_a_separate_temporary_compose_overlay(
     assert "file:///source-origin" not in base
     assert "VONK_DEV_LOCAL_ACCEPTANCE" in overlay
     assert "file:///source-origin" in overlay
-    assert "VONK_DEV_API_IMAGE" in overlay
-    assert "VONK_DEV_WORKER_IMAGE" in overlay
+    assert "VONK_DEV_API_IMAGE" not in overlay
+    assert "VONK_DEV_WORKER_IMAGE" not in overlay
+    assert "VONK_CONTROL_PROCESS_IMAGE" not in overlay
+    assert "x-pinned-expected-commit" not in base
+    assert "__VONK_EXPECTED_COMMIT__" not in base
+    assert "Compatibility input for the current pinned renderer" not in base
 
 
-def test_preserves_public_manifest_digests_in_runtime_identity_overlay(
+def test_public_acceptance_uses_selected_cohort_instead_of_rendered_identity_inputs(
     tmp_path: Path,
 ) -> None:
     repository = _fixture_repository(tmp_path)
@@ -409,8 +425,10 @@ def test_preserves_public_manifest_digests_in_runtime_identity_overlay(
 
     assert result.returncode == 48
     overlay = Path(f"{log}.compose-2").read_text(encoding="utf-8")
-    assert overlay.count(api_image) == 2
-    assert overlay.count(worker_image) == 2
+    assert api_image not in overlay
+    assert worker_image not in overlay
+    assert "VONK_DEV_EXPECTED_COMMIT" not in overlay
+    assert "VONK_DEV_SELECTED_COHORT_FILE" not in overlay
 
 
 def test_failed_compose_start_prints_bounded_diagnostics_before_teardown(
@@ -444,12 +462,13 @@ def test_failed_compose_start_prints_bounded_diagnostics_before_teardown(
     assert "[redacted]" in result.stderr
 
 
-def test_successful_lifecycle_exercises_health_isolation_restart_and_teardown(
+def test_mixed_cohort_gate_stops_before_initializer_or_migration(
     tmp_path: Path,
 ) -> None:
     repository = _fixture_repository(tmp_path)
     fake_bin, log = _successful_lifecycle_tools(tmp_path)
     commit = _commit(repository)
+    previous_commit = _commit(repository, "main^")
 
     result = _run(
         repository,
@@ -461,16 +480,83 @@ def test_successful_lifecycle_exercises_health_isolation_restart_and_teardown(
         WORKER_IMAGE,
         "--commit",
         commit,
-        extra_environment={"VONK_TEST_COMMIT": commit},
+        extra_environment={
+            "VONK_TEST_COMMIT": commit,
+            "VONK_TEST_PREVIOUS_COMMIT": previous_commit,
+        },
+    )
+
+    commands = log.read_text(encoding="utf-8").splitlines()
+    mixed_up = next(
+        index
+        for index, command in enumerate(commands)
+        if " up " in f" {command} " and "dev-cohort-verify" in command
+    )
+    first_full_up = next(
+        index
+        for index, command in enumerate(commands)
+        if " up " in f" {command} " and "dev-cohort-verify" not in command
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert mixed_up < first_full_up
+    assert any(
+        " ps --all --services dev-init migrate " in f" {command} "
+        for command in commands[mixed_up:first_full_up]
+    )
+    assert any(
+        " down --volumes --remove-orphans " in f" {command} "
+        for command in commands[mixed_up:first_full_up]
+    )
+
+
+def test_successful_lifecycle_exercises_mutable_redeploy_and_runtime_boundaries(
+    tmp_path: Path,
+) -> None:
+    repository = _fixture_repository(tmp_path)
+    fake_bin, log = _successful_lifecycle_tools(tmp_path)
+    commit = _commit(repository)
+    previous_commit = _commit(repository, "main^")
+
+    result = _run(
+        repository,
+        fake_bin,
+        log,
+        "--api-image",
+        API_IMAGE,
+        "--worker-image",
+        WORKER_IMAGE,
+        "--commit",
+        commit,
+        extra_environment={
+            "VONK_TEST_COMMIT": commit,
+            "VONK_TEST_PREVIOUS_COMMIT": previous_commit,
+        },
     )
 
     commands = log.read_text(encoding="utf-8").splitlines()
     normalized_commands = [line.replace("\\", "") for line in commands]
     assert result.returncode == 0, result.stderr
     assert "development image acceptance passed" in result.stdout
-    assert sum(" up --wait --pull never " in f" {line} " for line in commands) == 2
-    assert any(" restart control-api control-worker " in f" {line} " for line in commands)
-    assert sum(line.startswith("curl ") for line in commands) == 2
+    assert sum(" up --wait --pull never " in f" {line} " for line in commands) == 4
+    assert sum(" pull --policy missing " in f" {line} " for line in commands) == 1
+    assert sum(" --force-recreate " in f" {line} " for line in commands) == 2
+    assert not any(
+        " restart control-api control-worker " in f" {line} " for line in commands
+    )
+    assert sum(line.startswith("curl ") for line in commands) == 3
+    assert sum("build-identity" in line for line in commands) == 4
+    for service in (
+        "dev-cohort-reset",
+        "dev-api-cohort",
+        "dev-worker-cohort",
+        "dev-cohort-verify",
+    ):
+        assert sum(
+            "{{.State.Status}} {{.State.ExitCode}}" in line
+            and f"{service}-id" in line
+            for line in normalized_commands
+        ) == 3
     assert any(
         "test -r /run/secrets/git-signing-key" in line
         for line in normalized_commands
@@ -483,15 +569,15 @@ def test_successful_lifecycle_exercises_health_isolation_restart_and_teardown(
         "test -r /run/secrets/worker-api-token" in line
         for line in normalized_commands
     )
-    assert sum("{{json .Mounts}}" in line for line in normalized_commands) == 4
+    assert sum("{{json .Mounts}}" in line for line in normalized_commands) == 6
     assert sum(
         "{{json .Mounts}}" in line and "control-api-id" in line
         for line in normalized_commands
-    ) == 2
+    ) == 3
     assert sum(
         "{{json .Mounts}}" in line and "control-worker-id" in line
         for line in normalized_commands
-    ) == 2
+    ) == 3
     worker_boundary_commands = [
         line
         for line in normalized_commands
@@ -521,6 +607,7 @@ def test_acceptance_runs_the_task_three_scanner_and_never_requests_image_mutatio
     assert 'readonly scanner="$repository_root/scripts/verify-dev-image-secrets"' in text
     assert '"$scanner" "$api_image" "$worker_image"' in text
     assert "compose up --wait --pull never" in text
+    assert "compose pull --policy missing" in text
     assert "docker build" not in text
     assert "docker pull" not in text
     assert "docker push" not in text

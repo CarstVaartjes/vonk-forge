@@ -475,11 +475,11 @@ def test_development_dockerfile_embeds_role_identity_without_authority_build_arg
     )
 
 
-def test_workflow_publishes_tested_archives_then_renders_immutable_compose() -> None:
+def test_workflow_publishes_tested_archives_then_renders_both_compose_channels() -> None:
     text = _workflow()
     publish = _step(text, "Publish immutable tested images")
     verify = _step(text, "Verify immutable manifests and attestations")
-    render = _step(text, "Render digest-pinned Compose artifact")
+    render = _step(text, "Render development Compose artifacts")
     upload = _step(text, "Upload Compose artifact")
 
     assert "skopeo copy --all" in publish
@@ -501,11 +501,20 @@ def test_workflow_publishes_tested_archives_then_renders_immutable_compose() -> 
         assert "subject-digest:" in attestation
         assert "push-to-registry: true" in attestation
     assert "scripts/render-dev-compose" in render
-    assert ":${IMMUTABLE_TAG}@${API_DIGEST}" in render
-    assert ":${IMMUTABLE_TAG}@${WORKER_DIGEST}" in render
-    assert ":dev@${API_DIGEST}" in render
-    assert ":dev@${WORKER_DIGEST}" in render
-    assert "--channel dev" in render
+    pinned_render, mutable_render = render.split(
+        "scripts/render-dev-compose", maxsplit=2
+    )[1:]
+    assert ":${IMMUTABLE_TAG}@${API_DIGEST}" in pinned_render
+    assert ":${IMMUTABLE_TAG}@${WORKER_DIGEST}" in pinned_render
+    assert '--commit "$GITHUB_SHA"' in pinned_render
+    assert ":dev" not in pinned_render
+    assert '--api-image "$API_IMAGE:dev"' in mutable_render
+    assert '--worker-image "$WORKER_IMAGE:dev"' in mutable_render
+    assert "@${API_DIGEST}" not in mutable_render
+    assert "@${WORKER_DIGEST}" not in mutable_render
+    assert "--commit" not in mutable_render
+    assert "--channel dev" in mutable_render
+    assert render.count("docker compose -f dist/docker-compose.") == 2
     assert "dist/docker-compose.pinned.yml" in upload
     assert "dist/docker-compose.dev.yml" in upload
     assert "if-no-files-found: error" in upload
@@ -537,8 +546,10 @@ def test_dev_alias_is_the_last_mutation_and_latest_is_never_published() -> None:
     )
     assert ":latest" not in text
     assert "latest=" not in text
-    render = _step(text, "Render digest-pinned Compose artifact")
+    render = _step(text, "Render development Compose artifacts")
     assert "$DEV_ALIAS" not in render
+    publisher = _job(text, "publish-development-images")
+    assert publisher.rstrip().endswith('"$WORKER_IMAGE" "$WORKER_DIGEST" "$DEV_ALIAS"')
 
 
 def test_every_external_action_is_pinned_to_an_exact_commit() -> None:

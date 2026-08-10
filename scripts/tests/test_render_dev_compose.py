@@ -16,8 +16,8 @@ COMMIT = "a" * 40
 DIGEST = "b" * 64
 API_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-api:dev-sha-{COMMIT}@sha256:{DIGEST}"
 WORKER_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-worker:dev-sha-{COMMIT}@sha256:{DIGEST}"
-API_DEV_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-api:dev@sha256:{DIGEST}"
-WORKER_DEV_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-worker:dev@sha256:{DIGEST}"
+API_DEV_IMAGE = "ghcr.io/carstvaartjes/vonk-forge-api:dev"
+WORKER_DEV_IMAGE = "ghcr.io/carstvaartjes/vonk-forge-worker:dev"
 
 
 def _renderer():
@@ -29,10 +29,23 @@ def _renderer():
     return module
 
 
-def _rendered(tmp_path: Path) -> tuple[object, Path]:
+def _rendered_pinned(tmp_path: Path) -> tuple[object, Path]:
     output = tmp_path / "docker-compose.yml"
     renderer = _renderer()
     renderer.render(TEMPLATE, output, API_IMAGE, WORKER_IMAGE, COMMIT)
+    return renderer, output
+
+
+def _rendered_dev(tmp_path: Path) -> tuple[object, Path]:
+    output = tmp_path / "docker-compose.dev.yml"
+    renderer = _renderer()
+    renderer.render(
+        TEMPLATE,
+        output,
+        API_DEV_IMAGE,
+        WORKER_DEV_IMAGE,
+        channel="dev",
+    )
     return renderer, output
 
 
@@ -42,43 +55,93 @@ def _copy_template(tmp_path: Path, text: str) -> Path:
     return template
 
 
-def test_render_accepts_exact_public_dev_images_and_replaces_each_token_once(
+def test_pinned_render_requires_matching_images_and_explicit_dev_init_identity(
     tmp_path: Path,
 ) -> None:
-    _, output = _rendered(tmp_path)
+    _, output = _rendered_pinned(tmp_path)
 
     text = output.read_text(encoding="utf-8")
-    assert text.count(API_IMAGE) == 1
-    assert text.count(WORKER_IMAGE) == 1
+    assert text.count(API_IMAGE) == 2
+    assert text.count(WORKER_IMAGE) == 2
     assert text.count(f"VONK_DEV_EXPECTED_COMMIT: {COMMIT}") == 1
+    assert "VONK_DEV_SELECTED_COHORT_FILE" not in _compose_service(
+        output, "dev-init"
+    )["environment"]
     assert "__VONK_" not in text
 
 
-def test_render_accepts_digest_locked_dev_channel_only_when_selected(
+def test_dev_render_is_bare_mutable_and_removes_pinned_compatibility_input(
     tmp_path: Path,
 ) -> None:
-    output = tmp_path / "docker-compose.dev.yml"
-    renderer = _renderer()
-
-    renderer.render(
-        TEMPLATE,
-        output,
-        API_DEV_IMAGE,
-        WORKER_DEV_IMAGE,
-        COMMIT,
-        channel="dev",
-    )
+    _, output = _rendered_dev(tmp_path)
 
     text = output.read_text(encoding="utf-8")
-    assert API_DEV_IMAGE in text and WORKER_DEV_IMAGE in text
-    with pytest.raises(ValueError):
-        renderer.render(
+    assert text.count(API_DEV_IMAGE) == 1
+    assert text.count(WORKER_DEV_IMAGE) == 1
+    assert "@sha256:" not in "\n".join(
+        line for line in text.splitlines() if "vonk-forge-" in line
+    )
+    assert COMMIT not in text
+    assert "VONK_DEV_EXPECTED_COMMIT" not in text
+    assert "x-pinned-expected-commit" not in text
+    assert "Compatibility input for the current pinned renderer" not in text
+    assert "__VONK_" not in text
+
+
+def _compose_service(output: Path, service: str) -> dict[str, object]:
+    rendered = json.loads(
+        subprocess.run(
+            ("docker", "compose", "-f", str(output), "config", "--format", "json"),
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+    )
+    return rendered["services"][service]
+
+
+def test_dev_render_forbids_a_commit_input(tmp_path: Path) -> None:
+    output = tmp_path / "docker-compose.dev.yml"
+
+    with pytest.raises(ValueError, match="forbidden"):
+        _renderer().render(
             TEMPLATE,
-            tmp_path / "wrong-channel.yml",
+            output,
             API_DEV_IMAGE,
             WORKER_DEV_IMAGE,
             COMMIT,
+            channel="dev",
         )
+
+    assert not output.exists()
+
+
+@pytest.mark.parametrize(
+    "api_image",
+    (
+        f"ghcr.io/carstvaartjes/vonk-forge-api:dev@sha256:{DIGEST}",
+        "ghcr.io/carstvaartjes/vonk-forge-api:latest",
+        "ghcr.io/carstvaartjes/vonk-forge-api:dev-sha-" + COMMIT,
+        "ghcr.io/carstvaartjes/vonk-forge-api:v1.2.3",
+        "ghcr.io/example/vonk-forge-api:dev",
+        "${CALLER_IMAGE:-ghcr.io/carstvaartjes/vonk-forge-api:dev}",
+    ),
+)
+def test_dev_render_rejects_every_non_bare_public_dev_reference(
+    tmp_path: Path, api_image: str
+) -> None:
+    output = tmp_path / "docker-compose.dev.yml"
+
+    with pytest.raises(ValueError):
+        _renderer().render(
+            TEMPLATE,
+            output,
+            api_image,
+            WORKER_DEV_IMAGE,
+            channel="dev",
+        )
+
+    assert not output.exists()
 
 
 @pytest.mark.parametrize(
@@ -186,14 +249,9 @@ def test_render_rejects_source_output_identity_and_unresolved_template_tokens(
     with pytest.raises(ValueError):
         renderer.render(TEMPLATE, TEMPLATE, API_IMAGE, WORKER_IMAGE, COMMIT)
 
-    template = tmp_path / "template.yaml"
-    template.write_text(
-        "services: {}\n"
-        "api: __VONK_API_IMAGE__\n"
-        "worker: __VONK_WORKER_IMAGE__\n"
-        "commit: __VONK_EXPECTED_COMMIT__\n"
-        "value: __VONK_UNKNOWN__\n",
-        encoding="utf-8",
+    template = _copy_template(
+        tmp_path,
+        TEMPLATE.read_text(encoding="utf-8") + "\nx-unknown: __VONK_UNKNOWN__\n",
     )
     output = tmp_path / "docker-compose.yml"
     output.write_text("previous output\n", encoding="utf-8")
@@ -275,7 +333,7 @@ def test_cleanup_failure_preserves_output_and_cleans_staging_on_retry(
 def test_rendered_compose_is_image_only_and_has_exact_runtime_boundaries(
     tmp_path: Path,
 ) -> None:
-    _, output = _rendered(tmp_path)
+    _, output = _rendered_pinned(tmp_path)
     rendered = json.loads(
         subprocess.run(
             ("docker", "compose", "-f", str(output), "config", "--format", "json"),
@@ -324,6 +382,42 @@ def test_rendered_compose_is_image_only_and_has_exact_runtime_boundaries(
     assert migrate_secrets["source"] != volumes["control-api"]["/run/secrets"]["source"]
     assert migrate_secrets["source"] != volumes["control-worker"]["/run/secrets"]["source"]
     assert volumes["control-worker"]["/run/secrets"]["source"].endswith("dev-worker-secrets")
+
+
+def test_mutable_compose_uses_exact_refs_and_always_pulls_every_first_party_service(
+    tmp_path: Path,
+) -> None:
+    _, output = _rendered_dev(tmp_path)
+    rendered = json.loads(
+        subprocess.run(
+            ("docker", "compose", "-f", str(output), "config", "--format", "json"),
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+    )
+    services = rendered["services"]
+    api_services = {
+        "dev-cohort-reset",
+        "dev-api-cohort",
+        "dev-cohort-verify",
+        "dev-init",
+        "migrate",
+        "control-api",
+    }
+    worker_services = {"dev-worker-cohort", "control-worker"}
+
+    assert all(services[name]["image"] == API_DEV_IMAGE for name in api_services)
+    assert all(services[name]["image"] == WORKER_DEV_IMAGE for name in worker_services)
+    assert all(
+        services[name]["pull_policy"] == "always"
+        for name in api_services | worker_services
+    )
+    dev_init_environment = services["dev-init"]["environment"]
+    assert dev_init_environment["VONK_DEV_SELECTED_COHORT_FILE"] == "/cohort/selected.json"
+    assert "VONK_DEV_EXPECTED_COMMIT" not in dev_init_environment
+    assert "VONK_DEV_API_IMAGE" not in dev_init_environment
+    assert "VONK_DEV_WORKER_IMAGE" not in dev_init_environment
 
 
 def test_template_is_development_only_and_never_mentions_local_acceptance() -> None:

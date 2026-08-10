@@ -308,7 +308,7 @@ jobs:
           subject-digest: ${{ steps.publish.outputs.worker_digest }}
           push-to-registry: true
 
-      - name: Render digest-pinned Compose artifact
+      - name: Render development Compose artifacts
         shell: bash
         env:
           API_DIGEST: ${{ steps.publish.outputs.api_digest }}
@@ -326,9 +326,8 @@ jobs:
             --commit "$GITHUB_SHA"
           scripts/render-dev-compose \
             --output dist/docker-compose.dev.yml \
-            --api-image "$API_IMAGE:dev@${API_DIGEST}" \
-            --worker-image "$WORKER_IMAGE:dev@${WORKER_DIGEST}" \
-            --commit "$GITHUB_SHA" \
+            --api-image "$API_IMAGE:dev" \
+            --worker-image "$WORKER_IMAGE:dev" \
             --channel dev
           docker compose -f dist/docker-compose.pinned.yml config -q
           docker compose -f dist/docker-compose.dev.yml config -q
