@@ -137,11 +137,12 @@ In a generic NAS Docker UI (UGREEN calls this a Docker Project):
 5. Keep every named volume. Do not choose a remove-volumes or clean-project
    option during normal development.
 
-After the UI reports the deployment, inspect the job and container status in
-this order: the API and worker cohort reporters, the cohort gate, `dev-init`,
-`migrate`, then PostgreSQL and the long-running API and worker. The reporters,
-gate, `dev-init`, and `migrate` must complete successfully before the
-long-running services become healthy. The API binds only to NAS loopback; use
+After the UI reports the deployment, follow the two prerequisite lanes in the
+job and container status: the cohort reset, API and worker cohort reporters,
+and cohort verifier complete in one lane while PostgreSQL becomes healthy in
+the other. Only then may `dev-init` and `migrate` complete, followed by the
+long-running API and worker becoming healthy. A one-shot service that exits
+successfully is complete, not failed. The API binds only to NAS loopback; use
 your organization's approved trusted access path rather than widening the
 Compose listener.
 

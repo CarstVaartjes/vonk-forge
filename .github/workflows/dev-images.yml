@@ -63,8 +63,10 @@ jobs:
             scripts/tests/test_dev_image_acceptance.py \
             scripts/tests/test_dev_image_workflow.py
           uv run --project control --frozen pytest -q \
+            control/tests/test_dev_cohort.py \
             control/tests/test_dev_init.py \
-            control/tests/test_generation_readiness.py
+            control/tests/test_generation_readiness.py \
+            control/tests/test_settings.py
           scripts/verify-public-image-inputs
 
       - name: Set up Docker Buildx

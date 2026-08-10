@@ -34,9 +34,6 @@ PINNED_COMPATIBILITY_BLOCK = (
     "# token only for pinned output and omit it entirely from mutable output.\n"
     f"{PINNED_EXTENSION}"
 )
-DEV_INIT_SELECTED_COHORT = (
-    "      VONK_DEV_SELECTED_COHORT_FILE: /cohort/selected.json\n"
-)
 SYNTHETIC_SECRETS = {
     "postgres-password": "synthetic-postgres-password\n",
     "database-url": "postgresql+psycopg://control:synthetic@postgres:5432/control\n",
@@ -110,27 +107,6 @@ def _render_template(
         "__VONK_WORKER_IMAGE__", worker_image
     )
     rendered = rendered.replace(PINNED_COMPATIBILITY_BLOCK, "", 1)
-    if channel == "pinned":
-        assert commit is not None
-        dev_init_start = rendered.find("  dev-init:\n")
-        dev_init_end = rendered.find("\n  migrate:\n", dev_init_start)
-        if dev_init_start < 0 or dev_init_end < 0:
-            raise ValueError("template must contain exactly one dev-init service")
-        dev_init = rendered[dev_init_start:dev_init_end]
-        if dev_init.count(DEV_INIT_SELECTED_COHORT) != 1:
-            raise ValueError(
-                "template must contain the dev-init selected cohort input exactly once"
-            )
-        explicit_identity = (
-            f"      VONK_DEV_EXPECTED_COMMIT: {commit}\n"
-            f"      VONK_DEV_API_IMAGE: {api_image}\n"
-            f"      VONK_DEV_WORKER_IMAGE: {worker_image}\n"
-        )
-        rendered = (
-            rendered[:dev_init_start]
-            + dev_init.replace(DEV_INIT_SELECTED_COHORT, explicit_identity, 1)
-            + rendered[dev_init_end:]
-        )
     if UNRESOLVED_TOKEN.search(rendered):
         raise ValueError("template contains unresolved __VONK_*__ token")
     if (

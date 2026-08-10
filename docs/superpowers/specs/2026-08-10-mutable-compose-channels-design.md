@@ -165,6 +165,11 @@ read-only runtime volume. Development `dev-init` obtains its exact accepted
 repository commit from that document instead of from a rendered Compose
 literal.
 
+The pinned development artifact runs this same gate and derives every runtime
+identity from the selected-cohort document. Its reporter images are immutable
+`dev-sha-<commit>@sha256:<digest>` references, so pinning is enforced by image
+selection rather than by a second, potentially divergent initializer input.
+
 Migration, initializer, signer, API, worker, and other stateful services depend
 on successful cohort verification. A mismatch therefore fails before database
 migration or service mutation. Existing running containers remain available

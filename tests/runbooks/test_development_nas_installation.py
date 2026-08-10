@@ -29,6 +29,24 @@ def test_development_nas_runbook_explains_mixed_cohort_retry_before_migration() 
     assert "Do not delete `secrets/` or named volumes" in text
 
 
+def test_development_nas_runbook_documents_actual_startup_dependency_order() -> None:
+    text = _normalized_text(RUNBOOK).split(
+        "After the UI reports the deployment", maxsplit=1
+    )[1]
+    order = (
+        "cohort reset",
+        "API and worker cohort reporters",
+        "cohort verifier",
+        "PostgreSQL",
+        "`dev-init`",
+        "`migrate`",
+        "long-running API and worker",
+    )
+
+    positions = [text.index(item) for item in order]
+    assert positions == sorted(positions)
+
+
 def test_production_channel_uses_the_trusted_host_updater_and_latest_is_evaluation_only() -> None:
     text = _normalized_text(COMPOSE_README)
 

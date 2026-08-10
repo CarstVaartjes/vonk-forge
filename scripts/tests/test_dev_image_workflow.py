@@ -39,6 +39,13 @@ def _dockerfile() -> str:
     return DOCKERFILE.read_text(encoding="utf-8")
 
 
+def test_focused_publication_gate_covers_cohort_and_startup_settings() -> None:
+    step = _step(_workflow(), "Run focused source and Compose contracts")
+
+    assert "control/tests/test_dev_cohort.py" in step
+    assert "control/tests/test_settings.py" in step
+
+
 def _docker_stage(text: str, name: str) -> str:
     marker = re.compile(rf"^FROM .+ AS {re.escape(name)}$", re.MULTILINE)
     match = marker.search(text)

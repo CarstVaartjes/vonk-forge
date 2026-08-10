@@ -158,14 +158,14 @@ Expected: PASS.
 
 Test that `dev_init.main()` supports exactly two development identity inputs:
 
-- local/pinned mode: existing `VONK_DEV_EXPECTED_COMMIT`, `VONK_DEV_API_IMAGE`, and `VONK_DEV_WORKER_IMAGE` digest-shaped values;
-- mutable mode: `VONK_DEV_SELECTED_COHORT_FILE`, with no rendered commit or mutable image value.
+- local source mode: existing `VONK_DEV_EXPECTED_COMMIT`, `VONK_DEV_API_IMAGE`, and `VONK_DEV_WORKER_IMAGE` digest-shaped values;
+- image-only mutable and pinned modes: `VONK_DEV_SELECTED_COHORT_FILE`, with no rendered commit or image value in the initializer environment.
 
 Mutable mode must parse and verify `selected.json` against the initializer image before repository fetch, secret staging, or state writes. It must use the selected source commit to advance `refs/heads/main` while preserving locally advanced `deploy`, and write an active projection from selected cohort fields. Reject mixed input modes, malformed/stale cohort files, role mismatch, and missing input.
 
 **Step 2: Refactor development projection creation**
 
-Change `_active_projection` and `_write_active_projection` to accept one explicit development generation identity object. Preserve the current local/pinned adapter so existing local source Compose and pinned artifacts still work. For mutable mode, use selected cohort version, database revision, build/release digests, generation ID, and `development.invalid` API/worker references. Keep the production host-state schema and validators unchanged.
+Change `_active_projection` and `_write_active_projection` to accept one explicit development generation identity object. Preserve the current local-source adapter. For image-only mutable and pinned modes, use selected cohort version, database revision, build/release digests, generation ID, and `development.invalid` API/worker references. Keep the production host-state schema and validators unchanged.
 
 **Step 3: Write failing startup-settings tests**
 
@@ -206,6 +206,7 @@ Split renderer contracts by channel:
 
 - `channel="dev"` accepts only exact bare public refs `ghcr.io/carstvaartjes/vonk-forge-api:dev` and `...worker:dev`, takes no commit, emits `pull_policy: always`, no first-party `@sha256:`, no `VONK_DEV_EXPECTED_COMMIT`, and no unresolved token;
 - `channel="pinned"` still requires matching `dev-sha-<commit>@sha256:<digest>` refs and a lowercase full commit;
+- both rendered modes retain `VONK_DEV_SELECTED_COHORT_FILE` for initializer, migration, API, and worker so one verified cohort is the only runtime identity source;
 - neither mode accepts `:latest`, another owner/repository, another tag, interpolation, or caller-controlled output paths.
 
 **Step 2: Split template substitutions without weakening validation**

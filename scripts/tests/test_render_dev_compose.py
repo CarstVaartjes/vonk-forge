@@ -55,18 +55,18 @@ def _copy_template(tmp_path: Path, text: str) -> Path:
     return template
 
 
-def test_pinned_render_requires_matching_images_and_explicit_dev_init_identity(
+def test_pinned_render_uses_one_verified_cohort_identity_for_every_service(
     tmp_path: Path,
 ) -> None:
     _, output = _rendered_pinned(tmp_path)
 
     text = output.read_text(encoding="utf-8")
-    assert text.count(API_IMAGE) == 2
-    assert text.count(WORKER_IMAGE) == 2
-    assert text.count(f"VONK_DEV_EXPECTED_COMMIT: {COMMIT}") == 1
-    assert "VONK_DEV_SELECTED_COHORT_FILE" not in _compose_service(
-        output, "dev-init"
-    )["environment"]
+    assert text.count(API_IMAGE) == 1
+    assert text.count(WORKER_IMAGE) == 1
+    assert "VONK_DEV_EXPECTED_COMMIT" not in text
+    for service in ("dev-init", "migrate", "control-api", "control-worker"):
+        environment = _compose_service(output, service)["environment"]
+        assert environment["VONK_DEV_SELECTED_COHORT_FILE"] == "/cohort/selected.json"
     assert "__VONK_" not in text
 
 
@@ -349,9 +349,12 @@ def test_rendered_compose_is_image_only_and_has_exact_runtime_boundaries(
     assert services["migrate"]["image"] == API_IMAGE
     assert services["control-api"]["image"] == API_IMAGE
     assert services["control-worker"]["image"] == WORKER_IMAGE
-    assert services["dev-init"]["environment"]["VONK_DEV_EXPECTED_COMMIT"] == COMMIT
-    assert services["dev-init"]["environment"]["VONK_DEV_API_IMAGE"] == API_IMAGE
-    assert services["dev-init"]["environment"]["VONK_DEV_WORKER_IMAGE"] == WORKER_IMAGE
+    for service in ("dev-init", "migrate", "control-api", "control-worker"):
+        environment = services[service]["environment"]
+        assert environment["VONK_DEV_SELECTED_COHORT_FILE"] == "/cohort/selected.json"
+        assert "VONK_DEV_EXPECTED_COMMIT" not in environment
+        assert "VONK_DEV_API_IMAGE" not in environment
+        assert "VONK_DEV_WORKER_IMAGE" not in environment
     assert services["control-api"]["environment"]["VONK_DEPLOYMENT_BRANCH"] == "deploy"
     assert services["control-worker"]["environment"]["VONK_DEPLOYMENT_BRANCH"] == "deploy"
 
