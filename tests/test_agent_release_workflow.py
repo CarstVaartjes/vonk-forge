@@ -6,12 +6,25 @@ import struct
 import subprocess
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github/workflows/agent-release.yml"
 UNIFIED_WORKFLOW = ROOT / ".github/workflows/ci.yml"
 PACKAGE_WORKFLOW = ROOT / ".github/workflows/agent-package-build.yml"
 APT_WORKFLOW = ROOT / ".github/workflows/agent-apt-publish.yml"
 APT_STATE = ROOT / "scripts/agent-apt-state"
+
+EXPECTED_CALL_OUTPUTS = {
+    "version": "${{ jobs.build.outputs.version }}",
+    "package": "${{ jobs.build.outputs.package }}",
+    "artifact_name": "${{ jobs.build.outputs.artifact_name }}",
+}
+EXPECTED_BUILD_OUTPUTS = {
+    "version": "${{ inputs.version }}",
+    "package": "${{ inputs.package }}",
+    "artifact_name": "${{ inputs.artifact_name }}",
+}
 
 
 def invalid_external_action_refs(text: str) -> list[str]:
@@ -23,6 +36,50 @@ def invalid_external_action_refs(text: str) -> list[str]:
         if re.fullmatch(r"[^@\s]+@[0-9a-f]{40}", reference) is None:
             invalid.append(reference)
     return invalid
+
+
+def workflow_action_pin_errors(root: Path) -> dict[str, list[str]]:
+    errors: dict[str, list[str]] = {}
+    workflows = (
+        *root.glob(".github/workflows/*.yml"),
+        *root.glob(".github/workflows/*.yaml"),
+    )
+    for path in sorted(workflows):
+        invalid = invalid_external_action_refs(path.read_text())
+        if invalid:
+            errors[path.relative_to(root).as_posix()] = invalid
+    return errors
+
+
+def reusable_output_mappings(text: str) -> tuple[dict[str, str], dict[str, str]]:
+    call_outputs = text.split("    outputs:\n", 1)[1].split("\npermissions:\n", 1)[0]
+    actual_call_outputs: dict[str, str] = {}
+    current_output = ""
+    for line in call_outputs.splitlines():
+        output_name = re.fullmatch(
+            r"      ([A-Za-z_][A-Za-z0-9_-]*):",
+            line,
+        )
+        if output_name is not None:
+            current_output = output_name.group(1)
+        elif current_output and line.startswith("        value: "):
+            actual_call_outputs[current_output] = line.removeprefix("        value: ")
+
+    build_outputs = text.split("    outputs:\n", 2)[2].split("    steps:\n", 1)[0]
+    actual_build_outputs = dict(
+        re.findall(
+            r"^      ([A-Za-z_][A-Za-z0-9_-]*): (.+)$",
+            build_outputs,
+            re.MULTILINE,
+        )
+    )
+    return actual_call_outputs, actual_build_outputs
+
+
+def assert_exact_reusable_output_mappings(text: str) -> None:
+    call_outputs, build_outputs = reusable_output_mappings(text)
+    assert call_outputs == EXPECTED_CALL_OUTPUTS
+    assert build_outputs == EXPECTED_BUILD_OUTPUTS
 
 
 def package_step(step_name: str) -> str:
@@ -147,36 +204,64 @@ def test_reusable_agent_package_build_has_a_strict_call_boundary() -> None:
         "environment",
     ):
         assert f"      {input_name}:\n        required: true\n        type: string" in text
-    call_outputs = text.split("    outputs:\n", 1)[1].split("\npermissions:\n", 1)[0]
-    expected_call_outputs = {
-        "version": "${{ jobs.build.outputs.version }}",
-        "package": "${{ jobs.build.outputs.package }}",
-        "artifact_name": "${{ jobs.build.outputs.artifact_name }}",
-    }
-    assert re.findall(r"^      ([a-z_]+):$", call_outputs, re.MULTILINE) == list(
-        expected_call_outputs
-    )
-    actual_call_outputs: dict[str, str] = {}
-    current_output = ""
-    for line in call_outputs.splitlines():
-        output_name = re.fullmatch(r"      ([a-z_]+):", line)
-        if output_name is not None:
-            current_output = output_name.group(1)
-        elif current_output and line.startswith("        value: "):
-            actual_call_outputs[current_output] = line.removeprefix("        value: ")
-    assert actual_call_outputs == expected_call_outputs
-
-    build_outputs = text.split("    outputs:\n", 2)[2].split("    steps:\n", 1)[0]
-    assert dict(
-        re.findall(r"^      ([a-z_]+): (.+)$", build_outputs, re.MULTILINE)
-    ) == {
-        "version": "${{ inputs.version }}",
-        "package": "${{ inputs.package }}",
-        "artifact_name": "${{ inputs.artifact_name }}",
-    }
+    assert_exact_reusable_output_mappings(text)
     assert "runs-on: ubuntu-24.04-arm" in text
     assert "environment: ${{ inputs.environment }}" in text
     assert "timeout-minutes: 45" in text
+
+
+def test_reusable_output_parser_accepts_every_valid_identifier_shape() -> None:
+    fixture = """\
+on:
+  workflow_call:
+    outputs:
+      Release2:
+        value: call-release
+      _private:
+        value: call-private
+      release-id:
+        value: call-hyphen
+permissions:
+  contents: read
+jobs:
+  build:
+    outputs:
+      Release2: build-release
+      _private: build-private
+      release-id: build-hyphen
+    steps:
+      - run: true
+"""
+
+    assert reusable_output_mappings(fixture) == (
+        {
+            "Release2": "call-release",
+            "_private": "call-private",
+            "release-id": "call-hyphen",
+        },
+        {
+            "Release2": "build-release",
+            "_private": "build-private",
+            "release-id": "build-hyphen",
+        },
+    )
+
+
+def test_exact_reusable_output_guard_rejects_digit_and_hyphen_extras() -> None:
+    text = PACKAGE_WORKFLOW.read_text()
+
+    for extra in ("release2", "release-id"):
+        mutated = text.replace(
+            "    outputs:\n      version:\n",
+            "    outputs:\n"
+            f"      {extra}:\n"
+            "        description: Unexpected output\n"
+            "        value: ${{ jobs.build.outputs.version }}\n"
+            "      version:\n",
+            1,
+        )
+        with pytest.raises(AssertionError):
+            assert_exact_reusable_output_mappings(mutated)
 
 
 def test_reusable_agent_package_build_validates_authority_before_key_use() -> None:
@@ -257,18 +342,31 @@ def test_reusable_agent_package_build_preserves_acceptance_gates() -> None:
     assert "agent-package-build\\.yml@refs/tags/v" in text
 
 
-def test_agent_key_is_removed_before_third_party_actions_with_always_fallback() -> None:
+def test_agent_key_is_removed_immediately_after_final_use_with_always_fallback() -> None:
     text = PACKAGE_WORKFLOW.read_text()
-    lifecycle = text.index("Test fresh, offline, upgrade, downgrade, remove lifecycle")
-    cleanup = text.index("Remove protected agent key")
+    lifecycle = package_step_run(
+        "Test fresh, offline, upgrade, downgrade, remove lifecycle"
+    )
+    lifecycle_lines = lifecycle.splitlines()
+    final_build = lifecycle_lines.index("  --output-dir lifecycle")
+    immediate_cleanup = 'rm -f "$RUNNER_TEMP/vonk-agent-release.pem"'
+    fallback = package_step("Remove protected agent key")
     cosign = text.index("Install Cosign")
 
-    assert lifecycle < cleanup < cosign
-    assert 'rm -f "$RUNNER_TEMP/vonk-agent-release.pem"' in package_step(
-        "Remove protected agent key"
+    assert lifecycle_lines[final_build + 1] == immediate_cleanup
+    assert lifecycle_lines[final_build + 2] == (
+        'test ! -e "$RUNNER_TEMP/vonk-agent-release.pem"'
     )
-    assert "if: ${{ always() }}" in package_step("Remove protected agent key")
-    assert text.count('rm -f "$RUNNER_TEMP/vonk-agent-release.pem"') == 1
+    assert lifecycle_lines[final_build + 3] == (
+        "sudo env SYSTEMD_OFFLINE=1 dpkg -i \\"
+    )
+    assert lifecycle_lines[final_build + 4] == (
+        '  "lifecycle/vonk-forge-agent_${NEXT_VERSION}_arm64.deb"'
+    )
+    assert immediate_cleanup in fallback
+    assert "if: ${{ always() }}" in fallback
+    assert text.index("Remove protected agent key") < cosign
+    assert text.count(immediate_cleanup) == 2
 
 
 def test_stable_sigstore_identity_renders_the_exact_version() -> None:
@@ -507,12 +605,7 @@ def test_release_actions_are_commit_pinned_and_secrets_are_environment_scoped() 
         "uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
         in apt_text
     )
-    relevant_workflows = tuple((ROOT / ".github/workflows").glob("*.yml"))
-    assert relevant_workflows
-    assert {
-        path.name: invalid_external_action_refs(path.read_text())
-        for path in relevant_workflows
-    } == {path.name: [] for path in relevant_workflows}
+    assert workflow_action_pin_errors(ROOT) == {}
     for bad_reference in (
         "actions/checkout@v4",
         "actions/checkout@main",
@@ -528,6 +621,24 @@ def test_release_actions_are_commit_pinned_and_secrets_are_environment_scoped() 
     assert "permissions:\n  contents: read" in agent_text
     assert "contents: write" in unified_text
     assert "id-token: write" in package_text
+
+
+def test_action_pin_guard_scans_yaml_and_keeps_local_calls_exempt(
+    tmp_path: Path,
+) -> None:
+    workflows = tmp_path / ".github/workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "unpinned.yaml").write_text(
+        "jobs:\n"
+        "  test:\n"
+        "    uses: actions/checkout@main\n"
+        "  local:\n"
+        "    uses: ./.github/workflows/local.yml\n"
+    )
+
+    assert workflow_action_pin_errors(tmp_path) == {
+        ".github/workflows/unpinned.yaml": ["actions/checkout@main"]
+    }
 
 
 def test_development_agent_workflow_has_no_production_authority() -> None:
