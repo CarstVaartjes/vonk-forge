@@ -621,6 +621,7 @@ def test_hermes_build_keeps_its_existing_release_tags() -> None:
     assert "scripts/reconcile-hermes-release-image" in reconciliation
     assert "scripts/reconcile-hermes-release-image" in verification
     assert "--require-attestation" in verification
+    assert "--repair-tags" in verification
     assert "if: steps.existing-hermes.outputs.exists" not in workflow_step(
         "publish-images", "Attest Hermes release provenance"
     )

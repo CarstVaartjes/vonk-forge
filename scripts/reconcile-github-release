@@ -38,16 +38,16 @@ trap cleanup EXIT INT TERM
 
 release_json="$scratch/release.json"
 if gh release view "$tag" --repo "$repository" \
-  --json tagName,targetCommitish,isDraft,isPrerelease,name,assets \
+  --json tagName,targetCommitish,isDraft,isImmutable,isPrerelease,name,assets \
   >"$release_json" 2>"$scratch/view-error"; then
   jq -e --arg tag "$tag" --arg source "$source_sha" --arg title "$title" \
     '(.tagName == $tag) and (.targetCommitish == $source)
      and (.name == $title) and (.isPrerelease == false)' "$release_json" >/dev/null
-elif grep -Fqx 'release not found' "$scratch/view-error"; then
+elif [[ "$(<"$scratch/view-error")" == 'release not found' ]]; then
   gh release create "$tag" --repo "$repository" --verify-tag \
     --target "$source_sha" --title "$title" --draft --generate-notes
   printf '%s\n' \
-    '{"tagName":"new","targetCommitish":"new","name":"new","isDraft":true,"isPrerelease":false,"assets":[]}' \
+    '{"tagName":"new","targetCommitish":"new","name":"new","isDraft":true,"isImmutable":false,"isPrerelease":false,"assets":[]}' \
     > "$release_json"
 else
   printf '%s\n' 'unable to inspect existing GitHub release' >&2
@@ -56,10 +56,23 @@ fi
 
 mapfile -t observed < <(jq -r '.assets[]?.name' "$release_json" | LC_ALL=C sort)
 release_draft=$(jq -r '.isDraft' "$release_json")
+release_immutable=$(jq -r '.isImmutable' "$release_json")
 [[ "$release_draft" == true || "$release_draft" == false ]] || {
   printf '%s\n' 'GitHub release draft state is invalid' >&2
   exit 1
 }
+[[ "$release_immutable" == true || "$release_immutable" == false ]] || {
+  printf '%s\n' 'GitHub release immutable state is invalid' >&2
+  exit 1
+}
+if [[ "$release_draft" == false && "$release_immutable" != true ]]; then
+  printf '%s\n' 'published GitHub release is not immutable' >&2
+  exit 1
+fi
+if [[ "$release_draft" == true && "$release_immutable" != false ]]; then
+  printf '%s\n' 'draft GitHub release has an invalid immutable state' >&2
+  exit 1
+fi
 for name in "${observed[@]}"; do
   [[ -n ${expected[$name]+x} ]] || {
     printf 'unexpected release asset: %s\n' "$name" >&2
@@ -89,4 +102,34 @@ if (( "${#missing[@]}" )); then
 fi
 if [[ "$release_draft" == true ]]; then
   gh release edit "$tag" --repo "$repository" --draft=false
+  published_json="$scratch/published-release.json"
+  immutable=0
+  for attempt in 1 2 3; do
+    if gh release view "$tag" --repo "$repository" \
+      --json tagName,targetCommitish,isDraft,isImmutable,isPrerelease,name,assets \
+      >"$published_json" 2>"$scratch/published-view-error" \
+      && jq -e --arg tag "$tag" --arg source "$source_sha" --arg title "$title" \
+        '(.tagName == $tag) and (.targetCommitish == $source)
+         and (.name == $title) and (.isDraft == false)
+         and (.isImmutable == true) and (.isPrerelease == false)' \
+        "$published_json" >/dev/null; then
+      immutable=1
+      break
+    fi
+    [[ "$attempt" -eq 3 ]] || sleep 1
+  done
+  [[ "$immutable" -eq 1 ]] || {
+    printf '%s\n' 'published GitHub release did not become immutable' >&2
+    exit 1
+  }
+  mapfile -t published_names < <(
+    jq -r '.assets[]?.name' "$published_json" | LC_ALL=C sort
+  )
+  mapfile -t expected_names < <(
+    printf '%s\n' "${!expected[@]}" | LC_ALL=C sort
+  )
+  [[ "${published_names[*]}" == "${expected_names[*]}" ]] || {
+    printf '%s\n' 'published GitHub release asset set changed' >&2
+    exit 1
+  }
 fi

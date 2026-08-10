@@ -8,9 +8,19 @@ invalid() {
   exit 64
 }
 
-[[ "$#" -eq 6 || ( "$#" -eq 7 && "$7" == --require-attestation ) ]] || invalid
+[[ "$#" -ge 6 && "$#" -le 8 ]] || invalid
 readonly image=$1 version=$2 source_sha=$3 source_url=$4 repository=$5 source_ref=$6
-readonly require_attestation=${7:-}
+shift 6
+require_attestation=0
+repair_tags=0
+for option in "$@"; do
+  case "$option" in
+    --require-attestation) [[ "$require_attestation" -eq 0 ]] || invalid; require_attestation=1 ;;
+    --repair-tags) [[ "$repair_tags" -eq 0 ]] || invalid; repair_tags=1 ;;
+    *) invalid ;;
+  esac
+done
+[[ "$repair_tags" -eq 0 || "$require_attestation" -eq 1 ]] || invalid
 [[ "$image" == ghcr.io/carstvaartjes/vonk-forge-hermes ]] || invalid
 [[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || invalid
 [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]] || invalid
@@ -18,7 +28,7 @@ readonly require_attestation=${7:-}
 [[ "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || invalid
 [[ "$source_ref" == "refs/tags/v${version}" ]] || invalid
 
-readonly reference="docker://${image}:${version}"
+readonly version_tag=$version commit_tag="sha-$source_sha"
 readonly scratch=$(mktemp -d /tmp/vonk-hermes-release.XXXXXXXXXX)
 [[ "$scratch" =~ ^/tmp/vonk-hermes-release\.[A-Za-z0-9]{10}$ && -d "$scratch" && ! -L "$scratch" ]] || {
   printf '%s\n' 'Hermes release scratch path is unsafe' >&2
@@ -27,15 +37,67 @@ readonly scratch=$(mktemp -d /tmp/vonk-hermes-release.XXXXXXXXXX)
 cleanup() { rm -rf -- "$scratch"; }
 trap cleanup EXIT INT TERM
 
-inspect_error="$scratch/inspect-error"
-if ! digest=$(skopeo inspect --format '{{.Digest}}' "$reference" 2>"$inspect_error"); then
-  if grep -Eiq 'manifest unknown|name unknown|not found' "$inspect_error"; then
-    printf '%s\n' 'exists=false'
-    exit 0
+known_absent() {
+  local error_file=$1 line lowered
+  local -a lines=()
+  mapfile -t lines < <(sed -e 's/[[:space:]]*$//' -e '/^[[:space:]]*$/d' "$error_file")
+  [[ "${#lines[@]}" -eq 1 ]] || return 1
+  line=${lines[0]}
+  lowered=${line,,}
+  [[ "$lowered" != *'unauthorized'* && "$lowered" != *'denied'* \
+    && "$lowered" != *'forbidden'* && "$lowered" != *'timeout'* \
+    && "$lowered" != *'tls'* && "$lowered" != *'transport'* \
+    && ! "$lowered" =~ (^|[^0-9])5[0-9]{2}([^0-9]|$) ]] || return 1
+  [[ "$lowered" == *'manifest unknown'* || "$lowered" == *'name unknown'* \
+    || "$lowered" == *'not found'* ]]
+}
+
+inspect_tag() {
+  local tag=$1 error_file="$scratch/${1//[^A-Za-z0-9_.-]/_}.inspect-error" observed
+  if observed=$(skopeo inspect --format '{{.Digest}}' \
+    "docker://${image}:${tag}" 2>"$error_file"); then
+    [[ "$observed" =~ ^sha256:[0-9a-f]{64}$ ]] || return 1
+    printf '%s\n' "$observed"
+    return 0
   fi
-  printf '%s\n' 'unable to inspect Hermes release image' >&2
+  known_absent "$error_file" && return 2
+  return 1
+}
+
+version_digest=
+commit_digest=
+version_absent=0
+commit_absent=0
+if version_digest=$(inspect_tag "$version_tag"); then
+  :
+else
+  status=$?
+  [[ "$status" -eq 2 ]] || {
+    printf '%s\n' 'unable to inspect Hermes release version tag' >&2
+    exit 1
+  }
+  version_absent=1
+fi
+if commit_digest=$(inspect_tag "$commit_tag"); then
+  :
+else
+  status=$?
+  [[ "$status" -eq 2 ]] || {
+    printf '%s\n' 'unable to inspect Hermes release commit tag' >&2
+    exit 1
+  }
+  commit_absent=1
+fi
+if [[ "$version_absent" -eq 1 && "$commit_absent" -eq 1 ]]; then
+  printf '%s\n' 'exists=false'
+  exit 0
+fi
+if [[ "$version_absent" -eq 0 && "$commit_absent" -eq 0 \
+  && "$version_digest" != "$commit_digest" ]]; then
+  printf '%s\n' 'Hermes immutable release tags are conflicting' >&2
   exit 1
 fi
+digest=${version_digest:-$commit_digest}
 [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || {
   printf '%s\n' 'Hermes release image digest is invalid' >&2
   exit 1
@@ -56,7 +118,7 @@ docker buildx imagetools inspect "${image}@${digest}" --format '{{ json .Provena
       )] | length > 0)
      and ([.. | strings | select(. == $revision)] | length > 0)' \
     >/dev/null
-if [[ "$require_attestation" == --require-attestation ]]; then
+if [[ "$require_attestation" -eq 1 ]]; then
   gh attestation verify "oci://${image}@${digest}" \
     --repo "$repository" \
     --signer-workflow "$repository/.github/workflows/ci.yml" \
@@ -65,6 +127,29 @@ if [[ "$require_attestation" == --require-attestation ]]; then
     --source-ref "$source_ref" \
     --deny-self-hosted-runners \
     --format json >/dev/null
+fi
+
+if [[ "$repair_tags" -eq 1 ]]; then
+  for tag in "$version_tag" "$commit_tag"; do
+    if observed=$(inspect_tag "$tag"); then
+      :
+    else
+      status=$?
+      [[ "$status" -eq 2 ]] || {
+        printf '%s\n' 'unable to recheck Hermes immutable release tag' >&2
+        exit 1
+      }
+      docker buildx imagetools create --tag "$image:$tag" "$image@$digest"
+      observed=$(inspect_tag "$tag") || {
+        printf '%s\n' 'Hermes immutable release tag repair did not converge' >&2
+        exit 1
+      }
+    fi
+    [[ "$observed" == "$digest" ]] || {
+      printf '%s\n' 'Hermes immutable release tag changed during reconciliation' >&2
+      exit 1
+    }
+  done
 fi
 
 printf '%s\n' 'exists=true' "digest=$digest"

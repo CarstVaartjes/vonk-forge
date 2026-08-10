@@ -22,39 +22,76 @@ def _write_tool(path: Path, text: str) -> None:
 
 
 def _hermes_tools(
-    tmp_path: Path, *, revision: str = SHA, attestation_exit: int = 0
-) -> Path:
+    tmp_path: Path,
+    *,
+    revision: str = SHA,
+    attestation_exit: int = 0,
+    version_digest: str = DIGEST,
+    commit_digest: str = DIGEST,
+    version_error: str = "",
+    commit_error: str = "",
+) -> tuple[Path, Path]:
     tools = tmp_path / "bin"
-    tools.mkdir()
+    tools.mkdir(parents=True)
+    state = tmp_path / "hermes-state.json"
+    state.write_text(
+        json.dumps(
+            {
+                "version": version_digest,
+                "commit": commit_digest,
+                "version_error": version_error,
+                "commit_error": commit_error,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     _write_tool(
         tools / "skopeo",
         "#!/usr/bin/env python3\n"
-        "import json, sys\n"
+        "import json, os, sys\n"
+        "from pathlib import Path\n"
+        "state=json.loads(Path(os.environ['VONK_HERMES_STATE']).read_text())\n"
         "if '--config' in sys.argv:\n"
         " print(json.dumps({'config': {'Labels': {'org.opencontainers.image.revision': '"
         + revision
         + "', 'org.opencontainers.image.source': '"
         + SOURCE
         + "', 'org.opencontainers.image.version': '1.2.3'}}}))\n"
-        "else: print('"
-        + DIGEST
-        + "')\n",
+        "else:\n"
+        " ref=sys.argv[-1]; key='commit' if ':sha-' in ref else 'version'\n"
+        " error=state[key+'_error']; digest=state[key]\n"
+        " if error: print(error, file=sys.stderr); raise SystemExit(1)\n"
+        " if not digest: print('manifest unknown', file=sys.stderr); raise SystemExit(1)\n"
+        " print(digest)\n",
     )
     _write_tool(
         tools / "docker",
         "#!/usr/bin/env python3\n"
-        "import json\n"
+        "import json, os, sys\n"
+        "from pathlib import Path\n"
+        "args=sys.argv[1:]\n"
+        "if args[:3] == ['buildx', 'imagetools', 'create']:\n"
+        " state_path=Path(os.environ['VONK_HERMES_STATE']); state=json.loads(state_path.read_text())\n"
+        " tag=args[args.index('--tag')+1]; digest=args[-1].rsplit('@', 1)[1]\n"
+        " state['commit' if ':sha-' in tag else 'version']=digest\n"
+        " state['commit_error' if ':sha-' in tag else 'version_error']=''\n"
+        " state_path.write_text(json.dumps(state)+'\\n'); raise SystemExit(0)\n"
         "print(json.dumps({'predicateType': 'https://slsa.dev/provenance/v1', 'revision': '"
         + SHA
         + "'}))\n",
     )
     _write_tool(tools / "gh", f"#!/usr/bin/env bash\nexit {attestation_exit}\n")
-    return tools
+    return tools, state
 
 
 def _run_hermes(
-    tools: Path, *, require_attestation: bool = True
+    fixture: tuple[Path, Path],
+    *,
+    require_attestation: bool = True,
+    repair_tags: bool = False,
 ) -> subprocess.CompletedProcess[str]:
+    tools, state = fixture
     arguments = [
         str(HERMES),
         IMAGE,
@@ -66,10 +103,15 @@ def _run_hermes(
     ]
     if require_attestation:
         arguments.append("--require-attestation")
+    if repair_tags:
+        arguments.append("--repair-tags")
     return subprocess.run(
         arguments,
         cwd=ROOT,
-        env={"PATH": f"{tools}:{os.environ['PATH']}"},
+        env={
+            "PATH": f"{tools}:{os.environ['PATH']}",
+            "VONK_HERMES_STATE": str(state),
+        },
         check=False,
         capture_output=True,
         text=True,
@@ -105,6 +147,62 @@ def test_hermes_preflight_allows_a_matching_partial_publication_to_be_attested(
     assert result.stdout.splitlines() == ["exists=true", f"digest={DIGEST}"]
 
 
+def test_hermes_reconciler_repairs_a_missing_commit_tag_to_the_verified_digest(
+    tmp_path: Path,
+) -> None:
+    fixture = _hermes_tools(tmp_path, commit_digest="")
+
+    result = _run_hermes(fixture, repair_tags=True)
+
+    assert result.returncode == 0, result.stderr
+    state = json.loads(fixture[1].read_text(encoding="utf-8"))
+    assert state["version"] == DIGEST
+    assert state["commit"] == DIGEST
+
+
+def test_hermes_reconciler_rejects_conflicting_immutable_tags(tmp_path: Path) -> None:
+    result = _run_hermes(
+        _hermes_tools(tmp_path, commit_digest="sha256:" + "c" * 64)
+    )
+
+    assert result.returncode != 0
+    assert "conflicting" in result.stderr
+
+
+def test_hermes_reconciler_accepts_only_unambiguous_complete_absence(
+    tmp_path: Path,
+) -> None:
+    absent = _run_hermes(
+        _hermes_tools(tmp_path, version_digest="", commit_digest=""),
+        require_attestation=False,
+    )
+    mixed = _run_hermes(
+        _hermes_tools(
+            tmp_path / "mixed",
+            version_digest="",
+            commit_digest="",
+            version_error="manifest unknown\nregistry returned 503",
+        ),
+        require_attestation=False,
+    )
+    unknown = _run_hermes(
+        _hermes_tools(
+            tmp_path / "unknown",
+            version_digest="",
+            commit_digest="",
+            version_error="registry returned 503",
+        ),
+        require_attestation=False,
+    )
+
+    assert absent.returncode == 0, absent.stderr
+    assert absent.stdout.splitlines() == ["exists=false"]
+    assert mixed.returncode != 0
+    assert mixed.stdout == ""
+    assert unknown.returncode != 0
+    assert unknown.stdout == ""
+
+
 def _github_tool(tmp_path: Path) -> tuple[Path, Path]:
     tools = tmp_path / "bin"
     tools.mkdir()
@@ -127,7 +225,7 @@ def _github_tool(tmp_path: Path) -> tuple[Path, Path]:
         " print(json.dumps({**{k:v for k,v in state.items() if k != 'assets'}, 'assets':[{'name':n} for n in state['assets']]})); raise SystemExit(0)\n"
         "if command == 'create':\n"
         " target=args[args.index('--target')+1]; title=args[args.index('--title')+1]\n"
-        " state={'tagName':args[2],'targetCommitish':target,'name':title,'isDraft':True,'isPrerelease':False,'assets':{}}\n"
+        " state={'tagName':args[2],'targetCommitish':target,'name':title,'isDraft':True,'isImmutable':False,'isPrerelease':False,'assets':{}}\n"
         "if command == 'upload':\n"
         " for value in args[3:]:\n"
         "  path=Path(value)\n"
@@ -139,6 +237,7 @@ def _github_tool(tmp_path: Path) -> tuple[Path, Path]:
         " if not state['isDraft'] and os.environ.get('VONK_REJECT_PUBLISHED_EDIT'):\n"
         "  print('published release is immutable', file=sys.stderr); raise SystemExit(91)\n"
         " state['isDraft']=False\n"
+        " state['isImmutable']=os.environ.get('VONK_RELEASE_IMMUTABLE_AFTER_EDIT','1') == '1'\n"
         "state_path.write_text(json.dumps(state)+'\\n')\n",
     )
     return tools, state
@@ -151,6 +250,7 @@ def _run_release(
     *,
     view_error: str = "",
     reject_published_edit: bool = False,
+    immutable_after_edit: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         (str(RELEASE), REPOSITORY, "v1.2.3", SHA, "Vonk Forge 1.2.3", *map(str, assets)),
@@ -160,6 +260,7 @@ def _run_release(
             "VONK_RELEASE_STATE": str(state),
             "VONK_RELEASE_VIEW_ERROR": view_error,
             "VONK_REJECT_PUBLISHED_EDIT": "1" if reject_published_edit else "",
+            "VONK_RELEASE_IMMUTABLE_AFTER_EDIT": "1" if immutable_after_edit else "0",
         },
         check=False,
         capture_output=True,
@@ -186,6 +287,7 @@ def test_github_release_reconciler_creates_then_replays_the_exact_asset_set(
     assert release["targetCommitish"] == SHA
     assert release["name"] == "Vonk Forge 1.2.3"
     assert release["isDraft"] is False
+    assert release["isImmutable"] is True
     assert {
         name: base64.b64decode(content)
         for name, content in release["assets"].items()
@@ -205,6 +307,7 @@ def test_github_release_reconciler_rejects_a_conflicting_existing_asset(
                 "targetCommitish": SHA,
                 "name": "Vonk Forge 1.2.3",
                 "isDraft": True,
+                "isImmutable": False,
                 "isPrerelease": False,
                 "assets": {"one.txt": base64.b64encode(b"conflict\n").decode()},
             }
@@ -232,6 +335,7 @@ def test_github_release_reconciler_replays_a_published_release_without_editing_i
                 "targetCommitish": SHA,
                 "name": "Vonk Forge 1.2.3",
                 "isDraft": False,
+                "isImmutable": True,
                 "isPrerelease": False,
                 "assets": {"one.txt": base64.b64encode(b"expected\n").decode()},
             }
@@ -245,6 +349,47 @@ def test_github_release_reconciler_replays_a_published_release_without_editing_i
     assert result.returncode == 0, result.stderr
 
 
+def test_github_release_reconciler_rejects_a_published_mutable_release(
+    tmp_path: Path,
+) -> None:
+    tools, state = _github_tool(tmp_path)
+    asset = tmp_path / "one.txt"
+    asset.write_bytes(b"expected\n")
+    state.write_text(
+        json.dumps(
+            {
+                "tagName": "v1.2.3",
+                "targetCommitish": SHA,
+                "name": "Vonk Forge 1.2.3",
+                "isDraft": False,
+                "isImmutable": False,
+                "isPrerelease": False,
+                "assets": {"one.txt": base64.b64encode(b"expected\n").decode()},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = _run_release(tools, state, (asset,))
+
+    assert result.returncode != 0
+    assert "immutable" in result.stderr
+
+
+def test_github_release_reconciler_requires_immutability_after_publication(
+    tmp_path: Path,
+) -> None:
+    tools, state = _github_tool(tmp_path)
+    asset = tmp_path / "one.txt"
+    asset.write_bytes(b"expected\n")
+
+    result = _run_release(tools, state, (asset,), immutable_after_edit=False)
+
+    assert result.returncode != 0
+    assert "immutable" in result.stderr
+
+
 def test_github_release_reconciler_fails_closed_on_an_unknown_lookup_error(
     tmp_path: Path,
 ) -> None:
@@ -254,6 +399,24 @@ def test_github_release_reconciler_fails_closed_on_an_unknown_lookup_error(
 
     result = _run_release(
         tools, state, (asset,), view_error="release API returned 503"
+    )
+
+    assert result.returncode != 0
+    assert json.loads(state.read_text(encoding="utf-8")) == {}
+
+
+def test_github_release_reconciler_fails_closed_on_a_mixed_lookup_error(
+    tmp_path: Path,
+) -> None:
+    tools, state = _github_tool(tmp_path)
+    asset = tmp_path / "one.txt"
+    asset.write_bytes(b"expected\n")
+
+    result = _run_release(
+        tools,
+        state,
+        (asset,),
+        view_error="release not found\\nrelease API returned 503",
     )
 
     assert result.returncode != 0
