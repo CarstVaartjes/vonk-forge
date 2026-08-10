@@ -215,6 +215,19 @@ def _is_ancestor(
     raise DevInitError("Git could not compare repository commits")
 
 
+def _merge_base(
+    root: Path, accepted: str, deployed: str, *, local_origin: bool
+) -> str:
+    return _commit(
+        _git(
+            root,
+            ("merge-base", accepted, deployed),
+            action="find repository deployment merge-base",
+            local_origin=local_origin,
+        )
+    )
+
+
 def _chown_repository_tree(
     root: Path, uid: int, gid: int, *, root_last: bool
 ) -> None:
@@ -401,6 +414,14 @@ def _initialize_existing_repository(
         raise DevInitError(
             "development repository deployment branch does not descend "
             "from the deployment base"
+        )
+    if (
+        _merge_base(root, accepted, deployed, local_origin=local_origin)
+        != deployment_base
+    ):
+        raise DevInitError(
+            "development repository deployment base does not equal "
+            "the accepted/deploy merge-base"
         )
     if deployed == deployment_base:
         _compare_and_swap_refs(
