@@ -278,6 +278,7 @@ jobs:
       hermes_image: ${{ steps.release.outputs.hermes_image }}
       deployment_bundle_repository: ${{ steps.release.outputs.deployment_bundle_repository }}
       platform_channel: ${{ steps.release.outputs.platform_channel }}
+      tag_oid: ${{ steps.authority.outputs.tag_oid }}
     steps:
       - name: Check out tagged commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -285,6 +286,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Verify signed accepted release tag
+        id: authority
         shell: bash
         run: |
           set -euo pipefail
@@ -302,6 +304,10 @@ jobs:
             verify-tag "$tag_ref"
           [[ $(git rev-list -n 1 "$tag_ref") == "$GITHUB_SHA" ]]
           git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main
+          tag_oid=$(git rev-parse --verify "$tag_ref")
+          scripts/verify-release-tag-authority \
+            "$GITHUB_REF_NAME" "$tag_oid" "$GITHUB_SHA"
+          printf 'tag_oid=%s\n' "$tag_oid" >> "$GITHUB_OUTPUT"
       - name: Validate release metadata
         id: release
         shell: bash
@@ -328,6 +334,9 @@ jobs:
       package: ${{ needs.release-metadata.outputs.package }}
       artifact_name: ${{ needs.release-metadata.outputs.artifact_name }}
       environment: agent-release
+      source_sha: ${{ github.sha }}
+      tag_name: ${{ github.ref_name }}
+      tag_oid: ${{ needs.release-metadata.outputs.tag_oid }}
     permissions:
       artifact-metadata: write
       attestations: write
@@ -513,12 +522,34 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends skopeo
+      - name: Revalidate release authority before registry authentication
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+          TAG_NAME: ${{ github.ref_name }}
+          TAG_OID: ${{ needs.release-metadata.outputs.tag_oid }}
+        run: |
+          set -euo pipefail
+          scripts/verify-release-tag-authority \
+            "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
+
       - name: Log in to GHCR
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Revalidate release authority before API publication
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+          TAG_NAME: ${{ github.ref_name }}
+          TAG_OID: ${{ needs.release-metadata.outputs.tag_oid }}
+        run: |
+          set -euo pipefail
+          scripts/verify-release-tag-authority \
+            "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
+
       - name: Promote accepted API image
         id: api
         shell: bash
@@ -547,6 +578,17 @@ jobs:
           [[ $(skopeo inspect --format '{{.Digest}}' \
             "docker://$API_IMAGE:$IMAGE_VERSION_TAG") == "$DIGEST" ]]
           printf 'digest=%s\n' "$DIGEST" >> "$GITHUB_OUTPUT"
+      - name: Revalidate release authority before worker publication
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+          TAG_NAME: ${{ github.ref_name }}
+          TAG_OID: ${{ needs.release-metadata.outputs.tag_oid }}
+        run: |
+          set -euo pipefail
+          scripts/verify-release-tag-authority \
+            "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
+
       - name: Promote accepted worker image
         id: worker
         shell: bash
@@ -583,6 +625,17 @@ jobs:
         run: |
           scripts/refuse-existing-image-version \
             "$RELEASE_VERSION" "$HERMES_AGENT_IMAGE"
+      - name: Revalidate release authority before Hermes publication
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+          TAG_NAME: ${{ github.ref_name }}
+          TAG_OID: ${{ needs.release-metadata.outputs.tag_oid }}
+        run: |
+          set -euo pipefail
+          scripts/verify-release-tag-authority \
+            "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
+
       - name: Build and push Hermes image
         id: hermes
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
@@ -712,6 +765,17 @@ jobs:
           oras_path=$(command -v oras)
           test -x "$oras_path"
           printf 'VONK_PLATFORM_ORAS_BIN=%s\n' "$oras_path" >> "$GITHUB_ENV"
+      - name: Revalidate release authority before bundle publication
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+          TAG_NAME: ${{ github.ref_name }}
+          TAG_OID: ${{ needs.release-metadata.outputs.tag_oid }}
+        run: |
+          set -euo pipefail
+          scripts/verify-release-tag-authority \
+            "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
+
       - name: Publish immutable deployment bundle
         shell: bash
         run: |
@@ -750,11 +814,27 @@ jobs:
       id-token: write
       attestations: write
     steps:
+      - name: Check out tagged authority tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - name: Download immutable host updater build
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: platform-build-${{ needs.release-metadata.outputs.version }}
           path: release-output
+      - name: Revalidate release authority before host updater attestation
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+          TAG_NAME: ${{ github.ref_name }}
+          TAG_OID: ${{ needs.release-metadata.outputs.tag_oid }}
+        run: |
+          set -euo pipefail
+          scripts/verify-release-tag-authority \
+            "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
+
       - name: Attest host updater provenance
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
@@ -784,6 +864,17 @@ jobs:
         with:
           name: platform-build-${{ needs.release-metadata.outputs.version }}
           path: release-output
+      - name: Revalidate release authority before platform publication
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+          TAG_NAME: ${{ github.ref_name }}
+          TAG_OID: ${{ needs.release-metadata.outputs.tag_oid }}
+        run: |
+          set -euo pipefail
+          scripts/verify-release-tag-authority \
+            "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
+
       - name: Publish immutable platform target
         shell: bash
         env:
@@ -849,6 +940,17 @@ jobs:
             "HERMES_AGENT_IMAGE=$HERMES_AGENT_IMAGE@$HERMES_AGENT_DIGEST" \
             > vonk-forge-images.env
           sha256sum vonk-forge-images.env > vonk-forge-images.env.sha256
+      - name: Revalidate release authority before GitHub Release
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+          TAG_NAME: ${{ github.ref_name }}
+          TAG_OID: ${{ needs.release-metadata.outputs.tag_oid }}
+        run: |
+          set -euo pipefail
+          scripts/verify-release-tag-authority \
+            "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
+
       - name: Create public GitHub Release
         shell: bash
         env:
@@ -910,6 +1012,7 @@ jobs:
       group: vonk-forge-production-alias-reconciliation
       cancel-in-progress: false
     permissions:
+      attestations: read
       contents: read
       packages: write
     steps:
@@ -918,140 +1021,272 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
       - name: Install Skopeo from Ubuntu
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends skopeo
+      - name: Select newest completed signed release
+        id: target
+        shell: bash
+        env:
+          API_IMAGE: ${{ needs.release-metadata.outputs.api_image }}
+          HERMES_IMAGE: ${{ needs.release-metadata.outputs.hermes_image }}
+          WORKER_IMAGE: ${{ needs.release-metadata.outputs.worker_image }}
+        run: |
+          set -euo pipefail
+          releases_json="$RUNNER_TEMP/completed-releases.json"
+          printf '[]\n' > "$releases_json"
+          for page in $(seq 1 10); do
+            page_json="$RUNNER_TEMP/completed-releases-$page.json"
+            merged_json="$RUNNER_TEMP/completed-releases-merged.json"
+            curl --fail --silent --show-error --location \
+              --proto '=https' --proto-redir '=https' --tlsv1.2 \
+              --header 'Accept: application/vnd.github+json' \
+              --header 'X-GitHub-Api-Version: 2022-11-28' \
+              "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases?per_page=100&page=$page" \
+              > "$page_json"
+            jq -e 'type == "array"' "$page_json" >/dev/null
+            jq -s '.[0] + .[1]' "$releases_json" "$page_json" \
+              > "$merged_json"
+            mv "$merged_json" "$releases_json"
+            [[ $(jq 'length' "$page_json") -eq 100 ]] || break
+          done
+          git fetch --force --no-tags origin \
+            +refs/heads/main:refs/remotes/origin/main
+          git fetch --force --tags origin
+          mapfile -t release_tags < <(
+            jq -r '.[] | select(
+              (.draft | not) and (.prerelease | not)
+            ) | .tag_name' "$releases_json" \
+              | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' \
+              | sort -Vr
+          )
+          target_tag=
+          for candidate in "${release_tags[@]}"; do
+            if git rev-parse --verify "refs/tags/$candidate^{commit}" \
+              >/dev/null 2>&1; then
+              target_tag=$candidate
+              break
+            fi
+          done
+          test -n "$target_tag"
+          tag_ref="refs/tags/$target_tag"
+          [[ $(git cat-file -t "$tag_ref") == tag ]]
+          allowed_signers="$RUNNER_TEMP/release-allowed-signers"
+          git show refs/remotes/origin/main:.github/release-allowed-signers \
+            > "$allowed_signers"
+          test -s "$allowed_signers"
+          git -c gpg.format=ssh \
+            -c gpg.ssh.allowedSignersFile="$allowed_signers" \
+            verify-tag "$tag_ref"
+          target_tag_oid=$(git rev-parse --verify "$tag_ref")
+          target_commit=$(git rev-parse --verify "$tag_ref^{commit}")
+          [[ "$target_tag_oid" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$target_commit" =~ ^[0-9a-f]{40}$ ]]
+          git merge-base --is-ancestor \
+            "$target_commit" refs/remotes/origin/main
+          scripts/verify-release-tag-authority \
+            "$target_tag" "$target_tag_oid" "$target_commit"
+
+          evidence_dir=$(mktemp -d \
+            "$RUNNER_TEMP/vonk-production-alias.XXXXXXXXXX")
+          trap 'rm -rf -- "$evidence_dir"' EXIT
+          for asset in vonk-forge-images.env vonk-forge-images.env.sha256; do
+            mapfile -t asset_urls < <(
+              jq -r --arg tag "$target_tag" --arg asset "$asset" '
+                [.[] | select(.tag_name == $tag)] as $releases
+                | if ($releases | length) == 1 then
+                    $releases[0].assets[] | select(.name == $asset)
+                    | .browser_download_url
+                  else empty end
+              ' "$releases_json"
+            )
+            [[ "${#asset_urls[@]}" -eq 1 ]]
+            curl --fail --silent --show-error --location \
+              --proto '=https' --proto-redir '=https' --tlsv1.2 \
+              "${asset_urls[0]}" --output "$evidence_dir/$asset"
+          done
+          mapfile -t checksum_lines \
+            < "$evidence_dir/vonk-forge-images.env.sha256"
+          [[ "${#checksum_lines[@]}" -eq 1 ]]
+          read -r expected_hash expected_name <<<"${checksum_lines[0]}"
+          [[ "$expected_hash" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$expected_name" == vonk-forge-images.env ]]
+          actual_hash=$(sha256sum "$evidence_dir/vonk-forge-images.env")
+          [[ "${actual_hash%% *}" == "$expected_hash" ]]
+          declare -A release_images=()
+          while IFS='=' read -r key value; do
+            [[ -n "$key" && -n "$value" ]]
+            [[ -z "${release_images[$key]+present}" ]]
+            case "$key" in
+              CONTROL_API_IMAGE|CONTROL_WORKER_IMAGE|HERMES_AGENT_IMAGE)
+                release_images["$key"]=$value
+                ;;
+              *)
+                exit 1
+                ;;
+            esac
+          done < "$evidence_dir/vonk-forge-images.env"
+          [[ "${#release_images[@]}" -eq 3 ]]
+          target_version=${target_tag#v}
+          api_reference=${release_images[CONTROL_API_IMAGE]}
+          worker_reference=${release_images[CONTROL_WORKER_IMAGE]}
+          hermes_reference=${release_images[HERMES_AGENT_IMAGE]}
+          [[ "$api_reference" == "$API_IMAGE:$target_tag@"sha256:* ]]
+          [[ "$worker_reference" == "$WORKER_IMAGE:$target_tag@"sha256:* ]]
+          [[ "$hermes_reference" == "$HERMES_IMAGE:$target_version@"sha256:* ]]
+          api_digest=${api_reference##*@}
+          worker_digest=${worker_reference##*@}
+          hermes_digest=${hermes_reference##*@}
+          [[ "$api_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$worker_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$hermes_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          printf '%s\n' \
+            "target_tag=$target_tag" \
+            "target_tag_oid=$target_tag_oid" \
+            "target_commit=$target_commit" \
+            "target_version=$target_version" \
+            "api_digest=$api_digest" \
+            "worker_digest=$worker_digest" \
+            "hermes_digest=$hermes_digest" \
+            >> "$GITHUB_OUTPUT"
+
+      - name: Revalidate selected authority before evidence credentials
+        shell: bash
+        env:
+          TARGET_COMMIT: ${{ steps.target.outputs.target_commit }}
+          TARGET_TAG: ${{ steps.target.outputs.target_tag }}
+          TARGET_TAG_OID: ${{ steps.target.outputs.target_tag_oid }}
+        run: |
+          set -euo pipefail
+          scripts/verify-release-tag-authority \
+            "$TARGET_TAG" "$TARGET_TAG_OID" "$TARGET_COMMIT"
+
+      - name: Bind release digests to selected source revision and evidence
+        shell: bash
+        env:
+          API_DIGEST: ${{ steps.target.outputs.api_digest }}
+          API_IMAGE: ${{ needs.release-metadata.outputs.api_image }}
+          GH_TOKEN: ${{ github.token }}
+          HERMES_DIGEST: ${{ steps.target.outputs.hermes_digest }}
+          HERMES_IMAGE: ${{ needs.release-metadata.outputs.hermes_image }}
+          TARGET_COMMIT: ${{ steps.target.outputs.target_commit }}
+          TARGET_TAG: ${{ steps.target.outputs.target_tag }}
+          TARGET_VERSION: ${{ steps.target.outputs.target_version }}
+          WORKER_DIGEST: ${{ steps.target.outputs.worker_digest }}
+          WORKER_IMAGE: ${{ needs.release-metadata.outputs.worker_image }}
+        run: |
+          set -euo pipefail
+          for role in api worker hermes; do
+            case "$role" in
+              api)
+                image=$API_IMAGE; digest=$API_DIGEST; tag=$TARGET_TAG
+                ;;
+              worker)
+                image=$WORKER_IMAGE; digest=$WORKER_DIGEST; tag=$TARGET_TAG
+                ;;
+              hermes)
+                image=$HERMES_IMAGE; digest=$HERMES_DIGEST; tag=$TARGET_VERSION
+                ;;
+            esac
+            [[ $(skopeo inspect --format '{{.Digest}}' \
+              "docker://$image:$tag") == "$digest" ]]
+            skopeo inspect --config "docker://$image@$digest" \
+              | jq -e --arg revision "$TARGET_COMMIT" \
+                '.config.Labels["org.opencontainers.image.revision"] == $revision' \
+                >/dev/null
+            docker buildx imagetools inspect "$image@$digest" \
+              --format '{{ json .Provenance }}' \
+              | jq -e --arg revision "$TARGET_COMMIT" \
+                '([.. | strings | select(. == $revision)] | length > 0)' \
+                >/dev/null
+            if [[ "$role" != hermes ]]; then
+              gh attestation verify "oci://$image@$digest" \
+                --repo "$GITHUB_REPOSITORY" \
+                --signer-workflow dev-images.yml \
+                --source-digest "$TARGET_COMMIT" \
+                --source-ref refs/heads/main >/dev/null
+            fi
+          done
+
+      - name: Revalidate selected authority before registry authentication
+        shell: bash
+        env:
+          TARGET_COMMIT: ${{ steps.target.outputs.target_commit }}
+          TARGET_TAG: ${{ steps.target.outputs.target_tag }}
+          TARGET_TAG_OID: ${{ steps.target.outputs.target_tag_oid }}
+        run: |
+          set -euo pipefail
+          scripts/verify-release-tag-authority \
+            "$TARGET_TAG" "$TARGET_TAG_OID" "$TARGET_COMMIT"
+
       - name: Log in to GHCR
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Reconcile the newest completed production release
         shell: bash
         env:
+          API_DIGEST: ${{ steps.target.outputs.api_digest }}
           API_IMAGE: ${{ needs.release-metadata.outputs.api_image }}
-          GH_TOKEN: ${{ github.token }}
+          HERMES_DIGEST: ${{ steps.target.outputs.hermes_digest }}
           HERMES_IMAGE: ${{ needs.release-metadata.outputs.hermes_image }}
           LATEST_ALIAS: ${{ needs.release-metadata.outputs.latest_alias }}
+          TARGET_COMMIT: ${{ steps.target.outputs.target_commit }}
+          TARGET_TAG: ${{ steps.target.outputs.target_tag }}
+          TARGET_TAG_OID: ${{ steps.target.outputs.target_tag_oid }}
+          TARGET_VERSION: ${{ steps.target.outputs.target_version }}
+          WORKER_DIGEST: ${{ steps.target.outputs.worker_digest }}
           WORKER_IMAGE: ${{ needs.release-metadata.outputs.worker_image }}
         run: |
           set -euo pipefail
-          select_newest_completed_release() {
-            local candidate releases_json
-            local -a release_tags
-            releases_json=$(gh release list \
-              --repo "$GITHUB_REPOSITORY" \
-              --limit 1000 \
-              --json tagName,isDraft,isPrerelease)
-            mapfile -t release_tags < <(
-              jq -r '.[] | select(
-                (.isDraft | not) and (.isPrerelease | not)
-              ) | .tagName' <<<"$releases_json" \
-                | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' \
-                | sort -Vr
-            )
-            for candidate in "${release_tags[@]}"; do
-              if git rev-parse --verify "refs/tags/$candidate^{commit}" \
-                >/dev/null 2>&1; then
-                printf '%s\n' "$candidate"
-                return 0
-              fi
-            done
-            return 1
-          }
-          verify_release_tag() {
-            local target_tag=$1 target_commit
-            local allowed_signers="$RUNNER_TEMP/release-allowed-signers"
-            [[ $(git cat-file -t "refs/tags/$target_tag") == tag ]]
-            git show refs/remotes/origin/main:.github/release-allowed-signers \
-              > "$allowed_signers"
-            test -s "$allowed_signers"
-            git -c gpg.format=ssh \
-              -c gpg.ssh.allowedSignersFile="$allowed_signers" \
-              verify-tag "refs/tags/$target_tag"
-            target_commit=$(git rev-list -n 1 "refs/tags/$target_tag")
-            git merge-base --is-ancestor \
-              "$target_commit" refs/remotes/origin/main
-          }
-          load_release_digests() {
-            local target_tag=$1 target_version=${1#v}
-            local evidence_dir checksum_line expected_hash expected_name
-            local actual_hash key value
-            local -a checksum_lines
-            declare -A release_images=()
-            evidence_dir=$(mktemp -d \
-              "$RUNNER_TEMP/vonk-production-alias.XXXXXXXXXX")
-            gh release download "$target_tag" \
-              --repo "$GITHUB_REPOSITORY" \
-              --dir "$evidence_dir" \
-              --pattern vonk-forge-images.env \
-              --pattern vonk-forge-images.env.sha256
-            mapfile -t checksum_lines \
-              < "$evidence_dir/vonk-forge-images.env.sha256"
-            [[ "${#checksum_lines[@]}" -eq 1 ]]
-            checksum_line=${checksum_lines[0]}
-            read -r expected_hash expected_name \
-              <<<"$checksum_line"
-            [[ "$expected_hash" =~ ^[0-9a-f]{64}$ ]]
-            [[ "$expected_name" == vonk-forge-images.env ]]
-            actual_hash=$(sha256sum "$evidence_dir/vonk-forge-images.env")
-            [[ "${actual_hash%% *}" == "$expected_hash" ]]
-            while IFS='=' read -r key value; do
-              [[ -n "$key" && -n "$value" ]]
-              [[ -z "${release_images[$key]+present}" ]]
-              case "$key" in
-                CONTROL_API_IMAGE|CONTROL_WORKER_IMAGE|HERMES_AGENT_IMAGE)
-                  release_images["$key"]=$value
-                  ;;
-                *)
-                  echo "unexpected release image key: $key" >&2
-                  return 1
-                  ;;
-              esac
-            done < "$evidence_dir/vonk-forge-images.env"
-            [[ "${#release_images[@]}" -eq 3 ]]
-            api_reference=${release_images[CONTROL_API_IMAGE]}
-            worker_reference=${release_images[CONTROL_WORKER_IMAGE]}
-            hermes_reference=${release_images[HERMES_AGENT_IMAGE]}
-            [[ "$api_reference" == "$API_IMAGE:$target_tag@"sha256:* ]]
-            [[ "$worker_reference" == "$WORKER_IMAGE:$target_tag@"sha256:* ]]
-            [[ "$hermes_reference" == "$HERMES_IMAGE:$target_version@"sha256:* ]]
-            api_digest=${api_reference##*@}
-            worker_digest=${worker_reference##*@}
-            hermes_digest=${hermes_reference##*@}
-            [[ "$api_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-            [[ "$worker_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-            [[ "$hermes_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-            rm -rf -- "$evidence_dir"
-          }
-          for attempt in 1 2 3; do
-            git fetch --force --no-tags origin \
-              +refs/heads/main:refs/remotes/origin/main
-            git fetch --force --tags origin
-            target_tag=$(select_newest_completed_release)
-            verify_release_tag "$target_tag"
-            target_version=${target_tag#v}
-            load_release_digests "$target_tag"
-            [[ $(skopeo inspect --format '{{.Digest}}' \
-              "docker://$API_IMAGE:$target_tag") == "$api_digest" ]]
-            [[ $(skopeo inspect --format '{{.Digest}}' \
-              "docker://$WORKER_IMAGE:$target_tag") == "$worker_digest" ]]
-            [[ $(skopeo inspect --format '{{.Digest}}' \
-              "docker://$HERMES_IMAGE:$target_version") == "$hermes_digest" ]]
-            scripts/promote-image-aliases \
-              "$API_IMAGE" "$api_digest" \
-              "$WORKER_IMAGE" "$worker_digest" "$LATEST_ALIAS" \
-              "$HERMES_IMAGE" "$hermes_digest"
-            git fetch --force --tags origin
-            observed_tag=$(select_newest_completed_release)
-            [[ "$observed_tag" == "$target_tag" ]] && exit 0
+          scripts/verify-release-tag-authority \
+            "$TARGET_TAG" "$TARGET_TAG_OID" "$TARGET_COMMIT"
+          [[ $(skopeo inspect --format '{{.Digest}}' \
+            "docker://$API_IMAGE:$TARGET_TAG") == "$API_DIGEST" ]]
+          [[ $(skopeo inspect --format '{{.Digest}}' \
+            "docker://$WORKER_IMAGE:$TARGET_TAG") == "$WORKER_DIGEST" ]]
+          [[ $(skopeo inspect --format '{{.Digest}}' \
+            "docker://$HERMES_IMAGE:$TARGET_VERSION") == "$HERMES_DIGEST" ]]
+          scripts/promote-image-aliases \
+            "$API_IMAGE" "$API_DIGEST" \
+            "$WORKER_IMAGE" "$WORKER_DIGEST" "$LATEST_ALIAS" \
+            "$HERMES_IMAGE" "$HERMES_DIGEST"
+          scripts/verify-release-tag-authority \
+            "$TARGET_TAG" "$TARGET_TAG_OID" "$TARGET_COMMIT"
+          observed_releases="$RUNNER_TEMP/observed-releases.json"
+          printf '[]\n' > "$observed_releases"
+          for page in $(seq 1 10); do
+            page_json="$RUNNER_TEMP/observed-releases-$page.json"
+            merged_json="$RUNNER_TEMP/observed-releases-merged.json"
+            curl --fail --silent --show-error --location \
+              --proto '=https' --proto-redir '=https' --tlsv1.2 \
+              --header 'Accept: application/vnd.github+json' \
+              --header 'X-GitHub-Api-Version: 2022-11-28' \
+              "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases?per_page=100&page=$page" \
+              > "$page_json"
+            jq -e 'type == "array"' "$page_json" >/dev/null
+            jq -s '.[0] + .[1]' "$observed_releases" "$page_json" \
+              > "$merged_json"
+            mv "$merged_json" "$observed_releases"
+            [[ $(jq 'length' "$page_json") -eq 100 ]] || break
           done
-          echo "production release tags did not stabilize" >&2
-          exit 1
+          mapfile -t observed_tags < <(
+            jq -r '.[] | select(
+              (.draft | not) and (.prerelease | not)
+            ) | .tag_name' "$observed_releases" \
+              | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' \
+              | sort -Vr
+          )
+          observed_tag=${observed_tags[0]:-}
+          test "$observed_tag" = "$TARGET_TAG"
 
   publish-apt:
     name: Publish the verified agent package to apt
@@ -1065,5 +1300,7 @@ jobs:
       artifact_name: ${{ needs.build-agent-package.outputs.artifact_name }}
       environment: apt-release
       source_sha: ${{ github.sha }}
+      tag_name: ${{ github.ref_name }}
+      tag_oid: ${{ needs.release-metadata.outputs.tag_oid }}
     permissions:
       contents: read

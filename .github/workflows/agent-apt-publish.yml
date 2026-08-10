@@ -21,6 +21,12 @@ on:
       source_sha:
         required: true
         type: string
+      tag_name:
+        required: true
+        type: string
+      tag_oid:
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -118,6 +124,8 @@ jobs:
           CALLER_SHA: ${{ github.sha }}
           CHANNEL: ${{ inputs.channel }}
           SOURCE_SHA: ${{ inputs.source_sha }}
+          TAG_NAME: ${{ inputs.tag_name }}
+          TAG_OID: ${{ inputs.tag_oid }}
         run: |
           set -euo pipefail
           [[ "$CALLER_SHA" =~ ^[0-9a-f]{40}$ ]]
@@ -125,6 +133,7 @@ jobs:
           test "$SOURCE_SHA" = "$CALLER_SHA"
           case "$CHANNEL" in
             dev)
+              test -z "$TAG_NAME" && test -z "$TAG_OID"
               test "$GITHUB_REF" = "refs/heads/main"
               git fetch --no-tags --prune origin \
                 +refs/heads/main:refs/remotes/origin/main
@@ -132,6 +141,8 @@ jobs:
               test "$SOURCE_SHA" = "$main_sha"
               ;;
             stable)
+              scripts/verify-release-tag-authority \
+                "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
               ;;
             *)
               echo "unsupported agent apt channel" >&2
@@ -161,6 +172,37 @@ jobs:
           scripts/agent-apt-state prepare \
             --work-dir "$RUNNER_TEMP/agent-apt-publication" \
             >> "$GITHUB_OUTPUT"
+
+      - name: Revalidate source before apt signing key
+        shell: bash
+        env:
+          CALLER_SHA: ${{ github.sha }}
+          CHANNEL: ${{ inputs.channel }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          TAG_NAME: ${{ inputs.tag_name }}
+          TAG_OID: ${{ inputs.tag_oid }}
+        run: |
+          set -euo pipefail
+          [[ "$CALLER_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$SOURCE_SHA" = "$CALLER_SHA"
+          case "$CHANNEL" in
+            dev)
+              test -z "$TAG_NAME" && test -z "$TAG_OID"
+              test "$GITHUB_REF" = refs/heads/main
+              git fetch --force --no-tags origin \
+                +refs/heads/main:refs/remotes/origin/main
+              test "$SOURCE_SHA" = \
+                "$(git rev-parse --verify refs/remotes/origin/main^{commit})"
+              ;;
+            stable)
+              scripts/verify-release-tag-authority \
+                "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
+              ;;
+            *)
+              exit 64
+              ;;
+          esac
 
       - name: Materialize and verify apt signing key
         if: steps.state.outputs.needs_generation == 'true'
@@ -265,6 +307,37 @@ jobs:
           scripts/agent-apt-state bundle \
             --work-dir "$RUNNER_TEMP/agent-apt-publication"
 
+      - name: Revalidate source before apt state commit
+        shell: bash
+        env:
+          CALLER_SHA: ${{ github.sha }}
+          CHANNEL: ${{ inputs.channel }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          TAG_NAME: ${{ inputs.tag_name }}
+          TAG_OID: ${{ inputs.tag_oid }}
+        run: |
+          set -euo pipefail
+          [[ "$CALLER_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$SOURCE_SHA" = "$CALLER_SHA"
+          case "$CHANNEL" in
+            dev)
+              test -z "$TAG_NAME" && test -z "$TAG_OID"
+              test "$GITHUB_REF" = refs/heads/main
+              git fetch --force --no-tags origin \
+                +refs/heads/main:refs/remotes/origin/main
+              test "$SOURCE_SHA" = \
+                "$(git rev-parse --verify refs/remotes/origin/main^{commit})"
+              ;;
+            stable)
+              scripts/verify-release-tag-authority \
+                "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
+              ;;
+            *)
+              exit 64
+              ;;
+          esac
+
       - name: Commit immutable publication manifest
         shell: bash
         env:
@@ -285,6 +358,37 @@ jobs:
           set -euo pipefail
           scripts/agent-apt-state commit \
             --work-dir "$RUNNER_TEMP/agent-apt-publication"
+
+      - name: Revalidate source before apt public commit
+        shell: bash
+        env:
+          CALLER_SHA: ${{ github.sha }}
+          CHANNEL: ${{ inputs.channel }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          TAG_NAME: ${{ inputs.tag_name }}
+          TAG_OID: ${{ inputs.tag_oid }}
+        run: |
+          set -euo pipefail
+          [[ "$CALLER_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$SOURCE_SHA" = "$CALLER_SHA"
+          case "$CHANNEL" in
+            dev)
+              test -z "$TAG_NAME" && test -z "$TAG_OID"
+              test "$GITHUB_REF" = refs/heads/main
+              git fetch --force --no-tags origin \
+                +refs/heads/main:refs/remotes/origin/main
+              test "$SOURCE_SHA" = \
+                "$(git rev-parse --verify refs/remotes/origin/main^{commit})"
+              ;;
+            stable)
+              scripts/verify-release-tag-authority \
+                "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
+              ;;
+            *)
+              exit 64
+              ;;
+          esac
 
       - name: Publish exact committed public tree and latest pointer
         shell: bash

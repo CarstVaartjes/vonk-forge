@@ -119,6 +119,66 @@ def test_release_tag_is_ssh_signed_trusted_and_reachable_from_main() -> None:
     assert metadata.index("Verify signed accepted release tag") < metadata.index(
         "Validate release metadata"
     )
+    assert "tag_oid: ${{ steps.authority.outputs.tag_oid }}" in metadata
+    assert 'printf \'tag_oid=%s\\n\'' in verify
+
+
+def test_immutable_tag_authority_is_threaded_into_reusable_publishers() -> None:
+    metadata = job("release-metadata")
+    package = job("build-agent-package")
+    apt = job("publish-apt")
+
+    assert "tag_oid: ${{ steps.authority.outputs.tag_oid }}" in metadata
+    for caller in (package, apt):
+        assert "source_sha: ${{ github.sha }}" in caller
+        assert "tag_name: ${{ github.ref_name }}" in caller
+        assert "tag_oid: ${{ needs.release-metadata.outputs.tag_oid }}" in caller
+
+
+def test_each_protected_production_mutation_revalidates_exact_tag_authority() -> None:
+    boundaries = {
+        "publish-images": (
+            "Log in to GHCR",
+            "Promote accepted API image",
+            "Promote accepted worker image",
+            "Build and push Hermes image",
+            "Publish immutable deployment bundle",
+        ),
+        "attest-host-updater": ("Attest host updater provenance",),
+        "publish-platform-target": ("Publish immutable platform target",),
+        "release-manifest": ("Create public GitHub Release",),
+    }
+    for job_name, mutations in boundaries.items():
+        job_text = job(job_name)
+        for mutation in mutations:
+            mutation_index = job_text.index(f"- name: {mutation}")
+            prior = job_text[:mutation_index]
+            authority_index = prior.rfind("scripts/verify-release-tag-authority")
+            assert authority_index >= 0, f"{job_name}: {mutation} lacks revalidation"
+            authority_step_start = prior.rfind("- name:", 0, authority_index)
+            authority_step = prior[authority_step_start:]
+            assert "needs.release-metadata.outputs.tag_oid" in authority_step
+            assert "github.sha" in authority_step
+
+
+def test_alias_reconciliation_binds_selected_release_to_signed_tag_revision() -> None:
+    alias = job("advance-production-aliases")
+
+    assert "attestations: read" in alias
+    assert "tag_oid" in alias and "target_commit" in alias
+    assert "scripts/verify-release-tag-authority" in alias
+    assert alias.index("scripts/verify-release-tag-authority") < alias.index(
+        "Log in to GHCR"
+    )
+    assert 'org.opencontainers.image.revision' in alias
+    assert "docker buildx imagetools inspect" in alias
+    assert ".Provenance" in alias
+    assert "gh attestation verify" in alias
+    assert '--source-digest "$TARGET_COMMIT"' in alias
+    assert "scripts/promote-image-aliases" in alias
+    promotion = alias.index("scripts/promote-image-aliases")
+    assert alias.rfind("scripts/verify-release-tag-authority", 0, promotion) >= 0
+    assert alias.find("scripts/verify-release-tag-authority", promotion) >= 0
 
 
 def test_release_signer_allowlist_contains_only_public_ssh_authority() -> None:
@@ -361,7 +421,10 @@ def test_publisher_needs_every_ci_gate_and_alone_can_write_packages() -> None:
         assert "packages: write" not in job(read_only_job)
         assert "contents: write" not in job(read_only_job)
     alias = job("advance-production-aliases")
-    assert "permissions:\n      contents: read\n      packages: write" in alias
+    assert (
+        "permissions:\n      attestations: read\n      contents: read\n"
+        "      packages: write" in alias
+    )
     assert workflow().count("packages: write") == 2
     assert workflow().count("contents: write") == 1
 
@@ -547,29 +610,29 @@ def test_latest_alias_advances_only_after_release_evidence() -> None:
     assert "cancel-in-progress: false" in alias
     assert "scripts/promote-image-aliases" in alias
     assert "sort -V" in alias
-    assert '"$API_IMAGE" "$api_digest"' in alias
-    assert '"$WORKER_IMAGE" "$worker_digest" "$LATEST_ALIAS"' in alias
-    assert '"$HERMES_IMAGE" "$hermes_digest"' in alias
+    assert '"$API_IMAGE" "$API_DIGEST"' in alias
+    assert '"$WORKER_IMAGE" "$WORKER_DIGEST" "$LATEST_ALIAS"' in alias
+    assert '"$HERMES_IMAGE" "$HERMES_DIGEST"' in alias
     assert alias.index("Log in to GHCR") < alias.index(
         "Reconcile the newest completed production release"
     )
-    assert "gh release list" in alias
-    assert "select_newest_completed_release" in alias
+    assert "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases?per_page=100" in alias
+    assert "Select newest completed signed release" in alias
     assert "mapfile -t release_tags" in alias
     assert "for candidate in \"${release_tags[@]}\"" in alias
     assert "newer production tag is not complete" not in alias
-    assert "gh release download \"$target_tag\"" in alias
+    assert "browser_download_url" in alias
     assert "vonk-forge-images.env.sha256" in alias
     assert "sha256sum" in alias
     assert "git -c gpg.format=ssh" in alias
-    assert "verify-tag \"refs/tags/$target_tag\"" in alias
+    assert 'verify-tag "$tag_ref"' in alias
     assert "git merge-base --is-ancestor" in alias
     assert "CONTROL_API_IMAGE" in alias
     assert "CONTROL_WORKER_IMAGE" in alias
     assert "HERMES_AGENT_IMAGE" in alias
-    assert '"docker://$API_IMAGE:$target_tag"' in alias
-    assert '"docker://$WORKER_IMAGE:$target_tag"' in alias
-    assert '"docker://$HERMES_IMAGE:$target_version"' in alias
+    assert '"docker://$API_IMAGE:$TARGET_TAG"' in alias
+    assert '"docker://$WORKER_IMAGE:$TARGET_TAG"' in alias
+    assert '"docker://$HERMES_IMAGE:$TARGET_VERSION"' in alias
     assert ":dev" not in alias
 
 

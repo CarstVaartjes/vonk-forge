@@ -210,6 +210,9 @@ def test_reusable_agent_package_build_has_a_strict_call_boundary() -> None:
         "package",
         "artifact_name",
         "environment",
+        "source_sha",
+        "tag_name",
+        "tag_oid",
     ):
         assert f"      {input_name}:\n        required: true\n        type: string" in text
     assert_exact_reusable_output_mappings(text)
@@ -276,9 +279,16 @@ def test_reusable_agent_package_build_validates_authority_before_key_use() -> No
     text = PACKAGE_WORKFLOW.read_text()
 
     validation = text.index("Validate package metadata and environment")
+    authority = text.index("Revalidate protected package source authority")
     key = text.index("Materialize and verify protected agent key")
     build = text.index("Build package twice reproducibly")
-    assert validation < key < build
+    assert validation < authority < key < build
+    authority_step = package_step("Revalidate protected package source authority")
+    assert "scripts/verify-release-tag-authority" in authority_step
+    assert "+refs/heads/main:refs/remotes/origin/main" in authority_step
+    assert "SOURCE_SHA: ${{ inputs.source_sha }}" in authority_step
+    assert "TAG_NAME: ${{ inputs.tag_name }}" in authority_step
+    assert "TAG_OID: ${{ inputs.tag_oid }}" in authority_step
     assert "dev:agent-development" in text
     assert "stable:agent-release" in text
     assert "scripts/agent-package-metadata" in text
@@ -470,6 +480,8 @@ def test_development_agent_workflow_calls_both_reusable_channel_boundaries() -> 
     assert "uses: ./.github/workflows/agent-apt-publish.yml" in text
     assert "environment: apt-development" in text
     assert "source_sha: ${{ github.sha }}" in text
+    assert "tag_name: ''" in text
+    assert "tag_oid: ''" in text
     assert "needs: [package-metadata, build-test-sign]" in text
     assert "artifact_name: ${{ needs.build-test-sign.outputs.artifact_name }}" in text
     assert "secrets:" not in text
@@ -493,6 +505,8 @@ def test_reusable_apt_publisher_has_a_strict_channel_boundary() -> None:
         "artifact_name",
         "environment",
         "source_sha",
+        "tag_name",
+        "tag_oid",
     ):
         assert f"      {input_name}:\n        required: true\n        type: string" in text
     for forbidden in ("repository:", "distribution:", "keyring:", "state_prefix:"):
@@ -557,6 +571,37 @@ def test_reusable_apt_publisher_rechecks_dev_authority_inside_protected_job() ->
         "R2_SECRET_ACCESS_KEY",
     ):
         assert forbidden not in authority
+
+
+def test_reusable_publishers_revalidate_stable_authority_at_mutation_boundaries() -> None:
+    package_text = PACKAGE_WORKFLOW.read_text()
+    apt_text = APT_WORKFLOW.read_text()
+
+    for mutation in (
+        "Materialize and verify protected agent key",
+        "Create and verify keyless package signature",
+        "Attest package provenance",
+        "Attest package SBOM",
+        "Upload exact package release set",
+    ):
+        mutation_index = package_text.index(f"- name: {mutation}")
+        prior = package_text[:mutation_index]
+        assert prior.rfind("scripts/verify-release-tag-authority") >= 0
+
+    for mutation in (
+        "Prepare committed or recoverable private state",
+        "Materialize and verify apt signing key",
+        "Commit immutable publication manifest",
+        "Publish exact committed public tree and latest pointer",
+    ):
+        mutation_index = apt_text.index(f"- name: {mutation}")
+        prior = apt_text[:mutation_index]
+        assert prior.rfind("scripts/verify-release-tag-authority") >= 0
+
+    for text in (package_text, apt_text):
+        assert "SOURCE_SHA: ${{ inputs.source_sha }}" in text
+        assert "TAG_NAME: ${{ inputs.tag_name }}" in text
+        assert "TAG_OID: ${{ inputs.tag_oid }}" in text
 
 
 def test_reusable_apt_publisher_restores_only_authenticated_private_state() -> None:

@@ -63,6 +63,9 @@ jobs:
       package: ${{ needs.package-metadata.outputs.package }}
       artifact_name: ${{ needs.package-metadata.outputs.artifact_name }}
       environment: agent-development
+      source_sha: ${{ github.sha }}
+      tag_name: ''
+      tag_oid: ''
     permissions:
       artifact-metadata: write
       attestations: write
@@ -80,5 +83,7 @@ jobs:
       artifact_name: ${{ needs.build-test-sign.outputs.artifact_name }}
       environment: apt-development
       source_sha: ${{ github.sha }}
+      tag_name: ''
+      tag_oid: ''
     permissions:
       contents: read
