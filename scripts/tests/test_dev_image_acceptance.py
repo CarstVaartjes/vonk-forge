@@ -12,6 +12,7 @@ TEMPLATE = ROOT / "deploy/compose/compose.dev.images.yaml"
 API_IMAGE = "vonk-forge-api:dev-local"
 WORKER_IMAGE = "vonk-forge-worker:dev-local"
 LOCAL_WRAPPER = ROOT / "scripts/dev-compose"
+SOURCE_REPOSITORY = "https://github.com/CarstVaartjes/vonk-forge"
 
 
 def _fixture_repository(tmp_path: Path) -> Path:
@@ -80,13 +81,17 @@ def _config_capturing_docker(tmp_path: Path) -> tuple[Path, Path]:
         "  exit 0\n"
         "fi\n"
         "if [[ \"$1\" == image ]]; then\n"
-        "  printf '%s\\n' '[{\"Config\":{\"User\":\"10001:10001\",\"Env\":[],\"Labels\":{},\"Entrypoint\":[],\"Cmd\":[]}}]'\n"
+        "  printf '[{\"Config\":{\"User\":\"10001:10001\",\"Env\":[],\"Labels\":{\"org.opencontainers.image.revision\":\"%s\",\"org.opencontainers.image.source\":\"%s\"},\"Entrypoint\":[],\"Cmd\":[]}}]\\n' \"$VONK_TEST_COMMIT\" \"$VONK_TEST_SOURCE_REPOSITORY\"\n"
         "  exit 0\n"
         "fi\n"
         "if [[ \"$1\" == history ]]; then exit 0; fi\n"
         "if [[ \"$1\" == create ]]; then printf '%s\\n' scanner-container; exit 0; fi\n"
         "if [[ \"$1\" == export ]]; then tar -cf - --files-from /dev/null; exit 0; fi\n"
         "if [[ \"$1\" == rm || \"$1\" == ps ]]; then exit 0; fi\n"
+        "if [[ \"$1\" == run && \" $* \" == *' --network=none '* ]]; then\n"
+        "  printf '{\"image_role\":\"%s\",\"source_commit\":\"%s\",\"source_repository\":\"%s\"}\\n' \"${@: -3:1}\" \"${@: -2:1}\" \"${@: -1}\"\n"
+        "  exit 0\n"
+        "fi\n"
         "if [[ \"$1\" == run ]]; then printf '%s\\n' '{}'; exit 0; fi\n"
         "if [[ \"$1\" == compose && \" $* \" == *' config '* ]]; then\n"
         "  number=0\n"
@@ -123,13 +128,17 @@ def _failing_up_docker(tmp_path: Path) -> tuple[Path, Path]:
         "  exit 0\n"
         "fi\n"
         "if [[ \"$1\" == image ]]; then\n"
-        "  printf '%s\\n' '[{\"Config\":{\"User\":\"10001:10001\",\"Env\":[],\"Labels\":{},\"Entrypoint\":[],\"Cmd\":[]}}]'\n"
+        "  printf '[{\"Config\":{\"User\":\"10001:10001\",\"Env\":[],\"Labels\":{\"org.opencontainers.image.revision\":\"%s\",\"org.opencontainers.image.source\":\"%s\"},\"Entrypoint\":[],\"Cmd\":[]}}]\\n' \"$VONK_TEST_COMMIT\" \"$VONK_TEST_SOURCE_REPOSITORY\"\n"
         "  exit 0\n"
         "fi\n"
         "if [[ \"$1\" == history ]]; then exit 0; fi\n"
         "if [[ \"$1\" == create ]]; then printf '%s\\n' scanner-container; exit 0; fi\n"
         "if [[ \"$1\" == export ]]; then tar -cf - --files-from /dev/null; exit 0; fi\n"
         "if [[ \"$1\" == rm || \"$1\" == ps ]]; then exit 0; fi\n"
+        "if [[ \"$1\" == run && \" $* \" == *' --network=none '* ]]; then\n"
+        "  printf '{\"image_role\":\"%s\",\"source_commit\":\"%s\",\"source_repository\":\"%s\"}\\n' \"${@: -3:1}\" \"${@: -2:1}\" \"${@: -1}\"\n"
+        "  exit 0\n"
+        "fi\n"
         "if [[ \"$1\" == run ]]; then printf '%s\\n' '{}'; exit 0; fi\n"
         "if [[ \"$1\" == compose && \" $* \" == *' logs '* ]]; then\n"
         "  printf '%s\\n' \\\n"
@@ -164,13 +173,17 @@ def _successful_lifecycle_tools(tmp_path: Path) -> tuple[Path, Path]:
         "  exit 0\n"
         "fi\n"
         "if [[ \"$1\" == image ]]; then\n"
-        "  printf '%s\\n' '[{\"Config\":{\"User\":\"10001:10001\",\"Env\":[],\"Labels\":{},\"Entrypoint\":[],\"Cmd\":[]}}]'\n"
+        "  printf '[{\"Config\":{\"User\":\"10001:10001\",\"Env\":[],\"Labels\":{\"org.opencontainers.image.revision\":\"%s\",\"org.opencontainers.image.source\":\"%s\"},\"Entrypoint\":[],\"Cmd\":[]}}]\\n' \"$VONK_TEST_COMMIT\" \"$VONK_TEST_SOURCE_REPOSITORY\"\n"
         "  exit 0\n"
         "fi\n"
         "if [[ \"$1\" == history ]]; then exit 0; fi\n"
         "if [[ \"$1\" == create ]]; then printf '%s\\n' scanner-container; exit 0; fi\n"
         "if [[ \"$1\" == export ]]; then tar -cf - --files-from /dev/null; exit 0; fi\n"
         "if [[ \"$1\" == rm ]]; then exit 0; fi\n"
+        "if [[ \"$1\" == run && \" $* \" == *' --network=none '* ]]; then\n"
+        "  printf '{\"image_role\":\"%s\",\"source_commit\":\"%s\",\"source_repository\":\"%s\"}\\n' \"${@: -3:1}\" \"${@: -2:1}\" \"${@: -1}\"\n"
+        "  exit 0\n"
+        "fi\n"
         "if [[ \"$1\" == run ]]; then printf '%s\\n' '{}'; exit 0; fi\n"
         "if [[ \"$1\" == ps ]]; then exit 0; fi\n"
         "if [[ \"$1\" == inspect && \" $* \" == *'{{json .Mounts}}'* ]]; then\n"
@@ -227,9 +240,15 @@ def _run(
     *arguments: str,
     extra_environment: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    commit = next(
+        (arguments[index + 1] for index, value in enumerate(arguments) if value == "--commit"),
+        "",
+    )
     environment = os.environ | {
         "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
         "VONK_TEST_DOCKER_LOG": str(log),
+        "VONK_TEST_COMMIT": commit,
+        "VONK_TEST_SOURCE_REPOSITORY": SOURCE_REPOSITORY,
     }
     if extra_environment:
         environment.update(extra_environment)
@@ -293,6 +312,109 @@ def test_rejects_a_commit_that_is_not_the_local_main_tip_before_calling_docker(
     assert result.returncode != 0
     assert "main" in result.stderr
     assert not log.exists()
+
+
+def test_rejects_feature_branch_code_even_when_supplied_commit_is_main(
+    tmp_path: Path,
+) -> None:
+    repository = _fixture_repository(tmp_path)
+    fake_bin, log = _fake_docker(tmp_path)
+    main_commit = _commit(repository)
+    subprocess.run(("git", "-C", str(repository), "checkout", "-qb", "feature"), check=True)
+    (repository / "feature.txt").write_text("feature source\n", encoding="utf-8")
+    subprocess.run(("git", "-C", str(repository), "add", "feature.txt"), check=True)
+    subprocess.run(("git", "-C", str(repository), "commit", "-qm", "feature source"), check=True)
+
+    result = _run(
+        repository,
+        fake_bin,
+        log,
+        "--api-image",
+        API_IMAGE,
+        "--worker-image",
+        WORKER_IMAGE,
+        "--commit",
+        main_commit,
+    )
+
+    assert result.returncode != 0
+    assert "HEAD" in result.stderr
+    assert not log.exists()
+
+
+def test_rejects_a_dirty_main_worktree_before_calling_docker(tmp_path: Path) -> None:
+    repository = _fixture_repository(tmp_path)
+    fake_bin, log = _fake_docker(tmp_path)
+    commit = _commit(repository)
+    (repository / "untracked.txt").write_text("dirty source\n", encoding="utf-8")
+
+    result = _run(
+        repository,
+        fake_bin,
+        log,
+        "--api-image",
+        API_IMAGE,
+        "--worker-image",
+        WORKER_IMAGE,
+        "--commit",
+        commit,
+    )
+
+    assert result.returncode != 0
+    assert "clean" in result.stderr
+    assert not log.exists()
+
+
+def test_scanner_receives_authoritative_commit_and_repository_before_lifecycle_fixtures(
+    tmp_path: Path,
+) -> None:
+    repository = _fixture_repository(tmp_path)
+    fake_bin, log = _fake_docker(tmp_path)
+    scanner_log = tmp_path / "scanner.log"
+    scanner = repository / "scripts/verify-dev-image-secrets"
+    scanner.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -eu\n"
+        "printf '%s\\n' \"$@\" > \"$VONK_TEST_SCANNER_LOG\"\n"
+        "exit 73\n",
+        encoding="utf-8",
+    )
+    scanner.chmod(0o755)
+    subprocess.run(("git", "-C", str(repository), "add", str(scanner)), check=True)
+    subprocess.run(("git", "-C", str(repository), "commit", "-qm", "scanner probe"), check=True)
+    commit = _commit(repository)
+
+    result = _run(
+        repository,
+        fake_bin,
+        log,
+        "--api-image",
+        API_IMAGE,
+        "--worker-image",
+        WORKER_IMAGE,
+        "--commit",
+        commit,
+        extra_environment={"VONK_TEST_SCANNER_LOG": str(scanner_log)},
+    )
+
+    assert result.returncode == 73
+    assert scanner_log.read_text(encoding="utf-8").splitlines() == [
+        "--expected-commit",
+        commit,
+        "--expected-repository",
+        SOURCE_REPOSITORY,
+        API_IMAGE,
+        WORKER_IMAGE,
+    ]
+    docker_commands = log.read_text(encoding="utf-8").splitlines()
+    assert docker_commands
+    assert any(" down " in f" {command} " for command in docker_commands)
+    assert not any("build-identity" in command for command in docker_commands)
+    assert not any(
+        action in f" {command} "
+        for command in docker_commands
+        for action in (" up ", " pull ", " exec ")
+    )
 
 
 def test_installs_cleanup_before_image_inspection_and_uses_unique_project_teardown(
@@ -605,7 +727,10 @@ def test_acceptance_runs_the_task_three_scanner_and_never_requests_image_mutatio
     text = SCRIPT.read_text(encoding="utf-8")
 
     assert 'readonly scanner="$repository_root/scripts/verify-dev-image-secrets"' in text
-    assert '"$scanner" "$api_image" "$worker_image"' in text
+    assert 'readonly expected_repository="https://github.com/CarstVaartjes/vonk-forge"' in text
+    assert '--expected-commit "$expected_commit"' in text
+    assert '--expected-repository "$expected_repository"' in text
+    assert '"$api_image" "$worker_image"' in text
     assert "compose up --wait --pull never" in text
     assert "compose pull --policy missing" in text
     assert "docker build" not in text

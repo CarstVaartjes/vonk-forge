@@ -8,6 +8,7 @@ umask 077
 readonly repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 readonly template="$repository_root/deploy/compose/compose.dev.images.yaml"
 readonly scanner="$repository_root/scripts/verify-dev-image-secrets"
+readonly expected_repository="https://github.com/CarstVaartjes/vonk-forge"
 readonly temporary_prefix="/tmp/vonk-forge-dev-acceptance."
 
 api_image=
@@ -80,6 +81,14 @@ validate_image() {
 validate_image "$api_image" api
 validate_image "$worker_image" worker
 
+worktree_status=$(git -C "$repository_root" status --porcelain=v1 --untracked-files=all) \
+  || die "repository worktree status is unavailable"
+[[ -z "$worktree_status" ]] \
+  || die "repository worktree must be clean for image acceptance"
+local_head=$(git -C "$repository_root" rev-parse --verify 'HEAD^{commit}') \
+  || die "repository HEAD is required for image acceptance"
+[[ "$expected_commit" == "$local_head" ]] \
+  || die "commit must equal repository HEAD for image acceptance"
 local_main=$(git -C "$repository_root" rev-parse --verify 'refs/heads/main^{commit}') \
   || die "local main branch is required for image acceptance"
 [[ "$expected_commit" == "$local_main" ]] \
@@ -270,13 +279,19 @@ activate_fixture_cohort() {
 # deliberately after all input/path validation, so invalid requests never
 # create or remove Docker resources.
 [[ -x "$scanner" ]] || die "development image scanner is unavailable"
-"$scanner" "$api_image" "$worker_image"
+"$scanner" \
+  --expected-commit "$expected_commit" \
+  --expected-repository "$expected_repository" \
+  "$api_image" "$worker_image"
 # Git runs inside dev-init as its isolated UID.  Give that UID ownership of
 # this disposable, acceptance-only bare origin without touching the checkout.
 docker run --rm --user 0:0 --volume "$origin_dir:/source-origin" \
   "$api_image" chown -R 65534:65534 /source-origin
 
 render_acceptance_compose
+# These A/B identities are graph lifecycle fixtures over the same loaded,
+# already-verified immutable binaries; they do not represent distinct image
+# binaries and never create a global image alias.
 write_fixture_identity api "$previous_commit" "$api_identity_a"
 write_fixture_identity worker "$previous_commit" "$worker_identity_a"
 write_fixture_identity api "$expected_commit" "$api_identity_b"
