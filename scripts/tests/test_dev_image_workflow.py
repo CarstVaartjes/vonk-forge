@@ -295,6 +295,37 @@ def test_postcondition_failure_restores_the_complete_prior_alias_set(
     tmp_path: Path,
 ) -> None:
     fake_bin, state, log = _fake_skopeo(tmp_path)
+    state.write_text(
+        json.dumps({"api": DIGEST_D, "worker": DIGEST_D, "hermes": DIGEST_D})
+        + "\n",
+        encoding="utf-8",
+    )
+    postcondition = fake_bin / "postcondition"
+    postcondition.write_text("#!/usr/bin/env bash\nexit 23\n", encoding="utf-8")
+    postcondition.chmod(0o755)
+
+    result = _promote_aliases(
+        fake_bin,
+        state,
+        log,
+        alias="latest",
+        include_hermes=True,
+        postcondition=(str(postcondition),),
+    )
+
+    assert result.returncode != 0
+    assert json.loads(state.read_text(encoding="utf-8")) == {
+        "api": DIGEST_D,
+        "worker": DIGEST_D,
+        "hermes": DIGEST_D,
+    }
+    assert "not advanced as a set" in result.stderr
+
+
+def test_initial_postcondition_failure_happens_before_any_alias_mutation(
+    tmp_path: Path,
+) -> None:
+    fake_bin, state, log = _fake_skopeo(tmp_path)
     postcondition = fake_bin / "postcondition"
     postcondition.write_text("#!/usr/bin/env bash\nexit 23\n", encoding="utf-8")
     postcondition.chmod(0o755)
@@ -310,7 +341,10 @@ def test_postcondition_failure_restores_the_complete_prior_alias_set(
 
     assert result.returncode != 0
     assert json.loads(state.read_text(encoding="utf-8")) == {}
-    assert "not advanced as a set" in result.stderr
+    assert not any(
+        line.startswith(("copy ", "delete "))
+        for line in log.read_text(encoding="utf-8").splitlines()
+    )
 
 
 def test_failed_first_publication_is_repairable_by_failed_job_rerun(
@@ -324,12 +358,13 @@ def test_failed_first_publication_is_repairable_by_failed_job_rerun(
     repaired = _promote_aliases(fake_bin, state, log)
 
     assert failed.returncode != 0
-    assert partial == {}
+    assert partial == {"api": DIGEST_A}
     assert repaired.returncode == 0, repaired.stderr
     assert json.loads(state.read_text(encoding="utf-8")) == {
         "api": DIGEST_A,
         "worker": DIGEST_B,
     }
+    assert "delete " not in log.read_text(encoding="utf-8")
 
 
 def test_workflow_is_main_only_publication_without_repository_secrets() -> None:
