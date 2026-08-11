@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import socket
@@ -17,11 +18,20 @@ from vonk_control.source_policy import enforce_build_source_policy
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures/recipes/dev-http-smoke"
 CONTEXT_ROOT = FIXTURE_ROOT / "context"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 EXPECTED_SOURCE_SHA256 = (
     "7a65752ee1a950b3b358c66ceaf2007d0eb824a7842d0a67a5b1e3726957eb80"
 )
 EXPECTED_RECIPE_SHA256 = (
-    "72f8215c7d4f58343a038b04e3abc65b44ab89eea7790b26c6c2e406682b5f43"
+    "11fca06a786d0a84d2b5fe34a2ae4423327f1b79e6a3096b93714e494130842a"
+)
+EXPECTED_ARTIFACT_SOURCE = (
+    "https://raw.githubusercontent.com/CarstVaartjes/vonk-forge/"
+    "8c03b33ebcef859fa9cecd715ec000b9dbc00f4a/"
+    "tests/fixtures/node-health/healthy/commands/hostname.txt"
+)
+EXPECTED_ARTIFACT_SHA256 = (
+    "8f9e3902c909d7698aac45b2d9195c4baea090ee35b11705f05ea10c856bd230"
 )
 EXPECTED_ARCHIVE_BYTES = 10240
 EXPECTED_TOTAL_BYTES = 2469
@@ -55,6 +65,26 @@ def fixture_recipe() -> dict[str, object]:
 
 def fixture_expected() -> dict[str, object]:
     return _read_json(FIXTURE_ROOT / "expected.json")
+
+
+def test_fixture_artifact_is_an_immutable_public_smoke_payload() -> None:
+    recipe = fixture_recipe()
+    artifact = recipe["artifacts"][0]
+    expected_bytes = (
+        PROJECT_ROOT / "tests/fixtures/node-health/healthy/commands/hostname.txt"
+    ).read_bytes()
+
+    assert artifact == {
+        "id": "fixture-contract",
+        "kind": "http.file",
+        "repository": EXPECTED_ARTIFACT_SOURCE,
+        "revision": f"sha256:{EXPECTED_ARTIFACT_SHA256}",
+        "download_bytes": len(expected_bytes),
+        "installed_bytes": len(expected_bytes),
+        "mount": {"target": "/models", "read_only": True},
+        "roles": ["entrypoint"],
+    }
+    assert hashlib.sha256(expected_bytes).hexdigest() == EXPECTED_ARTIFACT_SHA256
 
 
 def fixture_bundle():

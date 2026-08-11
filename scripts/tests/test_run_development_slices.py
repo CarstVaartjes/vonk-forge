@@ -42,7 +42,7 @@ NODE = "spk_0123456789abcdef0123456789abcdef"
 NODE_2 = "spk_fedcba9876543210fedcba9876543210"
 ADMIN_TOKEN = "admin-secret-marker"
 INFERENCE_TOKEN = "inference-secret-marker"
-RECIPE_DIGEST = "72f8215c7d4f58343a038b04e3abc65b44ab89eea7790b26c6c2e406682b5f43"
+RECIPE_DIGEST = "11fca06a786d0a84d2b5fe34a2ae4423327f1b79e6a3096b93714e494130842a"
 
 
 class SliceServer(ThreadingHTTPServer):

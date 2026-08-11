@@ -42,12 +42,12 @@
   "parameters": [],
   "artifacts": [
     {
-      "id": "weights",
+      "id": "fixture-contract",
       "kind": "http.file",
-      "repository": "https://example.invalid/dev-http-smoke/model.bin",
-      "revision": "0123456789abcdef0123456789abcdef01234567",
-      "download_bytes": 1,
-      "installed_bytes": 1,
+      "repository": "https://raw.githubusercontent.com/CarstVaartjes/vonk-forge/8c03b33ebcef859fa9cecd715ec000b9dbc00f4a/tests/fixtures/node-health/healthy/commands/hostname.txt",
+      "revision": "sha256:8f9e3902c909d7698aac45b2d9195c4baea090ee35b11705f05ea10c856bd230",
+      "download_bytes": 10,
+      "installed_bytes": 10,
       "mount": {
         "target": "/models",
         "read_only": true
@@ -118,12 +118,12 @@
           "count": 1,
           "endpoint_owner": true,
           "artifacts": [
-            "weights"
+            "fixture-contract"
           ],
           "resources": {
             "disk": {
               "image_bytes": 1048576,
-              "artifact_bytes": 1,
+              "artifact_bytes": 10,
               "staging_bytes": 1048576,
               "cache_bytes": 0,
               "rollback_bytes": 0,
