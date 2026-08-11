@@ -330,6 +330,17 @@ def _source_bundle(context: Path) -> tuple[bytes, str, int]:
     return stream.getvalue(), hashlib.sha256(canonical_manifest).hexdigest(), len(files)
 
 
+def _recipe_content_digest(document: dict[str, object]) -> str:
+    encoded = json.dumps(
+        document,
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 class Runner:
     def __init__(self, args: argparse.Namespace) -> None:
         self.args = args
@@ -355,6 +366,7 @@ class Runner:
             raise SliceError("recipe acceptance input is invalid") from error
         if not isinstance(self.recipe, dict) or not isinstance(self.expected, dict):
             raise SliceError("recipe acceptance input is invalid")
+        self.recipe_digest = _recipe_content_digest(self.recipe)
         self.slug = str(self.recipe.get("identity", {}).get("slug", ""))
         if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,62}", self.slug):
             raise SliceError("recipe slug is invalid")
@@ -509,6 +521,12 @@ class Runner:
             or not isinstance(fields["recipe_revision"], int)
         ):
             raise SliceError("recipe resolution response is invalid")
+        expected_source = self.recipe.get("build", {}).get("context", {}).get("sha256")
+        if (
+            fields["recipe_content_sha256"] != self.recipe_digest
+            or resolved.get("source_bundle_sha256") != expected_source
+        ):
+            raise SliceError("resolved recipe does not match acceptance input")
         self.complete("recipe-resolved", fields)
 
     def source_verified(self) -> None:

@@ -30,6 +30,7 @@ STATES = [
 NODE = "spk_0123456789abcdef0123456789abcdef"
 ADMIN_TOKEN = "admin-secret-marker"
 INFERENCE_TOKEN = "inference-secret-marker"
+RECIPE_DIGEST = "72f8215c7d4f58343a038b04e3abc65b44ab89eea7790b26c6c2e406682b5f43"
 
 
 class SliceServer(ThreadingHTTPServer):
@@ -38,6 +39,7 @@ class SliceServer(ThreadingHTTPServer):
         self.fail_path = fail_path
         self.requests: list[tuple[str, str, str]] = []
         self.recipe_created = False
+        self.recipe_digest = RECIPE_DIGEST
         self.route_published = False
         self.operation = 0
 
@@ -100,6 +102,20 @@ class SliceHandler(BaseHTTPRequestHandler):
                     ],
                 },
             )
+        elif self.path == (
+            "/api/v1/catalog/recipes/10000000-0000-4000-8000-000000000001"
+        ):
+            self._json(
+                200,
+                {
+                    "recipe_id": "10000000-0000-4000-8000-000000000001",
+                    "id": "10000000-0000-4000-8000-000000000002",
+                    "revision_number": 1,
+                    "lifecycle": "resolved",
+                    "content_sha256": self.server.recipe_digest,
+                    "source_bundle_sha256": "7a65752ee1a950b3b358c66ceaf2007d0eb824a7842d0a67a5b1e3726957eb80",
+                },
+            )
         elif self.path.startswith("/api/v1/catalog/recipes"):
             recipes = []
             if self.server.recipe_created:
@@ -109,7 +125,7 @@ class SliceHandler(BaseHTTPRequestHandler):
                         "slug": "dev-http-smoke",
                         "revision_number": 1,
                         "lifecycle": "resolved",
-                        "content_sha256": "7" * 64,
+                        "content_sha256": self.server.recipe_digest,
                     }
                 )
             self._json(200, {"recipes": recipes, "next_cursor": None})
@@ -188,7 +204,7 @@ class SliceHandler(BaseHTTPRequestHandler):
                     "id": "10000000-0000-4000-8000-000000000002",
                     "revision_number": 1,
                     "lifecycle": "resolved",
-                    "content_sha256": "7" * 64,
+                    "content_sha256": self.server.recipe_digest,
                     "source_bundle_sha256": "7a65752ee1a950b3b358c66ceaf2007d0eb824a7842d0a67a5b1e3726957eb80",
                 },
             )
@@ -390,6 +406,20 @@ def test_runner_refuses_to_advance_past_failed_gate_and_redacts_errors(
     assert ADMIN_TOKEN not in result.stderr
     assert INFERENCE_TOKEN not in result.stderr
     assert "Authorization" not in result.stderr
+
+
+def test_runner_rejects_an_existing_same_slug_recipe_with_different_content(
+    tmp_path: Path, server: SliceServer
+) -> None:
+    server.recipe_created = True
+    server.recipe_digest = "9" * 64
+
+    result, evidence_path = _run(tmp_path, server)
+
+    assert result.returncode == 1
+    evidence = json.loads(evidence_path.read_text())
+    assert evidence["completed_states"] == ["inventory-ready"]
+    assert "does not match" in result.stderr
 
 
 @pytest.mark.parametrize("unsafe", ["symlink", "hardlink", "permissive"])
