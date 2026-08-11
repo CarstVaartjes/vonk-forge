@@ -49,6 +49,10 @@ class NodeStatus:
             certificate_expires_at (Union[None, Unset, str]):
             certificate_expiry_seconds (Union[None, Unset, float]):
             compatibility (Union[Unset, str]):  Default: 'unknown'.
+            inventory_age_seconds (Union[None, Unset, float]):
+            inventory_capabilities (Union[Unset, list[str]]):
+            inventory_observed_at (Union[None, Unset, str]):
+            inventory_stale (Union[Unset, bool]):  Default: True.
             last_seen_age_seconds (Union[None, Unset, float]):
             last_seen_at (Union[None, Unset, str]):
             probe_age_seconds (Union[None, Unset, float]):
@@ -77,6 +81,10 @@ class NodeStatus:
     certificate_expires_at: Union[None, Unset, str] = UNSET
     certificate_expiry_seconds: Union[None, Unset, float] = UNSET
     compatibility: Union[Unset, str] = 'unknown'
+    inventory_age_seconds: Union[None, Unset, float] = UNSET
+    inventory_capabilities: Union[Unset, list[str]] = UNSET
+    inventory_observed_at: Union[None, Unset, str] = UNSET
+    inventory_stale: Union[Unset, bool] = True
     last_seen_age_seconds: Union[None, Unset, float] = UNSET
     last_seen_at: Union[None, Unset, str] = UNSET
     probe_age_seconds: Union[None, Unset, float] = UNSET
@@ -175,6 +183,26 @@ class NodeStatus:
 
         compatibility = self.compatibility
 
+        inventory_age_seconds: Union[None, Unset, float]
+        if isinstance(self.inventory_age_seconds, Unset):
+            inventory_age_seconds = UNSET
+        else:
+            inventory_age_seconds = self.inventory_age_seconds
+
+        inventory_capabilities: Union[Unset, list[str]] = UNSET
+        if not isinstance(self.inventory_capabilities, Unset):
+            inventory_capabilities = self.inventory_capabilities
+
+
+
+        inventory_observed_at: Union[None, Unset, str]
+        if isinstance(self.inventory_observed_at, Unset):
+            inventory_observed_at = UNSET
+        else:
+            inventory_observed_at = self.inventory_observed_at
+
+        inventory_stale = self.inventory_stale
+
         last_seen_age_seconds: Union[None, Unset, float]
         if isinstance(self.last_seen_age_seconds, Unset):
             last_seen_age_seconds = UNSET
@@ -234,6 +262,14 @@ class NodeStatus:
             field_dict["certificate_expiry_seconds"] = certificate_expiry_seconds
         if compatibility is not UNSET:
             field_dict["compatibility"] = compatibility
+        if inventory_age_seconds is not UNSET:
+            field_dict["inventory_age_seconds"] = inventory_age_seconds
+        if inventory_capabilities is not UNSET:
+            field_dict["inventory_capabilities"] = inventory_capabilities
+        if inventory_observed_at is not UNSET:
+            field_dict["inventory_observed_at"] = inventory_observed_at
+        if inventory_stale is not UNSET:
+            field_dict["inventory_stale"] = inventory_stale
         if last_seen_age_seconds is not UNSET:
             field_dict["last_seen_age_seconds"] = last_seen_age_seconds
         if last_seen_at is not UNSET:
@@ -390,6 +426,31 @@ class NodeStatus:
 
         compatibility = d.pop("compatibility", UNSET)
 
+        def _parse_inventory_age_seconds(data: object) -> Union[None, Unset, float]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, float], data)
+
+        inventory_age_seconds = _parse_inventory_age_seconds(d.pop("inventory_age_seconds", UNSET))
+
+
+        inventory_capabilities = cast(list[str], d.pop("inventory_capabilities", UNSET))
+
+
+        def _parse_inventory_observed_at(data: object) -> Union[None, Unset, str]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, str], data)
+
+        inventory_observed_at = _parse_inventory_observed_at(d.pop("inventory_observed_at", UNSET))
+
+
+        inventory_stale = d.pop("inventory_stale", UNSET)
+
         def _parse_last_seen_age_seconds(data: object) -> Union[None, Unset, float]:
             if data is None:
                 return data
@@ -444,6 +505,10 @@ class NodeStatus:
             certificate_expires_at=certificate_expires_at,
             certificate_expiry_seconds=certificate_expiry_seconds,
             compatibility=compatibility,
+            inventory_age_seconds=inventory_age_seconds,
+            inventory_capabilities=inventory_capabilities,
+            inventory_observed_at=inventory_observed_at,
+            inventory_stale=inventory_stale,
             last_seen_age_seconds=last_seen_age_seconds,
             last_seen_at=last_seen_at,
             probe_age_seconds=probe_age_seconds,

@@ -1966,6 +1966,17 @@ export interface components {
             hostname: string;
             /** Id */
             id: string;
+            /** Inventory Age Seconds */
+            inventory_age_seconds?: number | null;
+            /** Inventory Capabilities */
+            inventory_capabilities?: string[];
+            /** Inventory Observed At */
+            inventory_observed_at?: string | null;
+            /**
+             * Inventory Stale
+             * @default true
+             */
+            inventory_stale: boolean;
             /** Labels */
             labels: {
                 [key: string]: string;

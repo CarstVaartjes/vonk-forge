@@ -49,7 +49,7 @@ function targetGate(node: NodeSummary | undefined, fleetCommit: string, planComm
   if (node.stale) reasons.push("stale");
   if (!node.agent_online) reasons.push("agent offline");
   if (node.agent_state !== "active") reasons.push(`agent ${bounded(node.agent_state)}`);
-  if (node.compatibility !== "compatible") reasons.push("agent compatibility failed");
+  if (node.compatibility !== "supported") reasons.push("agent compatibility failed");
   return reasons;
 }
 

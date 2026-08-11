@@ -35,6 +35,8 @@ _GENERATION_IDENTITY_ENVIRONMENT = (
     "VONK_PLATFORM_BUILD_DIGEST",
     "VONK_CONTROL_PROCESS_IMAGE",
     "VONK_CONTROL_START_NONCE",
+    "VONK_AGENT_PROTOCOL_MINIMUM",
+    "VONK_AGENT_PROTOCOL_MAXIMUM",
 )
 
 
@@ -124,6 +126,8 @@ class GenerationStartupSettings:
     process_image: str
     database_revision: str
     start_nonce: str
+    protocol_minimum: int
+    protocol_maximum: int
 
     @classmethod
     def from_env_and_secrets(cls) -> GenerationStartupSettings:
@@ -193,6 +197,8 @@ class GenerationStartupSettings:
             build = selected.build_digest
             image = selected.api_image if role == "api" else selected.worker_image
             nonce = selected.start_nonce
+            protocol_minimum = selected.protocol_minimum
+            protocol_maximum = selected.protocol_maximum
         else:
             generation_id = os.environ.get("VONK_CONTROL_GENERATION_ID", "")
             database_revision = os.environ.get("VONK_DATABASE_REVISION", "")
@@ -201,6 +207,15 @@ class GenerationStartupSettings:
             build = os.environ.get("VONK_PLATFORM_BUILD_DIGEST", "")
             image = os.environ.get("VONK_CONTROL_PROCESS_IMAGE", "")
             nonce = os.environ.get("VONK_CONTROL_START_NONCE", "")
+            try:
+                protocol_minimum = int(
+                    os.environ.get("VONK_AGENT_PROTOCOL_MINIMUM", "1")
+                )
+                protocol_maximum = int(
+                    os.environ.get("VONK_AGENT_PROTOCOL_MAXIMUM", "1")
+                )
+            except ValueError as error:
+                raise SettingsError("agent protocol range is invalid") from error
         if re.fullmatch(
             r"[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?", generation_id
         ) is None:
@@ -223,6 +238,8 @@ class GenerationStartupSettings:
             raise SettingsError("VONK_CONTROL_PROCESS_IMAGE is invalid")
         if re.fullmatch(r"[0-9a-f]{64}", nonce) is None:
             raise SettingsError("VONK_CONTROL_START_NONCE is invalid")
+        if not 1 <= protocol_minimum <= protocol_maximum <= 65535:
+            raise SettingsError("agent protocol range is invalid")
         return cls(
             database_url=database_url,
             startup_mode=startup_mode,
@@ -237,6 +254,8 @@ class GenerationStartupSettings:
             process_image=image,
             database_revision=database_revision,
             start_nonce=nonce,
+            protocol_minimum=protocol_minimum,
+            protocol_maximum=protocol_maximum,
         )
 
 
