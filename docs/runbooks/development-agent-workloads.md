@@ -202,8 +202,9 @@ test "$(stat -c '%a' '<EVIDENCE_DIRECTORY>/admin-token')" = 600
 test "$(stat -c '%a' '<LOCAL_SECRETS_DIR>/litellm-master-key')" = 600
 ```
 
-The helper prints only the token path. Open one long-lived SSH tunnel in a
-separate terminal:
+The helper prints only the token path. First configure the NAS runbook's
+[restricted operator loopback forwarding](development-nas-installation.md#restrict-operator-loopback-forwarding).
+Open one long-lived SSH tunnel in a separate terminal:
 
 ```bash
 ssh -N \
