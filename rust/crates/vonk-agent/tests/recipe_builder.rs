@@ -150,6 +150,13 @@ fn build_uses_only_typed_rootless_podman_arguments_and_records_exact_layout() {
         "--no-cache",
         "--cap-drop=all",
         "--security-opt=no-new-privileges",
+        "--storage-opt",
+        "overlay.ignore_chown_errors=true",
+        "overlay.mount_program=/usr/bin/fuse-overlayfs",
+        "--cpu-period=100000",
+        "--cpu-quota=800000",
+        "--memory=8589934592b",
+        "--ulimit=nproc=4096:4096",
         "--network=none",
         "--platform",
         "linux/arm64",
@@ -164,8 +171,19 @@ fn build_uses_only_typed_rootless_podman_arguments_and_records_exact_layout() {
             || value.contains("podman.sock")
             || value == "--device"
             || value == "--volume"
+            || value.starts_with("--cpus=")
+            || value.starts_with("--pids-limit=")
     }));
     for (_, arguments) in calls.iter() {
+        for option in [
+            "overlay.ignore_chown_errors=true",
+            "overlay.mount_program=/usr/bin/fuse-overlayfs",
+        ] {
+            assert!(
+                arguments.iter().any(|value| value == option),
+                "every isolated Podman call must preserve {option}"
+            );
+        }
         for option in ["--root", "--runroot"] {
             let path = arguments
                 .windows(2)
