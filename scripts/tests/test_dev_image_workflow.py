@@ -563,7 +563,7 @@ def test_workflow_builds_scans_and_accepts_oci_archives_before_login() -> None:
     text = _workflow()
     build = _step(text, "Build exact OCI archives")
     load = _step(text, "Load tested images without pulling")
-    preload = _step(text, "Preload pinned runtime dependency")
+    preload = _step(text, "Preload pinned runtime dependencies")
     render = _step(text, "Render and validate disposable development Compose artifacts")
     smoke = _step(text, "Render and smoke complete disposable development stack")
     accept = _step(text, "Scan complete local publication inputs")
@@ -582,9 +582,11 @@ def test_workflow_builds_scans_and_accepts_oci_archives_before_login() -> None:
     assert "docker-daemon:vonk-forge-api:dev-local" in load
     assert "docker-daemon:vonk-forge-worker:dev-local" in load
     assert "deploy/compose/compose.dev.images.yaml" in preload
-    assert "^postgres:" in preload
+    assert "mapfile -t runtime_images" in preload
     assert "@sha256:[0-9a-f]{64}$" in preload
-    assert 'docker pull "$postgres_image"' in preload
+    assert 'test "${#runtime_images[@]}" = 3' in preload
+    assert 'for runtime_image in "${runtime_images[@]}"; do' in preload
+    assert 'docker pull "$runtime_image"' in preload
     assert 'scripts/render-dev-compose \\' in render
     assert "docker-compose.pinned.yml" in render
     assert "docker-compose.dev.yml" in render
@@ -597,7 +599,7 @@ def test_workflow_builds_scans_and_accepts_oci_archives_before_login() -> None:
     assert "200|400|401|403|405|409|415|422" not in smoke
     assert "enroll_status" not in smoke
     assert "uv run --project control --frozen pytest" in smoke
-    assert text.index("Preload pinned runtime dependency") < text.index(
+    assert text.index("Preload pinned runtime dependencies") < text.index(
         "Render and validate disposable development Compose artifacts"
     )
     assert text.index("Render and validate disposable development Compose artifacts") < text.index(

@@ -127,19 +127,21 @@ jobs:
             "oci-archive:$RUNNER_TEMP/accepted/vonk-forge-worker.oci.tar" \
             docker-daemon:vonk-forge-worker:dev-local
 
-      - name: Preload pinned runtime dependency
+      - name: Preload pinned runtime dependencies
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -t postgres_images < <(
+          mapfile -t runtime_images < <(
             sed -nE \
-              's/^[[:space:]]+image:[[:space:]]+(postgres:[^[:space:]]+)$/\1/p' \
-              deploy/compose/compose.dev.images.yaml
+              's/^[[:space:]]+image:[[:space:]]+([a-z0-9][a-z0-9.\/:_-]*@sha256:[0-9a-f]{64})$/\1/p' \
+              deploy/compose/compose.dev.images.yaml \
+              | sort -u
           )
-          test "${#postgres_images[@]}" = 1
-          postgres_image=${postgres_images[0]}
-          [[ "$postgres_image" =~ ^postgres:[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$ ]]
-          docker pull "$postgres_image"
+          test "${#runtime_images[@]}" = 3
+          for runtime_image in "${runtime_images[@]}"; do
+            [[ "$runtime_image" =~ ^[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}$ ]]
+            docker pull "$runtime_image"
+          done
 
       - name: Render and validate disposable development Compose artifacts
         shell: bash
