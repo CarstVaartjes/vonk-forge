@@ -35,15 +35,23 @@ def _run(
     check: bool = True,
     timeout: int = 180,
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+    result = subprocess.run(
         arguments,
         cwd=ROOT,
         env=environment,
-        check=check,
+        check=False,
         capture_output=True,
         text=True,
         timeout=timeout,
     )
+    if check and result.returncode != 0:
+        stdout = result.stdout[-16_384:]
+        stderr = result.stderr[-16_384:]
+        raise AssertionError(
+            f"command failed with exit code {result.returncode}: "
+            f"{arguments!r}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        )
+    return result
 
 
 def _require_local_images() -> None:
@@ -52,6 +60,22 @@ def _require_local_images() -> None:
     for image in (API_IMAGE, WORKER_IMAGE):
         if _run(["docker", "image", "inspect", image], check=False).returncode != 0:
             pytest.skip(f"the prebuilt {image} acceptance image is required")
+
+
+def test_failed_subprocess_reports_bounded_stdout_and_stderr() -> None:
+    with pytest.raises(AssertionError) as failure:
+        _run(
+            [
+                "sh",
+                "-c",
+                "printf '%020000d' 0; printf 'diagnostic-stderr' >&2; exit 7",
+            ]
+        )
+
+    message = str(failure.value)
+    assert "exit code 7" in message
+    assert "diagnostic-stderr" in message
+    assert len(message) < 34_000
 
 
 def _unused_ports() -> tuple[int, int]:
