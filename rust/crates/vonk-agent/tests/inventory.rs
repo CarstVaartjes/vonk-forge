@@ -10,6 +10,7 @@ use vonk_agent::{
 
 struct FakeRunner {
     calls: RefCell<Vec<(Program, Vec<String>)>>,
+    gpu_output: &'static [u8],
 }
 
 impl ProcessRunner for FakeRunner {
@@ -21,7 +22,7 @@ impl ProcessRunner for FakeRunner {
     ) -> Result<ProcessOutput, ProcessError> {
         self.calls.borrow_mut().push((program, arguments.to_vec()));
         let stdout = match program {
-            Program::NvidiaSmi => b"119808, 110000, 590.44\n".to_vec(),
+            Program::NvidiaSmi => self.gpu_output.to_vec(),
             Program::Podman => b"5.4.2\n".to_vec(),
             _ => unreachable!(),
         };
@@ -44,6 +45,7 @@ fn inventory_reports_physical_and_available_memory_disk_and_gpu() {
     .unwrap();
     let runner = FakeRunner {
         calls: RefCell::new(vec![]),
+        gpu_output: b"NVIDIA H100, 119808, 110000, 590.44\n",
     };
     let inventory = InventoryCollector {
         runner: &runner,
@@ -94,6 +96,7 @@ fn malformed_or_inconsistent_memory_evidence_fails_closed() {
     fs::write(&meminfo, "MemTotal: 1 kB\nMemAvailable: 2 kB\n").unwrap();
     let runner = FakeRunner {
         calls: RefCell::new(vec![]),
+        gpu_output: b"NVIDIA H100, 119808, 110000, 590.44\n",
     };
     assert!(
         InventoryCollector {
@@ -107,4 +110,64 @@ fn malformed_or_inconsistent_memory_evidence_fails_closed() {
         .is_err()
     );
     assert!(runner.calls.borrow().is_empty());
+}
+
+#[test]
+fn inventory_uses_host_memory_for_the_unified_memory_gb10() {
+    let directory = tempdir().unwrap();
+    let meminfo = directory.path().join("meminfo");
+    fs::write(
+        &meminfo,
+        "MemTotal:       123456 kB\nMemAvailable:    65432 kB\n",
+    )
+    .unwrap();
+    let runner = FakeRunner {
+        calls: RefCell::new(vec![]),
+        gpu_output: b"NVIDIA GB10, [N/A], [N/A], 580.173.02\n",
+    };
+
+    let inventory = InventoryCollector {
+        runner: &runner,
+        meminfo_path: &meminfo,
+        store_path: directory.path(),
+        fabric_address: None,
+        fabric_bandwidth_mbps: None,
+    }
+    .collect()
+    .unwrap();
+
+    assert_eq!(inventory.gpu_count, 1);
+    assert_eq!(inventory.gpu_memory_total_bytes, 123456 * 1024);
+    assert_eq!(inventory.gpu_memory_free_bytes, 65432 * 1024);
+    assert_eq!(
+        available_memory_bytes(&runner, &meminfo).unwrap(),
+        65432 * 1024
+    );
+}
+
+#[test]
+fn unavailable_memory_on_an_unknown_gpu_fails_closed() {
+    let directory = tempdir().unwrap();
+    let meminfo = directory.path().join("meminfo");
+    fs::write(
+        &meminfo,
+        "MemTotal:       123456 kB\nMemAvailable:    65432 kB\n",
+    )
+    .unwrap();
+    let runner = FakeRunner {
+        calls: RefCell::new(vec![]),
+        gpu_output: b"Unknown GPU, [N/A], [N/A], 580.173.02\n",
+    };
+
+    assert!(
+        InventoryCollector {
+            runner: &runner,
+            meminfo_path: &meminfo,
+            store_path: directory.path(),
+            fabric_address: None,
+            fabric_bandwidth_mbps: None,
+        }
+        .collect()
+        .is_err()
+    );
 }

@@ -111,6 +111,22 @@ def test_dev_render_is_bare_mutable_and_removes_pinned_compatibility_input(
     assert "__VONK_" not in text
 
 
+def test_litellm_loopback_port_has_a_noninternal_network(tmp_path: Path) -> None:
+    _, output = _rendered_dev(tmp_path)
+
+    service = _compose_service(output, "litellm")
+    assert set(service["networks"]) == {"application", "ingress"}
+    assert service["ports"] == [
+        {
+            "mode": "ingress",
+            "target": 4000,
+            "published": "4000",
+            "protocol": "tcp",
+            "host_ip": "127.0.0.1",
+        }
+    ]
+
+
 def _compose_service(output: Path, service: str) -> dict[str, object]:
     rendered = json.loads(
         subprocess.run(

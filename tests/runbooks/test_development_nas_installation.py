@@ -73,6 +73,21 @@ def test_development_nas_runbook_keeps_pull_only_runtime_constraints() -> None:
     assert "does not clone\nthis repository" in text
 
 
+def test_operator_access_keeps_both_application_ports_on_nas_loopback() -> None:
+    text = RUNBOOK.read_text()
+
+    for required in (
+        "AllowTcpForwarding local",
+        "PermitOpen 127.0.0.1:8080 127.0.0.1:4000",
+        "AllowAgentForwarding no",
+        "GatewayPorts no",
+        "sudo sshd -t",
+        "sudo systemctl reload ssh",
+    ):
+        assert required in text
+    assert "restricted operator loopback forwarding" in FRESH_INSTALL.read_text()
+
+
 def test_normal_install_and_update_path_is_ui_only_before_guarded_recovery() -> None:
     text = RUNBOOK.read_text()
     assert "## Advanced guarded recovery" in text

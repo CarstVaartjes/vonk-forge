@@ -240,6 +240,41 @@ Windows ACLs on an SMB drive do not establish Linux numeric container
 ownership. Do not compensate with permissive public ACLs; the Docker daemon
 needs read access and `dev-init` establishes the container-side identities.
 
+## Restrict operator loopback forwarding
+
+The acceptance runner needs the loopback-only API and inference listeners.
+Keep them bound to `127.0.0.1` in Compose and permit one NAS operator to open
+local forwards only to those two destinations. On an OpenSSH NAS, create
+`/etc/ssh/sshd_config.d/00-vonk-operator-forwarding.conf` with:
+
+```sshconfig
+Match User <NAS_OPERATOR>
+    AllowTcpForwarding local
+    PermitOpen 127.0.0.1:8080 127.0.0.1:4000
+    AllowAgentForwarding no
+    GatewayPorts no
+
+Match all
+```
+
+The trailing `Match all` is required because the file is included by the main
+server configuration. Validate both the syntax and the effective per-user
+policy before reloading SSH:
+
+```bash
+sudo sshd -t
+sudo sshd -T -C user='<NAS_OPERATOR>',host='<NAS_SSH_HOST>',addr='<OPERATOR_IP>' \
+  | grep -E '^(allowtcpforwarding|allowagentforwarding|gatewayports|permitopen)'
+sudo systemctl reload ssh
+```
+
+Require `allowtcpforwarding local`, `allowagentforwarding no`,
+`gatewayports no`, and exactly the two `permitopen` destinations above. Test a
+new SSH session before closing the current one. An appliance with a managed SSH
+configuration must express the same restrictions through its supported UI;
+never enable unrestricted forwarding or bind either application port to the
+LAN.
+
 ## Create and redeploy the Compose project
 
 In a generic NAS Docker UI (UGREEN calls this a Docker Project):
@@ -261,8 +296,8 @@ the other. Only then may `dev-repository-init`, the offline `dev-init`, and
 `migrate` complete, followed by the
 long-running API and worker becoming healthy. A one-shot service that exits
 successfully is complete, not failed. The API binds only to NAS loopback; use
-your organization's approved trusted access path rather than widening the
-Compose listener.
+the restricted SSH forwarding boundary below rather than widening the Compose
+listener.
 
 ## Update after an accepted development publication
 

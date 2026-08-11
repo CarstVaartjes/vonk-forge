@@ -107,7 +107,10 @@ sources. In the NAS Docker/Compose UI:
 One-shot cohort, initializer, and migration containers should exit with status
 zero. They are completed prerequisites, not failed services. See
 [Development NAS installation](development-nas-installation.md) if startup
-does not reach healthy state.
+does not reach healthy state. Configure the guide's
+[restricted operator loopback forwarding](development-nas-installation.md#restrict-operator-loopback-forwarding)
+before the acceptance tunnel in step 7; do not expose ports 8080 or 4000 on the
+LAN.
 
 ## 5. Install and configure each GPU node
 

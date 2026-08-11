@@ -322,7 +322,7 @@ services:
       - dev-supervisor-state:/supervisor
     tmpfs: [/tmp]
     ports: ["127.0.0.1:${VONK_DEV_INFERENCE_PORT:-4000}:4000"]
-    networks: [application]
+    networks: [application, ingress]
     depends_on:
       dev-init: {condition: service_completed_successfully}
       dev-supervisor-init: {condition: service_completed_successfully}
