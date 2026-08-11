@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from jsonschema import Draft202012Validator
 from vonk_agent_protocol import (
     AgentClaim,
     AgentOperation,
@@ -18,7 +19,6 @@ from vonk_agent_protocol import (
     schema_validator,
     validate_schema_message,
 )
-from jsonschema import Draft202012Validator
 
 
 def valid_claim() -> dict[str, object]:
@@ -54,6 +54,16 @@ def valid_attempt() -> dict[str, object]:
 
 def claim_with_payload(payload: dict[str, str]) -> dict[str, object]:
     return valid_claim() | {
+        "payload": payload,
+        "payload_digest": hashlib.sha256(canonical_message(payload)).hexdigest(),
+    }
+
+
+def claim_for_operation(
+    operation: str, payload: dict[str, object]
+) -> dict[str, object]:
+    return valid_claim() | {
+        "operation": operation,
         "payload": payload,
         "payload_digest": hashlib.sha256(canonical_message(payload)).hexdigest(),
     }
@@ -228,6 +238,36 @@ def test_protocol_rejects_client_selected_filesystem_paths(
 ) -> None:
     with pytest.raises(AgentProtocolError, match="path"):
         AgentClaim.parse(valid_claim() | {"payload": payload})
+
+
+def test_recipe_build_claim_accepts_only_typed_slash_bearing_fields() -> None:
+    payload = {
+        "platform": "linux/arm64",
+        "dockerfile": "containers/runtime/Dockerfile",
+        "arguments": [{"name": "runtime-source", "value": "vendor/runtime"}],
+    }
+
+    claim = AgentClaim.parse(claim_for_operation("recipe.build.v1", payload))
+
+    assert claim.payload["platform"] == "linux/arm64"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"platform": "linux/amd64"},
+        {"dockerfile": "/etc/passwd"},
+        {"dockerfile": "../Dockerfile"},
+        {"dockerfile": "containers//Dockerfile"},
+        {"evidence": "host/path"},
+        {"arguments": [{"name": "safe", "nested": {"value": "host/path"}}]},
+    ],
+)
+def test_recipe_build_claim_rejects_untyped_filesystem_values(
+    payload: dict[str, object],
+) -> None:
+    with pytest.raises(AgentProtocolError, match="path"):
+        AgentClaim.parse(claim_for_operation("recipe.build.v1", payload))
 
 
 def protocol_message_with_document(

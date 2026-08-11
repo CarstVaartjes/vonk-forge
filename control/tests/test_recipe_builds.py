@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 from dataclasses import asdict
@@ -7,8 +8,20 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import (
+    AgentClaim,
+    canonical_message,
+)
+from vonk_agent_protocol import (
+    AgentOperation as ProtocolOperation,
+)
 from vonk_control.catalog_service import CatalogService, RecipeDraftInput
-from vonk_control.inventory_repository import InventoryRepository, InventorySnapshotInput
+from vonk_control.inventory_repository import (
+    InventoryRepository,
+    InventorySnapshotInput,
+)
 from vonk_control.models import (
     AgentNode,
     AgentOperation,
@@ -23,8 +36,6 @@ from vonk_control.models import (
 from vonk_control.recipe_builds import RecipeBuildError, RecipeBuildService
 from vonk_control.recipe_operations import RecipeOperationService
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import sessionmaker
 
 
 class RecordingQueue:
@@ -150,6 +161,30 @@ def test_build_plan_is_typed_sandboxed_and_durable(tmp_path: Path) -> None:
     with sessions() as session:
         stored = session.get(RecipeBuild, plan.build_id)
         assert stored is not None and stored.state == "planned"
+
+
+def test_build_plan_passes_the_installed_agent_claim_boundary(tmp_path: Path) -> None:
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    plan = RecipeBuildService(sessions, bundles=bundles).plan(
+        revision.id, node_id, now=now
+    )
+    payload_digest = hashlib.sha256(canonical_message(plan.agent_payload)).hexdigest()
+
+    claim = AgentClaim(
+        schema_version=1,
+        job_id="00000000-0000-4000-8000-000000000001",
+        operation_id="00000000-0000-4000-8000-000000000002",
+        attempt=1,
+        fence="00000000-0000-4000-8000-000000000003",
+        node_id=node_id,
+        operation=ProtocolOperation.RECIPE_BUILD,
+        base_commit="a" * 40,
+        payload_digest=payload_digest,
+        payload=plan.agent_payload,
+        deadline=now,
+    )
+
+    assert claim.payload["platform"] == "linux/arm64"
 
 
 def test_starting_build_atomically_reserves_temporary_disk_and_memory(

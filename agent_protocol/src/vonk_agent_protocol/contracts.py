@@ -149,6 +149,8 @@ def _validate_safe_keys(
     field_name: str | None = None,
     allow_secret_refs: bool = False,
     secret_value: bool = False,
+    operation: AgentOperation | None = None,
+    path: tuple[str | int, ...] = (),
 ) -> None:
     if isinstance(value, Mapping):
         for key, item in value.items():
@@ -165,13 +167,17 @@ def _validate_safe_keys(
                 field_name=key,
                 allow_secret_refs=allow_secret_refs or key == "deployment",
                 secret_value=field_name == "secrets",
+                operation=operation,
+                path=(*path, key),
             )
     elif isinstance(value, (list, tuple)):
-        for item in value:
+        for index, item in enumerate(value):
             _validate_safe_keys(
                 item,
                 allow_secret_refs=allow_secret_refs,
                 secret_value=secret_value,
+                operation=operation,
+                path=(*path, index),
             )
     elif isinstance(value, str):
         if secret_value:
@@ -181,6 +187,10 @@ def _validate_safe_keys(
         if field_name == "platform_target_name":
             if VERSIONED_PLATFORM_TARGET.fullmatch(value) is None:
                 raise AgentProtocolError("platform target identifier is not canonical")
+        elif operation is AgentOperation.RECIPE_BUILD and _typed_build_string(
+            path, value
+        ):
+            return
         elif "/" in value or "\\" in value:
             raise AgentProtocolError("filesystem path values are not allowed")
 
@@ -189,10 +199,33 @@ def _is_path_key(key: str) -> bool:
     return bool(PATH_KEY.search(key))
 
 
-def _validate_bounded_document(value: Any, *, name: str) -> Any:
+def _typed_build_string(path: tuple[str | int, ...], value: str) -> bool:
+    if path == ("platform",):
+        return value == "linux/arm64"
+    if path == ("dockerfile",):
+        return (
+            0 < len(value) <= 512
+            and not value.startswith("/")
+            and "\\" not in value
+            and "\x00" not in value
+            and all(part not in {"", ".", ".."} for part in value.split("/"))
+        )
+    return (
+        len(path) == 3
+        and path[0] == "arguments"
+        and isinstance(path[1], int)
+        and path[2] == "value"
+        and len(value) <= 1024
+        and "\x00" not in value
+    )
+
+
+def _validate_bounded_document(
+    value: Any, *, name: str, operation: AgentOperation | None = None
+) -> Any:
     if not isinstance(value, Mapping):
         raise AgentProtocolError(f"{name} must be a JSON object")
-    _validate_safe_keys(value)
+    _validate_safe_keys(value, operation=operation)
     copied = _canonical_copy(value, name=name)
     if len(canonical_message(copied)) > MAX_DOCUMENT_BYTES:
         raise AgentProtocolError(f"{name} is too large")
@@ -313,7 +346,9 @@ class AgentClaim:
             self.payload_digest
         ):
             raise AgentProtocolError("payload_digest must be a lowercase SHA-256")
-        payload = _validate_bounded_document(self.payload, name="payload")
+        payload = _validate_bounded_document(
+            self.payload, name="payload", operation=self.operation
+        )
         if (
             hashlib.sha256(canonical_message(payload)).hexdigest()
             != self.payload_digest
