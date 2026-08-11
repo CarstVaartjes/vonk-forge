@@ -295,8 +295,11 @@ sudo "$supervisor" activate --slot "$slot" --sha256 "$digest"
 for attempt in $(seq 1 60); do
   status=$(sudo python3 -c \
     'import json,sys; print(json.load(open(sys.argv[1]))["status"])' "$state")
-  test "$status" = activating || break
-  sleep 1
+  case "$status" in
+    pending) sleep 1 ;;
+    stable|failed) break ;;
+    *) printf 'unexpected supervisor status: %s\n' "$status" >&2; exit 1 ;;
+  esac
 done
 sudo cat "$state"
 sudo systemctl is-active vonk-forge-agent-supervisor.service \

@@ -176,6 +176,7 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
     assert "DeviceAllow=char-231:* rw" in unit
     assert "BindPaths=-/dev/fuse" in unit
     assert "Delegate=yes" in unit
+    assert "RestrictSUIDSGID=yes" not in unit
     helper_socket = (
         payload / "lib/systemd/system/vonk-forge-package-helper.socket"
     ).read_text()

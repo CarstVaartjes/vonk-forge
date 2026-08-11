@@ -256,6 +256,7 @@ def _verify_payload(payload: Path, control: Path) -> None:
         or "DeviceAllow=char-231:* rw" not in units["vonk-forge-agent.service"]
         or "BindPaths=-/dev/fuse" not in units["vonk-forge-agent.service"]
         or "Delegate=yes" not in units["vonk-forge-agent.service"]
+        or "RestrictSUIDSGID=yes" in units["vonk-forge-agent.service"]
     ):
         raise VerificationError("agent rootless container boundary is invalid")
     storage = (
