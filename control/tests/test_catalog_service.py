@@ -7,6 +7,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 from vonk_control.catalog_service import (
     CatalogConflict,
     CatalogService,
@@ -15,8 +17,6 @@ from vonk_control.catalog_service import (
 )
 from vonk_control.models import Base, RecipeSourceBundle
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 
 @pytest.fixture
@@ -73,6 +73,33 @@ def test_resolve_creates_immutable_revision_and_repeated_resolve_is_idempotent(
     assert repeated.id == resolved.id
     assert repeated.content_sha256 == resolved.content_sha256
     assert len(resolved.content_sha256 or "") == 64
+
+
+def test_resolved_recipe_can_start_a_new_draft_without_mutating_the_resolution(
+    service: CatalogService, recipe_document: dict[str, object]
+) -> None:
+    initial = service.create_recipe(
+        "admin", RecipeDraftInput(slug="qwen3-vllm", document=recipe_document)
+    )
+    resolved = service.resolve(initial.recipe_id, initial.revision_number, "admin")
+    changed = copy.deepcopy(recipe_document)
+    changed["metadata"]["title"] = "Changed title"
+
+    draft = service.update_draft(
+        resolved.recipe_id, resolved.revision_number, changed, "admin"
+    )
+
+    assert draft.lifecycle == "draft"
+    assert draft.revision_number == resolved.revision_number + 1
+    assert draft.document["metadata"]["title"] == "Changed title"
+    with service._sessions() as session:
+        preserved = service._repository.revision(
+            session, resolved.recipe_id, resolved.revision_number
+        )
+    assert preserved is not None
+    assert preserved.lifecycle == "resolved"
+    assert preserved.document == recipe_document
+    assert preserved.content_sha256 == resolved.content_sha256
 
 
 def test_stale_draft_update_has_stable_conflict_code(

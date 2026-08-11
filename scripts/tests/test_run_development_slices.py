@@ -44,7 +44,7 @@ NODE = "spk_0123456789abcdef0123456789abcdef"
 NODE_2 = "spk_fedcba9876543210fedcba9876543210"
 ADMIN_TOKEN = "admin-secret-marker"
 INFERENCE_TOKEN = "inference-secret-marker"
-RECIPE_DIGEST = "11fca06a786d0a84d2b5fe34a2ae4423327f1b79e6a3096b93714e494130842a"
+RECIPE_DIGEST = "f0b615191dd59e5baf6d988569e41173a48521394f4511b9f3f88ec44abfb0c9"
 
 
 class SliceServer(ThreadingHTTPServer):
@@ -54,6 +54,7 @@ class SliceServer(ThreadingHTTPServer):
         self.requests: list[tuple[str, str, str]] = []
         self.recipe_created = False
         self.recipe_digest = RECIPE_DIGEST
+        self.recipe_revision = 1
         self.source_digest = (
             "7a65752ee1a950b3b358c66ceaf2007d0eb824a7842d0a67a5b1e3726957eb80"
         )
@@ -153,7 +154,7 @@ class SliceHandler(BaseHTTPRequestHandler):
                 {
                     "recipe_id": "10000000-0000-4000-8000-000000000001",
                     "id": "10000000-0000-4000-8000-000000000002",
-                    "revision_number": 1,
+                    "revision_number": self.server.recipe_revision,
                     "lifecycle": "resolved",
                     "content_sha256": self.server.recipe_digest,
                     "source_bundle_sha256": self.server.source_digest,
@@ -166,7 +167,7 @@ class SliceHandler(BaseHTTPRequestHandler):
                     {
                         "recipe_id": "10000000-0000-4000-8000-000000000001",
                         "slug": self.server.slug,
-                        "revision_number": 1,
+                        "revision_number": self.server.recipe_revision,
                         "lifecycle": "resolved",
                         "content_sha256": self.server.recipe_digest,
                     }
@@ -273,6 +274,29 @@ class SliceHandler(BaseHTTPRequestHandler):
             body = self._record()
         except RuntimeError:
             return
+        if self.path.endswith("/draft"):
+            payload = json.loads(body)
+            if payload.get("expected_revision") != self.server.recipe_revision:
+                self._json(409, {"detail": "stale revision"})
+                return
+            document = payload["document"]
+            self.server.recipe_revision += 1
+            self.server.recipe_digest = hashlib.sha256(
+                json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest()
+            self.server.source_digest = document["build"]["context"]["sha256"]
+            self._json(
+                200,
+                {
+                    "recipe_id": "10000000-0000-4000-8000-000000000001",
+                    "id": "10000000-0000-4000-8000-000000000003",
+                    "revision_number": self.server.recipe_revision,
+                    "lifecycle": "draft",
+                    "content_sha256": None,
+                    "source_bundle_sha256": self.server.source_digest,
+                },
+            )
+            return
         digest = self.path.rsplit("/", 1)[-1]
         with tarfile.open(fileobj=io.BytesIO(body), mode="r:") as archive:
             files = [member for member in archive.getmembers() if member.isfile()]
@@ -307,7 +331,7 @@ class SliceHandler(BaseHTTPRequestHandler):
                 {
                     "recipe_id": "10000000-0000-4000-8000-000000000001",
                     "id": "10000000-0000-4000-8000-000000000002",
-                    "revision_number": 1,
+                    "revision_number": self.server.recipe_revision,
                     "lifecycle": "draft",
                     "content_sha256": None,
                     "source_bundle_sha256": payload["document"]["build"]["context"][
@@ -321,7 +345,7 @@ class SliceHandler(BaseHTTPRequestHandler):
                 {
                     "recipe_id": "10000000-0000-4000-8000-000000000001",
                     "id": "10000000-0000-4000-8000-000000000002",
-                    "revision_number": 1,
+                    "revision_number": self.server.recipe_revision,
                     "lifecycle": "resolved",
                     "content_sha256": self.server.recipe_digest,
                     "source_bundle_sha256": self.server.source_digest,
@@ -808,18 +832,26 @@ def test_runner_requires_fresh_rootless_inventory(
     assert json.loads(evidence_path.read_text())["completed_states"] == []
 
 
-def test_runner_rejects_an_existing_same_slug_recipe_with_different_content(
+def test_runner_revises_an_existing_same_slug_recipe_with_different_content(
     tmp_path: Path, server: SliceServer
 ) -> None:
     server.recipe_created = True
     server.recipe_digest = "9" * 64
 
-    result, evidence_path = _run(tmp_path, server)
+    result, evidence_path = _run(
+        tmp_path, server, "--stop-after", "recipe-resolved"
+    )
 
-    assert result.returncode == 1
+    assert result.returncode == 0, result.stderr
     evidence = json.loads(evidence_path.read_text())
-    assert evidence["completed_states"] == ["inventory-ready"]
-    assert "does not match" in result.stderr
+    assert evidence["completed_states"] == STATES[:2]
+    assert evidence["outputs"]["recipe_revision"] == 2
+    assert evidence["outputs"]["recipe_content_sha256"] == RECIPE_DIGEST
+    assert (
+        "PUT",
+        "/api/v1/catalog/recipes/10000000-0000-4000-8000-000000000001/draft",
+        f"Bearer {ADMIN_TOKEN}",
+    ) in server.requests
 
 
 def test_runner_rejects_plain_http_to_a_non_loopback_host(tmp_path: Path) -> None:

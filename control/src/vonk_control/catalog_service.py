@@ -312,9 +312,9 @@ class CatalogService:
                 raise CatalogConflict(
                     "catalog.stale_revision", "recipe revision changed"
                 )
-            if latest.lifecycle not in {"draft", "blocked"}:
+            if latest.lifecycle == "deprecated":
                 raise CatalogConflict(
-                    "catalog.resolved", "resolved recipe cannot be edited"
+                    "catalog.deprecated", "deprecated recipe cannot be revised"
                 )
             metadata = _mapping(clean["metadata"])
             now = self._clock()

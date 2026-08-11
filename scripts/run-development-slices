@@ -778,6 +778,25 @@ class Runner:
                 "GET", f"/api/v1/catalog/recipes/{recipe_id}"
             )
             created = _object(created_payload, "recipe lookup")
+            current_digest = created.get("content_sha256")
+            current_document = created.get("document")
+            if not isinstance(current_digest, str) and isinstance(
+                current_document, dict
+            ):
+                current_digest = _recipe_content_digest(current_document)
+            if current_digest != self.recipe_digest:
+                revision_number = created.get("revision_number")
+                if not isinstance(revision_number, int):
+                    raise SliceError("recipe catalog response is invalid")
+                _, draft_payload = self.control.request(
+                    "PUT",
+                    f"/api/v1/catalog/recipes/{recipe_id}/draft",
+                    {
+                        "expected_revision": revision_number,
+                        "document": self.recipe,
+                    },
+                )
+                created = _object(draft_payload, "recipe revision")
         if created.get("lifecycle") == "resolved":
             resolved = created
         else:
