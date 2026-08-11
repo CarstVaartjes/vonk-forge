@@ -12,10 +12,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-from vonk_agent_protocol import canonical_message
 from pydantic import BaseModel, ConfigDict, Field, RootModel
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import canonical_message
 
 from .auth import CursorCodec
 from .models import (
@@ -266,6 +266,18 @@ class AgentSummary(StrictModel):
     agent_implementation: str = Field(pattern=r"^(pending|python|rust)$")
     migration_state: str = Field(pattern=r"^(required|complete)$")
     protocol_version: int | None = Field(default=None, ge=1)
+    platform_version: str | None = Field(
+        default=None,
+        pattern=r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$",
+    )
+    build_digest: str | None = Field(
+        default=None, pattern=r"^sha256:[0-9a-f]{64}$"
+    )
+    active_slot: str | None = Field(default=None, pattern=r"^[AB]$")
+    agent_sha256: str | None = Field(default=None, pattern=DIGEST_PATTERN)
+    supervisor_generation: int | None = Field(
+        default=None, ge=1, le=999_999_999, strict=True
+    )
     capabilities: list[str]
     last_seen_at: str | None
     last_seen_age_seconds: float | None = Field(default=None, ge=0)

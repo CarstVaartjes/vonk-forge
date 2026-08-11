@@ -4,10 +4,46 @@
       "AgentSummary": {
         "additionalProperties": false,
         "properties": {
+          "active_slot": {
+            "anyOf": [
+              {
+                "pattern": "^[AB]$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Slot"
+          },
           "agent_implementation": {
             "pattern": "^(pending|python|rust)$",
             "title": "Agent Implementation",
             "type": "string"
+          },
+          "agent_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Sha256"
+          },
+          "build_digest": {
+            "anyOf": [
+              {
+                "pattern": "^sha256:[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Build Digest"
           },
           "capabilities": {
             "items": {
@@ -60,6 +96,18 @@
             "title": "Node Id",
             "type": "string"
           },
+          "platform_version": {
+            "anyOf": [
+              {
+                "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platform Version"
+          },
           "protocol_version": {
             "anyOf": [
               {
@@ -79,6 +127,19 @@
           "state": {
             "title": "State",
             "type": "string"
+          },
+          "supervisor_generation": {
+            "anyOf": [
+              {
+                "maximum": 999999999.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supervisor Generation"
           }
         },
         "required": [

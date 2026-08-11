@@ -1389,8 +1389,14 @@ export interface components {
     schemas: {
         /** AgentSummary */
         AgentSummary: {
+            /** Active Slot */
+            active_slot?: string | null;
             /** Agent Implementation */
             agent_implementation: string;
+            /** Agent Sha256 */
+            agent_sha256?: string | null;
+            /** Build Digest */
+            build_digest?: string | null;
             /** Capabilities */
             capabilities: string[];
             /** Certificate Expires At */
@@ -1403,12 +1409,16 @@ export interface components {
             migration_state: string;
             /** Node Id */
             node_id: string;
+            /** Platform Version */
+            platform_version?: string | null;
             /** Protocol Version */
             protocol_version?: number | null;
             /** Stale */
             stale: boolean;
             /** State */
             state: string;
+            /** Supervisor Generation */
+            supervisor_generation?: number | null;
         };
         /** AgentsResponse */
         AgentsResponse: {

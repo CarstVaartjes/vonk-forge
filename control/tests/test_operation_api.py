@@ -8,6 +8,9 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 from vonk_control import operation_api
 from vonk_control.api import AdminServices, create_app
 from vonk_control.audit import MemoryAuditStore
@@ -24,9 +27,6 @@ from vonk_control.models import (
     RoutePublicationOwner,
 )
 from vonk_control.operation_api import JobProgress, OperationApiServices, OperationPage
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 COMMIT = "a" * 40
 DIGEST = "d" * 64
@@ -674,6 +674,13 @@ def test_durable_projection_reads_only_current_activation_and_hides_agent_secret
     assert "10.0.0.42" not in serialized_agents
     assert "fingerprint-secret" not in serialized_agents
     assert "certificate-body-secret" not in serialized_agents
+
+    projection_client, projection_operator, *_ = _client(operations=services)
+    agent_response = projection_client.get(
+        "/api/v1/agents", headers=projection_operator
+    )
+    assert agent_response.status_code == 200
+    assert agent_response.json() == {"agents": agents}
 
     (generation / "litellm.json").unlink()
     endpoint_client, operator, _reconciler, _audits = _client(
