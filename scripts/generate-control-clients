@@ -1,4 +1,4 @@
-#!/usr/bin/env -S uv run --project control --frozen --group dev --with-editable . python
+#!/usr/bin/env -S uv run --python 3.12 --project control --frozen --group dev --with-editable . python
 """Generate the admin-only OpenAPI and pinned upstream language clients.
 
 Generator provenance:
