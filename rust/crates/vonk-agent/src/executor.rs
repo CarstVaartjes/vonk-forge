@@ -407,7 +407,7 @@ async fn run_once_with_heartbeat_interval<C: LoopClient, E: Executor>(
                 heartbeat_stop,
                 heartbeat_interval,
             ));
-            let executed = executor.execute(&claim).await;
+            let executed = normalize_execution_result(&claim, executor.execute(&claim).await);
             let _ = stop_heartbeat.send(());
             let heartbeat_result = heartbeat_task
                 .await
@@ -433,6 +433,34 @@ async fn run_once_with_heartbeat_interval<C: LoopClient, E: Executor>(
     client.submit_result(&result).await?;
     state.acknowledge(&result)?;
     Ok(())
+}
+
+fn normalize_execution_result(claim: &AgentClaim, executed: ExecutionResult) -> ExecutionResult {
+    if executed.state != "failed" {
+        return executed;
+    }
+    let reason = executed
+        .body
+        .get("reason")
+        .and_then(Value::as_str)
+        .unwrap_or("agent operation failed");
+    let error_code = match claim.operation.as_str() {
+        "recipe.build.v1" => "recipe_build_failed",
+        "recipe.image.import.v1" => "recipe_image_import_failed",
+        "recipe.install" => "recipe_install_failed",
+        "recipe.start" => "recipe_start_failed",
+        "recipe.stop" => "recipe_stop_failed",
+        "recipe.uninstall" => "recipe_uninstall_failed",
+        _ => "operation_failed",
+    };
+    ExecutionResult {
+        state: "failed",
+        body: json!({
+            "error_code": error_code,
+            "reason": reason,
+            "status": "failed",
+        }),
+    }
 }
 
 async fn run_heartbeats<C: LoopClient>(
@@ -477,7 +505,6 @@ mod tests {
     use serde_json::json;
     use std::{
         sync::{Arc, Mutex},
-        thread,
         time::Duration,
     };
     use tempfile::tempdir;
@@ -535,10 +562,22 @@ mod tests {
     #[async_trait(?Send)]
     impl Executor for SlowExecutor {
         async fn execute(&self, _claim: &AgentClaim) -> ExecutionResult {
-            thread::sleep(Duration::from_millis(90));
+            tokio::time::sleep(Duration::from_millis(90)).await;
             ExecutionResult {
                 state: "succeeded",
                 body: json!({"status": "ok"}),
+            }
+        }
+    }
+
+    struct FailedExecutor;
+
+    #[async_trait(?Send)]
+    impl Executor for FailedExecutor {
+        async fn execute(&self, _claim: &AgentClaim) -> ExecutionResult {
+            ExecutionResult {
+                state: "failed",
+                body: json!({"reason": "rootless image build failed"}),
             }
         }
     }
@@ -622,5 +661,38 @@ mod tests {
             super::LoopError::Client(ClientError::Retryable)
         ));
         assert_eq!(state.pending_results().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn failed_execution_emits_the_controller_failure_contract() {
+        let directory = tempdir().unwrap();
+        let client = RecordingClient {
+            claim: Arc::new(Mutex::new(Some(claim()))),
+            fail_heartbeat: false,
+            heartbeats: Arc::new(Mutex::new(Vec::new())),
+            results: Arc::new(Mutex::new(Vec::new())),
+        };
+        let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
+
+        run_once_with_heartbeat_interval(
+            &client,
+            &mut state,
+            &FailedExecutor,
+            &["recipe.install"],
+            0,
+            None,
+            Duration::from_secs(10),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            client.results.lock().unwrap()[0].result,
+            json!({
+                "error_code": "recipe_install_failed",
+                "reason": "rootless image build failed",
+                "status": "failed"
+            })
+        );
     }
 }
