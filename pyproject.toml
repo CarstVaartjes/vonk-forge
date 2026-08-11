@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling==1.31.0"]
 build-backend = "hatchling.build"
 
 [project]
@@ -20,7 +20,7 @@ dependencies = [
 vonkctl = "cluster_profiles.cli:main"
 
 [dependency-groups]
-dev = ["pytest==9.1.1", "pyyaml==6.0.3"]
+dev = ["hatchling==1.31.0", "pytest==9.1.1", "pyyaml==6.0.3"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/cluster_profiles"]
