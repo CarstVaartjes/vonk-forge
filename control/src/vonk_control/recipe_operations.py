@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
+import json
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -973,7 +974,7 @@ class RecipeOperationService:
         }
         if len(node_evidence) != len(raw_node_evidence):
             raise RecipeOperationConflict("recipe operation evidence is invalid")
-        observed_evidence = dict(evidence)
+        observed_evidence = json.loads(canonical_message(evidence))
         if node_id in node_evidence and node_evidence[node_id] != observed_evidence:
             raise RecipeOperationConflict("recipe node evidence changed")
         node_evidence[node_id] = observed_evidence
