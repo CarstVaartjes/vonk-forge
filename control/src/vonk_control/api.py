@@ -2053,7 +2053,7 @@ def production_app() -> FastAPI:
             forbidden_cidrs=settings.direct_fabric_cidrs,
         ),
         clock=clock,
-        maximum_age_seconds=300,
+        maximum_age_seconds=30,
     )
     recipe_operations = RecipeOperationService(
         sessions,

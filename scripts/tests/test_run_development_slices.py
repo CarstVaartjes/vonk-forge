@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import stat
@@ -27,7 +28,18 @@ STATES = [
     "route-withdrawn",
     "uninstalled",
 ]
+MODEL_MULTINODE_STATES = [
+    *STATES[:9],
+    "rank-failure-observed",
+    "route-withdrawn-after-failure",
+    "rank-recovered",
+    "route-republished",
+    "inference-recovered",
+    "restart-persistence-observed",
+    *STATES[9:],
+]
 NODE = "spk_0123456789abcdef0123456789abcdef"
+NODE_2 = "spk_fedcba9876543210fedcba9876543210"
 ADMIN_TOKEN = "admin-secret-marker"
 INFERENCE_TOKEN = "inference-secret-marker"
 RECIPE_DIGEST = "72f8215c7d4f58343a038b04e3abc65b44ab89eea7790b26c6c2e406682b5f43"
@@ -40,8 +52,18 @@ class SliceServer(ThreadingHTTPServer):
         self.requests: list[tuple[str, str, str]] = []
         self.recipe_created = False
         self.recipe_digest = RECIPE_DIGEST
+        self.source_digest = "7a65752ee1a950b3b358c66ceaf2007d0eb824a7842d0a67a5b1e3726957eb80"
+        self.slug = "dev-http-smoke"
         self.route_published = False
         self.operation = 0
+        self.operation_nodes: dict[str, list[str]] = {}
+        self.nodes = [NODE]
+        self.online = {NODE: True, NODE_2: True}
+        self.last_seen = {
+            NODE: "2026-08-11T10:00:00+00:00",
+            NODE_2: "2026-08-11T10:00:00+00:00",
+        }
+        self.fleet_digest = "b" * 64
 
 
 class SliceHandler(BaseHTTPRequestHandler):
@@ -89,16 +111,18 @@ class SliceHandler(BaseHTTPRequestHandler):
                 200,
                 {
                     "commit": "a" * 40,
-                    "evidence_digest": "b" * 64,
+                    "evidence_digest": self.server.fleet_digest,
                     "nodes": [
                         {
-                            "id": NODE,
+                            "id": node,
                             "healthy": True,
                             "stale": False,
-                            "agent_online": True,
+                            "agent_online": self.server.online[node],
                             "agent_state": "active",
                             "compatibility": "compatible",
+                            "agent_last_seen_at": self.server.last_seen[node],
                         }
+                        for node in self.server.nodes
                     ],
                 },
             )
@@ -113,7 +137,7 @@ class SliceHandler(BaseHTTPRequestHandler):
                     "revision_number": 1,
                     "lifecycle": "resolved",
                     "content_sha256": self.server.recipe_digest,
-                    "source_bundle_sha256": "7a65752ee1a950b3b358c66ceaf2007d0eb824a7842d0a67a5b1e3726957eb80",
+                    "source_bundle_sha256": self.server.source_digest,
                 },
             )
         elif self.path.startswith("/api/v1/catalog/recipes"):
@@ -122,7 +146,7 @@ class SliceHandler(BaseHTTPRequestHandler):
                 recipes.append(
                     {
                         "recipe_id": "10000000-0000-4000-8000-000000000001",
-                        "slug": "dev-http-smoke",
+                        "slug": self.server.slug,
                         "revision_number": 1,
                         "lifecycle": "resolved",
                         "content_sha256": self.server.recipe_digest,
@@ -139,15 +163,22 @@ class SliceHandler(BaseHTTPRequestHandler):
                     "state": "succeeded",
                     "plan_digest": "c" * 64,
                     "nodes": [NODE],
-                    "result": {"successful_nodes": [NODE], "failed_nodes": []},
+                    "result": {
+                        "successful_nodes": sorted(
+                            self.server.operation_nodes.get(
+                                self.path.rsplit("/", 1)[-1], self.server.nodes
+                            )
+                        ),
+                        "failed_nodes": [],
+                    },
                 },
             )
-        elif self.path == "/api/v1/endpoints/dev-http-smoke":
+        elif self.path == f"/api/v1/endpoints/{self.server.slug}":
             if self.server.route_published:
                 self._json(
                     200,
                     {
-                        "alias": "dev-http-smoke",
+                        "alias": self.server.slug,
                         "state": "published",
                         "nodes": [NODE],
                     },
@@ -183,6 +214,12 @@ class SliceHandler(BaseHTTPRequestHandler):
         path = self.path
         if path == "/api/v1/catalog/recipes":
             self.server.recipe_created = True
+            document = payload["document"]
+            self.server.slug = payload["slug"]
+            self.server.recipe_digest = hashlib.sha256(
+                json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest()
+            self.server.source_digest = document["build"]["context"]["sha256"]
             self._json(
                 201,
                 {
@@ -205,7 +242,7 @@ class SliceHandler(BaseHTTPRequestHandler):
                     "revision_number": 1,
                     "lifecycle": "resolved",
                     "content_sha256": self.server.recipe_digest,
-                    "source_bundle_sha256": "7a65752ee1a950b3b358c66ceaf2007d0eb824a7842d0a67a5b1e3726957eb80",
+                    "source_bundle_sha256": self.server.source_digest,
                 },
             )
         elif path == "/api/v1/recipes/source-checks":
@@ -244,20 +281,39 @@ class SliceHandler(BaseHTTPRequestHandler):
         elif path.endswith(("install-plans/preview", "run-plans/preview")):
             self._json(200, {"allowed": True, "plan_digest": "f" * 64, "nodes": []})
         elif path == "/v1/chat/completions":
-            self._json(
-                200,
-                json.loads(
+            if payload.get("model") == "dev-http-smoke":
+                response = json.loads(
                     (
                         ROOT
                         / "control/tests/fixtures/recipes/dev-http-smoke/expected.json"
                     ).read_text()
-                )["response"],
-            )
+                )["response"]
+            else:
+                response = {
+                    "id": "chatcmpl-model-smoke",
+                    "object": "chat.completion",
+                    "model": payload["model"],
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": "VONK MODEL OK",
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                }
+            self._json(200, response)
         elif path.endswith("/stop"):
             self.server.route_published = False
-            self._operation("20000000-0000-4000-8000-000000000004")
+            self._operation(
+                "20000000-0000-4000-8000-000000000004", self.server.nodes
+            )
         elif path.endswith("/uninstall"):
-            self._operation("20000000-0000-4000-8000-000000000005")
+            self._operation(
+                "20000000-0000-4000-8000-000000000005", self.server.nodes
+            )
         else:
             owner = {
                 "/api/v1/recipes/builds": "20000000-0000-4000-8000-000000000001",
@@ -270,11 +326,17 @@ class SliceHandler(BaseHTTPRequestHandler):
                 return
             if path == "/api/v1/recipes/runs":
                 self.server.route_published = True
-            self._operation(owner)
+            nodes = (
+                [NODE]
+                if path == "/api/v1/recipes/builds"
+                else self.server.nodes
+            )
+            self._operation(owner, nodes)
 
-    def _operation(self, owner: str) -> None:
+    def _operation(self, owner: str, nodes: list[str] | None = None) -> None:
         self.server.operation += 1
         operation_id = f"40000000-0000-4000-8000-{self.server.operation:012d}"
+        self.server.operation_nodes[operation_id] = list(nodes or self.server.nodes)
         self._json(
             202,
             {
@@ -283,7 +345,7 @@ class SliceHandler(BaseHTTPRequestHandler):
                 "owner_id": owner,
                 "state": "queued",
                 "plan_digest": "f" * 64,
-                "nodes": [NODE],
+                "nodes": list(nodes or self.server.nodes),
                 "result": None,
             },
         )
@@ -344,6 +406,46 @@ def _run(tmp_path: Path, server: SliceServer, *extra: str):
     return result, evidence
 
 
+def _run_model(tmp_path: Path, server: SliceServer, *extra: str):
+    admin = _token(tmp_path / "admin-token", ADMIN_TOKEN)
+    inference = _token(tmp_path / "inference-token", INFERENCE_TOKEN)
+    evidence = tmp_path / "model-evidence.json"
+    result = subprocess.run(
+        (
+            sys.executable,
+            str(RUNNER),
+            "--api-base",
+            f"http://127.0.0.1:{server.server_port}",
+            "--admin-token-file",
+            str(admin),
+            "--inference-token-file",
+            str(inference),
+            "--phase",
+            "model-multinode",
+            "--builder-node",
+            NODE,
+            "--target-node",
+            NODE,
+            "--target-node",
+            NODE_2,
+            "--failure-node",
+            NODE_2,
+            "--evidence-file",
+            str(evidence),
+            "--timeout-seconds",
+            "2",
+            "--poll-seconds",
+            "0.01",
+            *extra,
+        ),
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return result, evidence
+
+
 def test_runner_completes_exact_public_lifecycle_without_secret_leaks(
     tmp_path: Path, server: SliceServer
 ) -> None:
@@ -368,6 +470,54 @@ def test_runner_completes_exact_public_lifecycle_without_secret_leaks(
             "/api/v1/endpoints/dev-http-smoke",
             "/v1/chat/completions",
         }
+        for _method, path, _authorization in server.requests
+    )
+
+
+def test_model_multinode_runner_proves_failure_recovery_restart_and_cleanup(
+    tmp_path: Path, server: SliceServer
+) -> None:
+    server.nodes = [NODE, NODE_2]
+
+    initial, evidence_path = _run_model(
+        tmp_path, server, "--stop-after", "inference-ok"
+    )
+    assert initial.returncode == 0, initial.stderr
+
+    server.online[NODE_2] = False
+    server.route_published = False
+    failed, _ = _run_model(
+        tmp_path, server, "--stop-after", "route-withdrawn-after-failure"
+    )
+    assert failed.returncode == 0, failed.stderr
+
+    server.online[NODE_2] = True
+    server.last_seen = {
+        NODE: "2026-08-11T10:01:00+00:00",
+        NODE_2: "2026-08-11T10:01:00+00:00",
+    }
+    server.fleet_digest = "c" * 64
+    server.route_published = True
+    recovered, _ = _run_model(
+        tmp_path, server, "--stop-after", "inference-recovered"
+    )
+    assert recovered.returncode == 0, recovered.stderr
+
+    server.last_seen = {
+        NODE: "2026-08-11T10:02:00+00:00",
+        NODE_2: "2026-08-11T10:02:00+00:00",
+    }
+    server.fleet_digest = "d" * 64
+    completed, _ = _run_model(tmp_path, server)
+
+    assert completed.returncode == 0, completed.stderr
+    evidence = json.loads(evidence_path.read_text())
+    assert evidence["completed_states"] == list(MODEL_MULTINODE_STATES)
+    assert evidence["failure_node"] == NODE_2
+    assert evidence["outputs"]["restart_fleet_evidence_digest"] == "d" * 64
+    assert server.route_published is False
+    assert any(
+        path == "/api/v1/endpoints/development-deepseek-smoke"
         for _method, path, _authorization in server.requests
     )
 

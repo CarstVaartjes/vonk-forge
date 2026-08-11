@@ -145,19 +145,7 @@ impl WorkloadSpec {
         if self.security.host_network
             || self.security.privileged
             || !self.security.capabilities.is_empty()
-            || self.security.mounts
-                != [
-                    MountSpec {
-                        source: "model".to_owned(),
-                        target: "/models".to_owned(),
-                        read_only: true,
-                    },
-                    MountSpec {
-                        source: "state".to_owned(),
-                        target: "/state".to_owned(),
-                        read_only: false,
-                    },
-                ]
+            || !canonical_runtime_mounts(&self.security.mounts)
             || self
                 .security
                 .devices
@@ -366,4 +354,14 @@ fn numeric_non_root_user(value: &str) -> bool {
     valid(parts.next().unwrap_or_default())
         && parts.next().is_none_or(valid)
         && parts.next().is_none()
+}
+
+fn canonical_runtime_mounts(mounts: &[MountSpec]) -> bool {
+    mounts.len() == 2
+        && mounts
+            .iter()
+            .any(|mount| mount.source == "model" && mount.target == "/models" && mount.read_only)
+        && mounts
+            .iter()
+            .any(|mount| mount.source == "state" && mount.target == "/state" && !mount.read_only)
 }

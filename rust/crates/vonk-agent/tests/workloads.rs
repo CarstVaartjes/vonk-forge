@@ -261,6 +261,7 @@ fn container_arguments_are_typed_and_hardened() {
         "--read-only",
         "--cap-drop=ALL",
         "--security-opt=no-new-privileges",
+        "--userns=keep-id:uid=10001,gid=10001",
         "slirp4netns:allow_host_loopback=false",
         "--device",
         "nvidia.com/gpu=all",
@@ -300,6 +301,14 @@ fn container_arguments_are_typed_and_hardened() {
             .windows(2)
             .any(|values| values == ["--max-model-len", "32768"])
     );
+}
+
+#[test]
+fn canonical_runtime_mounts_are_order_independent() {
+    let mut workload = spec();
+    workload.security.mounts.reverse();
+
+    workload.validate().unwrap();
 }
 
 #[test]

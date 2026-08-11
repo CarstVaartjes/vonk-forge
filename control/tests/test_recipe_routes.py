@@ -5,6 +5,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 from vonk_control.litellm import LiteLlmPolicyError, LiteLlmPublisher
 from vonk_control.models import (
     AgentNode,
@@ -27,8 +29,6 @@ from vonk_control.recipe_routes import (
     RecipeRouteService,
 )
 from vonk_control.route_runtime import AtomicRouteBundlePublisher
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 NOW = datetime(2026, 8, 7, 12, tzinfo=UTC)
 
@@ -48,6 +48,8 @@ def setup(
                 state="active",
                 architecture="linux-arm64",
                 capabilities=[],
+                last_seen_at=NOW
+                - (timedelta(seconds=301) if stale else timedelta()),
             )
             for node in nodes
         )
@@ -170,7 +172,7 @@ def setup(
                     reserved_memory_bytes=100,
                     endpoint={"url": f"http://10.0.0.{rank + 2}:8000"},
                     evidence_digest=str(rank + 1) * 64,
-                    updated_at=NOW - (timedelta(seconds=301) if stale else timedelta()),
+                    updated_at=NOW,
                 )
             )
     applied: list[bytes] = []
@@ -258,6 +260,20 @@ def test_withdraw_publishes_empty_generation_before_workload_stop(
     assert publisher.active() == empty
 
 
+def test_withdrawn_running_recipe_is_excluded_from_other_route_candidates(
+    tmp_path: Path,
+) -> None:
+    service, _publisher, _applied, run_id = setup(tmp_path)
+    service.publish_run(run_id)
+    service.withdraw_run(run_id)
+
+    state, included, policy = service._candidate(exclude_run_id=None)
+
+    assert state.aliases == {}
+    assert included == set()
+    assert policy.models == {}
+
+
 def test_worker_publishes_pending_route_and_records_failure(tmp_path: Path) -> None:
     service, _publisher, _applied, run_id = setup(tmp_path)
     with service.sessions.begin() as session:
@@ -283,6 +299,35 @@ def test_worker_publishes_pending_route_and_records_failure(tmp_path: Path) -> N
         failed = session.get(RecipeRun, failed_run)
         assert failed.route_state == "failed"
         assert "LiteLlmPolicyError" in failed.route_error
+
+
+def test_worker_withdraws_on_rank_presence_loss_and_republishes_after_recovery(
+    tmp_path: Path,
+) -> None:
+    service, _publisher, applied, run_id = setup(tmp_path)
+    service.publish_run(run_id)
+    worker = RecipeOperationWorker(service.sessions, service, clock=lambda: NOW)
+    with service.sessions.begin() as session:
+        failed_node = session.get(AgentNode, "spk_" + f"{2:032x}")
+        assert failed_node is not None
+        failed_node.last_seen_at = NOW - timedelta(seconds=301)
+
+    assert worker.tick() is True
+    assert json.loads(applied[-1])["model_list"] == []
+    with service.sessions() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run.route_state == "withdrawn"
+        assert run.route_error == "recipe rank presence is unavailable"
+
+    with service.sessions.begin() as session:
+        session.get(AgentNode, "spk_" + f"{2:032x}").last_seen_at = NOW
+
+    assert worker.tick() is True
+    assert json.loads(applied[-1])["model_list"][0]["model_name"] == "qwen"
+    with service.sessions() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run.route_state == "published"
+        assert run.route_error is None
 
 
 def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(

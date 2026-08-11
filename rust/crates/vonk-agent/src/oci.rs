@@ -247,6 +247,11 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         managed_path(self.data_root, "installations", installation_id)?;
         let models = self.data_root.join("models");
         let state = managed_path(self.data_root, "runs", run_id)?;
+        let (runtime_uid, runtime_gid) = spec
+            .security
+            .user
+            .split_once(':')
+            .unwrap_or((&spec.security.user, &spec.security.user));
         let mut arguments = vec![
             "run".to_owned(),
             "--detach".to_owned(),
@@ -257,6 +262,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             "--read-only".to_owned(),
             "--cap-drop=ALL".to_owned(),
             "--security-opt=no-new-privileges".to_owned(),
+            format!("--userns=keep-id:uid={runtime_uid},gid={runtime_gid}"),
             "--network".to_owned(),
             "slirp4netns:allow_host_loopback=false".to_owned(),
             "--pids-limit".to_owned(),

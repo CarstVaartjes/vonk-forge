@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import ipaddress
 import io
+import ipaddress
 import json
 import os
 import re
@@ -24,7 +24,8 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 SYNTHETIC_ROOT = ROOT / "control/tests/fixtures/recipes/dev-http-smoke"
-STATES = (
+MODEL_ROOT = ROOT / "config/recipes/development"
+SYNTHETIC_STATES = (
     "inventory-ready",
     "recipe-resolved",
     "source-verified",
@@ -38,6 +39,27 @@ STATES = (
     "route-withdrawn",
     "uninstalled",
 )
+MODEL_SINGLE_STATES = (
+    *SYNTHETIC_STATES[:9],
+    "restart-persistence-observed",
+    *SYNTHETIC_STATES[9:],
+)
+MODEL_MULTINODE_STATES = (
+    *SYNTHETIC_STATES[:9],
+    "rank-failure-observed",
+    "route-withdrawn-after-failure",
+    "rank-recovered",
+    "route-republished",
+    "inference-recovered",
+    "restart-persistence-observed",
+    *SYNTHETIC_STATES[9:],
+)
+PHASE_STATES = {
+    "synthetic": SYNTHETIC_STATES,
+    "model-single": MODEL_SINGLE_STATES,
+    "model-multinode": MODEL_MULTINODE_STATES,
+}
+ALL_STATES = tuple(dict.fromkeys(state for states in PHASE_STATES.values() for state in states))
 NODE = re.compile(r"spk_[0-9a-f]{32}\Z")
 MAXIMUM_TOKEN_BYTES = 16 * 1024
 MAXIMUM_EVIDENCE_BYTES = 2 * 1024 * 1024
@@ -175,7 +197,9 @@ def _atomic_write(path: Path, value: object) -> None:
             pass
 
 
-def _load_evidence(path: Path, expected: dict[str, object]) -> dict[str, Any]:
+def _load_evidence(
+    path: Path, expected: dict[str, object], states: tuple[str, ...]
+) -> dict[str, Any]:
     if not path.exists() and not path.is_symlink():
         evidence: dict[str, Any] = {
             "schema_version": 1,
@@ -200,7 +224,7 @@ def _load_evidence(path: Path, expected: dict[str, object]) -> dict[str, Any]:
     acceptance_id = evidence.get("acceptance_id")
     if (
         not isinstance(completed, list)
-        or completed != list(STATES[: len(completed)])
+        or completed != list(states[: len(completed)])
         or not isinstance(outputs, dict)
         or not isinstance(acceptance_id, str)
     ):
@@ -356,6 +380,7 @@ def _recipe_content_digest(document: dict[str, object]) -> str:
 class Runner:
     def __init__(self, args: argparse.Namespace) -> None:
         self.args = args
+        self.states = PHASE_STATES[args.phase]
         self.api_base = _base_url(args.api_base, "control API")
         self.inference_base = _base_url(
             args.inference_base or args.api_base, "inference API"
@@ -368,11 +393,21 @@ class Runner:
         )
         # Tokens remain only inside the clients and are never persisted or printed.
         del admin_token, inference_token
-        self.recipe_path = args.recipe or SYNTHETIC_ROOT / "recipe.json"
+        self.recipe_path = args.recipe or (
+            SYNTHETIC_ROOT / "recipe.json"
+            if args.phase == "synthetic"
+            else MODEL_ROOT / "model-smoke.json"
+        )
         try:
             self.recipe = json.loads(self.recipe_path.read_text(encoding="utf-8"))
-            self.expected = json.loads(
-                (self.recipe_path.parent / "expected.json").read_text(encoding="utf-8")
+            self.expected = (
+                json.loads(
+                    (self.recipe_path.parent / "expected.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                if args.phase == "synthetic"
+                else {}
             )
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
             raise SliceError("recipe acceptance input is invalid") from error
@@ -382,14 +417,29 @@ class Runner:
         self.slug = str(self.recipe.get("identity", {}).get("slug", ""))
         if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,62}", self.slug):
             raise SliceError("recipe slug is invalid")
-        if args.phase != "synthetic":
-            raise SliceError("requested development phase is not implemented")
         nodes = [args.builder_node, *args.target_node]
         if any(NODE.fullmatch(node) is None for node in nodes):
             raise SliceError("development node identity is invalid")
         targets = list(dict.fromkeys(args.target_node))
         if not targets:
             raise SliceError("at least one target node is required")
+        expected_targets = 2 if args.phase == "model-multinode" else 1
+        if len(targets) != expected_targets:
+            raise SliceError("development phase target count is invalid")
+        if args.phase == "model-multinode":
+            if args.failure_node not in targets or args.failure_node == targets[0]:
+                raise SliceError("multi-node failure rank is invalid")
+            self.profile = "pair"
+        else:
+            if args.failure_node is not None:
+                raise SliceError("failure rank is only valid for multi-node acceptance")
+            self.profile = "solo"
+        self.targets = targets
+        self.source_context = args.source_context or (
+            self.recipe_path.parent / "context"
+            if args.phase == "synthetic"
+            else self.recipe_path.with_name(f"{self.recipe_path.stem}-context")
+        )
         expected_inputs = {
             "phase": args.phase,
             "api_base": self.api_base,
@@ -397,8 +447,11 @@ class Runner:
             "builder_node": args.builder_node,
             "target_nodes": targets,
             "recipe_slug": self.slug,
+            "profile": self.profile,
         }
-        self.evidence = _load_evidence(args.evidence_file, expected_inputs)
+        if args.failure_node is not None:
+            expected_inputs["failure_node"] = args.failure_node
+        self.evidence = _load_evidence(args.evidence_file, expected_inputs, self.states)
 
     @property
     def outputs(self) -> dict[str, Any]:
@@ -409,7 +462,7 @@ class Runner:
         return str(uuid.uuid5(namespace, f"{state}:{purpose}"))
 
     def complete(self, state: str, output: dict[str, object] | None = None) -> None:
-        expected = STATES[len(self.evidence["completed_states"])]
+        expected = self.states[len(self.evidence["completed_states"])]
         if state != expected:
             raise SliceError("acceptance state transition is invalid")
         if output:
@@ -417,7 +470,13 @@ class Runner:
         self.evidence["completed_states"].append(state)
         _atomic_write(self.args.evidence_file, self.evidence)
 
-    def operation(self, response: object | None, label: str) -> tuple[str, str]:
+    def operation(
+        self,
+        response: object | None,
+        label: str,
+        *,
+        expected_nodes: list[str] | None = None,
+    ) -> tuple[str, str]:
         operation = _object(response, label)
         operation_id = operation.get("id")
         owner_id = operation.get("owner_id")
@@ -435,6 +494,12 @@ class Runner:
             current = _object(payload, label)
         if current.get("state") != "succeeded":
             raise SliceError(f"{label} operation failed")
+        if expected_nodes is not None:
+            result = current.get("result")
+            successful = result.get("successful_nodes") if isinstance(result, dict) else None
+            failed = result.get("failed_nodes") if isinstance(result, dict) else None
+            if successful != sorted(expected_nodes) or failed != []:
+                raise SliceError(f"{label} rank evidence does not match")
         return operation_id, owner_id
 
     def run(self) -> None:
@@ -448,16 +513,47 @@ class Runner:
             "running": self.running,
             "route-published": self.route_published,
             "inference-ok": self.inference_ok,
+            "rank-failure-observed": self.rank_failure_observed,
+            "route-withdrawn-after-failure": self.route_withdrawn_after_failure,
+            "rank-recovered": self.rank_recovered,
+            "route-republished": self.route_republished,
+            "inference-recovered": self.inference_recovered,
+            "restart-persistence-observed": self.restart_persistence_observed,
             "stopped": self.stopped,
             "route-withdrawn": self.route_withdrawn,
             "uninstalled": self.uninstalled,
         }
-        for state in STATES[len(self.evidence["completed_states"]) :]:
+        for state in self.states[len(self.evidence["completed_states"]) :]:
             handlers[state]()
             if self.args.stop_after == state:
                 return
 
     def inventory_ready(self) -> None:
+        fleet, by_id = self._fleet()
+        required = {self.args.builder_node, *self.targets}
+        for node_id in required:
+            if not self._node_ready(by_id.get(node_id)):
+                raise SliceError("required development inventory is not ready")
+        digest = fleet.get("evidence_digest")
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise SliceError("fleet evidence is invalid")
+        last_seen = {
+            node_id: by_id[node_id].get("agent_last_seen_at")
+            for node_id in self.targets
+        }
+        if self.args.phase != "synthetic" and any(
+            not isinstance(value, str) or not value for value in last_seen.values()
+        ):
+            raise SliceError("development agent freshness evidence is missing")
+        self.complete(
+            "inventory-ready",
+            {
+                "fleet_evidence_digest": digest,
+                "initial_agent_last_seen": last_seen,
+            },
+        )
+
+    def _fleet(self) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
         _, payload = self.control.request("GET", "/api/v1/fleet")
         fleet = _object(payload, "fleet")
         nodes = fleet.get("nodes")
@@ -466,22 +562,18 @@ class Runner:
             for node in nodes
             if isinstance(node, dict) and isinstance(node.get("id"), str)
         } if isinstance(nodes, list) else {}
-        required = {self.args.builder_node, *self.args.target_node}
-        for node_id in required:
-            node = by_id.get(node_id)
-            if (
-                node is None
-                or node.get("healthy") is not True
-                or node.get("stale") is not False
-                or node.get("agent_online") is not True
-                or node.get("agent_state") != "active"
-                or node.get("compatibility") != "compatible"
-            ):
-                raise SliceError("required development inventory is not ready")
-        digest = fleet.get("evidence_digest")
-        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
-            raise SliceError("fleet evidence is invalid")
-        self.complete("inventory-ready", {"fleet_evidence_digest": digest})
+        return fleet, by_id
+
+    @staticmethod
+    def _node_ready(node: dict[str, Any] | None) -> bool:
+        return bool(
+            node is not None
+            and node.get("healthy") is True
+            and node.get("stale") is False
+            and node.get("agent_online") is True
+            and node.get("agent_state") == "active"
+            and node.get("compatibility") == "compatible"
+        )
 
     def recipe_resolved(self) -> None:
         _, listed_payload = self.control.request("GET", "/api/v1/catalog/recipes")
@@ -542,7 +634,7 @@ class Runner:
         self.complete("recipe-resolved", fields)
 
     def source_verified(self) -> None:
-        archive, digest, file_count = _source_bundle(self.recipe_path.parent / "context")
+        archive, digest, file_count = _source_bundle(self.source_context)
         context = self.recipe.get("build", {}).get("context", {})
         if (
             not isinstance(context, dict)
@@ -601,8 +693,8 @@ class Runner:
     def image_distributed(self) -> None:
         mapping_request = {
             "recipe_revision_id": self.outputs["recipe_revision_id"],
-            "profile_name": "solo",
-            "node_ids": self.args.target_node,
+            "profile_name": self.profile,
+            "node_ids": self.targets,
             "parameters": {},
         }
         _, preview_payload = self.control.request(
@@ -697,7 +789,9 @@ class Runner:
                 "request_key": self.request_key("running", "start"),
             },
         )
-        operation_id, run_id = self.operation(response, "recipe start")
+        operation_id, run_id = self.operation(
+            response, "recipe start", expected_nodes=self.targets
+        )
         self.complete(
             "running", {"run_id": run_id, "run_operation_id": operation_id}
         )
@@ -730,16 +824,117 @@ class Runner:
         self.complete("route-published")
 
     def inference_ok(self) -> None:
-        request = self.expected.get("request")
-        expected = self.expected.get("response")
-        if not isinstance(request, dict) or not isinstance(expected, dict):
-            raise SliceError("expected inference fixture is invalid")
-        _, response = self.inference.request("POST", "/v1/chat/completions", request)
-        if response != expected:
-            raise SliceError("synthetic inference response did not match")
+        response = self._inference()
         self.complete(
             "inference-ok",
             {"inference_response_sha256": hashlib.sha256(_canonical(response)).hexdigest()},
+        )
+
+    def _inference(self) -> dict[str, Any]:
+        if self.args.phase == "synthetic":
+            request = self.expected.get("request")
+            expected = self.expected.get("response")
+            if not isinstance(request, dict) or not isinstance(expected, dict):
+                raise SliceError("expected inference fixture is invalid")
+        else:
+            request = {
+                "model": self.slug,
+                "messages": [{"role": "user", "content": "Reply with exactly: VONK MODEL OK"}],
+                "temperature": 0,
+                "max_tokens": 16,
+                "stream": False,
+            }
+            expected = None
+        _, response = self.inference.request("POST", "/v1/chat/completions", request)
+        if not isinstance(response, dict):
+            raise SliceError("model inference response is invalid")
+        if expected is not None and response != expected:
+            raise SliceError("synthetic inference response did not match")
+        if expected is None:
+            choices = response.get("choices")
+            message = (
+                choices[0].get("message")
+                if isinstance(choices, list) and len(choices) == 1 and isinstance(choices[0], dict)
+                else None
+            )
+            content = message.get("content") if isinstance(message, dict) else None
+            if (
+                response.get("model") != self.slug
+                or not isinstance(content, str)
+                or "VONK MODEL OK" not in content.upper()
+            ):
+                raise SliceError("model inference response is invalid")
+        return response
+
+    def rank_failure_observed(self) -> None:
+        _fleet, by_id = self._fleet()
+        failure = by_id.get(self.args.failure_node)
+        age = failure.get("last_seen_age_seconds") if failure is not None else None
+        if failure is None or (
+            failure.get("agent_online") is not False
+            and not (isinstance(age, (int, float)) and age > 30)
+        ):
+            raise SliceError("expected failed rank is still online")
+        if any(
+            not self._node_ready(by_id.get(node_id))
+            for node_id in self.targets
+            if node_id != self.args.failure_node
+        ):
+            raise SliceError("healthy rank was lost during failure acceptance")
+        self.complete("rank-failure-observed")
+
+    def route_withdrawn_after_failure(self) -> None:
+        self._await_endpoint(published=False)
+        self.complete("route-withdrawn-after-failure")
+
+    def rank_recovered(self) -> None:
+        _fleet, by_id = self._fleet()
+        if any(not self._node_ready(by_id.get(node_id)) for node_id in self.targets):
+            raise SliceError("failed rank has not recovered")
+        self.complete("rank-recovered")
+
+    def route_republished(self) -> None:
+        self._await_endpoint(published=True)
+        self.complete("route-republished")
+
+    def inference_recovered(self) -> None:
+        response = self._inference()
+        self.complete(
+            "inference-recovered",
+            {
+                "recovered_inference_response_sha256": hashlib.sha256(
+                    _canonical(response)
+                ).hexdigest()
+            },
+        )
+
+    def restart_persistence_observed(self) -> None:
+        fleet, by_id = self._fleet()
+        initial = self.outputs.get("initial_agent_last_seen")
+        if not isinstance(initial, dict):
+            raise SliceError("initial agent freshness evidence is missing")
+        current: dict[str, str] = {}
+        for node_id in self.targets:
+            node = by_id.get(node_id)
+            value = node.get("agent_last_seen_at") if self._node_ready(node) else None
+            before = initial.get(node_id)
+            if not isinstance(value, str) or not isinstance(before, str) or value <= before:
+                raise SliceError("restart persistence freshness did not advance")
+            current[node_id] = value
+        self._await_endpoint(published=True)
+        response = self._inference()
+        digest = fleet.get("evidence_digest")
+        if not isinstance(digest, str) or digest == self.outputs["fleet_evidence_digest"]:
+            raise SliceError("restart persistence fleet evidence did not advance")
+        self.complete(
+            "restart-persistence-observed",
+            {
+                "restart_fleet_evidence_digest": digest,
+                "restart_agent_last_seen": current,
+                "restart_inference_response_sha256": hashlib.sha256(
+                    _canonical(response)
+                ).hexdigest(),
+            },
         )
 
     def stopped(self) -> None:
@@ -771,20 +966,24 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--inference-base")
     parser.add_argument("--admin-token-file", type=Path, required=True)
     parser.add_argument("--inference-token-file", type=Path, required=True)
-    parser.add_argument("--phase", required=True, choices=("synthetic",))
+    parser.add_argument("--phase", required=True, choices=tuple(PHASE_STATES))
     parser.add_argument("--builder-node", required=True)
     parser.add_argument("--target-node", action="append", required=True)
     parser.add_argument("--evidence-file", type=Path, required=True)
     parser.add_argument("--recipe", type=Path)
+    parser.add_argument("--source-context", type=Path)
+    parser.add_argument("--failure-node")
     parser.add_argument("--timeout-seconds", type=float, default=300.0)
     parser.add_argument("--poll-seconds", type=float, default=1.0)
-    parser.add_argument("--stop-after", choices=STATES, help=argparse.SUPPRESS)
+    parser.add_argument("--stop-after", choices=ALL_STATES, help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.timeout_seconds <= 0 or args.poll_seconds <= 0:
         parser.error("timeouts must be positive")
     args.evidence_file = args.evidence_file.resolve()
     if args.recipe is not None:
         args.recipe = args.recipe.resolve()
+    if args.source_context is not None:
+        args.source_context = args.source_context.resolve()
     return args
 
 

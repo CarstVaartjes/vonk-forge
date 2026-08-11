@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .litellm import LiteLlmGeneration, LiteLlmPolicy, LiteLlmPublisher
-from .models import RecipeRun, RunNode
+from .models import AgentNode, RecipeRun, RunNode
 from .presence import ManagementAddressPolicy, PresenceError
 from .routes import RouteState
 
@@ -114,7 +114,7 @@ class RecipeRouteService:
                 raise KeyError(run_id)
             if run.state != "running":
                 raise RecipeRouteError("recipe run is not ready for publication")
-        routes = self._candidate(exclude_run_id=None)
+        routes = self._candidate(exclude_run_id=None, include_run_id=run_id)
         if run_id not in routes[1]:
             raise RecipeRouteError("recipe run is absent from route candidate")
         generation = self._publisher.publish(routes[0], routes[2])
@@ -150,12 +150,44 @@ class RecipeRouteService:
             run.updated_at = self._clock()
         return generation
 
-    def _candidate(
-        self, *, exclude_run_id: str | None
-    ) -> tuple[RouteState, set[str], LiteLlmPolicy]:
+    def ranks_present(self, run_id: str) -> bool:
+        now = self._now()
+        with self.sessions() as session:
+            nodes = tuple(
+                session.scalars(
+                    select(RunNode)
+                    .where(RunNode.run_id == run_id)
+                    .order_by(RunNode.rank)
+                )
+            )
+            return bool(nodes) and all(
+                self._agent_present(session.get(AgentNode, node.node_id), now)
+                for node in nodes
+            )
+
+    def _now(self) -> datetime:
         now = self._clock()
         if now.tzinfo is None or now.utcoffset() is None:
             raise RecipeRouteError("recipe route clock must be timezone-aware")
+        return now.astimezone(UTC)
+
+    def _agent_present(self, agent: AgentNode | None, now: datetime) -> bool:
+        if (
+            agent is None
+            or agent.state != "active"
+            or agent.revoked_at is not None
+            or agent.last_seen_at is None
+        ):
+            return False
+        observed = _aware(agent.last_seen_at)
+        return observed <= now and now - observed <= timedelta(
+            seconds=self._maximum_age
+        )
+
+    def _candidate(
+        self, *, exclude_run_id: str | None, include_run_id: str | None = None
+    ) -> tuple[RouteState, set[str], LiteLlmPolicy]:
+        now = self._now()
         aliases: dict[str, str] = {}
         included: set[str] = set()
         node_ids: set[str] = set()
@@ -171,6 +203,11 @@ class RecipeRouteService:
             )
             for run in runs:
                 if run.id == exclude_run_id:
+                    continue
+                if (
+                    run.id != include_run_id
+                    and run.route_state not in {"pending", "published"}
+                ):
                     continue
                 if _ALIAS.fullmatch(run.alias) is None or run.alias in aliases:
                     raise RecipeRouteError("recipe run alias is invalid or duplicated")
@@ -190,9 +227,11 @@ class RecipeRouteService:
                 if len(entrypoints) != 1 or entrypoints[0].rank != 0:
                     raise RecipeRouteError("recipe run must have one rank-zero entrypoint")
                 for node in nodes:
-                    observed = _aware(node.updated_at)
-                    if observed > now.astimezone(UTC) or now.astimezone(UTC) - observed > timedelta(seconds=self._maximum_age):
-                        raise RecipeRouteError("recipe rank readiness evidence is stale")
+                    agent = session.get(AgentNode, node.node_id)
+                    if not self._agent_present(agent, now):
+                        raise RecipeRouteError("recipe rank presence is stale")
+                    assert agent is not None and agent.last_seen_at is not None
+                    observed = _aware(agent.last_seen_at)
                     if not isinstance(node.evidence_digest, str) or _DIGEST.fullmatch(node.evidence_digest) is None:
                         raise RecipeRouteError("recipe rank readiness identity is invalid")
                     evidence_times.append(observed)
