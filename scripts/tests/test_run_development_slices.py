@@ -77,7 +77,7 @@ class SliceHandler(BaseHTTPRequestHandler):
             raise RuntimeError("handled failure")
         return body
 
-    def do_GET(self) -> None:  # noqa: N802
+    def do_GET(self) -> None:
         try:
             self._record()
         except RuntimeError:
@@ -141,7 +141,7 @@ class SliceHandler(BaseHTTPRequestHandler):
         else:
             self._json(404, {"detail": "not found"})
 
-    def do_PUT(self) -> None:  # noqa: N802
+    def do_PUT(self) -> None:
         try:
             body = self._record()
         except RuntimeError:
@@ -158,7 +158,7 @@ class SliceHandler(BaseHTTPRequestHandler):
             },
         )
 
-    def do_POST(self) -> None:  # noqa: N802
+    def do_POST(self) -> None:
         try:
             body = self._record()
         except RuntimeError:
@@ -225,16 +225,16 @@ class SliceHandler(BaseHTTPRequestHandler):
                 200,
                 {"build_input_sha256": "e" * 64, "source_bundle_sha256": "f" * 64},
             )
-        elif path.endswith("install-plans/preview") or path.endswith(
-            "run-plans/preview"
-        ):
+        elif path.endswith(("install-plans/preview", "run-plans/preview")):
             self._json(200, {"allowed": True, "plan_digest": "f" * 64, "nodes": []})
         elif path == "/v1/chat/completions":
             self._json(
                 200,
                 json.loads(
-                    (ROOT / "control/tests/fixtures/recipes/dev-http-smoke/expected.json")
-                    .read_text()
+                    (
+                        ROOT
+                        / "control/tests/fixtures/recipes/dev-http-smoke/expected.json"
+                    ).read_text()
                 )["response"],
             )
         elif path.endswith("/stop"):
@@ -341,13 +341,13 @@ def test_runner_completes_exact_public_lifecycle_without_secret_leaks(
     assert ADMIN_TOKEN not in encoded
     assert INFERENCE_TOKEN not in encoded
     assert all(
-        authorization
-        in {f"Bearer {ADMIN_TOKEN}", f"Bearer {INFERENCE_TOKEN}"}
+        authorization in {f"Bearer {ADMIN_TOKEN}", f"Bearer {INFERENCE_TOKEN}"}
         for _method, _path, authorization in server.requests
     )
     assert all(
         path.startswith(("/api/v1/catalog/", "/api/v1/recipes/"))
-        or path in {
+        or path
+        in {
             "/api/v1/fleet",
             "/api/v1/endpoints/dev-http-smoke",
             "/v1/chat/completions",
