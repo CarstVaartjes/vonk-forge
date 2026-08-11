@@ -48,6 +48,19 @@ def test_builder_output_limit_matches_the_root_supervisor_limit() -> None:
     assert "MAX_ARTIFACT = 256 * 1024 * 1024" in BUILDER.read_text()
 
 
+def test_builder_reviewed_lock_digest_matches_committed_agent_lock() -> None:
+    specification = importlib.util.spec_from_loader(
+        "vonk_slot_builder_lock", SourceFileLoader("vonk_slot_builder_lock", str(BUILDER))
+    )
+    assert specification and specification.loader
+    builder = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(builder)
+
+    assert builder.LOCK_SHA256 == hashlib.sha256(
+        (ROOT / "agent/uv.lock").read_bytes()
+    ).hexdigest()
+
+
 @pytest.fixture(scope="session")
 def slot_wheels(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path]:
     distribution = tmp_path_factory.mktemp("slot-distribution")

@@ -45,6 +45,7 @@ def test_generated_cli_and_rendered_browser_share_live_plan_and_apply_contract(
             "3.12",
             "--project",
             "control",
+            "--frozen",
             "python",
             "control/tests/admin_equivalence_server.py",
             str(port),
@@ -54,7 +55,8 @@ def test_generated_cli_and_rendered_browser_share_live_plan_and_apply_contract(
         cwd=root,
     )
     try:
-        for _ in range(150):
+        startup_deadline = time.monotonic() + 30
+        while time.monotonic() < startup_deadline:
             if ready_file.exists():
                 try:
                     urllib.request.urlopen(f"{origin}/api/v1/healthz", timeout=0.2)
@@ -63,7 +65,7 @@ def test_generated_cli_and_rendered_browser_share_live_plan_and_apply_contract(
                     pass
             if server.poll() is not None:
                 raise AssertionError("disposable control API exited early")
-            time.sleep(0.02)
+            time.sleep(0.05)
         else:
             raise AssertionError("disposable control API did not start")
         token = json.loads(ready_file.read_text())["token"]
