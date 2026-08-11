@@ -318,6 +318,57 @@ def test_terminal_build_can_be_retried_once_with_fresh_fencing_and_capacity(
         assert sum(item.state == "released" for item in reservations) == 2
 
 
+def test_fresh_build_request_retries_matching_failed_build_idempotently(
+    tmp_path: Path,
+) -> None:
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    builds = RecipeBuildService(sessions, bundles=bundles)
+    plan = builds.plan(revision.id, node_id, now=now)
+    operations = RecipeOperationService(
+        sessions,
+        install_admission=object(),
+        run_admission=object(),
+        agent_jobs=RecordingQueue(),
+        clock=lambda: now,
+        builds=builds,
+    )
+    first = operations.build(
+        plan,
+        build_input_sha256=plan.build_input_sha256,
+        actor="admin",
+        request_id="failed-acceptance-build",
+    )
+    with sessions.begin() as session:
+        session.get(Job, first.id).state = "failed"  # type: ignore[union-attr]
+        child = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == first.id)
+        )
+        assert child is not None
+        child.state = "failed"
+        session.get(RecipeBuild, plan.build_id).state = "failed"  # type: ignore[union-attr]
+
+    retried = operations.build(
+        plan,
+        build_input_sha256=plan.build_input_sha256,
+        actor="admin",
+        request_id="fresh-acceptance-build",
+    )
+    replay = operations.build(
+        plan,
+        build_input_sha256=plan.build_input_sha256,
+        actor="admin",
+        request_id="fresh-acceptance-build",
+    )
+
+    assert retried == replay
+    assert retried.id != first.id
+    assert retried.owner_id == plan.build_id
+    assert retried.state == "running"
+    with sessions() as session:
+        assert session.get(RecipeBuild, plan.build_id).state == "building"  # type: ignore[union-attr]
+        assert session.get(Job, retried.id).request_id == "fresh-acceptance-build"  # type: ignore[union-attr]
+
+
 def test_successful_build_retry_converges_original_and_new_request_keys(
     tmp_path: Path,
 ) -> None:
