@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "nodes": [
+    "spk_42a502cc1a5de4c79aea1b6b6d993c74",
+    "spk_ec7897d93866091c4249cc7825fb95c7"
+  ],
+  "links": [
+    {
+      "id": "rdma-function-100",
+      "kind": "direct-rdma",
+      "accepted": true,
+      "endpoints": [
+        {
+          "node_id": "spk_42a502cc1a5de4c79aea1b6b6d993c74",
+          "interface": "enp1s0f1np1",
+          "address": "192.168.100.10",
+          "hca": "rocep1s0f1",
+          "gid_index": 3,
+          "mtu": 1500,
+          "link_rate_mbps": 200000
+        },
+        {
+          "node_id": "spk_ec7897d93866091c4249cc7825fb95c7",
+          "interface": "enp1s0f1np1",
+          "address": "192.168.100.11",
+          "hca": "rocep1s0f1",
+          "gid_index": 3,
+          "mtu": 1500,
+          "link_rate_mbps": 200000
+        }
+      ]
+    },
+    {
+      "id": "rdma-function-101",
+      "kind": "direct-rdma",
+      "accepted": true,
+      "endpoints": [
+        {
+          "node_id": "spk_42a502cc1a5de4c79aea1b6b6d993c74",
+          "interface": "enP2p1s0f1np1",
+          "address": "192.168.101.10",
+          "hca": "roceP2p1s0f1",
+          "gid_index": 3,
+          "mtu": 1500,
+          "link_rate_mbps": 200000
+        },
+        {
+          "node_id": "spk_ec7897d93866091c4249cc7825fb95c7",
+          "interface": "enP2p1s0f1np1",
+          "address": "192.168.101.11",
+          "hca": "roceP2p1s0f1",
+          "gid_index": 3,
+          "mtu": 1500,
+          "link_rate_mbps": 200000
+        }
+      ]
+    }
+  ]
+}

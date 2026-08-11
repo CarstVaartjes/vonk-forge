@@ -7,9 +7,9 @@
 - `inventory/fleet.toml` is the generic version 2 format used by newly
   onboarded nodes. It has no fixed node count or fixed node names.
 
-Phase 0 introduces contracts and parsers only. It does not contact a GPU node,
-change SSH configuration, migrate a runtime profile, or rewrite either
-inventory format.
+The version 2 inventory is now the controller's authoritative fleet input.
+`cluster.toml` remains only as accepted legacy evidence for older runtime and
+fabric tooling; new controller reads and node onboarding must use `fleet.toml`.
 
 ## Identity model
 
@@ -92,15 +92,13 @@ legacy file parses. A generic record becomes authoritative only after the
 per-node onboarding workflow has passed its identity, inventory, access,
 hardening, policy, and acceptance gates.
 
-Until the N-node controller phase is accepted:
+For every accepted node, commit the certificate-bound `spk_` identity and its
+sanitized management metadata to `inventory/fleet.toml`; commit physical links
+to `inventory/topology.json`. Never copy a private key, token, password, raw
+serial, or mutable observation into either document.
 
-1. keep `inventory/cluster.toml` as the runtime controller input;
-2. use the generic parser and onboarding journal only for new platform work;
-3. do not change existing model-definition hashes or evidence references; and
-4. roll back Phase 0 by selecting the earlier repository commit—no GPU node state
-   was changed by this phase.
-
-The later controller migration will prefer `inventory/fleet.toml` when present
-and otherwise adapt `inventory/cluster.toml`. That integration begins only
-after the separate SSH transport and runtime-release work has landed. It must
-consume those reviewed interfaces rather than replacing them.
+The controller does not fall back to `inventory/cluster.toml`. A deployment
+commit missing `fleet.toml` is incomplete and fleet-dependent API operations
+fail closed. Roll back by selecting an earlier complete repository commit with
+its matching fleet and topology documents, never by synthesizing IDs from the
+legacy file after pairing.
