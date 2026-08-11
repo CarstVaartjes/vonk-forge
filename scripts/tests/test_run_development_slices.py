@@ -422,6 +422,40 @@ def test_runner_rejects_an_existing_same_slug_recipe_with_different_content(
     assert "does not match" in result.stderr
 
 
+def test_runner_rejects_plain_http_to_a_non_loopback_host(tmp_path: Path) -> None:
+    admin = _token(tmp_path / "admin", ADMIN_TOKEN)
+    inference = _token(tmp_path / "inference", INFERENCE_TOKEN)
+
+    result = subprocess.run(
+        (
+            sys.executable,
+            str(RUNNER),
+            "--api-base",
+            "http://192.0.2.10:8080",
+            "--admin-token-file",
+            str(admin),
+            "--inference-token-file",
+            str(inference),
+            "--phase",
+            "synthetic",
+            "--builder-node",
+            NODE,
+            "--target-node",
+            NODE,
+            "--evidence-file",
+            str(tmp_path / "evidence.json"),
+        ),
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "plain HTTP requires an explicit loopback address" in result.stderr
+    assert not (tmp_path / "evidence.json").exists()
+
+
 @pytest.mark.parametrize("unsafe", ["symlink", "hardlink", "permissive"])
 def test_runner_rejects_unsafe_token_files(
     tmp_path: Path, server: SliceServer, unsafe: str

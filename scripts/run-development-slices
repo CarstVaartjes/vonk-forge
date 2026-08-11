@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import ipaddress
 import io
 import json
 import os
@@ -222,6 +223,17 @@ def _base_url(value: str, label: str) -> str:
         or parsed.fragment
     ):
         raise SliceError(f"{label} URL is invalid")
+    if parsed.scheme == "http":
+        try:
+            address = ipaddress.ip_address(parsed.hostname)
+        except ValueError as error:
+            raise SliceError(
+                f"{label} plain HTTP requires an explicit loopback address"
+            ) from error
+        if not address.is_loopback:
+            raise SliceError(
+                f"{label} plain HTTP requires an explicit loopback address"
+            )
     return value.rstrip("/")
 
 

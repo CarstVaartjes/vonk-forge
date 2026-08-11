@@ -72,3 +72,14 @@
 - Result: both lock graphs resolve successfully. The project-specific lock now
   records the already-declared PyYAML development dependency required by the
   development Compose validation suite.
+
+### Independent review resolution
+
+- Review found one P1: the runner initially allowed bearer-token requests to
+  arbitrary plain-HTTP hosts.
+- Added a failing regression for non-loopback HTTP, then restricted HTTP to
+  explicit loopback IP addresses; all other control and inference origins must
+  use HTTPS.
+- Final runner suite: `19 passed in 11.54s` under `uv run --frozen`.
+- Controller self-review also added exact canonical recipe/source matching for
+  pre-existing same-slug recipes before the independent review.
