@@ -372,6 +372,7 @@ fn container_arguments_are_typed_and_hardened() {
         "--cap-drop=ALL",
         "--security-opt=no-new-privileges",
         "--userns=keep-id:uid=10001,gid=10001",
+        "--cgroups=split",
         "slirp4netns:allow_host_loopback=false",
         "--device",
         "nvidia.com/gpu=all",

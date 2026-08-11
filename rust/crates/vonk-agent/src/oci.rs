@@ -280,6 +280,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             "--cap-drop=ALL".to_owned(),
             "--security-opt=no-new-privileges".to_owned(),
             format!("--userns=keep-id:uid={runtime_uid},gid={runtime_gid}"),
+            "--cgroups=split".to_owned(),
             "--network".to_owned(),
             "slirp4netns:allow_host_loopback=false".to_owned(),
             "--pids-limit".to_owned(),

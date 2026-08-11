@@ -91,7 +91,7 @@ def verify(deb: Path) -> dict[str, object]:
         name: command(["/usr/bin/dpkg-deb", "--field", str(deb), name])
         .decode("utf-8")
         .strip()
-        for name in ("Package", "Version", "Architecture")
+        for name in ("Package", "Version", "Architecture", "Depends")
     }
     if fields["Package"] != PACKAGE:
         raise VerificationError("package identity is invalid")
@@ -99,6 +99,8 @@ def verify(deb: Path) -> dict[str, object]:
         raise VerificationError("package architecture is not arm64")
     if PACKAGE_VERSION.fullmatch(fields["Version"]) is None:
         raise VerificationError("package version is not canonical")
+    if re.search(r"(?:^|,\s*)uidmap(?:\s*\([^)]*\))?(?:,|$)", fields["Depends"]) is None:
+        raise VerificationError("package does not require subordinate ID helpers")
 
     with tempfile.TemporaryDirectory(prefix="vonk-agent-deb-verify-") as temporary:
         root = Path(temporary)
@@ -206,6 +208,8 @@ def _verify_control(control: Path) -> None:
     postinst = (control / "postinst").read_text(encoding="utf-8")
     for required in (
         "adduser",
+        "usermod --add-subuids",
+        "usermod --add-subgids",
         "vonk-agent-supervisor initialize",
         "install -d -o root -g vonk-agent -m 0750 /var/lib/vonk-forge/supervisor",
         "deb-systemd-helper enable",
@@ -246,8 +250,10 @@ def _verify_payload(payload: Path, control: Path) -> None:
         raise VerificationError("agent unit is not unprivileged")
     if (
         "SupplementaryGroups=" not in units["vonk-forge-agent.service"]
-        or "NoNewPrivileges=yes" not in units["vonk-forge-agent.service"]
-        or "CapabilityBoundingSet=" not in units["vonk-forge-agent.service"]
+        or "NoNewPrivileges=no" not in units["vonk-forge-agent.service"]
+        or "CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_SETGID CAP_SETUID CAP_SYS_ADMIN"
+        not in units["vonk-forge-agent.service"]
+        or "AmbientCapabilities=" not in units["vonk-forge-agent.service"]
         or "CONTAINERS_STORAGE_CONF=/etc/vonk-forge-agent/containers-storage.conf"
         not in units["vonk-forge-agent.service"]
         or "RestrictNamespaces=user mnt pid ipc uts cgroup net"
@@ -265,9 +271,9 @@ def _verify_payload(payload: Path, control: Path) -> None:
     if (
         'driver = "overlay"' not in storage
         or 'mount_program = "/usr/bin/fuse-overlayfs"' not in storage
-        or 'ignore_chown_errors = "true"' not in storage
+        or "ignore_chown_errors" in storage
     ):
-        raise VerificationError("single-UID rootless storage is invalid")
+        raise VerificationError("rootless container storage is invalid")
     if "SocketGroup=vonk-agent" not in units["vonk-forge-package-helper.socket"]:
         raise VerificationError("helper socket group is invalid")
     if "PrivateNetwork=yes" not in units["vonk-forge-package-helper.service"]:

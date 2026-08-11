@@ -2119,8 +2119,12 @@ def test_rust_supervisor_is_stable_outside_slots_and_units_keep_agent_unprivileg
 
     assert "User=vonk-agent" in rust_agent
     assert "SupplementaryGroups=" in rust_agent
-    assert "NoNewPrivileges=yes" in rust_agent
-    assert "CapabilityBoundingSet=" in rust_agent
+    assert "NoNewPrivileges=no" in rust_agent
+    assert (
+        "CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_SETGID CAP_SETUID CAP_SYS_ADMIN"
+        in rust_agent
+    )
+    assert "AmbientCapabilities=" in rust_agent
     assert "RestrictSUIDSGID=yes" not in rust_agent
     assert (
         "ExecStart=/usr/lib/vonk-forge/vonk-agent-supervisor run-agent"

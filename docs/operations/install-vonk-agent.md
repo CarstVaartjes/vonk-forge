@@ -31,11 +31,13 @@ to `<NAS_MANAGEMENT_IP>` before pairing; `/etc/hosts` supplies names only, so
 both agent URLs must retain the explicit `:8443` port.
 
 Do not add the service user to `docker`, `sudo`, or an NVIDIA administration
-group. The package runs rootless Podman in a single-UID namespace with
-`fuse-overlayfs`, `slirp4netns`, NVIDIA CDI devices, and an allow-listed
-InfiniBand device class for multi-node recipes. Vonk images must run as root
-inside that namespace; this maps only to the unprivileged `vonk-agent` account
-on the host. Images declaring another OCI user are rejected before install.
+group. The package runs rootless Podman with a package-managed subordinate
+UID/GID range, `fuse-overlayfs`, `slirp4netns`, NVIDIA CDI devices, and an
+allow-listed InfiniBand device class for multi-node recipes. Vonk images must
+declare the policy's explicit numeric non-root user. Podman's user namespace
+maps both OCI layer ownership and that runtime identity without granting either
+identity on the host; images declaring a different user are rejected before
+install.
 
 ## Install
 
@@ -58,13 +60,21 @@ inactive slot and deliberately keep the current agent active. Use the
 for every upgrade; do not treat `apt install --only-upgrade` as rollout
 completion.
 
-The maintainer script creates the unprivileged account, single-UID rootless
-container storage, signed A/B slots, and disabled network state. It performs no
-download, pairing, or service start. The single-UID boundary deliberately keeps
-`NoNewPrivileges=yes`; no setuid `newuidmap`/`newgidmap` helper is available to
-the long-running agent. Because `vonk-agent` is a package-dedicated account,
-installation removes only that account's `/etc/subuid` and `/etc/subgid`
-mappings if an earlier prerelease or host policy created them.
+The maintainer script creates the unprivileged account, allocates the first
+non-overlapping standard subordinate UID and GID ranges permitted by
+`/etc/login.defs`, initializes rootless container storage and signed A/B slots,
+and leaves network state disabled. It performs no download, pairing, or service
+start. The service has no ambient capabilities; its capability bounding set is
+the tested minimum needed for the distribution's setuid
+`newuidmap`/`newgidmap` helpers to create the delegated namespace:
+`CAP_DAC_OVERRIDE`, `CAP_SETUID`, `CAP_SETGID`, and `CAP_SYS_ADMIN`. Existing
+host-managed subordinate ranges are preserved and reused when they are large
+enough.
+
+Workload containers use Podman's split-cgroup mode inside the delegated agent
+service. This keeps per-container PID and memory limits enforceable on cgroup
+v2 hosts even though the package account has no interactive systemd user
+session.
 
 Copy the CA and edit the bootstrap configuration:
 
@@ -128,6 +138,10 @@ sudo -u vonk-agent env \
   XDG_RUNTIME_DIR=/run/vonk-forge-agent \
   CONTAINERS_STORAGE_CONF=/etc/vonk-forge-agent/containers-storage.conf \
   podman info
+sudo awk -F: '$1 == "vonk-agent" { total += $3 } END { exit !(total >= 65536) }' \
+  /etc/subuid
+sudo awk -F: '$1 == "vonk-agent" { total += $3 } END { exit !(total >= 65536) }' \
+  /etc/subgid
 sudo systemctl enable --now vonk-forge-package-helper.socket
 sudo systemctl enable --now vonk-forge-agent-supervisor.service
 sudo systemctl status vonk-forge-agent.service vonk-forge-agent-supervisor.service

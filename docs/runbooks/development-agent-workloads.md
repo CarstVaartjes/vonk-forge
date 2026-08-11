@@ -66,10 +66,11 @@ Production remains selected by the trusted host updater and immutable TUF
 target; `:latest` is never production deployment authority.
 
 Confirm both nodes report `aarch64`, Ubuntu `24.04`, NVIDIA GB10 compute
-capability 12.1, rootless Podman, NVIDIA CDI, enough disk/memory, and an active
-common direct fabric. Confirm the NAS is `linux/amd64`, Docker Compose is
-available, and the project directory is empty or contains only the supported
-two-item layout.
+capability 12.1, rootless Podman with at least 65,536 subordinate UIDs and
+GIDs for `vonk-agent`, NVIDIA CDI, enough disk/memory, and an active common
+direct fabric. Confirm the NAS is `linux/amd64`, Docker Compose is available,
+and the project directory is empty or contains only the supported two-item
+layout.
 
 ## PKI and NAS project
 

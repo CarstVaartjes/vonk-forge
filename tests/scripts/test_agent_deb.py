@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 BUILD = ROOT / "scripts/build-agent-deb"
 VERIFY = ROOT / "scripts/verify-agent-deb"
 PREINST = ROOT / "packaging/debian/preinst"
+POSTINST = ROOT / "packaging/debian/postinst"
 
 
 def _aarch64_fixture(path: Path, marker: bytes) -> None:
@@ -86,6 +87,36 @@ def _run_preinst(tmp_path: Path, status: str) -> subprocess.CompletedProcess[str
     )
 
 
+def _allocate_subid_range(
+    tmp_path: Path,
+    entries: str,
+    *,
+    minimum: int = 100_000,
+    maximum: int = 600_100_000,
+    count: int = 65_536,
+) -> subprocess.CompletedProcess[str]:
+    source = POSTINST.read_text()
+    functions = source[
+        source.index("login_value() {") : source.index("sub_uid_min=")
+    ]
+    script = tmp_path / "allocate-subid-range"
+    script.write_text(
+        "#!/bin/sh\nset -eu\n"
+        + functions
+        + '\nallocate_subid_range "$1" "$2" "$3" "$4"\n'
+    )
+    script.chmod(0o755)
+    ranges = tmp_path / "subuid"
+    ranges.write_text(entries)
+    return subprocess.run(
+        [script, ranges, str(minimum), str(maximum), str(count)],
+        env={"LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "PATH": "/usr/bin:/bin"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
 def test_preinst_refuses_to_unpack_over_nonstable_supervisor_state(
     tmp_path: Path,
 ) -> None:
@@ -98,6 +129,35 @@ def test_preinst_refuses_to_unpack_over_nonstable_supervisor_state(
     assert failed.returncode != 0
     assert "supervisor state is not stable" in pending.stderr
     assert "supervisor state is not stable" in failed.stderr
+
+
+@pytest.mark.parametrize(
+    ("entries", "expected"),
+    (
+        ("", "100000-165535"),
+        ("carst:100000:65536\n", "165536-231071"),
+        ("first:165536:65536\nlast:100000:65536\n", "231072-296607"),
+        ("first:100000:32768\nsecond:198304:65536\n", "132768-198303"),
+    ),
+)
+def test_postinst_allocates_first_nonoverlapping_subid_range(
+    tmp_path: Path, entries: str, expected: str
+) -> None:
+    result = _allocate_subid_range(tmp_path, entries)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == expected
+
+
+def test_postinst_rejects_exhausted_subid_space(tmp_path: Path) -> None:
+    result = _allocate_subid_range(
+        tmp_path,
+        "first:100000:65536\nsecond:165536:65536\n",
+        maximum=231071,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""
 
 
 def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> None:
@@ -160,7 +220,7 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
     assert "curl" in fields
     assert "podman" in fields
     assert "util-linux" in fields
-    assert "uidmap" not in fields
+    assert "uidmap" in fields
     payload = tmp_path / "payload"
     subprocess.run(
         ["/usr/bin/dpkg-deb", "--extract", first_deb, payload], check=True
@@ -177,6 +237,11 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
     assert "BindPaths=-/dev/fuse" in unit
     assert "Delegate=yes" in unit
     assert "RestrictSUIDSGID=yes" not in unit
+    assert "NoNewPrivileges=no" in unit
+    assert (
+        "CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_SETGID CAP_SETUID CAP_SYS_ADMIN"
+        in unit
+    )
     helper_socket = (
         payload / "lib/systemd/system/vonk-forge-package-helper.socket"
     ).read_text()
@@ -185,14 +250,16 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
         in helper_socket.splitlines()
     )
     assert "DirectoryMode=0711" in helper_socket.splitlines()
-    assert "usermod --add-subuids" not in postinst
-    assert "usermod --add-subgids" not in postinst
-    assert "sed -i '/^vonk-agent:/d' /etc/subuid" in postinst
-    assert "sed -i '/^vonk-agent:/d' /etc/subgid" in postinst
+    assert "usermod --add-subuids" in postinst
+    assert "usermod --add-subgids" in postinst
+    assert "SUB_UID_MIN" in postinst
+    assert "SUB_GID_MIN" in postinst
+    assert "sed -i '/^vonk-agent:/d' /etc/subuid" not in postinst
+    assert "sed -i '/^vonk-agent:/d' /etc/subgid" not in postinst
     assert (
         "install -d -o root -g vonk-agent -m 0750 /var/lib/vonk-forge/supervisor"
     ) in postinst
-    assert 'ignore_chown_errors = "true"' in (
+    assert 'ignore_chown_errors' not in (
         payload / "etc/vonk-forge-agent/containers-storage.conf"
     ).read_text()
 
