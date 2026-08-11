@@ -4,11 +4,12 @@ import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from functools import lru_cache
-from pathlib import Path
 from typing import Any
 
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
+
+from .schema_resources import read_runtime_schema
 
 
 class RecipeContractError(ValueError):
@@ -104,10 +105,7 @@ def recipe_content_sha256(document: Mapping[str, object]) -> str:
 
 @lru_cache(maxsize=1)
 def _validator() -> Draft202012Validator:
-    root = Path(__file__).resolve().parents[3]
-    schema = json.loads(
-        (root / "schemas/global/recipe-v1.schema.json").read_text(encoding="utf-8")
-    )
+    schema = json.loads(read_runtime_schema("recipe-v1.schema.json"))
     Draft202012Validator.check_schema(schema)
     return Draft202012Validator(schema)
 

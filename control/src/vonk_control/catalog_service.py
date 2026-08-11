@@ -10,7 +10,6 @@ from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
-from pathlib import Path
 from typing import Any, BinaryIO
 
 from jsonschema import Draft202012Validator, FormatChecker
@@ -35,6 +34,7 @@ from .recipe_contract import (
     recipe_content_sha256,
     validate_recipe,
 )
+from .schema_resources import read_runtime_schema
 from .source_bundles import SourceBundleError, SourceBundleStore
 
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}$")
@@ -767,10 +767,7 @@ def _mapping(value: object) -> dict[str, Any]:
 
 @lru_cache(maxsize=1)
 def _test_report_validator() -> Draft202012Validator:
-    root = Path(__file__).resolve().parents[3]
-    schema = json.loads(
-        (root / "schemas/global/test-report-v1.schema.json").read_text(encoding="utf-8")
-    )
+    schema = json.loads(read_runtime_schema("test-report-v1.schema.json"))
     Draft202012Validator.check_schema(schema)
     return Draft202012Validator(schema, format_checker=FormatChecker())
 

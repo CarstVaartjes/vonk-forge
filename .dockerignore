@@ -16,6 +16,12 @@ control/web/node_modules
 control/web/dist
 control/web/test-results
 control/web/playwright-report
+!schemas/
+schemas/*
+!schemas/global/
+schemas/global/*
+!schemas/global/recipe-v1.schema.json
+!schemas/global/test-report-v1.schema.json
 !inventory/
 !inventory/wheels/
 !inventory/wheels/vonk_agent_protocol-2.1.0-py3-none-any.whl
