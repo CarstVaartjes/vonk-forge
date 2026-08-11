@@ -940,9 +940,11 @@ class Runner:
         mapping_id = mapping.get("mapping_id")
         if not isinstance(mapping_id, str) or mapping.get("generation") != generation:
             raise SliceError("mapping response is invalid")
-        distribution_nodes = [
-            node_id for node_id in self.targets if node_id != self.args.builder_node
-        ]
+        # Recipe builds use a private, operation-scoped Podman store. The
+        # builder uploads the accepted OCI archive but does not retain that
+        # image in its durable workload store, so it must pass through the
+        # same digest-bound import operation as every other mapped node.
+        distribution_nodes = list(self.targets)
         operation_id: str | None = None
         distribution_evidence: dict[str, object] = {}
         if distribution_nodes:
