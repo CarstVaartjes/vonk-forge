@@ -7,6 +7,8 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy import create_engine, func, select
+from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import AgentResult, canonical_message
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
 from vonk_control.agent_reconciliation import (
@@ -36,8 +38,6 @@ from vonk_control.node_leases import NodeLeaseService
 from vonk_control.orchestration import OperationNode
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
 from vonk_control.route_runtime import ActivationMarker
-from sqlalchemy import create_engine, func, select
-from sqlalchemy.orm import sessionmaker
 
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32

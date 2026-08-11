@@ -99,6 +99,7 @@ def _node(node_id: str, hostname: str, management: str, fabric: str) -> dict[str
         "compute_capability": "12.1",
         "cuda_codes": ["sm_121"],
         "podman_rootless": True,
+        "docker_gpu_runtime": True,
         "memory_available_bytes": 126_000_000_000,
         "disk_available_bytes": 3_000_000_000_000,
         "management_address": f"{management}/24",
@@ -296,6 +297,10 @@ def test_qualifier_emits_canonical_identity_bound_output(tmp_path: Path) -> None
         (
             lambda value: value["nodes"][0].update(cuda_codes=["sm_120"]),
             "node.cuda_code",
+        ),
+        (
+            lambda value: value["nodes"][0].update(docker_gpu_runtime=False),
+            "node.spark_docker_nvidia",
         ),
         (
             lambda value: value["nodes"][0]["artifacts"][0].update(sha256="0" * 64),

@@ -8,6 +8,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_control import updates
 from vonk_control.agent_jobs import AgentJobService
@@ -27,8 +29,6 @@ from vonk_control.node_leases import NodeLeaseService
 from vonk_control.update_admin import DurableUpdateGrantRefresher, durable_update_status
 from vonk_control.update_grants import AdminActionGrantIssuer
 from vonk_control.update_routes import RouteDrainReceipt
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import Session, sessionmaker
 
 NODE_A = "spk_00000000000000000000000000000001"
 NODE_B = "spk_00000000000000000000000000000002"

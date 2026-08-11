@@ -9,7 +9,9 @@ grep -Fq 'sudo bash /tmp/configure-direct-fabric --node node2 --local-postcheck'
 grep -Fq 'sudo cat /etc/netplan/99-vonk-node-direct-fabric.yaml' "$runbook"
 grep -Fq 'set -euo pipefail' "$runbook"
 grep -Fq 'NVIDIA `dgx-spark-playbooks` commit' "$runbook"
-grep -Fq "Do not use its generated Netplan, nor run \`discover-sparks\`" "$runbook"
+grep -Fq "prefer NVIDIA Sync's Cluster Assistant" "$runbook"
+grep -Fq 'do not layer it on top' "$runbook"
+grep -Fq 'of Sync-managed Netplan' "$runbook"
 grep -Fq 'nodes/bin/rollback-direct-fabric' "$runbook"
 grep -Fq 'GPU node 2 is a hard' "$runbook"
 

@@ -28,6 +28,7 @@ def _rendered() -> dict:
         "ADMIN_GRANT_PRIVATE_KEY_FILE": "/dev/null",
         "PACKAGE_HELPER_GRANT_PRIVATE_KEY_FILE": "/dev/null",
         "PACKAGE_HELPER_RECEIPT_PRIVATE_KEY_FILE": "/dev/null",
+        "HOST_RUNTIME_GRANT_PRIVATE_KEY_FILE": "/dev/null",
         "WORKLOAD_RELEASES_KEY_FILE": "/dev/null",
         "WORKLOAD_SNAPSHOT_KEY_FILE": "/dev/null",
         "WORKLOAD_TIMESTAMP_KEY_FILE": "/dev/null",

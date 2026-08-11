@@ -12,10 +12,10 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
-from vonk_agent_protocol import canonical_message
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import canonical_message
 
 from .models import (
     AgentCertificate,

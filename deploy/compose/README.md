@@ -79,6 +79,13 @@ its Dockerfile and build context. The controller validates that bundle, checks
 the builder's temporary disk and memory, and asks one compatible GPU-node agent
 to perform a rootless Podman/Buildah build with the recipe's declared policy.
 
+That rootless runtime is a build sandbox only. After export and digest
+verification, each enrolled Spark imports and starts the accepted image through
+its controller-signed helper and the Spark-managed Docker/NVIDIA runtime. The
+agent has no Docker-socket access and no Docker-group membership. Raw RDMA,
+host networking, arbitrary devices, privileged mode, and host socket mounts
+are outside the workload contract.
+
 The resulting OCI layout is retained in the local artifact store and is
 identified by its immutable image digest. For a multi-node mapping, Vonk
 transfers that exact OCI layout through the authenticated agent channel and
@@ -290,6 +297,7 @@ the mutually exclusive built-in CA overlay.
 Set every required secret path in `.env`; these are paths only, never values:
 `DATABASE_URL_FILE`, `POSTGRES_PASSWORD_FILE`, `TOKEN_SIGNING_KEY_FILE`,
 `METRICS_TOKEN_FILE`, `GIT_SIGNING_KEY_FILE`, `WORKER_API_TOKEN_FILE`,
+`HOST_RUNTIME_GRANT_PRIVATE_KEY_FILE`,
 `AGENT_UPDATE_AUTHORITY_KEY_FILE`, `ADMIN_GRANT_PUBLIC_KEY_FILE`,
 `AGENT_TUF_BOOTSTRAP_ROOT_FILE`,
 `LITELLM_MASTER_KEY_FILE`, `LITELLM_UPSTREAM_KEY_FILE`,
@@ -358,6 +366,7 @@ command line.
 | `ADMIN_GRANT_PUBLIC_KEY_FILE` → `admin-grant-public-key` | Signer only, `10003:10001 0400` | Canonical public document for the separate API admin-action grant authority. |
 | `PACKAGE_HELPER_GRANT_PRIVATE_KEY_FILE` → `package-helper-grant-private-key` | Control API `10001:10001`, `10001:10001 0400` | Dedicated Ed25519 PKCS#8 PEM for short-lived workload-helper grants; never install on a GPU node. |
 | `PACKAGE_HELPER_RECEIPT_PRIVATE_KEY_FILE` → `package-helper-receipt-private-key` | Control API `10001:10001`, `10001:10001 0400` | Independent Ed25519 PKCS#8 PEM for object receipts; never reuse the grant key or install on a GPU node. |
+| `HOST_RUNTIME_GRANT_PRIVATE_KEY_FILE` → `host-runtime-grant-private-key` | Control API `10001:10001`, `10001:10001 0400` | Dedicated Ed25519 PKCS#8 PEM for exact Spark Docker runtime grants. Install only its raw 32-byte public key (lowercase hexadecimal plus newline) at `/etc/vonk-forge-agent/host-helper-authority.pub` on GPU nodes. |
 | `WORKLOAD_RELEASES_KEY_FILE`, `WORKLOAD_SNAPSHOT_KEY_FILE`, `WORKLOAD_TIMESTAMP_KEY_FILE` → matching `workload-*` files | Workload signer `10003:10001`, `10003:10001 0400` | Three distinct Ed25519 PKCS#8 PEM online keys for workload-TUF releases, snapshot, and timestamp roles. The API and worker never receive these keys. |
 | `AGENT_TUF_BOOTSTRAP_ROOT_FILE` → `agent-tuf-bootstrap-root` | Signer only, `10003:10001 0400` | Explicit trusted public TUF root for platform releases. The corresponding offline root private key never enters the NAS. |
 | `LITELLM_MASTER_KEY_FILE`, `LITELLM_UPSTREAM_KEY_FILE`, `LITELLM_DATABASE_URL_FILE` → matching `litellm-*` files | LiteLLM `10002:10001`, `10002:10001 0400` | Respectively the master key, dedicated upstream key, and PostgreSQL URL. |

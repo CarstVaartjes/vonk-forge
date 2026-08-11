@@ -68,6 +68,14 @@ def _ordered_steps(section: str) -> list[str]:
     return steps
 
 
+def test_readme_describes_the_spark_native_runtime_boundary() -> None:
+    text = _normalized_text(README)
+
+    assert "Spark-managed Docker/NVIDIA runtime" in text
+    assert "for isolated recipe builds only" in text
+    assert "Docker is only required on the NAS" not in text
+
+
 def test_active_agent_install_examples_keep_pairing_and_controller_inputs_together() -> None:
     agent_configs = []
     for block in _fenced_blocks(INSTALL_AGENT, "toml"):
@@ -330,10 +338,11 @@ def test_secret_docs_separate_local_backup_from_exact_nas_projection() -> None:
     design = _normalized_text(DEV_WORKLOADS_DESIGN)
 
     for text in (runbook, design):
-        assert "15 local source files" in text
-        assert "14 protected secret/config files" in text
-        assert "existing 14-file local source" in text
-        assert "exactly 13 deployment files" in text
+        assert "17 local source files" in text
+        assert "14 deployment secret/config files" in text
+        assert "15-file" in text
+        assert "add-only" in text
+        assert "exactly 14 deployment files" in text
         assert "`controller-ca-key`" in text
         assert "must not be copied to the NAS" in text
 

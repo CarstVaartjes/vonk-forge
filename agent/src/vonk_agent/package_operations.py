@@ -50,7 +50,7 @@ class PackageInspection:
 
     def __post_init__(self) -> None:
         if not isinstance(self.disposition, PackageDisposition):
-            raise ValueError("package inspection disposition is invalid")
+            raise TypeError("package inspection disposition is invalid")
         if self.evidence is not None and not isinstance(self.evidence, Mapping):
             raise ValueError("package inspection evidence is invalid")
 

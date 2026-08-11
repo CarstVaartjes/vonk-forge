@@ -7,6 +7,7 @@ use crate::supervisor_readiness::AgentRuntimeIdentity;
 use crate::{
     client::{AgentHttpClient, ClientError},
     health::{HealthEvidence, wait_ready},
+    host_runtime::HostRuntimeBoundary,
     image_importer::ImageImporter,
     oci::OciRuntime,
     process::ProcessRunner,
@@ -15,8 +16,8 @@ use crate::{
     workloads::{Placement, image_digest},
 };
 use vonk_agent_protocol::{
-    AgentClaim, AgentDirective, AgentProgress, AgentResult, RecipeOperationRequest, canonical_json,
-    hex_sha256,
+    AgentClaim, AgentDirective, AgentProgress, AgentResult, HostRuntimeAction,
+    RecipeOperationRequest, canonical_json, hex_sha256,
 };
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
@@ -81,6 +82,24 @@ pub struct RecipeExecutor<'a, R> {
     pub runtime_root: &'a Path,
 }
 
+impl<R> RecipeExecutor<'_, R> {
+    async fn execute_host_runtime(
+        &self,
+        claim: &AgentClaim,
+        action: HostRuntimeAction,
+        arguments: Vec<String>,
+    ) -> Result<(), crate::host_runtime::HostRuntimeError> {
+        let request_root = self.runtime_root.join("runtime-requests");
+        HostRuntimeBoundary {
+            client: self.client,
+            request_root: &request_root,
+            helper_socket: Path::new("/run/vonk-forge-package-helper/package-helper.sock"),
+        }
+        .execute(claim, action, arguments)
+        .await
+    }
+}
+
 #[async_trait(?Send)]
 impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
     async fn execute(&self, claim: &AgentClaim) -> ExecutionResult {
@@ -141,7 +160,6 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     return failed("local disk capacity changed before image import");
                 }
                 let importer = ImageImporter {
-                    runner: self.runtime.runner,
                     data_root: self.runtime.data_root,
                 };
                 let archive = match importer.staging_path(claim.operation_id) {
@@ -156,13 +174,25 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 {
                     return failed("exact OCI image archive is unavailable");
                 }
-                match importer.import(&request, &archive) {
-                    Ok(evidence) => ExecutionResult {
-                        state: "succeeded",
-                        body: serde_json::to_value(evidence).unwrap_or_else(
-                            |_| json!({"reason": "image import evidence serialization failed"}),
-                        ),
-                    },
+                match importer.verify(&request, &archive) {
+                    Ok(evidence)
+                        if self
+                            .execute_host_runtime(
+                                claim,
+                                HostRuntimeAction::ImageImport,
+                                importer.runtime_arguments(&request, &archive),
+                            )
+                            .await
+                            .is_ok() =>
+                    {
+                        ExecutionResult {
+                            state: "succeeded",
+                            body: serde_json::to_value(evidence).unwrap_or_else(
+                                |_| json!({"reason": "image import evidence serialization failed"}),
+                            ),
+                        }
+                    }
+                    Ok(_) => failed("host runtime could not import the accepted OCI image"),
                     Err(error) => ExecutionResult {
                         state: "failed",
                         body: json!({"reason": error.to_string()}),
@@ -184,6 +214,21 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     != Some(request.image_digest.as_str())
                 {
                     return failed("installed image digest does not match the accepted build");
+                }
+                if self
+                    .execute_host_runtime(
+                        claim,
+                        HostRuntimeAction::ImageInspect,
+                        vec![
+                            spec.runtime.image.clone(),
+                            request.image_digest.clone(),
+                            spec.security.user.clone(),
+                        ],
+                    )
+                    .await
+                    .is_err()
+                {
+                    return failed("accepted container image is unavailable to the host runtime");
                 }
                 if self
                     .runtime
@@ -235,6 +280,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     return failed("local memory capacity changed after run admission");
                 }
                 let placement = Placement {
+                    endpoint_address: Some(request.endpoint_address),
                     rank: request.rank,
                     role: request.role.clone(),
                     world_size: request.world_size,
@@ -245,14 +291,40 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     reserved_memory_bytes: request.reserved_memory_bytes,
                 };
                 let run_id = request.run_id.to_string();
+                let plan =
+                    match self
+                        .runtime
+                        .prepare_start(&spec, &installation_id, &run_id, &placement)
+                    {
+                        Ok(plan) => plan,
+                        Err(_) => {
+                            return failed("container runtime could not prepare the workload");
+                        }
+                    };
+                for hook in plan.pre_start {
+                    let mut arguments = vec![plan.image_digest.clone()];
+                    arguments.extend(hook);
+                    if self
+                        .execute_host_runtime(claim, HostRuntimeAction::Start, arguments)
+                        .await
+                        .is_err()
+                    {
+                        let _ = self.runtime.complete_stop(&run_id);
+                        return failed("container runtime pre-start hook failed");
+                    }
+                }
+                let mut arguments = vec![plan.image_digest];
+                arguments.extend(plan.main);
                 if self
-                    .runtime
-                    .start(&spec, &installation_id, &run_id, &placement)
+                    .execute_host_runtime(claim, HostRuntimeAction::Start, arguments)
+                    .await
                     .is_err()
                 {
+                    let _ = self.runtime.complete_stop(&run_id);
                     return failed("container runtime could not start the workload");
                 }
                 if wait_ready(
+                    request.endpoint_address,
                     request.port,
                     &spec.endpoint.health_path,
                     claim.deadline.with_timezone(&Utc),
@@ -260,7 +332,17 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 .await
                 .is_err()
                 {
-                    let _ = self.runtime.stop(&run_id);
+                    let _ = self
+                        .execute_host_runtime(
+                            claim,
+                            HostRuntimeAction::Stop,
+                            vec![
+                                run_id.clone(),
+                                spec.lifecycle.stop_timeout_seconds.to_string(),
+                            ],
+                        )
+                        .await;
+                    let _ = self.runtime.complete_stop(&run_id);
                     return failed("workload did not become ready before its deadline");
                 }
                 let evidence = HealthEvidence {
@@ -311,9 +393,34 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 }
             }
             RecipeOperationRequest::Stop(request) => {
-                if self.runtime.stop(&request.run_id.to_string()).is_err() {
+                let run_id = request.run_id.to_string();
+                let plan = match self.runtime.prepare_stop(&run_id) {
+                    Ok(plan) => plan,
+                    Err(_) => return failed("container runtime could not prepare workload stop"),
+                };
+                if self
+                    .execute_host_runtime(claim, HostRuntimeAction::Stop, plan.remove)
+                    .await
+                    .is_err()
+                {
                     failed("container runtime could not stop the workload")
                 } else {
+                    if let Some(image_digest) = plan.image_digest {
+                        for hook in plan.post_stop {
+                            let mut arguments = vec![image_digest.clone()];
+                            arguments.extend(hook);
+                            if self
+                                .execute_host_runtime(claim, HostRuntimeAction::Stop, arguments)
+                                .await
+                                .is_err()
+                            {
+                                return failed("container runtime post-stop hook failed");
+                            }
+                        }
+                    }
+                    if self.runtime.complete_stop(&run_id).is_err() {
+                        return failed("container runtime stop metadata could not be finalized");
+                    }
                     ExecutionResult {
                         state: "succeeded",
                         body: json!({"stopped": true}),

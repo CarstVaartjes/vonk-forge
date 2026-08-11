@@ -160,6 +160,8 @@ services:
         target: /host-secrets/database-url
       - source: git-signing-key
         target: /host-secrets/git-signing-key
+      - source: host-runtime-grant-private-key
+        target: /host-secrets/host-runtime-grant-private-key
       - source: litellm-master-key
         target: /host-secrets/litellm-master-key
       - source: litellm-upstream-key
@@ -279,6 +281,7 @@ services:
       VONK_AGENT_PROXY_AUTH_FILE: /run/secrets/agent-proxy-auth
       VONK_WORKER_API_TOKEN_FILE: /run/secrets/worker-api-token
       VONK_GIT_SIGNING_KEY_FILE: /run/secrets/git-signing-key
+      VONK_HOST_RUNTIME_GRANT_PRIVATE_KEY_FILE: /run/secrets/host-runtime-grant-private-key
       VONK_ADMIN_GRANT_PRIVATE_KEY_FILE: /run/secrets/admin-grant-private-key
       VONK_TOKEN_SIGNING_KEY_FILE: /run/secrets/token-signing-key
     volumes:
@@ -375,6 +378,8 @@ secrets:
     file: ./secrets/database-url
   git-signing-key:
     file: ./secrets/git-signing-key
+  host-runtime-grant-private-key:
+    file: ./secrets/host-runtime-grant-private-key
   agent-ca-certificate:
     file: ./secrets/agent-ca-certificate
   agent-ca-key:

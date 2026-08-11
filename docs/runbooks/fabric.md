@@ -14,6 +14,15 @@ It deliberately does not use the Mac administration key for node-to-node
 access and does not enable SSH agent forwarding. The direct fabric must never
 receive a default route.
 
+For a fresh DGX Spark cluster, prefer NVIDIA Sync's Cluster Assistant and
+retain its generated validation report. The manual Netplan procedure below is
+the accepted fallback for this existing installation; do not layer it on top
+of Sync-managed Netplan. Regardless of how addresses are configured, Vonk's
+current container workload contract uses TCP over one declared direct-fabric
+address per node. The host-level RDMA/NCCL measurements in this runbook prove
+the physical platform, but Vonk does not pass raw InfiniBand devices into
+workload containers and does not claim GPUDirect RDMA.
+
 `inventory/reports/fabric.json` is committed as explicitly-labelled
 preconfiguration/staging evidence. Do not populate `inventory/cluster.toml` or
 replace its null post-configuration values until the probes below have been
@@ -68,13 +77,16 @@ both functions to be `UP` at 200000 Mb/s and preserves the management default
 route. Any cable or link warning, failed preflight, Netplan error, route
 change, or failed postcheck is a hard stop. Do not apply a manual workaround.
 
-## Out-of-scope helpers
+## Historical helper constraint for this manual rollout
 
-NVIDIA Sync/Cluster Assistant is out of scope for this selected GPU node-side CLI
-rollout. Do not use its generated Netplan, nor run `discover-sparks`: the
-current discovery helper copies `~/.ssh/id_ed25519_shared` private material to
-every node and appends a `Host * IdentityFile` rule. Both actions violate this
-rollout's key separation and password-SSH constraints.
+NVIDIA Sync/Cluster Assistant was excluded from this already-completed manual
+rollout. The reviewed helper revision at the time copied
+`~/.ssh/id_ed25519_shared` private material to every node and appended a
+`Host * IdentityFile` rule, which did not meet this site's key separation.
+That historical finding is not a blanket ban on current Sync releases: for a
+fresh site, review the current generated SSH and Netplan changes, use Cluster
+Assistant when they meet policy, and choose the manual fallback only when they
+do not.
 
 ## Selected manual CLI rollout
 

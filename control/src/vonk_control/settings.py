@@ -297,6 +297,7 @@ class Settings:
     direct_fabric_cidrs: str
     package_helper_grant_private_key_path: Path | None = None
     package_helper_receipt_private_key_path: Path | None = None
+    host_runtime_grant_private_key_path: Path | None = None
     workload_signer_socket_path: Path = Path("/run/vonk-workload-signer/signer.sock")
     global_catalog_url: str = "https://vonkforge.ai"
 
@@ -521,6 +522,11 @@ class Settings:
             if os.environ.get("VONK_PACKAGE_HELPER_RECEIPT_PRIVATE_KEY_FILE")
             else None
         )
+        host_runtime_grant_private_key_path = (
+            _secret_path("VONK_HOST_RUNTIME_GRANT_PRIVATE_KEY_FILE")
+            if os.environ.get("VONK_HOST_RUNTIME_GRANT_PRIVATE_KEY_FILE")
+            else None
+        )
         global_catalog_url = os.environ.get(
             "VONK_GLOBAL_CATALOG_URL", "https://vonkforge.ai"
         ).rstrip("/")
@@ -577,6 +583,7 @@ class Settings:
             direct_fabric_cidrs=direct_fabric_cidrs,
             package_helper_grant_private_key_path=package_helper_grant_private_key_path,
             package_helper_receipt_private_key_path=package_helper_receipt_private_key_path,
+            host_runtime_grant_private_key_path=host_runtime_grant_private_key_path,
             workload_signer_socket_path=_absolute_root(
                 "VONK_WORKLOAD_SIGNER_SOCKET",
                 "/run/vonk-workload-signer/signer.sock",

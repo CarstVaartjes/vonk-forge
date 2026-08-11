@@ -9,13 +9,13 @@ from pathlib import Path
 from types import MappingProxyType
 
 import pytest
+from jsonschema import Draft202012Validator
 from vonk_agent_protocol import AgentProtocolError
 from vonk_agent_protocol.workload_packages import (
     ComponentDescriptor,
     PackageReleaseGraph,
     PackageReleaseLock,
 )
-from jsonschema import Draft202012Validator
 
 SHA_A = "a" * 64
 SHA_B = "b" * 64

@@ -7,6 +7,8 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 
 import pytest
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import AgentOperation, PackageReleaseLock
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.models import (
@@ -23,8 +25,6 @@ from vonk_control.package_rollouts import (
     PackageRolloutOrchestrator,
     package_operation_payload,
 )
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import sessionmaker
 
 from cluster_profiles.workload_packages import WorkloadDeployment
 

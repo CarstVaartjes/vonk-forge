@@ -7,12 +7,12 @@ import uuid
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 
+from sqlalchemy import select
 from vonk_agent_protocol import (
     AgentOperation,
     PackageOperationRequest,
     canonical_message,
 )
-from sqlalchemy import select
 
 from .models import AgentOperation as StoredAgentOperation
 from .models import AgentOperationAttempt, Job, PackageValidationRun

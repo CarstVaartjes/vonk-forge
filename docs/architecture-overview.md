@@ -120,6 +120,16 @@ declared OCI output bound follows the recipe's temporary build envelope, so
 large CUDA-based images are not constrained by a small log-size constant;
 diagnostic stdout/stderr remains independently capped.
 
+Rootless Podman ends at the build/export boundary. Accepted workloads run on
+DGX Spark's supported Docker Engine and NVIDIA Container Toolkit. The
+unprivileged agent never joins the Docker group or opens the daemon socket;
+instead, the controller signs an expiring grant bound to one canonical runtime
+request, and a root helper compiles only the allow-listed Docker operation.
+The helper verifies the imported image, Linux/ARM64 platform, numeric non-root
+user, runtime-interface label, resource limits, mounts, ports, and optional
+`--gpus all` request. It rejects host networking, arbitrary devices, raw
+InfiniBand, privileged containers, additional capabilities, and socket mounts.
+
 Public build networking is fail-closed until a hostname-aware egress
 proxy/firewall is installed. `slirp4netns` is not an allowlist, so the agent
 rejects `network.mode: public` rather than allowing a Dockerfile to reach
@@ -132,7 +142,9 @@ agent channel and each target re-verifies it before import, so a three-node
 profile never rebuilds independently on the other two nodes. Model weights and
 other declared artifacts are installed separately, with disk checks before
 installation and memory/VRAM, active-workload, and direct-fabric checks before
-start. The resulting workload route is published to LiteLLM only after every
+start. Multi-node v1 uses ordinary TCP over the declared direct-fabric
+addresses; it does not claim GPUDirect RDMA support. The resulting workload
+route is published to LiteLLM only after every
 mapped node has acknowledged the same build and run evidence. The global
 catalog, when enabled, stores recipe metadata and source bundles; it does not
 store image layers or registry credentials.

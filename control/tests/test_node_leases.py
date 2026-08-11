@@ -7,10 +7,10 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from vonk_control.models import AgentNode, Base, NodeMutationLease
-from vonk_control.node_leases import NodeLeaseConflict, NodeLeaseService
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_control.models import AgentNode, Base, NodeMutationLease
+from vonk_control.node_leases import NodeLeaseConflict, NodeLeaseService
 
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
@@ -104,9 +104,8 @@ def test_release_requires_exact_fence_and_two_phase_release(tmp_path) -> None:
         )
 
     stale = replace(grant, fence=str(uuid.uuid4()))
-    with sessions.begin() as session:
-        with pytest.raises(NodeLeaseConflict):
-            service.mark_releasing_in_session(session, stale)
+    with sessions.begin() as session, pytest.raises(NodeLeaseConflict):
+        service.mark_releasing_in_session(session, stale)
 
     later = NOW + timedelta(minutes=1)
     service = NodeLeaseService(clock=lambda: later)

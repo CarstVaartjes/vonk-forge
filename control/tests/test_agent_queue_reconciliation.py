@@ -5,6 +5,8 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import AgentResult
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
 from vonk_control.jobs import JobService
@@ -18,8 +20,6 @@ from vonk_control.models import (
     Reconciliation,
     ReconciliationOperation,
 )
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import Session, sessionmaker
 
 NODE_ID = "spk_" + "a" * 32
 COMMIT = "a" * 40

@@ -153,6 +153,11 @@ The separate prepared, verified, and accepted evidence gates remain required.
 
 ## Remote container prerequisite
 
+This subsection applies only to the explicitly archived
+`vonkctl-legacy` SSH controller described above. It is not a fresh-install
+instruction. The supported outbound-agent path must not add `vonk-agent` to
+the Docker group and does not require an operator account there either.
+
 Profile transitions must start and stop containers noninteractively. On each
 dedicated GPU node, the trusted `carst` administrator therefore belongs to the
 `docker` group. This is root-equivalent access and must not be extended to

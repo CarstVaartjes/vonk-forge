@@ -84,9 +84,32 @@ impl<R: ProcessRunner> InventoryCollector<'_, R> {
         if !podman.success {
             return Err(InventoryError::Parse);
         }
+        let docker = self.runner.run(
+            Program::Docker,
+            &["--version".to_owned()],
+            Duration::from_secs(10),
+        )?;
+        if !docker.success {
+            return Err(InventoryError::Parse);
+        }
+        let cdi = self.runner.run(
+            Program::NvidiaCtk,
+            &["cdi".to_owned(), "list".to_owned()],
+            Duration::from_secs(10),
+        )?;
+        if !cdi.success
+            || !std::str::from_utf8(&cdi.stdout).ok().is_some_and(|value| {
+                value
+                    .lines()
+                    .any(|line| line.trim() == "nvidia.com/gpu=all")
+            })
+        {
+            return Err(InventoryError::Parse);
+        }
         let mut capabilities = vec![
             "recipe.operations.v1".to_owned(),
-            "runtime.rootless-podman.v1".to_owned(),
+            "build.rootless-podman.v1".to_owned(),
+            "runtime.spark-docker-nvidia.v1".to_owned(),
             "recipe.build.v1".to_owned(),
             "recipe.image.import.v1".to_owned(),
             "runtime.vonk.v1".to_owned(),
@@ -103,7 +126,7 @@ impl<R: ProcessRunner> InventoryCollector<'_, R> {
             gpu_memory_total_bytes,
             gpu_memory_free_bytes,
             nvidia_driver_version,
-            container_runtime_version: text(&podman.stdout)?,
+            container_runtime_version: text(&docker.stdout)?,
             artifact_store_read_only: filesystem
                 .f_flag
                 .contains(rustix::fs::StatVfsMountFlags::RDONLY),

@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
+from sqlalchemy import and_, or_, select
+from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentClaim,
     AgentOperation,
@@ -20,8 +22,6 @@ from vonk_agent_protocol import (
     AgentResult,
     canonical_message,
 )
-from sqlalchemy import and_, or_, select
-from sqlalchemy.orm import Session, sessionmaker
 
 from .auth import AgentSource
 from .logging import redact_text

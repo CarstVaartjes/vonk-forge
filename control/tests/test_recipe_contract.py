@@ -72,7 +72,7 @@ def test_recipe_validation_rejects_unsafe_values(path, value, message) -> None:
 
 def test_global_contract_lock_matches_vendored_bytes() -> None:
     lock = contract_lock()
-    assert lock["source_commit"] == "77f33e0a35b43a443e68d0704f36468612066a8a"
+    assert lock["source_commit"] == "13ad51e9b7997bafb9a87bb78fa636df40724125"
     for relative_path, metadata in lock["files"].items():
         payload = (ROOT / relative_path).read_bytes()
         assert __import__("hashlib").sha256(payload).hexdigest() == metadata["sha256"]
@@ -91,4 +91,4 @@ def test_vendored_runtime_policy_matches_agent_rootless_contract() -> None:
         "kind": "numeric-non-root",
         "pattern": "^[1-9][0-9]*(?::[1-9][0-9]*)?$",
     }
-    assert policy["host_isolation"] == "rootless-podman-subuid"
+    assert policy["host_isolation"] == "spark-docker-nvidia-compiled-helper"

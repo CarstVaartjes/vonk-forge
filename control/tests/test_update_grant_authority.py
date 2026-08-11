@@ -4,14 +4,14 @@ import io
 import json
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from vonk_control.worker_authority import (
     HttpWorkerAuthority,
     WorkerAuthorityError,
     install_worker_authority_routes,
     worker_document_signature,
 )
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
 ROLLOUT_ID = "10000000-0000-4000-8000-000000000001"
 NODE_ID = "spk_00000000000000000000000000000001"

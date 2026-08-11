@@ -15,9 +15,9 @@ from typing import Any, Protocol
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric import ed25519
-from vonk_agent_protocol import canonical_message
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import canonical_message
 
 from .models import (
     AgentNode,

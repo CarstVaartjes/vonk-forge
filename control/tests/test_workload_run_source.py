@@ -1,7 +1,10 @@
 from pathlib import Path
 
 import pytest
-from vonk_control.workload_run_source import WorkloadRunParseError, parse_workload_run_yaml
+from vonk_control.workload_run_source import (
+    WorkloadRunParseError,
+    parse_workload_run_yaml,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures/workload_run"
 

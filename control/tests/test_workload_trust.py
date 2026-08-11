@@ -8,6 +8,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from securesystemslib.signer import CryptoSigner
+from tuf.api.metadata import Metadata
 from vonk_agent_protocol import PackageReleaseLock
 from vonk_control.workload_trust import (
     WorkloadOnlineSigners,
@@ -18,8 +20,6 @@ from vonk_control.workload_trust import (
     initialize_workload_trust,
     rotate_workload_root,
 )
-from securesystemslib.signer import CryptoSigner
-from tuf.api.metadata import Metadata
 
 NOW = datetime(2026, 8, 6, 12, 0, tzinfo=UTC)
 COMMIT = "a" * 40

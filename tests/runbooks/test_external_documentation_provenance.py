@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -60,32 +59,50 @@ def test_model_overviews_preserve_upstream_dspark_and_trellis_names() -> None:
 def test_nvidia_document_links_keep_their_external_product_names() -> None:
     expected_by_file = {
         "docs/runbooks/fabric.md": (
-            "[NVIDIA DGX Spark clustering]"
-            "(https://docs.nvidia.com/dgx/dgx-spark/spark-clustering.html)",
+            (
+                "[NVIDIA DGX Spark clustering]"
+                "(https://docs.nvidia.com/dgx/dgx-spark/spark-clustering.html)"
+            ),
         ),
         "docs/runbooks/platform-update.md": (
-            "[DGX Spark release notes]"
-            "(https://docs.nvidia.com/dgx/dgx-spark/release-notes.html)",
-            "[DGX Dashboard access]"
-            "(https://docs.nvidia.com/dgx/dgx-spark/dgx-dashboard.html)",
-            "[DGX Spark system recovery]"
-            "(https://docs.nvidia.com/dgx/dgx-spark/system-recovery.html)",
-            "[May 2026 DGX Spark security bulletin]"
-            "(https://nvidia.custhelp.com/app/answers/detail/a_id/5835)",
+            (
+                "[DGX Spark release notes]"
+                "(https://docs.nvidia.com/dgx/dgx-spark/release-notes.html)"
+            ),
+            (
+                "[DGX Dashboard access]"
+                "(https://docs.nvidia.com/dgx/dgx-spark/dgx-dashboard.html)"
+            ),
+            (
+                "[DGX Spark system recovery]"
+                "(https://docs.nvidia.com/dgx/dgx-spark/system-recovery.html)"
+            ),
+            (
+                "[May 2026 DGX Spark security bulletin]"
+                "(https://nvidia.custhelp.com/app/answers/detail/a_id/5835)"
+            ),
         ),
         "docs/superpowers/specs/2026-08-03-existing-components-review.md": (
             "NVIDIA DGX Spark cloud-init/OEMDATA workflow",
-            "[NVIDIA DGX Spark Enterprise Manageability]"
-            "(https://docs.nvidia.com/dgx/dgx-spark/enterprise-manageability.html)",
-            "[DGX Spark clustering and Cluster Assistant boundaries]"
-            "(https://docs.nvidia.com/dgx/dgx-spark/spark-clustering.html)",
+            (
+                "[NVIDIA DGX Spark Enterprise Manageability]"
+                "(https://docs.nvidia.com/dgx/dgx-spark/enterprise-manageability.html)"
+            ),
+            (
+                "[DGX Spark clustering and Cluster Assistant boundaries]"
+                "(https://docs.nvidia.com/dgx/dgx-spark/spark-clustering.html)"
+            ),
         ),
         "docs/superpowers/specs/2026-08-01-dual-vonk-node-platform-design.md": (
             "[NVIDIA DGX Spark user guide](https://docs.nvidia.com/dgx/dgx-spark/)",
-            "[NVIDIA DGX Spark update guide]"
-            "(https://docs.nvidia.com/dgx/dgx-spark/os-and-component-update.html)",
-            "[NVIDIA two-Spark networking guide]"
-            "(https://build.nvidia.com/spark/connect-two-sparks/stacked-sparks)",
+            (
+                "[NVIDIA DGX Spark update guide]"
+                "(https://docs.nvidia.com/dgx/dgx-spark/os-and-component-update.html)"
+            ),
+            (
+                "[NVIDIA two-Spark networking guide]"
+                "(https://build.nvidia.com/spark/connect-two-sparks/stacked-sparks)"
+            ),
         ),
     }
     for relative, expected_links in expected_by_file.items():

@@ -14,6 +14,7 @@ use thiserror::Error;
 use url::Url;
 
 use crate::{
+    health::readiness_endpoint,
     inventory::{available_disk_bytes, available_memory_bytes},
     process::{ProcessError, ProcessRunner, Program},
     workloads::{
@@ -87,6 +88,7 @@ struct RuntimeEndpoint<'a> {
 
 #[derive(Debug, Serialize)]
 struct RuntimePlacement<'a> {
+    endpoint_address: Option<std::net::IpAddr>,
     rank: u32,
     role: &'a str,
     world_size: u32,
@@ -117,8 +119,21 @@ struct RunLifecycle {
 
 struct RecipeRunProbe {
     run_id: String,
+    address: IpAddr,
     port: u16,
     health_path: String,
+}
+
+pub struct RuntimeStartPlan {
+    pub image_digest: String,
+    pub pre_start: Vec<Vec<String>>,
+    pub main: Vec<String>,
+}
+
+pub struct RuntimeStopPlan {
+    pub remove: Vec<String>,
+    pub image_digest: Option<String>,
+    pub post_stop: Vec<Vec<String>>,
 }
 
 fn runtime_policy() -> Result<RuntimePolicy, OciError> {
@@ -190,61 +205,23 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
     pub fn verify_image(&self, spec: &WorkloadSpec) -> Result<(), OciError> {
         spec.validate()?;
         let policy = runtime_policy()?;
-        if spec.runtime.interface != policy.runtime_interface {
-            return Err(OciError::Runtime);
-        }
-        if !spec
+        let image_name = spec
             .runtime
             .image
-            .starts_with("localhost/vonk/recipe-build-")
-        {
-            let pull = self.runner.run(
-                Program::Podman,
-                &["pull".to_owned(), spec.runtime.image.clone()],
-                Duration::from_secs(3600),
-            )?;
-            if !pull.success {
-                return Err(OciError::Runtime);
-            }
-        }
-        let label_template = format!(
-            "{{{{.Digest}}}}\\t{{{{.Os}}}}\\t{{{{.Architecture}}}}\\t{{{{index .Config.Labels {:?}}}}}\\t{{{{.Config.User}}}}",
-            policy.required_image_label.name
-        );
-        let inspect = self.runner.run(
-            Program::Podman,
-            &[
-                "image".to_owned(),
-                "inspect".to_owned(),
-                "--format".to_owned(),
-                label_template,
-                spec.runtime.image.clone(),
-            ],
-            Duration::from_secs(30),
-        )?;
-        let expected = format!(
-            "sha256:{}",
-            image_digest(&spec.runtime.image).ok_or(OciError::ImageDigest)?
-        );
-        let fields = std::str::from_utf8(&inspect.stdout)
-            .ok()
-            .map(|value| value.trim_end_matches(['\r', '\n']))
-            .map(|value| value.split('\t').collect::<Vec<_>>())
-            .unwrap_or_default();
-        let expected_architecture = policy
-            .architecture
-            .split_once('/')
+            .split_once('@')
+            .map(|(name, _)| name)
             .ok_or(OciError::ImageDigest)?;
-        if !inspect.success
-            || fields.get(..4)
-                != Some(&[
-                    expected.as_str(),
-                    expected_architecture.0,
-                    expected_architecture.1,
-                    policy.required_image_label.value.as_str(),
-                ])
-            || fields.len() != 5
-            || fields.get(4) != Some(&spec.security.user.as_str())
+        let build_id = image_name
+            .strip_prefix("localhost/vonk/recipe-build-")
+            .ok_or(OciError::ImageDigest)?;
+        if spec.runtime.interface != policy.runtime_interface
+            || spec.runtime.architecture != policy.architecture
+            || policy.required_image_label.name != "ai.vonkforge.runtime-interface"
+            || policy.required_image_label.value != "v1"
+            || uuid::Uuid::parse_str(build_id)
+                .ok()
+                .is_none_or(|value| value.to_string() != build_id)
+            || image_digest(&spec.runtime.image).is_none()
         {
             return Err(OciError::ImageDigest);
         }
@@ -264,11 +241,8 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         let models = self.data_root.join("models");
         let state = managed_path(self.data_root, "runs", run_id)?;
         let metadata = self.run_metadata_path(run_id)?;
-        let (runtime_uid, runtime_gid) = spec
-            .security
-            .user
-            .split_once(':')
-            .unwrap_or((&spec.security.user, &spec.security.user));
+        let shared_memory_bytes =
+            (placement.reserved_memory_bytes / 8).clamp(64 * 1024 * 1024, 16 * 1024 * 1024 * 1024);
         let mut arguments = vec![
             "run".to_owned(),
             "--detach".to_owned(),
@@ -277,20 +251,39 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             "--restart".to_owned(),
             "no".to_owned(),
             "--read-only".to_owned(),
+            "--init".to_owned(),
+            "--pull".to_owned(),
+            "never".to_owned(),
+            "--log-driver".to_owned(),
+            "local".to_owned(),
+            "--log-opt".to_owned(),
+            "max-size=10m".to_owned(),
+            "--log-opt".to_owned(),
+            "max-file=3".to_owned(),
             "--cap-drop=ALL".to_owned(),
             "--security-opt=no-new-privileges".to_owned(),
-            format!("--userns=keep-id:uid={runtime_uid},gid={runtime_gid}"),
-            "--cgroups=split".to_owned(),
             "--network".to_owned(),
-            "slirp4netns:allow_host_loopback=false".to_owned(),
+            "bridge".to_owned(),
             "--pids-limit".to_owned(),
             "4096".to_owned(),
             "--memory".to_owned(),
             placement.reserved_memory_bytes.to_string(),
+            "--memory-swap".to_owned(),
+            placement.reserved_memory_bytes.to_string(),
+            "--shm-size".to_owned(),
+            shared_memory_bytes.to_string(),
             "--user".to_owned(),
             spec.security.user.clone(),
             "--publish".to_owned(),
-            format!("{}:{}", placement.port, spec.endpoint.port),
+            match placement.endpoint_address {
+                Some(IpAddr::V4(address)) => {
+                    format!("{address}:{}:{}", placement.port, spec.endpoint.port)
+                }
+                Some(IpAddr::V6(address)) => {
+                    format!("[{address}]:{}:{}", placement.port, spec.endpoint.port)
+                }
+                None => format!("{}:{}", placement.port, spec.endpoint.port),
+            },
             "--env".to_owned(),
             format!("VONK_RANK={}", placement.rank),
             "--env".to_owned(),
@@ -330,10 +323,13 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                 arguments.extend(["--publish".to_owned(), publication]);
             }
         }
-        if !spec.security.devices.is_empty() {
-            for device in &spec.security.devices {
-                arguments.extend(["--device".to_owned(), device.clone()]);
-            }
+        if spec
+            .security
+            .devices
+            .iter()
+            .any(|device| device == "nvidia.com/gpu=all")
+        {
+            arguments.extend(["--gpus".to_owned(), "all".to_owned()]);
         }
         for environment in &spec.runtime.environment {
             let Some(value) = &environment.value else {
@@ -379,26 +375,26 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         Ok(arguments)
     }
 
-    pub fn start(
+    pub fn prepare_start(
         &self,
         spec: &WorkloadSpec,
         installation_id: &str,
         run_id: &str,
         placement: &Placement,
-    ) -> Result<String, OciError> {
+    ) -> Result<RuntimeStartPlan, OciError> {
+        self.verify_image(spec)?;
         let state = managed_path(self.data_root, "runs", run_id)?;
         fs::create_dir_all(&state)?;
         fs::set_permissions(&state, fs::Permissions::from_mode(0o700))?;
         let metadata = self.ensure_run_metadata(run_id)?;
         self.write_runtime_contract(spec, installation_id, run_id, placement)?;
-        let arguments = self.start_arguments(spec, installation_id, run_id, placement)?;
+        let main = self.start_arguments(spec, installation_id, run_id, placement)?;
         let pre_start = spec
             .lifecycle
             .pre_start
             .iter()
-            .map(|hook| hook_arguments(&arguments, &spec.runtime.image, hook))
+            .map(|hook| hook_arguments(&main, &spec.runtime.image, hook))
             .collect::<Result<Vec<_>, _>>()?;
-        self.run_lifecycle_hooks(&pre_start, spec.lifecycle.stop_timeout_seconds)?;
         atomic_write(
             &metadata,
             "lifecycle.json",
@@ -407,64 +403,53 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                 placement: placement.clone(),
             })?,
         )?;
-        let output = self
-            .runner
-            .run(Program::Podman, &arguments, Duration::from_secs(300))?;
-        let identifier = std::str::from_utf8(&output.stdout)
-            .ok()
-            .map(str::trim)
-            .unwrap_or("");
-        if !output.success
-            || identifier.len() != 64
-            || !identifier.bytes().all(|byte| byte.is_ascii_hexdigit())
-        {
-            let post_stop = spec
-                .lifecycle
-                .post_stop
-                .iter()
-                .filter_map(|hook| hook_arguments(&arguments, &spec.runtime.image, hook).ok())
-                .collect::<Vec<_>>();
-            let _ = self.run_lifecycle_hooks(&post_stop, spec.lifecycle.stop_timeout_seconds);
-            return Err(OciError::Runtime);
-        }
-        Ok(identifier.to_owned())
+        Ok(RuntimeStartPlan {
+            image_digest: format!(
+                "sha256:{}",
+                image_digest(&spec.runtime.image).ok_or(OciError::ImageDigest)?
+            ),
+            pre_start,
+            main,
+        })
     }
 
-    pub fn stop(&self, run_id: &str) -> Result<(), OciError> {
+    pub fn prepare_stop(&self, run_id: &str) -> Result<RuntimeStopPlan, OciError> {
         let lifecycle = self.load_run_lifecycle(run_id)?;
         let stop_timeout = lifecycle
             .as_ref()
             .map(|(spec, _, _)| spec.lifecycle.stop_timeout_seconds)
             .unwrap_or(30);
-        let output = self.runner.run(
-            Program::Podman,
-            &[
-                "rm".to_owned(),
-                "--force".to_owned(),
-                "--ignore".to_owned(),
-                "--time".to_owned(),
-                stop_timeout.to_string(),
-                format!("vonk-{run_id}"),
-            ],
-            Duration::from_secs(u64::from(stop_timeout) + 15),
-        )?;
-        if !output.success {
-            return Err(OciError::Runtime);
+        let (image_digest, post_stop) = match lifecycle {
+            Some((spec, installation_id, placement)) => {
+                let main = self.start_arguments(&spec, &installation_id, run_id, &placement)?;
+                (
+                    Some(format!(
+                        "sha256:{}",
+                        image_digest(&spec.runtime.image).ok_or(OciError::ImageDigest)?
+                    )),
+                    spec.lifecycle
+                        .post_stop
+                        .iter()
+                        .map(|hook| hook_arguments(&main, &spec.runtime.image, hook))
+                        .collect::<Result<Vec<_>, _>>()?,
+                )
+            }
+            None => (None, Vec::new()),
+        };
+        Ok(RuntimeStopPlan {
+            remove: vec![run_id.to_owned(), stop_timeout.to_string()],
+            image_digest,
+            post_stop,
+        })
+    }
+
+    pub fn complete_stop(&self, run_id: &str) -> Result<(), OciError> {
+        let metadata = self.run_metadata_path(run_id)?;
+        match fs::remove_file(metadata.join("lifecycle.json")) {
+            Ok(()) => File::open(metadata)?.sync_all().map_err(OciError::Io),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error.into()),
         }
-        if let Some((spec, installation_id, placement)) = lifecycle {
-            let main = self.start_arguments(&spec, &installation_id, run_id, &placement)?;
-            let hooks = spec
-                .lifecycle
-                .post_stop
-                .iter()
-                .map(|hook| hook_arguments(&main, &spec.runtime.image, hook))
-                .collect::<Result<Vec<_>, _>>()?;
-            self.run_lifecycle_hooks(&hooks, spec.lifecycle.stop_timeout_seconds)?;
-            let metadata = self.run_metadata_path(run_id)?;
-            fs::remove_file(metadata.join("lifecycle.json"))?;
-            File::open(metadata)?.sync_all()?;
-        }
-        Ok(())
     }
 
     pub fn recipe_run_observations(&self) -> Result<Vec<RecipeRunObservation>, OciError> {
@@ -472,8 +457,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         probes
             .into_iter()
             .map(|probe| {
-                let ready = self.container_is_running(&probe.run_id)?
-                    && self.readiness_request(probe.port, &probe.health_path);
+                let ready = self.readiness_request(probe.address, probe.port, &probe.health_path);
                 Ok(RecipeRunObservation {
                     run_id: probe.run_id,
                     ready,
@@ -534,6 +518,9 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             }
             probes.push(RecipeRunProbe {
                 run_id,
+                address: placement
+                    .endpoint_address
+                    .unwrap_or(IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)),
                 port: placement.port,
                 health_path: spec.endpoint.health_path,
             });
@@ -541,28 +528,8 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         Ok(probes)
     }
 
-    fn container_is_running(&self, run_id: &str) -> Result<bool, OciError> {
-        let name = format!("vonk-{run_id}");
-        let output = self.runner.run(
-            Program::Podman,
-            &[
-                "container".to_owned(),
-                "inspect".to_owned(),
-                "--format".to_owned(),
-                "{{.State.Running}}\\t{{.Name}}".to_owned(),
-                name.clone(),
-            ],
-            Duration::from_secs(5),
-        )?;
-        if !output.success {
-            return Ok(false);
-        }
-        Ok(std::str::from_utf8(&output.stdout)
-            .ok()
-            .is_some_and(|value| value.trim_end_matches(['\r', '\n']) == format!("true\t{name}")))
-    }
-
-    fn readiness_request(&self, port: u16, health_path: &str) -> bool {
+    fn readiness_request(&self, address: IpAddr, port: u16, health_path: &str) -> bool {
+        let endpoint = readiness_endpoint(address, port, health_path);
         let output = self.runner.run(
             Program::Curl,
             &[
@@ -582,7 +549,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                 "/dev/null".to_owned(),
                 "--write-out".to_owned(),
                 "%{http_code}".to_owned(),
-                format!("http://127.0.0.1:{port}{health_path}"),
+                endpoint,
             ],
             Duration::from_secs(5),
         );
@@ -656,24 +623,6 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             Err(error) => return Err(error.into()),
         }
         Ok(metadata)
-    }
-
-    fn run_lifecycle_hooks(
-        &self,
-        hooks: &[Vec<String>],
-        timeout_seconds: u16,
-    ) -> Result<(), OciError> {
-        for arguments in hooks {
-            let output = self.runner.run(
-                Program::Podman,
-                arguments,
-                Duration::from_secs(u64::from(timeout_seconds)),
-            )?;
-            if !output.success {
-                return Err(OciError::Runtime);
-            }
-        }
-        Ok(())
     }
 
     pub fn uninstall(&self, installation_id: &str) -> Result<(), OciError> {
@@ -803,6 +752,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                 health_path: &spec.endpoint.health_path,
             },
             placement: RuntimePlacement {
+                endpoint_address: placement.endpoint_address,
                 rank: placement.rank,
                 role: &placement.role,
                 world_size: placement.world_size,

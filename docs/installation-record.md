@@ -120,7 +120,7 @@ The commands and observed baseline are in
 
 CUDA support was already present through the Vonk Forge driver and NVIDIA Container
 Toolkit even though a host `nvcc` command was not the correct first readiness
-test. We pulled and ran the pinned ARM64 CUDA development image
+test. We pulled and ran the versioned ARM64 CUDA development image
 `nvcr.io/nvidia/cuda:13.0.1-devel-ubuntu24.04`; it detected the GB10 GPU and
 reported driver `580.173.02` and CUDA `13.0` on both nodes. The first pull was
 large; subsequent validation reused the local image.

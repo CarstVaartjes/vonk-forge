@@ -4,11 +4,11 @@ import json
 from datetime import UTC, datetime
 
 import pytest
-from vonk_control.catalog_repository import CatalogRepository
-from vonk_control.models import Base, LocalRecipe, LocalRecipeRevision
 from sqlalchemy import create_engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from vonk_control.catalog_repository import CatalogRepository
+from vonk_control.models import Base, LocalRecipe, LocalRecipeRevision
 
 
 @pytest.fixture

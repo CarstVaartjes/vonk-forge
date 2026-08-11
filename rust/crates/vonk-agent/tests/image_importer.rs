@@ -1,43 +1,14 @@
 #![forbid(unsafe_code)]
 
-use std::{cell::RefCell, fs, time::Duration};
+use std::fs;
 
 use tempfile::tempdir;
 use uuid::Uuid;
-use vonk_agent::{
-    image_importer::ImageImporter,
-    process::{ProcessError, ProcessOutput, ProcessRunner, Program},
-};
+use vonk_agent::image_importer::ImageImporter;
 use vonk_agent_protocol::{RecipeImageImportRequest, hex_sha256};
 
-struct Runner {
-    calls: RefCell<Vec<(Program, Vec<String>)>>,
-}
-
-impl ProcessRunner for Runner {
-    fn run(
-        &self,
-        program: Program,
-        arguments: &[String],
-        _timeout: Duration,
-    ) -> Result<ProcessOutput, ProcessError> {
-        self.calls.borrow_mut().push((program, arguments.to_vec()));
-        Ok(ProcessOutput {
-            success: true,
-            stdout: if arguments.first().is_some_and(|item| item == "load") {
-                format!("Loaded image: sha256:{}\n", "a".repeat(64)).into_bytes()
-            } else if arguments.first().is_some_and(|item| item == "image") {
-                format!("sha256:{}\tlinux\tarm64\tv1\t10001:10001\n", "d".repeat(64)).into_bytes()
-            } else {
-                Vec::new()
-            },
-            stderr: Vec::new(),
-        })
-    }
-}
-
 #[test]
-fn exact_layout_is_verified_before_rootless_load_and_inspect() {
+fn exact_layout_is_verified_before_requesting_host_import() {
     let root = tempdir().unwrap();
     let archive = root.path().join("image.oci.tar");
     fs::write(&archive, b"exact oci layout").unwrap();
@@ -52,37 +23,30 @@ fn exact_layout_is_verified_before_rootless_load_and_inspect() {
         schema_version: 1,
         source_node_id: format!("spk_{}", "1".repeat(32)),
     };
-    let runner = Runner {
-        calls: RefCell::new(Vec::new()),
-    };
-
     let evidence = ImageImporter {
-        runner: &runner,
         data_root: root.path(),
     }
-    .import(&request, &archive)
+    .verify(&request, &archive)
     .unwrap();
 
     assert_eq!(evidence.oci_layout_sha256, request.oci_layout_sha256);
-    let calls = runner.calls.borrow();
-    assert_eq!(calls[0].1[0], "load");
-    assert_eq!(calls[1].1[..3], ["image", "inspect", "--format"]);
     assert_eq!(
-        calls[1].1.last().unwrap(),
-        &format!("sha256:{}", "a".repeat(64))
-    );
-    assert_eq!(
-        calls[2].1,
-        [
-            "tag",
-            &format!("sha256:{}", "a".repeat(64)),
-            "localhost/vonk/recipe-build-00000000-0000-4000-8000-000000000001",
+        ImageImporter {
+            data_root: root.path()
+        }
+        .runtime_arguments(&request, &archive),
+        vec![
+            archive.display().to_string(),
+            request.oci_layout_sha256.clone(),
+            "16".to_owned(),
+            request.image_digest.clone(),
+            "localhost/vonk/recipe-build-00000000-0000-4000-8000-000000000001".to_owned(),
         ]
     );
 }
 
 #[test]
-fn changed_archive_never_reaches_podman() {
+fn changed_archive_is_rejected_before_host_authority() {
     let root = tempdir().unwrap();
     let archive = root.path().join("image.oci.tar");
     fs::write(&archive, b"changed").unwrap();
@@ -97,17 +61,11 @@ fn changed_archive_never_reaches_podman() {
         schema_version: 1,
         source_node_id: format!("spk_{}", "1".repeat(32)),
     };
-    let runner = Runner {
-        calls: RefCell::new(Vec::new()),
-    };
-
     assert!(
         ImageImporter {
-            runner: &runner,
             data_root: root.path(),
         }
-        .import(&request, &archive)
+        .verify(&request, &archive)
         .is_err()
     );
-    assert!(runner.calls.borrow().is_empty());
 }

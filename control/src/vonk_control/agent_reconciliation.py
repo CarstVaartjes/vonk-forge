@@ -11,10 +11,10 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from vonk_agent_protocol import AgentOperation, AgentResult, canonical_message
 from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import AgentOperation, AgentResult, canonical_message
 
 from .logging import redact_text
 from .models import (

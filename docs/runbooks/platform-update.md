@@ -185,8 +185,17 @@ REMOTE
 ```
 
 Stage the audited privileged validator from the Mac and compare its local and
-remote SHA-256 before running it. The script uses the exact CUDA image in
-NVIDIA's DGX Spark container-runtime guide. The validator still intentionally
+remote SHA-256 before running it. First pull the script's immutable CUDA
+manifest-list digest while the node is healthy; the validator itself uses
+`--pull=never`, so validation cannot silently substitute a moved tag or depend
+on registry availability:
+
+```bash
+sudo docker pull \
+  nvcr.io/nvidia/cuda:13.0.1-devel-ubuntu24.04@sha256:7d2f6a8c2071d911524f95061a0db363e24d27aa51ec831fcccf9e76eb72bc92
+```
+
+The validator still intentionally
 runs with sudo even though `carst` now belongs to the Docker group: it also
 reads the root-only kernel log and validates privileged storage/filesystem
 state, failing closed on read errors or storage/filesystem errors.

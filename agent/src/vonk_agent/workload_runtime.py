@@ -24,9 +24,10 @@ import urllib3
 from tuf.api.exceptions import DownloadError, RepositoryError
 from tuf.ngclient import FetcherInterface, Updater
 from tuf.ngclient.config import UpdaterConfig
-
 from vonk_agent_protocol import AgentProtocolError
-from vonk_agent_protocol.workload_packages import ComponentDescriptor as ProtocolComponent
+from vonk_agent_protocol.workload_packages import (
+    ComponentDescriptor as ProtocolComponent,
+)
 
 from .deadlines import DeadlineBindingError, MonotonicDeadline
 from .package_trust import TrustedWorkloadTarget, WorkloadTrustError
@@ -41,7 +42,6 @@ from .packages.providers import (
     Validators,
 )
 from .update_trust import _BOOTSTRAP_MARKER, _LOCK_NAME
-
 
 # Keep these values independent of platform TUF limits.  They mirror the
 # bounded workload delivery contract and are intentionally not configurable by
@@ -418,15 +418,15 @@ class WorkloadTUFSource(FetcherInterface):
             raise WorkloadTrustError("workload TUF refresh is already active")
         deadline = MonotonicDeadline.bind(datetime.now(UTC) + timedelta(seconds=self._deadline_seconds))
         from .update_trust import (
+            _cached_root_bytes,
             _established_root_is_openable,
             _fsync_cache,
             _harden_cache,
+            _interruptible_tuf_call,
             _secure_directory,
             _validate_cache,
             _validate_empty_target_cache,
             _write_marker,
-            _cached_root_bytes,
-            _interruptible_tuf_call,
         )
 
         lock = -1
@@ -483,8 +483,13 @@ class WorkloadTUFSource(FetcherInterface):
         updater = self._updater
         if self._lock_fd < 0 or updater is None or _TUF_TARGET.fullmatch(name) is None:
             raise WorkloadTrustError("workload target request is invalid")
-        from .update_trust import _read_regular_fd, _seal_target_fd, _interruptible_tuf_call
         import fcntl
+
+        from .update_trust import (
+            _interruptible_tuf_call,
+            _read_regular_fd,
+            _seal_target_fd,
+        )
 
         digest = name.removeprefix("releases/").removesuffix(".json")
         fixed = MonotonicDeadline.bind(datetime.now(UTC) + timedelta(seconds=self._deadline_seconds))

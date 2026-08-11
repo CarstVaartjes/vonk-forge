@@ -9,6 +9,45 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 use uuid::Uuid;
 
+pub const MAX_HOST_RUNTIME_ARGUMENTS: usize = 512;
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum HostRuntimeAction {
+    ImageImport,
+    ImageInspect,
+    Start,
+    Stop,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct HostRuntimeRequest {
+    pub schema_version: u8,
+    pub action: HostRuntimeAction,
+    pub job_id: Uuid,
+    pub operation_id: Uuid,
+    pub attempt: u32,
+    pub fence: Uuid,
+    pub arguments: Vec<String>,
+}
+
+impl HostRuntimeRequest {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        if self.schema_version != 1
+            || self.attempt == 0
+            || self.arguments.is_empty()
+            || self.arguments.len() > MAX_HOST_RUNTIME_ARGUMENTS
+            || self.arguments.iter().any(|value| {
+                value.is_empty() || value.len() > 4096 || value.contains(['\0', '\r', '\n'])
+            })
+        {
+            return Err(ProtocolError::Identity("host runtime request"));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum ProtocolError {
     #[error("protocol JSON is invalid")]

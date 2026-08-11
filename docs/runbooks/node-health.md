@@ -82,14 +82,13 @@ prerequisites for live collection.
    and do not weaken strict host-key checking.
 3. For `hostname_mismatch`, inspect the SSH alias target; do not accept the
    wrong logical node.
-4. For an unavailable Docker query, verify the login's group membership with
-   `id -nG` and Docker daemon access with
-   `docker version --format '{{.Server.Version}}'`. If `docker` is absent from
-   the group list, run `sudo usermod -aG docker carst` on that GPU node, then log
-   out and reconnect before retrying; an existing SSH session does not acquire
-   the new supplementary group. Docker-group membership is root-equivalent and
-   is approved only for the trusted `carst` administrator on these dedicated
-   hosts.
+4. For an unavailable Docker query, do not add the login or `vonk-agent` to the
+   Docker group. That group is root-equivalent and is not required by the
+   supported agent path. Validate the platform separately with
+   `sudo docker version --format '{{.Server.Version}}'`, `nvidia-ctk cdi list`,
+   and the NVIDIA GPU-container command in
+   [Install the Vonk Forge agent](../operations/install-vonk-agent.md). Routine
+   workload authority remains the controller-signed helper boundary.
 5. For fabric/RDMA errors, run the read-only checks in
    [the fabric runbook](fabric.md) and compare with
    `inventory/reports/rdma-nccl.json`. The health comparison uses the accepted

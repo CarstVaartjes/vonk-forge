@@ -12,6 +12,8 @@ from uuid import uuid4
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
+from sqlalchemy import select
+from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import AgentProtocolError
 from vonk_agent_protocol.workload_packages import (
     MAX_PACKAGE_HELPER_GRANT_SECONDS,
@@ -25,8 +27,6 @@ from vonk_agent_protocol.workload_packages import (
     package_helper_grant_signing_bytes,
     package_object_receipt_signing_bytes,
 )
-from sqlalchemy import select
-from sqlalchemy.orm import Session, sessionmaker
 
 from .models import AgentOperation as StoredAgentOperation
 from .models import AgentOperationAttempt

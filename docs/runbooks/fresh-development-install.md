@@ -73,9 +73,9 @@ scripts/dev-runtime-project \
   --registry-hostname '<REGISTRY_HOSTNAME>'
 ```
 
-Back up all 15 local source files as one encrypted generation. The publisher
-copies exactly 13 files to the NAS and deliberately excludes the controller CA
-private key and public Git-signing key. Do not display secret contents while
+Back up all 17 local source files as one encrypted generation. The publisher
+copies exactly 14 files to the NAS and deliberately excludes the controller CA
+private key, public Git-signing key, and public host-runtime grant key. Do not display secret contents while
 checking the result. The publisher takes a nonblocking Linux file lock on the
 mounted share and rejects a concurrent invocation; it fails closed if locking
 is unavailable. If an SMB write, mount, or workstation is interrupted, do not
@@ -87,6 +87,12 @@ retries. A stable hidden lock file beside (never inside) the project coordinates
 publishers across workstations and is safe to retain. A successful run removes
 both hidden transaction states from the project and leaves exactly
 `docker-compose.yml` plus `secrets/`.
+
+An existing installation with the original valid 15-file local source can be
+upgraded without rotating its CA, database password, or other authority: repeat
+the generator command once with `--upgrade-host-runtime-authority`, then back
+up the resulting 17-file generation and republish it. The add-only migration
+refuses every other incomplete or unknown state.
 
 ## 4. Configure names and start the NAS stack
 
@@ -118,12 +124,19 @@ On every Ubuntu 24.04 ARM64 node:
 
 1. Complete the verified one-time
    [APT `dev` channel setup](../operations/agent-package-release.md#install-the-dev-channel).
-2. Run `sudo apt update && sudo apt install vonk-forge-agent`.
-3. Copy only `controller-ca` from the private local source bundle to the node.
-4. Install it at `/etc/vonk-forge-agent/controller-ca.pem`, owned by
+2. Run the installation guide's NVIDIA Docker/CDI preflight, then
+   `sudo apt update && sudo apt install vonk-forge-agent`.
+3. Copy only `controller-ca` and `host-runtime-grant-public-key` from the
+   private local source bundle to the node. Never copy either corresponding
+   private key.
+4. Install the CA at `/etc/vonk-forge-agent/controller-ca.pem`, owned by
    `root:vonk-agent` with mode `0640`.
-5. Set the two explicit `:8443` HTTPS origins, CA path, independently computed
-   DER SHA-256 fingerprint, and unique node ID in
+5. Install the helper authority public key at
+   `/etc/vonk-forge-agent/host-helper-authority.pub`, owned by `root:root` with
+   mode `0644`.
+6. Set the two explicit `:8443` HTTPS origins, CA path, independently computed
+   DER SHA-256 fingerprint, unique node ID, and (for multi-node use) the
+   node's direct-fabric address and measured 200000 Mb/s bandwidth in
    `/etc/vonk-forge-agent/agent.toml`.
 
 Use the exact commands and minimal configuration in
@@ -178,8 +191,9 @@ scripts/run-development-slices \
   --evidence-file .state/development-acceptance/synthetic.json
 ```
 
-Success proves source verification, rootless image build/import, install,
-start, route publication, inference, stop, route withdrawal, and uninstall.
+Success proves source verification, isolated rootless image build, signed
+Docker import/start, install, route publication, inference, stop, route
+withdrawal, and uninstall.
 For real single-node and multi-node model qualification, restart persistence,
 and rank failure/recovery, continue with
 [Development agent workload acceptance](development-agent-workloads.md).

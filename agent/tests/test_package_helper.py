@@ -14,6 +14,7 @@ from types import SimpleNamespace
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from packages.test_backends import OBJECT, invocation_document
 from vonk_agent.package_helper import (
     Ed25519ReceiptVerifier,
     PackageHelper,
@@ -44,7 +45,6 @@ from vonk_agent_protocol.workload_packages import (
     package_helper_grant_signing_bytes,
     package_object_receipt_signing_bytes,
 )
-from packages.test_backends import OBJECT, invocation_document
 
 REQUEST_ID = "11111111-1111-4111-8111-111111111111"
 JOB_ID = "22222222-2222-4222-8222-222222222222"

@@ -8,8 +8,8 @@ recipes, then claims only operations matching its advertised capabilities.
 ## Prerequisites
 
 - Ubuntu 24.04 ARM64 on the GPU node.
-- NVIDIA driver and NVIDIA Container Toolkit with a working CDI device list:
-  `nvidia-ctk cdi list` must include `nvidia.com/gpu=all`.
+- NVIDIA's DGX OS, Docker Engine, NVIDIA driver, and NVIDIA Container Toolkit.
+  Vonk does not install or reconfigure these platform-owned components.
 - A route from the node to the NAS agent endpoint. The NAS may use its
   node-only management-LAN listener at TCP 8443; human and inference access
   remain Tailscale-only.
@@ -31,13 +31,29 @@ to `<NAS_MANAGEMENT_IP>` before pairing; `/etc/hosts` supplies names only, so
 both agent URLs must retain the explicit `:8443` port.
 
 Do not add the service user to `docker`, `sudo`, or an NVIDIA administration
-group. The package runs rootless Podman with a package-managed subordinate
-UID/GID range, `fuse-overlayfs`, `slirp4netns`, NVIDIA CDI devices, and an
-allow-listed InfiniBand device class for multi-node recipes. Vonk images must
-declare the policy's explicit numeric non-root user. Podman's user namespace
-maps both OCI layer ownership and that runtime identity without granting either
-identity on the host; images declaring a different user are rejected before
-install.
+group. Rootless Podman is used only to build an untrusted source bundle. A
+controller-signed, narrowly typed root helper imports and starts the accepted
+image through the Spark-managed Docker/NVIDIA runtime; the agent cannot open
+the Docker socket. Raw InfiniBand and GPUDirect RDMA are not part of this
+runtime contract. Vonk images must declare the policy's explicit numeric
+non-root user and are started read-only with dropped capabilities, bounded
+memory/PIDs/shared memory, no swap, and only declared mounts and ports.
+
+Before installing Vonk, validate the platform exactly as NVIDIA documents:
+
+```bash
+test "$(uname -m)" = aarch64
+. /etc/os-release && test "$ID:$VERSION_ID" = ubuntu:24.04
+command -v docker nvidia-ctk nvidia-smi
+nvidia-ctk cdi list | grep -Fx 'nvidia.com/gpu=all'
+sudo docker run --rm --gpus all \
+  nvcr.io/nvidia/cuda:13.0.1-devel-ubuntu24.04@sha256:7d2f6a8c2071d911524f95061a0db363e24d27aa51ec831fcccf9e76eb72bc92 \
+  nvidia-smi -L
+```
+
+Use `sudo docker` for this administrator preflight; Docker-group membership is
+not a prerequisite. Stop if any check fails and repair DGX OS through NVIDIA's
+supported update/recovery path rather than adding a Vonk workaround.
 
 ## Install
 
@@ -69,14 +85,8 @@ the tested minimum needed for the distribution's setuid
 `newuidmap`/`newgidmap` helpers to create the delegated namespace:
 `CAP_DAC_OVERRIDE`, `CAP_SETUID`, `CAP_SETGID`, and `CAP_SYS_ADMIN`. Existing
 host-managed subordinate ranges are preserved and reused when they are large
-enough.
-
-Workload containers use Podman's split-cgroup mode inside the delegated agent
-service. This keeps per-container PID and memory limits enforceable on cgroup
-v2 hosts even though the package account has no interactive systemd user
-session. The unit keeps the default `/proc` visibility because the setuid
-namespace helpers must inspect Podman's child process; the remaining procfs
-and process-control restrictions stay enabled.
+enough. Package installation does not mutate Docker, containerd, NVIDIA CDI,
+the driver, firmware, Netplan, or the Docker group.
 
 Copy the CA and edit the bootstrap configuration:
 
@@ -85,6 +95,16 @@ sudo install -o root -g vonk-agent -m 0640 controller-ca.pem \
   /etc/vonk-forge-agent/controller-ca.pem
 openssl x509 -in controller-ca.pem -outform DER | sha256sum
 sudoedit /etc/vonk-forge-agent/agent.toml
+```
+
+Install the matching public host-runtime grant key generated with the NAS
+secret generation. This key is public but authority-sensitive; copy it from
+the same verified generation as the controller secrets. Never copy
+`host-runtime-grant-private-key` to a GPU node.
+
+```bash
+sudo install -o root -g root -m 0644 host-runtime-grant-public-key \
+  /etc/vonk-forge-agent/host-helper-authority.pub
 ```
 
 The DER SHA-256 fingerprint command prints one line in the form
@@ -99,6 +119,11 @@ controller_url = "https://<CONTROLLER_HOSTNAME>:8443/"
 ca_path = "/etc/vonk-forge-agent/controller-ca.pem"
 ca_sha256 = "<64_LOWERCASE_HEX_FROM_SHA256SUM>"
 node_id = "<NODE_ID>"
+# Required for multi-node admission; use one address from the common direct
+# TCP fabric configured by NVIDIA Sync/Cluster Assistant or the accepted
+# manual fallback.
+fabric_address = "<NODE_FABRIC_IP>"
+fabric_bandwidth_mbps = 200000
 ```
 
 `enrollment_url` is used only by `pair`; `controller_url` is used only after
@@ -152,7 +177,9 @@ sudo systemctl status vonk-forge-agent-supervisor.service
 ```
 
 The controller must show `Rust agent`, migration `complete`, protocol 3, the
-signed runtime identity, inventory, and only the four recipe capabilities.
+signed runtime identity, fresh inventory, `build.rootless-podman.v1`, and
+`runtime.spark-docker-nvidia.v1`. The latter is reported only when the Docker
+client and NVIDIA CDI `nvidia.com/gpu=all` checks pass.
 Install/start admission remains controller-side: disk is checked before image
 and weight installation, RAM/VRAM and current workloads before start, and all
 participants/fabric links before a multi-node start.
@@ -161,14 +188,18 @@ participants/fabric links before a multi-node start.
 
 ```bash
 sudo -u vonk-agent podman ps
+sudo -u vonk-agent test ! -r /run/docker.sock
+sudo test -S /run/docker.sock
 sudo ss -lntup
 systemd-analyze security vonk-forge-agent.service
 ```
 
-The agent must have no listening TCP socket. `podman ps` must work without a
-Docker socket. A recipe container receives only declared mounts, limits,
-network mode, and NVIDIA CDI devices; the image is always pulled and inspected
-by immutable digest.
+The agent must have no listening TCP socket. `podman ps` validates the isolated
+build store; it is not the accepted workload runtime. The first socket check
+must succeed because the service identity cannot read Docker, while the root
+check proves the NVIDIA-managed daemon socket exists. Workload images are
+transferred by immutable digest, imported by the signed helper, and run through
+Docker with NVIDIA CDI only when the recipe requests a GPU.
 
 ## Rotation, recovery, and removal
 

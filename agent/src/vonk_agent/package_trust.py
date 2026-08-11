@@ -46,7 +46,7 @@ class WorkloadTrust:
     def refresh(self) -> None:
         try:
             self._source.refresh()
-        except Exception as error:  # noqa: BLE001 - isolate transport/TUF failures
+        except Exception as error:
             raise WorkloadTrustError("workload trust refresh failed") from error
 
     def trusted_lock(self, digest: str) -> PackageReleaseLock:
@@ -55,7 +55,7 @@ class WorkloadTrust:
         name = f"releases/{digest}.json"
         try:
             target = self._source.trusted_target(name)
-        except Exception as error:  # noqa: BLE001 - isolate transport/TUF failures
+        except Exception as error:
             raise WorkloadTrustError("workload target authorization failed") from error
         if (
             type(target) is not TrustedWorkloadTarget

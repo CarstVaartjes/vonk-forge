@@ -40,12 +40,20 @@ class RestartUnit(StrEnum):
     HELPER = "helper"
 
 
+class ContainerRuntimeAction(StrEnum):
+    IMAGE_IMPORT = "image-import"
+    IMAGE_INSPECT = "image-inspect"
+    START = "start"
+    STOP = "stop"
+
+
 class HostOperationKind(StrEnum):
     CREATE_MANAGED_DIRECTORY = "create-managed-directory"
     ACTIVATE_AGENT_SLOT = "activate-agent-slot"
     INSTALL_VONK_DEB = "install-vonk-deb"
     RESTART_VONK_UNIT = "restart-vonk-unit"
     SCHEDULE_REBOOT = "schedule-reboot"
+    EXECUTE_CONTAINER_RUNTIME_REQUEST = "execute-container-runtime-request"
 
 
 @dataclass(frozen=True)
@@ -128,6 +136,46 @@ class HostHelperOperation:
             ):
                 raise AgentProtocolError("reboot delay is invalid")
             return values
+        if self.kind is HostOperationKind.EXECUTE_CONTAINER_RUNTIME_REQUEST:
+            _exact(
+                values,
+                {
+                    "action",
+                    "job_id",
+                    "operation_id",
+                    "attempt",
+                    "fence",
+                    "request_sha256",
+                },
+                "container runtime operation",
+            )
+            try:
+                action = ContainerRuntimeAction(values["action"])
+            except (TypeError, ValueError) as error:
+                raise AgentProtocolError(
+                    "container runtime action is invalid"
+                ) from error
+            job_id = _random_uuid(values["job_id"], "container runtime job")
+            operation_id = _random_uuid(
+                values["operation_id"], "container runtime operation"
+            )
+            fence = _random_uuid(values["fence"], "container runtime fence")
+            attempt = values["attempt"]
+            if (
+                not isinstance(attempt, int)
+                or isinstance(attempt, bool)
+                or not 1 <= attempt <= 2**31 - 1
+            ):
+                raise AgentProtocolError("container runtime attempt is invalid")
+            _digest(values["request_sha256"], "container runtime request")
+            return {
+                "action": action.value,
+                "job_id": job_id,
+                "operation_id": operation_id,
+                "attempt": attempt,
+                "fence": fence,
+                "request_sha256": values["request_sha256"],
+            }
         raise AgentProtocolError("host helper operation is invalid")
 
 
@@ -314,3 +362,13 @@ def _relative_path(value: Any) -> bool:
             for component in value.split("/")
         )
     )
+
+
+def _random_uuid(value: Any, name: str) -> str:
+    try:
+        parsed = UUID(value)
+    except (TypeError, ValueError) as error:
+        raise AgentProtocolError(f"{name} ID is invalid") from error
+    if not isinstance(value, str) or str(parsed) != value or parsed.version != 4:
+        raise AgentProtocolError(f"{name} ID is invalid")
+    return value

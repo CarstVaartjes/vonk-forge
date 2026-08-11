@@ -42,8 +42,9 @@ JOURNAL_CONTENT="{\"_BOOT_ID\":\"$current_boot_id\",\"MESSAGE\":\"normal kernel 
 cat > "$test_dir/expected-docker-args" <<'EXPECTED'
 run
 --rm
+--pull=never
 --gpus=all
-nvcr.io/nvidia/cuda:13.0.1-devel-ubuntu24.04
+nvcr.io/nvidia/cuda:13.0.1-devel-ubuntu24.04@sha256:7d2f6a8c2071d911524f95061a0db363e24d27aa51ec831fcccf9e76eb72bc92
 nvidia-smi
 EXPECTED
 

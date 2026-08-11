@@ -5,6 +5,7 @@ pub mod client;
 pub mod config;
 pub mod executor;
 pub mod health;
+pub mod host_runtime;
 pub mod identity;
 pub mod image_importer;
 pub mod inventory;

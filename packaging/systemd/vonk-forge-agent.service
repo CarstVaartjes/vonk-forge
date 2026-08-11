@@ -39,7 +39,11 @@ DeviceAllow=/dev/nvidia-uvm-tools rw
 DeviceAllow=/dev/nvidia-modeset rw
 DeviceAllow=/dev/nvidia0 rw
 DeviceAllow=char-231:* rw
-BindPaths=-/dev/fuse -/dev/nvidiactl -/dev/nvidia-uvm -/dev/nvidia-uvm-tools -/dev/nvidia-modeset -/dev/nvidia0 -/dev/infiniband
+# NVIDIA visibility is retained for trusted inventory collection only. Recipe
+# builds cannot declare devices; accepted workloads use the signed Docker
+# helper boundary. Raw InfiniBand devices are intentionally not exposed.
+BindPaths=-/dev/fuse -/dev/nvidiactl -/dev/nvidia-uvm -/dev/nvidia-uvm-tools -/dev/nvidia-modeset -/dev/nvidia0
+InaccessiblePaths=-/run/docker.sock
 ProtectSystem=strict
 ProtectHome=yes
 ProtectKernelTunables=yes

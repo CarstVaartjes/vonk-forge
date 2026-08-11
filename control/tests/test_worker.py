@@ -1,11 +1,11 @@
 from datetime import UTC, datetime
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 from vonk_control.jobs import JobService
 from vonk_control.models import Base
 from vonk_control.worker import HandlerRequest, Worker
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 
 def _service(tmp_path):

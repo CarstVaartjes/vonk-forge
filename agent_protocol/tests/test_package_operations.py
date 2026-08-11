@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
 import hashlib
+from datetime import UTC, datetime
 
 import pytest
 from vonk_agent_protocol import (
@@ -12,7 +12,6 @@ from vonk_agent_protocol import (
     canonical_message,
     validate_schema_message,
 )
-
 
 RELEASE_PAYLOAD = {
     "schema_version": 1,

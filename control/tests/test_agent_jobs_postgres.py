@@ -10,6 +10,10 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy import create_engine, event, func, select
+from sqlalchemy.engine import Engine
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
 from vonk_control.auth import TokenCodec
@@ -27,10 +31,6 @@ from vonk_control.models import (
 )
 from vonk_control.operation_api import durable_operation_services
 from vonk_control.pki import CertificateAuthority, IssuedCertificate
-from sqlalchemy import create_engine, event, func, select
-from sqlalchemy.engine import Engine
-from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import sessionmaker
 
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32

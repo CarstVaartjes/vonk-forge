@@ -28,6 +28,7 @@ EXPECTED_SECRET_NAMES = {
     "controller-server-key",
     "database-url",
     "git-signing-key",
+    "host-runtime-grant-private-key",
     "litellm-master-key",
     "litellm-upstream-key",
     "management-cidrs",

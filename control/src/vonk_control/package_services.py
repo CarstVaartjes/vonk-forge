@@ -19,9 +19,9 @@ from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from vonk_agent_protocol import AgentOperation, PackageReleaseLock, canonical_message
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import AgentOperation, PackageReleaseLock, canonical_message
 
 from cluster_profiles.workload_packages import PackageFamily, WorkloadDeployment
 

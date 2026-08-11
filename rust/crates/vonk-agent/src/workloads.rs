@@ -114,6 +114,8 @@ pub struct MountSpec {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Placement {
+    #[serde(default)]
+    pub endpoint_address: Option<IpAddr>,
     pub rank: u32,
     pub role: String,
     pub world_size: u32,

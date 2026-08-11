@@ -1,13 +1,14 @@
 use std::{fs, path::Path, time::Duration};
 
 use reqwest::{Certificate, Client, Identity, StatusCode};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::io::AsyncWriteExt;
 use tokio_util::io::ReaderStream;
 use url::Url;
 use vonk_agent_protocol::{
-    AgentClaim, AgentDirective, AgentProgress, AgentResult, canonical_json, parse_strict,
+    AgentClaim, AgentDirective, AgentProgress, AgentResult, HostRuntimeAction, canonical_json,
+    parse_strict,
 };
 
 use crate::{
@@ -87,6 +88,25 @@ struct RenewRequest<'a> {
 struct ActivateRequest<'a> {
     generation: u64,
     node_id: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(deny_unknown_fields)]
+struct HostRuntimeGrantRequest<'a> {
+    node_id: &'a str,
+    job_id: uuid::Uuid,
+    operation_id: uuid::Uuid,
+    attempt: u32,
+    fence: uuid::Uuid,
+    action: HostRuntimeAction,
+    request_sha256: &'a str,
+    expires_in_seconds: u16,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HostRuntimeGrantResponse {
+    grant: serde_json::Value,
 }
 
 #[derive(Clone)]
@@ -210,6 +230,43 @@ impl AgentHttpClient {
             return Err(ClientError::Protocol);
         }
         Ok(directive)
+    }
+
+    pub async fn host_runtime_grant(
+        &self,
+        claim: &AgentClaim,
+        action: HostRuntimeAction,
+        request_sha256: &str,
+    ) -> Result<serde_json::Value, ClientError> {
+        if claim.node_id != self.node_id || !valid_sha256(request_sha256) || claim.attempt == 0 {
+            return Err(ClientError::Protocol);
+        }
+        let body = canonical_json(&HostRuntimeGrantRequest {
+            node_id: &self.node_id,
+            job_id: claim.job_id,
+            operation_id: claim.operation_id,
+            attempt: claim.attempt,
+            fence: claim.fence,
+            action,
+            request_sha256,
+            expires_in_seconds: 30,
+        })
+        .map_err(|_| ClientError::Protocol)?;
+        let response = self
+            .client
+            .post(self.endpoint("/agent/v1/host-runtime/grant")?)
+            .header("content-type", "application/json")
+            .body(body)
+            .send()
+            .await?;
+        classify_status(response.status())?;
+        let body = bounded_body(response).await?;
+        let response: HostRuntimeGrantResponse =
+            parse_strict(&body).map_err(|_| ClientError::Protocol)?;
+        if !response.grant.is_object() {
+            return Err(ClientError::Protocol);
+        }
+        Ok(response.grant)
     }
 
     pub async fn recipe_spec(&self, installation_id: &str) -> Result<WorkloadSpec, ClientError> {

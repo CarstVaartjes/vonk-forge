@@ -1,6 +1,8 @@
 import re
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 from vonk_control.dashboard import DashboardService
 from vonk_control.metrics import MetricsRegistry, OperationalMetricsCollector
 from vonk_control.models import (
@@ -11,8 +13,6 @@ from vonk_control.models import (
     Base,
     Job,
 )
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 NOW = datetime(2026, 8, 5, 12, tzinfo=UTC)
 NODE = "spk_00000000000000000000000000000001"

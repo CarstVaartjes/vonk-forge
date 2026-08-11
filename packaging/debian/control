@@ -4,7 +4,7 @@ Section: admin
 Priority: optional
 Architecture: arm64
 Maintainer: Vonk Forge <release@vonkforge.ai>
-Depends: adduser, ca-certificates, curl, fuse-overlayfs, init-system-helpers, openssl, podman (>= 4.9), slirp4netns, systemd, uidmap, util-linux
+Depends: acl, adduser, ca-certificates, curl, fuse-overlayfs, init-system-helpers, openssl, podman (>= 4.9), slirp4netns, systemd, uidmap, util-linux
 Homepage: https://vonkforge.ai
 Description: Secure outbound agent for GPU clusters
  Rust agent, narrow privileged helper, and stable A/B supervisor used by a

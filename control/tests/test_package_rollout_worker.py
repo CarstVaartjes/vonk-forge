@@ -5,6 +5,8 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 from vonk_control.models import (
     AgentNode,
     AgentOperation,
@@ -14,8 +16,6 @@ from vonk_control.models import (
     PackageRolloutNode,
 )
 from vonk_control.package_rollout_worker import PackageRolloutWorker
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 NODE = "spk_" + "1" * 32
 NOW = datetime(2026, 8, 6, tzinfo=UTC)

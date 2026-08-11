@@ -99,8 +99,15 @@ def verify(deb: Path) -> dict[str, object]:
         raise VerificationError("package architecture is not arm64")
     if PACKAGE_VERSION.fullmatch(fields["Version"]) is None:
         raise VerificationError("package version is not canonical")
-    if re.search(r"(?:^|,\s*)uidmap(?:\s*\([^)]*\))?(?:,|$)", fields["Depends"]) is None:
-        raise VerificationError("package does not require subordinate ID helpers")
+    for dependency in ("acl", "podman", "uidmap"):
+        if (
+            re.search(
+                rf"(?:^|,\s*){dependency}(?:\s*\([^)]*\))?(?:,|$)",
+                fields["Depends"],
+            )
+            is None
+        ):
+            raise VerificationError(f"package does not require {dependency}")
 
     with tempfile.TemporaryDirectory(prefix="vonk-agent-deb-verify-") as temporary:
         root = Path(temporary)
@@ -262,10 +269,13 @@ def _verify_payload(payload: Path, control: Path) -> None:
         or "DeviceAllow=/dev/fuse rw" not in units["vonk-forge-agent.service"]
         or "DeviceAllow=char-231:* rw" not in units["vonk-forge-agent.service"]
         or "BindPaths=-/dev/fuse" not in units["vonk-forge-agent.service"]
+        or "InaccessiblePaths=-/run/docker.sock"
+        not in units["vonk-forge-agent.service"]
+        or "/dev/infiniband" in units["vonk-forge-agent.service"]
         or "Delegate=yes" not in units["vonk-forge-agent.service"]
         or "RestrictSUIDSGID=yes" in units["vonk-forge-agent.service"]
     ):
-        raise VerificationError("agent rootless container boundary is invalid")
+        raise VerificationError("agent build/runtime boundary is invalid")
     storage = (
         payload / "etc/vonk-forge-agent/containers-storage.conf"
     ).read_text(encoding="utf-8")
@@ -279,6 +289,15 @@ def _verify_payload(payload: Path, control: Path) -> None:
         raise VerificationError("helper socket group is invalid")
     if "PrivateNetwork=yes" not in units["vonk-forge-package-helper.service"]:
         raise VerificationError("helper unit is not network isolated")
+    helper = units["vonk-forge-package-helper.service"]
+    for boundary in (
+        "Wants=docker.service",
+        "After=local-fs.target docker.service",
+        "BindReadOnlyPaths=-/run/docker.sock -/run/vonk-forge-agent/runtime-requests -/var/lib/vonk-forge-agent/image-imports",
+        "ReadWritePaths=-/var/lib/vonk-forge-agent/models -/var/lib/vonk-forge-agent/runs -/var/lib/vonk-forge-agent/run-metadata",
+    ):
+        if boundary not in helper:
+            raise VerificationError("helper Spark runtime boundary is invalid")
     expected_md5: dict[str, str] = {}
     for line in (control / "md5sums").read_text(encoding="ascii").splitlines():
         digest, name = line.split(maxsplit=1)

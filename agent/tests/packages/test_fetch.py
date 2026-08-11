@@ -4,7 +4,6 @@ import hashlib
 from dataclasses import replace
 
 import pytest
-
 from vonk_agent.packages.fetch import (
     AcquisitionCancelled,
     AcquisitionEngine,
@@ -21,7 +20,6 @@ from vonk_agent.packages.providers import (
     SourceLocation,
     Validators,
 )
-
 
 DATA = b"0123456789abcdef"
 DIGEST = hashlib.sha256(DATA).hexdigest()

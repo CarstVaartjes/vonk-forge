@@ -9,6 +9,8 @@ from datetime import UTC, datetime, timedelta
 from threading import Event
 
 import pytest
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
 from vonk_control.models import (
@@ -22,8 +24,6 @@ from vonk_control.models import (
     Job,
     Observation,
 )
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import sessionmaker
 
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32

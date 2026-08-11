@@ -52,6 +52,15 @@ pub enum RestartUnit {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum ContainerRuntimeAction {
+    ImageImport,
+    ImageInspect,
+    Start,
+    Stop,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum HostOperation {
     CreateManagedDirectory {
@@ -73,6 +82,14 @@ pub enum HostOperation {
     ScheduleReboot {
         delay_seconds: u16,
     },
+    ExecuteContainerRuntimeRequest {
+        action: ContainerRuntimeAction,
+        job_id: Uuid,
+        operation_id: Uuid,
+        attempt: u32,
+        fence: Uuid,
+        request_sha256: String,
+    },
 }
 
 impl HostOperation {
@@ -92,6 +109,20 @@ impl HostOperation {
             } => valid_digest(package_sha256) && valid_signature(package_signature),
             Self::RestartVonkUnit { .. } => true,
             Self::ScheduleReboot { delay_seconds } => (60..=3600).contains(delay_seconds),
+            Self::ExecuteContainerRuntimeRequest {
+                job_id,
+                operation_id,
+                attempt,
+                fence,
+                request_sha256,
+                ..
+            } => {
+                job_id.get_version() == Some(Version::Random)
+                    && operation_id.get_version() == Some(Version::Random)
+                    && *attempt > 0
+                    && fence.get_version() == Some(Version::Random)
+                    && valid_digest(request_sha256)
+            }
         };
         if valid {
             Ok(())

@@ -10,14 +10,6 @@ from pathlib import Path
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
-from vonk_agent_protocol import canonical_message
-from vonk_control.update_authority import (
-    PublishedTUFReleaseSource,
-    UpdateAuthorizationAuthority,
-    UpdateAuthorizationError,
-    _PublishedTufFetcher,
-    snapshot_public_trust_root,
-)
 from securesystemslib.signer import CryptoSigner
 from tuf.api.metadata import (
     Metadata,
@@ -27,6 +19,14 @@ from tuf.api.metadata import (
     TargetFile,
     Targets,
     Timestamp,
+)
+from vonk_agent_protocol import canonical_message
+from vonk_control.update_authority import (
+    PublishedTUFReleaseSource,
+    UpdateAuthorizationAuthority,
+    UpdateAuthorizationError,
+    _PublishedTufFetcher,
+    snapshot_public_trust_root,
 )
 
 NOW = datetime(2026, 8, 5, 12, 0, tzinfo=UTC)

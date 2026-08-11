@@ -7,6 +7,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from vonk_agent_protocol import canonical_message
 from vonk_control.litellm import LiteLlmDeployment
 from vonk_control.presence import ManagementAddressPolicy
@@ -24,8 +26,6 @@ from vonk_control.worker_authority import (
     install_worker_authority_routes,
     worker_document_signature,
 )
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
 COMMIT = "a" * 40
 RECONCILIATION_ID = "00000000-0000-4000-8000-000000000001"

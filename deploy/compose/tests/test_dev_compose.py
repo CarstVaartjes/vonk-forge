@@ -1190,7 +1190,7 @@ def test_dev_compose_uses_the_python_runtime_generator_without_ssh_keygen(
     assert (capture / "environment").exists()
     assert (secrets / "git-signing-key").is_file()
     assert (secrets / "git-signing-key.pub").is_file()
-    assert len(tuple(secrets.iterdir())) == 15
+    assert len(tuple(secrets.iterdir())) == 17
 
 
 def test_dev_compose_rejects_an_existing_private_key_without_its_public_mate(

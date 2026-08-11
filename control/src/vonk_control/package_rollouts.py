@@ -17,14 +17,14 @@ from datetime import UTC, datetime
 from types import MappingProxyType
 from typing import Any, Protocol, cast
 
+from sqlalchemy import select
+from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentOperation,
     PackageOperationRequest,
     PackageReleaseLock,
     canonical_message,
 )
-from sqlalchemy import select
-from sqlalchemy.orm import Session, sessionmaker
 
 from cluster_profiles.workload_packages import WorkloadDeployment
 

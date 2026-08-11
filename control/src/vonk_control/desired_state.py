@@ -12,10 +12,10 @@ from importlib import resources
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, cast
 
-from vonk_agent_protocol import AgentOperation, canonical_message
 from jsonschema import ValidationError, validate
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import AgentOperation, canonical_message
 
 from cluster_profiles.fleet import Fleet, ManagementEndpoint, NodeId, NodeRecord
 from cluster_profiles.placement import (
