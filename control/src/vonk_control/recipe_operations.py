@@ -1235,6 +1235,7 @@ def _record_build_evidence(
         "policy",
     }
     policy = evidence.get("policy")
+    findings = policy.get("findings") if isinstance(policy, Mapping) else None
     image_digest = evidence.get("image_digest")
     layout_digest = evidence.get("oci_layout_sha256")
     image_bytes = evidence.get("image_bytes")
@@ -1253,7 +1254,8 @@ def _record_build_evidence(
         or not 1 <= image_bytes <= 16 * 1024**4
         or not isinstance(policy, Mapping)
         or policy.get("passed") is not True
-        or policy.get("findings") != []
+        or not isinstance(findings, (list, tuple))
+        or bool(findings)
         or policy.get("dockerfile") != build.plan.get("dockerfile")
         or build.image_digest not in {None, image_digest}
         or build.oci_layout_sha256 not in {None, layout_digest}

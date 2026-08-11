@@ -12,6 +12,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import (
     AgentClaim,
+    AgentResult,
     canonical_message,
 )
 from vonk_agent_protocol import (
@@ -591,6 +592,53 @@ def test_build_result_refreshes_upload_evidence_after_a_retried_attempt(
     finally:
         stale_session.rollback()
         stale_session.close()
+
+
+def test_build_result_accepts_protocol_frozen_empty_findings(tmp_path: Path) -> None:
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    plan = RecipeBuildService(sessions, bundles=bundles).plan(
+        revision.id, node_id, now=now
+    )
+    image_digest = "sha256:" + "b" * 64
+    layout_digest = "c" * 64
+    with sessions.begin() as session:
+        build = session.get(RecipeBuild, plan.build_id)
+        assert build is not None
+        build.image_digest = image_digest
+        build.oci_layout_sha256 = layout_digest
+        build.image_bytes = 500
+
+    message = AgentResult.parse(
+        {
+            "schema_version": 1,
+            "job_id": "11111111-1111-4111-8111-111111111111",
+            "operation_id": "22222222-2222-4222-8222-222222222222",
+            "attempt": 1,
+            "fence": "33333333-3333-4333-8333-333333333333",
+            "node_id": node_id,
+            "deadline": "2026-08-11T20:30:00+00:00",
+            "state": "succeeded",
+            "result": {
+                "build_input_sha256": plan.build_input_sha256,
+                "image_bytes": 500,
+                "image_digest": image_digest,
+                "oci_layout_sha256": layout_digest,
+                "policy": {
+                    "dockerfile": "Dockerfile",
+                    "findings": [],
+                    "passed": True,
+                },
+            },
+        }
+    )
+    with sessions.begin() as session:
+        build = session.get(RecipeBuild, plan.build_id)
+        assert build is not None
+        _record_build_evidence(session, build, message.result, now=now)
+
+    with sessions() as session:
+        build = session.get(RecipeBuild, plan.build_id)
+        assert build is not None and build.state == "succeeded"
 
 
 def test_distribution_uses_one_build_digest_for_every_missing_node(
