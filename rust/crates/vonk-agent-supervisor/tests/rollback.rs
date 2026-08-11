@@ -1,6 +1,7 @@
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
+use std::process::Command;
 
 use ring::signature::{self, Ed25519KeyPair, KeyPair};
 use tempfile::TempDir;
@@ -107,6 +108,41 @@ fn fixture() -> Fixture {
         release,
         a_digest,
     }
+}
+
+#[test]
+fn restrictive_umask_still_publishes_reloadable_state() {
+    const CHILD_ENV: &str = "VONK_RESTRICTIVE_UMASK_TEST_CHILD";
+    if std::env::var_os(CHILD_ENV).is_some() {
+        let fixture = fixture();
+        assert_eq!(
+            fs::metadata(&fixture.paths.state)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o644
+        );
+        fixture.store.load().unwrap();
+        return;
+    }
+
+    let output = Command::new("/bin/sh")
+        .args([
+            "-c",
+            "umask 077; exec \"$1\" --exact restrictive_umask_still_publishes_reloadable_state --nocapture",
+            "vonk-restrictive-umask-test",
+        ])
+        .arg(std::env::current_exe().unwrap())
+        .env(CHILD_ENV, "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "child test failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 fn ready(
