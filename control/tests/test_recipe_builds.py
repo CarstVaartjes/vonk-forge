@@ -596,8 +596,21 @@ def test_build_result_refreshes_upload_evidence_after_a_retried_attempt(
 
 def test_build_result_accepts_protocol_frozen_empty_findings(tmp_path: Path) -> None:
     sessions, bundles, now, node_id, revision = setup(tmp_path)
-    plan = RecipeBuildService(sessions, bundles=bundles).plan(
-        revision.id, node_id, now=now
+    builds = RecipeBuildService(sessions, bundles=bundles)
+    plan = builds.plan(revision.id, node_id, now=now)
+    operations = RecipeOperationService(
+        sessions,
+        install_admission=object(),
+        run_admission=object(),
+        agent_jobs=RecordingQueue(),
+        clock=lambda: now,
+        builds=builds,
+    )
+    operation_view = operations.build(
+        plan,
+        build_input_sha256=plan.build_input_sha256,
+        actor="admin",
+        request_id="frozen-policy-result",
     )
     image_digest = "sha256:" + "b" * 64
     layout_digest = "c" * 64
@@ -607,12 +620,19 @@ def test_build_result_accepts_protocol_frozen_empty_findings(tmp_path: Path) -> 
         build.image_digest = image_digest
         build.oci_layout_sha256 = layout_digest
         build.image_bytes = 500
+        agent_operation = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == operation_view.id
+            )
+        )
+        assert agent_operation is not None
+        operation_id = agent_operation.id
 
     message = AgentResult.parse(
         {
             "schema_version": 1,
-            "job_id": "11111111-1111-4111-8111-111111111111",
-            "operation_id": "22222222-2222-4222-8222-222222222222",
+            "job_id": operation_view.id,
+            "operation_id": operation_id,
             "attempt": 1,
             "fence": "33333333-3333-4333-8333-333333333333",
             "node_id": node_id,
@@ -632,13 +652,17 @@ def test_build_result_accepts_protocol_frozen_empty_findings(tmp_path: Path) -> 
         }
     )
     with sessions.begin() as session:
-        build = session.get(RecipeBuild, plan.build_id)
-        assert build is not None
-        _record_build_evidence(session, build, message.result, now=now)
+        agent_operation = session.get(AgentOperation, operation_id)
+        assert agent_operation is not None
+        agent_operation.state = "succeeded"
+        operations.consume_agent_result(session, agent_operation, object(), message)
 
     with sessions() as session:
         build = session.get(RecipeBuild, plan.build_id)
         assert build is not None and build.state == "succeeded"
+        job = session.get(Job, operation_view.id)
+        assert job is not None and job.state == "succeeded"
+        assert job.result["node_evidence"][node_id]["policy"]["findings"] == []
 
 
 def test_distribution_uses_one_build_digest_for_every_missing_node(
