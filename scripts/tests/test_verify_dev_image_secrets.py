@@ -256,6 +256,19 @@ def test_scanner_accepts_path_only_mode_for_clean_publication_artifacts(
     assert result.stderr == ""
 
 
+def test_path_scan_streams_complete_oci_sized_artifacts_past_image_file_limit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    scanner = _scanner_module()
+    canary = b"archive-canary"
+    archive = tmp_path / "image.oci.tar"
+    archive.write_bytes(b"clean-prefix-beyond-limit-" + canary)
+    monkeypatch.setattr(scanner, "MAX_FILE_BYTES", 8)
+
+    with pytest.raises(scanner.ScanFailure, match="canary"):
+        scanner._scan_path(archive, forbidden_bytes=(canary,))
+
+
 def test_scanner_rejects_canary_bytes_in_generated_workflow_artifacts_without_leaks(
     image_factory,
     tmp_path: Path,

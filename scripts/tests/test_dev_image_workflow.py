@@ -5,8 +5,10 @@ import os
 import re
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/dev-image-metadata"
@@ -33,6 +35,33 @@ def _metadata(*arguments: str) -> subprocess.CompletedProcess[str]:
 
 def _workflow() -> str:
     return WORKFLOW.read_text(encoding="utf-8")
+
+
+def _workflow_document() -> dict[str, Any]:
+    document = yaml.safe_load(_workflow())
+    assert isinstance(document, dict)
+    return document
+
+
+def _workflow_job(document: dict[str, Any], name: str) -> dict[str, Any]:
+    jobs = document.get("jobs")
+    assert isinstance(jobs, dict)
+    job = jobs.get(name)
+    assert isinstance(job, dict)
+    return job
+
+
+def _workflow_steps(job: dict[str, Any]) -> list[dict[str, Any]]:
+    steps = job.get("steps")
+    assert isinstance(steps, list)
+    assert all(isinstance(step, dict) for step in steps)
+    return steps
+
+
+def _workflow_step(job: dict[str, Any], name: str) -> dict[str, Any]:
+    matches = [step for step in _workflow_steps(job) if step.get("name") == name]
+    assert len(matches) == 1
+    return matches[0]
 
 
 def _dockerfile() -> str:
@@ -415,6 +444,114 @@ def test_workflow_is_main_only_publication_without_repository_secrets() -> None:
     assert "persist-credentials: false" in checkout
 
 
+def test_workflow_yaml_and_embedded_bash_are_structurally_valid() -> None:
+    document = _workflow_document()
+    jobs = document.get("jobs")
+    assert isinstance(jobs, dict)
+    assert {"build-and-accept", "publish-development-images"} <= set(jobs)
+
+    for job_name, untyped_job in jobs.items():
+        assert isinstance(untyped_job, dict)
+        for step in _workflow_steps(untyped_job):
+            script = step.get("run")
+            if script is None:
+                continue
+            assert step.get("shell") == "bash"
+            assert isinstance(script, str)
+            shell_input = re.sub(
+                r"\$\{\{[^{}]+\}\}", "github-expression", script
+            )
+            result = subprocess.run(
+                ("bash", "-n"),
+                input=shell_input,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            assert result.returncode == 0, f"{job_name}/{step.get('name')}: {result.stderr}"
+            assert result.stderr == "", f"{job_name}/{step.get('name')}: {result.stderr}"
+
+
+def test_complete_local_scan_gates_every_external_publication() -> None:
+    document = _workflow_document()
+    builder = _workflow_job(document, "build-and-accept")
+    publisher = _workflow_job(document, "publish-development-images")
+    build_steps = _workflow_steps(builder)
+    publish_steps = _workflow_steps(publisher)
+
+    assert publisher.get("needs") == ["build-and-accept"]
+    assert "if" not in publisher
+
+    scan = _workflow_step(builder, "Scan complete local publication inputs")
+    scan_index = build_steps.index(scan)
+    accepted_upload = _workflow_step(builder, "Upload accepted publication inputs")
+    for prerequisite in (
+        "Build exact OCI archives",
+        "Render and validate disposable development Compose artifacts",
+        "Render and smoke complete disposable development stack",
+    ):
+        assert build_steps.index(_workflow_step(builder, prerequisite)) < scan_index
+    assert scan_index < build_steps.index(accepted_upload)
+    assert not any(
+        str(step.get("uses", "")).startswith("actions/upload-artifact@")
+        for step in build_steps[: scan_index + 1]
+    )
+    assert not any(
+        str(step.get("uses", "")).startswith(
+            ("actions/attest@", "docker/login-action@")
+        )
+        for step in build_steps
+    )
+    pre_scan_scripts = "\n".join(
+        str(step.get("run", "")) for step in build_steps[:scan_index]
+    )
+    assert "skopeo copy --all" not in pre_scan_scripts
+    assert "push-to-registry: true" not in pre_scan_scripts
+
+    scan_script = scan.get("run")
+    assert isinstance(scan_script, str)
+    assert "docker history --no-trunc" in scan_script
+    assert "docker image inspect" in scan_script
+    assert "tar --extract" in scan_script
+    assert "attestation-manifest" in scan_script
+    assert "https://spdx.dev/Document" in scan_script
+    assert "https://slsa.dev/provenance/" in scan_script
+    assert "scripts/verify-dev-image-secrets" in scan_script
+    assert '--forbid-bytes-dir "$canary_root"' in scan_script
+    assert '--scan-path "$publication_root"' in scan_script
+    assert '--scan-path "$evidence_root"' in scan_script
+    assert "vonk-forge-api:dev-local vonk-forge-worker:dev-local" in scan_script
+
+    accepted_paths = accepted_upload.get("with", {}).get("path")
+    assert isinstance(accepted_paths, str)
+    for filename in (
+        "vonk-forge-api.oci.tar",
+        "vonk-forge-worker.oci.tar",
+        "docker-compose.pinned.yml",
+        "docker-compose.dev.yml",
+    ):
+        assert f"accepted/{filename}" in accepted_paths
+
+    publish_names = [step.get("name") for step in publish_steps]
+    assert publish_names.index("Publish immutable tested images") < publish_names.index(
+        "Sign accepted API image provenance"
+    )
+    assert publish_names.index("Publish immutable tested images") < publish_names.index(
+        "Sign accepted worker image provenance"
+    )
+    assert not any("Scan" in str(name) for name in publish_names)
+
+    compose_upload = _workflow_step(publisher, "Upload Compose artifact")
+    compose_paths = compose_upload.get("with", {}).get("path")
+    assert isinstance(compose_paths, str)
+    assert "accepted/docker-compose.pinned.yml" in compose_paths
+    assert "accepted/docker-compose.dev.yml" in compose_paths
+    assert not any(
+        "scripts/render-dev-compose" in str(step.get("run", ""))
+        for step in publish_steps
+    )
+
+
 def test_workflow_builds_scans_and_accepts_oci_archives_before_login() -> None:
     text = _workflow()
     build = _step(text, "Build exact OCI archives")
@@ -422,7 +559,7 @@ def test_workflow_builds_scans_and_accepts_oci_archives_before_login() -> None:
     preload = _step(text, "Preload pinned runtime dependency")
     render = _step(text, "Render and validate disposable development Compose artifacts")
     smoke = _step(text, "Render and smoke complete disposable development stack")
-    accept = _step(text, "Scan and accept image-only stack")
+    accept = _step(text, "Scan complete local publication inputs")
 
     assert "docker buildx build" in build
     assert "--platform linux/amd64" in build
@@ -445,8 +582,8 @@ def test_workflow_builds_scans_and_accepts_oci_archives_before_login() -> None:
     assert "docker-compose.pinned.yml" in render
     assert "docker-compose.dev.yml" in render
     assert "--channel dev" in render
-    assert 'docker compose -f "$compose_render_root/docker-compose.pinned.yml" config -q' in render
-    assert 'docker compose -f "$compose_render_root/docker-compose.dev.yml" config -q' in render
+    assert 'docker compose -f "$publication_root/docker-compose.pinned.yml" config -q' in render
+    assert 'docker compose -f "$publication_root/docker-compose.dev.yml" config -q' in render
     assert 'docker tag vonk-forge-api:dev-local ghcr.io/carstvaartjes/vonk-forge-api:dev' in smoke
     assert 'docker tag vonk-forge-worker:dev-local ghcr.io/carstvaartjes/vonk-forge-worker:dev' in smoke
     assert "scripts/dev-runtime-secrets.py" in smoke
@@ -454,11 +591,20 @@ def test_workflow_builds_scans_and_accepts_oci_archives_before_login() -> None:
     assert "docker compose" in smoke
     assert "up -d --pull never" in smoke
     assert "down --volumes --remove-orphans" in smoke
+    assert "development stack volume cleanup failed" in smoke
+    assert "original_status=$?" in smoke
+    assert 'exit "$original_status"' in smoke
+    assert "|| true" not in smoke
+    assert smoke.index("trap cleanup EXIT") < smoke.index("mktemp -d")
     for service in ("postgres", "migrate", "control-api", "caddy", "litellm"):
         assert service in smoke
     assert "/agent/v1/enroll" in smoke
     assert "enroll.vonk-forge.lan" in smoke
     assert "agents.vonk-forge.lan" in smoke
+    assert 'mtls_status=$(curl' in smoke
+    assert '[[ "$mtls_status" != 000 ]]' in smoke
+    assert '[[ "$mtls_exit" != 35 && "$mtls_exit" != 56 ]]' in smoke
+    assert "certificate (is )?required" in smoke
     assert text.index("Preload pinned runtime dependency") < text.index(
         "Render and validate disposable development Compose artifacts"
     )
@@ -466,7 +612,7 @@ def test_workflow_builds_scans_and_accepts_oci_archives_before_login() -> None:
         "Render and smoke complete disposable development stack"
     )
     assert text.index("Render and smoke complete disposable development stack") < text.index(
-        "Scan and accept image-only stack"
+        "Scan complete local publication inputs"
     )
     assert "scripts/verify-dev-image-secrets" in accept
     assert '--expected-commit "$GITHUB_SHA"' in accept
@@ -475,8 +621,8 @@ def test_workflow_builds_scans_and_accepts_oci_archives_before_login() -> None:
         in accept
     )
     assert "scripts/dev-image-acceptance" in accept
-    assert text.index("Scan and accept image-only stack") < text.index("Log in to GHCR")
-    assert "Upload accepted OCI archives" in text
+    assert text.index("Scan complete local publication inputs") < text.index("Log in to GHCR")
+    assert "Upload accepted publication inputs" in text
     assert "needs: [build-and-accept]" in text
     assert "Download accepted OCI archives" in text
 
@@ -508,12 +654,13 @@ def test_development_dockerfile_embeds_role_identity_without_authority_build_arg
     )
 
 
-def test_workflow_publishes_tested_archives_then_renders_both_compose_channels() -> None:
+def test_workflow_publishes_prevalidated_archives_and_compose_channels() -> None:
     text = _workflow()
     publish = _step(text, "Publish immutable tested images")
     verify = _step(text, "Verify immutable manifests and attestations")
-    render = _step(text, "Render development Compose artifacts")
-    artifact_scan = _step(text, "Scan published metadata and workflow artifacts")
+    render = _step(text, "Render and validate disposable development Compose artifacts")
+    artifact_scan = _step(text, "Scan complete local publication inputs")
+    accepted_upload = _step(text, "Upload accepted publication inputs")
     upload = _step(text, "Upload Compose artifact")
 
     assert "skopeo copy --all" in publish
@@ -538,32 +685,37 @@ def test_workflow_publishes_tested_archives_then_renders_both_compose_channels()
     pinned_render, mutable_render = render.split(
         "scripts/render-dev-compose", maxsplit=2
     )[1:]
-    assert ":${IMMUTABLE_TAG}@${API_DIGEST}" in pinned_render
-    assert ":${IMMUTABLE_TAG}@${WORKER_DIGEST}" in pinned_render
+    assert "vonk-forge-api:dev-sha-$GITHUB_SHA@$api_digest" in pinned_render
+    assert "vonk-forge-worker:dev-sha-$GITHUB_SHA@$worker_digest" in pinned_render
     assert '--commit "$GITHUB_SHA"' in pinned_render
-    assert ":dev" not in pinned_render
-    assert '--api-image "$API_IMAGE:dev"' in mutable_render
-    assert '--worker-image "$WORKER_IMAGE:dev"' in mutable_render
-    assert "@${API_DIGEST}" not in mutable_render
-    assert "@${WORKER_DIGEST}" not in mutable_render
+    assert 'vonk-forge-api:dev"' not in pinned_render
+    assert 'vonk-forge-worker:dev"' not in pinned_render
+    assert "ghcr.io/carstvaartjes/vonk-forge-api:dev" in mutable_render
+    assert "ghcr.io/carstvaartjes/vonk-forge-worker:dev" in mutable_render
+    assert "@$api_digest" not in mutable_render
+    assert "@$worker_digest" not in mutable_render
     assert "--commit" not in mutable_render
     assert "--channel dev" in mutable_render
-    assert render.count("docker compose -f dist/docker-compose.") == 2
+    assert render.count('docker compose -f "$publication_root/docker-compose.') == 2
     assert "docker history --no-trunc" in artifact_scan
-    assert "skopeo inspect --config" in artifact_scan
-    assert ".Provenance" in artifact_scan
-    assert ".SBOM" in artifact_scan
+    assert "docker image inspect" in artifact_scan
+    assert "attestation-manifest" in artifact_scan
+    assert "https://slsa.dev/provenance/" in artifact_scan
+    assert "https://spdx.dev/Document" in artifact_scan
     assert "scripts/verify-dev-image-secrets" in artifact_scan
-    assert "--scan-path dist" in artifact_scan
+    assert '--scan-path "$publication_root"' in artifact_scan
+    assert '--scan-path "$evidence_root"' in artifact_scan
     assert "--forbid-bytes-dir" in artifact_scan
-    assert text.index("Render development Compose artifacts") < text.index(
-        "Scan published metadata and workflow artifacts"
+    assert text.index("Render and validate disposable development Compose artifacts") < text.index(
+        "Scan complete local publication inputs"
     )
-    assert text.index("Scan published metadata and workflow artifacts") < text.index(
-        "Upload Compose artifact"
+    assert text.index("Scan complete local publication inputs") < text.index(
+        "Upload accepted publication inputs"
     )
-    assert "dist/docker-compose.pinned.yml" in upload
-    assert "dist/docker-compose.dev.yml" in upload
+    assert "accepted/docker-compose.pinned.yml" in accepted_upload
+    assert "accepted/docker-compose.dev.yml" in accepted_upload
+    assert "accepted/docker-compose.pinned.yml" in upload
+    assert "accepted/docker-compose.dev.yml" in upload
     assert "if-no-files-found: error" in upload
     assert "secrets/" not in upload
 
@@ -593,7 +745,7 @@ def test_dev_alias_is_the_last_mutation_and_latest_is_never_published() -> None:
     )
     assert ":latest" not in text
     assert "latest=" not in text
-    render = _step(text, "Render development Compose artifacts")
+    render = _step(text, "Render and validate disposable development Compose artifacts")
     assert "$DEV_ALIAS" not in render
     publisher = _job(text, "publish-development-images")
     assert publisher.rstrip().endswith('"$WORKER_IMAGE" "$WORKER_DIGEST" "$DEV_ALIAS"')
