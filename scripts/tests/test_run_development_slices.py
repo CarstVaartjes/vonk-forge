@@ -442,8 +442,6 @@ class SliceHandler(BaseHTTPRequestHandler):
                 "/api/v1/recipes/runs": "start",
             }[path]
             nodes = [NODE] if kind == "build" else self.server.nodes
-            if kind == "distribution":
-                nodes = [node for node in nodes if node != NODE]
             self._operation(owner, nodes, kind=kind)
 
     def _operation(
@@ -654,8 +652,8 @@ def test_runner_completes_exact_public_lifecycle_without_secret_leaks(
     assert evidence["outputs"]["image_digest"] == "sha256:" + "9" * 64
     assert evidence["outputs"]["oci_layout_sha256"] == "8" * 64
     assert evidence["outputs"]["artifact_set_digest"] == "7" * 64
-    assert evidence["outputs"]["distribution_nodes"] == []
-    assert not any(
+    assert evidence["outputs"]["distribution_nodes"] == [NODE]
+    assert any(
         path == "/api/v1/recipes/image-distributions"
         for _method, path, _authorization in server.requests
     )
