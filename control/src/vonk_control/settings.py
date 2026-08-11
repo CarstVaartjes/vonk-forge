@@ -10,6 +10,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from .dev_cohort import DevelopmentCohortError, require_selected_cohort
+from .development_tokens import DEVELOPMENT_TOKEN_SIGNING_KEY
 from .presence import ManagementAddressPolicy, PresenceError
 
 
@@ -374,7 +375,7 @@ class Settings:
         elif mode == "production":
             raise SettingsError("VONK_TOKEN_SIGNING_KEY_FILE is required in production")
         else:
-            signing_key = b"development-only-signing-key-32b"
+            signing_key = DEVELOPMENT_TOKEN_SIGNING_KEY
         if len(signing_key) < 32:
             raise SettingsError("token signing key must contain at least 32 bytes")
         metrics_file = os.environ.get("VONK_METRICS_TOKEN_FILE")

@@ -446,6 +446,20 @@ def _run_model(tmp_path: Path, server: SliceServer, *extra: str):
     return result, evidence
 
 
+def test_runner_help_exposes_restart_and_failure_checkpoints() -> None:
+    result = subprocess.run(
+        (sys.executable, str(RUNNER), "--help"),
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "--stop-after" in result.stdout
+    assert "Pause after an accepted state" in result.stdout
+
+
 def test_runner_completes_exact_public_lifecycle_without_secret_leaks(
     tmp_path: Path, server: SliceServer
 ) -> None:

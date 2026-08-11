@@ -35,6 +35,7 @@ EXPECTED_SECRET_NAMES = {
 }
 PORT_INTERPOLATIONS = {
     "VONK_AGENT_PORT": "${VONK_AGENT_PORT:-8443}",
+    "VONK_DEV_INFERENCE_PORT": "${VONK_DEV_INFERENCE_PORT:-4000}",
     "VONK_DEV_PORT": "${VONK_DEV_PORT:-8080}",
 }
 
@@ -336,6 +337,7 @@ def test_compose_validation_uses_only_path_and_fixed_dev_port(
     monkeypatch.setenv("COMPOSE_FILE", "/attacker/compose.yaml")
     monkeypatch.setenv("COMPOSE_PROJECT_NAME", "caller-project")
     monkeypatch.setenv("VONK_DEV_PORT", "65535")
+    monkeypatch.setenv("VONK_DEV_INFERENCE_PORT", "65534")
     monkeypatch.setenv("VONK_AGENT_PORT", "9443")
 
     renderer._validate_compose(stage)
@@ -343,6 +345,7 @@ def test_compose_validation_uses_only_path_and_fixed_dev_port(
     assert captured["env"] == {
         "PATH": os.environ["PATH"],
         "VONK_AGENT_PORT": "8443",
+        "VONK_DEV_INFERENCE_PORT": "4000",
         "VONK_DEV_PORT": "8080",
     }
 
@@ -455,8 +458,13 @@ def test_rendered_compose_is_image_only_and_has_exact_runtime_boundaries(
         EXPECTED_SECRET_NAMES - {"postgres-password"}
     )
     assert services["migrate"].get("secrets", []) == []
-    assert {secret["source"] for secret in services["control-api"]["secrets"]} == {
-        "management-cidrs"
+    assert services["control-api"].get("secrets", []) == []
+    assert volumes["control-api"]["/run/secrets"] == {
+        "type": "volume",
+        "source": "dev-api-secrets",
+        "target": "/run/secrets",
+        "read_only": True,
+        "volume": {},
     }
     assert "secrets" not in services["control-worker"]
     assert volumes["control-api"]["/run/secrets"]["source"].endswith("dev-api-secrets")

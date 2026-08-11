@@ -975,7 +975,11 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--failure-node")
     parser.add_argument("--timeout-seconds", type=float, default=300.0)
     parser.add_argument("--poll-seconds", type=float, default=1.0)
-    parser.add_argument("--stop-after", choices=ALL_STATES, help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--stop-after",
+        choices=ALL_STATES,
+        help="Pause after an accepted state so an operator can perform a restart or failure action.",
+    )
     args = parser.parse_args()
     if args.timeout_seconds <= 0 or args.poll_seconds <= 0:
         parser.error("timeouts must be positive")

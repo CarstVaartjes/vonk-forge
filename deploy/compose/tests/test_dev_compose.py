@@ -214,7 +214,13 @@ def test_image_template_hardens_caddy_as_the_only_lan_listener() -> None:
         for name, service in services.items()
         if service.get("ports")
     }
-    assert set(listeners) == {"caddy", "control-api"}
+    assert set(listeners) == {"caddy", "control-api", "litellm"}
+    assert all(
+        port.get("host_ip") == "127.0.0.1"
+        for service_name in ("control-api", "litellm")
+        for port in listeners[service_name]
+    )
+    assert all("host_ip" not in port for port in listeners["caddy"])
     assert listeners["control-api"] == [
         {
             "host_ip": "127.0.0.1",
@@ -285,7 +291,15 @@ def test_image_template_runs_acknowledged_litellm_only_on_internal_networks() ->
     assert set(litellm["networks"]) == {"application"}
     assert rendered["networks"]["application"]["internal"] is True
     assert rendered["networks"]["data"]["internal"] is True
-    assert litellm.get("ports", []) == []
+    assert litellm["ports"] == [
+        {
+            "host_ip": "127.0.0.1",
+            "mode": "ingress",
+            "published": "4000",
+            "protocol": "tcp",
+            "target": 4000,
+        }
+    ]
     assert litellm["healthcheck"] == {
         "test": [
             "CMD",

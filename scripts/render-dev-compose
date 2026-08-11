@@ -24,6 +24,7 @@ COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 UNRESOLVED_TOKEN = re.compile(r"__VONK_[A-Z0-9_]+__")
 ALLOWED_COMPOSE_INTERPOLATIONS = {
     "VONK_AGENT_PORT": "${VONK_AGENT_PORT:-8443}",
+    "VONK_DEV_INFERENCE_PORT": "${VONK_DEV_INFERENCE_PORT:-4000}",
     "VONK_DEV_PORT": "${VONK_DEV_PORT:-8080}",
 }
 IMAGE_TOKENS = {
@@ -159,6 +160,7 @@ def _validate_compose(stage: Path) -> None:
         env={
             "PATH": os.environ["PATH"],
             "VONK_AGENT_PORT": "8443",
+            "VONK_DEV_INFERENCE_PORT": "4000",
             "VONK_DEV_PORT": "8080",
         },
     )
