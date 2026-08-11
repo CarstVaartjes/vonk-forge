@@ -31,6 +31,9 @@ def _run_acceptance() -> tuple[bool, str, str]:
         command = [
             "uv",
             "run",
+            "--no-managed-python",
+            "--python",
+            sys.executable,
             "--project",
             "agent",
             "--frozen",
@@ -61,8 +64,6 @@ def _run_acceptance() -> tuple[bool, str, str]:
         completed.returncode == 0
         and "xfailed" not in lowered
         and "xpassed" not in lowered
-        and "failed" not in lowered
-        and "error" not in lowered
     )
     return passed, " ".join(command), output
 

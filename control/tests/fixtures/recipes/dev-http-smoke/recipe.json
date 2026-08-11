@@ -21,7 +21,7 @@
   },
   "build": {
     "context": {
-      "sha256": "7a65752ee1a950b3b358c66ceaf2007d0eb824a7842d0a67a5b1e3726957eb80",
+      "sha256": "4220553fbdd61b6bea80e593c9085686862503a9df904e6fbb16d695d26776f5",
       "expected_bytes": 10240,
       "media_type": "application/vnd.vonk-forge.source-bundle.v1+tar"
     },
@@ -34,7 +34,7 @@
     },
     "resources": {
       "download_bytes": 0,
-      "temporary_bytes": 1048576,
+      "temporary_bytes": 536870912,
       "memory_bytes": 134217728,
       "timeout_seconds": 60
     }
@@ -122,12 +122,12 @@
           ],
           "resources": {
             "disk": {
-              "image_bytes": 1048576,
+              "image_bytes": 268435456,
               "artifact_bytes": 10,
-              "staging_bytes": 1048576,
+              "staging_bytes": 536870912,
               "cache_bytes": 0,
               "rollback_bytes": 0,
-              "safety_margin_bytes": 1048576
+              "safety_margin_bytes": 536870912
             },
             "memory": {
               "kind": "host",
@@ -144,7 +144,7 @@
         "minimum_bandwidth_mbps": 0
       },
       "parameter_overrides": {},
-      "measurement": "declared"
+      "measurement": "measured"
     }
   ],
   "validation": {

@@ -13,6 +13,10 @@ COMPOSE_README = ROOT / "deploy/compose/README.md"
 ARCHITECTURE = ROOT / "docs/architecture-overview.md"
 SUPPLY_CHAIN = ROOT / "docs/runbooks/supply-chain.md"
 DEV_WORKLOADS = ROOT / "docs/runbooks/development-agent-workloads.md"
+DEV_WORKLOADS_DESIGN = (
+    ROOT
+    / "docs/superpowers/specs/2026-08-10-development-agent-workload-slices-design.md"
+)
 MODEL_SWITCHING = ROOT / "docs/runbooks/model-switching.md"
 MODEL_CAPACITY = ROOT / "docs/model-capacity-overview.md"
 
@@ -71,8 +75,8 @@ def test_active_agent_install_examples_keep_pairing_and_controller_inputs_togeth
 
     assert agent_configs
     for config in agent_configs:
-        assert config["enrollment_url"] == "https://<ENROLLMENT_HOSTNAME>/"
-        assert config["controller_url"] == "https://<CONTROLLER_HOSTNAME>/"
+        assert config["enrollment_url"] == "https://<ENROLLMENT_HOSTNAME>:8443/"
+        assert config["controller_url"] == "https://<CONTROLLER_HOSTNAME>:8443/"
         assert config["ca_path"] == "/etc/vonk-forge-agent/controller-ca.pem"
         assert config["ca_sha256"] == "<64_LOWERCASE_HEX_FROM_SHA256SUM>"
         assert config["node_id"] == "<NODE_ID>"
@@ -110,6 +114,22 @@ def test_agent_urls_have_distinct_pairing_and_post_identity_roles() -> None:
         and "authenticated service" in sentence
         for sentence in sentences
     )
+
+
+def test_agent_install_documents_explicit_agent_ingress_hosts_and_firewall() -> None:
+    text = INSTALL_AGENT.read_text()
+    normalized = _normalized_text(INSTALL_AGENT)
+
+    assert "/etc/hosts" in text
+    assert (
+        "<NAS_MANAGEMENT_IP> <ENROLLMENT_HOSTNAME> <CONTROLLER_HOSTNAME> "
+        "<REGISTRY_HOSTNAME>"
+    ) in text
+    assert "<NODE_MANAGEMENT_CIDR>" in text
+    assert "<NAS_MANAGEMENT_IP>:8443" in text
+    assert "https://<ENROLLMENT_HOSTNAME>:8443/" in text
+    assert "https://<CONTROLLER_HOSTNAME>:8443/" in text
+    assert "reject all other sources" in normalized
 
 
 def test_onboarding_preserves_the_one_use_grant_pair_approve_pair_sequence() -> None:
@@ -254,6 +274,44 @@ def test_complete_development_workload_runbook_has_every_operator_phase() -> Non
         "inference-recovered",
     ):
         assert f"--stop-after {checkpoint}" in text
+
+
+def test_model_commands_bind_private_qualification_and_runtime_evidence() -> None:
+    blocks = _fenced_blocks(DEV_WORKLOADS, "bash", "sh", "shell")
+
+    for phase in ("model-single", "model-multinode"):
+        command = next(block for block in blocks if f"--phase {phase}" in block)
+        assert (
+            "--qualification-file "
+            "'<EVIDENCE_DIRECTORY>/model-qualification.json'"
+        ) in command
+
+    normalized = _normalized_text(DEV_WORKLOADS)
+    assert "private qualification SHA-256" in normalized
+    assert "build and distribution evidence" in normalized
+    assert "per-node runtime artifact evidence" in normalized
+    assert "retained by the acceptance runner" in normalized
+
+
+def test_secret_docs_separate_local_backup_from_exact_nas_projection() -> None:
+    runbook = _normalized_text(DEV_WORKLOADS)
+    design = _normalized_text(DEV_WORKLOADS_DESIGN)
+
+    for text in (runbook, design):
+        assert "14 local source files" in text
+        assert "13 protected secret/config files" in text
+        assert "existing 13-file local source" in text
+        assert "exactly 12 deployment files" in text
+        assert "`controller-ca-key`" in text
+        assert "must not be copied to the NAS" in text
+
+
+def test_design_records_intentionally_database_free_litellm_runtime() -> None:
+    design = _normalized_text(DEV_WORKLOADS_DESIGN)
+
+    assert "LiteLLM effective configuration is intentionally database-free" in design
+    assert "No database URL is projected to LiteLLM" in design
+    assert "LiteLLM database URL is derived" not in design
 
 
 def test_complete_runbook_keeps_access_loopback_tokens_private_and_evidence_local() -> None:

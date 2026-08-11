@@ -74,8 +74,11 @@ def test_development_nas_runbook_keeps_pull_only_runtime_constraints() -> None:
 def test_normal_install_and_update_path_is_ui_only_before_guarded_recovery() -> None:
     text = RUNBOOK.read_text()
     assert "## Advanced guarded recovery" in text
-    normal_path, guarded_recovery = text.split(
+    supported_path, guarded_recovery = text.split(
         "## Advanced guarded recovery", maxsplit=1
+    )
+    _, normal_nas_path = supported_path.split(
+        "## Create and redeploy the Compose project", maxsplit=1
     )
 
     for marker in (
@@ -86,8 +89,10 @@ def test_normal_install_and_update_path_is_ui_only_before_guarded_recovery() -> 
         "ssh.exe ",
         "`ssh-keygen`",
     ):
-        assert marker not in normal_path
-    assert "docker compose -f " not in normal_path
+        assert marker not in normal_nas_path
+    assert "docker compose -f " not in normal_nas_path
+    assert "scripts/dev-runtime-secrets.py" in supported_path
+    assert "scripts/dev-runtime-project" in supported_path
     assert "```bash" in guarded_recovery
 
 

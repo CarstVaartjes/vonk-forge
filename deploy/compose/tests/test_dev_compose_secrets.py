@@ -114,7 +114,7 @@ def test_image_template_keeps_private_authority_with_its_exact_service() -> None
     assert secret_consumers["controller-server-key"] == {"dev-init"}
     assert secret_consumers["litellm-master-key"] == {"dev-init"}
     assert secret_consumers["litellm-upstream-key"] == {"dev-init"}
-    assert secret_consumers["management-cidrs"] == {"control-api", "dev-init"}
+    assert secret_consumers["management-cidrs"] == {"dev-init"}
 
     for service_name, service in services.items():
         environment = service.get("environment", {})

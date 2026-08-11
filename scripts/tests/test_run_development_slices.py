@@ -57,6 +57,7 @@ class SliceServer(ThreadingHTTPServer):
         self.route_published = False
         self.operation = 0
         self.operation_nodes: dict[str, list[str]] = {}
+        self.operation_kinds: dict[str, str] = {}
         self.nodes = [NODE]
         self.online = {NODE: True, NODE_2: True}
         self.last_seen = {
@@ -64,6 +65,8 @@ class SliceServer(ThreadingHTTPServer):
             NODE_2: "2026-08-11T10:00:00+00:00",
         }
         self.fleet_digest = "b" * 64
+        self.artifact_set_digests = {NODE: "7" * 64, NODE_2: "7" * 64}
+        self.rank_states = {NODE: "running", NODE_2: "running"}
 
 
 class SliceHandler(BaseHTTPRequestHandler):
@@ -154,22 +157,55 @@ class SliceHandler(BaseHTTPRequestHandler):
                 )
             self._json(200, {"recipes": recipes, "next_cursor": None})
         elif self.path.startswith("/api/v1/recipes/operations/"):
+            operation_id = self.path.rsplit("/", 1)[-1]
+            nodes = self.server.operation_nodes.get(operation_id, self.server.nodes)
+            kind = self.server.operation_kinds.get(operation_id, "unknown")
+            node_evidence: dict[str, dict[str, object]] = {}
+            for rank, node in enumerate(nodes):
+                if kind == "build":
+                    node_evidence[node] = {
+                        "build_input_sha256": "e" * 64,
+                        "image_bytes": 123456789,
+                        "image_digest": "sha256:" + "9" * 64,
+                        "oci_layout_sha256": "8" * 64,
+                        "policy": {
+                            "passed": True,
+                            "findings": [],
+                            "dockerfile": "Dockerfile",
+                        },
+                    }
+                elif kind == "distribution":
+                    node_evidence[node] = {
+                        "build_id": "20000000-0000-4000-8000-000000000001",
+                        "image_bytes": 123456789,
+                        "image_digest": "sha256:" + "9" * 64,
+                        "oci_layout_sha256": "8" * 64,
+                    }
+                elif kind == "start":
+                    node_evidence[node] = {
+                        "image_digest": "9" * 64,
+                        "artifact_set_digest": self.server.artifact_set_digests[node],
+                        "rank": rank,
+                        "ready": True,
+                        "evidence_digest": f"{rank + 1:064x}",
+                    }
+                elif kind == "install":
+                    node_evidence[node] = {"installed_bytes": 123456789}
+                else:
+                    node_evidence[node] = {"status": "ok"}
             self._json(
                 200,
                 {
-                    "id": self.path.rsplit("/", 1)[-1],
+                    "id": operation_id,
                     "kind": "recipe.test",
                     "owner_id": "20000000-0000-4000-8000-000000000001",
                     "state": "succeeded",
                     "plan_digest": "c" * 64,
                     "nodes": [NODE],
                     "result": {
-                        "successful_nodes": sorted(
-                            self.server.operation_nodes.get(
-                                self.path.rsplit("/", 1)[-1], self.server.nodes
-                            )
-                        ),
+                        "successful_nodes": sorted(nodes),
                         "failed_nodes": [],
+                        "node_evidence": node_evidence,
                     },
                 },
             )
@@ -185,6 +221,32 @@ class SliceHandler(BaseHTTPRequestHandler):
                 )
             else:
                 self._json(404, {"detail": "not found"})
+        elif self.path.startswith("/api/v1/recipes/runs/"):
+            ranks = [
+                {
+                    "node_id": node,
+                    "rank": rank,
+                    "role": "entrypoint" if rank == 0 else "worker",
+                    "state": self.server.rank_states[node],
+                    "observed_at": "2026-08-11T10:00:00Z",
+                    "age_seconds": 1.0,
+                    "fresh": True,
+                }
+                for rank, node in enumerate(self.server.nodes)
+            ]
+            self._json(
+                200,
+                {
+                    "id": self.path.rsplit("/", 1)[-1],
+                    "alias": self.server.slug,
+                    "state": "running",
+                    "route_state": (
+                        "published" if self.server.route_published else "withdrawn"
+                    ),
+                    "healthy": all(rank["state"] == "running" for rank in ranks),
+                    "ranks": ranks,
+                },
+            )
         else:
             self._json(404, {"detail": "not found"})
 
@@ -326,17 +388,24 @@ class SliceHandler(BaseHTTPRequestHandler):
                 return
             if path == "/api/v1/recipes/runs":
                 self.server.route_published = True
-            nodes = (
-                [NODE]
-                if path == "/api/v1/recipes/builds"
-                else self.server.nodes
-            )
-            self._operation(owner, nodes)
+            kind = {
+                "/api/v1/recipes/builds": "build",
+                "/api/v1/recipes/image-distributions": "distribution",
+                "/api/v1/recipes/installations": "install",
+                "/api/v1/recipes/runs": "start",
+            }[path]
+            nodes = [NODE] if kind == "build" else self.server.nodes
+            if kind == "distribution":
+                nodes = [node for node in nodes if node != NODE]
+            self._operation(owner, nodes, kind=kind)
 
-    def _operation(self, owner: str, nodes: list[str] | None = None) -> None:
+    def _operation(
+        self, owner: str, nodes: list[str] | None = None, *, kind: str = "lifecycle"
+    ) -> None:
         self.server.operation += 1
         operation_id = f"40000000-0000-4000-8000-{self.server.operation:012d}"
         self.server.operation_nodes[operation_id] = list(nodes or self.server.nodes)
+        self.server.operation_kinds[operation_id] = kind
         self._json(
             202,
             {
@@ -366,6 +435,38 @@ def server():
 
 def _token(path: Path, value: str) -> Path:
     path.write_text(value + "\n", encoding="ascii")
+    path.chmod(0o600)
+    return path
+
+
+def _canonical(value: object) -> bytes:
+    return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
+
+
+def _qualification(path: Path) -> Path:
+    source = json.loads(
+        (ROOT / "config/recipes/development/model-smoke-source.json").read_text()
+    )
+    artifact_document = json.loads(
+        (ROOT / "config/recipes/development/model-smoke-artifacts.json").read_text()
+    )
+    topology = json.loads(
+        (ROOT / "config/recipes/development/model-smoke-multinode.json").read_text()
+    )
+    document = {
+        "schema_version": 1,
+        "status": "qualified",
+        "runtime_image": source["runtime_image"],
+        "source_sha256": hashlib.sha256(_canonical(source)).hexdigest(),
+        "artifact_set_sha256": hashlib.sha256(
+            _canonical(artifact_document["artifacts"])
+        ).hexdigest(),
+        "topology_sha256": hashlib.sha256(_canonical(topology)).hexdigest(),
+        "evidence_sha256": "a" * 64,
+        "single_node": NODE,
+        "multinode_nodes": [NODE, NODE_2],
+    }
+    path.write_bytes(_canonical(document))
     path.chmod(0o600)
     return path
 
@@ -406,9 +507,15 @@ def _run(tmp_path: Path, server: SliceServer, *extra: str):
     return result, evidence
 
 
-def _run_model(tmp_path: Path, server: SliceServer, *extra: str):
+def _run_model(
+    tmp_path: Path,
+    server: SliceServer,
+    *extra: str,
+    qualification: Path | None = None,
+):
     admin = _token(tmp_path / "admin-token", ADMIN_TOKEN)
     inference = _token(tmp_path / "inference-token", INFERENCE_TOKEN)
+    qualification = qualification or _qualification(tmp_path / "qualification.json")
     evidence = tmp_path / "model-evidence.json"
     result = subprocess.run(
         (
@@ -422,6 +529,8 @@ def _run_model(tmp_path: Path, server: SliceServer, *extra: str):
             str(inference),
             "--phase",
             "model-multinode",
+            "--qualification-file",
+            str(qualification),
             "--builder-node",
             NODE,
             "--target-node",
@@ -486,6 +595,14 @@ def test_runner_completes_exact_public_lifecycle_without_secret_leaks(
         }
         for _method, path, _authorization in server.requests
     )
+    assert evidence["outputs"]["image_digest"] == "sha256:" + "9" * 64
+    assert evidence["outputs"]["oci_layout_sha256"] == "8" * 64
+    assert evidence["outputs"]["artifact_set_digest"] == "7" * 64
+    assert evidence["outputs"]["distribution_nodes"] == []
+    assert not any(
+        path == "/api/v1/recipes/image-distributions"
+        for _method, path, _authorization in server.requests
+    )
 
 
 def test_model_multinode_runner_proves_failure_recovery_restart_and_cleanup(
@@ -498,14 +615,14 @@ def test_model_multinode_runner_proves_failure_recovery_restart_and_cleanup(
     )
     assert initial.returncode == 0, initial.stderr
 
-    server.online[NODE_2] = False
+    server.rank_states[NODE_2] = "failed"
     server.route_published = False
     failed, _ = _run_model(
         tmp_path, server, "--stop-after", "route-withdrawn-after-failure"
     )
     assert failed.returncode == 0, failed.stderr
 
-    server.online[NODE_2] = True
+    server.rank_states[NODE_2] = "running"
     server.last_seen = {
         NODE: "2026-08-11T10:01:00+00:00",
         NODE_2: "2026-08-11T10:01:00+00:00",
@@ -529,11 +646,52 @@ def test_model_multinode_runner_proves_failure_recovery_restart_and_cleanup(
     assert evidence["completed_states"] == list(MODEL_MULTINODE_STATES)
     assert evidence["failure_node"] == NODE_2
     assert evidence["outputs"]["restart_fleet_evidence_digest"] == "d" * 64
+    assert evidence["qualification_sha256"] == hashlib.sha256(
+        (tmp_path / "qualification.json").read_bytes()
+    ).hexdigest()
     assert server.route_published is False
     assert any(
         path == "/api/v1/endpoints/development-deepseek-smoke"
         for _method, path, _authorization in server.requests
     )
+
+
+def test_model_runner_requires_exact_private_qualification(
+    tmp_path: Path, server: SliceServer
+) -> None:
+    server.nodes = [NODE, NODE_2]
+    qualification = _qualification(tmp_path / "qualification.json")
+    document = json.loads(qualification.read_text())
+    document["multinode_nodes"] = [NODE_2, NODE]
+    qualification.write_bytes(_canonical(document))
+
+    result, evidence = _run_model(
+        tmp_path, server, qualification=qualification
+    )
+
+    assert result.returncode == 1
+    assert result.stderr.strip() == (
+        "development slice failed: model qualification does not match this phase"
+    )
+    assert not evidence.exists()
+
+
+def test_model_runner_rejects_cross_node_artifact_identity_mismatch(
+    tmp_path: Path, server: SliceServer
+) -> None:
+    server.nodes = [NODE, NODE_2]
+    server.artifact_set_digests[NODE_2] = "6" * 64
+
+    result, evidence_path = _run_model(
+        tmp_path, server, "--stop-after", "running"
+    )
+
+    assert result.returncode == 1
+    assert result.stderr.strip() == (
+        "development slice failed: runtime artifacts differ between target nodes"
+    )
+    evidence = json.loads(evidence_path.read_text())
+    assert evidence["completed_states"] == MODEL_MULTINODE_STATES[:6]
 
 
 @pytest.mark.parametrize("completed_count", range(len(STATES)))

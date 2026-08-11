@@ -31,7 +31,7 @@ _PRIVATE_MODE = 0o600
 _UNSAFE_GENERATION_FILESYSTEMS = frozenset({"9p", "cifs", "drvfs", "smb3"})
 _HOST_LABEL = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?")
 
-RUNTIME_SECRET_NAMES = frozenset(
+DEPLOYMENT_SECRET_NAMES = frozenset(
     {
         "agent-ca-certificate",
         "agent-ca-key",
@@ -41,13 +41,18 @@ RUNTIME_SECRET_NAMES = frozenset(
         "controller-server-key",
         "database-url",
         "git-signing-key",
-        "git-signing-key.pub",
         "litellm-master-key",
         "litellm-upstream-key",
         "management-cidrs",
         "postgres-password",
     }
 )
+LOCAL_SOURCE_SECRET_NAMES = DEPLOYMENT_SECRET_NAMES | frozenset(
+    {"controller-ca-key", "git-signing-key.pub"}
+)
+# Compatibility for the project publisher, which validates the complete local
+# source before publishing its fixed deployment subset.
+RUNTIME_SECRET_NAMES = LOCAL_SOURCE_SECRET_NAMES
 
 
 class RuntimeSecretError(RuntimeError):
@@ -378,6 +383,7 @@ def _secret_bundle(
         "agent-ca-key": private_pem(agent_key),
         "agent-proxy-auth": token(),
         "controller-ca": controller_ca.public_bytes(serialization.Encoding.PEM),
+        "controller-ca-key": private_pem(controller_key),
         "controller-server-certificate": server_certificate.public_bytes(
             serialization.Encoding.PEM
         ),
@@ -413,6 +419,9 @@ def _validate_bundle(
         agent_key = serialization.load_pem_private_key(
             bundle["agent-ca-key"], password=None
         )
+        controller_key = serialization.load_pem_private_key(
+            bundle["controller-ca-key"], password=None
+        )
         server_key = serialization.load_pem_private_key(
             bundle["controller-server-key"], password=None
         )
@@ -431,6 +440,7 @@ def _validate_bundle(
     server_public = server.public_key()
     if (
         not isinstance(agent_key, Ed25519PrivateKey)
+        or not isinstance(controller_key, Ed25519PrivateKey)
         or not isinstance(server_key, Ed25519PrivateKey)
         or not isinstance(signing_key, Ed25519PrivateKey)
         or not isinstance(signing_public, Ed25519PublicKey)
@@ -438,6 +448,8 @@ def _validate_bundle(
         or not isinstance(controller_public, Ed25519PublicKey)
         or not isinstance(server_public, Ed25519PublicKey)
         or agent_public.public_bytes_raw() != agent_key.public_key().public_bytes_raw()
+        or controller_public.public_bytes_raw()
+        != controller_key.public_key().public_bytes_raw()
         or server_public.public_bytes_raw()
         != server_key.public_key().public_bytes_raw()
         or signing_key.public_key().public_bytes_raw()

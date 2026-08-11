@@ -11,8 +11,8 @@ recipes, then claims only operations matching its advertised capabilities.
 - NVIDIA driver and NVIDIA Container Toolkit with a working CDI device list:
   `nvidia-ctk cdi list` must include `nvidia.com/gpu=all`.
 - A route from the node to the NAS agent endpoint. The NAS may use its
-  node-only management-LAN listener; human and inference access remain
-  Tailscale-only.
+  node-only management-LAN listener at TCP 8443; human and inference access
+  remain Tailscale-only.
 - The controller CA certificate and its independently verified SHA-256 digest.
 
 Do not assume local DNS. Before pairing, add the management-LAN names to
@@ -25,6 +25,10 @@ names resolve to the NAS management address:
 
 Use the same hostnames on the NAS itself so local diagnostics, Caddy
 certificates, and agent recovery checks all refer to the same names.
+Allow `<NODE_MANAGEMENT_CIDR>` to `<NAS_MANAGEMENT_IP>:8443` in the NAS and host
+firewalls, and reject all other sources to that port. Verify each name resolves
+to `<NAS_MANAGEMENT_IP>` before pairing; `/etc/hosts` supplies names only, so
+both agent URLs must retain the explicit `:8443` port.
 
 Do not add the service user to `docker`, `sudo`, or an NVIDIA administration
 group. The package runs rootless Podman in a single-UID namespace with
@@ -72,15 +76,18 @@ paste the certificate, token, or any secret into notes or logs.
 Set the HTTPS root origins and controller CA path explicitly:
 
 ```toml
-enrollment_url = "https://<ENROLLMENT_HOSTNAME>/"
-controller_url = "https://<CONTROLLER_HOSTNAME>/"
+enrollment_url = "https://<ENROLLMENT_HOSTNAME>:8443/"
+controller_url = "https://<CONTROLLER_HOSTNAME>:8443/"
 ca_path = "/etc/vonk-forge-agent/controller-ca.pem"
 ca_sha256 = "<64_LOWERCASE_HEX_FROM_SHA256SUM>"
 node_id = "<NODE_ID>"
 ```
 
 `enrollment_url` is used only by `pair`; `controller_url` is used only after
-certificate issuance by the authenticated service. Keep `data_dir` at
+certificate issuance by the authenticated service. The development values are
+the exact roots `https://<ENROLLMENT_HOSTNAME>:8443/` and
+`https://<CONTROLLER_HOSTNAME>:8443/`; do not rely on HTTPS port 443 defaults.
+Keep `data_dir` at
 `/var/lib/vonk-forge-agent` unless a reviewed packaging change says otherwise.
 An upgraded, already-paired agent can continue to run with its preserved
 legacy conffile, but an administrator must add `enrollment_url` before any
@@ -95,7 +102,7 @@ appears in shell history:
 ```bash
 sudo -u vonk-agent -- \
   /var/lib/vonk-forge/supervisor/current/vonk-agent pair \
-  --enrollment https://<ENROLLMENT_HOSTNAME>/ \
+  --enrollment https://<ENROLLMENT_HOSTNAME>:8443/ \
   --ca-sha256 <64_LOWERCASE_HEX_FROM_SHA256SUM> \
   --token-stdin < /run/secrets/vonk-enrollment-token
 ```

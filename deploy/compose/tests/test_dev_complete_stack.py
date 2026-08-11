@@ -17,6 +17,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+from vonk_control.development_tokens import issue_development_admin_token
 
 ROOT = Path(__file__).resolve().parents[3]
 COMPOSE = ROOT / "scripts/dev-compose"
@@ -116,7 +117,7 @@ def _write_client_identity(secrets: Path, destination: Path) -> tuple[Path, Path
     return certificate_path, key_path
 
 
-def _enrollment_body(destination: Path) -> Path:
+def _enrollment_body(destination: Path, grant_token: str) -> tuple[Path, Path]:
     key = Ed25519PrivateKey.generate()
     csr = (
         x509.CertificateSigningRequestBuilder()
@@ -147,12 +148,46 @@ def _enrollment_body(destination: Path) -> Path:
             "host_key_fingerprint": "complete-stack-host-key",
             "node_id": NODE_ID,
         },
-        "grant_token": "A" * 43,
+        "grant_token": grant_token,
     }
     path = destination / "enrollment.json"
+    key_path = destination / "enrollment-key.pem"
     path.write_text(json.dumps(body), encoding="utf-8")
+    key_path.write_bytes(
+        key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    )
     path.chmod(0o600)
-    return path
+    key_path.chmod(0o600)
+    return path, key_path
+
+
+def _api_json(
+    *,
+    port: int,
+    path: str,
+    token: str,
+    payload: object | None = None,
+    expected: int,
+) -> dict[str, object]:
+    body = None if payload is None else json.dumps(payload).encode()
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{port}{path}",
+        data=body,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=10) as response:
+        assert response.status == expected
+        value = json.loads(response.read())
+    assert isinstance(value, dict)
+    return value
 
 
 def _curl_status(
@@ -165,6 +200,7 @@ def _curl_status(
     certificate: Path | None = None,
     key: Path | None = None,
     headers: tuple[str, ...] = (),
+    output: Path | None = None,
 ) -> tuple[int, str, str]:
     arguments = [
         "curl",
@@ -173,7 +209,7 @@ def _curl_status(
         "--silent",
         "--show-error",
         "--output",
-        "/dev/null",
+        str(output) if output is not None else "/dev/null",
         "--write-out",
         "%{http_code}",
         "--cacert",
@@ -305,8 +341,21 @@ def test_complete_development_stack_enforces_tls_identity_and_acks_routes(
     try:
         _run([str(COMPOSE), "up", "-d"], environment=environment, timeout=240)
         certificate, key = _write_client_identity(secrets, tmp_path)
-        enrollment = _enrollment_body(tmp_path)
         controller_ca = secrets / "controller-ca"
+
+        admin_token = issue_development_admin_token(
+            ttl_seconds=600, now=int(time.time())
+        )
+        grant = _api_json(
+            port=api_port,
+            path="/api/v1/agents/enrollments/grants",
+            token=admin_token,
+            payload={"node_id": NODE_ID, "ttl_seconds": 300},
+            expected=201,
+        )
+        assert isinstance(grant.get("token"), str)
+        enrollment, enrollment_key = _enrollment_body(tmp_path, grant["token"])
+        enrollment_response = tmp_path / "enrollment-response.json"
 
         enroll_exit, enroll_status, _enroll_error = _curl_status(
             hostname=ENROLL_HOST,
@@ -314,9 +363,44 @@ def test_complete_development_stack_enforces_tls_identity_and_acks_routes(
             ca=controller_ca,
             path="/agent/v1/enroll",
             body=enrollment,
+            output=enrollment_response,
         )
         assert enroll_exit == 0
-        assert int(enroll_status) in {202, 401, 403}
+        assert int(enroll_status) == 202, enrollment_response.read_text()
+        pending = json.loads(enrollment_response.read_text())
+        assert pending["node_id"] == NODE_ID
+        _api_json(
+            port=api_port,
+            path=f"/api/v1/agents/enrollments/{pending['id']}/approve",
+            token=admin_token,
+            expected=200,
+        )
+        pickup_response = tmp_path / "pickup-response.json"
+        pickup_exit, pickup_status, _pickup_error = _curl_status(
+            hostname=ENROLL_HOST,
+            port=agent_port,
+            ca=controller_ca,
+            path="/agent/v1/enroll",
+            body=enrollment,
+            output=pickup_response,
+        )
+        assert pickup_exit == 0
+        assert int(pickup_status) == 200
+        pickup = json.loads(pickup_response.read_text())
+        approved_certificate = tmp_path / "approved-agent-certificate.pem"
+        approved_certificate.write_text(pickup["certificate_pem"], encoding="ascii")
+        approved_certificate.chmod(0o600)
+
+        approved_claim_exit, approved_claim_status, _approved_claim_error = _curl_status(
+            hostname=AGENT_HOST,
+            port=agent_port,
+            ca=controller_ca,
+            path="/agent/v1/claim",
+            certificate=approved_certificate,
+            key=enrollment_key,
+        )
+        assert approved_claim_exit == 0
+        assert approved_claim_status == "204"
 
         claim_exit, claim_status, _claim_error = _curl_status(
             hostname=AGENT_HOST,

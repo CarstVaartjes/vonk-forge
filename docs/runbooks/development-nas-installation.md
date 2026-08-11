@@ -179,9 +179,10 @@ The content classes are:
 | `agent-proxy-auth`, `litellm-master-key`, `litellm-upstream-key` | Independent URL-safe random tokens followed by one newline. |
 | `management-cidrs` | Canonical network CIDRs, one per line, followed by one newline. |
 
-Do not overwrite existing secret files during a normal redeploy. If an SMB
-client created the files, safely eject/disconnect the share after copying and
-use the NAS file manager to confirm only the 12 expected names appear.
+Do not overwrite existing secret files during a normal redeploy. If you copied
+them through an SMB share or NAS file manager, safely eject/disconnect the
+share after copying and use the NAS file manager to confirm only the 12
+expected names appear.
 Back up that exact host bundle before first start and after every rotation, but
 confirm the backup by filename, size, and timestamp only; never reveal the
 secret values during the check.

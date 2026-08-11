@@ -28,7 +28,7 @@ AGENT_HOSTNAME = "agents.example.test"
 REGISTRY_HOSTNAME = "registry.example.test"
 MANAGEMENT_CIDRS = "192.0.2.0/24,2001:db8::/64"
 
-RUNTIME_SECRET_NAMES = {
+DEPLOYMENT_SECRET_NAMES = {
     "agent-ca-certificate",
     "agent-ca-key",
     "agent-proxy-auth",
@@ -41,6 +41,10 @@ RUNTIME_SECRET_NAMES = {
     "litellm-upstream-key",
     "management-cidrs",
     "postgres-password",
+}
+LOCAL_SOURCE_SECRET_NAMES = DEPLOYMENT_SECRET_NAMES | {
+    "controller-ca-key",
+    "git-signing-key.pub",
 }
 
 
@@ -139,6 +143,20 @@ def test_certificate_window_supports_the_ubuntu_cryptography_api() -> None:
     )
 
 
+def test_declares_local_source_and_deployment_secret_boundaries() -> None:
+    module = _load_module()
+
+    assert module.LOCAL_SOURCE_SECRET_NAMES == LOCAL_SOURCE_SECRET_NAMES
+    assert module.DEPLOYMENT_SECRET_NAMES == DEPLOYMENT_SECRET_NAMES
+    assert module.RUNTIME_SECRET_NAMES == LOCAL_SOURCE_SECRET_NAMES
+    assert len(module.LOCAL_SOURCE_SECRET_NAMES) == 14
+    assert len(module.DEPLOYMENT_SECRET_NAMES) == 12
+    assert module.LOCAL_SOURCE_SECRET_NAMES - module.DEPLOYMENT_SECRET_NAMES == {
+        "controller-ca-key",
+        "git-signing-key.pub",
+    }
+
+
 def test_generates_idempotent_local_runtime_secret_store_without_leaking_values(
     tmp_path: Path,
 ) -> None:
@@ -165,9 +183,8 @@ def test_generates_idempotent_local_runtime_secret_store_without_leaking_values(
     assert output["controller-server-not-after"].endswith("Z")
     assert first.stderr == ""
     assert stat.S_IMODE(secrets_dir.stat().st_mode) == 0o700
-    for name in RUNTIME_SECRET_NAMES:
+    for name in LOCAL_SOURCE_SECRET_NAMES:
         _assert_regular_private_file(secrets_dir / name)
-    assert (secrets_dir / "git-signing-key.pub").is_file()
 
     agent_ca = _certificate(secrets_dir / "agent-ca-certificate")
     controller_ca = _certificate(secrets_dir / "controller-ca")
@@ -176,6 +193,12 @@ def test_generates_idempotent_local_runtime_secret_store_without_leaking_values(
     assert agent_ca.serial_number != controller_ca.serial_number
     assert isinstance(agent_ca.public_key(), Ed25519PublicKey)
     assert isinstance(_private_key(secrets_dir / "agent-ca-key"), Ed25519PrivateKey)
+    controller_key = _private_key(secrets_dir / "controller-ca-key")
+    assert isinstance(controller_key, Ed25519PrivateKey)
+    assert (
+        controller_ca.public_key().public_bytes_raw()
+        == controller_key.public_key().public_bytes_raw()
+    )
     assert agent_ca.extensions.get_extension_for_class(
         x509.BasicConstraints
     ).value == x509.BasicConstraints(ca=True, path_length=0)
@@ -217,7 +240,7 @@ def test_generates_idempotent_local_runtime_secret_store_without_leaking_values(
             (secrets_dir / name).read_bytes(),
             (secrets_dir / name).stat().st_mtime_ns,
         )
-        for name in RUNTIME_SECRET_NAMES | {"git-signing-key.pub"}
+        for name in LOCAL_SOURCE_SECRET_NAMES
     }
     second = _run_generator(secrets_dir)
 
@@ -238,6 +261,7 @@ def test_generates_idempotent_local_runtime_secret_store_without_leaking_values(
         {
             "agent-ca-key",
             "agent-proxy-auth",
+            "controller-ca-key",
             "controller-server-key",
             "database-url",
             "git-signing-key",
@@ -288,7 +312,7 @@ def test_generates_into_an_existing_empty_private_directory(tmp_path: Path) -> N
 
     assert result.returncode == 0, result.stderr
     assert {path.name for path in secrets_dir.iterdir()} == (
-        RUNTIME_SECRET_NAMES | {"git-signing-key.pub"}
+        LOCAL_SOURCE_SECRET_NAMES
     )
 
 
@@ -320,7 +344,7 @@ def test_default_store_is_the_gitignored_local_development_directory(
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines()[0] == str(destination)
     assert {path.name for path in destination.iterdir()} == (
-        RUNTIME_SECRET_NAMES | {"git-signing-key.pub"}
+        LOCAL_SOURCE_SECRET_NAMES
     )
 
 
@@ -406,6 +430,28 @@ def test_rejects_existing_agent_ca_not_signed_by_its_declared_key(
     assert original.subject == x509.Name(
         [x509.NameAttribute(NameOID.COMMON_NAME, "Vonk Forge Development Agent CA")]
     )
+
+
+def test_rejects_existing_controller_ca_not_matching_its_retained_key(
+    tmp_path: Path,
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    created = _run_generator(secrets_dir)
+    assert created.returncode == 0, created.stderr
+    replacement = Ed25519PrivateKey.generate().private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    )
+    (secrets_dir / "controller-ca-key").write_bytes(replacement)
+
+    reused = _run_generator(secrets_dir)
+
+    assert reused.returncode == 1
+    assert reused.stdout == ""
+    assert "PRIVATE" not in reused.stderr
 
 
 def test_rejects_existing_server_certificate_with_extra_key_usage(

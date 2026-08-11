@@ -64,6 +64,7 @@ NODE = re.compile(r"spk_[0-9a-f]{32}\Z")
 MAXIMUM_TOKEN_BYTES = 16 * 1024
 MAXIMUM_EVIDENCE_BYTES = 2 * 1024 * 1024
 SOURCE_MEDIA_TYPE = "application/vnd.vonk-forge.source-bundle.v1+tar"
+SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 
 
 class SliceError(RuntimeError):
@@ -377,6 +378,111 @@ def _recipe_content_digest(document: dict[str, object]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _model_qualification(
+    path: Path,
+    *,
+    phase: str,
+    builder_node: str,
+    target_nodes: list[str],
+    recipe: dict[str, object],
+    source_context: Path,
+) -> tuple[dict[str, Any], str]:
+    raw = _safe_read(path, maximum=MAXIMUM_EVIDENCE_BYTES, private=True)
+    try:
+        document = json.loads(raw)
+        source = json.loads((MODEL_ROOT / "model-smoke-source.json").read_text())
+        artifact_document = json.loads(
+            (MODEL_ROOT / "model-smoke-artifacts.json").read_text()
+        )
+        topology = json.loads(
+            (MODEL_ROOT / "model-smoke-multinode.json").read_text()
+        )
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise SliceError("model qualification is invalid") from error
+    if (
+        not isinstance(document, dict)
+        or raw != _canonical(document)
+        or document.get("schema_version") != 1
+        or document.get("status") != "qualified"
+        or set(document)
+        != {
+            "schema_version",
+            "status",
+            "runtime_image",
+            "source_sha256",
+            "artifact_set_sha256",
+            "topology_sha256",
+            "evidence_sha256",
+            "single_node",
+            "multinode_nodes",
+        }
+        or any(
+            SHA256.fullmatch(str(document.get(field, ""))) is None
+            for field in (
+                "source_sha256",
+                "artifact_set_sha256",
+                "topology_sha256",
+                "evidence_sha256",
+            )
+        )
+        or document.get("source_sha256")
+        != hashlib.sha256(_canonical(source)).hexdigest()
+        or document.get("artifact_set_sha256")
+        != hashlib.sha256(_canonical(artifact_document.get("artifacts"))).hexdigest()
+        or document.get("topology_sha256")
+        != hashlib.sha256(_canonical(topology)).hexdigest()
+        or document.get("runtime_image") != source.get("runtime_image")
+        or document.get("single_node") != builder_node
+        or (
+            phase == "model-single"
+            and target_nodes != [document.get("single_node")]
+        )
+        or (
+            phase == "model-multinode"
+            and target_nodes != document.get("multinode_nodes")
+        )
+    ):
+        raise SliceError("model qualification does not match this phase")
+    raw_artifacts = artifact_document.get("artifacts")
+    recipe_artifacts = recipe.get("artifacts")
+    if not isinstance(raw_artifacts, list) or not isinstance(recipe_artifacts, list):
+        raise SliceError("model qualification does not match this phase")
+    expected_artifacts = [
+        {
+            "id": item.get("id"),
+            "kind": item.get("kind"),
+            "repository": item.get("repository"),
+            "revision": item.get("revision"),
+            "bytes": item.get("bytes"),
+        }
+        for item in raw_artifacts
+        if isinstance(item, dict)
+    ]
+    observed_artifacts = [
+        {
+            "id": item.get("id"),
+            "kind": item.get("kind"),
+            "repository": item.get("repository"),
+            "revision": item.get("revision"),
+            "bytes": item.get("download_bytes"),
+        }
+        for item in recipe_artifacts
+        if isinstance(item, dict)
+    ]
+    try:
+        dockerfile = (source_context / "Dockerfile").read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as error:
+        raise SliceError("model qualification does not match this phase") from error
+    if (
+        len(expected_artifacts) != len(raw_artifacts)
+        or len(observed_artifacts) != len(recipe_artifacts)
+        or observed_artifacts != expected_artifacts
+        or not dockerfile.startswith(f"FROM {document['runtime_image']}\n")
+    ):
+        raise SliceError("model qualification does not match this phase")
+    return document, hashlib.sha256(raw).hexdigest()
+
+
 class Runner:
     def __init__(self, args: argparse.Namespace) -> None:
         self.args = args
@@ -440,6 +546,22 @@ class Runner:
             if args.phase == "synthetic"
             else self.recipe_path.with_name(f"{self.recipe_path.stem}-context")
         )
+        self.qualification: dict[str, Any] | None = None
+        qualification_sha256: str | None = None
+        if args.phase == "synthetic":
+            if args.qualification_file is not None:
+                raise SliceError("synthetic acceptance does not use model qualification")
+        else:
+            if args.qualification_file is None:
+                raise SliceError("model qualification file is required")
+            self.qualification, qualification_sha256 = _model_qualification(
+                args.qualification_file,
+                phase=args.phase,
+                builder_node=args.builder_node,
+                target_nodes=targets,
+                recipe=self.recipe,
+                source_context=self.source_context,
+            )
         expected_inputs = {
             "phase": args.phase,
             "api_base": self.api_base,
@@ -451,6 +573,8 @@ class Runner:
         }
         if args.failure_node is not None:
             expected_inputs["failure_node"] = args.failure_node
+        if qualification_sha256 is not None:
+            expected_inputs["qualification_sha256"] = qualification_sha256
         self.evidence = _load_evidence(args.evidence_file, expected_inputs, self.states)
 
     @property
@@ -476,7 +600,7 @@ class Runner:
         label: str,
         *,
         expected_nodes: list[str] | None = None,
-    ) -> tuple[str, str]:
+    ) -> tuple[str, str, dict[str, Any]]:
         operation = _object(response, label)
         operation_id = operation.get("id")
         owner_id = operation.get("owner_id")
@@ -494,13 +618,22 @@ class Runner:
             current = _object(payload, label)
         if current.get("state") != "succeeded":
             raise SliceError(f"{label} operation failed")
+        result = current.get("result")
         if expected_nodes is not None:
-            result = current.get("result")
             successful = result.get("successful_nodes") if isinstance(result, dict) else None
             failed = result.get("failed_nodes") if isinstance(result, dict) else None
-            if successful != sorted(expected_nodes) or failed != []:
+            node_evidence = result.get("node_evidence") if isinstance(result, dict) else None
+            if (
+                successful != sorted(expected_nodes)
+                or failed != []
+                or not isinstance(node_evidence, dict)
+                or set(node_evidence) != set(expected_nodes)
+                or any(not isinstance(value, dict) for value in node_evidence.values())
+            ):
                 raise SliceError(f"{label} rank evidence does not match")
-        return operation_id, owner_id
+        if not isinstance(result, dict):
+            raise SliceError(f"{label} result evidence is missing")
+        return operation_id, owner_id, result
 
     def run(self) -> None:
         handlers = {
@@ -680,13 +813,37 @@ class Runner:
                 "request_key": self.request_key("image-built", "build"),
             },
         )
-        operation_id, build_id = self.operation(response, "recipe build")
+        operation_id, build_id, result = self.operation(
+            response, "recipe build", expected_nodes=[self.args.builder_node]
+        )
+        evidence = result["node_evidence"][self.args.builder_node]
+        image_digest = evidence.get("image_digest")
+        layout_digest = evidence.get("oci_layout_sha256")
+        image_bytes = evidence.get("image_bytes")
+        policy_evidence = evidence.get("policy")
+        if (
+            evidence.get("build_input_sha256") != build_input
+            or not isinstance(image_digest, str)
+            or re.fullmatch(r"sha256:[0-9a-f]{64}", image_digest) is None
+            or not isinstance(layout_digest, str)
+            or SHA256.fullmatch(layout_digest) is None
+            or not isinstance(image_bytes, int)
+            or isinstance(image_bytes, bool)
+            or image_bytes <= 0
+            or not isinstance(policy_evidence, dict)
+            or policy_evidence.get("passed") is not True
+            or policy_evidence.get("findings") != []
+        ):
+            raise SliceError("recipe build exact evidence does not match")
         self.complete(
             "image-built",
             {
                 "build_input_sha256": build_input,
                 "recipe_build_id": build_id,
                 "build_operation_id": operation_id,
+                "image_digest": image_digest,
+                "oci_layout_sha256": layout_digest,
+                "image_bytes": image_bytes,
             },
         )
 
@@ -718,23 +875,50 @@ class Runner:
         mapping_id = mapping.get("mapping_id")
         if not isinstance(mapping_id, str) or mapping.get("generation") != generation:
             raise SliceError("mapping response is invalid")
-        _, response = self.control.request(
-            "POST",
-            "/api/v1/recipes/image-distributions",
-            {
-                "recipe_build_id": self.outputs["recipe_build_id"],
-                "mapping_id": mapping_id,
-                "mapping_generation": generation,
-                "request_key": self.request_key("image-distributed", "distribution"),
-            },
-        )
-        operation_id, _owner = self.operation(response, "image distribution")
+        distribution_nodes = [
+            node_id for node_id in self.targets if node_id != self.args.builder_node
+        ]
+        operation_id: str | None = None
+        distribution_evidence: dict[str, object] = {}
+        if distribution_nodes:
+            _, response = self.control.request(
+                "POST",
+                "/api/v1/recipes/image-distributions",
+                {
+                    "recipe_build_id": self.outputs["recipe_build_id"],
+                    "mapping_id": mapping_id,
+                    "mapping_generation": generation,
+                    "request_key": self.request_key(
+                        "image-distributed", "distribution"
+                    ),
+                },
+            )
+            operation_id, _owner, result = self.operation(
+                response,
+                "image distribution",
+                expected_nodes=distribution_nodes,
+            )
+            distribution_evidence = result["node_evidence"]
+            for node_id in distribution_nodes:
+                observed = distribution_evidence[node_id]
+                if (
+                    observed.get("build_id") != self.outputs["recipe_build_id"]
+                    or observed.get("image_digest") != self.outputs["image_digest"]
+                    or observed.get("oci_layout_sha256")
+                    != self.outputs["oci_layout_sha256"]
+                    or observed.get("image_bytes") != self.outputs["image_bytes"]
+                ):
+                    raise SliceError("distributed image evidence does not match build")
         self.complete(
             "image-distributed",
             {
                 "mapping_id": mapping_id,
                 "mapping_generation": generation,
                 "distribution_operation_id": operation_id,
+                "distribution_nodes": distribution_nodes,
+                "distribution_evidence_sha256": hashlib.sha256(
+                    _canonical(distribution_evidence)
+                ).hexdigest(),
             },
         )
 
@@ -760,7 +944,9 @@ class Runner:
                 "request_key": self.request_key("installed", "install"),
             },
         )
-        operation_id, installation_id = self.operation(response, "recipe installation")
+        operation_id, installation_id, _result = self.operation(
+            response, "recipe installation", expected_nodes=self.targets
+        )
         self.complete(
             "installed",
             {
@@ -789,11 +975,42 @@ class Runner:
                 "request_key": self.request_key("running", "start"),
             },
         )
-        operation_id, run_id = self.operation(
+        operation_id, run_id, result = self.operation(
             response, "recipe start", expected_nodes=self.targets
         )
+        node_evidence = result["node_evidence"]
+        artifact_set_digests: set[str] = set()
+        evidence_digests: dict[str, str] = {}
+        for rank, node_id in enumerate(self.targets):
+            observed = node_evidence[node_id]
+            artifact_set_digest = observed.get("artifact_set_digest")
+            evidence_digest = observed.get("evidence_digest")
+            if (
+                observed.get("image_digest")
+                != str(self.outputs["image_digest"]).removeprefix("sha256:")
+                or observed.get("rank") != rank
+                or observed.get("ready") is not True
+                or not isinstance(artifact_set_digest, str)
+                or SHA256.fullmatch(artifact_set_digest) is None
+                or not isinstance(evidence_digest, str)
+                or SHA256.fullmatch(evidence_digest) is None
+            ):
+                raise SliceError("runtime image or artifact evidence does not match")
+            artifact_set_digests.add(artifact_set_digest)
+            evidence_digests[node_id] = evidence_digest
+        if len(artifact_set_digests) != 1:
+            raise SliceError("runtime artifacts differ between target nodes")
         self.complete(
-            "running", {"run_id": run_id, "run_operation_id": operation_id}
+            "running",
+            {
+                "run_id": run_id,
+                "run_operation_id": operation_id,
+                "artifact_set_digest": artifact_set_digests.pop(),
+                "run_node_evidence_digests": evidence_digests,
+                "run_evidence_sha256": hashlib.sha256(
+                    _canonical(node_evidence)
+                ).hexdigest(),
+            },
         )
 
     def _await_endpoint(self, *, published: bool) -> None:
@@ -868,19 +1085,34 @@ class Runner:
 
     def rank_failure_observed(self) -> None:
         _fleet, by_id = self._fleet()
-        failure = by_id.get(self.args.failure_node)
-        age = failure.get("last_seen_age_seconds") if failure is not None else None
-        if failure is None or (
-            failure.get("agent_online") is not False
-            and not (isinstance(age, (int, float)) and age > 30)
+        if any(not self._node_ready(by_id.get(node_id)) for node_id in self.targets):
+            raise SliceError("agent presence was lost during workload-rank failure")
+        _, payload = self.control.request(
+            "GET", f"/api/v1/recipes/runs/{self.outputs['run_id']}"
+        )
+        status = _object(payload, "recipe run status")
+        ranks = status.get("ranks")
+        if not isinstance(ranks, list):
+            raise SliceError("recipe rank health evidence is invalid")
+        by_rank_node = {
+            rank.get("node_id"): rank
+            for rank in ranks
+            if isinstance(rank, dict) and isinstance(rank.get("node_id"), str)
+        }
+        if set(by_rank_node) != set(self.targets):
+            raise SliceError("recipe rank health evidence is invalid")
+        failed_rank = by_rank_node[self.args.failure_node]
+        if (
+            status.get("healthy") is not False
+            or failed_rank.get("state") != "failed"
+            or failed_rank.get("fresh") is not True
+            or any(
+                rank.get("state") != "running" or rank.get("fresh") is not True
+                for node_id, rank in by_rank_node.items()
+                if node_id != self.args.failure_node
+            )
         ):
-            raise SliceError("expected failed rank is still online")
-        if any(
-            not self._node_ready(by_id.get(node_id))
-            for node_id in self.targets
-            if node_id != self.args.failure_node
-        ):
-            raise SliceError("healthy rank was lost during failure acceptance")
+            raise SliceError("expected workload rank failure is not proven")
         self.complete("rank-failure-observed")
 
     def route_withdrawn_after_failure(self) -> None:
@@ -890,7 +1122,25 @@ class Runner:
     def rank_recovered(self) -> None:
         _fleet, by_id = self._fleet()
         if any(not self._node_ready(by_id.get(node_id)) for node_id in self.targets):
-            raise SliceError("failed rank has not recovered")
+            raise SliceError("agent presence has not recovered")
+        _, payload = self.control.request(
+            "GET", f"/api/v1/recipes/runs/{self.outputs['run_id']}"
+        )
+        status = _object(payload, "recipe run status")
+        ranks = status.get("ranks")
+        if (
+            status.get("healthy") is not True
+            or not isinstance(ranks, list)
+            or {rank.get("node_id") for rank in ranks if isinstance(rank, dict)}
+            != set(self.targets)
+            or any(
+                not isinstance(rank, dict)
+                or rank.get("state") != "running"
+                or rank.get("fresh") is not True
+                for rank in ranks
+            )
+        ):
+            raise SliceError("failed workload rank has not recovered")
         self.complete("rank-recovered")
 
     def route_republished(self) -> None:
@@ -943,7 +1193,9 @@ class Runner:
             f"/api/v1/recipes/runs/{self.outputs['run_id']}/stop",
             {"request_key": self.request_key("stopped", "stop")},
         )
-        operation_id, _owner = self.operation(response, "recipe stop")
+        operation_id, _owner, _result = self.operation(
+            response, "recipe stop", expected_nodes=self.targets
+        )
         self.complete("stopped", {"stop_operation_id": operation_id})
 
     def route_withdrawn(self) -> None:
@@ -956,7 +1208,9 @@ class Runner:
             f"/api/v1/recipes/installations/{self.outputs['installation_id']}/uninstall",
             {"request_key": self.request_key("uninstalled", "uninstall")},
         )
-        operation_id, _owner = self.operation(response, "recipe uninstall")
+        operation_id, _owner, _result = self.operation(
+            response, "recipe uninstall", expected_nodes=self.targets
+        )
         self.complete("uninstalled", {"uninstall_operation_id": operation_id})
 
 
@@ -972,6 +1226,7 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--evidence-file", type=Path, required=True)
     parser.add_argument("--recipe", type=Path)
     parser.add_argument("--source-context", type=Path)
+    parser.add_argument("--qualification-file", type=Path)
     parser.add_argument("--failure-node")
     parser.add_argument("--timeout-seconds", type=float, default=300.0)
     parser.add_argument("--poll-seconds", type=float, default=1.0)
@@ -988,6 +1243,8 @@ def _arguments() -> argparse.Namespace:
         args.recipe = args.recipe.resolve()
     if args.source_context is not None:
         args.source_context = args.source_context.resolve()
+    if args.qualification_file is not None:
+        args.qualification_file = args.qualification_file.resolve()
     return args
 
 

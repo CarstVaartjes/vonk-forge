@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import platform
+import shutil
 import socket
 import subprocess
 import sys
@@ -12,6 +14,8 @@ from contextlib import contextmanager
 from http.client import HTTPConnection
 from pathlib import Path
 
+import pytest
+
 from vonk_control.recipe_contract import recipe_content_sha256, validate_recipe
 from vonk_control.source_bundles import generate_source_bundle
 from vonk_control.source_policy import enforce_build_source_policy
@@ -20,10 +24,10 @@ FIXTURE_ROOT = Path(__file__).parent / "fixtures/recipes/dev-http-smoke"
 CONTEXT_ROOT = FIXTURE_ROOT / "context"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 EXPECTED_SOURCE_SHA256 = (
-    "7a65752ee1a950b3b358c66ceaf2007d0eb824a7842d0a67a5b1e3726957eb80"
+    "4220553fbdd61b6bea80e593c9085686862503a9df904e6fbb16d695d26776f5"
 )
 EXPECTED_RECIPE_SHA256 = (
-    "11fca06a786d0a84d2b5fe34a2ae4423327f1b79e6a3096b93714e494130842a"
+    "3b14011cda36ec22467c341337b004c8e3fccadfd285a1b66854e9fbaf5a3c2c"
 )
 EXPECTED_ARTIFACT_SOURCE = (
     "https://raw.githubusercontent.com/CarstVaartjes/vonk-forge/"
@@ -34,10 +38,18 @@ EXPECTED_ARTIFACT_SHA256 = (
     "8f9e3902c909d7698aac45b2d9195c4baea090ee35b11705f05ea10c856bd230"
 )
 EXPECTED_ARCHIVE_BYTES = 10240
-EXPECTED_TOTAL_BYTES = 2469
+EXPECTED_TOTAL_BYTES = 2504
+MEASURED_IMAGE_BYTES = 150_054_446
+MEASURED_DOCKER_ARCHIVE_BYTES = 154_805_248
+BUILD_OUTPUT_LIMIT_BYTES = 256 * 1024 * 1024
+BUILD_TRANSIENT_LIMIT_BYTES = 512 * 1024 * 1024
+ROOTLESS_PODMAN_PHYSICAL_GATE = (
+    "physical gate pending: requires rootless Podman on linux/arm64 with public "
+    "access to the pinned python:3.12.11-slim-bookworm image"
+)
 EXPECTED_FILE_SHA256 = {
     "Dockerfile": "701a82b82b5056c17eb3dcf1e6c4d281e359ad771bc29a84c94715327e8f8257",
-    "server.py": "be0189b161a86bf72d8c1a9d93e03a724810c1488b5cdaaedd773ff0aea118e8",
+    "server.py": "c0e5517d35e8e19328e925210120d2374d751df6958a10ab67aaa9adf55d8c50",
 }
 EXPECTED_BASE_IMAGE = (
     "python:3.12.11-slim-bookworm@sha256:"
@@ -97,9 +109,13 @@ def fixture_bundle():
 
 
 def _request_json(
-    port: int, method: str, path: str, payload: dict[str, object] | None = None
+    host: str,
+    port: int,
+    method: str,
+    path: str,
+    payload: dict[str, object] | None = None,
 ) -> tuple[int, object]:
-    connection = HTTPConnection("127.0.0.1", port, timeout=2)
+    connection = HTTPConnection(host, port, timeout=2)
     try:
         body = None
         headers: dict[str, str] = {}
@@ -114,19 +130,24 @@ def _request_json(
     return response.status, json.loads(data) if data else None
 
 
-def _unused_port() -> int:
+def _unused_port(host: str = "127.0.0.1") -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
-        listener.bind(("127.0.0.1", 0))
+        listener.bind((host, 0))
         listener.listen()
         return int(listener.getsockname()[1])
 
 
 @contextmanager
 def running_fixture_server() -> Iterator[int]:
-    port = _unused_port()
+    host = "127.0.0.2"
+    port = _unused_port(host)
     process = subprocess.Popen(
         [sys.executable, str(CONTEXT_ROOT / "server.py")],
-        env={**os.environ, "PORT": str(port)},
+        env={
+            **os.environ,
+            "VONK_LISTEN_HOST": host,
+            "VONK_LISTEN_PORT": str(port),
+        },
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -143,7 +164,7 @@ def running_fixture_server() -> Iterator[int]:
                     f"stderr:\n{stderr}"
                 )
             try:
-                status, payload = _request_json(port, "GET", "/health")
+                status, payload = _request_json(host, port, "GET", "/health")
             except OSError as error:
                 last_error = error
                 time.sleep(0.1)
@@ -204,19 +225,161 @@ def test_dev_http_smoke_bundle_policy_is_exact_and_bounded() -> None:
     assert all(snippet not in lowered for snippet in FORBIDDEN_DOCKERFILE_SNIPPETS)
 
 
+def test_dev_http_smoke_limits_cover_measured_python_slim_build_and_export() -> None:
+    recipe = fixture_recipe()
+    build_resources = recipe["build"]["resources"]
+    profile = recipe["deployment_profiles"][0]
+    disk = profile["roles"][0]["resources"]["disk"]
+
+    assert BUILD_OUTPUT_LIMIT_BYTES >= MEASURED_DOCKER_ARCHIVE_BYTES + 64 * 1024 * 1024
+    assert BUILD_TRANSIENT_LIMIT_BYTES >= (
+        MEASURED_IMAGE_BYTES + MEASURED_DOCKER_ARCHIVE_BYTES + 128 * 1024 * 1024
+    )
+    assert build_resources["temporary_bytes"] == BUILD_TRANSIENT_LIMIT_BYTES
+    assert disk["image_bytes"] == BUILD_OUTPUT_LIMIT_BYTES
+    assert disk["staging_bytes"] == BUILD_TRANSIENT_LIMIT_BYTES
+    assert disk["safety_margin_bytes"] == BUILD_TRANSIENT_LIMIT_BYTES
+    assert profile["measurement"] == "measured"
+
+
 def test_dev_http_smoke_server_matches_expected_health_and_inference() -> None:
     recipe = fixture_recipe()
     expected = fixture_expected()
 
     with running_fixture_server() as port:
         status, health = _request_json(
-            port, "GET", str(recipe["runtime"]["endpoint"]["health_path"])
+            "127.0.0.2",
+            port,
+            "GET",
+            str(recipe["runtime"]["endpoint"]["health_path"]),
         )
         assert status == 200
         assert health == expected["health"]
 
         status, response = _request_json(
-            port, "POST", "/v1/chat/completions", expected["request"]
+            "127.0.0.2",
+            port,
+            "POST",
+            "/v1/chat/completions",
+            expected["request"],
         )
         assert status == 200
         assert response == expected["response"]
+
+
+def test_dev_http_smoke_build_import_and_host_published_port_with_rootless_podman(
+    tmp_path: Path,
+) -> None:
+    podman = shutil.which("podman")
+    if podman is None or platform.machine() not in {"aarch64", "arm64"}:
+        pytest.skip(ROOTLESS_PODMAN_PHYSICAL_GATE)
+    information = subprocess.run(
+        [podman, "info", "--format", "{{.Host.Security.Rootless}}"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if information.returncode != 0 or information.stdout.strip() != "true":
+        pytest.skip(ROOTLESS_PODMAN_PHYSICAL_GATE)
+
+    recipe = fixture_recipe()
+    disk = recipe["deployment_profiles"][0]["roles"][0]["resources"]["disk"]
+    host_port = _unused_port()
+    identity = f"{os.getpid()}-{host_port}"
+    image = f"localhost/vonk/dev-http-smoke-acceptance:{identity}"
+    container = f"vonk-dev-http-smoke-{identity}"
+    archive = tmp_path / "image.oci.tar"
+
+    try:
+        subprocess.run(
+            [
+                podman,
+                "build",
+                "--no-cache",
+                "--network=none",
+                "--platform=linux/arm64",
+                "--tag",
+                image,
+                str(CONTEXT_ROOT),
+            ],
+            check=True,
+            timeout=300,
+        )
+        subprocess.run(
+            [
+                podman,
+                "save",
+                "--format=oci-archive",
+                "--output",
+                str(archive),
+                image,
+            ],
+            check=True,
+            timeout=120,
+        )
+        assert 0 < archive.stat().st_size <= disk["image_bytes"]
+
+        subprocess.run([podman, "image", "rm", image], check=True, timeout=60)
+        subprocess.run(
+            [podman, "load", "--input", str(archive)], check=True, timeout=120
+        )
+        subprocess.run(
+            [
+                podman,
+                "run",
+                "--detach",
+                "--name",
+                container,
+                "--restart=no",
+                "--read-only",
+                "--cap-drop=ALL",
+                "--security-opt=no-new-privileges",
+                "--userns=keep-id:uid=10001,gid=10001",
+                "--network=slirp4netns:allow_host_loopback=false",
+                "--user=10001:10001",
+                "--publish",
+                f"127.0.0.1:{host_port}:8000",
+                "--env",
+                "VONK_LISTEN_HOST=0.0.0.0",
+                "--env",
+                "VONK_LISTEN_PORT=8000",
+                "--env",
+                "PYTHONDONTWRITEBYTECODE=1",
+                image,
+                "python",
+                "/app/server.py",
+            ],
+            check=True,
+            timeout=60,
+        )
+
+        deadline = time.monotonic() + 30
+        while True:
+            try:
+                status, payload = _request_json(
+                    "127.0.0.1", host_port, "GET", "/health"
+                )
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.2)
+                continue
+            assert status == 200
+            assert payload == fixture_expected()["health"]
+            break
+    finally:
+        subprocess.run(
+            [podman, "rm", "--force", container],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=30,
+        )
+        subprocess.run(
+            [podman, "image", "rm", "--force", image],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=30,
+        )

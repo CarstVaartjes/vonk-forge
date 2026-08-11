@@ -288,6 +288,11 @@ fn container_arguments_are_typed_and_hardened() {
     );
     assert!(
         arguments
+            .windows(2)
+            .any(|values| values == ["--publish", "8101:8000"])
+    );
+    assert!(
+        arguments
             .iter()
             .any(|value| value.ends_with("dst=/models,readonly"))
     );

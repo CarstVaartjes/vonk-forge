@@ -278,8 +278,8 @@ def test_development_image_compose_enables_complete_builtin_agent_settings(
     assert api["environment"]["VONK_MANAGEMENT_CIDRS_FILE"] == (
         "/run/secrets/management-cidrs"
     )
-    assert set(caddy["networks"]) == {"application"}
-    assert set(api["networks"]) == {"application", "data"}
+    assert set(caddy["networks"]) == {"application", "ingress"}
+    assert set(api["networks"]) == {"application", "data", "ingress"}
     assert caddy["depends_on"]["control-api"] == {
         "condition": "service_healthy",
         "required": True,

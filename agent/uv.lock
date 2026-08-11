@@ -613,7 +613,10 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = "==9.1.1" }]
+dev = [
+    { name = "pytest", specifier = "==9.1.1" },
+    { name = "pyyaml", specifier = "==6.0.3" },
+]
 
 [[package]]
 name = "vonk-forge-agent"

@@ -724,6 +724,22 @@ class RecipeOperationService:
             assert node is not None
             node.state = "uninstalled" if succeeded else "failed"
             node.updated_at = now
+        recorded_result = dict(job.result) if isinstance(job.result, Mapping) else {}
+        raw_node_evidence = recorded_result.get("node_evidence", {})
+        if not isinstance(raw_node_evidence, Mapping):
+            raise RecipeOperationConflict("recipe operation evidence is invalid")
+        node_evidence = {
+            str(recorded_node): dict(recorded_evidence)
+            for recorded_node, recorded_evidence in raw_node_evidence.items()
+            if isinstance(recorded_node, str) and isinstance(recorded_evidence, Mapping)
+        }
+        if len(node_evidence) != len(raw_node_evidence):
+            raise RecipeOperationConflict("recipe operation evidence is invalid")
+        observed_evidence = dict(evidence)
+        if node_id in node_evidence and node_evidence[node_id] != observed_evidence:
+            raise RecipeOperationConflict("recipe node evidence changed")
+        node_evidence[node_id] = observed_evidence
+        job.result = {**recorded_result, "node_evidence": node_evidence}
         children = tuple(
             session.scalars(
                 select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
@@ -738,7 +754,11 @@ class RecipeOperationService:
                 child.node_id for child in children if child.state == "failed"
             )
             job.state = "failed" if failed else "succeeded"
-            job.result = {"successful_nodes": successful, "failed_nodes": failed}
+            job.result = {
+                "successful_nodes": successful,
+                "failed_nodes": failed,
+                "node_evidence": node_evidence,
+            }
             if job.kind == "recipe.build.v1":
                 self._release(session, "recipe-build", owner_id, now)
             elif job.kind == "recipe.install":

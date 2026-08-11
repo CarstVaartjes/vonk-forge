@@ -348,7 +348,16 @@ def test_install_is_digest_bound_idempotent_and_gang_complete(tmp_path: Path) ->
     service.record_node_result(
         operation.id, nodes[1], succeeded=True, evidence={"installed_bytes": 120}
     )
-    assert service.get(operation.id).state == "succeeded"
+    completed = service.get(operation.id)
+    assert completed.state == "succeeded"
+    assert completed.result == {
+        "successful_nodes": sorted(nodes),
+        "failed_nodes": [],
+        "node_evidence": {
+            nodes[0]: {"installed_bytes": 120},
+            nodes[1]: {"installed_bytes": 120},
+        },
+    }
     with sessions() as session:
         assert session.get(RecipeInstallation, operation.owner_id).state == "installed"
 

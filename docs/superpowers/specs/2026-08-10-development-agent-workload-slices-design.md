@@ -68,12 +68,12 @@ The final development stack publishes two host ports:
 
 Caddy serves two names on the same port:
 
-- `enroll.vonk-forge.lan`: permits only `POST /agent/v1/enroll`, uses normal
-  server TLS, and does not require a client certificate because an unpaired
-  node has none.
-- `agents.vonk-forge.lan`: permits the authenticated `/agent/v1/*` surface
-  except enrollment and requires a certificate issued by the development
-  agent CA.
+- `https://enroll.vonk-forge.lan:8443/`: permits only
+  `POST /agent/v1/enroll`, uses normal server TLS, and does not require a client
+  certificate because an unpaired node has none.
+- `https://agents.vonk-forge.lan:8443/`: permits the authenticated
+  `/agent/v1/*` surface except enrollment and requires a certificate issued by
+  the development agent CA.
 
 Caddy removes all inbound identity and proxy-auth headers, reconstructs the
 verified client-certificate identity headers, and adds a random shared proxy
@@ -90,12 +90,14 @@ Development uses two independent local authorities:
 2. an Ed25519 agent CA signs short-lived Spark client certificates through the
    existing built-in control authority.
 
-The controller server CA private key is required only when rotating the server
-certificate and is not copied to the NAS. The NAS receives the server
-certificate/key, the public controller CA, and the agent CA certificate/key.
-The agent CA key is projected only into the API service. The worker, Caddy,
-LiteLLM, and Sparks cannot read it. Sparks receive only the public controller CA
-and their locally generated private identity.
+The controller server CA private key is retained in the protected local source
+generation so the generator can validate it against the public controller CA
+and operators can rotate the server certificate. `controller-ca-key` must not
+be copied to the NAS. The NAS receives the server certificate/key, the public
+controller CA, and the agent CA certificate/key. The agent CA key is projected
+only into the API service. The worker, Caddy, LiteLLM, and Sparks cannot read it.
+Sparks receive only the public controller CA and their locally generated
+private identity.
 
 The built-in authority is permitted only when all of the following are true:
 
@@ -123,16 +125,26 @@ The NAS `secrets/` directory contains the existing files plus:
 
 `management-cidrs` is integrity-sensitive configuration rather than a secret,
 but it lives in this directory to preserve the two-item NAS project contract.
-The LiteLLM database URL is derived by `dev-init` from the existing database URL
-and projected into a dedicated LiteLLM secret volume.
+The protected local source contains 14 local source files: 13 protected
+secret/config files plus the public `git-signing-key.pub`. The publisher
+validates that complete generation and copies exactly 12 deployment files to
+the NAS; `controller-ca-key` and `git-signing-key.pub` are local-only.
+An existing 13-file local source from an earlier branch head is incomplete
+because the missing CA private key cannot be reconstructed. It is replaced by
+a coordinated, backed-up 14-file PKI generation rather than repaired in place.
+
+LiteLLM effective configuration is intentionally database-free. The checked
+route document contains a fixed database marker only as an input-schema guard;
+the supervisor removes it before launching LiteLLM. No database URL is
+projected to LiteLLM, and its Admin UI remains disabled.
 
 The repository supplies an idempotent local preparation script. It creates
 missing keys and certificates in a gitignored development-secret directory,
 prints fingerprints and expiry dates but never secret values, refuses to
 overwrite existing material, validates existing material before reuse, and
 copies only explicitly selected files to the deployment destination. Operators
-back up the private source material in 1Password. Key generation never occurs
-on SMB storage or inside a published image.
+back up all 14 local files as one generation in 1Password. Key generation never
+occurs on SMB storage or inside a published image.
 
 `dev-init` runs as root only to read Compose file secrets and establish exact
 ownership. It creates separate least-privilege projections:
@@ -141,7 +153,7 @@ ownership. It creates separate least-privilege projections:
   certificate/key, and proxy token;
 - worker: database URL and worker token;
 - migration: database URL;
-- LiteLLM: master key, upstream key, and LiteLLM database URL;
+- LiteLLM: master key and upstream key only;
 - Caddy: controller certificate/key, agent CA certificate, proxy token, and
   management CIDRs.
 
@@ -151,9 +163,11 @@ No projection is shared between service identities merely for convenience.
 
 The Rust configuration gains two mandatory HTTPS origins:
 
-- `enrollment_url`, used only by `vonk-forge-agent pair`;
-- `controller_url`, used after identity issuance for claims, results, presence,
-  recipe specs, source/image transfer, and all other authenticated operations.
+- `enrollment_url`, set to `https://enroll.vonk-forge.lan:8443/` and used only
+  by `vonk-forge-agent pair`;
+- `controller_url`, set to `https://agents.vonk-forge.lan:8443/` and used after
+  identity issuance for claims, results, presence, recipe specs, source/image
+  transfer, and all other authenticated operations.
 
 Both must be canonical root URLs without userinfo, query, or fragment. They may
 be equal for compatible deployments, but the documented development and

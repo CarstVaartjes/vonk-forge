@@ -97,12 +97,23 @@ scripts/dev-runtime-project \
   --registry-hostname '<REGISTRY_HOSTNAME>'
 ```
 
-Back up all 12 source files as one encrypted generation in 1Password or an
-equivalent secret manager before first deployment. The NAS project must contain
-only `docker-compose.yml` and `secrets/`. Pull/redeploy it in the Docker UI and
-keep every named volume. Successful one-shot cohort, initialization, and
-migration containers are expected to exit; PostgreSQL, API, worker, Caddy, and
-LiteLLM must then be healthy. Never print secret values while diagnosing them.
+The generator creates 14 local source files: 13 protected secret/config files
+plus the public `git-signing-key.pub`. The protected `controller-ca-key` is
+required to validate and rotate the controller CA, so include all 14 local
+source files in one encrypted 1Password generation or equivalent backup before
+first deployment. `controller-ca-key` must not be copied to the NAS.
+An existing 13-file local source from an earlier branch head is incomplete: the
+missing private key cannot be reconstructed from `controller-ca`. Create and
+back up a fresh 14-file generation, then use the coordinated PKI rotation below;
+do not replace only the CA or server certificate.
+
+`dev-runtime-project` validates the complete local generation and projects
+exactly 12 deployment files into the NAS `secrets/` directory; it excludes both
+`controller-ca-key` and `git-signing-key.pub`. The NAS project must contain only
+`docker-compose.yml` and `secrets/`. Pull/redeploy it in the Docker UI and keep
+every named volume. Successful one-shot cohort, initialization, and migration
+containers are expected to exit; PostgreSQL, API, worker, Caddy, and LiteLLM
+must then be healthy. Never print secret values while diagnosing them.
 
 ## /etc/hosts and firewall
 
@@ -152,7 +163,9 @@ On each node, install that certificate as root and set the complete
 `/etc/vonk-forge-agent/agent.toml` inputs from
 [Install the Vonk Forge agent](../operations/install-vonk-agent.md):
 `enrollment_url`, `controller_url`, `ca_path`, the DER `ca_sha256`, and that
-node's unique `node_id`. Generate a non-secret candidate identity with
+node's unique `node_id`. Use `https://<ENROLLMENT_HOSTNAME>:8443/` for
+enrollment and `https://<CONTROLLER_HOSTNAME>:8443/` for authenticated
+controller traffic. Generate a non-secret candidate identity with
 `printf 'spk_%s\n' "$(openssl rand -hex 16)"`, record it, and never reuse it on
 another node.
 
@@ -259,6 +272,7 @@ scripts/run-development-slices \
   --admin-token-file '<EVIDENCE_DIRECTORY>/admin-token' \
   --inference-token-file '<LOCAL_SECRETS_DIR>/litellm-master-key' \
   --phase model-single \
+  --qualification-file '<EVIDENCE_DIRECTORY>/model-qualification.json' \
   --builder-node '<SPARK_1_NODE_ID>' \
   --target-node '<SPARK_1_NODE_ID>' \
   --evidence-file '<EVIDENCE_DIRECTORY>/model-single.json' \
@@ -280,6 +294,7 @@ scripts/run-development-slices \
   --admin-token-file '<EVIDENCE_DIRECTORY>/admin-token' \
   --inference-token-file '<LOCAL_SECRETS_DIR>/litellm-master-key' \
   --phase model-multinode \
+  --qualification-file '<EVIDENCE_DIRECTORY>/model-qualification.json' \
   --builder-node '<SPARK_1_NODE_ID>' \
   --target-node '<SPARK_1_NODE_ID>' \
   --target-node '<SPARK_2_NODE_ID>' \
@@ -306,6 +321,12 @@ inventory, and resume with:
 This proves both ranks are fresh, the sole route is republished, and inference
 works again. Do not delete a container, cache, model directory, identity, or
 named volume to simulate failure.
+
+For both model phases, the private qualification SHA-256, build and distribution
+evidence, and per-node runtime artifact evidence are retained by the acceptance
+runner in the phase evidence file. Keep the qualification document and phase
+evidence private even though their recorded public artifact identities are
+non-secret.
 
 ## Restart persistence
 
@@ -344,11 +365,11 @@ matching full-state restore.
 
 Rotate the PostgreSQL password and database URL only as one coordinated pair.
 Rotate Git signing authority with historical public-key retention. Rotate
-agent/controller PKI and LiteLLM/proxy tokens as one planned new 12-file
-generation: back it up, distribute replacement public trust first, schedule
-re-enrollment/client key change, replace the complete NAS bundle, and
-pull/redeploy. Never overwrite one CA private key or one server certificate in
-isolation and hope the other projections recover.
+agent/controller PKI and LiteLLM/proxy tokens as one planned new 14-file local
+source generation: back it up, distribute replacement public trust first,
+schedule re-enrollment/client key change, project the exact 12-file NAS bundle,
+and pull/redeploy. Never overwrite one CA private key or one server certificate
+in isolation and hope the other projections recover.
 
 ## Evidence and clean-room audit
 
