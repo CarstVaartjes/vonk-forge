@@ -1,7 +1,7 @@
 use std::{
     fs::{self, OpenOptions},
     os::unix::fs::{OpenOptionsExt, PermissionsExt},
-    path::Path,
+    path::{Path, PathBuf},
     time::Duration,
 };
 
@@ -9,7 +9,9 @@ use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, params};
 use serde_json::{Value, json};
 use thiserror::Error;
-use vonk_agent_protocol::{AgentClaim, AgentResult, canonical_json, parse_strict};
+use vonk_agent_protocol::{
+    AgentClaim, AgentDirective, AgentProgress, AgentResult, canonical_json, parse_strict,
+};
 
 #[derive(Debug, Error)]
 pub enum StateError {
@@ -41,6 +43,7 @@ pub enum BeginDecision {
 
 pub struct StateStore {
     connection: Connection,
+    path: PathBuf,
     node_id: String,
 }
 
@@ -110,8 +113,13 @@ impl StateStore {
         }
         Ok(Self {
             connection,
+            path: path.to_owned(),
             node_id: node_id.to_owned(),
         })
+    }
+
+    pub fn reopen(&self) -> Result<Self, StateError> {
+        Self::open(&self.path, &self.node_id)
     }
 
     pub fn begin(
@@ -199,9 +207,26 @@ impl StateStore {
         if !matches!(state, "succeeded" | "failed" | "waiting-for-operator") {
             return Err(StateError::ResultState);
         }
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let deadline: String = transaction
+            .query_row(
+                "SELECT deadline FROM operations
+                 WHERE operation_id=?1 AND attempt=?2 AND fence=?3 AND state='running'",
+                params![
+                    claim.operation_id.to_string(),
+                    claim.attempt,
+                    claim.fence.to_string()
+                ],
+                |row| row.get(0),
+            )
+            .optional()?
+            .ok_or(StateError::Stale)?;
         let result = AgentResult {
             attempt: claim.attempt,
-            deadline: claim.deadline,
+            deadline: DateTime::parse_from_rfc3339(&deadline)
+                .map_err(|_| StateError::ResultState)?,
             fence: claim.fence,
             job_id: claim.job_id,
             node_id: claim.node_id.clone(),
@@ -212,9 +237,6 @@ impl StateStore {
         };
         result.validate()?;
         let body = canonical_json(&result)?;
-        let transaction = self
-            .connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let changed = transaction.execute(
             "UPDATE operations SET state='completed',result_json=?4,result_acknowledged=0
              WHERE operation_id=?1 AND attempt=?2 AND fence=?3 AND state='running'",
@@ -230,6 +252,68 @@ impl StateStore {
         }
         transaction.commit()?;
         Ok(result)
+    }
+
+    pub fn apply_heartbeat(
+        &mut self,
+        request: &AgentProgress,
+        directive: &AgentDirective,
+    ) -> Result<(), StateError> {
+        request.validate()?;
+        directive.validate()?;
+        if request.schema_version != directive.schema_version
+            || request.job_id != directive.job_id
+            || request.operation_id != directive.operation_id
+            || request.attempt != directive.attempt
+            || request.fence != directive.fence
+            || request.node_id != directive.node_id
+            || request.node_id != self.node_id
+            || directive.deadline < request.deadline
+        {
+            return Err(StateError::Stale);
+        }
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current: String = transaction
+            .query_row(
+                "SELECT deadline FROM operations
+                 WHERE operation_id=?1 AND job_id=?2 AND node_id=?3
+                   AND attempt=?4 AND fence=?5 AND state='running'",
+                params![
+                    request.operation_id.to_string(),
+                    request.job_id.to_string(),
+                    request.node_id,
+                    request.attempt,
+                    request.fence.to_string(),
+                ],
+                |row| row.get(0),
+            )
+            .optional()?
+            .ok_or(StateError::Stale)?;
+        let current =
+            DateTime::parse_from_rfc3339(&current).map_err(|_| StateError::ResultState)?;
+        if current != request.deadline {
+            return Err(StateError::Stale);
+        }
+        let changed = transaction.execute(
+            "UPDATE operations SET deadline=?6
+             WHERE operation_id=?1 AND job_id=?2 AND node_id=?3
+               AND attempt=?4 AND fence=?5 AND state='running'",
+            params![
+                request.operation_id.to_string(),
+                request.job_id.to_string(),
+                request.node_id,
+                request.attempt,
+                request.fence.to_string(),
+                directive.deadline.to_rfc3339(),
+            ],
+        )?;
+        if changed != 1 {
+            return Err(StateError::Stale);
+        }
+        transaction.commit()?;
+        Ok(())
     }
 
     pub fn pending_results(&self) -> Result<Vec<AgentResult>, StateError> {

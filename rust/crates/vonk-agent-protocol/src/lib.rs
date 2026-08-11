@@ -62,6 +62,61 @@ impl AgentClaim {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
+pub struct AgentProgress {
+    pub attempt: u32,
+    pub deadline: DateTime<FixedOffset>,
+    pub fence: Uuid,
+    pub job_id: Uuid,
+    pub node_id: String,
+    pub operation_id: Uuid,
+    pub progress: Value,
+    pub schema_version: u8,
+}
+
+impl AgentProgress {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        validate_attempt_identity(self.schema_version, self.attempt, &self.node_id)?;
+        if !self.progress.is_object() || canonical_json(&self.progress)?.len() > 64 * 1024 {
+            return Err(ProtocolError::Identity("progress document"));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct AgentDirective {
+    pub attempt: u32,
+    pub cancel_requested: bool,
+    pub deadline: DateTime<FixedOffset>,
+    pub fence: Uuid,
+    pub job_id: Uuid,
+    pub node_id: String,
+    pub operation_id: Uuid,
+    pub schema_version: u8,
+}
+
+impl AgentDirective {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        validate_attempt_identity(self.schema_version, self.attempt, &self.node_id)
+    }
+
+    pub fn from_progress(progress: AgentProgress) -> Self {
+        Self {
+            attempt: progress.attempt,
+            cancel_requested: false,
+            deadline: progress.deadline,
+            fence: progress.fence,
+            job_id: progress.job_id,
+            node_id: progress.node_id,
+            operation_id: progress.operation_id,
+            schema_version: progress.schema_version,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct AgentResult {
     pub attempt: u32,
     pub deadline: DateTime<FixedOffset>,
@@ -405,6 +460,17 @@ fn valid_node_id(value: &str) -> bool {
         && value[4..]
             .bytes()
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+}
+
+fn validate_attempt_identity(
+    schema_version: u8,
+    attempt: u32,
+    node_id: &str,
+) -> Result<(), ProtocolError> {
+    if schema_version != 1 || attempt == 0 || !valid_node_id(node_id) {
+        return Err(ProtocolError::Identity("attempt identity"));
+    }
+    Ok(())
 }
 
 fn lower_hex(value: &str, length: usize) -> bool {

@@ -6,7 +6,9 @@ use thiserror::Error;
 use tokio::io::AsyncWriteExt;
 use tokio_util::io::ReaderStream;
 use url::Url;
-use vonk_agent_protocol::{AgentClaim, AgentResult, canonical_json, parse_strict};
+use vonk_agent_protocol::{
+    AgentClaim, AgentDirective, AgentProgress, AgentResult, canonical_json, parse_strict,
+};
 
 use crate::{
     config::AgentConfig,
@@ -87,6 +89,7 @@ struct ActivateRequest<'a> {
     node_id: &'a str,
 }
 
+#[derive(Clone)]
 pub struct AgentHttpClient {
     client: Client,
     controller: Url,
@@ -174,6 +177,39 @@ impl AgentHttpClient {
             classify_status(response.status())?;
             Err(ClientError::Protocol)
         }
+    }
+
+    pub async fn heartbeat(&self, progress: &AgentProgress) -> Result<AgentDirective, ClientError> {
+        progress.validate().map_err(|_| ClientError::Protocol)?;
+        if progress.node_id != self.node_id {
+            return Err(ClientError::Protocol);
+        }
+        let body = canonical_json(progress).map_err(|_| ClientError::Protocol)?;
+        let response = self
+            .client
+            .post(self.endpoint("/agent/v1/heartbeat")?)
+            .header("content-type", "application/json")
+            .timeout(Duration::from_secs(15))
+            .body(body)
+            .send()
+            .await?;
+        classify_status(response.status())?;
+        let body = bounded_body(response).await?;
+        let directive = parse_strict::<AgentDirective>(&body)
+            .or_else(|_| parse_strict::<AgentProgress>(&body).map(AgentDirective::from_progress))
+            .map_err(|_| ClientError::Protocol)?;
+        directive.validate().map_err(|_| ClientError::Protocol)?;
+        if directive.schema_version != progress.schema_version
+            || directive.job_id != progress.job_id
+            || directive.operation_id != progress.operation_id
+            || directive.attempt != progress.attempt
+            || directive.fence != progress.fence
+            || directive.node_id != progress.node_id
+            || directive.deadline < progress.deadline
+        {
+            return Err(ClientError::Protocol);
+        }
+        Ok(directive)
     }
 
     pub async fn recipe_spec(&self, installation_id: &str) -> Result<WorkloadSpec, ClientError> {
@@ -472,6 +508,8 @@ mod tests {
         thread,
     };
     use url::Url;
+    use uuid::Uuid;
+    use vonk_agent_protocol::{AgentDirective, AgentProgress, canonical_json};
 
     fn observation_client(status: u16) -> (AgentHttpClient, thread::JoinHandle<Vec<u8>>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -517,6 +555,125 @@ mod tests {
             },
             server,
         )
+    }
+
+    fn heartbeat_client(
+        response: AgentDirective,
+    ) -> (AgentHttpClient, thread::JoinHandle<Vec<u8>>) {
+        let response_body = canonical_json(&response).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 4096];
+            let header_end = loop {
+                let size = stream.read(&mut buffer).unwrap();
+                assert_ne!(size, 0);
+                request.extend_from_slice(&buffer[..size]);
+                if let Some(index) = request.windows(4).position(|value| value == b"\r\n\r\n") {
+                    break index + 4;
+                }
+            };
+            let headers = std::str::from_utf8(&request[..header_end]).unwrap();
+            let content_length = headers
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().unwrap())
+                })
+                .unwrap();
+            while request.len() - header_end < content_length {
+                let size = stream.read(&mut buffer).unwrap();
+                assert_ne!(size, 0);
+                request.extend_from_slice(&buffer[..size]);
+            }
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                response_body.len()
+            )
+            .unwrap();
+            stream.write_all(&response_body).unwrap();
+            request
+        });
+        (
+            AgentHttpClient {
+                client: reqwest::Client::new(),
+                controller: Url::parse(&format!("http://{address}/")).unwrap(),
+                node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
+            },
+            server,
+        )
+    }
+
+    fn progress() -> AgentProgress {
+        AgentProgress {
+            attempt: 2,
+            deadline: DateTime::parse_from_rfc3339("2099-01-01T00:00:00+00:00").unwrap(),
+            fence: Uuid::parse_str("44d4e914-34df-4962-a802-d1f7dcd928aa").unwrap(),
+            job_id: Uuid::parse_str("84ddf214-f067-4bbf-917e-95df32a07fd8").unwrap(),
+            node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
+            operation_id: Uuid::parse_str("f450b5ac-5a78-4af5-9670-e874f735e3ee").unwrap(),
+            progress: serde_json::json!({"phase": "executing"}),
+            schema_version: 1,
+        }
+    }
+
+    #[tokio::test]
+    async fn heartbeat_posts_exact_progress_and_accepts_matching_renewal() {
+        let progress = progress();
+        let directive = AgentDirective {
+            attempt: progress.attempt,
+            cancel_requested: false,
+            deadline: progress.deadline + chrono::Duration::seconds(30),
+            fence: progress.fence,
+            job_id: progress.job_id,
+            node_id: progress.node_id.clone(),
+            operation_id: progress.operation_id,
+            schema_version: progress.schema_version,
+        };
+        let (client, server) = heartbeat_client(directive.clone());
+
+        assert_eq!(client.heartbeat(&progress).await.unwrap(), directive);
+        let request = server.join().unwrap();
+        let (headers, body) = request
+            .windows(4)
+            .position(|value| value == b"\r\n\r\n")
+            .map(|index| (&request[..index], &request[index + 4..]))
+            .unwrap();
+        assert!(
+            std::str::from_utf8(headers)
+                .unwrap()
+                .starts_with("POST /agent/v1/heartbeat HTTP/1.1\r\n")
+        );
+        assert_eq!(
+            serde_json::from_slice::<AgentProgress>(body).unwrap(),
+            progress
+        );
+    }
+
+    #[tokio::test]
+    async fn heartbeat_rejects_mismatched_or_regressing_renewal() {
+        let progress = progress();
+        let directive = AgentDirective {
+            attempt: progress.attempt,
+            cancel_requested: false,
+            deadline: progress.deadline - chrono::Duration::seconds(1),
+            fence: progress.fence,
+            job_id: progress.job_id,
+            node_id: progress.node_id.clone(),
+            operation_id: progress.operation_id,
+            schema_version: progress.schema_version,
+        };
+        let (client, server) = heartbeat_client(directive);
+
+        assert!(matches!(
+            client.heartbeat(&progress).await,
+            Err(ClientError::Protocol)
+        ));
+        server.join().unwrap();
     }
 
     #[tokio::test]

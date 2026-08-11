@@ -32,7 +32,7 @@ sha2 = "0.11.0"
 tempfile = "3.20.0"
 tar = "0.4.44"
 thiserror = "2.0.12"
-tokio = { version = "1.47.1", features = ["fs", "io-util", "macros", "rt-multi-thread", "signal", "time"] }
+tokio = { version = "1.47.1", features = ["fs", "io-util", "macros", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-util = { version = "0.7.16", features = ["io"] }
 toml = "1.1.4"
 url = { version = "2.5.4", features = ["serde"] }

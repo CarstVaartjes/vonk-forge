@@ -6,7 +6,7 @@ use tempfile::tempdir;
 use uuid::Uuid;
 use vonk_agent::config::AgentConfig;
 use vonk_agent::state::{BeginDecision, StateError, StateStore};
-use vonk_agent_protocol::{AgentClaim, canonical_json, hex_sha256};
+use vonk_agent_protocol::{AgentClaim, AgentDirective, AgentProgress, canonical_json, hex_sha256};
 
 const NODE_ID: &str = "spk_0123456789abcdef0123456789abcdef";
 
@@ -66,6 +66,85 @@ fn claims_fail_closed_on_deadline_identity_and_stale_attempt() {
     assert!(matches!(
         state.begin(&foreign, now),
         Err(StateError::Identity)
+    ));
+}
+
+#[test]
+fn heartbeat_renewal_is_durable_and_used_by_the_terminal_result() {
+    let directory = tempdir().unwrap();
+    let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
+    let claim = claim(2, "2099-01-01T00:00:00+00:00");
+    assert_eq!(
+        state.begin(&claim, Utc::now()).unwrap(),
+        BeginDecision::Execute
+    );
+    let request = AgentProgress {
+        attempt: claim.attempt,
+        deadline: claim.deadline,
+        fence: claim.fence,
+        job_id: claim.job_id,
+        node_id: claim.node_id.clone(),
+        operation_id: claim.operation_id,
+        progress: json!({"phase": "executing"}),
+        schema_version: claim.schema_version,
+    };
+    let renewed = AgentDirective {
+        attempt: claim.attempt,
+        cancel_requested: false,
+        deadline: DateTime::parse_from_rfc3339("2099-01-01T00:00:30+00:00").unwrap(),
+        fence: claim.fence,
+        job_id: claim.job_id,
+        node_id: claim.node_id.clone(),
+        operation_id: claim.operation_id,
+        schema_version: claim.schema_version,
+    };
+
+    state.apply_heartbeat(&request, &renewed).unwrap();
+    drop(state);
+    let mut reopened = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
+    let result = reopened
+        .finish(&claim, "succeeded", json!({"status": "ok"}))
+        .unwrap();
+
+    assert_eq!(result.deadline, renewed.deadline);
+}
+
+#[test]
+fn heartbeat_renewal_rejects_stale_or_foreign_directives() {
+    let directory = tempdir().unwrap();
+    let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
+    let claim = claim(2, "2099-01-01T00:00:00+00:00");
+    state.begin(&claim, Utc::now()).unwrap();
+    let request = AgentProgress {
+        attempt: claim.attempt,
+        deadline: claim.deadline,
+        fence: claim.fence,
+        job_id: claim.job_id,
+        node_id: claim.node_id.clone(),
+        operation_id: claim.operation_id,
+        progress: json!({"phase": "executing"}),
+        schema_version: claim.schema_version,
+    };
+    let mut directive = AgentDirective {
+        attempt: claim.attempt,
+        cancel_requested: false,
+        deadline: claim.deadline - chrono::Duration::seconds(1),
+        fence: claim.fence,
+        job_id: claim.job_id,
+        node_id: claim.node_id.clone(),
+        operation_id: claim.operation_id,
+        schema_version: claim.schema_version,
+    };
+    assert!(matches!(
+        state.apply_heartbeat(&request, &directive),
+        Err(StateError::Stale)
+    ));
+
+    directive.deadline = claim.deadline + chrono::Duration::seconds(30);
+    directive.fence = Uuid::parse_str("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee").unwrap();
+    assert!(matches!(
+        state.apply_heartbeat(&request, &directive),
+        Err(StateError::Stale)
     ));
 }
 
