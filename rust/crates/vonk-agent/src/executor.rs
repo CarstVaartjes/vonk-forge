@@ -557,12 +557,24 @@ mod tests {
         }
     }
 
-    struct SlowExecutor;
+    struct HeartbeatGatedExecutor {
+        heartbeats: Arc<Mutex<Vec<AgentProgress>>>,
+        minimum: usize,
+    }
 
     #[async_trait(?Send)]
-    impl Executor for SlowExecutor {
+    impl Executor for HeartbeatGatedExecutor {
         async fn execute(&self, _claim: &AgentClaim) -> ExecutionResult {
-            tokio::time::sleep(Duration::from_millis(90)).await;
+            tokio::time::timeout(Duration::from_secs(2), async {
+                loop {
+                    if self.heartbeats.lock().unwrap().len() >= self.minimum {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
+            })
+            .await
+            .expect("heartbeat task did not make progress");
             ExecutionResult {
                 state: "succeeded",
                 body: json!({"status": "ok"}),
@@ -604,18 +616,23 @@ mod tests {
     async fn long_execution_renews_and_persists_its_lease_before_result() {
         let directory = tempdir().unwrap();
         let original = claim();
+        let heartbeats = Arc::new(Mutex::new(Vec::new()));
         let client = RecordingClient {
             claim: Arc::new(Mutex::new(Some(original.clone()))),
             fail_heartbeat: false,
-            heartbeats: Arc::new(Mutex::new(Vec::new())),
+            heartbeats: heartbeats.clone(),
             results: Arc::new(Mutex::new(Vec::new())),
+        };
+        let executor = HeartbeatGatedExecutor {
+            heartbeats,
+            minimum: 2,
         };
         let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
 
         run_once_with_heartbeat_interval(
             &client,
             &mut state,
-            &SlowExecutor,
+            &executor,
             &["recipe.install"],
             0,
             None,
@@ -636,18 +653,23 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn heartbeat_failure_leaves_a_durable_terminal_result_not_a_busy_attempt() {
         let directory = tempdir().unwrap();
+        let heartbeats = Arc::new(Mutex::new(Vec::new()));
         let client = RecordingClient {
             claim: Arc::new(Mutex::new(Some(claim()))),
             fail_heartbeat: true,
-            heartbeats: Arc::new(Mutex::new(Vec::new())),
+            heartbeats: heartbeats.clone(),
             results: Arc::new(Mutex::new(Vec::new())),
+        };
+        let executor = HeartbeatGatedExecutor {
+            heartbeats,
+            minimum: 1,
         };
         let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
 
         let error = run_once_with_heartbeat_interval(
             &client,
             &mut state,
-            &SlowExecutor,
+            &executor,
             &["recipe.install"],
             0,
             None,
