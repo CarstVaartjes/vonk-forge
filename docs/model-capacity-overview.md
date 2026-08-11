@@ -54,6 +54,13 @@ DS4 branch; a merged release keeps the same DeepSeek model identity but gets a
 new immutable runtime fingerprint and must repeat the DS4 gates. Laguna and the
 remaining creative definitions are planned candidates.
 
+The reproducible DS4 development lane, including its stricter 120 GB available
+memory admission floor and two-rank replicated failure/recovery exercise, is
+documented in [Development agent workload
+acceptance](runbooks/development-agent-workloads.md). That lane validates the
+development control path; it does not change the production maturity labels in
+this table until the physical evidence is accepted.
+
 ## Placement interpretation
 
 ```text

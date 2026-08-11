@@ -5,7 +5,7 @@ from __future__ import annotations
 import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from functools import lru_cache
+from functools import cache
 from importlib import resources
 from pathlib import Path
 from types import MappingProxyType
@@ -172,7 +172,7 @@ def _load_schema(name: str) -> dict[str, Any]:
         raise RuntimeError(f"cannot load contract schema {name}: {error}") from error
 
 
-@lru_cache(maxsize=None)
+@cache
 def _validator(name: str) -> Any:
     schema = _load_schema(name)
     validator_class = validators.validator_for(schema)

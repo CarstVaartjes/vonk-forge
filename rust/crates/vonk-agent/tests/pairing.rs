@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use std::{fs, os::unix::fs::PermissionsExt};
+use std::{fs, os::unix::fs::PermissionsExt, path::Path};
 
 use chrono::{TimeZone, Utc};
 use rcgen::string::Ia5String;
@@ -15,26 +15,80 @@ use vonk_agent::{
         persist_pending, publish_staged, renewal_due, stage_identity, staged_identity_paths,
     },
     pair::{
-        EnrollmentEvidence, EnrollmentOutcome, EnrollmentResponse, IssuedResponse, pair,
-        validate_enrollment_response, validate_issued,
+        EnrollmentEvidence, EnrollmentOutcome, EnrollmentResponse, IssuedResponse, PairingError,
+        pair, validate_enrollment_response, validate_issued,
     },
 };
 
 const NODE_ID: &str = "spk_0123456789abcdef0123456789abcdef";
-
-#[test]
-fn config_is_strict_and_rejects_secret_fields() {
-    let document = r#"
-controller_url = "https://controller.vonkforge.test"
-ca_path = "/etc/vonk-forge-agent/controller-ca.pem"
+const COMMON: &str = r#"ca_path = "/etc/vonk-forge-agent/controller-ca.pem"
 ca_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 data_dir = "/var/lib/vonk-forge"
 node_id = "spk_0123456789abcdef0123456789abcdef"
 poll_min_seconds = 2
 poll_max_seconds = 60
-token = "must-not-be-configurable"
 "#;
-    assert!(AgentConfig::parse(document).is_err());
+
+fn legacy_config(data_dir: &Path) -> AgentConfig {
+    AgentConfig::parse(&format!(
+        "controller_url = \"https://agents.vonk.test/\"\nca_path = \"/etc/vonk-forge-agent/controller-ca.pem\"\nca_sha256 = \"{}\"\ndata_dir = \"{}\"\nnode_id = \"{NODE_ID}\"\npoll_min_seconds = 2\npoll_max_seconds = 60\n",
+        "a".repeat(64),
+        data_dir.display(),
+    ))
+    .unwrap()
+}
+
+#[test]
+fn config_is_strict_and_rejects_secret_fields() {
+    let document = format!(
+        "enrollment_url = \"https://enroll.vonk.test/\"\ncontroller_url = \"https://agents.vonk.test/\"\n{COMMON}token = \"must-not-be-configurable\"\n"
+    );
+    assert!(AgentConfig::parse(&document).is_err());
+}
+
+#[test]
+fn config_parses_distinct_enrollment_and_controller_origins() {
+    let config = AgentConfig::parse(&format!(
+        "enrollment_url = \"https://enroll.vonk.test/\"\ncontroller_url = \"https://agents.vonk.test/\"\n{COMMON}"
+    ))
+    .unwrap();
+
+    assert_eq!(
+        config.enrollment_url.unwrap().as_str(),
+        "https://enroll.vonk.test/"
+    );
+    assert_eq!(config.controller_url.as_str(), "https://agents.vonk.test/");
+}
+
+#[test]
+fn config_rejects_unsafe_enrollment_and_controller_origins() {
+    for origin in [
+        "http://agents.vonk.test/",
+        "https://user@agents.vonk.test/",
+        "https://agents.vonk.test/enroll",
+        "https://agents.vonk.test/?target=pair",
+        "https://agents.vonk.test/#pair",
+    ] {
+        let enrollment = AgentConfig::parse(&format!(
+            "enrollment_url = \"{origin}\"\ncontroller_url = \"https://agents.vonk.test/\"\n{COMMON}"
+        ));
+        assert!(
+            enrollment
+                .unwrap_err()
+                .to_string()
+                .contains("enrollment_url")
+        );
+
+        let controller = AgentConfig::parse(&format!(
+            "enrollment_url = \"https://enroll.vonk.test/\"\ncontroller_url = \"{origin}\"\n{COMMON}"
+        ));
+        assert!(
+            controller
+                .unwrap_err()
+                .to_string()
+                .contains("controller_url")
+        );
+    }
 }
 
 #[test]
@@ -111,7 +165,7 @@ fn pending_enrollment_never_publishes_credentials() {
 }
 
 #[tokio::test]
-async fn ca_pin_is_checked_before_any_identity_material_is_written() {
+async fn pairing_rejects_controller_url_before_any_identity_material_is_written() {
     let directory = tempdir().unwrap();
     let ca_key = KeyPair::generate().unwrap();
     let ca = CertificateParams::new(vec!["controller.vonkforge.test".to_owned()])
@@ -122,9 +176,10 @@ async fn ca_pin_is_checked_before_any_identity_material_is_written() {
     fs::write(&ca_path, ca.pem()).unwrap();
     let data_dir = directory.path().join("state");
     let config = AgentConfig {
-        controller_url: Url::parse("https://controller.vonkforge.test/").unwrap(),
+        enrollment_url: Some(Url::parse("https://enroll.vonkforge.test/").unwrap()),
+        controller_url: Url::parse("https://127.0.0.1:1/").unwrap(),
         ca_path,
-        ca_sha256: "a".repeat(64),
+        ca_sha256: hex::encode(Sha256::digest(ca.der())),
         data_dir: data_dir.clone(),
         node_id: NODE_ID.to_owned(),
         poll_min_seconds: 2,
@@ -151,7 +206,37 @@ async fn ca_pin_is_checked_before_any_identity_material_is_written() {
     )
     .await;
 
-    assert!(result.unwrap_err().to_string().contains("fingerprint"));
+    assert!(matches!(result, Err(PairingError::CaPin)));
+    assert!(!data_dir.exists());
+}
+
+#[tokio::test]
+async fn pairing_refuses_legacy_config_before_identity_or_network_mutation() {
+    let directory = tempdir().unwrap();
+    let data_dir = directory.path().join("state");
+    let config = legacy_config(&data_dir);
+    let evidence = EnrollmentEvidence {
+        agent_digest: "a".repeat(64),
+        boot_id: "boot".to_owned(),
+        csr_public_key_fingerprint: String::new(),
+        hardware_fingerprint: "hardware".to_owned(),
+        host_key_fingerprint: "host".to_owned(),
+        node_id: String::new(),
+    };
+
+    let result = pair(
+        &config,
+        &Url::parse("https://enroll.vonk.test/").unwrap(),
+        &"t".repeat(43),
+        &config.ca_sha256,
+        evidence,
+    )
+    .await;
+
+    assert_eq!(
+        result.unwrap_err().to_string(),
+        "agent configuration has no enrollment URL"
+    );
     assert!(!data_dir.exists());
 }
 

@@ -5,6 +5,13 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
+DEV_CADDYFILE = (
+    ROOT / "control/src/vonk_control/resources/dev/Caddyfile"
+)
+DEV_CADDY_IMAGE = (
+    "caddy:2.11.4@sha256:"
+    "844f60b64e4724a5aa8245e019dace0d3f199f7433ce6c57676cb30a920dbad9"
+)
 
 
 def _environment() -> dict[str, str]:
@@ -119,6 +126,53 @@ def _server_on_port(adapted: dict, port: int) -> dict:
     )
 
 
+def _adapted_development_caddy() -> dict:
+    result = subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "-i",
+            "--user",
+            "10000:10000",
+            "--read-only",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges:true",
+            "--tmpfs",
+            "/tmp:rw,mode=1777",
+            "--tmpfs",
+            "/run/vonk-caddy:rw,exec,mode=0700,uid=10000,gid=10000",
+            "-e",
+            "VONK_AGENT_ENROLL_HOSTNAME=enroll.test.example",
+            "-e",
+            "VONK_AGENT_HOSTNAME=agents.test.example",
+            "-e",
+            "VONK_BACKEND_PORT=8443",
+            "-e",
+            "VONK_MANAGEMENT_CIDRS=10.0.0.0/24",
+            "--entrypoint",
+            "/bin/sh",
+            DEV_CADDY_IMAGE,
+            "-c",
+            (
+                "printf '%s\\n' 'header_up X-Vonk-Agent-Proxy-Auth test' "
+                ">/tmp/vonk-agent-proxy-auth.caddy; "
+                "cp /usr/bin/caddy /run/vonk-caddy/caddy; "
+                "chmod 0500 /run/vonk-caddy/caddy; "
+                "exec /run/vonk-caddy/caddy adapt --config - --adapter caddyfile"
+            ),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        input=DEV_CADDYFILE.read_text(encoding="utf-8"),
+        timeout=30,
+    )
+    return json.loads(result.stdout)
+
+
 def _entrypoint_result(
     environment: dict[str, str],
     secret_source: str | None = None,
@@ -169,6 +223,7 @@ def _settings_result(rendered: dict, tmp_path: Path) -> subprocess.CompletedProc
         "VONK_AGENT_INTERMEDIATE_KEY_FILE": "test-builtin-key\n",
         "VONK_AGENT_PROXY_AUTH_FILE": "A" * 30 + "_-\r\n",
         "VONK_WORKER_API_TOKEN_FILE": "W" * 32 + "\n",
+        "VONK_MANAGEMENT_CIDRS_FILE": "10.0.0.0/24\n",
         "VONK_ADMIN_GRANT_PRIVATE_KEY_FILE": "test-admin-grant-private-key\n",
         "VONK_PACKAGE_HELPER_GRANT_PRIVATE_KEY_FILE": "test-package-grant-key\n",
         "VONK_PACKAGE_HELPER_RECEIPT_PRIVATE_KEY_FILE": "test-package-receipt-key\n",
@@ -200,6 +255,81 @@ def _settings_result(rendered: dict, tmp_path: Path) -> subprocess.CompletedProc
         timeout=30,
         check=False,
     )
+
+
+def test_development_image_compose_enables_complete_builtin_agent_settings(
+    tmp_path: Path,
+) -> None:
+    rendered = _rendered("compose.dev.images.yaml")
+    services = rendered["services"]
+    api = services["control-api"]
+    caddy = services["caddy"]
+
+    result = _settings_result(rendered, tmp_path / "settings")
+    assert result.returncode == 0, result.stderr
+    provider, proxy_auth, management, direct_fabric = result.stdout.splitlines()
+    assert provider == "builtin"
+    assert proxy_auth == "A" * 30 + "_-"
+    assert management == "10.0.0.0/24"
+    assert direct_fabric == ""
+
+    assert api["environment"]["VONK_AGENT_RUNTIME"] == "enabled"
+    assert api["environment"]["VONK_AGENT_BUILTIN_CA_BOOTSTRAP"] == "1"
+    assert api["environment"]["VONK_MANAGEMENT_CIDRS_FILE"] == (
+        "/run/secrets/management-cidrs"
+    )
+    assert set(caddy["networks"]) == {"application", "ingress"}
+    assert set(api["networks"]) == {"application", "data", "ingress"}
+    assert caddy["depends_on"]["control-api"] == {
+        "condition": "service_healthy",
+        "required": True,
+    }
+
+
+def test_development_caddy_health_listener_is_exact_and_loopback_only() -> None:
+    adapted = _adapted_development_caddy()
+    health = _server_on_port(adapted, 2019)
+
+    assert health["listen"] == ["127.0.0.1:2019"]
+    assert health["routes"] == [
+        {
+            "match": [{"host": ["127.0.0.1"]}],
+            "handle": [
+                {
+                    "handler": "subroute",
+                    "routes": [
+                        {
+                            "handle": [
+                                {"handler": "static_response", "status_code": 200}
+                            ],
+                            "match": [{"path": ["/healthz"]}],
+                        },
+                        {
+                            "handle": [
+                                {"handler": "static_response", "status_code": 404}
+                            ]
+                        },
+                    ],
+                }
+            ],
+            "terminal": True,
+        }
+    ]
+    assert "tls_connection_policies" not in health
+    serialized = json.dumps(health, sort_keys=True)
+    assert "reverse_proxy" not in serialized
+    assert "control-api:8000" not in serialized
+    assert "/agent/" not in serialized
+
+    listeners = {
+        listener
+        for server in adapted["apps"]["http"]["servers"].values()
+        for listener in server.get("listen", [])
+    }
+    assert "127.0.0.1:2019" in listeners
+    assert ":2019" not in listeners
+    assert "0.0.0.0:2019" not in listeners
+    assert "[::]:2019" not in listeners
 
 
 def test_caddy_adapts_three_sni_boundaries_for_admin_enrollment_and_mtls_agents() -> None:
@@ -248,8 +378,23 @@ def test_caddy_adapts_three_sni_boundaries_for_admin_enrollment_and_mtls_agents(
     assert client_auth["ca"] == {"provider": "file", "pem_files": ["/run/secrets/agent-client-ca"]}
     agent_routes = agent_site["handle"][0]["routes"]
     agent_proxy = next(route for route in agent_routes if "control-api:8000" in json.dumps(route, sort_keys=True))
-    request_headers = agent_proxy["handle"][0]["routes"][0]["handle"][0]["headers"]["request"]
-    assert request_headers["delete"] == ["X-Vonk-Agent-*"]
+    agent_handlers = agent_proxy["handle"][0]["routes"][0]["handle"]
+    sanitizer_index = next(
+        index
+        for index, handler in enumerate(agent_handlers)
+        if handler.get("handler") == "headers"
+    )
+    proxy_index = next(
+        index
+        for index, handler in enumerate(agent_handlers)
+        if handler.get("handler") == "reverse_proxy"
+    )
+    assert sanitizer_index < proxy_index
+    assert agent_handlers[sanitizer_index]["request"]["delete"] == [
+        "X-Vonk-Agent-*"
+    ]
+    request_headers = agent_handlers[proxy_index]["headers"]["request"]
+    assert "delete" not in request_headers
     replacements = {key.lower(): value for key, value in request_headers["set"].items()}
     assert replacements == {
         "x-vonk-agent-node": ["{vonk_agent_node}"],
@@ -525,6 +670,9 @@ def test_each_provider_overlay_passes_application_settings_guard(tmp_path: Path)
         ("compose.builtin-ca.yaml", "builtin"),
     ):
         rendered = _rendered("compose.yaml", overlay)
+        environment = rendered["services"]["control-api"]["environment"]
+        assert environment["VONK_DEPLOYMENT_MODE"] == "production"
+        assert environment["VONK_AGENT_RUNTIME"] == "enabled"
         result = _settings_result(rendered, tmp_path / provider)
         assert result.returncode == 0, result.stderr
         assert result.stdout.splitlines() == [

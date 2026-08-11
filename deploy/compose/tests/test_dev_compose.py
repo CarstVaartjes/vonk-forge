@@ -13,9 +13,18 @@ COMPOSE = ROOT / "deploy/compose/compose.dev.yaml"
 IMAGE_TEMPLATE = ROOT / "deploy/compose/compose.dev.images.yaml"
 SCRIPT = ROOT / "scripts/dev-compose"
 SECRETS_HELPER = ROOT / "scripts/dev-compose-secrets.py"
+RUNTIME_SECRETS_HELPER = ROOT / "scripts/dev-runtime-secrets.py"
 EXPECTED_COMMIT = "a" * 40
 DEV_API_IMAGE = "vonk-forge-dev/control-api@sha256:" + "0" * 64
 DEV_WORKER_IMAGE = "vonk-forge-dev/control-worker@sha256:" + "1" * 64
+CADDY_IMAGE = (
+    "caddy:2.11.4@sha256:"
+    "844f60b64e4724a5aa8245e019dace0d3f199f7433ce6c57676cb30a920dbad9"
+)
+LITELLM_IMAGE = (
+    "ghcr.io/berriai/litellm:v1.81.14-stable@sha256:"
+    "a3ce130137752e6b085de521b773eacbb641c8b6322c6f538453e860e7b9cf43"
+)
 
 
 def _rendered(tmp_path: Path) -> dict[str, object]:
@@ -82,9 +91,7 @@ def test_dev_compose_builds_local_control_services_without_release_images(
     assert services["control-api"]["environment"]["VONK_DEPLOYMENT_MODE"] == (
         "development"
     )
-    assert services["control-api"]["environment"]["VONK_AGENT_RUNTIME"] == (
-        "disabled"
-    )
+    assert services["control-api"]["environment"]["VONK_AGENT_RUNTIME"] == ("disabled")
     assert services["control-api"]["ports"] == [
         {
             "host_ip": "127.0.0.1",
@@ -122,6 +129,271 @@ def _volumes_by_target(service: dict[str, object]) -> dict[str, dict[str, object
     return {volume["target"]: volume for volume in service.get("volumes", [])}
 
 
+def test_image_template_hardens_caddy_as_the_only_lan_listener() -> None:
+    rendered = _rendered_image_template()
+    services = rendered["services"]
+    caddy = services["caddy"]
+
+    assert caddy["image"] == CADDY_IMAGE
+    assert caddy["pull_policy"] == "always"
+    assert caddy["user"] == "10000:10000"
+    assert caddy["read_only"] is True
+    assert caddy["cap_drop"] == ["ALL"]
+    assert caddy["security_opt"] == ["no-new-privileges:true"]
+    assert set(caddy["tmpfs"]) == {
+        "/config:rw,noexec,nosuid,nodev,mode=0700,uid=10000,gid=10000",
+        "/data:rw,noexec,nosuid,nodev,mode=0700,uid=10000,gid=10000",
+        "/run/vonk-caddy:rw,exec,mode=0700,uid=10000,gid=10000",
+        "/tmp",
+    }
+    assert caddy["entrypoint"] == [
+        "/bin/sh",
+        "/run/vonk-runtime/caddy-entrypoint.sh",
+    ]
+    assert caddy["environment"] == {
+        "VONK_AGENT_ENROLL_HOSTNAME": "enroll.vonk-forge.lan",
+        "VONK_AGENT_HOSTNAME": "agents.vonk-forge.lan",
+        "VONK_BACKEND_PORT": "8443",
+    }
+    assert caddy["ports"] == [
+        {
+            "mode": "ingress",
+            "published": "8443",
+            "protocol": "tcp",
+            "target": 8443,
+        }
+    ]
+    assert set(caddy["networks"]) == {"application", "ingress"}
+    assert caddy["healthcheck"] == {
+        "test": [
+            "CMD",
+            "wget",
+            "-q",
+            "--spider",
+            "-T",
+            "3",
+            "http://127.0.0.1:2019/healthz",
+        ],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 12,
+    }
+    assert caddy["depends_on"] == {
+        "control-api": {
+            "condition": "service_healthy",
+            "required": True,
+        },
+        "dev-init": {
+            "condition": "service_completed_successfully",
+            "required": True,
+        },
+    }
+
+    volumes = _volumes_by_target(caddy)
+    assert set(volumes) == {
+        "/run/vonk-runtime",
+        "/run/secrets",
+    }
+    assert volumes["/run/secrets"] == {
+        "type": "volume",
+        "source": "dev-caddy-secrets",
+        "target": "/run/secrets",
+        "read_only": True,
+        "volume": {},
+    }
+    assert volumes["/run/vonk-runtime"] == {
+        "type": "volume",
+        "source": "dev-runtime-config",
+        "target": "/run/vonk-runtime",
+        "read_only": True,
+        "volume": {},
+    }
+
+    listeners = {
+        name: service["ports"]
+        for name, service in services.items()
+        if service.get("ports")
+    }
+    assert set(listeners) == {"caddy", "control-api", "litellm"}
+    assert all(
+        port.get("host_ip") == "127.0.0.1"
+        for service_name in ("control-api", "litellm")
+        for port in listeners[service_name]
+    )
+    assert all("host_ip" not in port for port in listeners["caddy"])
+    assert listeners["control-api"] == [
+        {
+            "host_ip": "127.0.0.1",
+            "mode": "ingress",
+            "published": "8080",
+            "protocol": "tcp",
+            "target": 8000,
+        }
+    ]
+    assert all(
+        port.get("host_ip") == "127.0.0.1"
+        for name, ports in listeners.items()
+        if name != "caddy"
+        for port in ports
+    )
+
+
+def test_pinned_caddy_image_provides_the_configured_http_probe() -> None:
+    result = subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--user",
+            "10000:10000",
+            "--read-only",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges:true",
+            "--entrypoint",
+            "/bin/sh",
+            CADDY_IMAGE,
+            "-c",
+            "command -v wget && wget --help",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[0] == "/usr/bin/wget"
+    assert "--spider" in result.stdout + result.stderr
+    assert "-T SEC" in result.stdout + result.stderr
+
+
+def test_image_template_runs_acknowledged_litellm_only_on_internal_networks() -> None:
+    rendered = _rendered_image_template()
+    services = rendered["services"]
+    litellm = services["litellm"]
+
+    assert litellm["image"] == LITELLM_IMAGE
+    assert litellm["pull_policy"] == "always"
+    assert litellm["user"] == "10002:10001"
+    assert litellm["read_only"] is True
+    assert litellm["cap_drop"] == ["ALL"]
+    assert litellm["security_opt"] == ["no-new-privileges:true"]
+    assert litellm["tmpfs"] == ["/tmp"]
+    assert litellm["entrypoint"] == ["/run/vonk-runtime/litellm-entrypoint.sh"]
+    assert litellm["environment"] == {
+        "DISABLE_ADMIN_UI": "True",
+        "HOME": "/tmp",
+        "SERVER_ROOT_PATH": "/litellm",
+        "STORE_MODEL_IN_DB": "False",
+    }
+    assert set(litellm["networks"]) == {"application"}
+    assert rendered["networks"]["application"]["internal"] is True
+    assert rendered["networks"]["data"]["internal"] is True
+    assert litellm["ports"] == [
+        {
+            "host_ip": "127.0.0.1",
+            "mode": "ingress",
+            "published": "4000",
+            "protocol": "tcp",
+            "target": 4000,
+        }
+    ]
+    assert litellm["healthcheck"] == {
+        "test": [
+            "CMD",
+            "python",
+            "-c",
+            "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=3)",
+        ],
+        "interval": "15s",
+        "timeout": "5s",
+        "retries": 10,
+    }
+    assert litellm["depends_on"] == {
+        "dev-init": {
+            "condition": "service_completed_successfully",
+            "required": True,
+        },
+        "dev-supervisor-init": {
+            "condition": "service_completed_successfully",
+            "required": True,
+        },
+    }
+
+    volumes = _volumes_by_target(litellm)
+    assert set(volumes) == {
+        "/routes",
+        "/run/secrets",
+        "/run/vonk-runtime",
+        "/supervisor",
+    }
+    assert volumes["/run/vonk-runtime"] == {
+        "type": "volume",
+        "source": "dev-runtime-config",
+        "target": "/run/vonk-runtime",
+        "read_only": True,
+        "volume": {},
+    }
+    assert volumes["/run/secrets"] == {
+        "type": "volume",
+        "source": "dev-litellm-secrets",
+        "target": "/run/secrets",
+        "read_only": True,
+        "volume": {},
+    }
+    assert volumes["/routes"]["source"].endswith("dev-route-publications")
+    assert volumes["/routes"]["read_only"] is True
+    assert volumes["/supervisor"]["source"].endswith("dev-supervisor-state")
+    assert volumes["/supervisor"].get("read_only", False) is False
+    assert "dev-litellm-cache-init" not in services
+    assert "dev-litellm-database-init" not in services
+
+
+def test_image_template_enables_only_the_explicit_builtin_agent_authority() -> None:
+    services = _rendered_image_template()["services"]
+    api = services["control-api"]
+    worker = services["control-worker"]
+
+    expected_environment = {
+        "VONK_AGENT_RUNTIME": "enabled",
+        "VONK_AGENT_CA_PROVIDER": "builtin",
+        "VONK_AGENT_BUILTIN_CA_BOOTSTRAP": "1",
+        "VONK_MANAGEMENT_CIDRS_FILE": "/run/secrets/management-cidrs",
+        "VONK_DEPLOYMENT_BRANCH": "deploy",
+        "VONK_AGENT_CLIENT_CA_FILE": "/run/secrets/agent-ca-certificate",
+        "VONK_AGENT_INTERMEDIATE_CERTIFICATE_FILE": "/run/secrets/agent-ca-certificate",
+        "VONK_AGENT_INTERMEDIATE_KEY_FILE": "/run/secrets/agent-ca-key",
+        "VONK_AGENT_PROXY_AUTH_FILE": "/run/secrets/agent-proxy-auth",
+        "VONK_WORKER_API_TOKEN_FILE": "/run/secrets/worker-api-token",
+    }
+    assert expected_environment.items() <= api["environment"].items()
+    assert worker["environment"]["VONK_DEPLOYMENT_BRANCH"] == "deploy"
+    assert worker["environment"]["VONK_MANAGEMENT_CIDRS_FILE"] == (
+        "/run/secrets/management-cidrs"
+    )
+
+    assert api.get("secrets", []) == []
+
+    api_volumes = _volumes_by_target(api)
+    worker_volumes = _volumes_by_target(worker)
+    assert api_volumes["/routes"].get("read_only", False) is False
+    assert api_volumes["/supervisor"]["read_only"] is True
+    assert worker_volumes["/routes"].get("read_only", False) is False
+    assert worker_volumes["/supervisor"]["read_only"] is True
+    assert worker["depends_on"]["litellm"] == {
+        "condition": "service_healthy",
+        "required": True,
+    }
+    assert set(api["networks"]) == {"application", "data", "ingress"}
+    assert set(services["caddy"]["networks"]) == {"application", "ingress"}
+    assert services["control-worker"]["networks"] == {
+        "application": None,
+        "data": None,
+    }
+
+
 def test_dev_compose_runs_packaged_initializer_with_disjoint_runtime_authority(
     tmp_path: Path,
 ) -> None:
@@ -156,13 +428,10 @@ def test_dev_compose_runs_packaged_initializer_with_disjoint_runtime_authority(
     assert "/host-secrets" not in init_volumes
     assert init_volumes["/repository"]["type"] == "volume"
     assert init_volumes["/api-secrets"]["type"] == "volume"
-    assert init_volumes["/migrate-secrets"]["source"].endswith(
-        "dev-migrate-secrets"
-    )
+    assert init_volumes["/migrate-secrets"]["source"].endswith("dev-migrate-secrets")
     assert init_volumes["/worker-secrets"]["type"] == "volume"
     assert {
-        (secret["source"], secret["target"])
-        for secret in initializer["secrets"]
+        (secret["source"], secret["target"]) for secret in initializer["secrets"]
     } == {
         ("database-url", "/host-secrets/database-url"),
         ("git-signing-key", "/host-secrets/git-signing-key"),
@@ -179,22 +448,21 @@ def test_dev_compose_runs_packaged_initializer_with_disjoint_runtime_authority(
     assert worker_volumes["/repository"]["type"] == "volume"
     assert worker_volumes["/repository"]["read_only"] is True
     assert api_volumes["/run/secrets"]["source"].endswith("dev-api-secrets")
-    assert worker_volumes["/run/secrets"]["source"].endswith(
-        "dev-worker-secrets"
-    )
-    assert migrate_volumes["/run/secrets"]["source"].endswith(
-        "dev-migrate-secrets"
-    )
+    assert worker_volumes["/run/secrets"]["source"].endswith("dev-worker-secrets")
+    assert migrate_volumes["/run/secrets"]["source"].endswith("dev-migrate-secrets")
     assert migrate_volumes["/run/secrets"]["read_only"] is True
-    assert api_volumes["/run/secrets"]["source"] != worker_volumes["/run/secrets"][
-        "source"
-    ]
-    assert migrate_volumes["/run/secrets"]["source"] != api_volumes["/run/secrets"][
-        "source"
-    ]
-    assert migrate_volumes["/run/secrets"]["source"] != worker_volumes[
-        "/run/secrets"
-    ]["source"]
+    assert (
+        api_volumes["/run/secrets"]["source"]
+        != worker_volumes["/run/secrets"]["source"]
+    )
+    assert (
+        migrate_volumes["/run/secrets"]["source"]
+        != api_volumes["/run/secrets"]["source"]
+    )
+    assert (
+        migrate_volumes["/run/secrets"]["source"]
+        != worker_volumes["/run/secrets"]["source"]
+    )
     assert services["control-api"]["environment"]["VONK_DEPLOYMENT_BRANCH"] == "deploy"
     assert services["control-worker"]["environment"]["VONK_DEPLOYMENT_BRANCH"] == (
         "deploy"
@@ -210,21 +478,21 @@ def test_image_template_uses_the_database_only_migration_projection() -> None:
     api_volumes = _volumes_by_target(services["control-api"])
     worker_volumes = _volumes_by_target(services["control-worker"])
 
-    assert initializer["environment"]["VONK_DEV_MIGRATE_SECRET_ROOT"] == "/migrate-secrets"
-    assert init_volumes["/migrate-secrets"]["source"].endswith(
-        "dev-migrate-secrets"
+    assert (
+        initializer["environment"]["VONK_DEV_MIGRATE_SECRET_ROOT"] == "/migrate-secrets"
     )
-    assert migrate_volumes["/run/secrets"]["source"].endswith(
-        "dev-migrate-secrets"
-    )
+    assert init_volumes["/migrate-secrets"]["source"].endswith("dev-migrate-secrets")
+    assert migrate_volumes["/run/secrets"]["source"].endswith("dev-migrate-secrets")
     assert migrate_volumes["/run/secrets"]["read_only"] is True
     assert services["migrate"].get("secrets", []) == []
-    assert migrate_volumes["/run/secrets"]["source"] != api_volumes["/run/secrets"][
-        "source"
-    ]
-    assert migrate_volumes["/run/secrets"]["source"] != worker_volumes[
-        "/run/secrets"
-    ]["source"]
+    assert (
+        migrate_volumes["/run/secrets"]["source"]
+        != api_volumes["/run/secrets"]["source"]
+    )
+    assert (
+        migrate_volumes["/run/secrets"]["source"]
+        != worker_volumes["/run/secrets"]["source"]
+    )
     assert services["control-api"]["environment"]["VONK_DEPLOYMENT_BRANCH"] == "deploy"
     assert services["control-worker"]["environment"]["VONK_DEPLOYMENT_BRANCH"] == (
         "deploy"
@@ -263,10 +531,19 @@ def test_image_template_gates_mutation_on_one_ordered_fail_closed_cohort() -> No
             "required": True,
         }
     }
-    for service_name in ("dev-init", "migrate"):
-        assert services[service_name]["depends_on"]["dev-cohort-verify"][
-            "condition"
-        ] == "service_completed_successfully"
+    assert (
+        services["dev-repository-init"]["depends_on"]["dev-cohort-verify"]["condition"]
+        == "service_completed_successfully"
+    )
+    assert (
+        services["dev-init"]["depends_on"]["dev-repository-init"]["condition"]
+        == "service_completed_successfully"
+    )
+    for dependency in ("dev-cohort-verify", "dev-init"):
+        assert (
+            services["migrate"]["depends_on"][dependency]["condition"]
+            == "service_completed_successfully"
+        )
 
     for service_name in gate_names:
         service = services[service_name]
@@ -362,6 +639,10 @@ def _script_repository(tmp_path: Path) -> tuple[Path, Path]:
     shutil.copy2(SCRIPT, local_script)
     if SECRETS_HELPER.exists():
         shutil.copy2(SECRETS_HELPER, local_script.parent / SECRETS_HELPER.name)
+    shutil.copy2(
+        RUNTIME_SECRETS_HELPER,
+        local_script.parent / RUNTIME_SECRETS_HELPER.name,
+    )
     local_compose = repository / "deploy/compose/compose.dev.images.yaml"
     local_compose.parent.mkdir(parents=True)
     shutil.copy2(IMAGE_TEMPLATE, local_compose)
@@ -388,53 +669,68 @@ def _fake_docker(tmp_path: Path) -> Path:
     fake_docker.write_text(
         "#!/usr/bin/env bash\n"
         "set -e\n"
-        "touch \"$VONK_TEST_CAPTURE_DIR/environment\"\n"
-        "printf '%s\\n' \"$@\" > \"$VONK_TEST_CAPTURE_DIR/arguments\"\n"
-        "if [[ \"${1:-}\" == image ]]; then\n"
-        "  if [[ \"${VONK_TEST_IMAGE_INSPECT_EXIT:-0}\" -ne 0 ]]; then\n"
-        "    exit \"$VONK_TEST_IMAGE_INSPECT_EXIT\"\n"
+        'touch "$VONK_TEST_CAPTURE_DIR/environment"\n'
+        'printf \'%s\\n\' "$@" > "$VONK_TEST_CAPTURE_DIR/arguments"\n'
+        'if [[ "${1:-}" == image ]]; then\n'
+        '  if [[ "${VONK_TEST_IMAGE_INSPECT_EXIT:-0}" -ne 0 ]]; then\n'
+        '    exit "$VONK_TEST_IMAGE_INSPECT_EXIT"\n'
         "  fi\n"
-        "  case \"${*: -1}\" in\n"
+        '  case "${*: -1}" in\n'
         "    *api*) printf 'sha256:%064d\\n' 0 ;;\n"
         "    *worker*) printf 'sha256:%064d\\n' 1 ;;\n"
         "  esac\n"
         "  exit 0\n"
         "fi\n"
         "file_number=0\n"
-        "while [[ \"$#\" -gt 0 ]]; do\n"
-        "  if [[ \"$1\" == --file ]]; then\n"
+        'while [[ "$#" -gt 0 ]]; do\n'
+        '  if [[ "$1" == --file ]]; then\n'
         "    file_number=$((file_number + 1))\n"
-        "    if [[ \"$file_number\" -eq 1 ]]; then\n"
-        "      cp \"$2\" \"$VONK_TEST_CAPTURE_DIR/rendered-compose.yaml\"\n"
+        '    if [[ "$file_number" -eq 1 ]]; then\n'
+        '      cp "$2" "$VONK_TEST_CAPTURE_DIR/rendered-compose.yaml"\n'
         "    else\n"
-        "      cp \"$2\" \"$VONK_TEST_CAPTURE_DIR/rendered-overlay.yaml\"\n"
+        '      cp "$2" "$VONK_TEST_CAPTURE_DIR/rendered-overlay.yaml"\n'
+        "      source_origin=$(awk '/source: .*source-origin[.]git$/ {print $2}' \"$2\")\n"
+        "      find \"$source_origin\" -printf '%y %m\\n' | sort -u > "
+        '"$VONK_TEST_CAPTURE_DIR/source-origin-modes"\n'
         "    fi\n"
         "    shift 2\n"
         "    continue\n"
         "  fi\n"
         "  shift\n"
         "done\n"
-        "if [[ \" $* \" == *\" up \"* && \" $* \" != *\" --wait \"* ]]; then\n"
+        'if [[ " $* " == *" up "* && " $* " != *" --wait "* ]]; then\n'
         "  exit 89\n"
         "fi\n"
-        "exit \"${VONK_TEST_DOCKER_EXIT:-0}\"\n",
+        'exit "${VONK_TEST_DOCKER_EXIT:-0}"\n',
         encoding="utf-8",
     )
     fake_docker.chmod(0o755)
     return fake_bin
 
 
-def _existing_secrets(tmp_path: Path) -> Path:
+def _existing_secrets(
+    tmp_path: Path, *, management_cidrs: str = "127.0.0.1/32"
+) -> Path:
     secrets = tmp_path / "secrets"
-    secrets.mkdir(mode=0o700)
-    for name in (
-        "postgres-password",
-        "database-url",
-        "git-signing-key",
-        "git-signing-key.pub",
-    ):
-        (secrets / name).write_text("already-created\n", encoding="utf-8")
-        (secrets / name).chmod(0o600)
+    subprocess.run(
+        (
+            "python3",
+            str(RUNTIME_SECRETS_HELPER),
+            "--secrets-dir",
+            str(secrets),
+            "--management-cidrs",
+            management_cidrs,
+            "--enroll-hostname",
+            "enroll.vonk-forge.lan",
+            "--agent-hostname",
+            "agents.vonk-forge.lan",
+            "--registry-hostname",
+            "registry.vonk-forge.lan",
+        ),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
     return secrets
 
 
@@ -447,6 +743,7 @@ def _run_dev_compose(
     *arguments: str,
     docker_exit: int = 0,
     image_inspect_exit: int = 0,
+    management_cidrs: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     environment = os.environ | {
         "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
@@ -455,7 +752,10 @@ def _run_dev_compose(
         "VONK_TEST_CAPTURE_DIR": str(capture),
         "VONK_TEST_DOCKER_EXIT": str(docker_exit),
         "VONK_TEST_IMAGE_INSPECT_EXIT": str(image_inspect_exit),
+        "VONK_DEV_PROJECT_NAME": "vonk-test-stack",
     }
+    if management_cidrs is not None:
+        environment["VONK_DEV_MANAGEMENT_CIDRS"] = management_cidrs
     return subprocess.run(
         (str(local_script), *arguments),
         cwd=repository,
@@ -494,21 +794,116 @@ def test_dev_compose_script_renders_the_image_only_graph(tmp_path: Path) -> None
     assert expected_commit in rendered
     assert "__VONK_" not in rendered
     assert "build:" not in rendered
-    assert "VONK_DEV_LOCAL_ACCEPTANCE" not in rendered
-    assert "file:///source-origin" not in rendered
-    assert str(repository) not in rendered
     overlay = (capture / "rendered-overlay.yaml").read_text(encoding="utf-8")
-    assert "VONK_DEV_API_IMAGE: vonk-forge-api@sha256:" in overlay
-    assert "VONK_DEV_WORKER_IMAGE: vonk-forge-worker@sha256:" in overlay
-    assert "VONK_CONTROL_PROCESS_IMAGE: vonk-forge-api@sha256:" in overlay
-    assert "VONK_CONTROL_PROCESS_IMAGE: vonk-forge-worker@sha256:" in overlay
+    assert "VONK_DEV_LOCAL_ACCEPTANCE: '1'" in overlay
+    assert "VONK_DEV_REPOSITORY_URL: file:///source-origin" in overlay
+    assert "/source-origin" in overlay
+    assert str(repository) not in rendered
+    assert "VONK_DEV_API_IMAGE:" not in overlay
+    assert "VONK_DEV_WORKER_IMAGE:" not in overlay
+    assert "VONK_CONTROL_PROCESS_IMAGE" not in overlay
+    compose_arguments = _captured_compose_arguments(capture)
+    assert compose_arguments[compose_arguments.index("--project-name") + 1] == (
+        "vonk-test-stack"
+    )
+    origin_modes = (
+        (capture / "source-origin-modes").read_text(encoding="utf-8").splitlines()
+    )
+    assert all(mode in {"d 755", "f 444", "f 644", "f 755"} for mode in origin_modes)
+
+
+def test_dev_compose_script_accepts_the_exact_checked_out_commit(
+    tmp_path: Path,
+) -> None:
+    repository, local_script = _script_repository(tmp_path)
+    (repository / "feature.txt").write_text("feature\n", encoding="utf-8")
+    subprocess.run(("git", "-C", str(repository), "add", "feature.txt"), check=True)
+    subprocess.run(
+        ("git", "-C", str(repository), "commit", "-qm", "feature"), check=True
+    )
+    expected_commit = subprocess.run(
+        ("git", "-C", str(repository), "rev-parse", "HEAD"),
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    secrets = _existing_secrets(tmp_path)
+    fake_bin = _fake_docker(tmp_path)
+    capture = tmp_path / "capture"
+    capture.mkdir()
+
+    result = _run_dev_compose(
+        repository, local_script, fake_bin, secrets, capture, "config"
+    )
+
+    assert result.returncode == 0
+    rendered = (capture / "rendered-compose.yaml").read_text(encoding="utf-8")
+    assert expected_commit in rendered
+
+
+def test_dev_compose_script_accepts_explicit_local_management_cidrs(
+    tmp_path: Path,
+) -> None:
+    management_cidrs = "127.0.0.0/8,172.16.0.0/12"
+    repository, local_script = _script_repository(tmp_path)
+    secrets = _existing_secrets(tmp_path, management_cidrs=management_cidrs)
+    fake_bin = _fake_docker(tmp_path)
+    capture = tmp_path / "capture"
+    capture.mkdir()
+
+    result = _run_dev_compose(
+        repository,
+        local_script,
+        fake_bin,
+        secrets,
+        capture,
+        "config",
+        management_cidrs=management_cidrs,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    "project_name",
+    ("../escape", "Uppercase", "a" * 64, "two words", ""),
+)
+def test_dev_compose_script_rejects_unsafe_project_names(
+    tmp_path: Path, project_name: str
+) -> None:
+    repository, local_script = _script_repository(tmp_path)
+    secrets = _existing_secrets(tmp_path)
+    fake_bin = _fake_docker(tmp_path)
+    capture = tmp_path / "capture"
+    capture.mkdir()
+    environment = os.environ | {
+        "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
+        "VONK_DEV_SECRETS_DIR": str(secrets),
+        "VONK_DEV_PROJECT_NAME": project_name,
+        "VONK_TEST_CAPTURE_DIR": str(capture),
+    }
+
+    result = subprocess.run(
+        (str(local_script), "config"),
+        cwd=repository,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert "project name" in result.stderr
 
 
 @pytest.mark.parametrize(
     ("arguments", "expected_tail"),
     (
         ((), ("up", "-d", "--wait", "--pull", "never")),
-        (("up", "-d", "control-api"), ("up", "-d", "control-api", "--wait", "--pull", "never")),
+        (
+            ("up", "-d", "control-api"),
+            ("up", "-d", "control-api", "--wait", "--pull", "never"),
+        ),
         (("config",), ("config",)),
     ),
 )
@@ -657,12 +1052,12 @@ def test_dev_compose_rejects_development_directory_symlink_swapped_in_before_saf
     swap_dev.write_text(
         "#!/usr/bin/env bash\n"
         "set -e\n"
-        "if [[ ! -e \"$VONK_TEST_CAPTURE_DIR/dev-swapped\" ]]; then\n"
-        "  touch \"$VONK_TEST_CAPTURE_DIR/dev-swapped\"\n"
-        "  mv -- \"$VONK_TEST_REPOSITORY_ROOT/.dev\" "
-        "\"$VONK_TEST_REPOSITORY_ROOT/.dev.pinned\"\n"
-        "  ln -s -- \"$VONK_TEST_REPOSITORY_ROOT/.dev.pinned\" "
-        "\"$VONK_TEST_REPOSITORY_ROOT/.dev\"\n"
+        'if [[ ! -e "$VONK_TEST_CAPTURE_DIR/dev-swapped" ]]; then\n'
+        '  touch "$VONK_TEST_CAPTURE_DIR/dev-swapped"\n'
+        '  mv -- "$VONK_TEST_REPOSITORY_ROOT/.dev" '
+        '"$VONK_TEST_REPOSITORY_ROOT/.dev.pinned"\n'
+        '  ln -s -- "$VONK_TEST_REPOSITORY_ROOT/.dev.pinned" '
+        '"$VONK_TEST_REPOSITORY_ROOT/.dev"\n'
         "fi\n",
         encoding="utf-8",
     )
@@ -671,10 +1066,10 @@ def test_dev_compose_rejects_development_directory_symlink_swapped_in_before_saf
     fake_stat.write_text(
         "#!/usr/bin/env bash\n"
         "set -e\n"
-        "output=$(" + real_stat + " \"$@\")\n"
-        "if [[ \" $* \" == *\" $VONK_TEST_REPOSITORY_ROOT/.dev \"* ]] "
-        "&& [[ \" $* \" == *\" %d:%i \"* ]]; then\n"
-        "  \"$VONK_TEST_CAPTURE_DIR/swap-dev\"\n"
+        "output=$(" + real_stat + ' "$@")\n'
+        'if [[ " $* " == *" $VONK_TEST_REPOSITORY_ROOT/.dev "* ]] '
+        '&& [[ " $* " == *" %d:%i "* ]]; then\n'
+        '  "$VONK_TEST_CAPTURE_DIR/swap-dev"\n'
         "fi\n"
         "printf '%s\\n' \"$output\"\n",
         encoding="utf-8",
@@ -684,8 +1079,8 @@ def test_dev_compose_rejects_development_directory_symlink_swapped_in_before_saf
     fake_python.write_text(
         "#!/usr/bin/env bash\n"
         "set -e\n"
-        "\"$VONK_TEST_CAPTURE_DIR/swap-dev\"\n"
-        f"exec {real_python} \"$@\"\n",
+        '"$VONK_TEST_CAPTURE_DIR/swap-dev"\n'
+        f'exec {real_python} "$@"\n',
         encoding="utf-8",
     )
     fake_python.chmod(0o755)
@@ -760,7 +1155,7 @@ def test_dev_compose_rejects_managed_secret_file_symlinks(
         assert outside.read_text(encoding="utf-8") == "preserve\n"
 
 
-def test_dev_compose_rolls_back_private_key_if_public_key_is_swapped_during_install(
+def test_dev_compose_uses_the_python_runtime_generator_without_ssh_keygen(
     tmp_path: Path,
 ) -> None:
     repository, local_script = _script_repository(tmp_path)
@@ -768,18 +1163,10 @@ def test_dev_compose_rolls_back_private_key_if_public_key_is_swapped_during_inst
     secrets.mkdir(parents=True, mode=0o700)
     secrets.parent.chmod(0o700)
     secrets.chmod(0o700)
-    outside = tmp_path / "outside-public-key"
-    outside.write_text("preserve\n", encoding="utf-8")
     fake_bin = _fake_docker(tmp_path)
-    real_ssh_keygen = shutil.which("ssh-keygen")
-    assert real_ssh_keygen is not None
     fake_ssh_keygen = fake_bin / "ssh-keygen"
     fake_ssh_keygen.write_text(
-        "#!/usr/bin/env bash\n"
-        "set -e\n"
-        f"{real_ssh_keygen} \"$@\"\n"
-        "ln -s -- \"$VONK_TEST_OUTSIDE_PUBLIC_KEY\" "
-        "\"$VONK_TEST_SECRETS_DIR/git-signing-key.pub\"\n",
+        "#!/usr/bin/env bash\nexit 97\n",
         encoding="utf-8",
     )
     fake_ssh_keygen.chmod(0o755)
@@ -788,8 +1175,6 @@ def test_dev_compose_rolls_back_private_key_if_public_key_is_swapped_during_inst
     environment = os.environ | {
         "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
         "VONK_TEST_CAPTURE_DIR": str(capture),
-        "VONK_TEST_OUTSIDE_PUBLIC_KEY": str(outside),
-        "VONK_TEST_SECRETS_DIR": str(secrets),
     }
 
     result = subprocess.run(
@@ -801,11 +1186,11 @@ def test_dev_compose_rolls_back_private_key_if_public_key_is_swapped_during_inst
         text=True,
     )
 
-    assert result.returncode != 0
-    assert not (capture / "environment").exists()
-    assert not (secrets / "git-signing-key").exists()
-    assert (secrets / "git-signing-key.pub").is_symlink()
-    assert outside.read_text(encoding="utf-8") == "preserve\n"
+    assert result.returncode == 0
+    assert (capture / "environment").exists()
+    assert (secrets / "git-signing-key").is_file()
+    assert (secrets / "git-signing-key.pub").is_file()
+    assert len(tuple(secrets.iterdir())) == 15
 
 
 def test_dev_compose_rejects_an_existing_private_key_without_its_public_mate(

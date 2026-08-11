@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import stat
 import subprocess
 from pathlib import Path
@@ -64,6 +65,9 @@ def _set_main_environment(
         "api": tmp_path / "api",
         "migrate": tmp_path / "migrate",
         "worker": tmp_path / "worker",
+        "caddy": tmp_path / "caddy",
+        "litellm": tmp_path / "litellm",
+        "runtime_config": tmp_path / "runtime-config",
         "identity": tmp_path / "identity",
         "state": tmp_path / "state",
         "routes": tmp_path / "routes",
@@ -76,6 +80,9 @@ def _set_main_environment(
         ("VONK_DEV_API_SECRET_ROOT", str(paths["api"])),
         ("VONK_DEV_MIGRATE_SECRET_ROOT", str(paths["migrate"])),
         ("VONK_DEV_WORKER_SECRET_ROOT", str(paths["worker"])),
+        ("VONK_DEV_CADDY_SECRET_ROOT", str(paths["caddy"])),
+        ("VONK_DEV_LITELLM_SECRET_ROOT", str(paths["litellm"])),
+        ("VONK_DEV_RUNTIME_CONFIG_ROOT", str(paths["runtime_config"])),
         ("VONK_CONTROL_IDENTITY_ROOT", str(paths["identity"])),
         ("VONK_STATE_PATH", str(paths["state"])),
         ("VONK_ROUTE_ROOT", str(paths["routes"])),
@@ -176,12 +183,15 @@ def test_all_git_subprocesses_drop_root_credentials_and_use_a_sanitized_environm
     monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.fsmonitor")
     monkeypatch.setenv("GIT_CONFIG_VALUE_0", str(tmp_path / "root-command"))
 
-    assert dev_init._git(
-        tmp_path,
-        ("rev-parse", "HEAD"),
-        action="inspect test repository",
-        local_origin=True,
-    ) == "accepted"
+    assert (
+        dev_init._git(
+            tmp_path,
+            ("rev-parse", "HEAD"),
+            action="inspect test repository",
+            local_origin=True,
+        )
+        == "accepted"
+    )
     assert dev_init._is_ancestor(
         tmp_path,
         "a" * 40,
@@ -203,6 +213,55 @@ def test_all_git_subprocesses_drop_root_credentials_and_use_a_sanitized_environm
             "HOME": "/nonexistent/vonk-control",
             "PATH": os.defpath,
         }
+
+
+def test_local_clone_marks_only_its_exact_read_only_origin_as_safe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[str, ...]] = []
+
+    def capture_run(
+        command: tuple[str, ...], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout="")
+
+    origin = tmp_path / "origin.git"
+    monkeypatch.setattr(dev_init.subprocess, "run", capture_run)
+
+    dev_init._git(
+        None,
+        ("clone", origin.as_uri(), str(tmp_path / "destination")),
+        action="clone test repository",
+        local_origin=True,
+        safe_directory=origin,
+    )
+
+    assert f"safe.directory={origin}" in calls[0]
+    assert "safe.directory=*" not in calls[0]
+
+
+def test_local_repository_initialization_scopes_upload_pack_to_its_exact_origin(
+    tmp_path: Path, local_acceptance: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    origin, _publisher, repository_url, expected = _origin(tmp_path)
+    commands: list[tuple[str, ...]] = []
+    real_run = dev_init.subprocess.run
+
+    def capture_run(command: tuple[str, ...], **kwargs: object):
+        commands.append(command)
+        return real_run(command, **kwargs)
+
+    monkeypatch.setattr(dev_init.subprocess, "run", capture_run)
+
+    initialize_repository(tmp_path / "repository", repository_url, expected)
+
+    clone = next(command for command in commands if "clone" in command)
+    assert f"--upload-pack=git -c safe.directory={origin} upload-pack" in clone
+    assert all("safe.directory=*" not in argument for argument in clone)
+    fetch = next(command for command in commands if "fetch" in command)
+    assert f"--upload-pack=git -c safe.directory={origin} upload-pack" in fetch
+    assert all("safe.directory=*" not in argument for argument in fetch)
 
 
 def test_git_subprocesses_do_not_request_a_credential_change_when_not_root(
@@ -277,11 +336,7 @@ def test_existing_repository_transfers_to_git_identity_before_git_and_restores_a
         event[0] == "owner" and event[2:] == (65534, 65534)
         for event in events[:first_git]
     )
-    assert all(
-        event[1:] == (65534, 65534, ())
-        for event in events
-        if event[0] == "git"
-    )
+    assert all(event[1:] == (65534, 65534, ()) for event in events if event[0] == "git")
     assert any(
         event[0] == "owner" and event[2:] == (10001, 10001)
         for event in events[last_git + 1 :]
@@ -435,12 +490,20 @@ def test_repository_ownership_walk_rejects_a_listed_directory_swapped_for_extern
     assert external_secret.read_text(encoding="utf-8") == "preserve\n"
     external_after = external.stat()
     secret_after = external_secret.stat()
-    assert (external_after.st_uid, external_after.st_gid, stat.S_IMODE(external_after.st_mode)) == (
+    assert (
+        external_after.st_uid,
+        external_after.st_gid,
+        stat.S_IMODE(external_after.st_mode),
+    ) == (
         external_before.st_uid,
         external_before.st_gid,
         stat.S_IMODE(external_before.st_mode),
     )
-    assert (secret_after.st_uid, secret_after.st_gid, stat.S_IMODE(secret_after.st_mode)) == (
+    assert (
+        secret_after.st_uid,
+        secret_after.st_gid,
+        stat.S_IMODE(secret_after.st_mode),
+    ) == (
         secret_before.st_uid,
         secret_before.st_gid,
         stat.S_IMODE(secret_before.st_mode),
@@ -485,9 +548,7 @@ def test_public_origin_policy_accepts_only_the_canonical_repository_url(
     monkeypatch.delenv("VONK_DEV_LOCAL_ACCEPTANCE", raising=False)
 
     assert (
-        dev_init._origin_is_allowed(
-            "https://github.com/CarstVaartjes/vonk-forge.git"
-        )
+        dev_init._origin_is_allowed("https://github.com/CarstVaartjes/vonk-forge.git")
         is False
     )
     with pytest.raises(DevInitError, match="origin"):
@@ -709,26 +770,239 @@ def test_initialize_repository_rejects_a_rollback_commit(
 
 def _secret_source(root: Path) -> Path:
     root.mkdir()
-    (root / "database-url").write_bytes(b"postgresql://vonk:secret@postgres/vonk\n")
-    (root / "git-signing-key").write_bytes(b"-----BEGIN OPENSSH PRIVATE KEY-----\nkey\n")
+    contents = {
+        "database-url": b"postgresql://vonk:secret@postgres/vonk\n",
+        "git-signing-key": b"-----BEGIN OPENSSH PRIVATE KEY-----\nkey\n",
+        "agent-ca-certificate": b"agent-ca-certificate-sentinel\n",
+        "agent-ca-key": b"agent-ca-private-key-sentinel\n",
+        "agent-proxy-auth": b"agent-proxy-auth-sentinel-000000000000\n",
+        "controller-ca": b"controller-ca-public-sentinel\n",
+        "controller-server-certificate": b"controller-server-certificate-sentinel\n",
+        "controller-server-key": b"controller-server-private-key-sentinel\n",
+        "litellm-master-key": b"litellm-master-key-sentinel\n",
+        "litellm-upstream-key": b"litellm-upstream-key-sentinel\n",
+        "management-cidrs": b"192.0.2.0/24\n2001:db8::/64\n",
+        "token-signing-key": b"token-signing-key-sentinel-00000000\n",
+    }
+    for name, content in contents.items():
+        (root / name).write_bytes(content)
     return root
 
 
-def test_stage_runtime_secrets_creates_disjoint_service_projections(tmp_path: Path) -> None:
+def _visible_bytes(root: Path) -> set[bytes]:
+    return {path.read_bytes() for path in root.iterdir() if path.is_file()}
+
+
+def _simulate_root_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    metadata: dict[Path, tuple[int, int, int]],
+) -> list[tuple[Path, int, int]]:
+    real_fstat = dev_init.os.fstat
+    ownership: list[tuple[Path, int, int]] = []
+
+    def root_metadata(descriptor: int) -> os.stat_result:
+        actual = real_fstat(descriptor)
+        try:
+            path = Path(os.readlink(f"/proc/self/fd/{descriptor}"))
+        except OSError:
+            return actual
+        override = metadata.get(path)
+        if override is None:
+            return actual
+        uid, gid, mode = override
+        values = list(actual)
+        values[0] = (actual.st_mode & ~0o7777) | mode
+        values[4] = uid
+        values[5] = gid
+        return os.stat_result(values)
+
+    def record_chown(descriptor: int, uid: int, gid: int) -> None:
+        path = Path(os.readlink(f"/proc/self/fd/{descriptor}"))
+        ownership.append((path, uid, gid))
+
+    monkeypatch.setattr(dev_init.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(dev_init.os, "fstat", root_metadata)
+    monkeypatch.setattr(dev_init.os, "fchown", record_chown)
+    return ownership
+
+
+def test_stage_runtime_secrets_projects_exact_disjoint_service_authority(
+    tmp_path: Path,
+) -> None:
+    source = _secret_source(tmp_path / "source")
+    (source / "database-url").write_bytes(
+        b"postgresql+psycopg://vonk:database-secret@postgres/vonk?sslmode=disable\n"
+    )
+    (source / "git-signing-key").write_bytes(b"git-signing-private-sentinel\n")
+    roots = {
+        name: tmp_path / name
+        for name in ("api", "migrate", "worker", "caddy", "litellm")
+    }
+
+    stage_runtime_secrets(
+        source,
+        roots["api"],
+        roots["migrate"],
+        roots["worker"],
+        roots["caddy"],
+        roots["litellm"],
+    )
+
+    assert {path.name for path in roots["api"].iterdir()} == {
+        "admin-grant-private-key",
+        "agent-ca-certificate",
+        "agent-ca-key",
+        "agent-proxy-auth",
+        "database-url",
+        "git-signing-key",
+        "management-cidrs",
+        "token-signing-key",
+        "worker-api-token",
+    }
+    assert {path.name for path in roots["worker"].iterdir()} == {
+        "database-url",
+        "management-cidrs",
+        "worker-api-token",
+    }
+    assert {path.name for path in roots["migrate"].iterdir()} == {"database-url"}
+    assert {path.name for path in roots["caddy"].iterdir()} == {
+        "agent-ca-certificate",
+        "agent-proxy-auth",
+        "controller-server-certificate",
+        "controller-server-key",
+        "management-cidrs",
+    }
+    assert {path.name for path in roots["litellm"].iterdir()} == {
+        "litellm-master-key",
+        "litellm-upstream-key",
+    }
+    assert (roots["api"] / "worker-api-token").read_bytes() == (
+        roots["worker"] / "worker-api-token"
+    ).read_bytes()
+    for root in roots.values():
+        assert stat.S_IMODE(root.stat().st_mode) == 0o550
+        assert all(
+            stat.S_IMODE(path.stat().st_mode) == 0o400 for path in root.iterdir()
+        )
+
+    visible = {name: _visible_bytes(root) for name, root in roots.items()}
+    api_private_sentinels = {
+        b"git-signing-private-sentinel\n",
+        b"agent-ca-private-key-sentinel\n",
+    }
+    assert not api_private_sentinels & visible["worker"]
+    assert not api_private_sentinels & visible["migrate"]
+    assert not api_private_sentinels & visible["caddy"]
+    assert not api_private_sentinels & visible["litellm"]
+    assert b"agent-ca-private-key-sentinel\n" not in visible["caddy"]
+    assert b"controller-server-private-key-sentinel\n" not in visible["api"]
+    assert b"litellm-master-key-sentinel\n" not in visible["api"]
+    assert b"litellm-upstream-key-sentinel\n" not in visible["worker"]
+
+
+def test_stage_runtime_secrets_assigns_exact_service_owners_when_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = _secret_source(tmp_path / "source")
+    roots = {
+        name: tmp_path / name
+        for name in ("api", "migrate", "worker", "caddy", "litellm")
+    }
+    expected_names = {
+        "admin-grant-private-key",
+        "agent-ca-certificate",
+        "agent-ca-key",
+        "agent-proxy-auth",
+        "controller-server-certificate",
+        "controller-server-key",
+        "database-url",
+        "git-signing-key",
+        "litellm-master-key",
+        "litellm-upstream-key",
+        "management-cidrs",
+        "token-signing-key",
+        "worker-api-token",
+    }
+    owners: dict[tuple[str, str], tuple[int, int]] = {}
+
+    def record_owner(descriptor: int, uid: int, gid: int) -> None:
+        path = Path(os.readlink(f"/proc/self/fd/{descriptor}"))
+        if not path.name.startswith("."):
+            return
+        projected_name = next(
+            (name for name in expected_names if path.name.startswith(f".{name}.")),
+            None,
+        )
+        if projected_name is not None:
+            owners[(path.parent.name, projected_name)] = (uid, gid)
+
+    monkeypatch.setattr(dev_init.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(dev_init.os, "fchown", record_owner)
+
+    stage_runtime_secrets(
+        source,
+        roots["api"],
+        roots["migrate"],
+        roots["worker"],
+        roots["caddy"],
+        roots["litellm"],
+    )
+
+    assert set(owners.values()) == {
+        (10000, 10000),
+        (10001, 10001),
+        (10002, 10001),
+    }
+    assert all(
+        owner == (10000, 10000)
+        for (root, _name), owner in owners.items()
+        if root == "caddy"
+    )
+    assert all(
+        owner == (10002, 10001)
+        for (root, _name), owner in owners.items()
+        if root == "litellm"
+    )
+    assert all(
+        owner == (10001, 10001)
+        for (root, _name), owner in owners.items()
+        if root in {"api", "migrate", "worker"}
+    )
+
+
+def test_stage_runtime_secrets_creates_disjoint_service_projections(
+    tmp_path: Path,
+) -> None:
     source = _secret_source(tmp_path / "source")
     api_root = tmp_path / "api"
     migrate_root = tmp_path / "migrate"
     worker_root = tmp_path / "worker"
+    caddy_root = tmp_path / "caddy"
+    litellm_root = tmp_path / "litellm"
 
-    stage_runtime_secrets(source, api_root, migrate_root, worker_root)
+    stage_runtime_secrets(
+        source,
+        api_root,
+        migrate_root,
+        worker_root,
+        caddy_root,
+        litellm_root,
+    )
 
     assert {path.name for path in api_root.iterdir()} == {
         "admin-grant-private-key",
+        "agent-ca-certificate",
+        "agent-ca-key",
+        "agent-proxy-auth",
         "database-url",
         "git-signing-key",
+        "management-cidrs",
+        "token-signing-key",
+        "worker-api-token",
     }
     assert {path.name for path in worker_root.iterdir()} == {
         "database-url",
+        "management-cidrs",
         "worker-api-token",
     }
     assert {path.name for path in migrate_root.iterdir()} == {"database-url"}
@@ -742,11 +1016,17 @@ def test_stage_runtime_secrets_creates_disjoint_service_projections(tmp_path: Pa
         b"postgresql://vonk:secret@postgres/vonk\n"
     )
     assert (api_root / "git-signing-key").read_bytes().startswith(b"-----BEGIN")
-    assert (api_root / "admin-grant-private-key").read_bytes().startswith(b"-----BEGIN PRIVATE KEY-----")
+    assert (
+        (api_root / "admin-grant-private-key")
+        .read_bytes()
+        .startswith(b"-----BEGIN PRIVATE KEY-----")
+    )
     assert len((worker_root / "worker-api-token").read_text(encoding="ascii")) >= 32
     assert stat.S_IMODE((api_root / "admin-grant-private-key").stat().st_mode) == 0o400
     assert stat.S_IMODE((worker_root / "worker-api-token").stat().st_mode) == 0o400
-    assert not (api_root / "worker-api-token").exists()
+    assert (api_root / "worker-api-token").read_bytes() == (
+        worker_root / "worker-api-token"
+    ).read_bytes()
     assert not (migrate_root / "git-signing-key").exists()
     assert not (migrate_root / "admin-grant-private-key").exists()
     assert not (migrate_root / "worker-api-token").exists()
@@ -764,7 +1044,12 @@ def test_stage_runtime_secrets_rejects_symlink_inputs_and_projection_roots(
 
     with pytest.raises(DevInitError, match="source"):
         stage_runtime_secrets(
-            source, tmp_path / "api", tmp_path / "migrate", tmp_path / "worker"
+            source,
+            tmp_path / "api",
+            tmp_path / "migrate",
+            tmp_path / "worker",
+            tmp_path / "caddy",
+            tmp_path / "litellm",
         )
 
     source = _secret_source(tmp_path / "safe-source")
@@ -773,7 +1058,14 @@ def test_stage_runtime_secrets_rejects_symlink_inputs_and_projection_roots(
     api_root = tmp_path / "api"
     api_root.symlink_to(actual_api, target_is_directory=True)
     with pytest.raises(DevInitError, match="projection"):
-        stage_runtime_secrets(source, api_root, tmp_path / "migrate", tmp_path / "worker")
+        stage_runtime_secrets(
+            source,
+            api_root,
+            tmp_path / "migrate",
+            tmp_path / "worker",
+            tmp_path / "caddy",
+            tmp_path / "litellm",
+        )
 
 
 def test_stage_runtime_secrets_rejects_parent_symlink_aliases_before_mutation(
@@ -796,7 +1088,14 @@ def test_stage_runtime_secrets_rejects_parent_symlink_aliases_before_mutation(
         (tmp_path / "api", shared, alias_parent / "shared"),
     ):
         with pytest.raises(DevInitError, match="projection"):
-            stage_runtime_secrets(source, api_root, migrate_root, worker_root)
+            stage_runtime_secrets(
+                source,
+                api_root,
+                migrate_root,
+                worker_root,
+                tmp_path / "caddy",
+                tmp_path / "litellm",
+            )
 
     after = shared.stat()
     assert sentinel.read_bytes() == b"preserve-me\n"
@@ -813,7 +1112,12 @@ def test_stage_runtime_secrets_requires_absolute_projection_paths(
 
     with pytest.raises(DevInitError, match="absolute"):
         stage_runtime_secrets(
-            source, Path("api"), tmp_path / "migrate", tmp_path / "worker"
+            source,
+            Path("api"),
+            tmp_path / "migrate",
+            tmp_path / "worker",
+            tmp_path / "caddy",
+            tmp_path / "litellm",
         )
 
     assert not (tmp_path / "api").exists()
@@ -836,7 +1140,14 @@ def test_stage_runtime_secrets_rejects_symlinked_parent_components(
         (tmp_path / "api", tmp_path / "migrate", linked_parent / "worker"),
     ):
         with pytest.raises(DevInitError, match="projection"):
-            stage_runtime_secrets(source, api_root, migrate_root, worker_root)
+            stage_runtime_secrets(
+                source,
+                api_root,
+                migrate_root,
+                worker_root,
+                tmp_path / "caddy",
+                tmp_path / "litellm",
+            )
 
     assert not any(actual_parent.iterdir())
 
@@ -848,21 +1159,35 @@ def test_stage_runtime_secrets_preserves_generated_credentials_and_refreshes_inp
     api_root = tmp_path / "api"
     migrate_root = tmp_path / "migrate"
     worker_root = tmp_path / "worker"
-    stage_runtime_secrets(source, api_root, migrate_root, worker_root)
+    caddy_root = tmp_path / "caddy"
+    litellm_root = tmp_path / "litellm"
+    stage_runtime_secrets(
+        source,
+        api_root,
+        migrate_root,
+        worker_root,
+        caddy_root,
+        litellm_root,
+    )
     admin_key = (api_root / "admin-grant-private-key").read_bytes()
     worker_token = (worker_root / "worker-api-token").read_bytes()
     (source / "database-url").write_bytes(
         b"postgresql://vonk:replacement@postgres/vonk\n"
     )
     (source / "git-signing-key").write_bytes(b"replacement-signing-key\n")
-    api_root.chmod(0o700)
-    migrate_root.chmod(0o700)
-    worker_root.chmod(0o700)
-    (api_root / "unexpected-api-authority").write_bytes(b"remove\n")
-    (migrate_root / "unexpected-migrate-authority").write_bytes(b"remove\n")
-    (worker_root / "unexpected-worker-authority").write_bytes(b"remove\n")
-
-    stage_runtime_secrets(source, api_root, migrate_root, worker_root)
+    (source / "agent-ca-certificate").write_bytes(b"replacement-agent-ca\n")
+    (source / "agent-ca-key").write_bytes(b"replacement-agent-ca-key\n")
+    (source / "controller-server-key").write_bytes(b"replacement-server-key\n")
+    (source / "litellm-master-key").write_bytes(b"replacement-litellm-key\n")
+    (source / "token-signing-key").write_bytes(b"replacement-token-signing-key-0000\n")
+    stage_runtime_secrets(
+        source,
+        api_root,
+        migrate_root,
+        worker_root,
+        caddy_root,
+        litellm_root,
+    )
 
     assert (api_root / "admin-grant-private-key").read_bytes() == admin_key
     assert (worker_root / "worker-api-token").read_bytes() == worker_token
@@ -876,16 +1201,482 @@ def test_stage_runtime_secrets_preserves_generated_credentials_and_refreshes_inp
         b"postgresql://vonk:replacement@postgres/vonk\n"
     )
     assert (api_root / "git-signing-key").read_bytes() == b"replacement-signing-key\n"
+    assert (api_root / "agent-ca-key").read_bytes() == b"replacement-agent-ca-key\n"
+    assert (caddy_root / "controller-server-key").read_bytes() == (
+        b"replacement-server-key\n"
+    )
+    assert (litellm_root / "litellm-master-key").read_bytes() == (
+        b"replacement-litellm-key\n"
+    )
+    assert (api_root / "token-signing-key").read_bytes() == (
+        b"replacement-token-signing-key-0000\n"
+    )
     assert {path.name for path in api_root.iterdir()} == {
         "admin-grant-private-key",
+        "agent-ca-certificate",
+        "agent-ca-key",
+        "agent-proxy-auth",
         "database-url",
         "git-signing-key",
+        "management-cidrs",
+        "token-signing-key",
+        "worker-api-token",
     }
     assert {path.name for path in worker_root.iterdir()} == {
         "database-url",
+        "management-cidrs",
         "worker-api-token",
     }
     assert {path.name for path in migrate_root.iterdir()} == {"database-url"}
+
+
+def test_stage_runtime_secrets_does_not_clear_canonical_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = _secret_source(tmp_path / "source")
+    roots = [
+        tmp_path / name for name in ("api", "migrate", "worker", "caddy", "litellm")
+    ]
+    stage_runtime_secrets(source, *roots)
+    admin = (roots[0] / "admin-grant-private-key").read_bytes()
+    worker = (roots[2] / "worker-api-token").read_bytes()
+    worker_metadata = (roots[2] / "worker-api-token").stat()
+
+    def fail_clear(_parent: int) -> None:
+        raise AssertionError("projection clearing must not be used")
+
+    monkeypatch.setattr(dev_init, "_clear_projection", fail_clear, raising=False)
+    stage_runtime_secrets(source, *roots)
+
+    assert (roots[0] / "admin-grant-private-key").read_bytes() == admin
+    assert (roots[2] / "worker-api-token").read_bytes() == worker
+    assert (roots[0] / "worker-api-token").read_bytes() == worker
+    worker_after = (roots[2] / "worker-api-token").stat()
+    assert (worker_after.st_dev, worker_after.st_ino) == (
+        worker_metadata.st_dev,
+        worker_metadata.st_ino,
+    )
+
+
+def test_stage_runtime_secrets_never_stages_the_worker_canonical_on_rerun(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = _secret_source(tmp_path / "source")
+    roots = [
+        tmp_path / name for name in ("api", "migrate", "worker", "caddy", "litellm")
+    ]
+    stage_runtime_secrets(source, *roots)
+    worker_token = roots[2] / "worker-api-token"
+    canonical_before = worker_token.stat()
+    operations: list[tuple[str, Path]] = []
+    real_open = dev_init.os.open
+    real_replace = dev_init.os.replace
+
+    def record_open(
+        path: str | os.PathLike[str],
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        if (
+            dir_fd is not None
+            and flags & os.O_CREAT
+            and os.fspath(path).startswith(".worker-api-token.")
+        ):
+            parent = Path(os.readlink(f"/proc/self/fd/{dir_fd}"))
+            operations.append(("temporary", parent))
+        return real_open(path, flags, mode, dir_fd=dir_fd)
+
+    def record_replace(
+        source_name: str | os.PathLike[str],
+        target_name: str | os.PathLike[str],
+        *,
+        src_dir_fd: int | None = None,
+        dst_dir_fd: int | None = None,
+    ) -> None:
+        if os.fspath(target_name) == "worker-api-token":
+            assert src_dir_fd is not None and dst_dir_fd == src_dir_fd
+            parent = Path(os.readlink(f"/proc/self/fd/{src_dir_fd}"))
+            operations.append(("replace", parent))
+        real_replace(
+            source_name,
+            target_name,
+            src_dir_fd=src_dir_fd,
+            dst_dir_fd=dst_dir_fd,
+        )
+
+    monkeypatch.setattr(dev_init.os, "open", record_open)
+    monkeypatch.setattr(dev_init.os, "replace", record_replace)
+    stage_runtime_secrets(source, *roots)
+
+    canonical_after = worker_token.stat()
+    assert (canonical_after.st_dev, canonical_after.st_ino) == (
+        canonical_before.st_dev,
+        canonical_before.st_ino,
+    )
+    assert [operation for operation in operations if operation[1] == roots[2]] == []
+    assert ("temporary", roots[0]) in operations
+    assert ("replace", roots[0]) in operations
+
+
+@pytest.mark.parametrize(
+    ("operation_name", "boundary"),
+    (
+        ("write", "write"),
+        ("fchown", "chown"),
+        ("fsync", "file-fsync"),
+        ("fsync", "directory-fsync"),
+    ),
+)
+def test_stage_runtime_secrets_faults_preserve_canonical_credentials_and_token_copies(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operation_name: str,
+    boundary: str,
+) -> None:
+    source = _secret_source(tmp_path / "source")
+    roots = [
+        tmp_path / name for name in ("api", "migrate", "worker", "caddy", "litellm")
+    ]
+    stage_runtime_secrets(source, *roots)
+    admin = (roots[0] / "admin-grant-private-key").read_bytes()
+    worker = (roots[2] / "worker-api-token").read_bytes()
+    worker_metadata = (roots[2] / "worker-api-token").stat()
+    (source / "database-url").write_bytes(
+        b"postgresql://vonk:replacement@postgres/vonk\n"
+    )
+    operation = getattr(dev_init.os, operation_name)
+    triggered = False
+
+    def fault(descriptor: int, *args: object, **kwargs: object):
+        nonlocal triggered
+        try:
+            descriptor_path = Path(os.readlink(f"/proc/self/fd/{descriptor}"))
+        except OSError:
+            descriptor_path = Path("/")
+        selected = (
+            boundary == "directory-fsync"
+            and descriptor_path == roots[0]
+            and not triggered
+        ) or (
+            boundary != "directory-fsync"
+            and descriptor_path.parent == roots[0]
+            and descriptor_path.name.startswith(".worker-api-token.")
+        )
+        if selected:
+            triggered = True
+            raise OSError("injected projection fault")
+        return operation(descriptor, *args, **kwargs)
+
+    monkeypatch.setattr(dev_init.os, operation_name, fault)
+    with pytest.raises(DevInitError, match="cannot be staged"):
+        stage_runtime_secrets(source, *roots)
+
+    assert (roots[0] / "admin-grant-private-key").read_bytes() == admin
+    assert (roots[2] / "worker-api-token").read_bytes() == worker
+    assert (roots[0] / "worker-api-token").read_bytes() == worker
+    worker_after = (roots[2] / "worker-api-token").stat()
+    assert (worker_after.st_dev, worker_after.st_ino) == (
+        worker_metadata.st_dev,
+        worker_metadata.st_ino,
+    )
+    assert triggered is True
+    assert all(stat.S_IMODE(root.stat().st_mode) == 0o550 for root in roots)
+
+
+def test_stage_runtime_secrets_initializes_pristine_docker_volume_roots(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = _secret_source(tmp_path / "source")
+    roots = [
+        tmp_path / name for name in ("api", "migrate", "worker", "caddy", "litellm")
+    ]
+    for root in roots:
+        root.mkdir(mode=0o755)
+    ownership = _simulate_root_metadata(
+        monkeypatch,
+        {root: (0, 0, 0o755) for root in roots},
+    )
+
+    stage_runtime_secrets(source, *roots)
+
+    expected_owners = {
+        roots[0]: (10001, 10001),
+        roots[1]: (10001, 10001),
+        roots[2]: (10001, 10001),
+        roots[3]: (10000, 10000),
+        roots[4]: (10002, 10001),
+    }
+    root_chowns = {
+        path: (uid, gid) for path, uid, gid in ownership if path in expected_owners
+    }
+    assert root_chowns == expected_owners
+    assert all(stat.S_IMODE(root.stat().st_mode) == 0o550 for root in roots)
+    assert (roots[2] / "worker-api-token").is_file()
+    assert (roots[0] / "worker-api-token").read_bytes() == (
+        roots[2] / "worker-api-token"
+    ).read_bytes()
+
+
+def test_stage_runtime_secrets_rejects_mixed_pristine_and_unsafe_roots_without_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = _secret_source(tmp_path / "source")
+    roots = [
+        tmp_path / name for name in ("api", "migrate", "worker", "caddy", "litellm")
+    ]
+    for root in (roots[0], roots[1], roots[3], roots[4]):
+        root.mkdir(mode=0o755)
+    ownership = _simulate_root_metadata(
+        monkeypatch,
+        {
+            roots[0]: (0, 0, 0o755),
+            roots[1]: (0, 0, 0o750),
+            roots[3]: (0, 0, 0o755),
+            roots[4]: (0, 0, 0o755),
+        },
+    )
+
+    with pytest.raises(DevInitError, match="migration projection root"):
+        stage_runtime_secrets(source, *roots)
+
+    assert ownership == []
+    assert not roots[2].exists()
+    assert all(
+        stat.S_IMODE(root.stat().st_mode) == 0o755
+        for root in (roots[0], roots[1], roots[3], roots[4])
+    )
+    assert all(
+        not any(root.iterdir()) for root in (roots[0], roots[1], roots[3], roots[4])
+    )
+
+
+@pytest.mark.parametrize("name", ("database-url", "unexpected-authority"))
+def test_stage_runtime_secrets_rejects_nonempty_docker_volume_roots_without_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    source = _secret_source(tmp_path / "source")
+    roots = [
+        tmp_path / item for item in ("api", "migrate", "worker", "caddy", "litellm")
+    ]
+    for root in roots:
+        root.mkdir(mode=0o755)
+    existing = roots[0] / name
+    existing.write_bytes(b"operator-owned\n")
+    ownership = _simulate_root_metadata(
+        monkeypatch,
+        {root: (0, 0, 0o755) for root in roots},
+    )
+
+    with pytest.raises(DevInitError, match="API projection root"):
+        stage_runtime_secrets(source, *roots)
+
+    assert ownership == []
+    assert existing.read_bytes() == b"operator-owned\n"
+    assert stat.S_IMODE(roots[0].stat().st_mode) == 0o755
+
+
+@pytest.mark.parametrize(
+    ("uid", "gid", "mode"),
+    ((1, 0, 0o755), (0, 1, 0o755), (0, 0, 0o750), (0, 0, 0o775)),
+)
+def test_stage_runtime_secrets_rejects_wrong_pristine_root_metadata(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    uid: int,
+    gid: int,
+    mode: int,
+) -> None:
+    source = _secret_source(tmp_path / "source")
+    roots = [
+        tmp_path / name for name in ("api", "migrate", "worker", "caddy", "litellm")
+    ]
+    for root in roots:
+        root.mkdir(mode=0o755)
+    ownership = _simulate_root_metadata(
+        monkeypatch,
+        {
+            root: ((uid, gid, mode) if root == roots[0] else (0, 0, 0o755))
+            for root in roots
+        },
+    )
+
+    with pytest.raises(DevInitError, match="API projection root"):
+        stage_runtime_secrets(source, *roots)
+
+    assert ownership == []
+    assert all(stat.S_IMODE(root.stat().st_mode) == 0o755 for root in roots)
+
+
+@pytest.mark.parametrize(
+    "unsafe_kind",
+    ("symlink", "fifo", "socket", "hardlink", "directory", "unknown"),
+)
+def test_stage_runtime_secrets_rejects_unsafe_entries_without_mutation(
+    tmp_path: Path, unsafe_kind: str
+) -> None:
+    source = _secret_source(tmp_path / "source")
+    roots = [
+        tmp_path / name for name in ("api", "migrate", "worker", "caddy", "litellm")
+    ]
+    stage_runtime_secrets(source, *roots)
+    api = roots[0]
+    canonical = api / "admin-grant-private-key"
+    original = canonical.read_bytes()
+    api.chmod(0o700)
+    target = api / ("unknown-authority" if unsafe_kind == "unknown" else "database-url")
+    if unsafe_kind != "unknown":
+        target.unlink()
+    outside = tmp_path / "outside"
+    bound_socket: socket.socket | None = None
+    if unsafe_kind == "symlink":
+        outside.write_bytes(b"preserve\n")
+        target.symlink_to(outside)
+    elif unsafe_kind == "fifo":
+        os.mkfifo(target)
+    elif unsafe_kind == "socket":
+        bound_socket = socket.socket(socket.AF_UNIX)
+        bound_socket.bind(str(target))
+    elif unsafe_kind == "hardlink":
+        outside.write_bytes(b"preserve\n")
+        os.link(outside, target)
+    elif unsafe_kind == "directory":
+        target.mkdir()
+    else:
+        target.write_bytes(b"preserve\n")
+    api.chmod(0o550)
+
+    try:
+        with pytest.raises(DevInitError, match="projection"):
+            stage_runtime_secrets(source, *roots)
+    finally:
+        if bound_socket is not None:
+            bound_socket.close()
+
+    assert canonical.read_bytes() == original
+    assert target.exists() or target.is_symlink()
+    assert stat.S_IMODE(api.stat().st_mode) == 0o550
+    if outside.exists():
+        assert outside.read_bytes() == b"preserve\n"
+
+
+def test_stage_runtime_secrets_rejects_wrong_root_mode_without_mutation(
+    tmp_path: Path,
+) -> None:
+    source = _secret_source(tmp_path / "source")
+    roots = [
+        tmp_path / name for name in ("api", "migrate", "worker", "caddy", "litellm")
+    ]
+    stage_runtime_secrets(source, *roots)
+    canonical = roots[0] / "admin-grant-private-key"
+    original = canonical.read_bytes()
+    roots[0].chmod(0o700)
+
+    with pytest.raises(DevInitError, match="projection"):
+        stage_runtime_secrets(source, *roots)
+
+    assert canonical.read_bytes() == original
+    assert stat.S_IMODE(roots[0].stat().st_mode) == 0o700
+
+
+def test_stage_runtime_secrets_preflights_existing_roots_before_creating_missing_roots(
+    tmp_path: Path,
+) -> None:
+    source = _secret_source(tmp_path / "source")
+    roots = [
+        tmp_path / name for name in ("api", "migrate", "worker", "caddy", "litellm")
+    ]
+    roots[1].mkdir(mode=0o700)
+
+    with pytest.raises(DevInitError, match="migration projection root"):
+        stage_runtime_secrets(source, *roots)
+
+    assert not roots[0].exists()
+    assert not roots[2].exists()
+    assert stat.S_IMODE(roots[1].stat().st_mode) == 0o700
+
+
+def test_stage_runtime_secrets_rejects_wrong_root_owner_without_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = _secret_source(tmp_path / "source")
+    roots = [
+        tmp_path / name for name in ("api", "migrate", "worker", "caddy", "litellm")
+    ]
+    stage_runtime_secrets(source, *roots)
+    canonical = roots[0] / "admin-grant-private-key"
+    original = canonical.read_bytes()
+    real_fstat = dev_init.os.fstat
+
+    def wrong_owner(descriptor: int) -> os.stat_result:
+        metadata = real_fstat(descriptor)
+        try:
+            selected = Path(os.readlink(f"/proc/self/fd/{descriptor}")) == roots[0]
+        except OSError:
+            selected = False
+        if not selected:
+            return metadata
+        values = list(metadata)
+        values[4] = metadata.st_uid + 1
+        return os.stat_result(values)
+
+    monkeypatch.setattr(dev_init.os, "fstat", wrong_owner)
+    with pytest.raises(DevInitError, match="projection"):
+        stage_runtime_secrets(source, *roots)
+
+    assert canonical.read_bytes() == original
+    assert stat.S_IMODE(roots[0].stat().st_mode) == 0o550
+
+
+@pytest.mark.parametrize("metadata_fault", ("owner", "mode"))
+def test_stage_runtime_secrets_rejects_wrong_entry_metadata_without_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, metadata_fault: str
+) -> None:
+    source = _secret_source(tmp_path / "source")
+    roots = [
+        tmp_path / name for name in ("api", "migrate", "worker", "caddy", "litellm")
+    ]
+    stage_runtime_secrets(source, *roots)
+    api = roots[0]
+    target = api / "database-url"
+    canonical = api / "admin-grant-private-key"
+    original = canonical.read_bytes()
+    if metadata_fault == "mode":
+        target.chmod(0o600)
+    else:
+        real_stat = dev_init.os.stat
+
+        def wrong_owner(
+            path: str | os.PathLike[str] | int,
+            *,
+            dir_fd: int | None = None,
+            follow_symlinks: bool = True,
+        ) -> os.stat_result:
+            metadata = real_stat(
+                path,
+                dir_fd=dir_fd,
+                follow_symlinks=follow_symlinks,
+            )
+            if path != "database-url" or dir_fd is None:
+                return metadata
+            try:
+                selected = Path(os.readlink(f"/proc/self/fd/{dir_fd}")) == api
+            except OSError:
+                selected = False
+            if not selected:
+                return metadata
+            values = list(metadata)
+            values[4] = metadata.st_uid + 1
+            return os.stat_result(values)
+
+        monkeypatch.setattr(dev_init.os, "stat", wrong_owner)
+
+    with pytest.raises(DevInitError, match="projection"):
+        stage_runtime_secrets(source, *roots)
+
+    assert canonical.read_bytes() == original
+    assert stat.S_IMODE(api.stat().st_mode) == 0o550
 
 
 @pytest.mark.parametrize(
@@ -902,16 +1693,33 @@ def test_stage_runtime_secrets_rejects_malformed_generated_credentials(
     api_root = tmp_path / "api"
     migrate_root = tmp_path / "migrate"
     worker_root = tmp_path / "worker"
-    stage_runtime_secrets(source, api_root, migrate_root, worker_root)
+    caddy_root = tmp_path / "caddy"
+    litellm_root = tmp_path / "litellm"
+    stage_runtime_secrets(
+        source,
+        api_root,
+        migrate_root,
+        worker_root,
+        caddy_root,
+        litellm_root,
+    )
     root = api_root if projection == "api" else worker_root
     root.chmod(0o700)
     target = root / name
     target.unlink()
     target.write_bytes(malformed)
     target.chmod(0o400)
+    root.chmod(0o550)
 
     with pytest.raises(DevInitError, match="generated credential"):
-        stage_runtime_secrets(source, api_root, migrate_root, worker_root)
+        stage_runtime_secrets(
+            source,
+            api_root,
+            migrate_root,
+            worker_root,
+            caddy_root,
+            litellm_root,
+        )
 
     assert target.read_bytes() == malformed
 
@@ -930,7 +1738,16 @@ def test_stage_runtime_secrets_rejects_symlinked_generated_credentials(
     api_root = tmp_path / "api"
     migrate_root = tmp_path / "migrate"
     worker_root = tmp_path / "worker"
-    stage_runtime_secrets(source, api_root, migrate_root, worker_root)
+    caddy_root = tmp_path / "caddy"
+    litellm_root = tmp_path / "litellm"
+    stage_runtime_secrets(
+        source,
+        api_root,
+        migrate_root,
+        worker_root,
+        caddy_root,
+        litellm_root,
+    )
     root = api_root if projection == "api" else worker_root
     root.chmod(0o700)
     target = root / name
@@ -938,9 +1755,17 @@ def test_stage_runtime_secrets_rejects_symlinked_generated_credentials(
     outside = tmp_path / f"outside-{name}"
     outside.write_bytes(b"must-not-be-read-or-replaced\n")
     target.symlink_to(outside)
+    root.chmod(0o550)
 
-    with pytest.raises(DevInitError, match="generated credential"):
-        stage_runtime_secrets(source, api_root, migrate_root, worker_root)
+    with pytest.raises(DevInitError, match="projection entry"):
+        stage_runtime_secrets(
+            source,
+            api_root,
+            migrate_root,
+            worker_root,
+            caddy_root,
+            litellm_root,
+        )
 
     assert target.is_symlink()
     assert outside.read_bytes() == b"must-not-be-read-or-replaced\n"
@@ -955,6 +1780,9 @@ def test_main_initializes_repository_synthetic_state_and_runtime_secrets(
     api_root = tmp_path / "api"
     migrate_root = tmp_path / "migrate"
     worker_root = tmp_path / "worker"
+    caddy_root = tmp_path / "caddy"
+    litellm_root = tmp_path / "litellm"
+    runtime_config_root = tmp_path / "runtime-config"
     identity = tmp_path / "identity"
     state = tmp_path / "state"
     routes = tmp_path / "routes"
@@ -966,6 +1794,9 @@ def test_main_initializes_repository_synthetic_state_and_runtime_secrets(
     monkeypatch.setenv("VONK_DEV_API_SECRET_ROOT", str(api_root))
     monkeypatch.setenv("VONK_DEV_MIGRATE_SECRET_ROOT", str(migrate_root))
     monkeypatch.setenv("VONK_DEV_WORKER_SECRET_ROOT", str(worker_root))
+    monkeypatch.setenv("VONK_DEV_CADDY_SECRET_ROOT", str(caddy_root))
+    monkeypatch.setenv("VONK_DEV_LITELLM_SECRET_ROOT", str(litellm_root))
+    monkeypatch.setenv("VONK_DEV_RUNTIME_CONFIG_ROOT", str(runtime_config_root))
     monkeypatch.setenv("VONK_DEV_API_IMAGE", API_IMAGE)
     monkeypatch.setenv("VONK_DEV_WORKER_IMAGE", WORKER_IMAGE)
     monkeypatch.setenv("VONK_CONTROL_IDENTITY_ROOT", str(identity))
@@ -981,9 +1812,66 @@ def test_main_initializes_repository_synthetic_state_and_runtime_secrets(
     assert generation["api_image"] == API_IMAGE
     assert generation["worker_image"] == WORKER_IMAGE
     assert (api_root / "admin-grant-private-key").is_file()
+    assert (api_root / "token-signing-key").is_file()
     assert (migrate_root / "database-url").is_file()
     assert (worker_root / "worker-api-token").is_file()
+    assert (caddy_root / "controller-server-key").is_file()
+    assert (litellm_root / "litellm-master-key").is_file()
+    assert (runtime_config_root / "Caddyfile").is_file()
     assert all(path.is_dir() for path in (state, routes, supervisor))
+
+
+def test_main_repository_phase_never_requires_or_projects_runtime_authority(
+    tmp_path: Path,
+    local_acceptance: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _origin_path, _publisher, repository_url, expected = _origin(tmp_path)
+    repository = tmp_path / "repository"
+    monkeypatch.setenv("VONK_DEV_INIT_PHASE", "repository")
+    monkeypatch.setenv("VONK_DEV_EXPECTED_COMMIT", expected)
+    monkeypatch.setenv("VONK_DEV_API_IMAGE", API_IMAGE)
+    monkeypatch.setenv("VONK_DEV_WORKER_IMAGE", WORKER_IMAGE)
+    monkeypatch.setenv("VONK_DEV_REPOSITORY_URL", repository_url)
+    monkeypatch.setenv("VONK_REPOSITORY_PATH", str(repository))
+
+    assert main() == 0
+    assert _git(repository, "rev-parse", "main") == expected
+    assert not (tmp_path / "api").exists()
+    assert not (tmp_path / "identity").exists()
+
+
+def test_main_runtime_phase_never_requires_or_mutates_a_repository(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = _set_main_environment(
+        tmp_path,
+        monkeypatch,
+        repository_url="https://must-not-be-used.invalid/repository.git",
+    )
+    paths["source"] = _secret_source(paths["source"])
+    monkeypatch.setenv("VONK_DEV_INIT_PHASE", "runtime")
+    monkeypatch.setenv("VONK_DEV_EXPECTED_COMMIT", "a" * 40)
+    monkeypatch.setenv("VONK_DEV_API_IMAGE", API_IMAGE)
+    monkeypatch.setenv("VONK_DEV_WORKER_IMAGE", WORKER_IMAGE)
+    monkeypatch.delenv("VONK_DEV_REPOSITORY_URL")
+    monkeypatch.delenv("VONK_REPOSITORY_PATH")
+
+    assert main() == 0
+    assert not paths["repository"].exists()
+    assert (paths["api"] / "token-signing-key").is_file()
+    assert (paths["runtime_config"] / "Caddyfile").is_file()
+    assert (paths["identity"] / "active.json").is_file()
+
+
+def test_main_rejects_an_unknown_initialization_phase(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("VONK_DEV_INIT_PHASE", "network-and-secrets")
+
+    with pytest.raises(DevInitError, match="VONK_DEV_INIT_PHASE"):
+        main()
 
 
 def test_main_derives_mutable_repository_and_projection_identity_from_selected_cohort(
@@ -1163,6 +2051,12 @@ def test_main_preflights_all_required_environment_before_cloning(
     monkeypatch.setenv("VONK_DEV_SECRET_SOURCE_ROOT", str(source))
     monkeypatch.setenv("VONK_DEV_API_SECRET_ROOT", str(tmp_path / "api"))
     monkeypatch.setenv("VONK_DEV_WORKER_SECRET_ROOT", str(tmp_path / "worker"))
+    monkeypatch.setenv("VONK_DEV_CADDY_SECRET_ROOT", str(tmp_path / "caddy"))
+    monkeypatch.setenv("VONK_DEV_LITELLM_SECRET_ROOT", str(tmp_path / "litellm"))
+    monkeypatch.setenv(
+        "VONK_DEV_RUNTIME_CONFIG_ROOT",
+        str(tmp_path / "runtime-config"),
+    )
     monkeypatch.delenv("VONK_DEV_MIGRATE_SECRET_ROOT", raising=False)
 
     with pytest.raises(DevInitError, match="VONK_DEV_MIGRATE_SECRET_ROOT is required"):
@@ -1183,6 +2077,12 @@ def test_main_rejects_an_unpinned_process_image_before_cloning(
     monkeypatch.setenv("VONK_DEV_API_SECRET_ROOT", str(tmp_path / "api"))
     monkeypatch.setenv("VONK_DEV_MIGRATE_SECRET_ROOT", str(tmp_path / "migrate"))
     monkeypatch.setenv("VONK_DEV_WORKER_SECRET_ROOT", str(tmp_path / "worker"))
+    monkeypatch.setenv("VONK_DEV_CADDY_SECRET_ROOT", str(tmp_path / "caddy"))
+    monkeypatch.setenv("VONK_DEV_LITELLM_SECRET_ROOT", str(tmp_path / "litellm"))
+    monkeypatch.setenv(
+        "VONK_DEV_RUNTIME_CONFIG_ROOT",
+        str(tmp_path / "runtime-config"),
+    )
     monkeypatch.setenv("VONK_DEV_API_IMAGE", "vonk-forge-api:dev-local")
     monkeypatch.setenv("VONK_DEV_WORKER_IMAGE", WORKER_IMAGE)
 

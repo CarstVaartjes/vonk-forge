@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ ${VONK_RANK:-} != 0 && ${VONK_RANK:-} != 1 ]] ||
+   [[ ${VONK_WORLD_SIZE:-} != 1 && ${VONK_WORLD_SIZE:-} != 2 ]] ||
+   [[ ${VONK_LISTEN_HOST:-} != 0.0.0.0 ]] ||
+   [[ ! ${VONK_LISTEN_PORT:-} =~ ^[0-9]+$ ]]; then
+  echo "invalid Vonk runtime contract" >&2
+  exit 2
+fi
+
+artifact() {
+  local expected_bytes=$1 expected_sha256=$2
+  local -a matches=()
+  mapfile -t matches < <(
+    find "${VONK_MODEL_ROOT:?}/sha256" -mindepth 2 -maxdepth 2 \
+      -type f -name artifact -size "${expected_bytes}c" -print
+  )
+  if [[ ${#matches[@]} != 1 ]]; then
+    echo "expected exactly one immutable model artifact" >&2
+    return 1
+  fi
+  echo "${expected_sha256}  ${matches[0]}" | sha256sum --check --status
+  printf '%s\n' "${matches[0]}"
+}
+
+base=$(artifact 86720111488 ca22ae2f838e14077c22bc1c1417b71b45b5e5a3687bd96c2ac6e17fdb6261c0)
+drafter=$(artifact 6971241504 8fa269560dc76fd73e4233ad9b1938b5f65dd363381fd9b1a5c6183f7d12d686)
+state=${VONK_STATE_ROOT:?}
+install -d -m 0700 "${state}/kv"
+
+rendezvous_pid=
+if [[ ${VONK_WORLD_SIZE} == 2 ]]; then
+  rendezvous=/opt/vonk/fabric-rendezvous
+  if [[ ${VONK_RANK} == 0 ]]; then
+    "${rendezvous}" coordinator &
+    rendezvous_pid=$!
+    if ! VONK_RENDEZVOUS_PID=${rendezvous_pid} "${rendezvous}" await-worker; then
+      kill "${rendezvous_pid}" 2>/dev/null || true
+      wait "${rendezvous_pid}" 2>/dev/null || true
+      exit 1
+    fi
+  else
+    "${rendezvous}" join
+  fi
+fi
+
+export HOME="${state}"
+export DS4_NO_UPDATE_CHECK=1
+export DS4_SERVED_MODEL_NAME=development-deepseek-smoke
+export DS4_CONT_MTP_MODE=2
+export DS4_CONT_DSPARK=1
+export DS4_DSPARK_MODEL="${drafter}"
+
+ds4=(
+  /opt/ds4/ds4-server
+  --cuda
+  -m "${base}"
+  -c 4096
+  --host "${VONK_LISTEN_HOST}"
+  --port "${VONK_LISTEN_PORT}"
+  --kv-disk-dir "${state}/kv"
+  --kv-disk-space-mb 2048
+)
+
+if [[ -z ${rendezvous_pid} ]]; then
+  exec "${ds4[@]}"
+fi
+
+ds4_pid=
+shutdown() {
+  trap - TERM INT
+  [[ -z ${ds4_pid} ]] || kill -TERM "${ds4_pid}" 2>/dev/null || true
+  kill -TERM "${rendezvous_pid}" 2>/dev/null || true
+}
+trap shutdown TERM INT
+"${ds4[@]}" &
+ds4_pid=$!
+set +e
+wait "${ds4_pid}"
+status=$?
+set -e
+kill -TERM "${rendezvous_pid}" 2>/dev/null || true
+wait "${rendezvous_pid}" 2>/dev/null || true
+trap - TERM INT
+exit "${status}"

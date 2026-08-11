@@ -96,9 +96,9 @@ https://{$VONK_AGENT_HOSTNAME:agents.example.invalid}:{$VONK_BACKEND_PORT:8443} 
 		not path /agent/v1/enroll
 	}
 	handle @agent_api {
+		# Remove caller-controlled identity before adding Caddy's verified values.
+		request_header -X-Vonk-Agent-*
 		reverse_proxy control-api:8000 {
-			# Strip first, then only Caddy supplies the verified TLS metadata.
-			header_up -X-Vonk-Agent-*
 			header_up X-Vonk-Agent-Node {vonk_agent_node}
 			header_up X-Vonk-Agent-Serial {tls_client_serial}
 			header_up X-Vonk-Agent-Fingerprint {tls_client_fingerprint}

@@ -143,3 +143,12 @@ When status is `degraded` or `transitioning` after interruption:
 
 Do not delete model snapshots, output artifacts, runtime caches, or logs as a
 switch-recovery shortcut.
+
+## Development recipe acceptance
+
+The catalog-backed development image lane does not use `vonkctl switch` for its
+physical qualification. Follow [Development agent workload
+acceptance](development-agent-workloads.md) for the source-build, exact image
+distribution, single-node/multi-node recipe, route, restart, rank-failure, and
+normal uninstall gates. Successful development evidence does not promote a
+planned production Cluster Profile or bypass its immutable acceptance record.

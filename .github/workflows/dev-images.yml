@@ -58,7 +58,11 @@ jobs:
           set -euo pipefail
           uv run --python 3.12 --frozen --with pytest==9.1.1 pytest -q \
             deploy/compose/tests/test_dev_compose.py \
+            deploy/compose/tests/test_dev_compose_secrets.py \
             scripts/tests/test_render_dev_compose.py \
+            scripts/tests/test_dev_runtime_secrets.py \
+            scripts/tests/test_dev_runtime_project.py \
+            scripts/tests/test_dev_admin_token.py \
             scripts/tests/test_verify_dev_image_secrets.py \
             scripts/tests/test_dev_image_acceptance.py \
             scripts/tests/test_dev_image_workflow.py
@@ -83,8 +87,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          api_archive="$RUNNER_TEMP/vonk-forge-api.oci.tar"
-          worker_archive="$RUNNER_TEMP/vonk-forge-worker.oci.tar"
+          publication_root="$RUNNER_TEMP/accepted"
+          install -d -m 0700 "$publication_root"
+          api_archive="$publication_root/vonk-forge-api.oci.tar"
+          worker_archive="$publication_root/vonk-forge-worker.oci.tar"
           common_labels=(
             --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
             --label "org.opencontainers.image.revision=$GITHUB_SHA"
@@ -115,10 +121,10 @@ jobs:
         run: |
           set -euo pipefail
           skopeo copy --override-os linux --override-arch amd64 \
-            "oci-archive:$RUNNER_TEMP/vonk-forge-api.oci.tar" \
+            "oci-archive:$RUNNER_TEMP/accepted/vonk-forge-api.oci.tar" \
             docker-daemon:vonk-forge-api:dev-local
           skopeo copy --override-os linux --override-arch amd64 \
-            "oci-archive:$RUNNER_TEMP/vonk-forge-worker.oci.tar" \
+            "oci-archive:$RUNNER_TEMP/accepted/vonk-forge-worker.oci.tar" \
             docker-daemon:vonk-forge-worker:dev-local
 
       - name: Preload pinned runtime dependency
@@ -135,20 +141,145 @@ jobs:
           [[ "$postgres_image" =~ ^postgres:[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$ ]]
           docker pull "$postgres_image"
 
-      - name: Scan and accept image-only stack
+      - name: Render and validate disposable development Compose artifacts
         shell: bash
         run: |
           set -euo pipefail
+          publication_root="$RUNNER_TEMP/accepted"
+          api_manifest="$RUNNER_TEMP/vonk-forge-api.manifest.json"
+          worker_manifest="$RUNNER_TEMP/vonk-forge-worker.manifest.json"
+          skopeo inspect --raw \
+            "oci-archive:$publication_root/vonk-forge-api.oci.tar" \
+            > "$api_manifest"
+          skopeo inspect --raw \
+            "oci-archive:$publication_root/vonk-forge-worker.oci.tar" \
+            > "$worker_manifest"
+          api_digest=$(skopeo manifest-digest "$api_manifest")
+          worker_digest=$(skopeo manifest-digest "$worker_manifest")
+          scripts/render-dev-compose \
+            --output "$publication_root/docker-compose.pinned.yml" \
+            --api-image "ghcr.io/carstvaartjes/vonk-forge-api:dev-sha-$GITHUB_SHA@$api_digest" \
+            --worker-image "ghcr.io/carstvaartjes/vonk-forge-worker:dev-sha-$GITHUB_SHA@$worker_digest" \
+            --commit "$GITHUB_SHA"
+          scripts/render-dev-compose \
+            --output "$publication_root/docker-compose.dev.yml" \
+            --api-image "ghcr.io/carstvaartjes/vonk-forge-api:dev" \
+            --worker-image "ghcr.io/carstvaartjes/vonk-forge-worker:dev" \
+            --channel dev
+          docker compose -f "$publication_root/docker-compose.pinned.yml" config -q
+          docker compose -f "$publication_root/docker-compose.dev.yml" config -q
+
+      - name: Render and smoke complete disposable development stack
+        shell: bash
+        run: |
+          set -euo pipefail
+          acceptance_test="deploy/compose/tests/test_dev_complete_stack.py::test_complete_development_stack_enforces_tls_identity_and_acks_routes"
+          uv run --project control --frozen pytest -q --maxfail=1 \
+            "$acceptance_test"
+
+      - name: Scan complete local publication inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          publication_root="$RUNNER_TEMP/accepted"
+          scan_root=""
+          cleanup() {
+            original_status=$?
+            trap - EXIT INT TERM
+            cleanup_status=0
+            if [[ -n "$scan_root" ]]; then
+              if [[ "$scan_root" != "$RUNNER_TEMP"/dev-publication-scan.* ]]; then
+                echo "refusing unsafe publication scan cleanup" >&2
+                cleanup_status=1
+              elif ! rm -rf -- "$scan_root"; then
+                echo "publication scan cleanup failed" >&2
+                cleanup_status=1
+              fi
+            fi
+            if (( original_status != 0 )); then
+              exit "$original_status"
+            fi
+            exit "$cleanup_status"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+          scan_root=$(mktemp -d "$RUNNER_TEMP/dev-publication-scan.XXXXXX")
+          layout_root="$scan_root/layouts"
+          evidence_root="$scan_root/evidence"
+          canary_root="$scan_root/canaries"
+          install -d -m 0700 "$layout_root" "$evidence_root" "$canary_root"
+          printf '%s' 'task-6-publication-canary-api' > "$canary_root/api"
+          printf '%s' 'task-6-publication-canary-worker' > "$canary_root/worker"
+          chmod 0600 "$canary_root/api" "$canary_root/worker"
+          for role in api worker; do
+            if [[ "$role" == api ]]; then
+              image=vonk-forge-api:dev-local
+            else
+              image=vonk-forge-worker:dev-local
+            fi
+            archive="$publication_root/vonk-forge-$role.oci.tar"
+            layout="$layout_root/$role"
+            install -d -m 0700 "$layout"
+            tar --extract --no-same-owner --file "$archive" --directory "$layout"
+            cp "$layout/index.json" "$evidence_root/$role.index.json"
+            docker history --no-trunc --format '{{json .}}' "$image" \
+              > "$evidence_root/$role.history.jsonl"
+            docker image inspect "$image" \
+              > "$evidence_root/$role.config.json"
+            mapfile -t attestation_manifests < <(
+              jq -r '.manifests[] | select(
+                .annotations["vnd.docker.reference.type"] == "attestation-manifest"
+              ) | .digest' "$layout/index.json"
+            )
+            ((${#attestation_manifests[@]} > 0))
+            found_sbom=0
+            found_provenance=0
+            evidence_count=0
+            for manifest_digest in "${attestation_manifests[@]}"; do
+              [[ "$manifest_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+              manifest_path="$layout/blobs/sha256/${manifest_digest#sha256:}"
+              cp "$manifest_path" \
+                "$evidence_root/$role.attestation-manifest-$evidence_count.json"
+              mapfile -t statement_descriptors < <(
+                jq -r '.layers[] | select(
+                  .mediaType == "application/vnd.in-toto+json"
+                ) | [(.annotations["in-toto.io/predicate-type"] // ""), .digest]
+                  | @tsv' "$manifest_path"
+              )
+              for statement_descriptor in "${statement_descriptors[@]}"; do
+                IFS=$'\t' read -r declared_predicate statement_digest \
+                  <<< "$statement_descriptor"
+                [[ "$statement_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+                statement_path="$layout/blobs/sha256/${statement_digest#sha256:}"
+                actual_predicate=$(jq -r '.predicateType // empty' "$statement_path")
+                [[ "$actual_predicate" == "$declared_predicate" ]]
+                cp "$statement_path" \
+                  "$evidence_root/$role.attestation-$evidence_count.json"
+                case "$actual_predicate" in
+                  https://spdx.dev/Document) found_sbom=1 ;;
+                  https://slsa.dev/provenance/*) found_provenance=1 ;;
+                esac
+                evidence_count=$((evidence_count + 1))
+              done
+            done
+            ((found_sbom == 1))
+            ((found_provenance == 1))
+          done
           scripts/verify-dev-image-secrets \
             --expected-commit "$GITHUB_SHA" \
             --expected-repository "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --forbid-bytes-dir "$canary_root" \
+            --scan-path "$publication_root" \
+            --scan-path "$evidence_root" \
             vonk-forge-api:dev-local vonk-forge-worker:dev-local
-          scripts/dev-image-acceptance \
+          uv run --project control --frozen --with-editable . \
+            scripts/dev-image-acceptance \
             --api-image vonk-forge-api:dev-local \
             --worker-image vonk-forge-worker:dev-local \
             --commit "$GITHUB_SHA"
 
-      - name: Upload accepted OCI archives
+      - name: Upload accepted publication inputs
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: accepted-development-images-${{ github.sha }}-${{ github.run_id }}
@@ -156,8 +287,10 @@ jobs:
           retention-days: 1
           compression-level: 0
           path: |
-            ${{ runner.temp }}/vonk-forge-api.oci.tar
-            ${{ runner.temp }}/vonk-forge-worker.oci.tar
+            ${{ runner.temp }}/accepted/vonk-forge-api.oci.tar
+            ${{ runner.temp }}/accepted/vonk-forge-worker.oci.tar
+            ${{ runner.temp }}/accepted/docker-compose.pinned.yml
+            ${{ runner.temp }}/accepted/docker-compose.dev.yml
 
   publish-development-images:
     name: Publish accepted main images
@@ -310,30 +443,6 @@ jobs:
           subject-digest: ${{ steps.publish.outputs.worker_digest }}
           push-to-registry: true
 
-      - name: Render development Compose artifacts
-        shell: bash
-        env:
-          API_DIGEST: ${{ steps.publish.outputs.api_digest }}
-          API_IMAGE: ${{ needs.build-and-accept.outputs.api_image }}
-          IMMUTABLE_TAG: ${{ needs.build-and-accept.outputs.immutable_tag }}
-          WORKER_DIGEST: ${{ steps.publish.outputs.worker_digest }}
-          WORKER_IMAGE: ${{ needs.build-and-accept.outputs.worker_image }}
-        run: |
-          set -euo pipefail
-          install -d -m 0700 dist
-          scripts/render-dev-compose \
-            --output dist/docker-compose.pinned.yml \
-            --api-image "$API_IMAGE:${IMMUTABLE_TAG}@${API_DIGEST}" \
-            --worker-image "$WORKER_IMAGE:${IMMUTABLE_TAG}@${WORKER_DIGEST}" \
-            --commit "$GITHUB_SHA"
-          scripts/render-dev-compose \
-            --output dist/docker-compose.dev.yml \
-            --api-image "$API_IMAGE:dev" \
-            --worker-image "$WORKER_IMAGE:dev" \
-            --channel dev
-          docker compose -f dist/docker-compose.pinned.yml config -q
-          docker compose -f dist/docker-compose.dev.yml config -q
-
       - name: Upload Compose artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -341,8 +450,8 @@ jobs:
           if-no-files-found: error
           retention-days: 30
           path: |
-            dist/docker-compose.pinned.yml
-            dist/docker-compose.dev.yml
+            ${{ runner.temp }}/accepted/docker-compose.pinned.yml
+            ${{ runner.temp }}/accepted/docker-compose.dev.yml
 
       - name: Advance accepted development aliases
         shell: bash

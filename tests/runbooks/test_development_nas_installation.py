@@ -2,6 +2,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNBOOK = ROOT / "docs/runbooks/development-nas-installation.md"
+FRESH_INSTALL = ROOT / "docs/runbooks/fresh-development-install.md"
 COMPOSE_README = ROOT / "deploy/compose/README.md"
 
 
@@ -15,7 +16,8 @@ def test_development_nas_runbook_leads_with_the_mutable_two_item_project() -> No
     assert "Its contents must be exactly:" in text
     assert "├── docker-compose.yml" in text
     assert "└── secrets/" in text
-    assert "docker-compose.dev.yml` as the bare mutable `:dev`" in text
+    assert "give `docker-compose.dev.yml` to `scripts/dev-runtime-project`" in text
+    assert "publishes that artifact as `docker-compose.yml`" in text
     assert "pull/redeploy the unchanged `docker-compose.yml`" in text
     assert "not restart" in text
 
@@ -74,8 +76,11 @@ def test_development_nas_runbook_keeps_pull_only_runtime_constraints() -> None:
 def test_normal_install_and_update_path_is_ui_only_before_guarded_recovery() -> None:
     text = RUNBOOK.read_text()
     assert "## Advanced guarded recovery" in text
-    normal_path, guarded_recovery = text.split(
+    supported_path, guarded_recovery = text.split(
         "## Advanced guarded recovery", maxsplit=1
+    )
+    _, normal_nas_path = supported_path.split(
+        "## Create and redeploy the Compose project", maxsplit=1
     )
 
     for marker in (
@@ -86,8 +91,10 @@ def test_normal_install_and_update_path_is_ui_only_before_guarded_recovery() -> 
         "ssh.exe ",
         "`ssh-keygen`",
     ):
-        assert marker not in normal_path
-    assert "docker compose -f " not in normal_path
+        assert marker not in normal_nas_path
+    assert "docker compose -f " not in normal_nas_path
+    assert "scripts/dev-runtime-secrets.py" in supported_path
+    assert "scripts/dev-runtime-project" in supported_path
     assert "```bash" in guarded_recovery
 
 
@@ -107,11 +114,22 @@ def test_development_nas_runbook_documents_only_runtime_secret_inputs() -> None:
 def test_rollback_discovers_volume_and_requires_matching_database_state() -> None:
     text = RUNBOOK.read_text()
     normalized = _normalized_text(RUNBOOK)
+    recovery_block = next(
+        block
+        for block in text.split("```bash\n")[1:]
+        if "expected_commit=REPLACE_WITH_PINNED_40_CHARACTER_COMMIT" in block
+    ).split("```", maxsplit=1)[0]
 
     assert "docker compose -f docker-compose.yml ps -q control-api" in text
     assert "com.docker.compose.volume" in text
     assert "Type the exact volume name to confirm" in text
-    assert "set -euo pipefail\ncd /volume1/docker/vonk-forge" in text
+    assert "NAS_PROJECT_DIRECTORY='<NAS_PROJECT_DIRECTORY>'" in recovery_block
+    assert 'case "$NAS_PROJECT_DIRECTORY" in' in recovery_block
+    assert 'test -d "$NAS_PROJECT_DIRECTORY"' in recovery_block
+    assert 'test -f "$NAS_PROJECT_DIRECTORY/docker-compose.yml"' in recovery_block
+    assert 'test -d "$NAS_PROJECT_DIRECTORY/secrets"' in recovery_block
+    assert 'cd -- "$NAS_PROJECT_DIRECTORY"' in recovery_block
+    assert "/volume1/" not in recovery_block
     assert "Never treat a repository-volume\nreset as a database or runtime-state rollback" in text
     assert "identity, control state, route publications, supervisor state" in normalized
     assert "docker volume rm vonk-forge-dev_dev-repository" not in text
@@ -143,6 +161,33 @@ def test_operator_entry_points_link_to_development_nas_runbook() -> None:
     assert "../../docs/runbooks/development-nas-installation.md" in (
         ROOT / "deploy/compose/README.md"
     ).read_text()
+
+
+def test_fresh_install_is_the_concise_operator_entry_point() -> None:
+    text = _normalized_text(FRESH_INSTALL)
+
+    for required in (
+        "docker-compose.yml",
+        "secrets/",
+        "scripts/dev-runtime-secrets.py",
+        "scripts/dev-runtime-project",
+        "APT `dev` channel setup",
+        "/var/lib/vonk-forge/supervisor/current/vonk-agent pair ... --token-stdin",
+        "scripts/run-development-slices",
+        "--phase synthetic",
+    ):
+        assert required in text
+    assert "No GitHub, GHCR, R2, database, signing, or model credential" in text
+    assert "Do not install a registry token on the NAS" in text
+
+
+def test_readme_and_documentation_index_lead_to_fresh_install() -> None:
+    assert (
+        "docs/runbooks/fresh-development-install.md" in (ROOT / "README.md").read_text()
+    )
+    assert (
+        "runbooks/fresh-development-install.md" in (ROOT / "docs/README.md").read_text()
+    )
 
 
 def test_runtime_secret_directory_is_ignored_from_git() -> None:

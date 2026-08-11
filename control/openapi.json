@@ -4905,6 +4905,58 @@
         "title": "RunPreviewRequest",
         "type": "object"
       },
+      "RunRankStatusResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "age_seconds": {
+            "minimum": 0.0,
+            "title": "Age Seconds",
+            "type": "number"
+          },
+          "fresh": {
+            "title": "Fresh",
+            "type": "boolean"
+          },
+          "node_id": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "observed_at": {
+            "format": "date-time",
+            "title": "Observed At",
+            "type": "string"
+          },
+          "rank": {
+            "minimum": 0.0,
+            "title": "Rank",
+            "type": "integer"
+          },
+          "role": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Role",
+            "type": "string"
+          },
+          "state": {
+            "maxLength": 24,
+            "minLength": 1,
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "rank",
+          "role",
+          "state",
+          "observed_at",
+          "age_seconds",
+          "fresh"
+        ],
+        "title": "RunRankStatusResponse",
+        "type": "object"
+      },
       "RunRequest": {
         "additionalProperties": false,
         "properties": {
@@ -4936,6 +4988,53 @@
           "request_key"
         ],
         "title": "RunRequest",
+        "type": "object"
+      },
+      "RunStatusResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "alias": {
+            "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
+            "title": "Alias",
+            "type": "string"
+          },
+          "healthy": {
+            "title": "Healthy",
+            "type": "boolean"
+          },
+          "id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "ranks": {
+            "items": {
+              "$ref": "#/components/schemas/RunRankStatusResponse"
+            },
+            "title": "Ranks",
+            "type": "array"
+          },
+          "route_state": {
+            "pattern": "^(withdrawn|pending|published|failed)$",
+            "title": "Route State",
+            "type": "string"
+          },
+          "state": {
+            "maxLength": 24,
+            "minLength": 1,
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "alias",
+          "state",
+          "route_state",
+          "healthy",
+          "ranks"
+        ],
+        "title": "RunStatusResponse",
         "type": "object"
       },
       "SourceBundleResponse": {
@@ -10439,6 +10538,51 @@
           }
         ],
         "summary": "Start"
+      }
+    },
+    "/api/v1/recipes/runs/{run_id}": {
+      "get": {
+        "operationId": "getRecipeRunStatus",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Run Status"
       }
     },
     "/api/v1/recipes/runs/{run_id}/stop": {

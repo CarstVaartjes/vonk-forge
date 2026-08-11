@@ -31,8 +31,9 @@ three version-and-digest assignments as one release set. See the authoritative
 [NAS pull-only Compose deployment guide](../../deploy/compose/README.md).
 
 The workflow may update each package's `latest` tag after a successful stable
-version release, but `latest` is evaluation-only and never a production image
-input. Production uses only the release asset's immutable digests. Docker does
+version release, but `latest` is informational only and never a production
+image input. Production selection remains authoritative only through the
+trusted host-updater and its TUF-reviewed release asset digests. Docker does
 not update running containers merely because a tag moves.
 
 Dependabot checks Docker build inputs, Docker Compose files, and GitHub Actions

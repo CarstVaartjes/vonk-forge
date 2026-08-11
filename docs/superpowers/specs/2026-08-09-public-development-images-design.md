@@ -105,7 +105,10 @@ filesystem rather than relying only on source-pattern assertions.
 The generated Compose project contains these services:
 
 - `postgres`: the existing digest-pinned upstream PostgreSQL image.
-- `dev-init`: a one-shot service using the exact API image.
+- `dev-repository-init`: a networked, secret-free one-shot service using the
+  exact API image.
+- `dev-init`: a network-disabled runtime-projection one-shot service using the
+  exact API image.
 - `migrate`: a one-shot service using the exact API image.
 - `control-worker`: the exact worker image.
 - `control-api`: the exact API image.
@@ -113,7 +116,8 @@ The generated Compose project contains these services:
 There is no dedicated init image. The API package exposes
 `python -m vonk_control.dev_init`; production Compose never invokes it.
 
-`dev-init` runs as root only for named-volume ownership setup. It clones the
+`dev-repository-init` runs as root only for repository-volume ownership setup.
+It receives no secrets. It clones the
 public GitHub repository at the exact 40-character commit embedded in the
 generated Compose file into a NAS-local `dev-repository` named volume, records
 that accepted GitHub commit on local `main`, checks out a separate mutable
@@ -121,11 +125,12 @@ that accepted GitHub commit on local `main`, checks out a separate mutable
 durable internal ref `refs/vonk/deploy-base`. It verifies all three refs and
 assigns the checkout to UID/GID 10001. The generated Compose file sets
 `VONK_DEPLOYMENT_BRANCH=deploy` for API and worker, and passes
-`VONK_DEV_EXPECTED_COMMIT=<40-character-main-commit>` only to `dev-init`.
+`VONK_DEV_EXPECTED_COMMIT=<40-character-main-commit>` only to the two
+initialization services through their verified cohort input.
 Initial deployment therefore requires outbound HTTPS access to public GitHub
 as well as GHCR.
 
-On every subsequent start, `dev-init` validates that the existing checkout is a
+On every subsequent start, `dev-repository-init` validates that the existing checkout is a
 non-symlink Git repository with a clean worktree checked out on `deploy`,
 fetches public `origin/main` without credentials, and verifies that the expected
 commit is reachable from that ref. Local `main` is the last accepted GitHub

@@ -8,8 +8,6 @@ x-dev-generation: &dev-generation
   VONK_REPOSITORY_PATH: /repository
   VONK_DEPLOYMENT_BRANCH: deploy
   VONK_STATE_PATH: /state
-  VONK_AGENT_RUNTIME: disabled
-  VONK_MANAGEMENT_CIDRS: 127.0.0.1/32
   VONK_GLOBAL_CATALOG_URL: https://vonkforge.ai
 
 x-api-image: &api-image __VONK_API_IMAGE__
@@ -84,27 +82,61 @@ services:
       dev-worker-cohort: {condition: service_completed_successfully}
     restart: "no"
 
+  dev-repository-init:
+    image: *api-image
+    pull_policy: always
+    user: "0:0"
+    read_only: true
+    cap_drop: [ALL]
+    # Git is deliberately executed as nobody; SETUID/SETGID are used only for
+    # that child identity drop before the repository is reassigned to the API.
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    security_opt: [no-new-privileges:true]
+    command: [python, -m, vonk_control.dev_init]
+    environment:
+      VONK_DEV_INIT_PHASE: repository
+      VONK_DEV_REPOSITORY_URL: https://github.com/CarstVaartjes/vonk-forge.git
+      VONK_DEV_SELECTED_COHORT_FILE: /cohort/selected.json
+      VONK_REPOSITORY_PATH: /repository
+    volumes:
+      - dev-repository:/repository
+      - dev-image-cohort:/cohort:ro
+    tmpfs: [/tmp]
+    networks: [ingress]
+    depends_on:
+      dev-cohort-verify: {condition: service_completed_successfully}
+    restart: "no"
+
   dev-init:
     image: *api-image
     pull_policy: always
     user: "0:0"
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER]
+    security_opt: [no-new-privileges:true]
+    network_mode: none
     command: [python, -m, vonk_control.dev_init]
     environment:
       VONK_CONTROL_IDENTITY_ROOT: /control-identity
       VONK_DEV_API_SECRET_ROOT: /api-secrets
+      VONK_DEV_CADDY_SECRET_ROOT: /caddy-secrets
+      VONK_DEV_LITELLM_SECRET_ROOT: /litellm-secrets
       VONK_DEV_MIGRATE_SECRET_ROOT: /migrate-secrets
-      VONK_DEV_REPOSITORY_URL: https://github.com/CarstVaartjes/vonk-forge.git
+      VONK_DEV_INIT_PHASE: runtime
+      VONK_DEV_RUNTIME_CONFIG_ROOT: /runtime-config
       VONK_DEV_SECRET_SOURCE_ROOT: /host-secrets
       VONK_DEV_WORKER_SECRET_ROOT: /worker-secrets
       VONK_DEV_SELECTED_COHORT_FILE: /cohort/selected.json
-      VONK_REPOSITORY_PATH: /repository
       VONK_ROUTE_ROOT: /routes
       VONK_STATE_PATH: /state
       VONK_SUPERVISOR_ROOT: /supervisor
     volumes:
-      - dev-repository:/repository
       - dev-api-secrets:/api-secrets
+      - dev-caddy-secrets:/caddy-secrets
+      - dev-litellm-secrets:/litellm-secrets
       - dev-migrate-secrets:/migrate-secrets
+      - dev-runtime-config:/runtime-config
       - dev-worker-secrets:/worker-secrets
       - dev-control-identity:/control-identity
       - dev-control-state:/state
@@ -112,12 +144,56 @@ services:
       - dev-supervisor-state:/supervisor
       - dev-image-cohort:/cohort:ro
     secrets:
+      - source: agent-ca-certificate
+        target: /host-secrets/agent-ca-certificate
+      - source: agent-ca-key
+        target: /host-secrets/agent-ca-key
+      - source: agent-proxy-auth
+        target: /host-secrets/agent-proxy-auth
+      - source: controller-ca
+        target: /host-secrets/controller-ca
+      - source: controller-server-certificate
+        target: /host-secrets/controller-server-certificate
+      - source: controller-server-key
+        target: /host-secrets/controller-server-key
       - source: database-url
         target: /host-secrets/database-url
       - source: git-signing-key
         target: /host-secrets/git-signing-key
+      - source: litellm-master-key
+        target: /host-secrets/litellm-master-key
+      - source: litellm-upstream-key
+        target: /host-secrets/litellm-upstream-key
+      - source: management-cidrs
+        target: /host-secrets/management-cidrs
+      - source: token-signing-key
+        target: /host-secrets/token-signing-key
     depends_on:
-      dev-cohort-verify: {condition: service_completed_successfully}
+      dev-repository-init: {condition: service_completed_successfully}
+    restart: "no"
+
+  dev-supervisor-init:
+    image: *api-image
+    pull_policy: always
+    user: "0:0"
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [CHOWN]
+    security_opt: [no-new-privileges:true]
+    command:
+      - python
+      - -c
+      - >-
+        import os,stat;
+        metadata=os.stat('/supervisor',follow_symlinks=False);
+        assert stat.S_ISDIR(metadata.st_mode);
+        assert (metadata.st_uid,metadata.st_gid,stat.S_IMODE(metadata.st_mode)) == (10001,10001,0o750);
+        os.chown('/supervisor',10002,10001)
+    volumes:
+      - dev-supervisor-state:/supervisor
+    network_mode: none
+    depends_on:
+      dev-init: {condition: service_completed_successfully}
     restart: "no"
 
   migrate:
@@ -165,13 +241,14 @@ services:
       VONK_CONTROL_PROCESS_ROLE: worker
       VONK_INTERNAL_API_URL: http://control-api:8000
       VONK_DEV_SELECTED_COHORT_FILE: /cohort/selected.json
+      VONK_MANAGEMENT_CIDRS_FILE: /run/secrets/management-cidrs
       VONK_WORKER_API_TOKEN_FILE: /run/secrets/worker-api-token
     volumes:
       - dev-repository:/repository:ro
       - dev-control-identity:/control-identity:ro
       - dev-control-state:/state
       - dev-route-publications:/routes
-      - dev-supervisor-state:/supervisor
+      - dev-supervisor-state:/supervisor:ro
       - dev-worker-secrets:/run/secrets:ro
       - dev-image-cohort:/cohort:ro
     networks: [application, data]
@@ -179,6 +256,7 @@ services:
       postgres: {condition: service_healthy}
       migrate: {condition: service_completed_successfully}
       dev-init: {condition: service_completed_successfully}
+      litellm: {condition: service_healthy}
 
   control-api:
     image: *api-image
@@ -191,17 +269,27 @@ services:
       <<: *dev-generation
       VONK_CONTROL_PROCESS_ROLE: api
       VONK_DEV_SELECTED_COHORT_FILE: /cohort/selected.json
+      VONK_AGENT_RUNTIME: enabled
+      VONK_AGENT_CA_PROVIDER: builtin
+      VONK_AGENT_BUILTIN_CA_BOOTSTRAP: "1"
+      VONK_MANAGEMENT_CIDRS_FILE: /run/secrets/management-cidrs
+      VONK_AGENT_CLIENT_CA_FILE: /run/secrets/agent-ca-certificate
+      VONK_AGENT_INTERMEDIATE_CERTIFICATE_FILE: /run/secrets/agent-ca-certificate
+      VONK_AGENT_INTERMEDIATE_KEY_FILE: /run/secrets/agent-ca-key
+      VONK_AGENT_PROXY_AUTH_FILE: /run/secrets/agent-proxy-auth
+      VONK_WORKER_API_TOKEN_FILE: /run/secrets/worker-api-token
       VONK_GIT_SIGNING_KEY_FILE: /run/secrets/git-signing-key
       VONK_ADMIN_GRANT_PRIVATE_KEY_FILE: /run/secrets/admin-grant-private-key
+      VONK_TOKEN_SIGNING_KEY_FILE: /run/secrets/token-signing-key
     volumes:
       - dev-repository:/repository
       - dev-control-identity:/control-identity:ro
       - dev-control-state:/state
       - dev-route-publications:/routes
-      - dev-supervisor-state:/supervisor
+      - dev-supervisor-state:/supervisor:ro
       - dev-api-secrets:/run/secrets:ro
       - dev-image-cohort:/cohort:ro
-    networks: [application, data]
+    networks: [application, data, ingress]
     ports: ["127.0.0.1:${VONK_DEV_PORT:-8080}:8000"]
     depends_on:
       postgres: {condition: service_healthy}
@@ -214,9 +302,71 @@ services:
       timeout: 3s
       retries: 20
 
+  litellm:
+    image: ghcr.io/berriai/litellm:v1.81.14-stable@sha256:a3ce130137752e6b085de521b773eacbb641c8b6322c6f538453e860e7b9cf43
+    pull_policy: always
+    entrypoint: [/run/vonk-runtime/litellm-entrypoint.sh]
+    user: "10002:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      DISABLE_ADMIN_UI: "True"
+      HOME: /tmp
+      SERVER_ROOT_PATH: /litellm
+      STORE_MODEL_IN_DB: "False"
+    volumes:
+      - dev-runtime-config:/run/vonk-runtime:ro
+      - dev-litellm-secrets:/run/secrets:ro
+      - dev-route-publications:/routes:ro
+      - dev-supervisor-state:/supervisor
+    tmpfs: [/tmp]
+    ports: ["127.0.0.1:${VONK_DEV_INFERENCE_PORT:-4000}:4000"]
+    networks: [application]
+    depends_on:
+      dev-init: {condition: service_completed_successfully}
+      dev-supervisor-init: {condition: service_completed_successfully}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  caddy:
+    image: caddy:2.11.4@sha256:844f60b64e4724a5aa8245e019dace0d3f199f7433ce6c57676cb30a920dbad9
+    pull_policy: always
+    user: "10000:10000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    ports: ["${VONK_AGENT_PORT:-8443}:8443"]
+    volumes:
+      - dev-runtime-config:/run/vonk-runtime:ro
+      - dev-caddy-secrets:/run/secrets:ro
+    tmpfs:
+      - /config:rw,noexec,nosuid,nodev,mode=0700,uid=10000,gid=10000
+      - /data:rw,noexec,nosuid,nodev,mode=0700,uid=10000,gid=10000
+      - /run/vonk-caddy:rw,exec,mode=0700,uid=10000,gid=10000
+      - /tmp
+    entrypoint: [/bin/sh, /run/vonk-runtime/caddy-entrypoint.sh]
+    environment:
+      VONK_AGENT_ENROLL_HOSTNAME: enroll.vonk-forge.lan
+      VONK_AGENT_HOSTNAME: agents.vonk-forge.lan
+      VONK_BACKEND_PORT: "8443"
+    networks: [application, ingress]
+    depends_on:
+      control-api: {condition: service_healthy}
+      dev-init: {condition: service_completed_successfully}
+    healthcheck:
+      test: [CMD, wget, -q, --spider, -T, "3", http://127.0.0.1:2019/healthz]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
 networks:
-  application: {}
+  application: {internal: true}
   data: {internal: true}
+  ingress: {}
 
 secrets:
   postgres-password:
@@ -225,6 +375,26 @@ secrets:
     file: ./secrets/database-url
   git-signing-key:
     file: ./secrets/git-signing-key
+  agent-ca-certificate:
+    file: ./secrets/agent-ca-certificate
+  agent-ca-key:
+    file: ./secrets/agent-ca-key
+  agent-proxy-auth:
+    file: ./secrets/agent-proxy-auth
+  controller-ca:
+    file: ./secrets/controller-ca
+  controller-server-certificate:
+    file: ./secrets/controller-server-certificate
+  controller-server-key:
+    file: ./secrets/controller-server-key
+  litellm-master-key:
+    file: ./secrets/litellm-master-key
+  litellm-upstream-key:
+    file: ./secrets/litellm-upstream-key
+  management-cidrs:
+    file: ./secrets/management-cidrs
+  token-signing-key:
+    file: ./secrets/token-signing-key
 
 volumes:
   dev-postgres-data: {}
@@ -235,5 +405,8 @@ volumes:
   dev-supervisor-state: {}
   dev-repository: {}
   dev-api-secrets: {}
+  dev-caddy-secrets: {}
+  dev-litellm-secrets: {}
   dev-migrate-secrets: {}
+  dev-runtime-config: {}
   dev-worker-secrets: {}

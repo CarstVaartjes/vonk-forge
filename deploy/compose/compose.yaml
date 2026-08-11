@@ -77,9 +77,9 @@ services:
       - >-
         import os,pathlib;
         os.chown('/routes', 0, 0);
-        os.chmod('/routes', 0o700);
-        os.makedirs('/routes/generations', mode=0o700, exist_ok=True);
-        os.chmod('/routes/generations', 0o700);
+        os.chmod('/routes', 0o750);
+        os.makedirs('/routes/generations', mode=0o750, exist_ok=True);
+        os.chmod('/routes/generations', 0o750);
         os.chown('/routes/generations', 10001, 10001);
         os.chown('/routes', 10001, 10001);
         os.makedirs('/supervisor', mode=0o750, exist_ok=True);
@@ -167,7 +167,7 @@ services:
       - agent-tuf-publication:/agent-tuf
       - workload-tuf-publication:/workload-tuf:ro
       - workload-signer-socket:/run/vonk-workload-signer:ro
-      - route-publications:/routes:ro
+      - route-publications:/routes
       - api-admin-grant-runtime:/run/vonk-api-secrets:ro
       - type: bind
         source: ${CONTROL_IDENTITY_PATH:?set control identity directory path}

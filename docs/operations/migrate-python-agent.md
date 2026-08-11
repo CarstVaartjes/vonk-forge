@@ -16,8 +16,9 @@ files or units until the physical GPU node soak is accepted.
    with Python first; the receipt importer rejects active work.
 3. Back up the Python state and `/etc` configuration. Never copy its private
    key into `/var/lib/vonk-forge/agent`.
-4. Install `vonk-forge-agent` and configure the controller URL, CA pin, and the
-   same node ID using the installation runbook.
+4. Install `vonk-forge-agent` and configure both the `enrollment_url` used
+   only for pairing and the post-certificate `controller_url`, plus the CA pin
+   and the same node ID, using the installation runbook.
 
 ## Cut over
 
@@ -46,7 +47,7 @@ the fresh certificate:
 ```bash
 sudo -u vonk-agent -- \
   /var/lib/vonk-forge/supervisor/current/vonk-agent pair \
-  --controller https://agents.example.internal/ \
+  --enrollment https://enroll.example.internal/ \
   --ca-sha256 REPLACE_WITH_64_LOWERCASE_HEX \
   --token-stdin < /run/secrets/vonk-migration-token
 ```

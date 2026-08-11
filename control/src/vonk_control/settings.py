@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import secrets
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -25,6 +26,7 @@ class StartupMode(StrEnum):
 
 
 _AGENT_PROXY_AUTH_PATTERN = re.compile(rb"[A-Za-z0-9_-]{32,}\Z")
+_EPHEMERAL_DEVELOPMENT_TOKEN_SIGNING_KEY = secrets.token_bytes(32)
 _GENERATION_IDENTITY_ENVIRONMENT = (
     "VONK_CONTROL_GENERATION_ID",
     "VONK_DATABASE_REVISION",
@@ -62,6 +64,22 @@ def _secret_path(name: str) -> Path:
     if path.is_symlink() or not path.is_file():
         raise SettingsError(f"{name} must name a regular non-symlink file")
     return path
+
+
+def _secret_or_file(name: str, file_name: str) -> str:
+    raw = os.environ.get(name)
+    source = os.environ.get(file_name)
+    if raw is not None and source is not None:
+        raise SettingsError(f"{name} and {file_name} cannot be combined")
+    if source:
+        path = Path(source)
+        if path.is_symlink() or not path.is_file():
+            raise SettingsError(f"{file_name} must name a regular non-symlink file")
+        value = path.read_text().strip()
+        if not value:
+            raise SettingsError(f"{file_name} must not be empty")
+        return value
+    return (raw or "").strip()
 
 
 def _agent_proxy_auth_secret(name: str, *, production: bool) -> bytes:
@@ -281,10 +299,13 @@ class Settings:
         if mode == "production" and legacy_direct_transport:
             raise SettingsError("legacy direct transport is forbidden in production")
         agent_ca_provider = os.environ.get("VONK_AGENT_CA_PROVIDER", "")
-        agent_runtime = os.environ.get("VONK_AGENT_RUNTIME", "enabled")
+        agent_runtime = os.environ.get(
+            "VONK_AGENT_RUNTIME",
+            "disabled" if mode == "development" else "enabled",
+        )
         if agent_runtime not in {"enabled", "disabled"}:
             raise SettingsError("VONK_AGENT_RUNTIME is invalid")
-        agent_enabled = mode == "production" and agent_runtime == "enabled"
+        agent_enabled = agent_runtime == "enabled" and mode in {"development", "production"}
         builtin_bootstrap = os.environ.get("VONK_AGENT_BUILTIN_CA_BOOTSTRAP", "")
         if builtin_bootstrap not in {"", "1"}:
             raise SettingsError("VONK_AGENT_BUILTIN_CA_BOOTSTRAP is invalid")
@@ -292,6 +313,16 @@ class Settings:
             raise SettingsError("VONK_AGENT_CA_PROVIDER is required in production")
         if agent_ca_provider and agent_ca_provider not in {"step-ca", "builtin"}:
             raise SettingsError("VONK_AGENT_CA_PROVIDER is invalid")
+        if mode == "development" and agent_ca_provider == "step-ca":
+            raise SettingsError("development agent runtime cannot use step-ca")
+        if (
+            mode == "development"
+            and agent_runtime == "enabled"
+            and agent_ca_provider != "builtin"
+        ):
+            raise SettingsError(
+                "development agent runtime requires the builtin provider"
+            )
         step_ca_settings_present = any(
             os.environ.get(name)
             for name in (
@@ -315,11 +346,14 @@ class Settings:
         database_url = _secret("VONK_DATABASE_URL_FILE", production=mode == "production")
         if urlsplit(database_url).scheme not in {"postgresql", "postgresql+psycopg"}:
             raise SettingsError("database URL must use PostgreSQL")
-        management_cidrs = os.environ.get("VONK_MANAGEMENT_CIDRS", "").strip()
+        management_cidrs = _secret_or_file(
+            "VONK_MANAGEMENT_CIDRS",
+            "VONK_MANAGEMENT_CIDRS_FILE",
+        )
         direct_fabric_cidrs = os.environ.get(
             "VONK_DIRECT_FABRIC_CIDRS", ""
         ).strip()
-        if mode == "production" and not management_cidrs:
+        if (mode == "production" or agent_enabled) and not management_cidrs:
             raise SettingsError("VONK_MANAGEMENT_CIDRS is required in production")
         if not management_cidrs and direct_fabric_cidrs:
             raise SettingsError(
@@ -339,10 +373,10 @@ class Settings:
             if signing_path.is_symlink() or not signing_path.is_file():
                 raise SettingsError("token signing key must be a regular non-symlink file")
             signing_key = signing_path.read_bytes().strip()
-        elif mode == "production":
-            raise SettingsError("VONK_TOKEN_SIGNING_KEY_FILE is required in production")
+        elif mode == "production" or (mode == "development" and agent_enabled):
+            raise SettingsError("VONK_TOKEN_SIGNING_KEY_FILE is required when the agent runtime is enabled")
         else:
-            signing_key = b"development-only-signing-key-32b"
+            signing_key = _EPHEMERAL_DEVELOPMENT_TOKEN_SIGNING_KEY
         if len(signing_key) < 32:
             raise SettingsError("token signing key must contain at least 32 bytes")
         metrics_file = os.environ.get("VONK_METRICS_TOKEN_FILE")
@@ -383,7 +417,7 @@ class Settings:
         )
         agent_intermediate_key_path = (
             _secret_path("VONK_AGENT_INTERMEDIATE_KEY_FILE")
-            if mode == "production" and agent_ca_provider == "builtin" else None
+            if agent_enabled and agent_ca_provider == "builtin" else None
         )
         step_ca_enabled = agent_enabled and agent_ca_provider == "step-ca"
         agent_ca_credential_path = _secret_path("VONK_AGENT_CA_CREDENTIAL_FILE") if step_ca_enabled else None
@@ -418,7 +452,7 @@ class Settings:
         )
         worker_api_token = (
             _agent_proxy_auth_secret("VONK_WORKER_API_TOKEN_FILE", production=True)
-            if mode == "production" else b""
+            if agent_enabled else b""
         )
         agent_artifact_root = _absolute_root(
             "VONK_AGENT_ARTIFACT_ROOT", "/state/agent-artifacts"
@@ -590,7 +624,10 @@ class WorkerSettings:
             raise SettingsError("internal API timeout must be numeric") from error
         if not 0 < timeout <= 30:
             raise SettingsError("internal API timeout must be between zero and 30 seconds")
-        management_cidrs = os.environ.get("VONK_MANAGEMENT_CIDRS", "").strip()
+        management_cidrs = _secret_or_file(
+            "VONK_MANAGEMENT_CIDRS",
+            "VONK_MANAGEMENT_CIDRS_FILE",
+        )
         direct_fabric_cidrs = os.environ.get(
             "VONK_DIRECT_FABRIC_CIDRS",
             "",

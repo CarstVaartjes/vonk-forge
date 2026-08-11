@@ -19,9 +19,10 @@ global catalog is unavailable.
 Use the image-only development stack to try the control API, bundled web
 interface, PostgreSQL catalog, and worker on any Docker Compose-capable NAS.
 GitHub Actions builds and accepts the API and worker from `main`, then publishes
-the bare mutable `:dev` `docker-compose.dev.yml` artifact. Copy it once as
-`docker-compose.yml`; normal development is a Docker-UI pull/redeploy of that
-unchanged file, never a checkout build, file replacement, or restart. Keep
+the bare mutable `:dev` `docker-compose.dev.yml` artifact. Publish it once as
+`docker-compose.yml` with `scripts/dev-runtime-project`; normal development is
+a Docker-UI pull/redeploy of that unchanged file, never a checkout build,
+manual copy, file replacement, or restart. Keep
 `docker-compose.pinned.yml` for explicit reproduction or state-aware recovery.
 Signed releases publish `docker-compose.production.yml` from the full production
 graph, but it is selected only through the production host updater.
@@ -34,7 +35,17 @@ vonk-forge/
 └── secrets/
     ├── postgres-password
     ├── database-url
-    └── git-signing-key
+    ├── git-signing-key
+    ├── agent-ca-certificate
+    ├── agent-ca-key
+    ├── agent-proxy-auth
+    ├── controller-ca
+    ├── controller-server-certificate
+    ├── controller-server-key
+    ├── litellm-master-key
+    ├── litellm-upstream-key
+    ├── management-cidrs
+    └── token-signing-key
 ```
 
 Follow [Development NAS installation and runtime secrets](../../docs/runbooks/development-nas-installation.md)
@@ -513,10 +524,10 @@ ghcr.io/carstvaartjes/vonk-forge-worker:latest
 ghcr.io/carstvaartjes/vonk-forge-hermes:latest
 ```
 
-`:latest` is evaluation/discovery only. Production must not use these aliases;
-it requires the version-and-digest references selected from one complete release
-asset by the trusted host updater. Docker does not continuously update running
-containers: changing `latest` remotely has no effect until an operator
-explicitly pulls and recreates containers. Evaluation users must still
-deliberately pull and recreate, and must not mistake that for a production
-update path.
+`:latest` is evaluation/discovery only. It is also informational only:
+production must not use these aliases; it requires the version-and-digest
+references selected from one complete release asset by the trusted host
+updater. Docker does not continuously update running containers: changing
+`latest` remotely has no effect until an operator explicitly pulls and
+recreates containers. Evaluation users must still deliberately pull and
+recreate, and must not mistake that for a production update path.

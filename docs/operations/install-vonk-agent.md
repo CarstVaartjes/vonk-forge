@@ -11,9 +11,24 @@ recipes, then claims only operations matching its advertised capabilities.
 - NVIDIA driver and NVIDIA Container Toolkit with a working CDI device list:
   `nvidia-ctk cdi list` must include `nvidia.com/gpu=all`.
 - A route from the node to the NAS agent endpoint. The NAS may use its
-  node-only management-LAN listener; human and inference access remain
-  Tailscale-only.
+  node-only management-LAN listener at TCP 8443; human and inference access
+  remain Tailscale-only.
 - The controller CA certificate and its independently verified SHA-256 digest.
+
+Do not assume local DNS. Before pairing, add the management-LAN names to
+`/etc/hosts` on the GPU node so the enrollment and post-identity controller
+names resolve to the NAS management address:
+
+```text
+<NAS_MANAGEMENT_IP> <ENROLLMENT_HOSTNAME> <CONTROLLER_HOSTNAME> <REGISTRY_HOSTNAME>
+```
+
+Use the same hostnames on the NAS itself so local diagnostics, Caddy
+certificates, and agent recovery checks all refer to the same names.
+Allow `<NODE_MANAGEMENT_CIDR>` to `<NAS_MANAGEMENT_IP>:8443` in the NAS and host
+firewalls, and reject all other sources to that port. Verify each name resolves
+to `<NAS_MANAGEMENT_IP>` before pairing; `/etc/hosts` supplies names only, so
+both agent URLs must retain the explicit `:8443` port.
 
 Do not add the service user to `docker`, `sudo`, or an NVIDIA administration
 group. The package runs rootless Podman in a single-UID namespace with
@@ -45,30 +60,58 @@ the long-running agent. Because `vonk-agent` is a package-dedicated account,
 installation removes only that account's `/etc/subuid` and `/etc/subgid`
 mappings if an earlier prerelease or host policy created them.
 
-Copy the CA and edit the four bootstrap values:
+Copy the CA and edit the bootstrap configuration:
 
 ```bash
 sudo install -o root -g vonk-agent -m 0640 controller-ca.pem \
   /etc/vonk-forge-agent/controller-ca.pem
+openssl x509 -in controller-ca.pem -outform DER | sha256sum
 sudoedit /etc/vonk-forge-agent/agent.toml
 ```
 
-Set `controller_url`, `ca_sha256`, and the controller-created `node_id`.
-Keep `data_dir` at `/var/lib/vonk-forge-agent`.
+The DER SHA-256 fingerprint command prints one line in the form
+`<64-lowercase-hex>  -`. Copy only the first field into `ca_sha256`; do not
+paste the certificate, token, or any secret into notes or logs.
 
-In the admin interface, create a new-node pairing grant for that node. Supply
-the one-use token through standard input so it never appears in shell history:
+Set the HTTPS root origins and controller CA path explicitly:
+
+```toml
+enrollment_url = "https://<ENROLLMENT_HOSTNAME>:8443/"
+controller_url = "https://<CONTROLLER_HOSTNAME>:8443/"
+ca_path = "/etc/vonk-forge-agent/controller-ca.pem"
+ca_sha256 = "<64_LOWERCASE_HEX_FROM_SHA256SUM>"
+node_id = "<NODE_ID>"
+```
+
+`enrollment_url` is used only by `pair`; `controller_url` is used only after
+certificate issuance by the authenticated service. The development values are
+the exact roots `https://<ENROLLMENT_HOSTNAME>:8443/` and
+`https://<CONTROLLER_HOSTNAME>:8443/`; do not rely on HTTPS port 443 defaults.
+Keep `data_dir` at
+`/var/lib/vonk-forge-agent` unless a reviewed packaging change says otherwise.
+An upgraded, already-paired agent can continue to run with its preserved
+legacy conffile, but an administrator must add `enrollment_url` before any
+future pairing or recovery enrollment.
+
+In the admin interface, create a one-use pairing grant for that node. The
+ordering is strict: create the grant, run `pair`, approve the pending
+enrollment, then run the exact same `pair` command again to collect the issued
+certificate. Supply the one-use token through standard input so it never
+appears in shell history:
 
 ```bash
 sudo -u vonk-agent -- \
   /var/lib/vonk-forge/supervisor/current/vonk-agent pair \
-  --controller https://agents.example.internal/ \
-  --ca-sha256 REPLACE_WITH_64_LOWERCASE_HEX \
+  --enrollment https://<ENROLLMENT_HOSTNAME>:8443/ \
+  --ca-sha256 <64_LOWERCASE_HEX_FROM_SHA256SUM> \
   --token-stdin < /run/secrets/vonk-enrollment-token
 ```
 
-Approve the displayed enrollment in the admin interface, then repeat the
-exact command once to collect the issued certificate. Delete the token file.
+Approve the displayed enrollment in the admin interface, then repeat the exact
+command once to collect the issued certificate. Delete the token file after
+the second successful run. If the node loses its key, expires before renewal,
+or the disk is replaced, do not copy another node's certificate: create a new
+one-use grant and repeat this same grant/pair/approve/pair flow.
 
 ## Validate and start
 
@@ -82,6 +125,8 @@ sudo -u vonk-agent env \
 sudo systemctl enable --now vonk-forge-package-helper.socket
 sudo systemctl enable --now vonk-forge-agent-supervisor.service
 sudo systemctl status vonk-forge-agent.service vonk-forge-agent-supervisor.service
+sudo systemctl restart vonk-forge-agent-supervisor.service
+sudo systemctl status vonk-forge-agent-supervisor.service
 ```
 
 The controller must show `Rust agent`, migration `complete`, protocol 3, the
@@ -102,3 +147,21 @@ The agent must have no listening TCP socket. `podman ps` must work without a
 Docker socket. A recipe container receives only declared mounts, limits,
 network mode, and NVIDIA CDI devices; the image is always pulled and inspected
 by immutable digest.
+
+## Rotation, recovery, and removal
+
+- Controller CA rotation: install the replacement certificate at
+  `/etc/vonk-forge-agent/controller-ca.pem`, recompute the DER SHA-256
+  fingerprint with the exact `openssl x509 ... -outform DER | sha256sum`
+  command above, update `ca_sha256`, then restart the supervisor and confirm
+  the controller still reports the same `node_id`.
+- Identity-loss recovery: for expiry, key loss, or storage replacement, create
+  a fresh one-use grant and repeat the original grant/pair/approve/pair
+  sequence. Recovery is always a new local key plus a new certificate.
+- Removal: stop the running units first, then remove the package:
+
+  ```bash
+  sudo systemctl disable --now vonk-forge-agent-supervisor.service \
+    vonk-forge-package-helper.socket
+  sudo apt remove vonk-forge-agent
+  ```

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Run the local development graph from already-built images.  The public NAS
-# artifact is rendered elsewhere; this wrapper never builds images or provides
-# a local repository-origin override.
+# artifact is rendered elsewhere. This wrapper never builds images; it creates
+# a one-use origin for the exact checked-out commit so feature branches can be
+# tested without weakening the public-main acceptance boundary.
 set -euo pipefail
 umask 077
 
@@ -10,8 +11,15 @@ template="$repository_root/deploy/compose/compose.dev.images.yaml"
 secrets_helper="$repository_root/scripts/dev-compose-secrets.py"
 api_image='vonk-forge-api:dev-local'
 worker_image='vonk-forge-worker:dev-local'
+project_name=${VONK_DEV_PROJECT_NAME-vonk-forge-dev}
+management_cidrs=${VONK_DEV_MANAGEMENT_CIDRS-127.0.0.1/32}
 workspace=
 overlay=
+
+if [[ ! "$project_name" =~ ^[a-z0-9][a-z0-9_-]{0,62}$ ]]; then
+  printf '%s\n' 'development Compose project name is invalid' >&2
+  exit 2
+fi
 
 if [[ "$#" -eq 0 ]]; then
   set -- up -d --wait --pull never
@@ -29,14 +37,17 @@ fi
 if [[ -n ${VONK_DEV_SECRETS_DIR:-} ]]; then
   secrets_dir=$(python3 "$secrets_helper" \
     --repository-root "$repository_root" \
+    --management-cidrs "$management_cidrs" \
     --external-secrets-dir "$VONK_DEV_SECRETS_DIR")
 else
-  secrets_dir=$(python3 "$secrets_helper" --repository-root "$repository_root")
+  secrets_dir=$(python3 "$secrets_helper" \
+    --repository-root "$repository_root" \
+    --management-cidrs "$management_cidrs")
 fi
 
-expected_commit=$(git -C "$repository_root" rev-parse --verify 'refs/heads/main^{commit}')
+expected_commit=$(git -C "$repository_root" rev-parse --verify 'HEAD^{commit}')
 [[ "$expected_commit" =~ ^[0-9a-f]{40}$ ]] || {
-  printf '%s\n' 'local main must resolve to a full commit' >&2
+  printf '%s\n' 'checked-out development commit must resolve fully' >&2
   exit 2
 }
 
@@ -52,6 +63,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
+git clone --quiet --bare "$repository_root" "$workspace/source-origin.git"
+git --git-dir="$workspace/source-origin.git" update-ref \
+  refs/heads/main "$expected_commit"
+git --git-dir="$workspace/source-origin.git" symbolic-ref HEAD refs/heads/main
+chmod -R a+rX "$workspace/source-origin.git"
+
 [[ -f "$template" && ! -L "$template" ]] || {
   printf '%s\n' 'development image template is unavailable' >&2
   exit 2
@@ -66,34 +83,22 @@ sed \
   "$template" > "$workspace/docker-compose.yml"
 ln -s "$secrets_dir" "$workspace/secrets"
 
-if [[ "$1" == down ]]; then
-  api_id="sha256:$(printf '%064d' 0)"
-  worker_id="sha256:$(printf '%064d' 1)"
-else
-  api_id=$(docker image inspect --format '{{.Id}}' "$api_image")
-  worker_id=$(docker image inspect --format '{{.Id}}' "$worker_image")
-fi
-[[ "$api_id" =~ ^sha256:[0-9a-f]{64}$ && "$worker_id" =~ ^sha256:[0-9a-f]{64}$ ]] || {
-  printf '%s\n' 'local development images did not provide immutable IDs' >&2
-  exit 2
-}
 overlay="$workspace/docker-compose.local.yaml"
 cat > "$overlay" <<EOF
 services:
-  dev-init:
+  dev-repository-init:
     environment:
-      VONK_DEV_API_IMAGE: vonk-forge-api@$api_id
-      VONK_DEV_WORKER_IMAGE: vonk-forge-worker@$worker_id
-  control-api:
-    environment:
-      VONK_CONTROL_PROCESS_IMAGE: vonk-forge-api@$api_id
-  control-worker:
-    environment:
-      VONK_CONTROL_PROCESS_IMAGE: vonk-forge-worker@$worker_id
+      VONK_DEV_LOCAL_ACCEPTANCE: '1'
+      VONK_DEV_REPOSITORY_URL: file:///source-origin
+    volumes:
+      - type: bind
+        source: $workspace/source-origin.git
+        target: /source-origin
+        read_only: true
 EOF
 
 docker compose \
-  --project-name vonk-forge-dev \
+  --project-name "$project_name" \
   --project-directory "$workspace" \
   --file "$workspace/docker-compose.yml" \
   --file "$overlay" \

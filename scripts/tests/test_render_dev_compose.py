@@ -18,6 +18,27 @@ API_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-api:dev-sha-{COMMIT}@sha256:{DIGE
 WORKER_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-worker:dev-sha-{COMMIT}@sha256:{DIGEST}"
 API_DEV_IMAGE = "ghcr.io/carstvaartjes/vonk-forge-api:dev"
 WORKER_DEV_IMAGE = "ghcr.io/carstvaartjes/vonk-forge-worker:dev"
+PINNED_BASELINE = f'x-pinned-expected-commit: "{COMMIT}"'
+EXPECTED_SECRET_NAMES = {
+    "agent-ca-certificate",
+    "agent-ca-key",
+    "agent-proxy-auth",
+    "controller-ca",
+    "controller-server-certificate",
+    "controller-server-key",
+    "database-url",
+    "git-signing-key",
+    "litellm-master-key",
+    "litellm-upstream-key",
+    "management-cidrs",
+    "postgres-password",
+    "token-signing-key",
+}
+PORT_INTERPOLATIONS = {
+    "VONK_AGENT_PORT": "${VONK_AGENT_PORT:-8443}",
+    "VONK_DEV_INFERENCE_PORT": "${VONK_DEV_INFERENCE_PORT:-4000}",
+    "VONK_DEV_PORT": "${VONK_DEV_PORT:-8080}",
+}
 
 
 def _renderer():
@@ -63,6 +84,8 @@ def test_pinned_render_uses_one_verified_cohort_identity_for_every_service(
     text = output.read_text(encoding="utf-8")
     assert text.count(API_IMAGE) == 1
     assert text.count(WORKER_IMAGE) == 1
+    assert PINNED_BASELINE in text
+    assert "__VONK_EXPECTED_COMMIT__" not in text
     assert "VONK_DEV_EXPECTED_COMMIT" not in text
     for service in ("dev-init", "migrate", "control-api", "control-worker"):
         environment = _compose_service(output, service)["environment"]
@@ -192,26 +215,43 @@ def test_render_rejects_extra_compose_interpolation_even_when_caller_resolves_it
 
 
 @pytest.mark.parametrize(
-    "replacement",
+    ("original", "replacement", "name"),
     (
-        "${VONK_DEV_PORT-8080}",
-        "${VONK_DEV_PORT:-8080",
-        "${VONK_DEV_PORT:-8080}:${VONK_DEV_PORT:-8080}",
+        ("${VONK_DEV_PORT:-8080}", "${VONK_DEV_PORT-8080}", "VONK_DEV_PORT"),
+        ("${VONK_DEV_PORT:-8080}", "${VONK_DEV_PORT:-8080", "VONK_DEV_PORT"),
+        (
+            "${VONK_DEV_PORT:-8080}",
+            "${VONK_DEV_PORT:-8080}:${VONK_DEV_PORT:-8080}",
+            "VONK_DEV_PORT",
+        ),
+        (
+            "${VONK_AGENT_PORT:-8443}",
+            "${VONK_AGENT_PORT-8443}",
+            "VONK_AGENT_PORT",
+        ),
+        (
+            "${VONK_AGENT_PORT:-8443}",
+            "${VONK_AGENT_PORT:-8443",
+            "VONK_AGENT_PORT",
+        ),
+        (
+            "${VONK_AGENT_PORT:-8443}",
+            "${VONK_AGENT_PORT:-8443}:${VONK_AGENT_PORT:-8443}",
+            "VONK_AGENT_PORT",
+        ),
     ),
 )
-def test_render_rejects_malformed_or_duplicate_dev_port_interpolation(
-    tmp_path: Path, replacement: str
+def test_render_rejects_malformed_or_duplicate_documented_port_interpolation(
+    tmp_path: Path, original: str, replacement: str, name: str
 ) -> None:
     template = _copy_template(
         tmp_path,
-        TEMPLATE.read_text(encoding="utf-8").replace(
-            "${VONK_DEV_PORT:-8080}", replacement
-        ),
+        TEMPLATE.read_text(encoding="utf-8").replace(original, replacement),
     )
     output = tmp_path / "docker-compose.yml"
     output.write_text("previous output\n", encoding="utf-8")
 
-    with pytest.raises(ValueError, match="VONK_DEV_PORT"):
+    with pytest.raises(ValueError, match=name):
         _renderer().render(template, output, API_IMAGE, WORKER_IMAGE, COMMIT)
 
     assert output.read_text(encoding="utf-8") == "previous output\n"
@@ -298,10 +338,55 @@ def test_compose_validation_uses_only_path_and_fixed_dev_port(
     monkeypatch.setenv("COMPOSE_FILE", "/attacker/compose.yaml")
     monkeypatch.setenv("COMPOSE_PROJECT_NAME", "caller-project")
     monkeypatch.setenv("VONK_DEV_PORT", "65535")
+    monkeypatch.setenv("VONK_DEV_INFERENCE_PORT", "65534")
+    monkeypatch.setenv("VONK_AGENT_PORT", "9443")
 
     renderer._validate_compose(stage)
 
-    assert captured["env"] == {"PATH": os.environ["PATH"], "VONK_DEV_PORT": "8080"}
+    assert captured["env"] == {
+        "PATH": os.environ["PATH"],
+        "VONK_AGENT_PORT": "8443",
+        "VONK_DEV_INFERENCE_PORT": "4000",
+        "VONK_DEV_PORT": "8080",
+    }
+
+
+def test_render_stages_every_compose_secret_with_nonsecret_synthetic_material(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    renderer = _renderer()
+    output = tmp_path / "docker-compose.yml"
+    captured: dict[str, object] = {}
+
+    def inspect_validation(stage: Path) -> None:
+        secrets_root = stage.parent / "secrets"
+        captured["validation_root"] = stage.parent
+        captured["secrets"] = {
+            path.name: path.read_text(encoding="utf-8")
+            for path in sorted(secrets_root.iterdir())
+        }
+
+    monkeypatch.setattr(renderer, "_validate_compose", inspect_validation)
+
+    renderer.render(TEMPLATE, output, API_IMAGE, WORKER_IMAGE, COMMIT)
+
+    assert set(captured["secrets"]) == EXPECTED_SECRET_NAMES
+    for value in captured["secrets"].values():
+        assert value
+        assert "PRIVATE KEY" not in value
+    assert not Path(captured["validation_root"]).exists()
+
+
+def test_repeated_render_is_byte_stable(tmp_path: Path) -> None:
+    output = tmp_path / "docker-compose.yml"
+    renderer = _renderer()
+
+    renderer.render(TEMPLATE, output, API_IMAGE, WORKER_IMAGE, COMMIT)
+    first = output.read_bytes()
+
+    renderer.render(TEMPLATE, output, API_IMAGE, WORKER_IMAGE, COMMIT)
+
+    assert output.read_bytes() == first
 
 
 def test_cleanup_failure_preserves_output_and_cleans_staging_on_retry(
@@ -370,9 +455,18 @@ def test_rendered_compose_is_image_only_and_has_exact_runtime_boundaries(
         for volume in service.get("volumes", [])
     )
     assert {secret["source"] for secret in services["postgres"]["secrets"]} == {"postgres-password"}
-    assert {secret["source"] for secret in services["dev-init"]["secrets"]} == {"database-url", "git-signing-key"}
+    assert {secret["source"] for secret in services["dev-init"]["secrets"]} == (
+        EXPECTED_SECRET_NAMES - {"postgres-password"}
+    )
     assert services["migrate"].get("secrets", []) == []
-    assert "secrets" not in services["control-api"]
+    assert services["control-api"].get("secrets", []) == []
+    assert volumes["control-api"]["/run/secrets"] == {
+        "type": "volume",
+        "source": "dev-api-secrets",
+        "target": "/run/secrets",
+        "read_only": True,
+        "volume": {},
+    }
     assert "secrets" not in services["control-worker"]
     assert volumes["control-api"]["/run/secrets"]["source"].endswith("dev-api-secrets")
     init_migrate_secrets = volumes["dev-init"]["/migrate-secrets"]
@@ -430,4 +524,6 @@ def test_template_is_development_only_and_never_mentions_local_acceptance() -> N
     assert "build:" not in text
     assert "context:" not in text
     assert "../" not in text
-    assert text.count("${VONK_DEV_PORT:-8080}") == 1
+    assert {name for name, value in PORT_INTERPOLATIONS.items() if text.count(value) == 1} == set(
+        PORT_INTERPOLATIONS
+    )

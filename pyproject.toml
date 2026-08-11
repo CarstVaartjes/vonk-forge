@@ -20,7 +20,7 @@ dependencies = [
 vonkctl = "cluster_profiles.cli:main"
 
 [dependency-groups]
-dev = ["pytest==9.1.1"]
+dev = ["pytest==9.1.1", "pyyaml==6.0.3"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/cluster_profiles"]
@@ -48,6 +48,9 @@ packages = ["src/cluster_profiles"]
 required-version = "==0.16.1"
 target-version = "py312"
 extend-exclude = ["src/cluster_profiles/generated_control"]
+
+[tool.ruff.lint.per-file-ignores]
+"control/src/vonk_control/resources/dev/litellm-supervisor.py" = ["N999"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src", "."]

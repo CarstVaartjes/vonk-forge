@@ -15,6 +15,10 @@ import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
+from fastapi import HTTPException
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_control.agent_api import (
     AgentApiServices,
@@ -54,10 +58,6 @@ from vonk_control.pki import CertificateAuthority, IssuedCertificate
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
 from vonk_control.recipe_contract import recipe_content_sha256
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
-from fastapi import HTTPException
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import sessionmaker
 
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
@@ -286,6 +286,38 @@ def test_agent_posts_authenticated_runtime_and_fabric_inventory(agent_system) ->
             "/agent/v1/inventory",
             headers=agent_headers(NODE_B, "serial-b"),
             json=denied,
+        ).status_code
+        == 422
+    )
+
+
+def test_agent_posts_authenticated_complete_recipe_run_observation_snapshot(
+    agent_system,
+) -> None:
+    client, _services, _, clock = agent_system
+    payload = {
+        "schema_version": 1,
+        "observed_at": clock.now.isoformat(),
+        "runs": [],
+    }
+
+    assert (
+        client.post(
+            "/agent/v1/recipe-runs/observations",
+            headers=agent_headers(NODE_A, "serial-a"),
+            json=payload,
+        ).status_code
+        == 204
+    )
+    assert (
+        client.post("/agent/v1/recipe-runs/observations", json=payload).status_code
+        == 401
+    )
+    assert (
+        client.post(
+            "/agent/v1/recipe-runs/observations",
+            headers=agent_headers(NODE_A, "serial-a"),
+            json=payload | {"runs": [{"run_id": "not-a-uuid", "ready": True}]},
         ).status_code
         == 422
     )

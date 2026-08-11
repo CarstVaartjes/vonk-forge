@@ -252,7 +252,7 @@ render_acceptance_compose() {
 render_acceptance_override() {
   cat > "$override_file" <<EOF
 services:
-  dev-init:
+  dev-repository-init:
     environment:
       VONK_DEV_LOCAL_ACCEPTANCE: "1"
       VONK_DEV_REPOSITORY_URL: file:///source-origin
@@ -415,19 +415,14 @@ active_compose_file=$compose_file
 
 secrets_dir="$acceptance_root/secrets"
 mkdir -m 0700 "$secrets_dir"
-postgres_password=$(python3 - <<'PY'
-import secrets
-print(secrets.token_urlsafe(32))
-PY
-)
-printf '%s\n' "$postgres_password" > "$secrets_dir/postgres-password"
-printf 'postgresql+psycopg://control:%s@postgres:5432/control\n' "$postgres_password" \
-  > "$secrets_dir/database-url"
-ssh-keygen -q -t ed25519 -N '' -f "$secrets_dir/git-signing-key" >/dev/null
-chmod 0600 "$secrets_dir/postgres-password" "$secrets_dir/database-url" \
-  "$secrets_dir/git-signing-key" "$secrets_dir/git-signing-key.pub"
-docker run --rm --user 0:0 --volume "$secrets_dir:/acceptance-secrets" \
-  "$api_image" chown -R 10001:10001 /acceptance-secrets
+python3 "$repository_root/scripts/dev-runtime-secrets.py" \
+  --secrets-dir "$secrets_dir" \
+  --management-cidrs '127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16' \
+  --enroll-hostname enroll.vonk-forge.lan \
+  --agent-hostname agents.vonk-forge.lan \
+  --registry-hostname registry.vonk-forge.lan \
+  >/dev/null
+postgres_password=$(sed -n '1p' "$secrets_dir/postgres-password")
 
 compose config -q
 
@@ -500,9 +495,9 @@ for mount in json.load(sys.stdin):
 ' "$repository_root"
   done
   compose exec -T control-api sh -ec \
-    'test -r /run/secrets/git-signing-key && test -r /run/secrets/admin-grant-private-key && test ! -e /run/secrets/worker-api-token'
+    'test -r /run/secrets/git-signing-key && test -r /run/secrets/admin-grant-private-key && test -r /run/secrets/token-signing-key && test -r /run/secrets/worker-api-token'
   compose exec -T control-worker sh -ec \
-    'test -r /run/secrets/worker-api-token && test ! -e /run/secrets/git-signing-key && test ! -e /run/secrets/admin-grant-private-key'
+    'test -r /run/secrets/worker-api-token && test ! -e /run/secrets/git-signing-key && test ! -e /run/secrets/admin-grant-private-key && test ! -e /run/secrets/token-signing-key'
 }
 
 repository_commit() {
@@ -581,7 +576,7 @@ assert_project_volume_exists() {
 pull_first_party_aliases() {
   compose pull --policy always \
     dev-cohort-reset dev-api-cohort dev-worker-cohort dev-cohort-verify \
-    dev-init migrate control-api control-worker
+    dev-repository-init dev-init migrate control-api control-worker
 }
 
 # A deliberately mixed API-current/worker-previous pair uses two distinct
@@ -593,7 +588,7 @@ compose_started=1
 if compose up --wait --pull never dev-cohort-verify; then
   die "mixed development image cohort was accepted"
 fi
-if [[ -n $(compose ps --all --services dev-init migrate) ]]; then
+if [[ -n $(compose ps --all --services dev-repository-init dev-init migrate) ]]; then
   die "mixed development image cohort reached initializer or migration"
 fi
 compose down --volumes --remove-orphans >/dev/null
@@ -606,6 +601,7 @@ pull_first_party_aliases
 compose_started=1
 compose up --wait --pull never
 assert_cohort_gate_succeeded
+assert_exited_successfully dev-repository-init
 assert_exited_successfully dev-init
 assert_exited_successfully migrate
 assert_running postgres
@@ -629,6 +625,7 @@ pull_first_party_aliases
   || die "mutable Compose graph changed during cohort promotion"
 compose up --wait --pull never --force-recreate
 assert_cohort_gate_succeeded
+assert_exited_successfully dev-repository-init
 assert_exited_successfully dev-init
 assert_exited_successfully migrate
 assert_running postgres
@@ -654,13 +651,14 @@ active_compose_file=$pinned_file
 compose stop control-api control-worker >/dev/null
 compose rm --force --stop \
   dev-cohort-reset dev-api-cohort dev-worker-cohort dev-cohort-verify \
-  dev-init migrate control-api control-worker >/dev/null
+  dev-repository-init dev-init migrate control-api control-worker >/dev/null
 if compose up --wait --pull never --force-recreate; then
   die "pinned cohort A unexpectedly accepted cohort B's repository baseline"
 fi
-assert_exited_with_failure dev-init
+assert_exited_with_failure dev-repository-init
+assert_service_never_started dev-init
 assert_service_never_started migrate
-rollback_logs=$(compose logs --no-color dev-init 2>&1 || true)
+rollback_logs=$(compose logs --no-color dev-repository-init 2>&1 || true)
 [[ "$rollback_logs" == *"development repository accepted baseline is divergent"* ]] \
   || die "pinned cohort A did not report the non-fast-forward repository baseline"
 
@@ -684,6 +682,7 @@ done
 compose_started=1
 compose up --wait --pull never --force-recreate
 assert_cohort_gate_succeeded
+assert_exited_successfully dev-repository-init
 assert_exited_successfully dev-init
 assert_exited_successfully migrate
 assert_running postgres

@@ -16,15 +16,65 @@ directory when creating a Docker/Compose project. Its contents must be exactly:
 vonk-forge/
 ├── docker-compose.yml
 └── secrets/
-    ├── postgres-password
+    ├── agent-ca-certificate
+    ├── agent-ca-key
+    ├── agent-proxy-auth
+    ├── controller-ca
+    ├── controller-server-certificate
+    ├── controller-server-key
     ├── database-url
-    └── git-signing-key
+    ├── git-signing-key
+    ├── litellm-master-key
+    ├── litellm-upstream-key
+    ├── management-cidrs
+    ├── postgres-password
+    └── token-signing-key
 ```
 
-Copy only those three development secret files into `secrets/`; do not put a
-checkout, an image archive, or a production secret beside them. The Compose
-file is replaceable, while `secrets/` and Docker named volumes survive normal
-redeploys. The file contains secret *paths*, never secret values.
+Generate and validate that complete bundle on local operator storage, then copy
+it as one generation. Do not hand-assemble only the original database/signing
+files: agent PKI and LiteLLM cannot start without the remaining files. Do not
+put a checkout, an image archive, or a production secret beside them. The
+Compose file is replaceable, while `secrets/` and Docker named volumes survive
+normal redeploys. The file contains secret *paths*, never secret values.
+No `current/`, source tree, Dockerfiles, or `.env` file belongs in this
+project.
+
+## Clean-machine prerequisites
+
+Before copying anything to the NAS, start from a clean local staging
+directory on an operator workstation:
+
+- Download the accepted workflow artifact containing
+  `docker-compose.dev.yml` and `docker-compose.pinned.yml`.
+- Generate the complete runtime secret bundle locally with
+  `scripts/dev-runtime-secrets.py`; let the helper validate names, certificate
+  constraints, line endings, and key relationships before publication.
+- Store an encrypted backup of the complete bundle in 1Password or another
+  approved operator secret store, but never paste their contents into shell
+  history, terminal output, screenshots, or ticket comments.
+- Confirm the NAS can pull public GHCR images and that its management-LAN
+  firewall will allow only the required agent ingress described below.
+
+## Prepare management-LAN names and firewall
+
+Do not assume local DNS. Add the same management-LAN names to `/etc/hosts` on
+the NAS and on every GPU node that will pair to this controller:
+
+```text
+<NAS_MANAGEMENT_IP> <ENROLLMENT_HOSTNAME> <CONTROLLER_HOSTNAME> <REGISTRY_HOSTNAME>
+```
+
+Those names are generic inputs, not constants. They are later reused as the
+agent `enrollment_url`, post-certificate `controller_url`, and registry host.
+Operational commands in this repository intentionally use
+`<NAS_MANAGEMENT_IP>` rather than a site-specific constant.
+
+On the NAS firewall, allow the backend agent TLS listener only from the GPU
+node management network, for example `<NODE_MANAGEMENT_CIDR>` to
+`<NAS_MANAGEMENT_IP>:8443`. Keep human control, inference, Grafana, and Hermes
+access on their separate trusted paths; do not widen the management listener
+for convenience.
 
 The publication workflows expose three clearly named files:
 
@@ -34,26 +84,36 @@ The publication workflows expose three clearly named files:
 | `docker-compose.production.yml` | Signed release workflow | Full production graph selected only by the trusted host updater; use its production deployment bundle and [production secret guide](../../deploy/compose/README.md#required-secret-file-paths). |
 | `docker-compose.pinned.yml` | Accepted `main` workflow | Immutable development references for explicit reproduction or state-aware recovery. |
 
-For normal development, copy `docker-compose.dev.yml` as the bare mutable `:dev`
-artifact and rename it to `docker-compose.yml`. A moved tag does not change a
+For normal development, give `docker-compose.dev.yml` to
+`scripts/dev-runtime-project`; it publishes that artifact as
+`docker-compose.yml`. A moved tag does not change a
 running project: after a successful publication, pull/redeploy the unchanged
 `docker-compose.yml`, not restart containers and not replace the file. The
 pinned file is deliberately an exception for
 reproduction or recovery; this development guide never installs the production
 graph or its much larger production credential set.
 
-The three operator-owned inputs have narrow purposes:
+The operator-owned bundle has narrow service projections:
 
 | File | Consumer | Purpose |
 |---|---|---|
 | `postgres-password` | PostgreSQL only | Password for the development `control` database role. |
 | `database-url` | initializer, migration, then separate API/worker projections | Matching SQLAlchemy URL for that role. |
 | `git-signing-key` | initializer, then API projection only | Unencrypted Ed25519 SSH private key for development Git signing. |
+| `agent-ca-certificate`, `agent-ca-key`, `agent-proxy-auth` | initializer, then separated API/Caddy projections | Agent certificate issuance and authenticated proxy boundary. |
+| `controller-ca`, `controller-server-certificate`, `controller-server-key` | operator backup plus Caddy projection | Server trust for the two agent hostnames. |
+| `litellm-master-key`, `litellm-upstream-key` | initializer, then LiteLLM-only projection | User-facing development inference and internal upstream authentication. |
+| `management-cidrs` | initializer, API, worker, and Caddy projections | Exact management networks allowed to use agent ingress. |
+| `token-signing-key` | initializer, then API projection only | Random authority used to sign short-lived development administrator tokens. |
 
-On first start, `dev-init` generates an admin-grant private key and a separate
-worker API token. It projects secrets into three distinct named volumes: API
-gets the database URL, signing key, and admin-grant key; migration gets only
-the database URL; worker gets the database URL and worker token. Those values
+On first start, the networked `dev-repository-init` service fetches and verifies
+the public repository without receiving any runtime secret. The separate
+`network_mode: none` `dev-init` service generates an admin-grant private key and
+a worker API token without mounting the repository. It projects authority into distinct API, migration, worker,
+Caddy, and LiteLLM named volumes: API gets its signing and enrollment
+authority; migration gets only the database URL; worker gets the database URL,
+management CIDRs, and worker token; Caddy gets only TLS/proxy material; and
+LiteLLM gets only its two keys. Those values
 are not host files, image contents, CI inputs, Compose environment values, or
 worker/API-shared authority.
 
@@ -62,10 +122,13 @@ worker/API-shared authority.
 Open the successful `Development images` workflow run for the accepted `main`
 commit. Download the artifact named
 `vonk-forge-dev-compose-<40-character-commit>`. It contains
-`docker-compose.dev.yml` and `docker-compose.pinned.yml`. Select
-`docker-compose.dev.yml` and rename it to `docker-compose.yml` in the NAS
-project directory. Do not edit the first-party image references or add digests:
-the mutable `:dev` channel is intentionally selected when the Docker UI pulls.
+`docker-compose.dev.yml` and `docker-compose.pinned.yml`. Keep both on local
+operator storage. Pass `docker-compose.dev.yml` to
+`scripts/dev-runtime-project` as shown below; the publisher validates and writes
+it as the NAS project's `docker-compose.yml`. Do not rename or copy either
+artifact into the NAS project by hand. Do not edit the first-party image
+references or add digests: the mutable `:dev` channel is intentionally selected
+when the Docker UI pulls.
 
 In the NAS file manager, confirm that the artifact is named
 `docker-compose.yml` and that the project UI identifies it as a Compose file;
@@ -74,54 +137,108 @@ packages must be public. A pull-only NAS needs no registry login. If the Docker
 UI requests credentials, stop and correct package visibility instead of
 installing a GitHub token on the NAS.
 
-## Create and copy the three NAS secret files
+## Generate and copy the NAS secret bundle
 
-Use the NAS SMB share or NAS file manager to create `secrets/` in the same
-project directory as `docker-compose.yml`, then copy the following exact files
-into it. Create regular files, not folders or shortcuts; use UTF-8 without a
-BOM and end each text value with one newline. Do not open values in the Docker
-UI or put them in the Compose file.
+Generate secrets on a private local Linux filesystem, never directly on SMB:
+
+```bash
+set -euo pipefail
+install -d -m 0700 '<LOCAL_STAGING_DIRECTORY>'
+scripts/dev-runtime-secrets.py \
+  --secrets-dir '<LOCAL_STAGING_DIRECTORY>/secrets' \
+  --management-cidrs '<NODE_MANAGEMENT_CIDR>' \
+  --enroll-hostname '<ENROLLMENT_HOSTNAME>' \
+  --agent-hostname '<CONTROLLER_HOSTNAME>' \
+  --registry-hostname '<REGISTRY_HOSTNAME>'
+```
+
+The helper prints only the destination plus public certificate fingerprints
+and expiry dates. It never prints secret values. It creates regular files with
+mode `0600` in an operator-owned mode `0700` directory and refuses an
+incomplete, unknown, symlinked, or inconsistent existing bundle.
+
+Publish the accepted Compose and that exact bundle to the mounted NAS share:
+
+```bash
+scripts/dev-runtime-project \
+  --source-compose '<DOWNLOAD_DIRECTORY>/docker-compose.dev.yml' \
+  --secrets-dir '<LOCAL_STAGING_DIRECTORY>/secrets' \
+  --destination '<MOUNTED_NAS_PARENT>/vonk-forge' \
+  --nas-address '<NAS_MANAGEMENT_IP>' \
+  --management-cidrs '<NODE_MANAGEMENT_CIDR>' \
+  --enroll-hostname '<ENROLLMENT_HOSTNAME>' \
+  --agent-hostname '<CONTROLLER_HOSTNAME>' \
+  --registry-hostname '<REGISTRY_HOSTNAME>'
+```
+
+This is the supported copy operation: it renders only the site hostnames,
+verifies every source and destination byte, and permits only
+`docker-compose.yml` plus `secrets/` at the destination. The helper takes a
+nonblocking exclusive Linux file lock in a stable hidden sibling of the project
+before inspecting or recovering a transaction. The lock remains outside the
+two-item project and is reused by later publications. A live second publisher
+is rejected without touching the active
+journal; an unlocked file left by a dead process is safely reused. Publication
+fails closed if the mounted SMB filesystem cannot provide that lock. The
+helper keeps a private, hidden transaction journal while replacing files
+because SMB directory rename is not a dependable atomic generation switch. It
+restores the complete previous generation after an ordinary write failure. If
+the workstation, mount, or process disappears, remount the same share and
+rerun the same command: the helper verifies the stale journal, restores the
+prior generation, and then safely retries publication.
+After verifying a completed generation, it atomically retires the rollback
+journal as `.vonk-forge-publish.cleanup` before deleting it. An interrupted
+cleanup is therefore disposable and is removed on the next locked invocation
+without being mistaken for rollback state. Do not manually delete, move,
+inspect, or copy either hidden path; both can temporarily contain private
+copies. A successful invocation removes them and leaves exactly the two visible
+project items.
+
+The content classes are:
 
 | File | Exact content rule |
 |---|---|
 | `postgres-password` | 64 lowercase hexadecimal characters followed by one newline. |
 | `database-url` | `postgresql+psycopg://control:<postgres-password>@postgres:5432/control` followed by one newline, where `<postgres-password>` is the exact value in `postgres-password`. |
 | `git-signing-key` | One unencrypted Ed25519 OpenSSH private key followed by one newline; the initializer has no interactive passphrase input. |
+| `*-certificate`, `controller-ca` | PEM certificates generated as one validated PKI generation for the configured hostnames. |
+| `agent-ca-key`, `controller-server-key` | Matching unencrypted PEM private keys; never shared with a GPU node. |
+| `agent-proxy-auth`, `litellm-master-key`, `litellm-upstream-key`, `token-signing-key` | Independent URL-safe random tokens followed by one newline. |
+| `management-cidrs` | Canonical network CIDRs, one per line, followed by one newline. |
 
-Do not overwrite existing secret files during a normal redeploy. If an SMB
-client created the files, safely eject/disconnect the share after copying and
-use the NAS file manager to confirm only the three expected names appear.
+Do not overwrite existing secret files during a normal redeploy. If you copied
+them through an SMB share or NAS file manager, safely eject/disconnect the
+share after copying and use the NAS file manager to confirm only the 13
+expected names appear.
+Back up that exact host bundle before first start and after every rotation, but
+confirm the backup by filename, size, and timestamp only; never reveal the
+secret values during the check.
 
-The numeric owners match the pinned images: PostgreSQL is UID/GID `999`, while
-the API and migration run as `10001:10001`. Docker implementations differ in
-how bind-backed Compose secrets expose ownership; these owners and mode `0400`
-are the restrictive compatible host settings. The Docker daemon must be able
-to traverse the root-owned `0700` secret directory.
-
-Expected owners are `999:999`, `10001:10001`, and `0:0`, respectively; every
-mode is `400`. File sizes are safe to display. Never use `cat`, `Get-Content`,
-or a screenshot that reveals values. Confirm the names, presence, and file
-sizes through the NAS file manager; do not copy configuration output into
-diagnostics.
+Do not change host files to container UIDs. The Docker daemon reads the
+Compose file-backed secrets, and `dev-init` creates service-owned mode `0400`
+projections inside separate named volumes. File sizes are safe to display.
+Never use `cat`, `Get-Content`, or a screenshot that reveals values. Confirm
+names, presence, and sizes through the NAS file manager; do not copy
+configuration output into diagnostics.
 
 ## SMB/file-manager preparation
 
-Use an SMB client only to copy the three already-prepared files into
-`secrets/`. Generate password and private-key material through the
-organization's approved secret-management process rather than by pasting a
-command into a client terminal. The SMB client must create regular files with
-the exact names and content rules above; it must not create a public key,
-temporary copy, or duplicate filename in the project directory.
+Use an SMB client only as the mounted destination of
+`scripts/dev-runtime-project`; secret generation occurs on private local
+storage. The SMB client must create regular files with the exact names and
+content rules above; it must not leave a public key, temporary copy, or
+duplicate filename in the project directory. If publication is interrupted,
+leave its hidden journal untouched and rerun the publisher before importing or
+redeploying the NAS project.
 
 Obtain the unencrypted private key through the approved secret-management
 process, then copy it as a regular file from protected local storage. SMB is a
 copy path, not a secret-generation environment; its ordinary cleanup does not
 guarantee secure erasure from snapshots or managed Windows storage.
 
-Windows ACLs on an SMB drive do not establish the Linux numeric ownership used
-inside containers. Use the NAS administration interface's file-permission
-controls to apply the ownership and modes above before deploying; do not use a
-Docker-project action to change secret-file permissions.
+Windows ACLs on an SMB drive do not establish Linux numeric container
+ownership. Do not compensate with permissive public ACLs; the Docker daemon
+needs read access and `dev-init` establishes the container-side identities.
 
 ## Create and redeploy the Compose project
 
@@ -129,8 +246,8 @@ In a generic NAS Docker UI (UGREEN calls this a Docker Project):
 
 1. Create or import a project from the NAS-local `vonk-forge/` directory.
 2. Select `docker-compose.yml`; retain its relative `./secrets/...` paths.
-3. Verify that `secrets/` contains `postgres-password`, `database-url`, and
-   `git-signing-key`, without opening their contents in the UI.
+3. Verify that `secrets/` contains exactly the 13 names in the project tree
+   above, without opening their contents in the UI.
 4. Choose **Pull** then **Redeploy** for the project. Do not choose build or
    restart; there is no build context and restart cannot fetch a moved `:dev`
    image.
@@ -140,7 +257,8 @@ In a generic NAS Docker UI (UGREEN calls this a Docker Project):
 After the UI reports the deployment, follow the two prerequisite lanes in the
 job and container status: the cohort reset, API and worker cohort reporters,
 and cohort verifier complete in one lane while PostgreSQL becomes healthy in
-the other. Only then may `dev-init` and `migrate` complete, followed by the
+the other. Only then may `dev-repository-init`, the offline `dev-init`, and
+`migrate` complete, followed by the
 long-running API and worker becoming healthy. A one-shot service that exits
 successfully is complete, not failed. The API binds only to NAS loopback; use
 your organization's approved trusted access path rather than widening the
@@ -155,7 +273,7 @@ volume has two deliberately separate branches: `main` is the accepted
 origin-tracking baseline from public `origin/main`, while `deploy` is the
 mutable runtime branch used for locally signed development changes.
 `refs/vonk/deploy-base` is the exact merge-base between those branches. On each
-start, `dev-init` fetches public `origin/main`, verifies the artifact's exact
+start, `dev-repository-init` fetches public `origin/main`, verifies the artifact's exact
 accepted commit, and updates `main`; it advances `deploy` and
 `refs/vonk/deploy-base` together only when `deploy` still equals that base.
 Other local refs are preserved. A dirty checkout, rollback, changed origin,
@@ -197,11 +315,29 @@ repository history.
 
 For a documented repository-only rollback, discover the actual volume name
 from the running API before stopping the project. This remains correct if a NAS
-UI changes the Compose project name:
+UI changes the Compose project name. Replace `<NAS_PROJECT_DIRECTORY>` with the
+absolute NAS-local directory selected by the Docker Project UI. This is a
+site input: the validation below refuses a relative path, a symlinked project
+root, a missing `docker-compose.yml` or `secrets/`, and unexpected top-level
+project entries before it runs a Docker command:
 
 ```bash
 set -euo pipefail
-cd /volume1/docker/vonk-forge
+NAS_PROJECT_DIRECTORY='<NAS_PROJECT_DIRECTORY>'
+case "$NAS_PROJECT_DIRECTORY" in
+  /*) ;;
+  *) echo 'NAS_PROJECT_DIRECTORY must be an absolute path' >&2; exit 1 ;;
+esac
+test -d "$NAS_PROJECT_DIRECTORY"
+test ! -L "$NAS_PROJECT_DIRECTORY"
+test -f "$NAS_PROJECT_DIRECTORY/docker-compose.yml"
+test -d "$NAS_PROJECT_DIRECTORY/secrets"
+mapfile -d '' -t unexpected_entries < <(
+  find "$NAS_PROJECT_DIRECTORY" -mindepth 1 -maxdepth 1 \
+    ! -name docker-compose.yml ! -name secrets -print0
+)
+test "${#unexpected_entries[@]}" -eq 0
+cd -- "$NAS_PROJECT_DIRECTORY"
 expected_commit=REPLACE_WITH_PINNED_40_CHARACTER_COMMIT
 [[ "$expected_commit" =~ ^[0-9a-f]{40}$ ]]
 mapfile -t selected_images < <(
@@ -262,7 +398,8 @@ deletion.
 
 ### Recovery after an interrupted repository reset
 
-`dev-init` atomically advances `main`, `deploy`, and `refs/vonk/deploy-base`
+`dev-repository-init` atomically advances `main`, `deploy`, and
+`refs/vonk/deploy-base`
 before resetting the worktree. A host or container interruption in that narrow
 interval can leave those refs at the accepted commit while checked-out files
 remain old. The next start intentionally fails because the worktree is not
@@ -279,16 +416,18 @@ ambiguous, restore the repository volume from its backup instead.
 After recording those checks in the incident notes, explicitly run
 `git reset --hard <expected-commit>` on `deploy`, then verify
 `git status --porcelain=v1 --untracked-files=all` is empty. Restart the stack;
-`dev-init` will recheck origin, refs, merge-base, and the exact artifact
+`dev-repository-init` will recheck origin, refs, merge-base, and the exact artifact
 commit. Do not move one ref alone, delete `.git`, or use this repository reset
 as a substitute for restoring PostgreSQL or generated-secret state.
 
 ## Rotation and recovery
 
-- To rotate the Git signing key, generate a replacement as a temporary file in
-  `secrets/`, set `root:root 0400`, atomically rename it to `git-signing-key`,
-  and redeploy. `dev-init` refreshes the API-only projection. Preserve the old
-  public key wherever historical development signatures are verified.
+- To rotate the Git signing key, create a complete replacement local generation
+  with the secret generator, retain the former public key wherever historical
+  development signatures are verified, and publish the complete validated
+  generation with `scripts/dev-runtime-project`. Never edit the active NAS
+  `secrets/` directory file by file. The offline `dev-init` refreshes the
+  API-only projection during redeploy.
 - The PostgreSQL password and `database-url` are one credential pair. Never
   replace only one file. Back up the database, stage a new hexadecimal password
   and matching URL, change the existing PostgreSQL `control` role through a
@@ -300,8 +439,13 @@ as a substitute for restoring PostgreSQL or generated-secret state.
   removing their named volumes, but that invalidates related development state.
   Do not delete individual secret-projection volumes in a stateful installation
   without a tested recovery plan.
+- Rotate agent/controller PKI and LiteLLM/proxy tokens as one planned bundle
+  generation with `scripts/dev-runtime-secrets.py` in a new private staging
+  directory. Pairing identities and clients trust the existing generation, so
+  a blind file-by-file replacement causes an outage. Follow the complete
+  rotation window in [Development agent workloads](development-agent-workloads.md#rollback-and-secret-rotation).
 
-Back up the three host secret files and every named volume needed for continuity
+Back up all 13 host secret files and every named volume needed for continuity
 to encrypted, access-controlled storage. The repository volume can be cloned
 again from public GitHub, but local `deploy` history, `main`,
 `refs/vonk/deploy-base`, other local refs, and signed changes exist only in its
@@ -318,12 +462,12 @@ volume and matching password/URL pair from the same recovery point.
 - `pull access denied`: make both GHCR packages public; do not add a long-lived
   GitHub token to the NAS.
 - `permission denied` under `/run/secrets`: repeat the NAS ownership/mode step,
-  check for CRLF/BOM corruption, and redeploy so bind-backed secrets are
-  recreated.
+  validate the local bundle again, check the NAS Docker daemon's share access,
+  and redeploy so service projections are recreated.
 - PostgreSQL authentication failure after editing secrets: restore the matching
   password/URL pair and database state. Recreating containers does not change
   the password stored in an existing database volume.
-- `dev-init` repository failure: inspect its status and the public GitHub
+- `dev-repository-init` failure: inspect its status and the public GitHub
   connectivity. Do not bind-mount the SMB project as `/repository`; the live
   checkout belongs in the Compose-managed `dev-repository` volume discovered
   from the running container.
@@ -335,3 +479,6 @@ volume and matching password/URL pair from the same recovery point.
 When sharing diagnostics, include service state, exit codes, image digests, and
 the accepted commit. Do not paste secret files, unredacted environment output,
 or unrestricted service logs.
+
+Continue with the end-to-end [development agent workload acceptance
+runbook](development-agent-workloads.md) after the stack is healthy.

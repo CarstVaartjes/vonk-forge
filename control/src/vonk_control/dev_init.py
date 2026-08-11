@@ -7,6 +7,7 @@ import json
 import os
 import re
 import secrets
+import shlex
 import stat
 import subprocess
 from dataclasses import dataclass
@@ -21,6 +22,7 @@ from .dev_cohort import (
     SelectedDevelopmentCohort,
     require_selected_cohort,
 )
+from .dev_runtime_assets import stage_development_assets
 from .host_state import HostOperationPlan, SelectionReceipt
 
 _COMMIT = re.compile(r"[0-9a-f]{40}\Z")
@@ -31,9 +33,40 @@ _DEPLOYMENT_BASE_REF = "refs/vonk/deploy-base"
 _ZERO_COMMIT = "0" * 40
 _API_UID = 10001
 _API_GID = 10001
+_CADDY_UID = 10000
+_CADDY_GID = 10000
+_LITELLM_UID = 10002
+_LITELLM_GID = 10001
 _GIT_UID = 65534
 _GIT_GID = 65534
 _MAX_SECRET_BYTES = 64 * 1024
+_PROJECTION_FILES = {
+    "API": frozenset(
+        {
+            "database-url",
+            "git-signing-key",
+            "admin-grant-private-key",
+            "worker-api-token",
+            "agent-ca-certificate",
+            "agent-ca-key",
+            "agent-proxy-auth",
+            "management-cidrs",
+            "token-signing-key",
+        }
+    ),
+    "migration": frozenset({"database-url"}),
+    "worker": frozenset({"database-url", "management-cidrs", "worker-api-token"}),
+    "Caddy": frozenset(
+        {
+            "controller-server-certificate",
+            "controller-server-key",
+            "agent-ca-certificate",
+            "agent-proxy-auth",
+            "management-cidrs",
+        }
+    ),
+    "LiteLLM": frozenset({"litellm-master-key", "litellm-upstream-key"}),
+}
 _TARGET_SHA256 = "0" * 64
 _BUILD_DIGEST = "sha256:" + "1" * 64
 _VERSION = "0.1.0"
@@ -111,6 +144,7 @@ def _git(
     action: str,
     local_origin: bool,
     standard_input: str | None = None,
+    safe_directory: Path | None = None,
 ) -> str:
     command = (
         "git",
@@ -121,6 +155,10 @@ def _git(
         "-c",
         f"protocol.file.allow={'always' if local_origin else 'never'}",
     )
+    if safe_directory is not None:
+        if not local_origin or not safe_directory.is_absolute():
+            raise DevInitError("Git safe directory is invalid")
+        command += ("-c", f"safe.directory={safe_directory}")
     if root is not None:
         command += ("-C", str(root))
     command += arguments
@@ -235,9 +273,7 @@ def _is_ancestor(
     raise DevInitError("Git could not compare repository commits")
 
 
-def _merge_base(
-    root: Path, accepted: str, deployed: str, *, local_origin: bool
-) -> str:
+def _merge_base(root: Path, accepted: str, deployed: str, *, local_origin: bool) -> str:
     return _commit(
         _git(
             root,
@@ -248,9 +284,7 @@ def _merge_base(
     )
 
 
-def _chown_repository_tree(
-    root: Path, uid: int, gid: int, *, root_last: bool
-) -> None:
+def _chown_repository_tree(root: Path, uid: int, gid: int, *, root_last: bool) -> None:
     if os.geteuid() != 0:
         return
     flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
@@ -273,11 +307,10 @@ def _chown_repository_tree(
             child = os.open(name, flags, dir_fd=descriptor)
             try:
                 opened = os.fstat(child)
-                if (
-                    not stat.S_ISDIR(opened.st_mode)
-                    or (opened.st_dev, opened.st_ino)
-                    != (metadata.st_dev, metadata.st_ino)
-                ):
+                if not stat.S_ISDIR(opened.st_mode) or (
+                    opened.st_dev,
+                    opened.st_ino,
+                ) != (metadata.st_dev, metadata.st_ino):
                     raise DevInitError(
                         "development repository ownership traversal changed"
                     )
@@ -298,7 +331,9 @@ def _chown_repository_tree(
     except DevInitError:
         raise
     except OSError as error:
-        raise DevInitError("development repository ownership cannot be initialized") from error
+        raise DevInitError(
+            "development repository ownership cannot be initialized"
+        ) from error
     finally:
         if descriptor >= 0:
             os.close(descriptor)
@@ -308,20 +343,40 @@ def _initialize_fresh_repository(
     root: Path, repository_url: str, expected_commit: str, *, local_origin: bool
 ) -> None:
     _prepare_empty_repository_root(root)
+    safe_origin = Path(urlsplit(repository_url).path) if local_origin else None
+    clone_arguments = ("clone", "--no-checkout", "--origin", "origin")
+    upload_pack = None
+    if safe_origin is not None:
+        upload_pack = (
+            "git -c safe.directory=" + shlex.quote(str(safe_origin)) + " upload-pack"
+        )
+        clone_arguments += (f"--upload-pack={upload_pack}",)
+    clone_arguments += (repository_url, str(root))
     _git(
         None,
-        ("clone", "--no-checkout", "--origin", "origin", repository_url, str(root)),
+        clone_arguments,
         action="clone development repository",
         local_origin=local_origin,
+        safe_directory=safe_origin,
     )
     _git(
         root,
-        ("fetch", "--no-tags", "origin", "+refs/heads/main:refs/remotes/origin/main"),
+        (
+            "fetch",
+            *((f"--upload-pack={upload_pack}",) if upload_pack else ()),
+            "--no-tags",
+            "origin",
+            "+refs/heads/main:refs/remotes/origin/main",
+        ),
         action="fetch development repository main",
         local_origin=local_origin,
     )
-    if not _is_ancestor(root, expected_commit, "refs/remotes/origin/main", local_origin=local_origin):
-        raise DevInitError("expected development commit is not reachable from origin/main")
+    if not _is_ancestor(
+        root, expected_commit, "refs/remotes/origin/main", local_origin=local_origin
+    ):
+        raise DevInitError(
+            "expected development commit is not reachable from origin/main"
+        )
     accepted = _git(
         root,
         ("rev-parse", "--verify", "refs/heads/main^{commit}"),
@@ -415,14 +470,30 @@ def _initialize_existing_repository(
         local_origin=local_origin,
     )
     _commit(deployment_base)
+    safe_origin = Path(urlsplit(repository_url).path) if local_origin else None
+    upload_pack = (
+        "git -c safe.directory=" + shlex.quote(str(safe_origin)) + " upload-pack"
+        if safe_origin is not None
+        else None
+    )
     _git(
         root,
-        ("fetch", "--no-tags", "origin", "+refs/heads/main:refs/remotes/origin/main"),
+        (
+            "fetch",
+            *((f"--upload-pack={upload_pack}",) if upload_pack else ()),
+            "--no-tags",
+            "origin",
+            "+refs/heads/main:refs/remotes/origin/main",
+        ),
         action="fetch development repository main",
         local_origin=local_origin,
     )
-    if not _is_ancestor(root, expected_commit, "refs/remotes/origin/main", local_origin=local_origin):
-        raise DevInitError("expected development commit is not reachable from origin/main")
+    if not _is_ancestor(
+        root, expected_commit, "refs/remotes/origin/main", local_origin=local_origin
+    ):
+        raise DevInitError(
+            "expected development commit is not reachable from origin/main"
+        )
     if not _is_ancestor(root, accepted, expected_commit, local_origin=local_origin):
         raise DevInitError("development repository accepted baseline is divergent")
     if not _is_ancestor(root, deployment_base, accepted, local_origin=local_origin):
@@ -473,7 +544,9 @@ def _initialize_existing_repository(
         )
 
 
-def initialize_repository(root: Path, repository_url: str, expected_commit: str) -> None:
+def initialize_repository(
+    root: Path, repository_url: str, expected_commit: str
+) -> None:
     """Advance accepted ``main`` while preserving one clean local ``deploy``."""
     root = Path(root)
     expected_commit = _commit(expected_commit)
@@ -487,9 +560,7 @@ def initialize_repository(root: Path, repository_url: str, expected_commit: str)
             if any(root.iterdir()):
                 if os.geteuid() == 0:
                     managed_ownership = True
-                    _chown_repository_tree(
-                        root, _GIT_UID, _GIT_GID, root_last=False
-                    )
+                    _chown_repository_tree(root, _GIT_UID, _GIT_GID, root_last=False)
                 _initialize_existing_repository(
                     root, repository_url, expected_commit, local_origin=local_origin
                 )
@@ -504,19 +575,25 @@ def initialize_repository(root: Path, repository_url: str, expected_commit: str)
                 root, repository_url, expected_commit, local_origin=local_origin
             )
         _repository_is_clean(root, local_origin=local_origin)
-        if _git(
-            root,
-            ("symbolic-ref", "--quiet", "--short", "HEAD"),
-            action="verify development repository branch",
-            local_origin=local_origin,
-        ) != "deploy":
+        if (
+            _git(
+                root,
+                ("symbolic-ref", "--quiet", "--short", "HEAD"),
+                action="verify development repository branch",
+                local_origin=local_origin,
+            )
+            != "deploy"
+        ):
             raise DevInitError("development repository must check out deploy")
-        if _git(
-            root,
-            ("rev-parse", "--verify", "refs/heads/main^{commit}"),
-            action="verify development repository main",
-            local_origin=local_origin,
-        ) != expected_commit:
+        if (
+            _git(
+                root,
+                ("rev-parse", "--verify", "refs/heads/main^{commit}"),
+                action="verify development repository main",
+                local_origin=local_origin,
+            )
+            != expected_commit
+        ):
             raise DevInitError(
                 "development repository did not resolve to the expected commit"
             )
@@ -566,7 +643,9 @@ def _read_source_secret(root: Path, name: str) -> bytes:
             raise DevInitError(f"development secret source {name} changed while read")
         return bytes(content)
     except OSError as error:
-        raise DevInitError(f"development secret source {name} cannot be read") from error
+        raise DevInitError(
+            f"development secret source {name} cannot be read"
+        ) from error
     finally:
         os.close(descriptor)
 
@@ -577,15 +656,28 @@ def _service_identity() -> tuple[int, int]:
     return os.geteuid(), os.getegid()
 
 
+def _projection_identity(uid: int, gid: int) -> tuple[int, int]:
+    if os.geteuid() == 0:
+        return uid, gid
+    return os.geteuid(), os.getegid()
+
+
 def _projection_path(root: Path, *, label: str) -> tuple[str, ...]:
-    if root.anchor != "/" or len(root.parts) < 2 or any(
-        part in {"", ".", ".."} for part in root.parts[1:]
+    if (
+        root.anchor != "/"
+        or len(root.parts) < 2
+        or any(part in {"", ".", ".."} for part in root.parts[1:])
     ):
         raise DevInitError(f"{label} projection path must be absolute and normalized")
     return root.parts[1:]
 
 
-def _open_projection_directory(root: Path, *, label: str) -> int:
+def _open_projection_directory(
+    root: Path,
+    *,
+    label: str,
+    create: bool,
+) -> tuple[int, bool] | None:
     components = _projection_path(root, label=label)
     flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
     try:
@@ -593,45 +685,105 @@ def _open_projection_directory(root: Path, *, label: str) -> int:
     except OSError as error:
         raise DevInitError(f"{label} projection root is unsafe") from error
     try:
-        for component in components:
+        final_created = False
+        for index, component in enumerate(components):
             try:
                 child = os.open(component, flags, dir_fd=current)
             except FileNotFoundError:
+                if not create:
+                    os.close(current)
+                    return None
                 try:
                     os.mkdir(component, 0o700, dir_fd=current)
+                    created = True
                 except FileExistsError:
-                    pass
+                    created = False
                 child = os.open(component, flags, dir_fd=current)
+                if index == len(components) - 1:
+                    final_created = created
             os.close(current)
             current = child
-        return current
+        return current, final_created
     except OSError as error:
         os.close(current)
         raise DevInitError(f"{label} projection component is unsafe") from error
 
 
-def _prepare_projection_directory(parent: int) -> None:
+def _validate_projection_directory(
+    parent: int,
+    *,
+    label: str,
+    uid: int,
+    gid: int,
+    created: bool,
+) -> bool:
     try:
-        uid, gid = _service_identity()
-        os.fchown(parent, uid, gid)
+        metadata = os.fstat(parent)
+        expected_uid, expected_gid = _projection_identity(uid, gid)
+        if not stat.S_ISDIR(metadata.st_mode):
+            raise DevInitError(f"{label} projection root is unsafe")
+        names = os.listdir(parent)
+        if created:
+            if names:
+                raise DevInitError(f"{label} projection root is unsafe")
+            return True
+        managed = (
+            metadata.st_uid == expected_uid
+            and metadata.st_gid == expected_gid
+            and stat.S_IMODE(metadata.st_mode) == 0o550
+        )
+        if names and not managed:
+            raise DevInitError(f"{label} projection root is unsafe")
+        if not names and not managed:
+            if (
+                metadata.st_uid == 0
+                and metadata.st_gid == 0
+                and stat.S_IMODE(metadata.st_mode) == 0o755
+            ):
+                return True
+            raise DevInitError(f"{label} projection root is unsafe")
+        allowed = _PROJECTION_FILES[label]
+        for name in names:
+            if name not in allowed:
+                raise DevInitError(f"{label} projection entry is unsafe")
+            entry = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            if (
+                not stat.S_ISREG(entry.st_mode)
+                or entry.st_nlink != 1
+                or entry.st_uid != expected_uid
+                or entry.st_gid != expected_gid
+                or stat.S_IMODE(entry.st_mode) != 0o400
+                or not 0 < entry.st_size <= _MAX_SECRET_BYTES
+            ):
+                raise DevInitError(f"{label} projection entry is unsafe")
+        return False
+    except DevInitError:
+        raise
+    except OSError as error:
+        raise DevInitError(f"{label} projection root is unsafe") from error
+
+
+def _prepare_projection_directory(
+    parent: int, *, uid: int, gid: int, initialize: bool
+) -> None:
+    try:
+        uid, gid = _projection_identity(uid, gid)
+        if initialize:
+            os.fchown(parent, uid, gid)
         os.fchmod(parent, 0o700)
     except OSError as error:
-        raise DevInitError("development secret projection cannot be prepared") from error
+        raise DevInitError(
+            "development secret projection cannot be prepared"
+        ) from error
 
 
-def _clear_projection(parent: int) -> None:
-    try:
-        names = os.listdir(parent)
-        for name in names:
-            metadata = os.stat(name, dir_fd=parent, follow_symlinks=False)
-            if stat.S_ISDIR(metadata.st_mode):
-                raise DevInitError("development secret projection contains a directory")
-            os.unlink(name, dir_fd=parent)
-    except OSError as error:
-        raise DevInitError("development secret projection cannot be cleared") from error
-
-
-def _read_generated_credential(parent: int, name: str) -> bytes | None:
+def _read_generated_credential(
+    parent: int,
+    name: str,
+    *,
+    uid: int,
+    gid: int,
+) -> bytes | None:
     try:
         descriptor = os.open(
             name,
@@ -644,7 +796,7 @@ def _read_generated_credential(parent: int, name: str) -> bytes | None:
         raise DevInitError(f"generated credential {name} is unsafe") from error
     try:
         before = os.fstat(descriptor)
-        uid, gid = _service_identity()
+        uid, gid = _projection_identity(uid, gid)
         if (
             not stat.S_ISREG(before.st_mode)
             or before.st_nlink != 1
@@ -686,7 +838,12 @@ def _read_generated_credential(parent: int, name: str) -> bytes | None:
 
 def _admin_credential(parent: int) -> bytes:
     name = "admin-grant-private-key"
-    content = _read_generated_credential(parent, name)
+    content = _read_generated_credential(
+        parent,
+        name,
+        uid=_API_UID,
+        gid=_API_GID,
+    )
     if content is None:
         return ed25519.Ed25519PrivateKey.generate().private_bytes(
             serialization.Encoding.PEM,
@@ -704,7 +861,12 @@ def _admin_credential(parent: int) -> bytes:
 
 def _worker_credential(parent: int) -> bytes:
     name = "worker-api-token"
-    content = _read_generated_credential(parent, name)
+    content = _read_generated_credential(
+        parent,
+        name,
+        uid=_API_UID,
+        gid=_API_GID,
+    )
     if content is None:
         return secrets.token_urlsafe(32).encode("ascii")
     if _WORKER_TOKEN.fullmatch(content) is None:
@@ -720,17 +882,21 @@ def _seal_projection(parent: int) -> None:
         raise DevInitError("development secret projection cannot be sealed") from error
 
 
-def _write_projection_secret(parent: int, name: str, content: bytes) -> None:
+def _write_projection_secret(
+    parent: int,
+    name: str,
+    content: bytes,
+    *,
+    uid: int,
+    gid: int,
+    replace: bool = True,
+) -> None:
     temporary = f".{name}.{secrets.token_hex(12)}.new"
     descriptor = -1
     try:
         descriptor = os.open(
             temporary,
-            os.O_WRONLY
-            | os.O_CREAT
-            | os.O_EXCL
-            | os.O_NOFOLLOW
-            | os.O_CLOEXEC,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
             0o600,
             dir_fd=parent,
         )
@@ -740,13 +906,23 @@ def _write_projection_secret(parent: int, name: str, content: bytes) -> None:
             if written <= 0:
                 raise DevInitError("development secret write was incomplete")
             offset += written
-        uid, gid = _service_identity()
+        uid, gid = _projection_identity(uid, gid)
         os.fchown(descriptor, uid, gid)
         os.fchmod(descriptor, 0o400)
         os.fsync(descriptor)
         os.close(descriptor)
         descriptor = -1
-        os.replace(temporary, name, src_dir_fd=parent, dst_dir_fd=parent)
+        if replace:
+            os.replace(temporary, name, src_dir_fd=parent, dst_dir_fd=parent)
+        else:
+            os.link(
+                temporary,
+                name,
+                src_dir_fd=parent,
+                dst_dir_fd=parent,
+                follow_symlinks=False,
+            )
+            os.unlink(temporary, dir_fd=parent)
         os.fsync(parent)
     except DevInitError:
         raise
@@ -766,7 +942,11 @@ def _are_distinct_projection_roots(*roots: tuple[Path, str]) -> bool:
         _projection_path(root, label=label)
     for index, (root, _label) in enumerate(roots):
         for other, _other_label in roots[index + 1 :]:
-            if root == other or root.is_relative_to(other) or other.is_relative_to(root):
+            if (
+                root == other
+                or root.is_relative_to(other)
+                or other.is_relative_to(root)
+            ):
                 return False
     return True
 
@@ -776,68 +956,234 @@ def stage_runtime_secrets(
     api_root: Path,
     migrate_root: Path,
     worker_root: Path,
+    caddy_root: Path,
+    litellm_root: Path,
 ) -> None:
-    """Stage three disjoint, service-owned runtime-secret projections."""
+    """Stage five disjoint, service-owned runtime-secret projections."""
     source = Path(source)
-    api_root = Path(api_root)
-    migrate_root = Path(migrate_root)
-    worker_root = Path(worker_root)
+    roots = (
+        (Path(api_root), "API", _API_UID, _API_GID),
+        (Path(migrate_root), "migration", _API_UID, _API_GID),
+        (Path(worker_root), "worker", _API_UID, _API_GID),
+        (Path(caddy_root), "Caddy", _CADDY_UID, _CADDY_GID),
+        (Path(litellm_root), "LiteLLM", _LITELLM_UID, _LITELLM_GID),
+    )
     _directory(source, label="development secret source")
     if not _are_distinct_projection_roots(
-        (api_root, "API"),
-        (migrate_root, "migration"),
-        (worker_root, "worker"),
+        *((root, label) for root, label, _uid, _gid in roots)
     ):
         raise DevInitError("development secret projections must be distinct")
+
     database_url = _read_source_secret(source, "database-url")
     signing_key = _read_source_secret(source, "git-signing-key")
-    api = _open_projection_directory(api_root, label="API")
-    migrate = -1
-    worker = -1
+    agent_ca_certificate = _read_source_secret(source, "agent-ca-certificate")
+    agent_ca_key = _read_source_secret(source, "agent-ca-key")
+    agent_proxy_auth = _read_source_secret(source, "agent-proxy-auth")
+    _read_source_secret(source, "controller-ca")
+    controller_server_certificate = _read_source_secret(
+        source, "controller-server-certificate"
+    )
+    controller_server_key = _read_source_secret(source, "controller-server-key")
+    litellm_master_key = _read_source_secret(source, "litellm-master-key")
+    litellm_upstream_key = _read_source_secret(source, "litellm-upstream-key")
+    management_cidrs = _read_source_secret(source, "management-cidrs")
+    token_signing_key = _read_source_secret(source, "token-signing-key")
+
+    opened: list[tuple[int, bool] | None] = []
     try:
-        migrate = _open_projection_directory(migrate_root, label="migration")
-        worker = _open_projection_directory(worker_root, label="worker")
-        api_identity = os.fstat(api)
-        migrate_identity = os.fstat(migrate)
-        worker_identity = os.fstat(worker)
-        identities = {
-            (api_identity.st_dev, api_identity.st_ino),
-            (migrate_identity.st_dev, migrate_identity.st_ino),
-            (worker_identity.st_dev, worker_identity.st_ino),
+        for root, label, _uid, _gid in roots:
+            opened.append(_open_projection_directory(root, label=label, create=False))
+        existing = [item for item in opened if item is not None]
+        existing_identities = {
+            (metadata.st_dev, metadata.st_ino)
+            for metadata in (os.fstat(descriptor) for descriptor, _created in existing)
         }
-        if len(identities) != 3:
+        if len(existing_identities) != len(existing):
             raise DevInitError(
                 "development secret projections must be physically distinct"
             )
-        _prepare_projection_directory(api)
-        _prepare_projection_directory(migrate)
-        _prepare_projection_directory(worker)
+        for item, (_root, label, uid, gid) in zip(opened, roots, strict=True):
+            if item is None:
+                continue
+            descriptor, created = item
+            _validate_projection_directory(
+                descriptor,
+                label=label,
+                uid=uid,
+                gid=gid,
+                created=created,
+            )
+
+        for index, (item, (root, label, _uid, _gid)) in enumerate(
+            zip(opened, roots, strict=True)
+        ):
+            if item is None:
+                created_item = _open_projection_directory(
+                    root,
+                    label=label,
+                    create=True,
+                )
+                if created_item is None:
+                    raise DevInitError(f"{label} projection root is unsafe")
+                opened[index] = created_item
+        complete = [item for item in opened if item is not None]
+        if len(complete) != len(roots):
+            raise DevInitError("development secret projection root is unsafe")
+        descriptors = [descriptor for descriptor, _created in complete]
+        identities = {
+            (metadata.st_dev, metadata.st_ino)
+            for metadata in (os.fstat(descriptor) for descriptor in descriptors)
+        }
+        if len(identities) != len(descriptors):
+            raise DevInitError(
+                "development secret projections must be physically distinct"
+            )
+        initialize_roots: list[bool] = []
+        for (descriptor, created), (_root, label, uid, gid) in zip(
+            complete, roots, strict=True
+        ):
+            initialize_roots.append(
+                _validate_projection_directory(
+                    descriptor,
+                    label=label,
+                    uid=uid,
+                    gid=gid,
+                    created=created,
+                )
+            )
+
+        api, migrate, worker, caddy, litellm = descriptors
+        admin_present = "admin-grant-private-key" in os.listdir(api)
+        worker_present = "worker-api-token" in os.listdir(worker)
         admin_key = _admin_credential(api)
         worker_token = _worker_credential(worker)
-        _clear_projection(api)
-        _clear_projection(migrate)
-        _clear_projection(worker)
-        for name, content in (
-            ("database-url", database_url),
-            ("git-signing-key", signing_key),
-            ("admin-grant-private-key", admin_key),
-        ):
-            _write_projection_secret(api, name, content)
-        _write_projection_secret(migrate, "database-url", database_url)
-        for name, content in (
-            ("database-url", database_url),
-            ("worker-api-token", worker_token),
-        ):
-            _write_projection_secret(worker, name, content)
-        _seal_projection(api)
-        _seal_projection(migrate)
-        _seal_projection(worker)
+        api_worker_token = _read_generated_credential(
+            api,
+            "worker-api-token",
+            uid=_API_UID,
+            gid=_API_GID,
+        )
+        if api_worker_token is not None and api_worker_token != worker_token:
+            raise DevInitError("development worker credential projections diverge")
+
+        prepared: list[int] = []
+        try:
+            for (descriptor, _created), initialize, (
+                _root,
+                _label,
+                uid,
+                gid,
+            ) in zip(
+                complete,
+                initialize_roots,
+                roots,
+                strict=True,
+            ):
+                prepared.append(descriptor)
+                _prepare_projection_directory(
+                    descriptor,
+                    uid=uid,
+                    gid=gid,
+                    initialize=initialize,
+                )
+
+            if not admin_present:
+                _write_projection_secret(
+                    api,
+                    "admin-grant-private-key",
+                    admin_key,
+                    uid=_API_UID,
+                    gid=_API_GID,
+                    replace=False,
+                )
+            if not worker_present:
+                _write_projection_secret(
+                    worker,
+                    "worker-api-token",
+                    worker_token,
+                    uid=_API_UID,
+                    gid=_API_GID,
+                    replace=False,
+                )
+
+            for name, content in (
+                ("database-url", database_url),
+                ("git-signing-key", signing_key),
+                ("worker-api-token", worker_token),
+                ("agent-ca-certificate", agent_ca_certificate),
+                ("agent-ca-key", agent_ca_key),
+                ("agent-proxy-auth", agent_proxy_auth),
+                ("management-cidrs", management_cidrs),
+                ("token-signing-key", token_signing_key),
+            ):
+                _write_projection_secret(
+                    api,
+                    name,
+                    content,
+                    uid=_API_UID,
+                    gid=_API_GID,
+                )
+            _write_projection_secret(
+                migrate,
+                "database-url",
+                database_url,
+                uid=_API_UID,
+                gid=_API_GID,
+            )
+            _write_projection_secret(
+                worker,
+                "database-url",
+                database_url,
+                uid=_API_UID,
+                gid=_API_GID,
+            )
+            _write_projection_secret(
+                worker,
+                "management-cidrs",
+                management_cidrs,
+                uid=_API_UID,
+                gid=_API_GID,
+            )
+            for name, content in (
+                ("controller-server-certificate", controller_server_certificate),
+                ("controller-server-key", controller_server_key),
+                ("agent-ca-certificate", agent_ca_certificate),
+                ("agent-proxy-auth", agent_proxy_auth),
+                ("management-cidrs", management_cidrs),
+            ):
+                _write_projection_secret(
+                    caddy,
+                    name,
+                    content,
+                    uid=_CADDY_UID,
+                    gid=_CADDY_GID,
+                )
+            for name, content in (
+                ("litellm-master-key", litellm_master_key),
+                ("litellm-upstream-key", litellm_upstream_key),
+            ):
+                _write_projection_secret(
+                    litellm,
+                    name,
+                    content,
+                    uid=_LITELLM_UID,
+                    gid=_LITELLM_GID,
+                )
+        finally:
+            sealing_error: DevInitError | None = None
+            for descriptor in prepared:
+                try:
+                    _seal_projection(descriptor)
+                except DevInitError as error:
+                    if sealing_error is None:
+                        sealing_error = error
+            if sealing_error is not None:
+                raise sealing_error
     finally:
-        os.close(api)
-        if migrate >= 0:
-            os.close(migrate)
-        if worker >= 0:
-            os.close(worker)
+        for item in opened:
+            if item is not None:
+                descriptor, _created = item
+                os.close(descriptor)
 
 
 def _pinned_generation_identity(
@@ -904,9 +1250,7 @@ def _development_generation_identity() -> DevelopmentGenerationIdentity:
 
 def _active_projection(identity: DevelopmentGenerationIdentity) -> bytes:
     target_sha256 = identity.release_digest.removeprefix("sha256:")
-    target_name = (
-        f"platform/releases/{identity.platform_version}/{target_sha256}.json"
-    )
+    target_name = f"platform/releases/{identity.platform_version}/{target_sha256}.json"
     plan = HostOperationPlan(
         operation_id="dev-compose",
         plan_digest="sha256:" + "2" * 64,
@@ -945,7 +1289,9 @@ def _initialize_directory(path: Path, *, mode: int, uid: int, gid: int) -> None:
             os.chown(path, uid, gid, follow_symlinks=False)
         os.chmod(path, mode, follow_symlinks=False)
     except OSError as error:
-        raise DevInitError("development runtime directory cannot be initialized") from error
+        raise DevInitError(
+            "development runtime directory cannot be initialized"
+        ) from error
 
 
 def _write_active_projection(
@@ -1003,25 +1349,60 @@ def _required_image_environment(name: str) -> str:
 
 def main() -> int:
     """Initialize repository, synthetic state, and disjoint runtime authority."""
-    repository_path = Path(_required_environment("VONK_REPOSITORY_PATH"))
-    repository_url = _required_environment("VONK_DEV_REPOSITORY_URL")
-    secret_source = Path(_required_environment("VONK_DEV_SECRET_SOURCE_ROOT"))
-    api_secret_root = Path(_required_environment("VONK_DEV_API_SECRET_ROOT"))
-    migrate_secret_root = Path(_required_environment("VONK_DEV_MIGRATE_SECRET_ROOT"))
-    worker_secret_root = Path(_required_environment("VONK_DEV_WORKER_SECRET_ROOT"))
+    phase = os.environ.get("VONK_DEV_INIT_PHASE", "all")
+    if phase not in {"all", "repository", "runtime"}:
+        raise DevInitError("VONK_DEV_INIT_PHASE is invalid")
+    repository_inputs: tuple[Path, str] | None = None
+    if phase in {"all", "repository"}:
+        repository_inputs = (
+            Path(_required_environment("VONK_REPOSITORY_PATH")),
+            _required_environment("VONK_DEV_REPOSITORY_URL"),
+        )
+    runtime_paths: tuple[Path, Path, Path, Path, Path, Path, Path] | None = None
+    if phase in {"all", "runtime"}:
+        runtime_paths = (
+            Path(_required_environment("VONK_DEV_SECRET_SOURCE_ROOT")),
+            Path(_required_environment("VONK_DEV_API_SECRET_ROOT")),
+            Path(_required_environment("VONK_DEV_MIGRATE_SECRET_ROOT")),
+            Path(_required_environment("VONK_DEV_WORKER_SECRET_ROOT")),
+            Path(_required_environment("VONK_DEV_CADDY_SECRET_ROOT")),
+            Path(_required_environment("VONK_DEV_LITELLM_SECRET_ROOT")),
+            Path(_required_environment("VONK_DEV_RUNTIME_CONFIG_ROOT")),
+        )
     generation = _development_generation_identity()
-    initialize_repository(
-        repository_path,
-        repository_url,
-        generation.expected_commit,
-    )
+    if phase in {"all", "repository"}:
+        assert repository_inputs is not None
+        repository_path, repository_url = repository_inputs
+        initialize_repository(
+            repository_path,
+            repository_url,
+            generation.expected_commit,
+        )
+        if phase == "repository":
+            return 0
+
+    assert runtime_paths is not None
+    (
+        secret_source,
+        api_secret_root,
+        migrate_secret_root,
+        worker_secret_root,
+        caddy_secret_root,
+        litellm_secret_root,
+        runtime_config_root,
+    ) = runtime_paths
     stage_runtime_secrets(
         secret_source,
         api_secret_root,
         migrate_secret_root,
         worker_secret_root,
+        caddy_secret_root,
+        litellm_secret_root,
     )
-    identity_root = Path(os.environ.get("VONK_CONTROL_IDENTITY_ROOT", "/control-identity"))
+    stage_development_assets("vonk_control.resources.dev", runtime_config_root)
+    identity_root = Path(
+        os.environ.get("VONK_CONTROL_IDENTITY_ROOT", "/control-identity")
+    )
     _write_active_projection(identity_root, generation)
     uid, gid = _service_identity()
     for name, default in (
@@ -1029,7 +1410,9 @@ def main() -> int:
         ("VONK_ROUTE_ROOT", "/routes"),
         ("VONK_SUPERVISOR_ROOT", "/supervisor"),
     ):
-        _initialize_directory(Path(os.environ.get(name, default)), mode=0o750, uid=uid, gid=gid)
+        _initialize_directory(
+            Path(os.environ.get(name, default)), mode=0o750, uid=uid, gid=gid
+        )
     return 0
 
 

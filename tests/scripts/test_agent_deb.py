@@ -119,6 +119,7 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
         text=True,
         check=True,
     ).stdout
+    assert "curl" in fields
     assert "podman" in fields
     assert "uidmap" not in fields
     payload = tmp_path / "payload"
@@ -146,6 +147,9 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
     assert "usermod --add-subgids" not in postinst
     assert "sed -i '/^vonk-agent:/d' /etc/subuid" in postinst
     assert "sed -i '/^vonk-agent:/d' /etc/subgid" in postinst
+    assert (
+        "install -d -o root -g vonk-agent -m 0750 /var/lib/vonk-forge/supervisor"
+    ) in postinst
     assert 'ignore_chown_errors = "true"' in (
         payload / "etc/vonk-forge-agent/containers-storage.conf"
     ).read_text()

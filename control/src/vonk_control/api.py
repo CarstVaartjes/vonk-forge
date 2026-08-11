@@ -17,7 +17,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
-from vonk_agent_protocol import canonical_message
 from fastapi import (
     Body,
     Depends,
@@ -41,6 +40,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import FileResponse
+from vonk_agent_protocol import canonical_message
 
 from .agent_api import (
     AgentApiServices,
@@ -2053,7 +2053,7 @@ def production_app() -> FastAPI:
             forbidden_cidrs=settings.direct_fabric_cidrs,
         ),
         clock=clock,
-        maximum_age_seconds=300,
+        maximum_age_seconds=30,
     )
     recipe_operations = RecipeOperationService(
         sessions,

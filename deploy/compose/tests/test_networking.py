@@ -170,10 +170,9 @@ def test_worker_has_a_distinct_minimal_image_and_runtime_boundary() -> None:
     api_secrets = {item["source"] for item in api["secrets"]}
     assert "agent-update-authority-key" not in api_secrets
     assert "admin-grant-private-key" not in api_secrets
-    assert {
-        item["source"]: item.get("read_only", False)
-        for item in api["volumes"]
-    }["api-admin-grant-runtime"] is True
+    assert {item["source"]: item.get("read_only", False) for item in api["volumes"]}[
+        "api-admin-grant-runtime"
+    ] is True
     assert {item["target"] for item in worker["volumes"]} == {
         "/routes",
         "/supervisor",
@@ -237,7 +236,9 @@ def test_selected_services_reopen_the_root_owned_identity_directory_read_only() 
     }
 
     assert "signer-activation-init" not in services
-    assert not any(name.endswith("signer-active-control") for name in rendered["volumes"])
+    assert not any(
+        name.endswith("signer-active-control") for name in rendered["volumes"]
+    )
     for service_name in ("control-api", "control-worker"):
         service = services[service_name]
         mounts = {volume["target"]: volume for volume in service["volumes"]}
@@ -264,7 +265,9 @@ def test_selected_services_reopen_the_root_owned_identity_directory_read_only() 
     assert "VONK_ACTIVE_CONTROL_STATE_ROOT" not in signer["environment"]
 
 
-def test_selected_api_and_worker_receive_one_dynamic_exact_generation_identity() -> None:
+def test_selected_api_and_worker_receive_one_dynamic_exact_generation_identity() -> (
+    None
+):
     services = _rendered()["services"]
     api = services["control-api"]
     worker = services["control-worker"]
@@ -336,9 +339,10 @@ def test_admin_grant_signing_key_is_available_only_to_the_api() -> None:
         if volume["target"] == "/run/vonk-api-secrets"
     )
     assert runtime_mount["read_only"] is True
-    assert services["control-api"]["environment"][
-        "VONK_ADMIN_GRANT_PRIVATE_KEY_FILE"
-    ] == "/run/vonk-api-secrets/admin-grant-private-key.pem"
+    assert (
+        services["control-api"]["environment"]["VONK_ADMIN_GRANT_PRIVATE_KEY_FILE"]
+        == "/run/vonk-api-secrets/admin-grant-private-key.pem"
+    )
 
 
 def test_tailnet_backends_have_readiness_checks() -> None:
@@ -364,11 +368,16 @@ def test_litellm_routes_use_a_dedicated_atomic_config_volume() -> None:
     worker_volumes = {
         volume["target"]: volume for volume in services["control-worker"]["volumes"]
     }
+    api_volumes = {
+        volume["target"]: volume for volume in services["control-api"]["volumes"]
+    }
     litellm_volumes = {
         volume["target"]: volume for volume in services["litellm"]["volumes"]
     }
 
     assert worker_volumes["/routes"]["source"] == "route-publications"
+    assert api_volumes["/routes"]["source"] == "route-publications"
+    assert api_volumes["/routes"].get("read_only", False) is False
     assert worker_volumes["/supervisor"] == {
         "type": "volume",
         "source": "litellm-supervisor-state",

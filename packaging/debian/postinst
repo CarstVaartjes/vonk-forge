@@ -34,8 +34,11 @@ install -d -o root -g root -m 0755 /var/lib/vonk-forge/slots
 install -d -o root -g root -m 0700 \
     /var/lib/vonk-forge/helper \
     /var/lib/vonk-forge/helper/requests \
-    /var/lib/vonk-forge/incoming \
-    /var/lib/vonk-forge/supervisor
+    /var/lib/vonk-forge/incoming
+# The supervisor remains root-owned and non-writable by the runtime account,
+# while the dedicated group may traverse it to read the verified state and
+# execute the active slot selected by the root supervisor.
+install -d -o root -g vonk-agent -m 0750 /var/lib/vonk-forge/supervisor
 
 release=/usr/lib/vonk-forge/release
 state=/var/lib/vonk-forge/supervisor/state.json
