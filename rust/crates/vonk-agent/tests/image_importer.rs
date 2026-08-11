@@ -24,7 +24,9 @@ impl ProcessRunner for Runner {
         self.calls.borrow_mut().push((program, arguments.to_vec()));
         Ok(ProcessOutput {
             success: true,
-            stdout: if arguments.first().is_some_and(|item| item == "image") {
+            stdout: if arguments.first().is_some_and(|item| item == "load") {
+                format!("Loaded image: sha256:{}\n", "a".repeat(64)).into_bytes()
+            } else if arguments.first().is_some_and(|item| item == "image") {
                 format!("sha256:{}\tlinux\tarm64\tv1\t10001:10001\n", "d".repeat(64)).into_bytes()
             } else {
                 Vec::new()
@@ -65,6 +67,18 @@ fn exact_layout_is_verified_before_rootless_load_and_inspect() {
     let calls = runner.calls.borrow();
     assert_eq!(calls[0].1[0], "load");
     assert_eq!(calls[1].1[..3], ["image", "inspect", "--format"]);
+    assert_eq!(
+        calls[1].1.last().unwrap(),
+        &format!("sha256:{}", "a".repeat(64))
+    );
+    assert_eq!(
+        calls[2].1,
+        [
+            "tag",
+            &format!("sha256:{}", "a".repeat(64)),
+            "localhost/vonk/recipe-build-00000000-0000-4000-8000-000000000001",
+        ]
+    );
 }
 
 #[test]
