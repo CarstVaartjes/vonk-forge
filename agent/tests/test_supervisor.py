@@ -279,7 +279,13 @@ class SupervisorHost:
         )
         return target
 
-    def compile_readiness_agent(self, slot: str, *, pid_delta: int = 0) -> Path:
+    def compile_readiness_agent(
+        self,
+        slot: str,
+        *,
+        pid_delta: int = 0,
+        publish_delay_milliseconds: int = 0,
+    ) -> Path:
         source = self.root / f"agent-ready-{slot}.c"
         source.write_text(
             "#include <fcntl.h>\n#include <stdio.h>\n#include <stdlib.h>\n"
@@ -289,14 +295,18 @@ class SupervisorHost:
             'char credential[4096]; snprintf(credential, sizeof(credential), "%s/activation-challenge", getenv("CREDENTIALS_DIRECTORY"));\n'
             "FILE *c=fopen(credential, \"r\"); if (!c) return 3;\n"
             "char challenge[66]; if (!fgets(challenge, sizeof(challenge), c)) return 4; fclose(c); challenge[strcspn(challenge, \"\\n\")]=0;\n"
-            f'FILE *f=fopen("{self.readiness_path}", "w"); if (!f) return 2;\n'
+            f'FILE *f=fopen("{self.readiness_path}.new", "w"); if (!f) return 2;\n'
+            f"usleep({publish_delay_milliseconds} * 1000);\n"
             'fprintf(f, "{\\"challenge\\":\\"%s\\",\\"generation\\":%s,\\"pid\\":%ld,\\"schema_version\\":2,'
             '\\"sha256\\":\\"%s\\",\\"slot\\":\\"%s\\"}\\n", challenge, '
             'getenv("VONK_AGENT_SUPERVISOR_GENERATION"), '
             f"(long)getpid()+{pid_delta}, "
             'getenv("VONK_AGENT_SUPERVISOR_SHA256"), '
             'getenv("VONK_AGENT_SUPERVISOR_SLOT"));\n'
-            f"fflush(f); fsync(fileno(f)); fchmod(fileno(f), 0600); fclose(f); sleep({3 if pid_delta == 0 else 0}); return 0; }}\n"
+            "fflush(f); fsync(fileno(f)); fchmod(fileno(f), 0600); fclose(f);\n"
+            f'if (rename("{self.readiness_path}.new", "{self.readiness_path}") != 0) return 5;\n'
+            f'int d=open("{self.readiness_path.parent}", O_RDONLY|O_DIRECTORY); if (d < 0) return 6; fsync(d); close(d);\n'
+            f"sleep({3 if pid_delta == 0 else 0}); return 0; }}\n"
         )
         target = self.host_root / "opt/vonk-forge/agent-slots" / slot / "vonk-forge-agent"
         target.parent.mkdir(parents=True, mode=0o755)
@@ -917,6 +927,27 @@ def _stable_ab_host(supervisor_host: SupervisorHost) -> tuple[Path, Path]:
     assert supervisor_host.state()["status"] == "stable"
     supervisor_host.actions.write_text("")
     return a, b
+
+
+def test_readiness_fixture_publishes_only_complete_marker(
+    supervisor_host: SupervisorHost,
+) -> None:
+    a = supervisor_host.compile_agent("A", "slot-a")
+    b = supervisor_host.compile_readiness_agent(
+        "B", publish_delay_milliseconds=100
+    )
+    assert supervisor_host.run(
+        "initialize", "--slot", "A", "--sha256", _digest(a)
+    ).returncode == 0
+    assert supervisor_host.run(
+        "activate", "--slot", "B", "--sha256", _digest(b)
+    ).returncode == 0
+    supervisor_host.spawn_agent_from_systemctl()
+
+    supervised = supervisor_host.run("supervise")
+
+    assert supervised.returncode == 0, supervised.stderr
+    assert supervisor_host.state()["status"] == "stable"
 
 
 def _rollback_request(a: Path, b: Path) -> dict[str, object]:
