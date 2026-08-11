@@ -614,7 +614,8 @@ class Runner:
             raise SliceError(f"{label} response is invalid")
         deadline = time.monotonic() + self.args.timeout_seconds
         current = operation
-        while current.get("state") not in {"succeeded", "failed"}:
+        terminal_states = {"succeeded", "failed", "waiting-for-operator", "expired"}
+        while current.get("state") not in terminal_states:
             if time.monotonic() >= deadline:
                 raise SliceError(f"{label} operation timed out")
             time.sleep(self.args.poll_seconds)
@@ -623,7 +624,7 @@ class Runner:
             )
             current = _object(payload, label)
         if current.get("state") != "succeeded":
-            raise SliceError(f"{label} operation failed")
+            raise SliceError(f"{label} operation ended in {current.get('state')}")
         result = current.get("result")
         if expected_nodes is not None:
             successful = result.get("successful_nodes") if isinstance(result, dict) else None

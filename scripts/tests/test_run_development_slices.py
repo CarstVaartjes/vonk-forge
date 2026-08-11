@@ -60,6 +60,7 @@ class SliceServer(ThreadingHTTPServer):
         self.operation = 0
         self.operation_nodes: dict[str, list[str]] = {}
         self.operation_kinds: dict[str, str] = {}
+        self.operation_state = "succeeded"
         self.nodes = [NODE]
         self.online = {NODE: True, NODE_2: True}
         self.inventory_stale = {NODE: False, NODE_2: False}
@@ -210,7 +211,7 @@ class SliceHandler(BaseHTTPRequestHandler):
                     "id": operation_id,
                     "kind": "recipe.test",
                     "owner_id": "20000000-0000-4000-8000-000000000001",
-                    "state": "succeeded",
+                    "state": self.server.operation_state,
                     "plan_digest": "c" * 64,
                     "nodes": [NODE],
                     "result": {
@@ -741,6 +742,21 @@ def test_runner_refuses_to_advance_past_failed_gate_and_redacts_errors(
     assert ADMIN_TOKEN not in result.stderr
     assert INFERENCE_TOKEN not in result.stderr
     assert "Authorization" not in result.stderr
+
+
+@pytest.mark.parametrize("terminal_state", ("failed", "waiting-for-operator", "expired"))
+def test_runner_stops_immediately_at_every_terminal_operation_state(
+    tmp_path: Path, server: SliceServer, terminal_state: str
+) -> None:
+    server.operation_state = terminal_state
+
+    result, evidence_path = _run(tmp_path, server)
+
+    assert result.returncode == 1
+    assert result.stderr.strip() == (
+        f"development slice failed: recipe build operation ended in {terminal_state}"
+    )
+    assert json.loads(evidence_path.read_text())["completed_states"] == STATES[:3]
 
 
 @pytest.mark.parametrize("failure", ("stale", "missing-rootless"))

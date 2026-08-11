@@ -82,11 +82,20 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
             return Err(RecipeBuildError::Policy(policy));
         }
         let tag = format!("localhost/vonk/recipe-build-{}", request.build_id);
+        // Ubuntu 24.04's supported Podman 4.9 build command does not accept
+        // the `--cpus` or `--pids-limit` aliases. Express the same boundaries
+        // with the portable CFS quota and nproc ulimit forms.
+        let cpu_period = 100_000_u64;
+        let cpu_quota = u64::from(request.limits.cpu_cores) * cpu_period;
         let mut arguments = vec![
             "--root".to_owned(),
             storage.display().to_string(),
             "--runroot".to_owned(),
             runroot.display().to_string(),
+            "--storage-opt".to_owned(),
+            "overlay.ignore_chown_errors=true".to_owned(),
+            "--storage-opt".to_owned(),
+            "overlay.mount_program=/usr/bin/fuse-overlayfs".to_owned(),
             "build".to_owned(),
             "--no-cache".to_owned(),
             "--platform".to_owned(),
@@ -97,9 +106,10 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
             tag.clone(),
             "--cap-drop=all".to_owned(),
             "--security-opt=no-new-privileges".to_owned(),
-            format!("--cpus={}", request.limits.cpu_cores),
-            format!("--memory={}", request.limits.memory_bytes),
-            format!("--pids-limit={}", request.limits.processes),
+            format!("--cpu-period={cpu_period}"),
+            format!("--cpu-quota={cpu_quota}"),
+            format!("--memory={}b", request.limits.memory_bytes),
+            format!("--ulimit=nproc={0}:{0}", request.limits.processes),
             format!("--network={network}"),
         ];
         for argument in &request.arguments {
@@ -126,6 +136,10 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
                 storage.display().to_string(),
                 "--runroot".to_owned(),
                 runroot.display().to_string(),
+                "--storage-opt".to_owned(),
+                "overlay.ignore_chown_errors=true".to_owned(),
+                "--storage-opt".to_owned(),
+                "overlay.mount_program=/usr/bin/fuse-overlayfs".to_owned(),
                 "image".to_owned(),
                 "inspect".to_owned(),
                 "--format".to_owned(),
@@ -148,6 +162,10 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
                 storage.display().to_string(),
                 "--runroot".to_owned(),
                 runroot.display().to_string(),
+                "--storage-opt".to_owned(),
+                "overlay.ignore_chown_errors=true".to_owned(),
+                "--storage-opt".to_owned(),
+                "overlay.mount_program=/usr/bin/fuse-overlayfs".to_owned(),
                 "push".to_owned(),
                 "--digestfile".to_owned(),
                 digest_file.display().to_string(),
@@ -189,6 +207,10 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
                 storage.display().to_string(),
                 "--runroot".to_owned(),
                 runroot.display().to_string(),
+                "--storage-opt".to_owned(),
+                "overlay.ignore_chown_errors=true".to_owned(),
+                "--storage-opt".to_owned(),
+                "overlay.mount_program=/usr/bin/fuse-overlayfs".to_owned(),
                 "image".to_owned(),
                 "rm".to_owned(),
                 tag,
