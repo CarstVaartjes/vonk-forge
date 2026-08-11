@@ -35,7 +35,10 @@ from vonk_control.models import (
     ResourceReservation,
 )
 from vonk_control.recipe_builds import RecipeBuildError, RecipeBuildService
-from vonk_control.recipe_operations import RecipeOperationService
+from vonk_control.recipe_operations import (
+    RecipeOperationService,
+    _record_build_evidence,
+)
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 
 
@@ -537,6 +540,57 @@ def test_success_records_one_exact_image_on_builder(tmp_path: Path) -> None:
             select(NodeArtifact).where(NodeArtifact.node_id == node_id)
         )
         assert artifact is not None and artifact.digest == "b" * 64
+
+
+def test_build_result_refreshes_upload_evidence_after_a_retried_attempt(
+    tmp_path: Path,
+) -> None:
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    plan = RecipeBuildService(sessions, bundles=bundles).plan(
+        revision.id, node_id, now=now
+    )
+    old_image = "sha256:" + "a" * 64
+    new_image = "sha256:" + "b" * 64
+    old_layout = "c" * 64
+    new_layout = "d" * 64
+    with sessions.begin() as session:
+        build = session.get(RecipeBuild, plan.build_id)
+        assert build is not None
+        build.image_digest = old_image
+        build.oci_layout_sha256 = old_layout
+        build.image_bytes = 400
+
+    stale_session = sessions()
+    try:
+        stale_build = stale_session.get(RecipeBuild, plan.build_id)
+        assert stale_build is not None and stale_build.image_digest == old_image
+        with sessions.begin() as upload_session:
+            uploaded = upload_session.get(RecipeBuild, plan.build_id)
+            assert uploaded is not None
+            uploaded.image_digest = new_image
+            uploaded.oci_layout_sha256 = new_layout
+            uploaded.image_bytes = 500
+
+        _record_build_evidence(
+            stale_session,
+            stale_build,
+            {
+                "build_input_sha256": plan.build_input_sha256,
+                "image_bytes": 500,
+                "image_digest": new_image,
+                "oci_layout_sha256": new_layout,
+                "policy": {
+                    "dockerfile": "Dockerfile",
+                    "findings": [],
+                    "passed": True,
+                },
+            },
+            now=now,
+        )
+        assert stale_build.image_digest == new_image
+    finally:
+        stale_session.rollback()
+        stale_session.close()
 
 
 def test_distribution_uses_one_build_digest_for_every_missing_node(

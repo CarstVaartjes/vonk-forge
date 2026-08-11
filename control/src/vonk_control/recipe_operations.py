@@ -1222,6 +1222,11 @@ def _record_build_evidence(
     *,
     now: datetime,
 ) -> None:
+    # A retried build may already be present in this transaction's identity map
+    # with the previous attempt's upload fields. Refresh under the row lock so
+    # terminal evidence is compared with the upload transaction that just
+    # completed, not with stale in-memory values.
+    session.refresh(build, with_for_update=True)
     expected = {
         "build_input_sha256",
         "image_bytes",
