@@ -269,7 +269,7 @@ def test_pinned_caddy_image_provides_the_configured_http_probe() -> None:
     assert "-T SEC" in result.stdout + result.stderr
 
 
-def test_image_template_runs_acknowledged_litellm_only_on_internal_networks() -> None:
+def test_image_template_runs_litellm_on_application_and_loopback_ingress() -> None:
     rendered = _rendered_image_template()
     services = rendered["services"]
     litellm = services["litellm"]
@@ -288,7 +288,7 @@ def test_image_template_runs_acknowledged_litellm_only_on_internal_networks() ->
         "SERVER_ROOT_PATH": "/litellm",
         "STORE_MODEL_IN_DB": "False",
     }
-    assert set(litellm["networks"]) == {"application"}
+    assert set(litellm["networks"]) == {"application", "ingress"}
     assert rendered["networks"]["application"]["internal"] is True
     assert rendered["networks"]["data"]["internal"] is True
     assert litellm["ports"] == [
