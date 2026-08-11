@@ -1,9 +1,9 @@
 from dataclasses import dataclass
 
+from fastapi.testclient import TestClient
 from vonk_control.api import create_app, create_preselection_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
-from fastapi.testclient import TestClient
 
 
 @dataclass
@@ -45,6 +45,22 @@ def test_health_is_public_but_fleet_requires_authentication() -> None:
     client, _, _, _ = _client("viewer")
     assert client.get("/api/v1/healthz").status_code == 200
     assert client.get("/api/v1/fleet").status_code == 401
+
+
+def test_request_boundary_admits_large_recipe_images_only_on_exact_put_route() -> None:
+    client, _, _, _ = _client("viewer")
+    build_id = "00000000-0000-4000-8000-000000000001"
+    route = f"/agent/v1/recipe-builds/{build_id}/image"
+    body = b"x" * 1_048_577
+
+    # The missing trusted-proxy identity is rejected after the request-size
+    # boundary, proving that the protocol's streaming image route was admitted.
+    assert client.put(route, content=body).status_code == 401
+
+    # Method and path are both part of the authority boundary. Near-matches
+    # retain the ordinary one-MiB API ceiling.
+    assert client.post(route, content=body).status_code == 413
+    assert client.put(f"{route}/extra", content=body).status_code == 413
 
 
 def test_preselection_is_a_distinct_app_factory() -> None:

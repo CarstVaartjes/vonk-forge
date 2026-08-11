@@ -43,6 +43,7 @@ from starlette.responses import FileResponse
 from vonk_agent_protocol import canonical_message
 
 from .agent_api import (
+    MAX_RECIPE_IMAGE_BYTES,
     AgentApiServices,
     EnrollmentRateLimiter,
     activation_agent_identity,
@@ -98,6 +99,11 @@ _CONTROL_OPERATION = re.compile(r"[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?\Z")
 _CONTROL_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _CONTROL_IMAGE = re.compile(r"[^\s]{1,1900}@sha256:[0-9a-f]{64}\Z")
 _CONTROL_START_NONCE = re.compile(r"[0-9a-f]{64}\Z")
+_RECIPE_IMAGE_UPLOAD = re.compile(
+    r"/agent/v1/recipe-builds/"
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+    r"[89ab][0-9a-f]{3}-[0-9a-f]{12}/image\Z"
+)
 _MAX_IDENTITY_PROJECTION_BYTES = 64 * 1024
 
 
@@ -998,9 +1004,16 @@ def create_app(
             request_id = str(uuid.uuid4())
         request.state.request_id = request_id
         length = request.headers.get("content-length")
+        recipe_image_upload = (
+            request.method == "PUT"
+            and _RECIPE_IMAGE_UPLOAD.fullmatch(request.url.path) is not None
+        )
+        maximum = (
+            MAX_RECIPE_IMAGE_BYTES if recipe_image_upload else 1_048_576
+        )
         if (
             length
-            and int(length) > 1_048_576
+            and int(length) > maximum
             and request.url.path != "/agent/v1/enroll"
         ):
             response = Response(status_code=413)
