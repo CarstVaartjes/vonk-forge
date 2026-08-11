@@ -226,12 +226,10 @@ fn directory_bytes(path: &Path) -> Result<u64, std::io::Error> {
             let entry = entry?;
             let metadata = entry.file_type()?;
             if metadata.is_symlink() {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "bounded subprocess created a symlink",
-                ));
-            }
-            if metadata.is_dir() {
+                total = total
+                    .checked_add(fs::symlink_metadata(entry.path())?.len())
+                    .ok_or_else(|| std::io::Error::other("directory size overflow"))?;
+            } else if metadata.is_dir() {
                 pending.push(entry.path());
             } else if metadata.is_file() {
                 total = total
@@ -263,9 +261,17 @@ fn output_bytes(output: &ProcessOutput) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{ProcessError, ProcessRunner, Program, SystemProcessRunner};
-    use std::{fs, io::Write, net::TcpListener, thread, time::Duration};
+    use super::{ProcessError, ProcessRunner, Program, SystemProcessRunner, directory_bytes};
+    use std::{fs, io::Write, net::TcpListener, os::unix::fs::symlink, thread, time::Duration};
     use tempfile::tempdir;
+
+    #[test]
+    fn storage_accounting_counts_a_symlink_without_following_it() {
+        let directory = tempdir().unwrap();
+        symlink("/usr/bin", directory.path().join("bin")).unwrap();
+
+        assert_eq!(directory_bytes(directory.path()).unwrap(), 8);
+    }
 
     #[test]
     fn system_runner_kills_a_process_while_output_exceeds_the_live_cap() {
