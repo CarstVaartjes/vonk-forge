@@ -248,20 +248,10 @@ def test_rejects_symlink_in_source_secret_ancestry(tmp_path: Path) -> None:
     assert not destination.exists()
 
 
-def test_permits_copy_to_mounted_destination_but_not_generation_there(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_permits_validated_copy_to_a_mounted_destination(tmp_path: Path) -> None:
     secrets_dir = _prepare_source_secrets(tmp_path)
     project = _load_project_module()
     destination = tmp_path / "mounted-nas"
-    inspected: list[Path] = []
-
-    def filesystem_type(path: Path) -> str:
-        inspected.append(path)
-        return "cifs" if path == destination else "ext4"
-
-    monkeypatch.setattr(project, "_filesystem_type", filesystem_type)
 
     project.publish_project(
         source_compose=SOURCE_COMPOSE,
@@ -275,7 +265,6 @@ def test_permits_copy_to_mounted_destination_but_not_generation_there(
     )
 
     assert _project_listing(destination) == EXPECTED_PROJECT_FILES
-    assert destination in inspected
 
 
 def test_rejects_nonlocal_project_staging_root(
@@ -288,11 +277,7 @@ def test_rejects_nonlocal_project_staging_root(
     remote_temporary = tmp_path / "remote-temporary"
     remote_temporary.mkdir(mode=0o700)
     monkeypatch.setattr(project.tempfile, "gettempdir", lambda: str(remote_temporary))
-    monkeypatch.setattr(
-        project,
-        "_filesystem_type",
-        lambda path: "nfs4" if path == remote_temporary else "ext4",
-    )
+    monkeypatch.setattr(project, "_filesystem_type", lambda _path: "nfs4")
 
     with pytest.raises(project.ProjectPublicationError):
         project.publish_project(
@@ -321,12 +306,12 @@ def test_revalidates_created_local_staging_directory(
     temporary.mkdir(mode=0o700)
     monkeypatch.setattr(project.tempfile, "gettempdir", lambda: str(temporary))
 
-    def filesystem_type(path: Path) -> str:
-        if path == temporary:
-            return "ext4"
-        if path.parent == temporary:
-            return "nfs4"
-        return "ext4"
+    filesystem_checks = 0
+
+    def filesystem_type(_path: Path) -> str:
+        nonlocal filesystem_checks
+        filesystem_checks += 1
+        return "ext4" if filesystem_checks == 1 else "nfs4"
 
     monkeypatch.setattr(project, "_filesystem_type", filesystem_type)
 
@@ -344,6 +329,62 @@ def test_revalidates_created_local_staging_directory(
 
     assert not destination.exists()
     assert list(temporary.iterdir()) == []
+
+
+def test_local_staging_writes_stay_on_pinned_directory_after_path_swap(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secrets_dir = _prepare_source_secrets(tmp_path)
+    project = _load_project_module()
+    destination = tmp_path / "nas-project"
+    temporary = tmp_path / "temporary"
+    temporary.mkdir(mode=0o700)
+    redirected = tmp_path / "redirected"
+    redirected.mkdir(mode=0o700)
+    renamed = temporary / "renamed-staging"
+    monkeypatch.setattr(project.tempfile, "gettempdir", lambda: str(temporary))
+    monkeypatch.setattr(project, "_filesystem_type", lambda _path: "ext4")
+    real_open = os.open
+    swapped = False
+
+    def swap_before_first_staged_write(
+        path: str | os.PathLike[str],
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        nonlocal swapped
+        if path == "docker-compose.yml" and dir_fd is not None and not swapped:
+            staging = next(temporary.glob(".vonk-forge-project-*"))
+            staging.rename(renamed)
+            staging.symlink_to(redirected, target_is_directory=True)
+            swapped = True
+        return real_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(project.os, "open", swap_before_first_staged_write)
+    try:
+        project.publish_project(
+            source_compose=SOURCE_COMPOSE,
+            secrets_dir=secrets_dir,
+            destination=destination,
+            nas_address=NAS_ADDRESS,
+            management_cidrs=MANAGEMENT_CIDRS,
+            enroll_hostname=ENROLL_HOSTNAME,
+            agent_hostname=AGENT_HOSTNAME,
+            registry_hostname=REGISTRY_HOSTNAME,
+        )
+
+        assert swapped is True
+        assert _project_listing(destination) == EXPECTED_PROJECT_FILES
+        assert list(redirected.iterdir()) == []
+        assert list(renamed.iterdir()) == []
+    finally:
+        for child in temporary.iterdir():
+            if child.is_symlink():
+                child.unlink()
+        renamed.rmdir()
 
 
 def test_rejects_invalid_project_inputs(tmp_path: Path) -> None:

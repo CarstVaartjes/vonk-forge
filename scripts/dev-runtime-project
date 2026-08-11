@@ -35,9 +35,6 @@ _LOCAL_STAGING_FILESYSTEMS = frozenset(
         "zfs",
     }
 )
-_DESTINATION_FILESYSTEMS = _LOCAL_STAGING_FILESYSTEMS | frozenset(
-    {"9p", "cifs", "drvfs", "fuse.sshfs", "fuseblk", "nfs", "nfs4", "smb3"}
-)
 _HOST_LABEL = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?")
 _PUBLISHED_SECRET_NAMES = frozenset(
     {
@@ -319,7 +316,11 @@ def _remove_hidden_temporaries(destination: Path) -> None:
                     child.unlink(missing_ok=True)
 
 
-def _validate_local_staging_directory(path: Path) -> tuple[int, int]:
+def _filesystem_type_at(descriptor: int) -> str:
+    return _filesystem_type(Path(f"/proc/self/fd/{descriptor}"))
+
+
+def _open_local_staging_parent(path: Path) -> int:
     descriptor = -1
     try:
         listed = path.lstat()
@@ -328,19 +329,198 @@ def _validate_local_staging_directory(path: Path) -> tuple[int, int]:
         if (
             (listed.st_dev, listed.st_ino) != (opened.st_dev, opened.st_ino)
             or not stat.S_ISDIR(opened.st_mode)
-            or opened.st_uid != os.geteuid()
-            or stat.S_IMODE(opened.st_mode) != 0o700
-            or _filesystem_type(path) not in _LOCAL_STAGING_FILESYSTEMS
+            or _filesystem_type_at(descriptor) not in _LOCAL_STAGING_FILESYSTEMS
         ):
-            raise ProjectPublicationError("project staging directory is unsafe")
-        return (opened.st_dev, opened.st_ino)
+            raise ProjectPublicationError("project staging root must be local storage")
+        return descriptor
     except OSError as error:
         raise ProjectPublicationError(
-            "project staging directory cannot be opened safely"
+            "local staging root cannot be opened safely"
+        ) from error
+    except BaseException:
+        if descriptor >= 0:
+            os.close(descriptor)
+        raise
+
+
+def _create_local_staging_directory(parent: int) -> tuple[str, int, tuple[int, int]]:
+    name = f".vonk-forge-project-{secrets.token_hex(16)}"
+    descriptor = -1
+    try:
+        os.mkdir(name, 0o700, dir_fd=parent)
+        listed = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        descriptor = os.open(name, _DIRECTORY_FLAGS, dir_fd=parent)
+        opened = os.fstat(descriptor)
+        identity = (opened.st_dev, opened.st_ino)
+        if (
+            (listed.st_dev, listed.st_ino) != identity
+            or not stat.S_ISDIR(opened.st_mode)
+            or opened.st_uid != os.geteuid()
+            or stat.S_IMODE(opened.st_mode) != 0o700
+            or _filesystem_type_at(descriptor) not in _LOCAL_STAGING_FILESYSTEMS
+        ):
+            raise ProjectPublicationError("project staging directory is unsafe")
+        return name, descriptor, identity
+    except OSError as error:
+        if descriptor >= 0:
+            os.close(descriptor)
+        try:
+            os.rmdir(name, dir_fd=parent)
+        except OSError:
+            pass
+        raise ProjectPublicationError(
+            "project staging directory cannot be created safely"
+        ) from error
+    except BaseException:
+        if descriptor >= 0:
+            os.close(descriptor)
+        try:
+            os.rmdir(name, dir_fd=parent)
+        except OSError:
+            pass
+        raise
+
+
+def _open_private_staging_child(parent: int, name: str) -> int:
+    descriptor = -1
+    created = False
+    try:
+        os.mkdir(name, 0o700, dir_fd=parent)
+        created = True
+        listed = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        descriptor = os.open(name, _DIRECTORY_FLAGS, dir_fd=parent)
+        opened = os.fstat(descriptor)
+        if (
+            (listed.st_dev, listed.st_ino) != (opened.st_dev, opened.st_ino)
+            or not stat.S_ISDIR(opened.st_mode)
+            or opened.st_uid != os.geteuid()
+            or stat.S_IMODE(opened.st_mode) != 0o700
+        ):
+            raise ProjectPublicationError("project staging child is unsafe")
+        return descriptor
+    except OSError as error:
+        if descriptor >= 0:
+            os.close(descriptor)
+        if created:
+            try:
+                os.rmdir(name, dir_fd=parent)
+            except OSError:
+                pass
+        raise ProjectPublicationError(
+            "project staging child cannot be created"
+        ) from error
+    except BaseException:
+        if descriptor >= 0:
+            os.close(descriptor)
+        if created:
+            try:
+                os.rmdir(name, dir_fd=parent)
+            except OSError:
+                pass
+        raise
+
+
+def _read_regular_at(
+    directory: int, name: str, *, maximum: int = _MAX_FILE_BYTES
+) -> bytes:
+    descriptor = -1
+    try:
+        listed = os.stat(name, dir_fd=directory, follow_symlinks=False)
+        descriptor = os.open(name, _READ_FLAGS, dir_fd=directory)
+        before = os.fstat(descriptor)
+        if (
+            (listed.st_dev, listed.st_ino) != (before.st_dev, before.st_ino)
+            or not stat.S_ISREG(before.st_mode)
+            or before.st_uid != os.geteuid()
+            or before.st_nlink != 1
+            or stat.S_IMODE(before.st_mode) != 0o600
+            or not 0 < before.st_size <= maximum
+        ):
+            raise ProjectPublicationError(f"staged file {name} is unsafe")
+        content = bytearray()
+        while len(content) <= maximum:
+            chunk = os.read(descriptor, min(65536, maximum + 1 - len(content)))
+            if not chunk:
+                break
+            content.extend(chunk)
+        after = os.fstat(descriptor)
+        identity = (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_nlink,
+            before.st_mtime_ns,
+            before.st_ctime_ns,
+        )
+        updated = (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_nlink,
+            after.st_mtime_ns,
+            after.st_ctime_ns,
+        )
+        if len(content) != before.st_size or identity != updated:
+            raise ProjectPublicationError(f"staged file {name} changed while reading")
+        return bytes(content)
+    except OSError as error:
+        raise ProjectPublicationError(f"staged file {name} is unsafe") from error
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def _write_verified_at(directory: int, name: str, content: bytes) -> bytes:
+    descriptor = -1
+    try:
+        descriptor = os.open(name, _WRITE_FLAGS, 0o600, dir_fd=directory)
+        view = memoryview(content)
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:
+                raise OSError("short write")
+            view = view[written:]
+        os.fchmod(descriptor, 0o600)
+        os.fsync(descriptor)
+    except OSError as error:
+        raise ProjectPublicationError(
+            f"staged file {name} cannot be written"
         ) from error
     finally:
         if descriptor >= 0:
             os.close(descriptor)
+    copied = _read_regular_at(directory, name)
+    if (
+        len(copied) != len(content)
+        or hashlib.sha256(copied).digest() != hashlib.sha256(content).digest()
+    ):
+        raise ProjectPublicationError(f"staged file {name} failed verification")
+    return copied
+
+
+def _remove_local_staging(
+    parent: int,
+    name: str,
+    directory: int,
+    identity: tuple[int, int],
+    secrets_directory: int,
+) -> None:
+    if secrets_directory >= 0:
+        for child in os.listdir(secrets_directory):
+            os.unlink(child, dir_fd=secrets_directory)
+        os.close(secrets_directory)
+        os.rmdir("secrets", dir_fd=directory)
+    try:
+        os.unlink("docker-compose.yml", dir_fd=directory)
+    except FileNotFoundError:
+        pass
+    os.close(directory)
+    try:
+        current = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        if (current.st_dev, current.st_ino) == identity:
+            os.rmdir(name, dir_fd=parent)
+    except FileNotFoundError:
+        pass
 
 
 def publish_project(
@@ -383,31 +563,30 @@ def publish_project(
     compose_source = _read_regular(source_compose, private=False)
     compose = _render_compose(compose_source, enroll=enroll, agent=agent)
 
-    local_parent = Path(tempfile.gettempdir())
+    staging_parent = _open_local_staging_parent(Path(tempfile.gettempdir()))
+    staging_name = ""
+    staging_directory = -1
+    staging_identity = (-1, -1)
+    staging_secrets = -1
     try:
-        local_parent_metadata = local_parent.lstat()
-    except OSError as error:
-        raise ProjectPublicationError(
-            "local staging root cannot be inspected"
-        ) from error
-    if (
-        not stat.S_ISDIR(local_parent_metadata.st_mode)
-        or _filesystem_type(local_parent) not in _LOCAL_STAGING_FILESYSTEMS
-    ):
-        raise ProjectPublicationError("project staging root must be local storage")
-    if _filesystem_type(destination) not in _DESTINATION_FILESYSTEMS:
-        raise ProjectPublicationError("project destination filesystem is unsupported")
-    local_root = Path(tempfile.mkdtemp(prefix="vonk-forge-project-", dir=local_parent))
-    os.chmod(local_root, 0o700)
-    try:
-        staging_identity = _validate_local_staging_directory(local_root)
-        local_compose = local_root / "docker-compose.yml"
-        local_secrets = local_root / "secrets"
-        local_secrets.mkdir(mode=0o700)
-        _write_verified(local_compose, compose, 0o600)
+        staging_name, staging_directory, staging_identity = (
+            _create_local_staging_directory(staging_parent)
+        )
+        staging_secrets = _open_private_staging_child(staging_directory, "secrets")
+        staged_compose = _write_verified_at(
+            staging_directory, "docker-compose.yml", compose
+        )
+        staged_secrets: dict[str, bytes] = {}
         for name in sorted(_PUBLISHED_SECRET_NAMES):
-            _write_verified(local_secrets / name, source_bundle[name], 0o600)
-        if _validate_local_staging_directory(local_root) != staging_identity:
+            staged_secrets[name] = _write_verified_at(
+                staging_secrets, name, source_bundle[name]
+            )
+        if (
+            os.fstat(staging_directory).st_dev,
+            os.fstat(staging_directory).st_ino,
+        ) != staging_identity or _filesystem_type_at(
+            staging_directory
+        ) not in _LOCAL_STAGING_FILESYSTEMS:
             raise ProjectPublicationError("project staging directory changed")
 
         secret_destination, _created = _validate_destination(destination)
@@ -415,14 +594,10 @@ def publish_project(
         compose_temporary = destination / f".docker-compose.yml.{suffix}"
         temporary_secrets: list[Path] = []
         try:
-            _write_verified(
-                compose_temporary, _read_regular(local_compose, private=True), 0o600
-            )
+            _write_verified(compose_temporary, staged_compose, 0o600)
             for name in sorted(_PUBLISHED_SECRET_NAMES):
                 temporary = secret_destination / f".{name}.{suffix}"
-                _write_verified(
-                    temporary, _read_regular(local_secrets / name, private=True), 0o600
-                )
+                _write_verified(temporary, staged_secrets[name], 0o600)
                 temporary_secrets.append(temporary)
             os.replace(compose_temporary, destination / "docker-compose.yml")
             for name, temporary in zip(
@@ -447,7 +622,15 @@ def publish_project(
         finally:
             _remove_hidden_temporaries(destination)
     finally:
-        shutil.rmtree(local_root, ignore_errors=True)
+        if staging_directory >= 0:
+            _remove_local_staging(
+                staging_parent,
+                staging_name,
+                staging_directory,
+                staging_identity,
+                staging_secrets,
+            )
+        os.close(staging_parent)
     return destination
 
 
