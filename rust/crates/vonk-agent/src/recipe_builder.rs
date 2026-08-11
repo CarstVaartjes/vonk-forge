@@ -1,6 +1,6 @@
 //! Rootless, typed recipe image build execution.
 
-use std::{fs, path::Path, time::Duration};
+use std::{fs, os::unix::ffi::OsStrExt, path::Path, time::Duration};
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -47,6 +47,7 @@ pub struct RecipeBuildEvidence {
 pub struct RecipeBuilder<'a, R> {
     pub runner: &'a R,
     pub data_root: &'a Path,
+    pub runtime_root: &'a Path,
 }
 
 impl<R: ProcessRunner> RecipeBuilder<'_, R> {
@@ -73,9 +74,16 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
         let staging = Builder::new().prefix("source-").tempdir_in(&staging_root)?;
         let context = staging.path().join("context");
         let storage = staging.path().join("podman-storage");
-        let runroot = staging.path().join("podman-runroot");
+        fs::create_dir_all(self.runtime_root)?;
+        // Ubuntu 24.04 ships Podman 4.9, which rejects runroot path strings
+        // longer than 50 bytes. Keep the durable, storage-accounted graphroot
+        // under the build staging tree while putting only Podman's ephemeral
+        // runtime metadata in the private systemd RuntimeDirectory.
+        let runroot = Builder::new().prefix("b-").tempdir_in(self.runtime_root)?;
+        if runroot.path().as_os_str().as_bytes().len() > 50 {
+            return Err(RecipeBuildError::Evidence);
+        }
         fs::create_dir_all(&storage)?;
-        fs::create_dir_all(&runroot)?;
         let source = materialize_source_bundle(archive, &request.source_bundle_sha256, &context)?;
         let policy = inspect_build_source(&source.files, &request.dockerfile);
         if !policy.passed {
@@ -91,7 +99,7 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
             "--root".to_owned(),
             storage.display().to_string(),
             "--runroot".to_owned(),
-            runroot.display().to_string(),
+            runroot.path().display().to_string(),
             "--storage-opt".to_owned(),
             "overlay.ignore_chown_errors=true".to_owned(),
             "--storage-opt".to_owned(),
@@ -135,7 +143,7 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
                 "--root".to_owned(),
                 storage.display().to_string(),
                 "--runroot".to_owned(),
-                runroot.display().to_string(),
+                runroot.path().display().to_string(),
                 "--storage-opt".to_owned(),
                 "overlay.ignore_chown_errors=true".to_owned(),
                 "--storage-opt".to_owned(),
@@ -161,7 +169,7 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
                 "--root".to_owned(),
                 storage.display().to_string(),
                 "--runroot".to_owned(),
-                runroot.display().to_string(),
+                runroot.path().display().to_string(),
                 "--storage-opt".to_owned(),
                 "overlay.ignore_chown_errors=true".to_owned(),
                 "--storage-opt".to_owned(),
@@ -206,7 +214,7 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
                 "--root".to_owned(),
                 storage.display().to_string(),
                 "--runroot".to_owned(),
-                runroot.display().to_string(),
+                runroot.path().display().to_string(),
                 "--storage-opt".to_owned(),
                 "overlay.ignore_chown_errors=true".to_owned(),
                 "--storage-opt".to_owned(),

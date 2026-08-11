@@ -167,6 +167,13 @@ class RecipeOperationService:
     ) -> RecipeOperationView:
         existing = self._idempotent(request_id, "recipe.build.v1", build_input_sha256)
         if existing is not None:
+            if existing.state != "succeeded":
+                with self._sessions() as session:
+                    succeeded = self._successful_build_job_in_session(
+                        session, existing.owner_id, build_input_sha256
+                    )
+                    if succeeded is not None:
+                        return self._view(succeeded)
             return existing
         if build_input_sha256 != plan.build_input_sha256:
             raise RecipeOperationConflict(
@@ -175,6 +182,38 @@ class RecipeOperationService:
         now = self._clock()
         with self._sessions.begin() as session:
             build = session.get(RecipeBuild, plan.build_id, with_for_update=True)
+            if (
+                build is not None
+                and build.state == "succeeded"
+                and build.build_input_sha256 == plan.build_input_sha256
+                and build.builder_node_id == plan.builder_node_id
+            ):
+                succeeded = self._successful_build_job_in_session(
+                    session, build.id, build.build_input_sha256
+                )
+                if succeeded is None:
+                    raise RecipeOperationConflict("recipe build receipt is unavailable")
+                replay = Job(
+                    id=str(uuid.uuid4()),
+                    request_id=request_id,
+                    kind=succeeded.kind,
+                    state="succeeded",
+                    actor=actor,
+                    base_commit=succeeded.base_commit,
+                    targets=list(succeeded.targets),
+                    payload_digest=succeeded.payload_digest,
+                    payload=dict(succeeded.payload),
+                    result=(
+                        dict(succeeded.result)
+                        if isinstance(succeeded.result, Mapping)
+                        else None
+                    ),
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(replay)
+                session.flush()
+                return self._view(replay)
             if (
                 build is None
                 or build.state != "planned"
@@ -201,6 +240,23 @@ class RecipeOperationService:
             )
         self._agent_jobs.notify_available()
         return self.get(job.id)
+
+    @staticmethod
+    def _successful_build_job_in_session(
+        session: Session, build_id: str, build_input_sha256: str
+    ) -> Job | None:
+        job = session.scalar(
+            select(Job)
+            .where(
+                Job.kind == "recipe.build.v1",
+                Job.state == "succeeded",
+                Job.payload["owner_id"].as_string() == build_id,
+                Job.payload["plan_digest"].as_string() == build_input_sha256,
+            )
+            .order_by(Job.updated_at.desc())
+            .limit(1)
+        )
+        return job if job is not None and isinstance(job.result, Mapping) else None
 
     def preview_install(self, mapping_id: str, recipe_build_id: str) -> InstallPlan:
         return self._install_admission.plan_install(

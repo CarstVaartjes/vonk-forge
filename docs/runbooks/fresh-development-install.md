@@ -188,7 +188,9 @@ and rank failure/recovery, continue with
 
 - NAS development stack: in the existing Docker UI project choose **Pull**,
   then **Redeploy**. Keep the Compose file, secrets, and named volumes.
-- GPU nodes: run `sudo apt update && sudo apt upgrade vonk-forge-agent` only
-  after the accepted APT `dev` publication is complete.
+- GPU nodes: after the accepted APT `dev` publication is complete, follow
+  [Update and switch channels](../operations/agent-package-release.md#update-and-switch-channels).
+  Apt stages the signed inactive slot; activate and prove one canary node,
+  wait for fresh controller inventory, then repeat on the next node.
 - Never substitute production `latest` tags or a local build. Production is
   selected only through its signed release and trusted host updater.

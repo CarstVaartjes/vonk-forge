@@ -318,6 +318,90 @@ def test_terminal_build_can_be_retried_once_with_fresh_fencing_and_capacity(
         assert sum(item.state == "released" for item in reservations) == 2
 
 
+def test_successful_build_retry_converges_original_and_new_request_keys(
+    tmp_path: Path,
+) -> None:
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    builds = RecipeBuildService(sessions, bundles=bundles)
+    plan = builds.plan(revision.id, node_id, now=now)
+    operations = RecipeOperationService(
+        sessions,
+        install_admission=object(),
+        run_admission=object(),
+        agent_jobs=RecordingQueue(),
+        clock=lambda: now,
+        builds=builds,
+    )
+    first = operations.build(
+        plan,
+        build_input_sha256=plan.build_input_sha256,
+        actor="admin",
+        request_id="initial-build",
+    )
+    with sessions.begin() as session:
+        session.get(Job, first.id).state = "waiting-for-operator"  # type: ignore[union-attr]
+        child = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == first.id)
+        )
+        assert child is not None
+        child.state = "waiting-for-operator"
+
+    retried = operations.retry(first.id, actor="admin", request_id="retry-build")
+    succeeded = operations.record_node_result(
+        retried.id,
+        node_id,
+        succeeded=True,
+        evidence={
+            "build_input_sha256": plan.build_input_sha256,
+            "image_bytes": 500,
+            "image_digest": "sha256:" + "b" * 64,
+            "oci_layout_sha256": "c" * 64,
+            "policy": {
+                "dockerfile": "Dockerfile",
+                "findings": [],
+                "passed": True,
+                "source_bundle_sha256": plan.source_bundle_sha256,
+            },
+        },
+    )
+    assert succeeded.state == "succeeded"
+
+    original_replay = operations.build(
+        plan,
+        build_input_sha256=plan.build_input_sha256,
+        actor="admin",
+        request_id="initial-build",
+    )
+    new_replay = operations.build(
+        plan,
+        build_input_sha256=plan.build_input_sha256,
+        actor="admin",
+        request_id="fresh-acceptance-build",
+    )
+    repeated_replay = operations.build(
+        plan,
+        build_input_sha256=plan.build_input_sha256,
+        actor="admin",
+        request_id="fresh-acceptance-build",
+    )
+
+    assert original_replay == succeeded
+    assert new_replay == repeated_replay
+    assert new_replay.id != succeeded.id
+    assert new_replay.state == "succeeded"
+    assert new_replay.result == succeeded.result
+    with sessions() as session:
+        assert session.get(Job, new_replay.id).request_id == "fresh-acceptance-build"  # type: ignore[union-attr]
+        assert (
+            session.scalar(
+                select(AgentOperation).where(
+                    AgentOperation.parent_job_id == new_replay.id
+                )
+            )
+            is None
+        )
+
+
 def test_build_plan_rejects_disk_below_concurrent_oci_export_peak(
     tmp_path: Path,
 ) -> None:

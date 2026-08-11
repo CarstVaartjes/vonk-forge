@@ -41,6 +41,7 @@ impl Executor for RejectingExecutor {
 pub struct RecipeExecutor<'a, R> {
     pub client: &'a AgentHttpClient,
     pub runtime: OciRuntime<'a, R>,
+    pub runtime_root: &'a Path,
 }
 
 #[async_trait(?Send)]
@@ -63,6 +64,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 let builder = RecipeBuilder {
                     runner: self.runtime.runner,
                     data_root: self.runtime.data_root,
+                    runtime_root: self.runtime_root,
                 };
                 match builder.build(&request, claim.operation_id, &archive) {
                     Ok(evidence) => {
