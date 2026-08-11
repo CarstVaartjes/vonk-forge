@@ -99,6 +99,14 @@ def _scan(*images: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _canary_dir(tmp_path: Path, **contents: bytes) -> Path:
+    root = tmp_path / "canaries"
+    root.mkdir()
+    for name, content in contents.items():
+        (root / name).write_bytes(content)
+    return root
+
+
 def _accept(
     api_image: str,
     worker_image: str,
@@ -225,6 +233,88 @@ def test_scanner_accepts_clean_nonroot_images(image_factory) -> None:
     assert result.returncode == 0, result.stderr
     assert result.stdout == ""
     assert result.stderr == ""
+
+
+def test_scanner_accepts_path_only_mode_for_clean_publication_artifacts(
+    tmp_path: Path,
+) -> None:
+    artifact_root = tmp_path / "artifact"
+    artifact_root.mkdir()
+    (artifact_root / "docker-compose.dev.yml").write_text("services: {}\n", encoding="utf-8")
+    (artifact_root / "provenance.json").write_text('{"predicateType":"clean"}\n', encoding="utf-8")
+    canaries = _canary_dir(tmp_path, opaque=b"secret-canary-opaque\n")
+
+    result = _scan(
+        "--forbid-bytes-dir",
+        str(canaries),
+        "--scan-path",
+        str(artifact_root),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""
+    assert result.stderr == ""
+
+
+def test_scanner_rejects_canary_bytes_in_generated_workflow_artifacts_without_leaks(
+    image_factory,
+    tmp_path: Path,
+) -> None:
+    image = image_factory()
+    canary = b"secret-canary-opaque\n"
+    canaries = _canary_dir(tmp_path, database_url=canary)
+    artifact = tmp_path / "dist" / "docker-compose.dev.yml"
+    artifact.parent.mkdir()
+    artifact.write_bytes(b"header\n" + canary + b"footer\n")
+
+    result = _scan(
+        "--forbid-bytes-dir",
+        str(canaries),
+        "--scan-path",
+        str(artifact),
+        image,
+        image,
+    )
+
+    assert result.returncode == 1
+    assert canary.decode().strip() not in result.stdout
+    assert canary.decode().strip() not in result.stderr
+
+
+def test_scanner_rejects_private_key_markers_in_generated_publication_files_without_leaks(
+    image_factory,
+    tmp_path: Path,
+) -> None:
+    image = image_factory()
+    provenance = tmp_path / "provenance.json"
+    provenance.write_bytes(PRIVATE_KEY_BLOCK)
+
+    result = _scan("--scan-path", str(provenance), image, image)
+
+    assert result.returncode == 1
+    assert "c3ludGhldGljLXNlY3JldC1tYXRlcmlhbA" not in result.stdout
+    assert "c3ludGhldGljLXNlY3JldC1tYXRlcmlhbA" not in result.stderr
+
+
+def test_scanner_rejects_secret_canary_bytes_in_image_metadata_values(
+    image_factory,
+    tmp_path: Path,
+) -> None:
+    image = image_factory(
+        dockerfile=(
+            "FROM scratch\n"
+            "COPY . /scan/\n"
+            "LABEL org.example.note=workflow-canary-opaque\n"
+            "USER 10001:10001\n"
+        )
+    )
+    canaries = _canary_dir(tmp_path, note=b"workflow-canary-opaque")
+
+    result = _scan("--forbid-bytes-dir", str(canaries), image, image)
+
+    assert result.returncode == 1
+    assert "workflow-canary-opaque" not in result.stdout
+    assert "workflow-canary-opaque" not in result.stderr
 
 
 @pytest.mark.parametrize(

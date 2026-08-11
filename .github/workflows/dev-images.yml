@@ -135,6 +135,173 @@ jobs:
           [[ "$postgres_image" =~ ^postgres:[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$ ]]
           docker pull "$postgres_image"
 
+      - name: Render and validate disposable development Compose artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          compose_render_root=$(mktemp -d "$RUNNER_TEMP/dev-compose-render.XXXXXX")
+          cleanup() {
+            rm -rf -- "$compose_render_root"
+          }
+          trap cleanup EXIT INT TERM
+          api_manifest="$RUNNER_TEMP/vonk-forge-api.manifest.json"
+          worker_manifest="$RUNNER_TEMP/vonk-forge-worker.manifest.json"
+          skopeo inspect --raw "oci-archive:$RUNNER_TEMP/vonk-forge-api.oci.tar" \
+            > "$api_manifest"
+          skopeo inspect --raw "oci-archive:$RUNNER_TEMP/vonk-forge-worker.oci.tar" \
+            > "$worker_manifest"
+          api_digest=$(skopeo manifest-digest "$api_manifest")
+          worker_digest=$(skopeo manifest-digest "$worker_manifest")
+          scripts/render-dev-compose \
+            --output "$compose_render_root/docker-compose.pinned.yml" \
+            --api-image "ghcr.io/carstvaartjes/vonk-forge-api:dev-sha-$GITHUB_SHA@$api_digest" \
+            --worker-image "ghcr.io/carstvaartjes/vonk-forge-worker:dev-sha-$GITHUB_SHA@$worker_digest" \
+            --commit "$GITHUB_SHA"
+          scripts/render-dev-compose \
+            --output "$compose_render_root/docker-compose.dev.yml" \
+            --api-image "ghcr.io/carstvaartjes/vonk-forge-api:dev" \
+            --worker-image "ghcr.io/carstvaartjes/vonk-forge-worker:dev" \
+            --channel dev
+          docker compose -f "$compose_render_root/docker-compose.pinned.yml" config -q
+          docker compose -f "$compose_render_root/docker-compose.dev.yml" config -q
+
+      - name: Render and smoke complete disposable development stack
+        shell: bash
+        run: |
+          set -euo pipefail
+          compose_render_root=$(mktemp -d "$RUNNER_TEMP/dev-compose-smoke-render.XXXXXX")
+          runtime_secrets_root=$(mktemp -d "$RUNNER_TEMP/dev-runtime-secrets.XXXXXX")
+          stack_root=$(mktemp -d "$RUNNER_TEMP/dev-compose-stack.XXXXXX")
+          project_name="vonk-forge-dev-smoke-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          read -r agent_port dev_port < <(python3 - <<'PY'
+import socket
+
+listeners = []
+ports = []
+for _ in range(2):
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    listeners.append(listener)
+    ports.append(str(listener.getsockname()[1]))
+print(" ".join(ports))
+for listener in listeners:
+    listener.close()
+PY
+          )
+          compose() {
+            env -u COMPOSE_FILE -u COMPOSE_PROJECT_NAME \
+              VONK_AGENT_PORT="$agent_port" \
+              VONK_DEV_PORT="$dev_port" \
+              docker compose -p "$project_name" --project-directory "$stack_root" \
+                -f "$stack_root/docker-compose.yml" "$@"
+          }
+          cleanup() {
+            set +e
+            compose down --volumes --remove-orphans >/dev/null 2>&1 || true
+            docker image rm \
+              ghcr.io/carstvaartjes/vonk-forge-api:dev \
+              ghcr.io/carstvaartjes/vonk-forge-worker:dev >/dev/null 2>&1 || true
+            rm -rf -- "$compose_render_root" "$runtime_secrets_root" "$stack_root"
+          }
+          trap cleanup EXIT INT TERM
+          scripts/render-dev-compose \
+            --output "$compose_render_root/docker-compose.dev.yml" \
+            --api-image "ghcr.io/carstvaartjes/vonk-forge-api:dev" \
+            --worker-image "ghcr.io/carstvaartjes/vonk-forge-worker:dev" \
+            --channel dev
+          docker tag vonk-forge-api:dev-local ghcr.io/carstvaartjes/vonk-forge-api:dev
+          docker tag vonk-forge-worker:dev-local ghcr.io/carstvaartjes/vonk-forge-worker:dev
+          scripts/dev-runtime-secrets.py \
+            --secrets-dir "$runtime_secrets_root" \
+            --management-cidrs 127.0.0.1/32 \
+            --enroll-hostname enroll.vonk-forge.lan \
+            --agent-hostname agents.vonk-forge.lan \
+            --registry-hostname registry.vonk-forge.lan >/dev/null
+          scripts/dev-runtime-project \
+            --source-compose "$compose_render_root/docker-compose.dev.yml" \
+            --secrets-dir "$runtime_secrets_root" \
+            --destination "$stack_root" \
+            --nas-address 127.0.0.1 \
+            --management-cidrs 127.0.0.1/32 \
+            --enroll-hostname enroll.vonk-forge.lan \
+            --agent-hostname agents.vonk-forge.lan \
+            --registry-hostname registry.vonk-forge.lan >/dev/null
+          compose up -d --pull never
+          service_container() {
+            local service=$1 container
+            container=$(compose ps -q "$service")
+            [[ -n "$container" ]] || {
+              echo "missing Compose container for $service" >&2
+              exit 1
+            }
+            printf '%s\n' "$container"
+          }
+          wait_for_healthy() {
+            local service=$1 container state
+            container=$(service_container "$service")
+            for _ in {1..120}; do
+              state=$(docker inspect \
+                --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' \
+                "$container")
+              if [[ "$state" == healthy ]]; then
+                return 0
+              fi
+              if [[ "$state" == exited || "$state" == dead ]]; then
+                break
+              fi
+              sleep 2
+            done
+            echo "$service did not become healthy" >&2
+            return 1
+          }
+          wait_for_completed() {
+            local service=$1 container state
+            container=$(service_container "$service")
+            for _ in {1..120}; do
+              state=$(docker inspect --format '{{.State.Status}} {{.State.ExitCode}}' "$container")
+              if [[ "$state" == 'exited 0' ]]; then
+                return 0
+              fi
+              if [[ "$state" =~ ^exited\ [1-9][0-9]*$ || "$state" == dead\ * ]]; then
+                break
+              fi
+              sleep 2
+            done
+            echo "$service did not complete successfully" >&2
+            return 1
+          }
+          wait_for_healthy postgres
+          wait_for_completed dev-init
+          wait_for_completed migrate
+          wait_for_healthy control-api
+          wait_for_healthy caddy
+          wait_for_healthy litellm
+          curl --fail --silent --show-error \
+            "http://127.0.0.1:$dev_port/api/v1/readyz" >/dev/null
+          enroll_status=$(curl --silent --show-error \
+            --output /dev/null \
+            --write-out '%{http_code}' \
+            --resolve "enroll.vonk-forge.lan:$agent_port:127.0.0.1" \
+            --cacert "$stack_root/secrets/controller-ca" \
+            --request POST \
+            --header 'content-type: application/json' \
+            --data '{}' \
+            "https://enroll.vonk-forge.lan:$agent_port/agent/v1/enroll")
+          case "$enroll_status" in
+            200|400|401|403|405|409|415|422) ;;
+            *)
+              echo "unexpected enrollment response: $enroll_status" >&2
+              exit 1
+              ;;
+          esac
+          if curl --fail --silent --show-error \
+            --resolve "agents.vonk-forge.lan:$agent_port:127.0.0.1" \
+            --cacert "$stack_root/secrets/controller-ca" \
+            "https://agents.vonk-forge.lan:$agent_port/agent/v1/enroll" >/dev/null; then
+            echo "agents.vonk-forge.lan unexpectedly accepted a request without mTLS" >&2
+            exit 1
+          fi
+
       - name: Scan and accept image-only stack
         shell: bash
         run: |
@@ -333,6 +500,44 @@ jobs:
             --channel dev
           docker compose -f dist/docker-compose.pinned.yml config -q
           docker compose -f dist/docker-compose.dev.yml config -q
+
+      - name: Scan published metadata and workflow artifacts
+        shell: bash
+        env:
+          API_DIGEST: ${{ steps.publish.outputs.api_digest }}
+          API_IMAGE: ${{ needs.build-and-accept.outputs.api_image }}
+          WORKER_DIGEST: ${{ steps.publish.outputs.worker_digest }}
+          WORKER_IMAGE: ${{ needs.build-and-accept.outputs.worker_image }}
+        run: |
+          set -euo pipefail
+          metadata_root="dist/published-metadata"
+          canary_root="$RUNNER_TEMP/published-metadata-canaries"
+          install -d -m 0700 "$metadata_root" "$canary_root"
+          printf '%s\n' 'published-scan-canary-api' > "$canary_root/api"
+          printf '%s\n' 'published-scan-canary-worker' > "$canary_root/worker"
+          chmod 0600 "$canary_root/api" "$canary_root/worker"
+          for role in api worker; do
+            if [[ "$role" == api ]]; then
+              image=$API_IMAGE
+              digest=$API_DIGEST
+            else
+              image=$WORKER_IMAGE
+              digest=$WORKER_DIGEST
+            fi
+            docker history --no-trunc "$image@$digest" \
+              > "$metadata_root/$role.history.txt"
+            skopeo inspect --config "docker://$image@$digest" \
+              > "$metadata_root/$role.config.json"
+            docker buildx imagetools inspect "$image@$digest" \
+              --format '{{ json .Provenance }}' \
+              > "$metadata_root/$role.provenance.json"
+            docker buildx imagetools inspect "$image@$digest" \
+              --format '{{ json .SBOM }}' \
+              > "$metadata_root/$role.sbom.json"
+          done
+          scripts/verify-dev-image-secrets \
+            --forbid-bytes-dir "$canary_root" \
+            --scan-path dist
 
       - name: Upload Compose artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

@@ -420,6 +420,8 @@ def test_workflow_builds_scans_and_accepts_oci_archives_before_login() -> None:
     build = _step(text, "Build exact OCI archives")
     load = _step(text, "Load tested images without pulling")
     preload = _step(text, "Preload pinned runtime dependency")
+    render = _step(text, "Render and validate disposable development Compose artifacts")
+    smoke = _step(text, "Render and smoke complete disposable development stack")
     accept = _step(text, "Scan and accept image-only stack")
 
     assert "docker buildx build" in build
@@ -439,7 +441,31 @@ def test_workflow_builds_scans_and_accepts_oci_archives_before_login() -> None:
     assert "^postgres:" in preload
     assert "@sha256:[0-9a-f]{64}$" in preload
     assert 'docker pull "$postgres_image"' in preload
+    assert 'scripts/render-dev-compose \\' in render
+    assert "docker-compose.pinned.yml" in render
+    assert "docker-compose.dev.yml" in render
+    assert "--channel dev" in render
+    assert 'docker compose -f "$compose_render_root/docker-compose.pinned.yml" config -q' in render
+    assert 'docker compose -f "$compose_render_root/docker-compose.dev.yml" config -q' in render
+    assert 'docker tag vonk-forge-api:dev-local ghcr.io/carstvaartjes/vonk-forge-api:dev' in smoke
+    assert 'docker tag vonk-forge-worker:dev-local ghcr.io/carstvaartjes/vonk-forge-worker:dev' in smoke
+    assert "scripts/dev-runtime-secrets.py" in smoke
+    assert "scripts/dev-runtime-project" in smoke
+    assert "docker compose" in smoke
+    assert "up -d --pull never" in smoke
+    assert "down --volumes --remove-orphans" in smoke
+    for service in ("postgres", "migrate", "control-api", "caddy", "litellm"):
+        assert service in smoke
+    assert "/agent/v1/enroll" in smoke
+    assert "enroll.vonk-forge.lan" in smoke
+    assert "agents.vonk-forge.lan" in smoke
     assert text.index("Preload pinned runtime dependency") < text.index(
+        "Render and validate disposable development Compose artifacts"
+    )
+    assert text.index("Render and validate disposable development Compose artifacts") < text.index(
+        "Render and smoke complete disposable development stack"
+    )
+    assert text.index("Render and smoke complete disposable development stack") < text.index(
         "Scan and accept image-only stack"
     )
     assert "scripts/verify-dev-image-secrets" in accept
@@ -487,6 +513,7 @@ def test_workflow_publishes_tested_archives_then_renders_both_compose_channels()
     publish = _step(text, "Publish immutable tested images")
     verify = _step(text, "Verify immutable manifests and attestations")
     render = _step(text, "Render development Compose artifacts")
+    artifact_scan = _step(text, "Scan published metadata and workflow artifacts")
     upload = _step(text, "Upload Compose artifact")
 
     assert "skopeo copy --all" in publish
@@ -522,6 +549,19 @@ def test_workflow_publishes_tested_archives_then_renders_both_compose_channels()
     assert "--commit" not in mutable_render
     assert "--channel dev" in mutable_render
     assert render.count("docker compose -f dist/docker-compose.") == 2
+    assert "docker history --no-trunc" in artifact_scan
+    assert "skopeo inspect --config" in artifact_scan
+    assert ".Provenance" in artifact_scan
+    assert ".SBOM" in artifact_scan
+    assert "scripts/verify-dev-image-secrets" in artifact_scan
+    assert "--scan-path dist" in artifact_scan
+    assert "--forbid-bytes-dir" in artifact_scan
+    assert text.index("Render development Compose artifacts") < text.index(
+        "Scan published metadata and workflow artifacts"
+    )
+    assert text.index("Scan published metadata and workflow artifacts") < text.index(
+        "Upload Compose artifact"
+    )
     assert "dist/docker-compose.pinned.yml" in upload
     assert "dist/docker-compose.dev.yml" in upload
     assert "if-no-files-found: error" in upload

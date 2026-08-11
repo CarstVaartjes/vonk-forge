@@ -22,7 +22,10 @@ PINNED_IMAGE_PATTERN = re.compile(
 )
 COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 UNRESOLVED_TOKEN = re.compile(r"__VONK_[A-Z0-9_]+__")
-ALLOWED_COMPOSE_INTERPOLATION = "${VONK_DEV_PORT:-8080}"
+ALLOWED_COMPOSE_INTERPOLATIONS = {
+    "VONK_AGENT_PORT": "${VONK_AGENT_PORT:-8443}",
+    "VONK_DEV_PORT": "${VONK_DEV_PORT:-8080}",
+}
 IMAGE_TOKENS = {
     "__VONK_API_IMAGE__": "api image",
     "__VONK_WORKER_IMAGE__": "worker image",
@@ -35,9 +38,18 @@ PINNED_COMPATIBILITY_BLOCK = (
     f"{PINNED_EXTENSION}"
 )
 SYNTHETIC_SECRETS = {
+    "agent-ca-certificate": "synthetic-agent-ca-certificate\n",
+    "agent-ca-key": "synthetic-agent-ca-key\n",
+    "agent-proxy-auth": "synthetic-agent-proxy-auth\n",
+    "controller-ca": "synthetic-controller-ca\n",
+    "controller-server-certificate": "synthetic-controller-server-certificate\n",
+    "controller-server-key": "synthetic-controller-server-key\n",
     "postgres-password": "synthetic-postgres-password\n",
     "database-url": "postgresql+psycopg://control:synthetic@postgres:5432/control\n",
     "git-signing-key": "synthetic-git-signing-key\n",
+    "litellm-master-key": "synthetic-litellm-master-key\n",
+    "litellm-upstream-key": "synthetic-litellm-upstream-key\n",
+    "management-cidrs": "127.0.0.1/32\n",
 }
 
 
@@ -106,20 +118,26 @@ def _render_template(
     rendered = text.replace("__VONK_API_IMAGE__", api_image).replace(
         "__VONK_WORKER_IMAGE__", worker_image
     )
-    rendered = rendered.replace(PINNED_COMPATIBILITY_BLOCK, "", 1)
+    if channel == "dev":
+        rendered = rendered.replace(PINNED_COMPATIBILITY_BLOCK, "", 1)
+    else:
+        assert commit is not None
+        rendered = rendered.replace(COMMIT_TOKEN, commit, 1)
     if UNRESOLVED_TOKEN.search(rendered):
         raise ValueError("template contains unresolved __VONK_*__ token")
-    if (
-        rendered.count(ALLOWED_COMPOSE_INTERPOLATION) != 1
-        or rendered.count("VONK_DEV_PORT") != 1
-    ):
-        raise ValueError(
-            "template must contain exactly one ${VONK_DEV_PORT:-8080} expression"
-        )
-    without_optional_port = rendered.replace(ALLOWED_COMPOSE_INTERPOLATION, "", 1)
-    if "$" in without_optional_port:
+    for name, expression in ALLOWED_COMPOSE_INTERPOLATIONS.items():
+        if rendered.count(expression) != 1 or rendered.count(name) != 1:
+            raise ValueError(
+                f"template must contain exactly one {expression} expression for {name}"
+            )
+        rendered = rendered.replace(expression, "", 1)
+    if "$" in rendered:
         raise ValueError("template contains unsupported Compose interpolation")
-    return rendered
+    return text.replace("__VONK_API_IMAGE__", api_image).replace(
+        "__VONK_WORKER_IMAGE__", worker_image
+    ).replace(PINNED_COMPATIBILITY_BLOCK, "", 1) if channel == "dev" else text.replace(
+        "__VONK_API_IMAGE__", api_image
+    ).replace("__VONK_WORKER_IMAGE__", worker_image).replace(COMMIT_TOKEN, commit or "", 1)
 
 
 def _write_synthetic_secrets(root: Path) -> None:
@@ -138,7 +156,11 @@ def _validate_compose(stage: Path) -> None:
         check=True,
         capture_output=True,
         text=True,
-        env={"PATH": os.environ["PATH"], "VONK_DEV_PORT": "8080"},
+        env={
+            "PATH": os.environ["PATH"],
+            "VONK_AGENT_PORT": "8443",
+            "VONK_DEV_PORT": "8080",
+        },
     )
 
 
