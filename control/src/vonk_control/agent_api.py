@@ -82,6 +82,7 @@ _MAX_EVIDENCE_BYTES = 8 * 1024
 _MAX_ENROLLMENT_BODY_BYTES = 64 * 1024
 _MAX_ENROLLMENT_TOKEN_PREFIX_BYTES = 2 * 1024
 _MAX_ARTIFACT_BYTES = 256 * 1024 * 1024
+MAX_RECIPE_IMAGE_BYTES = 16 * 1024**4
 _MAX_RANGE_BYTES = 8 * 1024 * 1024
 _MAX_TUF_METADATA_BYTES = 2 * 1024 * 1024
 _MAX_TUF_TARGET_BYTES = 16 * 1024 * 1024
@@ -123,7 +124,7 @@ class AgentApiServices:
     workload_tuf_metadata_root: Path = Path("/state/workload-tuf/metadata")
     workload_tuf_target_root: Path = Path("/state/workload-tuf/targets")
     max_artifact_bytes: int = _MAX_ARTIFACT_BYTES
-    max_recipe_image_bytes: int = 16 * 1024**4
+    max_recipe_image_bytes: int = MAX_RECIPE_IMAGE_BYTES
     max_range_bytes: int = _MAX_RANGE_BYTES
     max_tuf_metadata_bytes: int = _MAX_TUF_METADATA_BYTES
     max_tuf_target_bytes: int = _MAX_TUF_TARGET_BYTES
