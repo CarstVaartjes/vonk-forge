@@ -204,6 +204,7 @@ class NodeHealthService:
             for node_id, record in sorted(fleet.nodes.items() if fleet else ())
             if record.lifecycle != "retired"
         ) or _NODES
+        self._baseline_nodes = {node: node for node in self._nodes}
         if fleet is None:
             self._functions = self._validate_local_assets()
         else:
@@ -374,6 +375,26 @@ class NodeHealthService:
             baseline = self.rdma_baseline["rdma_counters_after"]
             if not isinstance(baseline, Mapping):
                 raise TypeError("generic RDMA baseline counters are required")
+            if not all(isinstance(key, str) for key in baseline):
+                raise TypeError("generic RDMA baseline keys must be strings")
+            baseline_names = {key.split("/", 1)[0] for key in baseline}
+            legacy_aliases = (
+                {
+                    node: f"node{index + 1}"
+                    for index, node in enumerate(sorted(self._nodes))
+                }
+                if self.rdma_baseline.get("inventory") == "inventory/cluster.toml"
+                and len(self._nodes) == 2
+                else {}
+            )
+            self._baseline_nodes = {
+                node: (
+                    node
+                    if node in baseline_names
+                    else legacy_aliases.get(node, node)
+                )
+                for node in self._nodes
+            }
             for link in topology["links"]:
                 if not link.get("accepted") or link.get("kind") not in {"direct-rdma", "switched-rdma"}:
                     continue
@@ -397,7 +418,8 @@ class NodeHealthService:
                         "gid_index": gid, "mtu": mtu, "link_rate_mbps": rate,
                     }
                     for counter in counter_names:
-                        value = baseline.get(f"{node}/{hca}/{counter}")
+                        baseline_node = self._baseline_nodes[node]
+                        value = baseline.get(f"{baseline_node}/{hca}/{counter}")
                         if not isinstance(value, int) or isinstance(value, bool) or value < 0:
                             raise TypeError(f"missing RDMA baseline for {node}/{hca}/{counter}")
             self.inventory = {"hosts": expected_hosts}
@@ -545,7 +567,7 @@ class NodeHealthService:
             if str(function["rdma_state"]).upper() != "ACTIVE":
                 errors.add("rdma_inactive")
             for counter, current in function["counters"].items():
-                baseline_key = f"{node}/{hca}/{counter}"
+                baseline_key = f"{self._baseline_nodes[node]}/{hca}/{counter}"
                 accepted = self.rdma_baseline["rdma_counters_after"].get(baseline_key)
                 if current is None or not isinstance(accepted, int):
                     errors.add("rdma_counter_unavailable")

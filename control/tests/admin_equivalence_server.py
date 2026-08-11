@@ -70,7 +70,7 @@ class Reconciler:
                     "targets": [NODE_ID],
                 },
             ),
-            agent_protocol_range=(1, 1),
+            agent_protocol_range=(3, 3),
         )
 
     def enqueue(
@@ -105,7 +105,7 @@ def main() -> None:
                 {
                     "agent_online": available,
                     "agent_state": "active" if available else "unavailable",
-                    "compatibility": "compatible" if available else "incompatible",
+                    "compatibility": "supported" if available else "incompatible",
                     "disk_available_bytes": 2_000_000,
                     "display_name": "Compute A",
                     "healthy": available,

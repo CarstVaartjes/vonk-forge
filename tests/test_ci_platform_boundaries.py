@@ -70,13 +70,25 @@ def test_pr_smoke_does_not_reintroduce_a_second_os_matrix() -> None:
     assert workflow.count("runs-on: ubuntu-latest") >= 4
 
 
-def test_catalog_runtime_suites_run_in_parallel_with_stable_aggregate() -> None:
+def test_repository_and_service_suites_run_in_parallel_with_stable_aggregate() -> None:
     workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+    repository = "\n".join(_workflow_job_lines(workflow, "repository-suite"))
     control = "\n".join(_workflow_job_lines(workflow, "control-suite"))
     agent = "\n".join(_workflow_job_lines(workflow, "agent-suite"))
     web = "\n".join(_workflow_job_lines(workflow, "web-suite"))
     aggregate = "\n".join(_workflow_job_lines(workflow, "catalog-runtime"))
 
+    assert "name: Complete repository suite (${{ matrix.shard.label }})" in repository
+    assert "fail-fast: false" in repository
+    assert repository.count("index:") == 4
+    assert "SHARD_TOTAL: 4" in repository
+    assert "pytest --collect-only -q" in repository
+    assert "awk '/^tests\\/.*::/'" in repository
+    assert "position % SHARD_TOTAL == SHARD_INDEX" in repository
+    assert 'shard_tests+=("${repository_tests[$position]}")' in repository
+    assert '"${shard_tests[@]}"' in repository
+    assert "pytest-xdist" not in repository
+    assert "--python 3.12" in repository
     assert "name: Complete control suite (${{ matrix.shard.label }})" in control
     assert "fail-fast: false" in control
     assert control.count("index:") == 4
@@ -95,8 +107,12 @@ def test_catalog_runtime_suites_run_in_parallel_with_stable_aggregate() -> None:
     assert "npm test --prefix control/web -- --run" in web
     assert "npm run build --prefix control/web" in web
     assert "name: Catalog and service suites" in aggregate
-    assert "needs: [control-suite, agent-suite, web-suite]" in aggregate
+    assert (
+        "needs: [repository-suite, control-suite, agent-suite, web-suite]"
+        in aggregate
+    )
     assert "if: always()" in aggregate
+    assert "needs.repository-suite.result" in aggregate
     assert "needs.control-suite.result" in aggregate
     assert "needs.agent-suite.result" in aggregate
     assert "needs.web-suite.result" in aggregate

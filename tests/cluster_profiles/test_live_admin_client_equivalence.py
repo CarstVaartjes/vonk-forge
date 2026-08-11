@@ -41,6 +41,8 @@ def test_generated_cli_and_rendered_browser_share_live_plan_and_apply_contract(
         [
             "uv",
             "run",
+            "--python",
+            "3.12",
             "--project",
             "control",
             "python",

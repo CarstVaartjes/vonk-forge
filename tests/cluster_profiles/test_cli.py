@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from cluster_profiles.catalog import Catalog, fingerprint
+from cluster_profiles.fleet.loaders import load_fleet
 from cluster_profiles.health import ClusterHealth, NodeHealth
 from cluster_profiles.legacy_cli import CliDependencies, build_dependencies, main
 from cluster_profiles.state import (
@@ -946,7 +947,10 @@ def test_default_dependencies_use_local_state_and_conservative_inventory(
     )
 
     assert dependencies.state_store.load().status == "stopped"
-    assert dependencies.inventory_provider() == {"node1": {}, "node2": {}}
+    fleet = load_fleet(REPOSITORY_ROOT / "inventory/fleet.toml")
+    assert dependencies.inventory_provider() == {
+        node_id.value: {} for node_id in fleet.nodes
+    }
     assert dependencies.health_service is None
     assert not (tmp_path / "vonkctl").exists()
 
