@@ -71,6 +71,7 @@ impl<R: ProcessRunner> ImageImporter<'_, R> {
             return Err(ImageImportError::Digest);
         }
         let tag = format!("localhost/vonk/recipe-build-{}", request.build_id);
+        let identifier = loaded_image_identifier(&loaded.stdout, &tag)?;
         let inspected = self.runner.run(
             Program::Podman,
             &[
@@ -78,7 +79,7 @@ impl<R: ProcessRunner> ImageImporter<'_, R> {
                 "inspect".to_owned(),
                 "--format".to_owned(),
                 "{{.Digest}}\t{{.Os}}\t{{.Architecture}}\t{{index .Config.Labels \"ai.vonkforge.runtime-interface\"}}\t{{.Config.User}}".to_owned(),
-                tag,
+                identifier.clone(),
             ],
             Duration::from_secs(60),
         )?;
@@ -97,6 +98,14 @@ impl<R: ProcessRunner> ImageImporter<'_, R> {
         {
             return Err(ImageImportError::Digest);
         }
+        let tagged = self.runner.run(
+            Program::Podman,
+            &["tag".to_owned(), identifier, tag],
+            Duration::from_secs(60),
+        )?;
+        if !tagged.success {
+            return Err(ImageImportError::Digest);
+        }
         Ok(ImageImportEvidence {
             build_id: request.build_id,
             image_bytes: request.image_bytes,
@@ -104,6 +113,28 @@ impl<R: ProcessRunner> ImageImporter<'_, R> {
             oci_layout_sha256: request.oci_layout_sha256.clone(),
         })
     }
+}
+
+fn loaded_image_identifier(payload: &[u8], expected_tag: &str) -> Result<String, ImageImportError> {
+    let text = std::str::from_utf8(payload).map_err(|_| ImageImportError::Digest)?;
+    let identifiers = text
+        .lines()
+        .filter_map(|line| line.strip_prefix("Loaded image: "))
+        .collect::<Vec<_>>();
+    let [identifier] = identifiers.as_slice() else {
+        return Err(ImageImportError::Digest);
+    };
+    if *identifier != expected_tag
+        && identifier.strip_prefix("sha256:").is_none_or(|digest| {
+            digest.len() != 64
+                || !digest
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        })
+    {
+        return Err(ImageImportError::Digest);
+    }
+    Ok((*identifier).to_owned())
 }
 
 fn sha256_file(path: &Path) -> Result<String, std::io::Error> {
