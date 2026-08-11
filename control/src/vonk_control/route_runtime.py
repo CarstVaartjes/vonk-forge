@@ -180,9 +180,7 @@ def build_published_route(
     if parsed_address.compressed != address:
         raise RouteRuntimeError("route policy address is not canonical")
     host = (
-        f"[{address}]"
-        if isinstance(parsed_address, ipaddress.IPv6Address)
-        else address
+        f"[{address}]" if isinstance(parsed_address, ipaddress.IPv6Address) else address
     )
     return PublishedRoute(
         alias=alias,
@@ -379,12 +377,13 @@ class AtomicRouteBundlePublisher:
             raise RouteRuntimeError("route runtime root must not be a symlink")
         if not 1 <= maximum_lease_seconds <= 3600:
             raise RouteRuntimeError("route lease bound is invalid")
-        root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        root.chmod(0o700)
+        root.mkdir(parents=True, exist_ok=True, mode=0o750)
+        root.chmod(0o750)
         generations = root / "generations"
         if generations.is_symlink():
             raise RouteRuntimeError("route generation root must not be a symlink")
-        generations.mkdir(mode=0o700, exist_ok=True)
+        generations.mkdir(mode=0o750, exist_ok=True)
+        generations.chmod(0o750)
         self._root = root
         self._generations = generations
         self._policy = management_policy
@@ -474,7 +473,9 @@ class AtomicRouteBundlePublisher:
         with self._locked():
             active = self._read_update_boundary()
             if active != key:
-                raise RouteRuntimeError("route update boundary key does not own publication")
+                raise RouteRuntimeError(
+                    "route update boundary key does not own publication"
+                )
             path = self._root / ".update-boundary.json"
             try:
                 path.unlink()
@@ -706,9 +707,7 @@ class AtomicRouteBundlePublisher:
         litellm_document = json.loads(self.empty_litellm())
         if self._litellm_deployments is not None:
             if _COMMIT.fullmatch(request.base_commit) is None:
-                raise RouteRuntimeError(
-                    "Hermes repository commit is invalid"
-                )
+                raise RouteRuntimeError("Hermes repository commit is invalid")
             try:
                 deployments = tuple(
                     self._litellm_deployments(
@@ -721,10 +720,8 @@ class AtomicRouteBundlePublisher:
                         not isinstance(deployment, LiteLlmDeployment)
                         for deployment in deployments
                     )
-                    or len({item.priority for item in deployments})
-                    != len(deployments)
-                    or len({item.workload for item in deployments})
-                    != len(deployments)
+                    or len({item.priority for item in deployments}) != len(deployments)
+                    or len({item.workload for item in deployments}) != len(deployments)
                 ):
                     raise ValueError("Hermes deployments are invalid")
                 for deployment in sorted(
@@ -779,14 +776,14 @@ class AtomicRouteBundlePublisher:
         if not isinstance(renew_update_boundary, bool):
             raise RouteRuntimeError("route update renewal flag is invalid")
         if renew_update_boundary and update_boundary_key is None:
-            raise RouteRuntimeError(
-                "route update renewal requires its exact fence"
-            )
+            raise RouteRuntimeError("route update renewal requires its exact fence")
         if (
             expected_current_digest is not None
             and _DIGEST.fullmatch(expected_current_digest) is None
         ):
-            raise RouteRuntimeError("route publication compare-and-swap digest is invalid")
+            raise RouteRuntimeError(
+                "route publication compare-and-swap digest is invalid"
+            )
         self._identity(
             request.reconciliation_id,
             request.plan_digest,
@@ -815,12 +812,8 @@ class AtomicRouteBundlePublisher:
             ):
                 self._require_supervisor_ack(current)
                 return current
-            if (
-                expected_current_digest is not None
-                and (
-                    current is None
-                    or current.digest != expected_current_digest
-                )
+            if expected_current_digest is not None and (
+                current is None or current.digest != expected_current_digest
             ):
                 raise RouteRuntimeError("route publication compare-and-swap failed")
             generation = (current.generation if current is not None else 0) + 1
@@ -898,14 +891,14 @@ class AtomicRouteBundlePublisher:
         if not isinstance(renew_update_boundary, bool):
             raise RouteRuntimeError("route update renewal flag is invalid")
         if renew_update_boundary and update_boundary_key is None:
-            raise RouteRuntimeError(
-                "route update renewal requires its exact fence"
-            )
+            raise RouteRuntimeError("route update renewal requires its exact fence")
         if (
             expected_current_digest is not None
             and _DIGEST.fullmatch(expected_current_digest) is None
         ):
-            raise RouteRuntimeError("route publication compare-and-swap digest is invalid")
+            raise RouteRuntimeError(
+                "route publication compare-and-swap digest is invalid"
+            )
         self._identity(reconciliation_id, plan_digest, "0" * 64)
         if (
             not targets
@@ -955,12 +948,8 @@ class AtomicRouteBundlePublisher:
             ):
                 self._require_supervisor_ack(current)
                 return current
-            if (
-                expected_current_digest is not None
-                and (
-                    current is None
-                    or current.digest != expected_current_digest
-                )
+            if expected_current_digest is not None and (
+                current is None or current.digest != expected_current_digest
             ):
                 raise RouteRuntimeError("route publication compare-and-swap failed")
             generation = (current.generation if current is not None else 0) + 1
@@ -1054,7 +1043,9 @@ class AtomicRouteBundlePublisher:
         marker = ActivationMarker(**activation_document)  # type: ignore[arg-type]
         try:
             self._atomic_write(
-                self._root / "activation.json", _encoded(activation_document)
+                self._root / "activation.json",
+                _encoded(activation_document),
+                mode=0o640,
             )
         except Exception as error:
             raise RouteRuntimeError(
@@ -1090,7 +1081,8 @@ class AtomicRouteBundlePublisher:
             if directory.is_symlink() or not directory.is_dir():
                 raise RouteRuntimeError("staged route generation is unsafe")
         else:
-            directory.mkdir(mode=0o700)
+            directory.mkdir(mode=0o750)
+        directory.chmod(0o750)
         target = directory / name
         if target.exists():
             if (
@@ -1102,7 +1094,7 @@ class AtomicRouteBundlePublisher:
                     "staged route generation conflicts with existing bytes"
                 )
             return
-        self._atomic_write(target, content)
+        self._atomic_write(target, content, mode=0o640)
 
     def inspect(
         self,
@@ -1235,9 +1227,7 @@ def _read_active_route_bundle(
     try:
         marker = ActivationMarker(**raw)
     except TypeError as error:
-        raise RouteRuntimeError(
-            "route activation marker fields are invalid"
-        ) from error
+        raise RouteRuntimeError("route activation marker fields are invalid") from error
     AtomicRouteBundlePublisher._validate_marker(marker)
     if marker_content != marker.canonical_bytes():
         raise RouteRuntimeError("route activation marker is not canonical")
@@ -1280,17 +1270,11 @@ def _read_active_route_bundle(
                 raise RouteRuntimeError(
                     "active route generation file is unreadable"
                 ) from error
-            if _sha256(content) != digest or (
-                exact is not None and content != exact
-            ):
-                raise RouteRuntimeError(
-                    "active route generation checksum mismatch"
-                )
+            if _sha256(content) != digest or (exact is not None and content != exact):
+                raise RouteRuntimeError("active route generation checksum mismatch")
             if name in {"routes.json", "litellm.json"}:
                 validator = (
-                    validate_routes
-                    if name == "routes.json"
-                    else validate_litellm
+                    validate_routes if name == "routes.json" else validate_litellm
                 )
                 try:
                     document = json.loads(content)

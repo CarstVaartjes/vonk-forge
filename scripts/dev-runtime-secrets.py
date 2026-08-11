@@ -494,6 +494,9 @@ def _validate_bundle(
             "development secret certificate constraints are invalid"
         ) from error
     now = dt.datetime.now(dt.UTC)
+    agent_before, agent_after = _certificate_window(agent_ca)
+    controller_before, controller_after = _certificate_window(controller_ca)
+    server_before, server_after = _certificate_window(server)
 
     def usage_values(usage: x509.KeyUsage) -> tuple[bool | None, ...]:
         return (
@@ -535,11 +538,9 @@ def _validate_bundle(
         or set(server_extended_usage) != {ExtendedKeyUsageOID.SERVER_AUTH}
         or set(sans.get_values_for_type(x509.DNSName))
         != {enroll_hostname, agent_hostname, registry_hostname}
-        or not agent_ca.not_valid_before_utc <= now <= agent_ca.not_valid_after_utc
-        or not controller_ca.not_valid_before_utc
-        <= now
-        <= controller_ca.not_valid_after_utc
-        or not server.not_valid_before_utc <= now <= server.not_valid_after_utc
+        or not agent_before <= now <= agent_after
+        or not controller_before <= now <= controller_after
+        or not server_before <= now <= server_after
     ):
         raise RuntimeSecretError(
             "development secret certificate constraints are invalid"
@@ -704,8 +705,19 @@ def prepare_runtime_secrets(
         os.close(parent)
 
 
+def _certificate_window(
+    certificate: x509.Certificate,
+) -> tuple[dt.datetime, dt.datetime]:
+    before = getattr(certificate, "not_valid_before_utc", None)
+    after = getattr(certificate, "not_valid_after_utc", None)
+    if before is None or after is None:
+        before = certificate.not_valid_before.replace(tzinfo=dt.UTC)
+        after = certificate.not_valid_after.replace(tzinfo=dt.UTC)
+    return before.astimezone(dt.UTC), after.astimezone(dt.UTC)
+
+
 def _expiry(certificate: x509.Certificate) -> str:
-    return certificate.not_valid_after_utc.isoformat().replace("+00:00", "Z")
+    return _certificate_window(certificate)[1].isoformat().replace("+00:00", "Z")
 
 
 def _public_summary(secrets_dir: Path) -> tuple[str, ...]:

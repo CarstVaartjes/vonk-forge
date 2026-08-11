@@ -15,21 +15,21 @@ LOCAL_WRAPPER = ROOT / "scripts/dev-compose"
 SOURCE_REPOSITORY = "https://github.com/CarstVaartjes/vonk-forge"
 
 _FIXTURE_IMAGE_INSPECTION = (
-    "if [[ \"$1\" == image && \" $* \" == *'.RepoDigests'* ]]; then\n"
-    "  tag=\"${@: -1}\"\n"
+    'if [[ "$1" == image && " $* " == *\'.RepoDigests\'* ]]; then\n'
+    '  tag="${@: -1}"\n'
     "  repository=${tag%:*}\n"
-    "  case \"$tag\" in\n"
+    '  case "$tag" in\n'
     "    *vonk-forge-api:cohort-a) digest='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' ;;\n"
     "    *vonk-forge-worker:cohort-a) digest='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' ;;\n"
     "    *vonk-forge-api:cohort-b) digest='cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc' ;;\n"
     "    *) digest='dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd' ;;\n"
     "  esac\n"
-    "  printf '%s@sha256:%s\\n' \"$repository\" \"$digest\"\n"
+    '  printf \'%s@sha256:%s\\n\' "$repository" "$digest"\n'
     "  exit 0\n"
     "fi\n"
-    "if [[ \"$1\" == image && \" $* \" == *\"{{.Id}}\"* ]]; then\n"
-    "  reference=\"${@: -1}\"\n"
-    "  case \"$reference\" in\n"
+    'if [[ "$1" == image && " $* " == *"{{.Id}}"* ]]; then\n'
+    '  reference="${@: -1}"\n'
+    '  case "$reference" in\n'
     "    *@sha256:aaaa*) digit=1 ;;\n"
     "    *@sha256:bbbb*) digit=2 ;;\n"
     "    *@sha256:cccc*) digit=3 ;;\n"
@@ -47,7 +47,7 @@ def _install_successful_curl(fake_bin: Path, log: Path) -> None:
         "#!/usr/bin/env bash\n"
         "set -eu\n"
         "printf 'curl ' >> \"$VONK_TEST_DOCKER_LOG\"\n"
-        "printf '%q ' \"$@\" >> \"$VONK_TEST_DOCKER_LOG\"\n"
+        'printf \'%q \' "$@" >> "$VONK_TEST_DOCKER_LOG"\n'
         "printf '\\n' >> \"$VONK_TEST_DOCKER_LOG\"\n",
         encoding="utf-8",
     )
@@ -59,7 +59,10 @@ def _fixture_repository(tmp_path: Path) -> Path:
     (repository / "scripts").mkdir(parents=True)
     (repository / "deploy/compose").mkdir(parents=True)
     shutil.copy2(SCRIPT, repository / "scripts/dev-image-acceptance")
-    shutil.copy2(ROOT / "scripts/verify-dev-image-secrets", repository / "scripts/verify-dev-image-secrets")
+    shutil.copy2(
+        ROOT / "scripts/verify-dev-image-secrets",
+        repository / "scripts/verify-dev-image-secrets",
+    )
     shutil.copy2(TEMPLATE, repository / "deploy/compose/compose.dev.images.yaml")
     subprocess.run(("git", "init", "-q", "-b", "main", str(repository)), check=True)
     subprocess.run(
@@ -71,10 +74,15 @@ def _fixture_repository(tmp_path: Path) -> Path:
     )
     (repository / "README.md").write_text("fixture\n", encoding="utf-8")
     subprocess.run(("git", "-C", str(repository), "add", "."), check=True)
-    subprocess.run(("git", "-C", str(repository), "commit", "-qm", "main fixture"), check=True)
+    subprocess.run(
+        ("git", "-C", str(repository), "commit", "-qm", "main fixture"), check=True
+    )
     (repository / "README.md").write_text("fixture update\n", encoding="utf-8")
     subprocess.run(("git", "-C", str(repository), "add", "README.md"), check=True)
-    subprocess.run(("git", "-C", str(repository), "commit", "-qm", "main update fixture"), check=True)
+    subprocess.run(
+        ("git", "-C", str(repository), "commit", "-qm", "main update fixture"),
+        check=True,
+    )
     return repository
 
 
@@ -95,9 +103,9 @@ def _fake_docker(tmp_path: Path) -> tuple[Path, Path]:
     docker.write_text(
         "#!/usr/bin/env bash\n"
         "set -eu\n"
-        "printf '%q ' \"$@\" >> \"$VONK_TEST_DOCKER_LOG\"\n"
+        'printf \'%q \' "$@" >> "$VONK_TEST_DOCKER_LOG"\n'
         "printf '\\n' >> \"$VONK_TEST_DOCKER_LOG\"\n"
-        "if [[ \"$1\" == image ]]; then exit 47; fi\n"
+        'if [[ "$1" == image ]]; then exit 47; fi\n'
         "exit 0\n",
         encoding="utf-8",
     )
@@ -113,33 +121,32 @@ def _config_capturing_docker(tmp_path: Path) -> tuple[Path, Path]:
     docker.write_text(
         "#!/usr/bin/env bash\n"
         "set -eu\n"
-        "printf '%q ' \"$@\" >> \"$VONK_TEST_DOCKER_LOG\"\n"
+        'printf \'%q \' "$@" >> "$VONK_TEST_DOCKER_LOG"\n'
         "printf '\\n' >> \"$VONK_TEST_DOCKER_LOG\"\n"
         + _FIXTURE_IMAGE_INSPECTION
-        +
-        "if [[ \"$1\" == image && \" $* \" == *' --format '* ]]; then\n"
+        + 'if [[ "$1" == image && " $* " == *\' --format \'* ]]; then\n'
         "  printf '%s\\n' 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'\n"
         "  exit 0\n"
         "fi\n"
-        "if [[ \"$1\" == image ]]; then\n"
-        "  printf '[{\"Config\":{\"User\":\"10001:10001\",\"Env\":[],\"Labels\":{\"org.opencontainers.image.revision\":\"%s\",\"org.opencontainers.image.source\":\"%s\"},\"Entrypoint\":[],\"Cmd\":[]}}]\\n' \"$VONK_TEST_COMMIT\" \"$VONK_TEST_SOURCE_REPOSITORY\"\n"
+        'if [[ "$1" == image ]]; then\n'
+        '  printf \'[{"Config":{"User":"10001:10001","Env":[],"Labels":{"org.opencontainers.image.revision":"%s","org.opencontainers.image.source":"%s"},"Entrypoint":[],"Cmd":[]}}]\\n\' "$VONK_TEST_COMMIT" "$VONK_TEST_SOURCE_REPOSITORY"\n'
         "  exit 0\n"
         "fi\n"
-        "if [[ \"$1\" == history ]]; then exit 0; fi\n"
+        'if [[ "$1" == history ]]; then exit 0; fi\n'
         "if [[ \"$1\" == create ]]; then printf '%s\\n' scanner-container; exit 0; fi\n"
-        "if [[ \"$1\" == export ]]; then tar -cf - --files-from /dev/null; exit 0; fi\n"
-        "if [[ \"$1\" == rm || \"$1\" == ps ]]; then exit 0; fi\n"
-        "if [[ \"$1\" == run && \" $* \" == *' --network=none '* ]]; then\n"
-        "  printf '{\"image_role\":\"%s\",\"source_commit\":\"%s\",\"source_repository\":\"%s\"}\\n' \"${@: -3:1}\" \"${@: -2:1}\" \"${@: -1}\"\n"
+        'if [[ "$1" == export ]]; then tar -cf - --files-from /dev/null; exit 0; fi\n'
+        'if [[ "$1" == rm || "$1" == ps ]]; then exit 0; fi\n'
+        'if [[ "$1" == run && " $* " == *\' --network=none \'* ]]; then\n'
+        '  printf \'{"image_role":"%s","source_commit":"%s","source_repository":"%s"}\\n\' "${@: -3:1}" "${@: -2:1}" "${@: -1}"\n'
         "  exit 0\n"
         "fi\n"
         "if [[ \"$1\" == run ]]; then printf '%s\\n' '{}'; exit 0; fi\n"
-        "if [[ \"$1\" == compose && \" $* \" == *' config '* ]]; then\n"
+        'if [[ "$1" == compose && " $* " == *\' config \'* ]]; then\n'
         "  number=0\n"
-        "  while [[ \"$#\" -gt 0 ]]; do\n"
-        "    if [[ \"$1\" == --file || \"$1\" == -f ]]; then\n"
+        '  while [[ "$#" -gt 0 ]]; do\n'
+        '    if [[ "$1" == --file || "$1" == -f ]]; then\n'
         "      number=$((number + 1))\n"
-        "      cp \"$2\" \"$VONK_TEST_DOCKER_LOG.compose-$number\"\n"
+        '      cp "$2" "$VONK_TEST_DOCKER_LOG.compose-$number"\n'
         "      shift 2\n"
         "    else\n"
         "      shift\n"
@@ -163,28 +170,27 @@ def _failing_up_docker(tmp_path: Path) -> tuple[Path, Path]:
     docker.write_text(
         "#!/usr/bin/env bash\n"
         "set -eu\n"
-        "printf '%q ' \"$@\" >> \"$VONK_TEST_DOCKER_LOG\"\n"
+        'printf \'%q \' "$@" >> "$VONK_TEST_DOCKER_LOG"\n'
         "printf '\\n' >> \"$VONK_TEST_DOCKER_LOG\"\n"
         + _FIXTURE_IMAGE_INSPECTION
-        +
-        "if [[ \"$1\" == image && \" $* \" == *' --format '* ]]; then\n"
+        + 'if [[ "$1" == image && " $* " == *\' --format \'* ]]; then\n'
         "  printf '%s\\n' 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'\n"
         "  exit 0\n"
         "fi\n"
-        "if [[ \"$1\" == image ]]; then\n"
-        "  printf '[{\"Config\":{\"User\":\"10001:10001\",\"Env\":[],\"Labels\":{\"org.opencontainers.image.revision\":\"%s\",\"org.opencontainers.image.source\":\"%s\"},\"Entrypoint\":[],\"Cmd\":[]}}]\\n' \"$VONK_TEST_COMMIT\" \"$VONK_TEST_SOURCE_REPOSITORY\"\n"
+        'if [[ "$1" == image ]]; then\n'
+        '  printf \'[{"Config":{"User":"10001:10001","Env":[],"Labels":{"org.opencontainers.image.revision":"%s","org.opencontainers.image.source":"%s"},"Entrypoint":[],"Cmd":[]}}]\\n\' "$VONK_TEST_COMMIT" "$VONK_TEST_SOURCE_REPOSITORY"\n'
         "  exit 0\n"
         "fi\n"
-        "if [[ \"$1\" == history ]]; then exit 0; fi\n"
+        'if [[ "$1" == history ]]; then exit 0; fi\n'
         "if [[ \"$1\" == create ]]; then printf '%s\\n' scanner-container; exit 0; fi\n"
-        "if [[ \"$1\" == export ]]; then tar -cf - --files-from /dev/null; exit 0; fi\n"
-        "if [[ \"$1\" == rm || \"$1\" == ps ]]; then exit 0; fi\n"
-        "if [[ \"$1\" == run && \" $* \" == *' --network=none '* ]]; then\n"
-        "  printf '{\"image_role\":\"%s\",\"source_commit\":\"%s\",\"source_repository\":\"%s\"}\\n' \"${@: -3:1}\" \"${@: -2:1}\" \"${@: -1}\"\n"
+        'if [[ "$1" == export ]]; then tar -cf - --files-from /dev/null; exit 0; fi\n'
+        'if [[ "$1" == rm || "$1" == ps ]]; then exit 0; fi\n'
+        'if [[ "$1" == run && " $* " == *\' --network=none \'* ]]; then\n'
+        '  printf \'{"image_role":"%s","source_commit":"%s","source_repository":"%s"}\\n\' "${@: -3:1}" "${@: -2:1}" "${@: -1}"\n'
         "  exit 0\n"
         "fi\n"
         "if [[ \"$1\" == run ]]; then printf '%s\\n' '{}'; exit 0; fi\n"
-        "if [[ \"$1\" == compose && \" $* \" == *' logs '* ]]; then\n"
+        'if [[ "$1" == compose && " $* " == *\' logs \'* ]]; then\n'
         "  printf '%s\\n' \\\n"
         "    'api | -----BEGIN OPENSSH PRIVATE KEY-----' \\\n"
         "    'api | QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFB' \\\n"
@@ -194,7 +200,7 @@ def _failing_up_docker(tmp_path: Path) -> tuple[Path, Path]:
         "    'migrate | postgresql+psycopg://control:visible@postgres:5432/control'\n"
         "  exit 0\n"
         "fi\n"
-        "if [[ \"$1\" == compose && \" $* \" == *' up '* ]]; then exit 49; fi\n"
+        'if [[ "$1" == compose && " $* " == *\' up \'* ]]; then exit 49; fi\n'
         "exit 0\n",
         encoding="utf-8",
     )
@@ -211,61 +217,60 @@ def _successful_lifecycle_tools(tmp_path: Path) -> tuple[Path, Path]:
     docker.write_text(
         "#!/usr/bin/env bash\n"
         "set -eu\n"
-        "printf '%q ' \"$@\" >> \"$VONK_TEST_DOCKER_LOG\"\n"
+        'printf \'%q \' "$@" >> "$VONK_TEST_DOCKER_LOG"\n'
         "printf '\\n' >> \"$VONK_TEST_DOCKER_LOG\"\n"
-        "state_file=\"$VONK_TEST_DOCKER_LOG.state\"\n"
-        "reset_file=\"$VONK_TEST_DOCKER_LOG.reset\"\n"
+        'state_file="$VONK_TEST_DOCKER_LOG.state"\n'
+        'reset_file="$VONK_TEST_DOCKER_LOG.reset"\n'
         + _FIXTURE_IMAGE_INSPECTION
-        +
-        "if [[ \"$1\" == image && \" $* \" == *' --format '* ]]; then\n"
+        + 'if [[ "$1" == image && " $* " == *\' --format \'* ]]; then\n'
         "  printf '%s\\n' 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'\n"
         "  exit 0\n"
         "fi\n"
-        "if [[ \"$1\" == image ]]; then\n"
-        "  printf '[{\"Config\":{\"User\":\"10001:10001\",\"Env\":[],\"Labels\":{\"org.opencontainers.image.revision\":\"%s\",\"org.opencontainers.image.source\":\"%s\"},\"Entrypoint\":[],\"Cmd\":[]}}]\\n' \"$VONK_TEST_COMMIT\" \"$VONK_TEST_SOURCE_REPOSITORY\"\n"
+        'if [[ "$1" == image ]]; then\n'
+        '  printf \'[{"Config":{"User":"10001:10001","Env":[],"Labels":{"org.opencontainers.image.revision":"%s","org.opencontainers.image.source":"%s"},"Entrypoint":[],"Cmd":[]}}]\\n\' "$VONK_TEST_COMMIT" "$VONK_TEST_SOURCE_REPOSITORY"\n'
         "  exit 0\n"
         "fi\n"
-        "if [[ \"$1\" == history ]]; then exit 0; fi\n"
+        'if [[ "$1" == history ]]; then exit 0; fi\n'
         "if [[ \"$1\" == create ]]; then printf '%s\\n' scanner-container; exit 0; fi\n"
-        "if [[ \"$1\" == export ]]; then tar -cf - --files-from /dev/null; exit 0; fi\n"
-        "if [[ \"$1\" == rm || \"$1\" == build || \"$1\" == tag || \"$1\" == push ]]; then exit 0; fi\n"
-        "if [[ \"$1\" == volume && \" $* \" == *' rm '* ]]; then touch \"$reset_file\"; exit 0; fi\n"
-        "if [[ \"$1\" == volume && \" $* \" == *' inspect '* ]]; then\n"
+        'if [[ "$1" == export ]]; then tar -cf - --files-from /dev/null; exit 0; fi\n'
+        'if [[ "$1" == rm || "$1" == build || "$1" == tag || "$1" == push ]]; then exit 0; fi\n'
+        'if [[ "$1" == volume && " $* " == *\' rm \'* ]]; then touch "$reset_file"; exit 0; fi\n'
+        'if [[ "$1" == volume && " $* " == *\' inspect \'* ]]; then\n'
         "  if [[ \" $* \" == *' --format '* ]]; then\n"
-        "    volume=\"${@: -1}\"\n"
+        '    volume="${@: -1}"\n'
         "    project=${volume%_*}\n"
         "    logical=${volume##*_}\n"
-        "    printf '%s %s\\n' \"$logical\" \"$project\"\n"
+        '    printf \'%s %s\\n\' "$logical" "$project"\n'
         "  fi\n"
         "  exit 0\n"
         "fi\n"
-        "if [[ \"$1\" == run && \" $* \" == *' --network=none '* ]]; then\n"
+        'if [[ "$1" == run && " $* " == *\' --network=none \'* ]]; then\n'
         "  if [[ \" $* \" == *database_revision* ]]; then printf '%s\\n' 0020_recipe_catalog_bridge; exit 0; fi\n"
-        "  printf '{\"image_role\":\"%s\",\"source_commit\":\"%s\",\"source_repository\":\"%s\"}\\n' \"${@: -3:1}\" \"${@: -2:1}\" \"${@: -1}\"\n"
+        '  printf \'{"image_role":"%s","source_commit":"%s","source_repository":"%s"}\\n\' "${@: -3:1}" "${@: -2:1}" "${@: -1}"\n'
         "  exit 0\n"
         "fi\n"
         "if [[ \"$1\" == run ]]; then printf '%s\\n' '{}'; exit 0; fi\n"
-        "if [[ \"$1\" == ps ]]; then exit 0; fi\n"
-        "if [[ \"$1\" == inspect && \" $* \" == *'{{json .Mounts}}'* ]]; then\n"
-        "  container=\"${@: -1}\"\n"
+        'if [[ "$1" == ps ]]; then exit 0; fi\n'
+        'if [[ "$1" == inspect && " $* " == *\'{{json .Mounts}}\'* ]]; then\n'
+        '  container="${@: -1}"\n'
         "  project=$(sed -n 's/.*-p \\([^ ]*\\).*/\\1/p' \"$VONK_TEST_DOCKER_LOG\" | tail -n 1)\n"
-        "  case \"$container\" in\n"
-        "    postgres-id) printf '[{\"Destination\":\"/var/lib/postgresql\",\"Type\":\"volume\",\"Name\":\"%s_dev-postgres-data\",\"Source\":\"%s_dev-postgres-data\"}]\\n' \"$project\" \"$project\" ;;\n"
-        "    control-api-id) printf '[{\"Destination\":\"/repository\",\"Type\":\"volume\",\"Name\":\"%s_dev-repository\",\"Source\":\"%s_dev-repository\"},{\"Destination\":\"/state\",\"Type\":\"volume\",\"Name\":\"%s_dev-control-state\",\"Source\":\"%s_dev-control-state\"}]\\n' \"$project\" \"$project\" \"$project\" \"$project\" ;;\n"
-        "    *) printf '[{\"Destination\":\"/repository\",\"Type\":\"volume\",\"Name\":\"%s_dev-repository\",\"Source\":\"%s_dev-repository\"}]\\n' \"$project\" \"$project\" ;;\n"
+        '  case "$container" in\n'
+        '    postgres-id) printf \'[{"Destination":"/var/lib/postgresql","Type":"volume","Name":"%s_dev-postgres-data","Source":"%s_dev-postgres-data"}]\\n\' "$project" "$project" ;;\n'
+        '    control-api-id) printf \'[{"Destination":"/repository","Type":"volume","Name":"%s_dev-repository","Source":"%s_dev-repository"},{"Destination":"/state","Type":"volume","Name":"%s_dev-control-state","Source":"%s_dev-control-state"}]\\n\' "$project" "$project" "$project" "$project" ;;\n'
+        '    *) printf \'[{"Destination":"/repository","Type":"volume","Name":"%s_dev-repository","Source":"%s_dev-repository"}]\\n\' "$project" "$project" ;;\n'
         "  esac\n"
         "  exit 0\n"
         "fi\n"
-        "if [[ \"$1\" == inspect && \" $* \" == *'{{.Image}}'* ]]; then\n"
+        'if [[ "$1" == inspect && " $* " == *\'{{.Image}}\'* ]]; then\n'
         "  cohort=$(sed -n '1p' \"$state_file\" 2>/dev/null || true)\n"
-        "  container=\"${@: -1}\"\n"
-        "  if [[ \"$cohort\" == b ]]; then api_digit=3; worker_digit=4; else api_digit=1; worker_digit=2; fi\n"
-        "  if [[ \"$container\" == control-api-id ]]; then printf 'sha256:%064d\\n' \"$api_digit\"; else printf 'sha256:%064d\\n' \"$worker_digit\"; fi\n"
+        '  container="${@: -1}"\n'
+        '  if [[ "$cohort" == b ]]; then api_digit=3; worker_digit=4; else api_digit=1; worker_digit=2; fi\n'
+        '  if [[ "$container" == control-api-id ]]; then printf \'sha256:%064d\\n\' "$api_digit"; else printf \'sha256:%064d\\n\' "$worker_digit"; fi\n'
         "  exit 0\n"
         "fi\n"
-        "if [[ \"$1\" == inspect ]]; then\n"
+        'if [[ "$1" == inspect ]]; then\n'
         "  cohort=$(sed -n '1p' \"$state_file\" 2>/dev/null || true)\n"
-        "  case \"${*: -1}\" in\n"
+        '  case "${*: -1}" in\n'
         "    dev-init-id) if [[ \"$cohort\" == rollback-failed ]]; then printf '%s\\n' 'exited 1'; else printf '%s\\n' 'exited 0'; fi ;;\n"
         "    migrate-id) if [[ \"$cohort\" == rollback-failed ]]; then printf '%s\\n' 'created 0'; else printf '%s\\n' 'exited 0'; fi ;;\n"
         "    dev-*-id) printf '%s\\n' 'exited 0' ;;\n"
@@ -273,14 +278,14 @@ def _successful_lifecycle_tools(tmp_path: Path) -> tuple[Path, Path]:
         "  esac\n"
         "  exit 0\n"
         "fi\n"
-        "if [[ \"$1\" == compose && \" $* \" == *' ps -aq '* ]]; then\n"
+        'if [[ "$1" == compose && " $* " == *\' ps -aq \'* ]]; then\n'
         "  printf '%s-id\\n' \"${*: -1}\"\n"
         "  exit 0\n"
         "fi\n"
-        "if [[ \"$1\" == compose && \" $* \" == *' exec '* ]]; then\n"
-        "  case \" $* \" in\n"
+        'if [[ "$1" == compose && " $* " == *\' exec \'* ]]; then\n'
+        '  case " $* " in\n'
         "    *' git -C /repository rev-parse '*)\n"
-        "      if [[ \" $* \" == *docker-compose.pinned.yaml* ]]; then\n"
+        '      if [[ " $* " == *docker-compose.pinned.yaml* ]]; then\n'
         "        printf '%s\\n' \"$VONK_TEST_PREVIOUS_COMMIT\"\n"
         "      elif grep -q -- '--force-recreate' \"$VONK_TEST_DOCKER_LOG\"; then\n"
         "        printf '%s\\n' \"$VONK_TEST_COMMIT\"\n"
@@ -292,22 +297,22 @@ def _successful_lifecycle_tools(tmp_path: Path) -> tuple[Path, Path]:
         "  esac\n"
         "  exit 0\n"
         "fi\n"
-        "if [[ \"$1\" == compose && \" $* \" == *' logs '*dev-init* ]]; then\n"
+        'if [[ "$1" == compose && " $* " == *\' logs \'*dev-init* ]]; then\n'
         "  printf '%s\\n' 'development repository accepted baseline is divergent'\n"
         "  exit 0\n"
         "fi\n"
-        "if [[ \"$1\" == compose && \" $* \" == *' up '*dev-cohort-verify* ]]; then exit 50; fi\n"
-        "if [[ \"$1\" == compose && \" $* \" == *' up '* ]]; then\n"
-        "  if [[ \" $* \" == *docker-compose.pinned.yaml* && ! -e \"$reset_file\" ]]; then\n"
+        'if [[ "$1" == compose && " $* " == *\' up \'*dev-cohort-verify* ]]; then exit 50; fi\n'
+        'if [[ "$1" == compose && " $* " == *\' up \'* ]]; then\n'
+        '  if [[ " $* " == *docker-compose.pinned.yaml* && ! -e "$reset_file" ]]; then\n'
         "    printf '%s\\n' rollback-failed > \"$state_file\"\n"
         "    exit 51\n"
         "  fi\n"
-        "  if [[ \" $* \" == *docker-compose.pinned.yaml* ]]; then printf '%s\\n' a > \"$state_file\"\n"
+        '  if [[ " $* " == *docker-compose.pinned.yaml* ]]; then printf \'%s\\n\' a > "$state_file"\n'
         "  elif [[ \" $* \" == *' --force-recreate '* ]]; then printf '%s\\n' b > \"$state_file\"\n"
         "  else printf '%s\\n' a > \"$state_file\"; fi\n"
         "  exit 0\n"
         "fi\n"
-        "if [[ \"$1\" == compose ]]; then exit 0; fi\n"
+        'if [[ "$1" == compose ]]; then exit 0; fi\n'
         "exit 97\n",
         encoding="utf-8",
     )
@@ -324,7 +329,11 @@ def _run(
     extra_environment: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     commit = next(
-        (arguments[index + 1] for index, value in enumerate(arguments) if value == "--commit"),
+        (
+            arguments[index + 1]
+            for index, value in enumerate(arguments)
+            if value == "--commit"
+        ),
         "",
     )
     environment = os.environ | {
@@ -375,10 +384,14 @@ def test_rejects_a_commit_that_is_not_the_local_main_tip_before_calling_docker(
 ) -> None:
     repository = _fixture_repository(tmp_path)
     fake_bin, log = _fake_docker(tmp_path)
-    subprocess.run(("git", "-C", str(repository), "checkout", "-qb", "feature"), check=True)
+    subprocess.run(
+        ("git", "-C", str(repository), "checkout", "-qb", "feature"), check=True
+    )
     (repository / "feature.txt").write_text("not main\n", encoding="utf-8")
     subprocess.run(("git", "-C", str(repository), "add", "feature.txt"), check=True)
-    subprocess.run(("git", "-C", str(repository), "commit", "-qm", "feature fixture"), check=True)
+    subprocess.run(
+        ("git", "-C", str(repository), "commit", "-qm", "feature fixture"), check=True
+    )
 
     result = _run(
         repository,
@@ -403,10 +416,14 @@ def test_rejects_feature_branch_code_even_when_supplied_commit_is_main(
     repository = _fixture_repository(tmp_path)
     fake_bin, log = _fake_docker(tmp_path)
     main_commit = _commit(repository)
-    subprocess.run(("git", "-C", str(repository), "checkout", "-qb", "feature"), check=True)
+    subprocess.run(
+        ("git", "-C", str(repository), "checkout", "-qb", "feature"), check=True
+    )
     (repository / "feature.txt").write_text("feature source\n", encoding="utf-8")
     subprocess.run(("git", "-C", str(repository), "add", "feature.txt"), check=True)
-    subprocess.run(("git", "-C", str(repository), "commit", "-qm", "feature source"), check=True)
+    subprocess.run(
+        ("git", "-C", str(repository), "commit", "-qm", "feature source"), check=True
+    )
 
     result = _run(
         repository,
@@ -458,13 +475,15 @@ def test_scanner_receives_authoritative_commit_and_repository_before_lifecycle_f
     scanner.write_text(
         "#!/usr/bin/env bash\n"
         "set -eu\n"
-        "printf '%s\\n' \"$@\" > \"$VONK_TEST_SCANNER_LOG\"\n"
+        'printf \'%s\\n\' "$@" > "$VONK_TEST_SCANNER_LOG"\n'
         "exit 73\n",
         encoding="utf-8",
     )
     scanner.chmod(0o755)
     subprocess.run(("git", "-C", str(repository), "add", str(scanner)), check=True)
-    subprocess.run(("git", "-C", str(repository), "commit", "-qm", "scanner probe"), check=True)
+    subprocess.run(
+        ("git", "-C", str(repository), "commit", "-qm", "scanner probe"), check=True
+    )
     commit = _commit(repository)
 
     result = _run(
@@ -521,15 +540,16 @@ def test_installs_cleanup_before_image_inspection_and_uses_unique_project_teardo
     assert first.returncode == 1
     assert second.returncode == 1
     commands = log.read_text(encoding="utf-8").splitlines()
-    image_commands = [command for command in commands if command.startswith("image inspect")]
+    image_commands = [
+        command for command in commands if command.startswith("image inspect")
+    ]
     down_commands = [command for command in commands if " down " in f" {command} "]
     assert len(image_commands) == 2
     assert len(down_commands) == 2
     assert all("--volumes" in command for command in down_commands)
     assert all("--remove-orphans" in command for command in down_commands)
     projects = {
-        command.split("-p ", 1)[1].split(" ", 1)[0]
-        for command in down_commands
+        command.split("-p ", 1)[1].split(" ", 1)[0] for command in down_commands
     }
     assert len(projects) == 2
     assert all(project.startswith("vonk-forge-accept-") for project in projects)
@@ -545,8 +565,7 @@ def test_rejects_an_untrusted_temporary_workspace_before_calling_docker(
     unsafe.mkdir()
     mktemp = fake_bin / "mktemp"
     mktemp.write_text(
-        "#!/usr/bin/env bash\n"
-        "printf '%s\\n' \"$VONK_TEST_UNSAFE_WORKSPACE\"\n",
+        "#!/usr/bin/env bash\nprintf '%s\\n' \"$VONK_TEST_UNSAFE_WORKSPACE\"\n",
         encoding="utf-8",
     )
     mktemp.chmod(0o755)
@@ -612,8 +631,7 @@ def test_public_acceptance_uses_selected_cohort_instead_of_rendered_identity_inp
         f"ghcr.io/carstvaartjes/vonk-forge-api:dev-sha-{commit}@sha256:" + "a" * 64
     )
     worker_image = (
-        f"ghcr.io/carstvaartjes/vonk-forge-worker:dev-sha-{commit}@sha256:"
-        + "b" * 64
+        f"ghcr.io/carstvaartjes/vonk-forge-worker:dev-sha-{commit}@sha256:" + "b" * 64
     )
 
     result = _run(
@@ -754,7 +772,9 @@ def test_successful_lifecycle_exercises_mutable_redeploy_and_runtime_boundaries(
     assert sum(line.startswith("build --pull=false ") for line in commands) == 4
     assert sum(line.startswith("tag ") and ":dev " in line for line in commands) == 6
     assert sum(line.startswith("push ") for line in commands) == 10
-    assert sum(line.startswith("image rm ") and ":dev " in line for line in commands) >= 6
+    assert (
+        sum(line.startswith("image rm ") and ":dev " in line for line in commands) >= 6
+    )
     assert sum("{{.Image}}" in line for line in normalized_commands) == 6
     repository_removals = [
         line for line in commands if line.startswith("volume rm -- ")
@@ -768,36 +788,46 @@ def test_successful_lifecycle_exercises_mutable_redeploy_and_runtime_boundaries(
         "dev-worker-cohort",
         "dev-cohort-verify",
     ):
-        assert sum(
-            "{{.State.Status}} {{.State.ExitCode}}" in line
-            and f"{service}-id" in line
-            for line in normalized_commands
-        ) == 3
+        assert (
+            sum(
+                "{{.State.Status}} {{.State.ExitCode}}" in line
+                and f"{service}-id" in line
+                for line in normalized_commands
+            )
+            == 3
+        )
     assert any(
-        "test -r /run/secrets/git-signing-key" in line
-        for line in normalized_commands
+        "test -r /run/secrets/git-signing-key" in line for line in normalized_commands
     )
     assert any(
         "test -r /run/secrets/admin-grant-private-key" in line
         for line in normalized_commands
     )
     assert any(
-        "test -r /run/secrets/worker-api-token" in line
-        for line in normalized_commands
+        "test -r /run/secrets/worker-api-token" in line for line in normalized_commands
     )
     assert sum("{{json .Mounts}}" in line for line in normalized_commands) == 9
-    assert sum(
-        "{{json .Mounts}}" in line and "control-api-id" in line
-        for line in normalized_commands
-    ) == 5
-    assert sum(
-        "{{json .Mounts}}" in line and "control-worker-id" in line
-        for line in normalized_commands
-    ) == 3
-    assert sum(
-        "{{json .Mounts}}" in line and "postgres-id" in line
-        for line in normalized_commands
-    ) == 1
+    assert (
+        sum(
+            "{{json .Mounts}}" in line and "control-api-id" in line
+            for line in normalized_commands
+        )
+        == 5
+    )
+    assert (
+        sum(
+            "{{json .Mounts}}" in line and "control-worker-id" in line
+            for line in normalized_commands
+        )
+        == 3
+    )
+    assert (
+        sum(
+            "{{json .Mounts}}" in line and "postgres-id" in line
+            for line in normalized_commands
+        )
+        == 1
+    )
     worker_boundary_commands = [
         line
         for line in normalized_commands
@@ -809,7 +839,7 @@ def test_successful_lifecycle_exercises_mutable_redeploy_and_runtime_boundaries(
     assert any(" down --volumes --remove-orphans " in f" {line} " for line in commands)
 
 
-def test_local_wrapper_runs_the_image_only_template_without_a_source_origin() -> None:
+def test_local_wrapper_uses_a_one_use_source_origin_without_building() -> None:
     text = LOCAL_WRAPPER.read_text(encoding="utf-8")
 
     assert "compose.dev.images.yaml" in text
@@ -817,22 +847,29 @@ def test_local_wrapper_runs_the_image_only_template_without_a_source_origin() ->
     assert "vonk-forge-worker:dev-local" in text
     assert "--build" not in text
     assert "VONK_DEV_ORIGIN_DIR" not in text
-    assert "VONK_DEV_LOCAL_ACCEPTANCE" not in text
-    assert "file:///source-origin" not in text
+    assert "VONK_DEV_LOCAL_ACCEPTANCE" in text
+    assert "file:///source-origin" in text
 
 
-def test_acceptance_scans_authoritative_inputs_before_mutating_randomized_fixture_images() -> None:
+def test_acceptance_scans_authoritative_inputs_before_mutating_randomized_fixture_images() -> (
+    None
+):
     text = SCRIPT.read_text(encoding="utf-8")
 
-    assert 'readonly scanner="$repository_root/scripts/verify-dev-image-secrets"' in text
-    assert 'readonly expected_repository="https://github.com/CarstVaartjes/vonk-forge"' in text
+    assert (
+        'readonly scanner="$repository_root/scripts/verify-dev-image-secrets"' in text
+    )
+    assert (
+        'readonly expected_repository="https://github.com/CarstVaartjes/vonk-forge"'
+        in text
+    )
     assert '--expected-commit "$expected_commit"' in text
     assert '--expected-repository "$expected_repository"' in text
     assert '"$api_image" "$worker_image"' in text
     assert text.index('"$api_image" "$worker_image"') < text.index(
         'build_acceptance_image "$api_image"'
     )
-    assert 'FROM ${BASE_IMAGE}' in text
+    assert "FROM ${BASE_IMAGE}" in text
     assert (
         "COPY --chmod=0444 development-image-identity.json "
         "/usr/local/share/vonk-forge/development-image-identity.json"
@@ -846,15 +883,14 @@ def test_acceptance_scans_authoritative_inputs_before_mutating_randomized_fixtur
     assert "compose pull --policy always" in text
     assert "docker build" in text
     assert "docker pull" not in text
-    assert (
-        ":/usr/local/share/vonk-forge/development-image-identity.json:ro"
-        not in text
-    )
+    assert ":/usr/local/share/vonk-forge/development-image-identity.json:ro" not in text
     assert 'docker tag "$api_image"' not in text
     assert 'docker tag "$worker_image"' not in text
 
 
-def test_acceptance_exercises_pinned_rollback_and_deletes_only_the_verified_repository_volume() -> None:
+def test_acceptance_exercises_pinned_rollback_and_deletes_only_the_verified_repository_volume() -> (
+    None
+):
     text = SCRIPT.read_text(encoding="utf-8")
 
     assert 'api_image_a_ref=$(immutable_registry_ref "$api_image_a_tag")' in text
@@ -865,13 +901,10 @@ def test_acceptance_exercises_pinned_rollback_and_deletes_only_the_verified_repo
     ) in text
     assert "development repository accepted baseline is divergent" in text
     assert 'assert_repository_only_reset_compatible "$api_image_a_ref"' in text
-    assert (
-        'read_identity(DEVELOPMENT_IMAGE_IDENTITY_PATH, expected_role="api")'
-        in text
-    )
+    assert 'read_identity(DEVELOPMENT_IMAGE_IDENTITY_PATH, expected_role="api")' in text
     assert "incompatible schemas require a matching full-state restore" in text
-    assert 'com.docker.compose.volume' in text
-    assert 'com.docker.compose.project' in text
+    assert "com.docker.compose.volume" in text
+    assert "com.docker.compose.project" in text
     assert text.count('docker volume rm -- "$repository_volume"') == 1
     assert 'assert_volume_exists "$postgres_volume"' in text
     assert 'assert_volume_exists "$state_volume"' in text
@@ -885,7 +918,9 @@ def test_acceptance_diagnostics_are_bounded_and_avoid_raw_secret_output() -> Non
     assert "[redacted]" in text
 
 
-def test_acceptance_pins_the_temporary_registry_image_for_all_runner_architectures() -> None:
+def test_acceptance_pins_the_temporary_registry_image_for_all_runner_architectures() -> (
+    None
+):
     text = SCRIPT.read_text(encoding="utf-8")
 
     pinned = (
@@ -901,4 +936,4 @@ def test_acceptance_checks_container_mounts_without_stealing_inspect_stdin() -> 
 
     assert "docker inspect --format '{{json .Mounts}}'" in text
     assert "| python3 -c" in text
-    assert "docker inspect \"$api_container\" | python3 -" not in text
+    assert 'docker inspect "$api_container" | python3 -' not in text

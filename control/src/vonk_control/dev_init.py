@@ -7,11 +7,12 @@ import json
 import os
 import re
 import secrets
+import shlex
 import stat
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urlsplit
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
@@ -49,10 +50,11 @@ _PROJECTION_FILES = {
             "agent-ca-certificate",
             "agent-ca-key",
             "agent-proxy-auth",
+            "management-cidrs",
         }
     ),
     "migration": frozenset({"database-url"}),
-    "worker": frozenset({"database-url", "worker-api-token"}),
+    "worker": frozenset({"database-url", "management-cidrs", "worker-api-token"}),
     "Caddy": frozenset(
         {
             "controller-server-certificate",
@@ -62,9 +64,7 @@ _PROJECTION_FILES = {
             "management-cidrs",
         }
     ),
-    "LiteLLM": frozenset(
-        {"litellm-master-key", "litellm-upstream-key", "litellm-database-url"}
-    ),
+    "LiteLLM": frozenset({"litellm-master-key", "litellm-upstream-key"}),
 }
 _TARGET_SHA256 = "0" * 64
 _BUILD_DIGEST = "sha256:" + "1" * 64
@@ -143,6 +143,7 @@ def _git(
     action: str,
     local_origin: bool,
     standard_input: str | None = None,
+    safe_directory: Path | None = None,
 ) -> str:
     command = (
         "git",
@@ -153,6 +154,10 @@ def _git(
         "-c",
         f"protocol.file.allow={'always' if local_origin else 'never'}",
     )
+    if safe_directory is not None:
+        if not local_origin or not safe_directory.is_absolute():
+            raise DevInitError("Git safe directory is invalid")
+        command += ("-c", f"safe.directory={safe_directory}")
     if root is not None:
         command += ("-C", str(root))
     command += arguments
@@ -267,9 +272,7 @@ def _is_ancestor(
     raise DevInitError("Git could not compare repository commits")
 
 
-def _merge_base(
-    root: Path, accepted: str, deployed: str, *, local_origin: bool
-) -> str:
+def _merge_base(root: Path, accepted: str, deployed: str, *, local_origin: bool) -> str:
     return _commit(
         _git(
             root,
@@ -280,9 +283,7 @@ def _merge_base(
     )
 
 
-def _chown_repository_tree(
-    root: Path, uid: int, gid: int, *, root_last: bool
-) -> None:
+def _chown_repository_tree(root: Path, uid: int, gid: int, *, root_last: bool) -> None:
     if os.geteuid() != 0:
         return
     flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
@@ -305,11 +306,10 @@ def _chown_repository_tree(
             child = os.open(name, flags, dir_fd=descriptor)
             try:
                 opened = os.fstat(child)
-                if (
-                    not stat.S_ISDIR(opened.st_mode)
-                    or (opened.st_dev, opened.st_ino)
-                    != (metadata.st_dev, metadata.st_ino)
-                ):
+                if not stat.S_ISDIR(opened.st_mode) or (
+                    opened.st_dev,
+                    opened.st_ino,
+                ) != (metadata.st_dev, metadata.st_ino):
                     raise DevInitError(
                         "development repository ownership traversal changed"
                     )
@@ -330,7 +330,9 @@ def _chown_repository_tree(
     except DevInitError:
         raise
     except OSError as error:
-        raise DevInitError("development repository ownership cannot be initialized") from error
+        raise DevInitError(
+            "development repository ownership cannot be initialized"
+        ) from error
     finally:
         if descriptor >= 0:
             os.close(descriptor)
@@ -340,20 +342,40 @@ def _initialize_fresh_repository(
     root: Path, repository_url: str, expected_commit: str, *, local_origin: bool
 ) -> None:
     _prepare_empty_repository_root(root)
+    safe_origin = Path(urlsplit(repository_url).path) if local_origin else None
+    clone_arguments = ("clone", "--no-checkout", "--origin", "origin")
+    upload_pack = None
+    if safe_origin is not None:
+        upload_pack = (
+            "git -c safe.directory=" + shlex.quote(str(safe_origin)) + " upload-pack"
+        )
+        clone_arguments += (f"--upload-pack={upload_pack}",)
+    clone_arguments += (repository_url, str(root))
     _git(
         None,
-        ("clone", "--no-checkout", "--origin", "origin", repository_url, str(root)),
+        clone_arguments,
         action="clone development repository",
         local_origin=local_origin,
+        safe_directory=safe_origin,
     )
     _git(
         root,
-        ("fetch", "--no-tags", "origin", "+refs/heads/main:refs/remotes/origin/main"),
+        (
+            "fetch",
+            *((f"--upload-pack={upload_pack}",) if upload_pack else ()),
+            "--no-tags",
+            "origin",
+            "+refs/heads/main:refs/remotes/origin/main",
+        ),
         action="fetch development repository main",
         local_origin=local_origin,
     )
-    if not _is_ancestor(root, expected_commit, "refs/remotes/origin/main", local_origin=local_origin):
-        raise DevInitError("expected development commit is not reachable from origin/main")
+    if not _is_ancestor(
+        root, expected_commit, "refs/remotes/origin/main", local_origin=local_origin
+    ):
+        raise DevInitError(
+            "expected development commit is not reachable from origin/main"
+        )
     accepted = _git(
         root,
         ("rev-parse", "--verify", "refs/heads/main^{commit}"),
@@ -447,14 +469,30 @@ def _initialize_existing_repository(
         local_origin=local_origin,
     )
     _commit(deployment_base)
+    safe_origin = Path(urlsplit(repository_url).path) if local_origin else None
+    upload_pack = (
+        "git -c safe.directory=" + shlex.quote(str(safe_origin)) + " upload-pack"
+        if safe_origin is not None
+        else None
+    )
     _git(
         root,
-        ("fetch", "--no-tags", "origin", "+refs/heads/main:refs/remotes/origin/main"),
+        (
+            "fetch",
+            *((f"--upload-pack={upload_pack}",) if upload_pack else ()),
+            "--no-tags",
+            "origin",
+            "+refs/heads/main:refs/remotes/origin/main",
+        ),
         action="fetch development repository main",
         local_origin=local_origin,
     )
-    if not _is_ancestor(root, expected_commit, "refs/remotes/origin/main", local_origin=local_origin):
-        raise DevInitError("expected development commit is not reachable from origin/main")
+    if not _is_ancestor(
+        root, expected_commit, "refs/remotes/origin/main", local_origin=local_origin
+    ):
+        raise DevInitError(
+            "expected development commit is not reachable from origin/main"
+        )
     if not _is_ancestor(root, accepted, expected_commit, local_origin=local_origin):
         raise DevInitError("development repository accepted baseline is divergent")
     if not _is_ancestor(root, deployment_base, accepted, local_origin=local_origin):
@@ -505,7 +543,9 @@ def _initialize_existing_repository(
         )
 
 
-def initialize_repository(root: Path, repository_url: str, expected_commit: str) -> None:
+def initialize_repository(
+    root: Path, repository_url: str, expected_commit: str
+) -> None:
     """Advance accepted ``main`` while preserving one clean local ``deploy``."""
     root = Path(root)
     expected_commit = _commit(expected_commit)
@@ -519,9 +559,7 @@ def initialize_repository(root: Path, repository_url: str, expected_commit: str)
             if any(root.iterdir()):
                 if os.geteuid() == 0:
                     managed_ownership = True
-                    _chown_repository_tree(
-                        root, _GIT_UID, _GIT_GID, root_last=False
-                    )
+                    _chown_repository_tree(root, _GIT_UID, _GIT_GID, root_last=False)
                 _initialize_existing_repository(
                     root, repository_url, expected_commit, local_origin=local_origin
                 )
@@ -536,19 +574,25 @@ def initialize_repository(root: Path, repository_url: str, expected_commit: str)
                 root, repository_url, expected_commit, local_origin=local_origin
             )
         _repository_is_clean(root, local_origin=local_origin)
-        if _git(
-            root,
-            ("symbolic-ref", "--quiet", "--short", "HEAD"),
-            action="verify development repository branch",
-            local_origin=local_origin,
-        ) != "deploy":
+        if (
+            _git(
+                root,
+                ("symbolic-ref", "--quiet", "--short", "HEAD"),
+                action="verify development repository branch",
+                local_origin=local_origin,
+            )
+            != "deploy"
+        ):
             raise DevInitError("development repository must check out deploy")
-        if _git(
-            root,
-            ("rev-parse", "--verify", "refs/heads/main^{commit}"),
-            action="verify development repository main",
-            local_origin=local_origin,
-        ) != expected_commit:
+        if (
+            _git(
+                root,
+                ("rev-parse", "--verify", "refs/heads/main^{commit}"),
+                action="verify development repository main",
+                local_origin=local_origin,
+            )
+            != expected_commit
+        ):
             raise DevInitError(
                 "development repository did not resolve to the expected commit"
             )
@@ -598,7 +642,9 @@ def _read_source_secret(root: Path, name: str) -> bytes:
             raise DevInitError(f"development secret source {name} changed while read")
         return bytes(content)
     except OSError as error:
-        raise DevInitError(f"development secret source {name} cannot be read") from error
+        raise DevInitError(
+            f"development secret source {name} cannot be read"
+        ) from error
     finally:
         os.close(descriptor)
 
@@ -616,8 +662,10 @@ def _projection_identity(uid: int, gid: int) -> tuple[int, int]:
 
 
 def _projection_path(root: Path, *, label: str) -> tuple[str, ...]:
-    if root.anchor != "/" or len(root.parts) < 2 or any(
-        part in {"", ".", ".."} for part in root.parts[1:]
+    if (
+        root.anchor != "/"
+        or len(root.parts) < 2
+        or any(part in {"", ".", ".."} for part in root.parts[1:])
     ):
         raise DevInitError(f"{label} projection path must be absolute and normalized")
     return root.parts[1:]
@@ -723,7 +771,9 @@ def _prepare_projection_directory(
             os.fchown(parent, uid, gid)
         os.fchmod(parent, 0o700)
     except OSError as error:
-        raise DevInitError("development secret projection cannot be prepared") from error
+        raise DevInitError(
+            "development secret projection cannot be prepared"
+        ) from error
 
 
 def _read_generated_credential(
@@ -845,11 +895,7 @@ def _write_projection_secret(
     try:
         descriptor = os.open(
             temporary,
-            os.O_WRONLY
-            | os.O_CREAT
-            | os.O_EXCL
-            | os.O_NOFOLLOW
-            | os.O_CLOEXEC,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
             0o600,
             dir_fd=parent,
         )
@@ -895,29 +941,13 @@ def _are_distinct_projection_roots(*roots: tuple[Path, str]) -> bool:
         _projection_path(root, label=label)
     for index, (root, _label) in enumerate(roots):
         for other, _other_label in roots[index + 1 :]:
-            if root == other or root.is_relative_to(other) or other.is_relative_to(root):
+            if (
+                root == other
+                or root.is_relative_to(other)
+                or other.is_relative_to(root)
+            ):
                 return False
     return True
-
-
-def _litellm_database_url(database_url: bytes) -> bytes:
-    try:
-        value = database_url.decode("utf-8").strip()
-    except UnicodeDecodeError as error:
-        raise DevInitError("development database URL is invalid") from error
-    parsed = urlsplit(value)
-    if (
-        parsed.scheme not in {"postgresql", "postgresql+psycopg"}
-        or not parsed.hostname
-        or parsed.path in {"", "/"}
-        or parsed.fragment
-        or any(character.isspace() for character in value)
-    ):
-        raise DevInitError("development database URL is invalid")
-    return (
-        urlunsplit(("postgresql", parsed.netloc, parsed.path, parsed.query, ""))
-        + "\n"
-    ).encode("utf-8")
 
 
 def stage_runtime_secrets(
@@ -956,28 +986,21 @@ def stage_runtime_secrets(
     litellm_master_key = _read_source_secret(source, "litellm-master-key")
     litellm_upstream_key = _read_source_secret(source, "litellm-upstream-key")
     management_cidrs = _read_source_secret(source, "management-cidrs")
-    litellm_database_url = _litellm_database_url(database_url)
 
     opened: list[tuple[int, bool] | None] = []
     try:
         for root, label, _uid, _gid in roots:
-            opened.append(
-                _open_projection_directory(root, label=label, create=False)
-            )
+            opened.append(_open_projection_directory(root, label=label, create=False))
         existing = [item for item in opened if item is not None]
         existing_identities = {
             (metadata.st_dev, metadata.st_ino)
-            for metadata in (
-                os.fstat(descriptor) for descriptor, _created in existing
-            )
+            for metadata in (os.fstat(descriptor) for descriptor, _created in existing)
         }
         if len(existing_identities) != len(existing):
             raise DevInitError(
                 "development secret projections must be physically distinct"
             )
-        for item, (_root, label, uid, gid) in zip(
-            opened, roots, strict=True
-        ):
+        for item, (_root, label, uid, gid) in zip(opened, roots, strict=True):
             if item is None:
                 continue
             descriptor, created = item
@@ -1088,6 +1111,7 @@ def stage_runtime_secrets(
                 ("agent-ca-certificate", agent_ca_certificate),
                 ("agent-ca-key", agent_ca_key),
                 ("agent-proxy-auth", agent_proxy_auth),
+                ("management-cidrs", management_cidrs),
             ):
                 _write_projection_secret(
                     api,
@@ -1110,6 +1134,13 @@ def stage_runtime_secrets(
                 uid=_API_UID,
                 gid=_API_GID,
             )
+            _write_projection_secret(
+                worker,
+                "management-cidrs",
+                management_cidrs,
+                uid=_API_UID,
+                gid=_API_GID,
+            )
             for name, content in (
                 ("controller-server-certificate", controller_server_certificate),
                 ("controller-server-key", controller_server_key),
@@ -1127,7 +1158,6 @@ def stage_runtime_secrets(
             for name, content in (
                 ("litellm-master-key", litellm_master_key),
                 ("litellm-upstream-key", litellm_upstream_key),
-                ("litellm-database-url", litellm_database_url),
             ):
                 _write_projection_secret(
                     litellm,
@@ -1217,9 +1247,7 @@ def _development_generation_identity() -> DevelopmentGenerationIdentity:
 
 def _active_projection(identity: DevelopmentGenerationIdentity) -> bytes:
     target_sha256 = identity.release_digest.removeprefix("sha256:")
-    target_name = (
-        f"platform/releases/{identity.platform_version}/{target_sha256}.json"
-    )
+    target_name = f"platform/releases/{identity.platform_version}/{target_sha256}.json"
     plan = HostOperationPlan(
         operation_id="dev-compose",
         plan_digest="sha256:" + "2" * 64,
@@ -1258,7 +1286,9 @@ def _initialize_directory(path: Path, *, mode: int, uid: int, gid: int) -> None:
             os.chown(path, uid, gid, follow_symlinks=False)
         os.chmod(path, mode, follow_symlinks=False)
     except OSError as error:
-        raise DevInitError("development runtime directory cannot be initialized") from error
+        raise DevInitError(
+            "development runtime directory cannot be initialized"
+        ) from error
 
 
 def _write_active_projection(
@@ -1340,7 +1370,9 @@ def main() -> int:
         litellm_secret_root,
     )
     stage_development_assets("vonk_control.resources.dev", runtime_config_root)
-    identity_root = Path(os.environ.get("VONK_CONTROL_IDENTITY_ROOT", "/control-identity"))
+    identity_root = Path(
+        os.environ.get("VONK_CONTROL_IDENTITY_ROOT", "/control-identity")
+    )
     _write_active_projection(identity_root, generation)
     uid, gid = _service_identity()
     for name, default in (
@@ -1348,7 +1380,9 @@ def main() -> int:
         ("VONK_ROUTE_ROOT", "/routes"),
         ("VONK_SUPERVISOR_ROOT", "/supervisor"),
     ):
-        _initialize_directory(Path(os.environ.get(name, default)), mode=0o750, uid=uid, gid=gid)
+        _initialize_directory(
+            Path(os.environ.get(name, default)), mode=0o750, uid=uid, gid=gid
+        )
     return 0
 
 

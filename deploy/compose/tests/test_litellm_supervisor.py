@@ -184,21 +184,18 @@ def test_supervisor_ack_binds_a_live_child_to_the_exact_activation_request(
     ack = json.loads(module.ACK.read_bytes())
     assert ack == {
         "acknowledged_at": now.isoformat(),
-        "activation_sha256": hashlib.sha256(
-            module.ACTIVATION.read_bytes()
-        ).hexdigest(),
+        "activation_sha256": hashlib.sha256(module.ACTIVATION.read_bytes()).hexdigest(),
         "child_pid": 123,
         "expires_at": (now + timedelta(seconds=120)).isoformat(),
         "generation": 1,
-        "litellm_sha256": hashlib.sha256(
-            request.config.read_bytes()
-        ).hexdigest(),
+        "litellm_sha256": hashlib.sha256(request.config.read_bytes()).hexdigest(),
         "schema_version": 1,
         "state": "published",
     }
-    assert module.ACK.read_bytes() == (
-        json.dumps(ack, sort_keys=True, separators=(",", ":")) + "\n"
-    ).encode()
+    assert (
+        module.ACK.read_bytes()
+        == (json.dumps(ack, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    )
 
 
 def test_live_supervisor_removes_ack_when_the_acknowledged_child_crashes(
@@ -318,6 +315,7 @@ def test_live_supervisor_stops_published_child_at_exact_lease_expiry(
     assert commands[1][2] == str(bootstrap)
     assert not module.ACK.exists()
 
+
 def test_compose_mounts_one_read_only_route_volume_and_starts_bounded_supervisor() -> (
     None
 ):
@@ -367,6 +365,8 @@ def test_compose_initializes_route_volume_for_unprivileged_control_worker() -> N
     root = "os.chown('/routes', 10001, 10001)"
     assert command.index(reclaim) < command.index("os.makedirs")
     assert command.index(child) < command.index(root)
+    assert "os.chmod('/routes', 0o750)" in command
+    assert "os.chmod('/routes/generations', 0o750)" in command
     assert services["control-worker"]["depends_on"]["route-publication-init"] == {
         "condition": "service_completed_successfully",
         "required": True,
@@ -380,12 +380,14 @@ def test_compose_initializes_route_volume_for_unprivileged_control_worker() -> N
     assert litellm["cap_drop"] == ["ALL"]
     assert litellm["security_opt"] == ["no-new-privileges:true"]
     assert litellm["read_only"] is True
-    assert "litellm-supervisor-state:/supervisor:rw" in (
-        ROOT / "deploy/compose/compose.yaml"
-    ).read_text()
-    assert "litellm-supervisor-state:/supervisor:ro" in (
-        ROOT / "deploy/compose/compose.yaml"
-    ).read_text()
+    assert (
+        "litellm-supervisor-state:/supervisor:rw"
+        in (ROOT / "deploy/compose/compose.yaml").read_text()
+    )
+    assert (
+        "litellm-supervisor-state:/supervisor:ro"
+        in (ROOT / "deploy/compose/compose.yaml").read_text()
+    )
 
 
 def test_development_image_compose_mounts_staged_acknowledging_supervisor() -> None:
@@ -408,22 +410,18 @@ def test_development_image_compose_mounts_staged_acknowledging_supervisor() -> N
     worker = services["control-worker"]
     volumes = {volume["target"]: volume for volume in litellm["volumes"]}
 
-    assert litellm["entrypoint"] == ["/app/vonk-entrypoint"]
-    assert volumes["/app/bootstrap-config.json"]["volume"] == {
-        "subpath": "litellm-bootstrap.json"
-    }
-    assert volumes["/app/vonk-entrypoint"]["volume"] == {
-        "subpath": "litellm-entrypoint.sh"
-    }
-    assert volumes["/app/config-supervisor.py"]["volume"] == {
-        "subpath": "litellm-supervisor.py"
+    assert litellm["entrypoint"] == ["/run/vonk-runtime/litellm-entrypoint.sh"]
+    assert volumes["/run/vonk-runtime"] == {
+        "type": "volume",
+        "source": "dev-runtime-config",
+        "target": "/run/vonk-runtime",
+        "read_only": True,
+        "volume": {},
     }
     assert volumes["/routes"]["read_only"] is True
     assert volumes["/supervisor"].get("read_only", False) is False
 
-    worker_volumes = {
-        volume["target"]: volume for volume in worker["volumes"]
-    }
+    worker_volumes = {volume["target"]: volume for volume in worker["volumes"]}
     assert worker_volumes["/routes"].get("read_only", False) is False
     assert worker_volumes["/supervisor"]["read_only"] is True
     assert worker["depends_on"]["litellm"] == {

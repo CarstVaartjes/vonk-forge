@@ -30,9 +30,7 @@ def _runtime_assets():
 
 
 def _litellm_supervisor():
-    path = importlib.resources.files(RESOURCE_PACKAGE).joinpath(
-        "litellm-supervisor.py"
-    )
+    path = importlib.resources.files(RESOURCE_PACKAGE).joinpath("litellm-supervisor.py")
     spec = importlib.util.spec_from_file_location("test_litellm_supervisor", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -163,11 +161,14 @@ def test_stage_development_assets_atomically_replaces_complete_regular_files(
             follow_symlinks=False,
         )
         assert stat.S_ISREG(source_metadata.st_mode)
-        assert os.stat(
-            target,
-            dir_fd=dst_dir_fd,
-            follow_symlinks=False,
-        ).st_nlink == 1
+        assert (
+            os.stat(
+                target,
+                dir_fd=dst_dir_fd,
+                follow_symlinks=False,
+            ).st_nlink
+            == 1
+        )
         assert Path(f"/proc/self/fd/{src_dir_fd}").resolve() == destination
         source_content = os.open(
             source,
@@ -176,9 +177,12 @@ def test_stage_development_assets_atomically_replaces_complete_regular_files(
         )
         try:
             with os.fdopen(source_content, "rb", closefd=False) as staged:
-                assert staged.read() == importlib.resources.files(
-                    RESOURCE_PACKAGE
-                ).joinpath(target_name).read_bytes()
+                assert (
+                    staged.read()
+                    == importlib.resources.files(RESOURCE_PACKAGE)
+                    .joinpath(target_name)
+                    .read_bytes()
+                )
         finally:
             os.close(source_content)
         replacements.append(target_name)
@@ -197,10 +201,32 @@ def test_stage_development_assets_atomically_replaces_complete_regular_files(
     assert {path.name for path in destination.iterdir()} == set(EXPECTED_RESOURCES)
     for name, mode in EXPECTED_RESOURCES.items():
         target = destination / name
-        assert target.read_bytes() == importlib.resources.files(
-            RESOURCE_PACKAGE
-        ).joinpath(name).read_bytes()
+        assert (
+            target.read_bytes()
+            == importlib.resources.files(RESOURCE_PACKAGE).joinpath(name).read_bytes()
+        )
         assert stat.S_IMODE(target.stat().st_mode) == mode
+
+
+def test_stage_development_assets_preserves_unchanged_live_mount_inodes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime_assets = _runtime_assets()
+    destination = tmp_path / "runtime-config"
+    runtime_assets.stage_development_assets(RESOURCE_PACKAGE, destination)
+    identities = {
+        name: (destination / name).stat().st_ino for name in EXPECTED_RESOURCES
+    }
+
+    def reject_replace(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("unchanged runtime assets must preserve their inode")
+
+    monkeypatch.setattr(runtime_assets.os, "replace", reject_replace)
+    runtime_assets.stage_development_assets(RESOURCE_PACKAGE, destination)
+
+    assert {
+        name: (destination / name).stat().st_ino for name in EXPECTED_RESOURCES
+    } == identities
 
 
 def test_stage_development_assets_assigns_exact_service_owners_when_root(
@@ -375,9 +401,9 @@ def test_caddy_entrypoint_stages_runtime_files_as_uid_10000(
             "-c",
             (
                 "exec /bin/sh /entrypoint.sh /bin/sh -c '"
-                "test \"$(stat -c %a /tmp/vonk-agent-proxy-auth.caddy)\" = 400 "
-                "&& test \"$(wc -l < /tmp/vonk-agent-proxy-auth.caddy)\" = 1 "
-                "&& test \"$(stat -c %a /run/vonk-caddy/caddy)\" = 500 "
+                'test "$(stat -c %a /tmp/vonk-agent-proxy-auth.caddy)" = 400 '
+                '&& test "$(wc -l < /tmp/vonk-agent-proxy-auth.caddy)" = 1 '
+                '&& test "$(stat -c %a /run/vonk-caddy/caddy)" = 500 '
                 "&& /run/vonk-caddy/caddy version >/dev/null'"
             ),
         ),
@@ -399,9 +425,6 @@ def test_litellm_supervisor_materializes_file_secrets_without_environment(
     secret_values = {
         "os.environ/LITELLM_MASTER_KEY": "master-file-sentinel",
         "os.environ/LITELLM_UPSTREAM_KEY": "upstream-file-sentinel",
-        "os.environ/LITELLM_DATABASE_URL": (
-            "postgresql://control:database-file-sentinel@postgres/control"
-        ),
     }
     secret_paths: dict[str, Path] = {}
     for marker, value in secret_values.items():
@@ -418,13 +441,13 @@ def test_litellm_supervisor_materializes_file_secrets_without_environment(
     assert effective == destination
     document = json.loads(destination.read_bytes())
     assert document["general_settings"] == {
-        "database_url": secret_values["os.environ/LITELLM_DATABASE_URL"],
-        "disable_admin_ui": False,
+        "disable_admin_ui": True,
         "master_key": secret_values["os.environ/LITELLM_MASTER_KEY"],
         "store_model_in_db": False,
     }
-    assert document["model_list"][0]["litellm_params"]["api_key"] == (
-        secret_values["os.environ/LITELLM_UPSTREAM_KEY"]
+    assert (
+        document["model_list"][0]["litellm_params"]["api_key"]
+        == (secret_values["os.environ/LITELLM_UPSTREAM_KEY"])
     )
     assert stat.S_IMODE(destination.stat().st_mode) == 0o400
     assert all(
@@ -497,7 +520,6 @@ def test_litellm_supervisor_materializes_the_exact_verified_bytes_after_path_swa
     secret_values = {
         "os.environ/LITELLM_MASTER_KEY": "master-file-sentinel",
         "os.environ/LITELLM_UPSTREAM_KEY": "upstream-file-sentinel",
-        "os.environ/LITELLM_DATABASE_URL": "postgresql://db/control",
     }
     secret_paths: dict[str, Path] = {}
     for marker, value in secret_values.items():

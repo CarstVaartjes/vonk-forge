@@ -118,6 +118,11 @@ def test_bundle_stages_structured_routes_litellm_and_manifest_before_one_marker(
     config = json.loads((directory / "litellm.json").read_bytes())
     manifest = json.loads((directory / "manifest.json").read_bytes())
     activation_path = tmp_path / "runtime/activation.json"
+    assert (tmp_path / "runtime").stat().st_mode & 0o777 == 0o750
+    assert (tmp_path / "runtime/generations").stat().st_mode & 0o777 == 0o750
+    assert directory.stat().st_mode & 0o777 == 0o750
+    assert activation_path.stat().st_mode & 0o777 == 0o640
+    assert (directory / "routes.json").stat().st_mode & 0o777 == 0o640
     activation = json.loads(activation_path.read_bytes())
 
     assert routes == {
@@ -285,13 +290,17 @@ def test_control_accepts_only_a_recent_ack_for_the_exact_marker(tmp_path: Path) 
         "state": marker.state,
     }
     ack_path.write_bytes(
-        (json.dumps(acknowledgement, sort_keys=True, separators=(",", ":")) + "\n").encode()
+        (
+            json.dumps(acknowledgement, sort_keys=True, separators=(",", ":")) + "\n"
+        ).encode()
     )
     FileSupervisorAcknowledger(ack_path, clock=lambda: NOW)(marker)
 
     acknowledgement["activation_sha256"] = "f" * 64
     ack_path.write_bytes(
-        (json.dumps(acknowledgement, sort_keys=True, separators=(",", ":")) + "\n").encode()
+        (
+            json.dumps(acknowledgement, sort_keys=True, separators=(",", ":")) + "\n"
+        ).encode()
     )
     moments = iter((0.0, 1.0))
     mismatched = FileSupervisorAcknowledger(
@@ -647,9 +656,7 @@ def test_atomic_bundle_includes_commit_pinned_hermes_group_or_fails_closed(
         tmp_path,
         repository_reader=lambda _commit, path: files[path],
     )
-    request = _request().__class__(
-        **{**_request().__dict__, "base_commit": "a" * 40}
-    )
+    request = _request().__class__(**{**_request().__dict__, "base_commit": "a" * 40})
     publisher = _publisher(
         tmp_path,
         litellm_deployments=policy.deployments,
@@ -658,10 +665,7 @@ def test_atomic_bundle_includes_commit_pinned_hermes_group_or_fails_closed(
     marker = publisher.publish(request)
     config = json.loads(
         (
-            tmp_path
-            / "runtime/generations"
-            / marker.directory
-            / "litellm.json"
+            tmp_path / "runtime/generations" / marker.directory / "litellm.json"
         ).read_bytes()
     )
 

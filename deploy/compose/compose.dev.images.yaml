@@ -211,6 +211,7 @@ services:
       VONK_CONTROL_PROCESS_ROLE: worker
       VONK_INTERNAL_API_URL: http://control-api:8000
       VONK_DEV_SELECTED_COHORT_FILE: /cohort/selected.json
+      VONK_MANAGEMENT_CIDRS_FILE: /run/secrets/management-cidrs
       VONK_WORKER_API_TOKEN_FILE: /run/secrets/worker-api-token
     volumes:
       - dev-repository:/repository:ro
@@ -253,14 +254,11 @@ services:
       - dev-repository:/repository
       - dev-control-identity:/control-identity:ro
       - dev-control-state:/state
-      - dev-route-publications:/routes:ro
+      - dev-route-publications:/routes
       - dev-supervisor-state:/supervisor:ro
       - dev-api-secrets:/run/secrets:ro
       - dev-image-cohort:/cohort:ro
-    secrets:
-      - source: management-cidrs
-        target: /run/secrets/management-cidrs
-    networks: [application, data]
+    networks: [application, data, ingress]
     ports: ["127.0.0.1:${VONK_DEV_PORT:-8080}:8000"]
     depends_on:
       postgres: {condition: service_healthy}
@@ -274,41 +272,26 @@ services:
       retries: 20
 
   litellm:
-    image: ghcr.io/berriai/litellm:v1.83.14-stable@sha256:c81eb79cd4333c6cfe374c0ec929110fd23f0ee5f7fd198855a6fbddc77b83ba
+    image: ghcr.io/berriai/litellm:v1.81.14-stable@sha256:a3ce130137752e6b085de521b773eacbb641c8b6322c6f538453e860e7b9cf43
     pull_policy: always
-    entrypoint: [/app/vonk-entrypoint]
+    entrypoint: [/run/vonk-runtime/litellm-entrypoint.sh]
     user: "10002:10001"
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     environment:
-      DISABLE_ADMIN_UI: "False"
-      LITELLM_UI_PATH: /tmp/litellm-ui
+      DISABLE_ADMIN_UI: "True"
+      HOME: /tmp
       SERVER_ROOT_PATH: /litellm
       STORE_MODEL_IN_DB: "False"
     volumes:
-      - type: volume
-        source: dev-runtime-config
-        target: /app/bootstrap-config.json
-        read_only: true
-        volume: {subpath: litellm-bootstrap.json}
-      - type: volume
-        source: dev-runtime-config
-        target: /app/vonk-entrypoint
-        read_only: true
-        volume: {subpath: litellm-entrypoint.sh}
-      - type: volume
-        source: dev-runtime-config
-        target: /app/config-supervisor.py
-        read_only: true
-        volume: {subpath: litellm-supervisor.py}
+      - dev-runtime-config:/run/vonk-runtime:ro
       - dev-litellm-secrets:/run/secrets:ro
       - dev-route-publications:/routes:ro
       - dev-supervisor-state:/supervisor
     tmpfs: [/tmp]
-    networks: [application, data]
+    networks: [application]
     depends_on:
-      postgres: {condition: service_healthy}
       dev-init: {condition: service_completed_successfully}
       dev-supervisor-init: {condition: service_completed_successfully}
     healthcheck:
@@ -326,28 +309,19 @@ services:
     security_opt: [no-new-privileges:true]
     ports: ["${VONK_AGENT_PORT:-8443}:8443"]
     volumes:
-      - type: volume
-        source: dev-runtime-config
-        target: /etc/caddy/Caddyfile
-        read_only: true
-        volume: {subpath: Caddyfile}
-      - type: volume
-        source: dev-runtime-config
-        target: /usr/local/bin/vonk-caddy-entrypoint
-        read_only: true
-        volume: {subpath: caddy-entrypoint.sh}
+      - dev-runtime-config:/run/vonk-runtime:ro
       - dev-caddy-secrets:/run/secrets:ro
     tmpfs:
-      - /config
-      - /data
+      - /config:rw,noexec,nosuid,nodev,mode=0700,uid=10000,gid=10000
+      - /data:rw,noexec,nosuid,nodev,mode=0700,uid=10000,gid=10000
       - /run/vonk-caddy:rw,exec,mode=0700,uid=10000,gid=10000
       - /tmp
-    entrypoint: [/bin/sh, /usr/local/bin/vonk-caddy-entrypoint]
+    entrypoint: [/bin/sh, /run/vonk-runtime/caddy-entrypoint.sh]
     environment:
       VONK_AGENT_ENROLL_HOSTNAME: enroll.vonk-forge.lan
       VONK_AGENT_HOSTNAME: agents.vonk-forge.lan
       VONK_BACKEND_PORT: "8443"
-    networks: [application]
+    networks: [application, ingress]
     depends_on:
       control-api: {condition: service_healthy}
       dev-init: {condition: service_completed_successfully}
@@ -360,6 +334,7 @@ services:
 networks:
   application: {internal: true}
   data: {internal: true}
+  ingress: {}
 
 secrets:
   postgres-password:

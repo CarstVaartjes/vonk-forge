@@ -32,15 +32,9 @@ class _Asset:
 _ASSETS = {
     "Caddyfile": _Asset(0o444, _CADDY_UID, _CADDY_GID, 128 * 1024),
     "caddy-entrypoint.sh": _Asset(0o555, _CADDY_UID, _CADDY_GID, 128 * 1024),
-    "litellm-bootstrap.json": _Asset(
-        0o444, _LITELLM_UID, _LITELLM_GID, 128 * 1024
-    ),
-    "litellm-entrypoint.sh": _Asset(
-        0o555, _LITELLM_UID, _LITELLM_GID, 128 * 1024
-    ),
-    "litellm-supervisor.py": _Asset(
-        0o555, _LITELLM_UID, _LITELLM_GID, 128 * 1024
-    ),
+    "litellm-bootstrap.json": _Asset(0o444, _LITELLM_UID, _LITELLM_GID, 128 * 1024),
+    "litellm-entrypoint.sh": _Asset(0o555, _LITELLM_UID, _LITELLM_GID, 128 * 1024),
+    "litellm-supervisor.py": _Asset(0o555, _LITELLM_UID, _LITELLM_GID, 128 * 1024),
 }
 
 
@@ -91,9 +85,7 @@ def _read_resource(resource: Traversable, *, name: str, limit: int) -> bytes:
             after.st_ctime_ns,
         )
         if len(content) != before.st_size or before_identity != after_identity:
-            raise DevelopmentAssetError(
-                f"development asset {name} changed while read"
-            )
+            raise DevelopmentAssetError(f"development asset {name} changed while read")
         return bytes(content)
     except DevelopmentAssetError:
         raise
@@ -105,8 +97,10 @@ def _read_resource(resource: Traversable, *, name: str, limit: int) -> bytes:
 
 
 def _destination_components(destination: Path) -> tuple[str, ...]:
-    if destination.anchor != "/" or len(destination.parts) < 2 or any(
-        part in {"", ".", ".."} for part in destination.parts[1:]
+    if (
+        destination.anchor != "/"
+        or len(destination.parts) < 2
+        or any(part in {"", ".", ".."} for part in destination.parts[1:])
     ):
         raise DevelopmentAssetError(
             "development asset destination must be absolute and normalized"
@@ -166,6 +160,51 @@ def _effective_identity(asset: _Asset) -> tuple[int, int]:
     return os.geteuid(), os.getegid()
 
 
+def _target_matches(parent: int, name: str, content: bytes, asset: _Asset) -> bool:
+    descriptor = -1
+    try:
+        descriptor = os.open(
+            name,
+            os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC,
+            dir_fd=parent,
+        )
+    except FileNotFoundError:
+        return False
+    except OSError as error:
+        raise DevelopmentAssetError(
+            f"development asset target {name} is unsafe"
+        ) from error
+    try:
+        metadata = os.fstat(descriptor)
+        uid, gid = _effective_identity(asset)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_nlink != 1
+            or stat.S_IMODE(metadata.st_mode) != asset.mode
+            or (metadata.st_uid, metadata.st_gid) != (uid, gid)
+            or metadata.st_size != len(content)
+        ):
+            return False
+        existing = bytearray()
+        while len(existing) <= len(content):
+            chunk = os.read(descriptor, min(4096, len(content) + 1 - len(existing)))
+            if not chunk:
+                break
+            existing.extend(chunk)
+        after = os.fstat(descriptor)
+        return bytes(existing) == content and (
+            metadata.st_dev,
+            metadata.st_ino,
+            metadata.st_mtime_ns,
+        ) == (after.st_dev, after.st_ino, after.st_mtime_ns)
+    except OSError as error:
+        raise DevelopmentAssetError(
+            f"development asset target {name} is unsafe"
+        ) from error
+    finally:
+        os.close(descriptor)
+
+
 def _stage_asset(
     parent: int,
     name: str,
@@ -178,11 +217,7 @@ def _stage_asset(
     try:
         descriptor = os.open(
             temporary,
-            os.O_WRONLY
-            | os.O_CREAT
-            | os.O_EXCL
-            | os.O_NOFOLLOW
-            | os.O_CLOEXEC,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
             0o600,
             dir_fd=parent,
         )
@@ -241,6 +276,7 @@ def stage_development_assets(source_package: str, destination: Path) -> None:
         _preflight_targets(parent)
         for name, asset in _ASSETS.items():
             content, digest = staged[name]
-            _stage_asset(parent, name, content, digest, asset)
+            if not _target_matches(parent, name, content, asset):
+                _stage_asset(parent, name, content, digest, asset)
     finally:
         os.close(parent)

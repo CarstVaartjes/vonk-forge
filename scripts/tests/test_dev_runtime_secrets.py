@@ -124,6 +124,21 @@ def _assert_no_sensitive_output(
                 pytest.fail(f"secret value from {name} leaked to command output")
 
 
+def test_certificate_window_supports_the_ubuntu_cryptography_api() -> None:
+    module = _load_module()
+    before = dt.datetime(2026, 1, 1, tzinfo=dt.UTC).replace(tzinfo=None)
+    after = dt.datetime(2027, 1, 1, tzinfo=dt.UTC).replace(tzinfo=None)
+
+    class LegacyCertificate:
+        not_valid_before = before
+        not_valid_after = after
+
+    assert module._certificate_window(LegacyCertificate()) == (
+        before.replace(tzinfo=dt.UTC),
+        after.replace(tzinfo=dt.UTC),
+    )
+
+
 def test_generates_idempotent_local_runtime_secret_store_without_leaking_values(
     tmp_path: Path,
 ) -> None:

@@ -21,12 +21,11 @@ from pathlib import Path
 ROOT = Path("/routes")
 ACTIVATION = ROOT / "activation.json"
 GENERATIONS = ROOT / "generations"
-BOOTSTRAP = Path("/app/bootstrap-config.json")
+BOOTSTRAP = Path("/run/vonk-runtime/litellm-bootstrap.json")
 EFFECTIVE_CONFIG = Path("/tmp/vonk-litellm-effective.json")
 SECRET_FILES = {
     "os.environ/LITELLM_MASTER_KEY": Path("/run/secrets/litellm-master-key"),
     "os.environ/LITELLM_UPSTREAM_KEY": Path("/run/secrets/litellm-upstream-key"),
-    "os.environ/LITELLM_DATABASE_URL": Path("/run/secrets/litellm-database-url"),
 }
 ACK_ROOT = Path("/supervisor")
 ACK = ACK_ROOT / "ack.json"
@@ -197,7 +196,10 @@ def _read_secret(path: Path) -> str:
 
 
 def _marker_paths(value: object, path: tuple[object, ...] = ()) -> dict[str, set[tuple[object, ...]]]:
-    found = {marker: set() for marker in SECRET_FILES}
+    found = {
+        marker: set()
+        for marker in (_MASTER_MARKER, _UPSTREAM_MARKER, _DATABASE_MARKER)
+    }
     if isinstance(value, str):
         if value in found:
             found[value].add(path)
@@ -323,7 +325,8 @@ def _materialize_config(
     models = document["model_list"]
     assert isinstance(general, dict) and isinstance(models, list)
     general["master_key"] = secret_values[_MASTER_MARKER]
-    general["database_url"] = secret_values[_DATABASE_MARKER]
+    del general["database_url"]
+    general["disable_admin_ui"] = True
     for model in models:
         assert isinstance(model, dict)
         parameters = model["litellm_params"]

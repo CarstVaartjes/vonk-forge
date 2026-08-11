@@ -168,6 +168,6 @@ mv -f "$runtime_temporary" "$runtime_caddy"
 trap - EXIT HUP INT TERM
 
 if [ "$#" -eq 0 ]; then
-  set -- "$runtime_caddy" run --config /etc/caddy/Caddyfile --adapter caddyfile
+  set -- "$runtime_caddy" run --config /run/vonk-runtime/Caddyfile --adapter caddyfile
 fi
 exec "$@"

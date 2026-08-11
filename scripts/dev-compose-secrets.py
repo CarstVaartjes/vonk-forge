@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import errno
+import importlib.util
 import os
 import secrets
 import stat
@@ -14,9 +15,7 @@ from pathlib import Path
 
 _DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 _FILE_READ_FLAGS = os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC
-_FILE_WRITE_FLAGS = (
-    os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
-)
+_FILE_WRITE_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
 _MAX_SECRET_BYTES = 64 * 1024
 _PRIVATE_MODE = 0o600
 
@@ -115,9 +114,7 @@ def _read_existing(
     except FileNotFoundError:
         return None
     except OSError as error:
-        raise SecretPreparationError(
-            f"development secret {name} is unsafe"
-        ) from error
+        raise SecretPreparationError(f"development secret {name} is unsafe") from error
     if (
         not stat.S_ISREG(listed.st_mode)
         or listed.st_nlink != 1
@@ -129,9 +126,7 @@ def _read_existing(
     try:
         descriptor = os.open(name, _FILE_READ_FLAGS, dir_fd=directory)
     except OSError as error:
-        raise SecretPreparationError(
-            f"development secret {name} is unsafe"
-        ) from error
+        raise SecretPreparationError(f"development secret {name} is unsafe") from error
     try:
         before = os.fstat(descriptor)
         if not _same_inode(listed, before) or not stat.S_ISREG(before.st_mode):
@@ -220,16 +215,16 @@ def _remove_temporary_directory(parent: int, name: str, descriptor: int) -> None
             os.unlink(child, dir_fd=descriptor)
     finally:
         os.close(descriptor)
-        try:
-            current = os.stat(name, dir_fd=parent, follow_symlinks=False)
-        except FileNotFoundError:
-            return
-        if not _same_inode(pinned, current):
-            return
-        try:
-            os.rmdir(name, dir_fd=parent)
-        except FileNotFoundError:
-            pass
+    try:
+        current = os.stat(name, dir_fd=parent, follow_symlinks=False)
+    except FileNotFoundError:
+        return
+    if not _same_inode(pinned, current):
+        return
+    try:
+        os.rmdir(name, dir_fd=parent)
+    except FileNotFoundError:
+        pass
 
 
 def _generate_signing_key(directory: int) -> None:
@@ -300,9 +295,7 @@ def _generate_signing_key(directory: int) -> None:
                 "development signing key cannot be generated"
             ) from error
         if result.returncode != 0:
-            raise SecretPreparationError(
-                "development signing key cannot be generated"
-            )
+            raise SecretPreparationError("development signing key cannot be generated")
         private = _read_existing(temporary_descriptor, "key")
         public = _read_existing(
             temporary_descriptor,
@@ -354,9 +347,7 @@ def _generate_signing_key(directory: int) -> None:
             finally:
                 os.close(descriptor)
             if _read_existing(directory, name) is None:
-                raise SecretPreparationError(
-                    f"development secret {name} is missing"
-                )
+                raise SecretPreparationError(f"development secret {name} is missing")
     except BaseException:
         rollback_links()
         raise
@@ -376,9 +367,7 @@ def _prepare_secret_files(directory: int) -> None:
     if (existing["git-signing-key"] is None) != (
         existing["git-signing-key.pub"] is None
     ):
-        raise SecretPreparationError(
-            "development signing key pair is incomplete"
-        )
+        raise SecretPreparationError("development signing key pair is incomplete")
     password = existing["postgres-password"]
     if password is None:
         password = (secrets.token_hex(24) + "\n").encode("ascii")
@@ -433,28 +422,40 @@ def main() -> int:
     arguments = _arguments()
     os.umask(0o077)
     development = -1
-    descriptor = -1
     try:
         development = _open_development_directory(arguments.repository_root)
         if arguments.external_secrets_dir is None:
-            descriptor = _open_child_directory(
-                development,
-                "vonk-forge-secrets",
-                label="development secrets directory",
+            secrets_path = Path(_physical_directory_path(development)) / (
+                "vonk-forge-secrets"
             )
         else:
-            descriptor = _open_external_secret_directory(
-                arguments.external_secrets_dir
+            secrets_path = arguments.external_secrets_dir.resolve(strict=False)
+        helper = Path(__file__).with_name("dev-runtime-secrets.py")
+        specification = importlib.util.spec_from_file_location(
+            "vonk_dev_runtime_secrets", helper
+        )
+        if specification is None or specification.loader is None:
+            raise SecretPreparationError(
+                "development runtime secret generator is unavailable"
             )
-        _prepare_secret_files(descriptor)
-        print(_physical_directory_path(descriptor))
+        module = importlib.util.module_from_spec(specification)
+        specification.loader.exec_module(module)
+        try:
+            destination = module.prepare_runtime_secrets(
+                secrets_path,
+                management_cidrs="127.0.0.1/32",
+                enroll_hostname="enroll.vonk-forge.lan",
+                agent_hostname="agents.vonk-forge.lan",
+                registry_hostname="registry.vonk-forge.lan",
+            )
+        except module.RuntimeSecretError as error:
+            raise SecretPreparationError(str(error)) from error
+        print(destination)
         return 0
-    except SecretPreparationError as error:
+    except (SecretPreparationError, OSError) as error:
         print(str(error), file=sys.stderr)
         return 1
     finally:
-        if descriptor >= 0:
-            os.close(descriptor)
         if development >= 0:
             os.close(development)
 
