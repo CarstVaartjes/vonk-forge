@@ -222,23 +222,42 @@ fn directory_bytes(path: &Path) -> Result<u64, std::io::Error> {
     let mut total = 0_u64;
     let mut pending = vec![path.to_path_buf()];
     while let Some(directory) = pending.pop() {
-        for entry in fs::read_dir(directory)? {
-            let entry = entry?;
-            let metadata = entry.file_type()?;
+        let Some(entries) = present_during_scan(fs::read_dir(directory))? else {
+            continue;
+        };
+        for entry in entries {
+            let Some(entry) = present_during_scan(entry)? else {
+                continue;
+            };
+            let Some(metadata) = present_during_scan(entry.file_type())? else {
+                continue;
+            };
             if metadata.is_symlink() {
-                total = total
-                    .checked_add(fs::symlink_metadata(entry.path())?.len())
-                    .ok_or_else(|| std::io::Error::other("directory size overflow"))?;
+                if let Some(metadata) = present_during_scan(fs::symlink_metadata(entry.path()))? {
+                    total = total
+                        .checked_add(metadata.len())
+                        .ok_or_else(|| std::io::Error::other("directory size overflow"))?;
+                }
             } else if metadata.is_dir() {
                 pending.push(entry.path());
-            } else if metadata.is_file() {
+            } else if metadata.is_file()
+                && let Some(metadata) = present_during_scan(entry.metadata())?
+            {
                 total = total
-                    .checked_add(entry.metadata()?.len())
+                    .checked_add(metadata.len())
                     .ok_or_else(|| std::io::Error::other("directory size overflow"))?;
             }
         }
     }
     Ok(total)
+}
+
+fn present_during_scan<T>(result: Result<T, std::io::Error>) -> Result<Option<T>, std::io::Error> {
+    match result {
+        Ok(value) => Ok(Some(value)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 
 fn bounded_read(file: &mut File, output_limit: u64) -> Result<Vec<u8>, ProcessError> {
@@ -261,9 +280,24 @@ fn output_bytes(output: &ProcessOutput) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{ProcessError, ProcessRunner, Program, SystemProcessRunner, directory_bytes};
+    use super::{
+        ProcessError, ProcessRunner, Program, SystemProcessRunner, directory_bytes,
+        present_during_scan,
+    };
     use std::{fs, io::Write, net::TcpListener, os::unix::fs::symlink, thread, time::Duration};
     use tempfile::tempdir;
+
+    #[test]
+    fn storage_scan_ignores_paths_removed_by_the_running_process() {
+        let directory = tempdir().unwrap();
+        let removed = directory.path().join("transient-layer");
+
+        assert!(
+            present_during_scan(fs::metadata(removed))
+                .unwrap()
+                .is_none()
+        );
+    }
 
     #[test]
     fn storage_accounting_counts_a_symlink_without_following_it() {
