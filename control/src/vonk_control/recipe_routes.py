@@ -32,6 +32,7 @@ _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _RECIPE_AUTHORITY_ID = str(
     uuid.uuid5(uuid.NAMESPACE_URL, "https://vonkforge.ai/local-recipes")
 )
+_HEALTH_RECOVERY_ERROR = "recipe rank health requires recovery"
 
 
 class RecipeRouteError(RuntimeError):
@@ -296,6 +297,23 @@ class RecipeRouteService:
                     .order_by(RecipeRun.created_at, RecipeRun.id)
                 )
             )
+            recovering = tuple(
+                session.scalars(
+                    select(RecipeRun)
+                    .where(
+                        RecipeRun.state == "running",
+                        RecipeRun.route_state == "withdrawn",
+                        RecipeRun.route_error == _HEALTH_RECOVERY_ERROR,
+                    )
+                    .order_by(RecipeRun.created_at, RecipeRun.id)
+                )
+            )
+        for run in recovering:
+            try:
+                self.publish_run(run.id)
+            except RecipeRouteError:
+                continue
+            return True
         if not published:
             return False
         not_running = frozenset(run.id for run in published if run.state != "running")
@@ -309,7 +327,21 @@ class RecipeRouteService:
         except RecipeRouteError as error:
             if error.run_id is None:
                 raise
+            published_ids = frozenset(run.id for run in published)
             self.withdraw_run(error.run_id)
+            with self.sessions.begin() as session:
+                withdrawn = tuple(
+                    session.scalars(
+                        select(RecipeRun).where(
+                            RecipeRun.id.in_(published_ids),
+                            RecipeRun.state == "running",
+                            RecipeRun.route_state == "withdrawn",
+                        )
+                    )
+                )
+                for run in withdrawn:
+                    run.route_error = _HEALTH_RECOVERY_ERROR
+                    run.updated_at = self._clock()
             return True
         if not isinstance(self._publisher, AtomicRecipeRoutePublisher):
             if any(run.route_digest != candidate.state.digest for run in published):
@@ -373,7 +405,7 @@ class RecipeRouteService:
         return self._publisher.publish(candidate.state, candidate.policy)
 
     def _publish_empty(self, route_digest: str) -> LiteLlmGeneration:
-        publish_empty = getattr(self._publisher, "publish_empty")
+        publish_empty = self._publisher.publish_empty
         if isinstance(self._publisher, AtomicRecipeRoutePublisher):
             return publish_empty(
                 route_digest, expires_at=_aware(self._clock()) + self._maximum_age
@@ -558,13 +590,15 @@ class RecipeRouteService:
                         "run_id": run.id,
                         "alias": run.alias,
                         "plan_digest": run.plan_digest,
+                        # Observation time bounds the activation lease below;
+                        # keeping it out of route identity avoids generating a
+                        # new bundle for every otherwise identical heartbeat.
                         "ranks": [
                             {
                                 "node_id": node.node_id,
                                 "rank": node.rank,
                                 "role": node.role,
                                 "evidence_digest": node.evidence_digest,
-                                "observed_at": _aware(node.updated_at).isoformat(),
                             }
                             for node in nodes
                         ],

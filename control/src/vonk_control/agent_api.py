@@ -18,6 +18,11 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, Literal, Protocol
 
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from sqlalchemy import and_, or_, select
+from sqlalchemy.orm import Session, sessionmaker
+from starlette.responses import StreamingResponse
 from vonk_agent_protocol import (
     AgentProgress,
     AgentProtocolError,
@@ -27,11 +32,6 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.workload_packages import (
     PackageHelperOperation,
 )
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from sqlalchemy import and_, or_, select
-from sqlalchemy.orm import Session, sessionmaker
-from starlette.responses import StreamingResponse
 
 from .agent_jobs import AgentJobService, StaleAgentAttempt
 from .audit import AuditRecord
@@ -70,6 +70,7 @@ from .package_helper_authority import (
 from .pki import IssuedCertificate
 from .presence import AgentPresenceService, ManagementAddressPolicy, PresenceError
 from .recipe_contract import recipe_content_sha256, validate_recipe
+from .recipe_operations import RecipeRunObservation, record_recipe_run_observations
 from .recipe_runtime_specs import RecipeRuntimeSpecError, compile_runtime_spec
 from .source_bundles import SourceBundleError, SourceBundleStore
 
@@ -311,6 +312,31 @@ class InventoryRequest(BaseModel):
             )
         ):
             raise ValueError("inventory evidence is inconsistent")
+        return self
+
+
+class RecipeRunObservationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    run_id: str = Field(
+        pattern=(
+            r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+            r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        )
+    )
+    ready: bool = Field(strict=True)
+
+
+class RecipeRunObservationsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    schema_version: Literal[1]
+    observed_at: datetime
+    runs: list[RecipeRunObservationRequest] = Field(max_length=64)
+
+    @model_validator(mode="after")
+    def unique_runs(self) -> RecipeRunObservationsRequest:
+        identities = [run.run_id for run in self.runs]
+        if len(identities) != len(set(identities)):
+            raise ValueError("recipe run observation is duplicated")
         return self
 
 
@@ -922,7 +948,7 @@ def install_agent_routes(
             grant = required.enrollment.create(
                 body.node_id, authenticated.subject, body.ttl_seconds
             )
-        except ValueError as error:
+        except (TypeError, ValueError) as error:
             raise HTTPException(status_code=422, detail=str(error)) from None
         audits.append(
             AuditRecord(
@@ -1321,6 +1347,38 @@ def install_agent_routes(
                     nvidia_driver_version=body.nvidia_driver_version,
                     container_runtime_version=body.container_runtime_version,
                 )
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from None
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @agent.post("/recipe-runs/observations", status_code=status.HTTP_204_NO_CONTENT)
+    def recipe_run_observations(
+        body: RecipeRunObservationsRequest, request: Request
+    ) -> Response:
+        _scope_identity(request)
+        required = _require_services(services)
+        identity = _authenticated_identity(request, required)
+        if body.observed_at.tzinfo is None or body.observed_at.utcoffset() is None:
+            raise HTTPException(
+                status_code=422,
+                detail="recipe run observation time must be timezone-aware",
+            )
+        observed_at = body.observed_at.astimezone(UTC)
+        now = _now(required.clock()).astimezone(UTC)
+        if observed_at > now + timedelta(seconds=30) or now - observed_at > timedelta(
+            minutes=5
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail="recipe run observation time is outside the accepted window",
+            )
+        try:
+            record_recipe_run_observations(
+                required.sessions,
+                identity.node_id,
+                observed_at,
+                tuple(RecipeRunObservation(run.run_id, run.ready) for run in body.runs),
             )
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from None

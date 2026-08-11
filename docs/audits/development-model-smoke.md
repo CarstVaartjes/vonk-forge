@@ -123,8 +123,10 @@ After accepted-main images and packages are published, the physical run must:
    route withdrawal, and uninstall;
 3. execute the replicated two-rank profile and prove both exact start receipts
    before publication;
-4. stop the designated worker agent, observe automatic route withdrawal after
-   the 30-second rank-presence window, restore it, and observe republication;
+4. stop the designated worker rank's exact rootless managed container while
+   its Rust agent remains healthy, observe the next authenticated run snapshot
+   mark only that rank failed and withdraw the route, start the same container,
+   then observe fresh health and automatic republication;
 5. restart both agents and the NAS stack, prove fresh identities and inference
    without rebuilding, then stop and uninstall normally.
 

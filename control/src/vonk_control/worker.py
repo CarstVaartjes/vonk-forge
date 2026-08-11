@@ -343,7 +343,7 @@ def assemble_production_worker(
         publisher=AtomicRecipeRoutePublisher(publisher, clock=clock),
         management_policy=management_policy,
         clock=clock,
-        maximum_age_seconds=30,
+        maximum_age_seconds=120,
     )
     recipe_operations = RecipeOperationWorker(
         sessions, recipe_routes, clock=clock

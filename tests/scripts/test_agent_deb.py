@@ -119,6 +119,7 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
         text=True,
         check=True,
     ).stdout
+    assert "curl" in fields
     assert "podman" in fields
     assert "uidmap" not in fields
     payload = tmp_path / "payload"

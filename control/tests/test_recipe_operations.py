@@ -13,6 +13,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from sqlalchemy import create_engine, select
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_control.artifact_sizes import ArtifactSize, StaticArtifactSizeResolver
 from vonk_control.catalog_service import CatalogService, RecipeDraftInput
@@ -40,11 +43,10 @@ from vonk_control.models import (
 from vonk_control.recipe_operations import (
     RecipeOperationConflict,
     RecipeOperationService,
+    RecipeRunObservation,
+    record_recipe_run_observations,
 )
 from vonk_control.run_admission import RunAdmissionService
-from sqlalchemy import create_engine, select
-from sqlalchemy.exc import OperationalError
-from sqlalchemy.orm import sessionmaker
 
 
 class RecordingQueue:
@@ -652,6 +654,84 @@ def test_run_status_projects_exact_rank_health_without_agent_secrets(
         assert all(
             session.get(AgentNode, node_id).state == "active" for node_id in nodes
         )
+
+
+def test_authenticated_run_observations_project_failure_recovery_and_missing_rank(
+    tmp_path: Path,
+) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2
+    )
+    install_plan = service.preview_install(mapping_id, build_id)
+    install = service.install(
+        install_plan,
+        plan_digest=install_plan.plan_digest,
+        actor="admin",
+        request_id="b" * 36,
+    )
+    for node_id in nodes:
+        service.record_node_result(
+            install.id, node_id, succeeded=True, evidence={"installed_bytes": 120}
+        )
+    run_plan = service.preview_run(install.owner_id)
+    start = service.start(
+        run_plan,
+        plan_digest=run_plan.plan_digest,
+        alias="observed-gang",
+        actor="admin",
+        request_id="c" * 36,
+    )
+    with sessions() as session:
+        operations = tuple(
+            session.scalars(
+                select(AgentOperation)
+                .where(AgentOperation.parent_job_id == start.id)
+                .order_by(AgentOperation.node_id)
+            )
+        )
+    for operation in operations:
+        service.record_node_result(
+            start.id,
+            operation.node_id,
+            succeeded=True,
+            evidence=start_evidence(operation.payload),
+        )
+
+    record_recipe_run_observations(
+        sessions,
+        nodes[0],
+        NOW,
+        (RecipeRunObservation(start.owner_id, True),),
+    )
+    record_recipe_run_observations(sessions, nodes[1], NOW, ())
+    failed = service.run_status(start.owner_id)
+    assert [rank.state for rank in failed.ranks] == ["running", "failed"]
+    assert [rank.fresh for rank in failed.ranks] == [True, True]
+    assert failed.healthy is False
+
+    record_recipe_run_observations(
+        sessions,
+        nodes[1],
+        NOW,
+        (RecipeRunObservation(start.owner_id, True),),
+    )
+    recovered = service.run_status(start.owner_id)
+    assert [rank.state for rank in recovered.ranks] == ["running", "running"]
+    assert recovered.healthy is True
+
+
+def test_run_observation_snapshot_rejects_duplicate_and_naive_evidence(
+    tmp_path: Path,
+) -> None:
+    sessions, _service, _queue, _mapping_id, _build_id, nodes = setup_services(tmp_path)
+    observation = RecipeRunObservation(str(uuid.uuid4()), True)
+
+    with pytest.raises(ValueError, match="duplicated"):
+        record_recipe_run_observations(
+            sessions, nodes[0], NOW, (observation, observation)
+        )
+    with pytest.raises(ValueError, match="timezone-aware"):
+        record_recipe_run_observations(sessions, nodes[0], NOW.replace(tzinfo=None), ())
 
 
 def test_multinode_start_is_bound_to_authenticated_fabric_rendezvous(

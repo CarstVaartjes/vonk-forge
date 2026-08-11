@@ -5,6 +5,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import TokenCodec
 from vonk_control.litellm import LiteLlmPolicyError, LiteLlmPublisher
 from vonk_control.models import (
@@ -32,8 +34,6 @@ from vonk_control.recipe_routes import (
     RecipeRouteService,
 )
 from vonk_control.route_runtime import AtomicRouteBundlePublisher
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 NOW = datetime(2026, 8, 7, 12, tzinfo=UTC)
 
@@ -514,6 +514,24 @@ def test_worker_renews_from_fresh_all_rank_evidence_and_recovers_owner(
         )
 
 
+def test_fresh_health_timestamp_does_not_churn_route_before_renewal_window(
+    tmp_path: Path,
+) -> None:
+    clock = MutableClock(NOW)
+    base, _publisher, _applied, run_id = setup(tmp_path / "database", clock=clock)
+    service = atomic_service(base, tmp_path / "live", clock)
+    first = service.publish_run(run_id)
+
+    clock.now += timedelta(seconds=1)
+    with service.sessions.begin() as session:
+        for node in session.query(RunNode).filter_by(run_id=run_id):
+            node.updated_at = clock.now
+
+    assert RecipeOperationWorker(service.sessions, service, clock=clock).tick() is False
+    with service.sessions() as session:
+        assert session.get(RecipeRun, run_id).route_generation == first.generation
+
+
 def test_worker_withdraws_when_rank_health_is_stale_while_agent_is_active(
     tmp_path: Path,
 ) -> None:
@@ -535,6 +553,77 @@ def test_worker_withdraws_when_rank_health_is_stale_while_agent_is_active(
         owner = session.get(RoutePublicationOwner, 1)
         publication = session.get(RoutePublication, owner.reconciliation_id)
         assert publication.state == "routes-withdrawn"
+
+
+def test_worker_republishes_automatically_with_fresh_recovered_rank_evidence(
+    tmp_path: Path,
+) -> None:
+    clock = MutableClock(NOW)
+    base, _publisher, _applied, run_id = setup(tmp_path / "database", clock=clock)
+    service = atomic_service(base, tmp_path / "live", clock)
+    first = service.publish_run(run_id)
+    with service.sessions.begin() as session:
+        failed = session.query(RunNode).filter_by(run_id=run_id, rank=1).one()
+        failed.state = "failed"
+        failed.updated_at = clock.now
+
+    worker = RecipeOperationWorker(service.sessions, service, clock=clock)
+    assert worker.tick() is True
+    with service.sessions() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run.route_state == "withdrawn"
+        assert run.route_error == "recipe rank health requires recovery"
+
+    clock.now += timedelta(seconds=1)
+    with service.sessions.begin() as session:
+        recovered = session.query(RunNode).filter_by(run_id=run_id, rank=1).one()
+        recovered.state = "running"
+        recovered.updated_at = clock.now
+
+    restarted = RecipeOperationWorker(service.sessions, service, clock=clock)
+    assert restarted.tick() is True
+    with service.sessions() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run.route_state == "published"
+        assert run.route_error is None
+        assert run.route_generation > first.generation
+
+
+def test_recovered_run_rejoins_candidate_while_another_run_remains_published(
+    tmp_path: Path,
+) -> None:
+    clock = MutableClock(NOW)
+    base, _publisher, _applied, healthy_run = setup(tmp_path / "database", clock=clock)
+    recovered_run = add_running_run(
+        base,
+        healthy_run,
+        alias="recovered",
+        route_state="pending",
+        identity=3,
+    )
+    service = atomic_service(base, tmp_path / "live", clock)
+    service.publish_run(healthy_run)
+    service.publish_run(recovered_run)
+    with service.sessions.begin() as session:
+        node = session.query(RunNode).filter_by(run_id=recovered_run).one()
+        node.state = "failed"
+
+    worker = RecipeOperationWorker(service.sessions, service, clock=clock)
+    assert worker.tick() is True
+    with service.sessions() as session:
+        assert session.get(RecipeRun, healthy_run).route_state == "published"
+        assert session.get(RecipeRun, recovered_run).route_state == "withdrawn"
+
+    clock.now += timedelta(seconds=1)
+    with service.sessions.begin() as session:
+        node = session.query(RunNode).filter_by(run_id=recovered_run).one()
+        node.state = "running"
+        node.updated_at = clock.now
+
+    assert RecipeOperationWorker(service.sessions, service, clock=clock).tick() is True
+    with service.sessions() as session:
+        assert session.get(RecipeRun, healthy_run).route_state == "published"
+        assert session.get(RecipeRun, recovered_run).route_state == "published"
 
 
 def test_worker_withdraws_all_stale_runs_in_one_recovered_candidate(

@@ -36,7 +36,7 @@ class RecipeOperationWorker:
                 .limit(1)
             )
         if run_id is None:
-            return self._routes.maintain()
+            return self._routes.maintain(renew_before_seconds=10)
         try:
             self._routes.publish_run(run_id)
         except (OSError, RuntimeError, TypeError, ValueError) as error:

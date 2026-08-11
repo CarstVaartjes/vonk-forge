@@ -1,11 +1,21 @@
 #![forbid(unsafe_code)]
 
-use std::{cell::RefCell, collections::VecDeque, fs, net::IpAddr, path::Path, time::Duration};
+use std::{
+    cell::RefCell,
+    collections::VecDeque,
+    fs,
+    io::{Read, Write},
+    net::{IpAddr, TcpListener},
+    os::unix::fs::symlink,
+    path::Path,
+    thread,
+    time::Duration,
+};
 
 use tempfile::tempdir;
 use vonk_agent::{
     oci::OciRuntime,
-    process::{ProcessError, ProcessOutput, ProcessRunner, Program},
+    process::{ProcessError, ProcessOutput, ProcessRunner, Program, SystemProcessRunner},
     workloads::{
         ArgumentValue, ArtifactMountSpec, ArtifactSpec, EndpointSpec, LifecycleSpec, MountSpec,
         Placement, RuntimeArgument, RuntimeSpec, SecuritySpec, WorkloadSpec,
@@ -49,6 +59,26 @@ impl ProcessRunner for FakeRunner {
 struct BudgetRunner {
     inner: FakeRunner,
     budgets: RefCell<Vec<u64>>,
+}
+
+struct ObservationRunner {
+    calls: RefCell<Vec<(Program, Vec<String>)>>,
+    podman_outputs: RefCell<VecDeque<ProcessOutput>>,
+}
+
+impl ProcessRunner for ObservationRunner {
+    fn run(
+        &self,
+        program: Program,
+        arguments: &[String],
+        timeout: Duration,
+    ) -> Result<ProcessOutput, ProcessError> {
+        self.calls.borrow_mut().push((program, arguments.to_vec()));
+        if program == Program::Podman {
+            return Ok(self.podman_outputs.borrow_mut().pop_front().unwrap());
+        }
+        SystemProcessRunner.run(program, arguments, timeout)
+    }
 }
 
 impl ProcessRunner for BudgetRunner {
@@ -140,6 +170,54 @@ fn spec() -> WorkloadSpec {
             stop_timeout_seconds: 30,
         },
     }
+}
+
+fn write_managed_run(root: &Path, run_id: &str, installation_id: &str, port: u16) {
+    let installation = root.join("installations").join(installation_id);
+    fs::create_dir_all(&installation).unwrap();
+    fs::write(
+        installation.join("spec.json"),
+        serde_json::to_vec(&spec()).unwrap(),
+    )
+    .unwrap();
+    let run = root.join("runs").join(run_id);
+    fs::create_dir_all(&run).unwrap();
+    fs::write(
+        run.join("lifecycle.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "installation_id": installation_id,
+            "placement": {
+                "rank": 0,
+                "role": "entrypoint",
+                "world_size": 1,
+                "local_address": null,
+                "master_address": null,
+                "master_port": null,
+                "port": port,
+                "reserved_memory_bytes": 1024
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+}
+
+fn one_response_server(status: u16) -> (u16, thread::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut request = [0_u8; 4096];
+        let size = stream.read(&mut request).unwrap();
+        let request = std::str::from_utf8(&request[..size]).unwrap();
+        assert!(request.starts_with("GET /v1/models HTTP/1.1\r\n"));
+        write!(
+            stream,
+            "HTTP/1.1 {status} Test\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        )
+        .unwrap();
+    });
+    (port, server)
 }
 
 #[test]
@@ -782,6 +860,325 @@ fn start_writes_a_bounded_standard_runtime_contract() {
 }
 
 #[test]
+fn managed_recipe_run_observation_reports_running_healthy_container() {
+    let directory = tempdir().unwrap();
+    let run_id = "45ea6921-50c9-4971-be2a-4cd04ce05069";
+    let (port, server) = one_response_server(204);
+    write_managed_run(
+        directory.path(),
+        run_id,
+        "cb555393-764b-4eb6-8f15-b416d289428f",
+        port,
+    );
+    let runner = ObservationRunner {
+        calls: RefCell::new(vec![]),
+        podman_outputs: RefCell::new(VecDeque::from([ProcessOutput {
+            success: true,
+            stdout: format!("true\tvonk-{run_id}\n").into_bytes(),
+            stderr: vec![],
+        }])),
+    };
+
+    let observations = OciRuntime {
+        runner: &runner,
+        data_root: directory.path(),
+        huggingface_curl_config: None,
+    }
+    .recipe_run_observations()
+    .unwrap();
+
+    assert_eq!(
+        serde_json::to_value(&observations).unwrap(),
+        serde_json::json!([{"run_id": run_id, "ready": true}])
+    );
+    server.join().unwrap();
+    let calls = runner.calls.borrow();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0].0, Program::Podman);
+    assert_eq!(
+        calls[0].1,
+        [
+            "container",
+            "inspect",
+            "--format",
+            "{{.State.Running}}\\t{{.Name}}",
+            &format!("vonk-{run_id}"),
+        ]
+    );
+    assert_eq!(calls[1].0, Program::Curl);
+    assert!(calls[1].1.iter().any(|value| value == "--max-time"));
+    assert!(
+        calls[1]
+            .1
+            .iter()
+            .any(|value| value == &format!("http://127.0.0.1:{port}/v1/models"))
+    );
+}
+
+#[test]
+fn managed_recipe_run_observation_reports_running_unhealthy_container() {
+    let directory = tempdir().unwrap();
+    let run_id = "45ea6921-50c9-4971-be2a-4cd04ce05069";
+    let (port, server) = one_response_server(503);
+    write_managed_run(
+        directory.path(),
+        run_id,
+        "cb555393-764b-4eb6-8f15-b416d289428f",
+        port,
+    );
+    let runner = ObservationRunner {
+        calls: RefCell::new(vec![]),
+        podman_outputs: RefCell::new(VecDeque::from([ProcessOutput {
+            success: true,
+            stdout: format!("true\tvonk-{run_id}\n").into_bytes(),
+            stderr: vec![],
+        }])),
+    };
+
+    let observations = OciRuntime {
+        runner: &runner,
+        data_root: directory.path(),
+        huggingface_curl_config: None,
+    }
+    .recipe_run_observations()
+    .unwrap();
+
+    assert_eq!(observations.len(), 1);
+    assert!(!observations[0].ready);
+    server.join().unwrap();
+}
+
+#[test]
+fn managed_recipe_run_observation_reports_missing_and_stopped_without_http() {
+    let directory = tempdir().unwrap();
+    let first = "45ea6921-50c9-4971-be2a-4cd04ce05069";
+    let second = "55ea6921-50c9-4971-be2a-4cd04ce05069";
+    for run_id in [first, second] {
+        write_managed_run(
+            directory.path(),
+            run_id,
+            "cb555393-764b-4eb6-8f15-b416d289428f",
+            8101,
+        );
+    }
+    let runner = ObservationRunner {
+        calls: RefCell::new(vec![]),
+        podman_outputs: RefCell::new(VecDeque::from([
+            ProcessOutput {
+                success: false,
+                stdout: vec![],
+                stderr: b"no such container".to_vec(),
+            },
+            ProcessOutput {
+                success: true,
+                stdout: format!("false\tvonk-{second}\n").into_bytes(),
+                stderr: vec![],
+            },
+        ])),
+    };
+
+    let observations = OciRuntime {
+        runner: &runner,
+        data_root: directory.path(),
+        huggingface_curl_config: None,
+    }
+    .recipe_run_observations()
+    .unwrap();
+
+    assert_eq!(observations.len(), 2);
+    assert!(observations.iter().all(|observation| !observation.ready));
+    assert!(
+        runner
+            .calls
+            .borrow()
+            .iter()
+            .all(|call| call.0 == Program::Podman)
+    );
+}
+
+#[test]
+fn managed_recipe_run_snapshot_skips_safe_historical_directory_without_lifecycle_marker() {
+    let directory = tempdir().unwrap();
+    let run = directory
+        .path()
+        .join("runs")
+        .join("45ea6921-50c9-4971-be2a-4cd04ce05069");
+    fs::create_dir_all(&run).unwrap();
+    fs::write(run.join("runtime.json"), b"historical runtime evidence").unwrap();
+    let runner = ObservationRunner {
+        calls: RefCell::new(vec![]),
+        podman_outputs: RefCell::new(VecDeque::new()),
+    };
+
+    let observations = OciRuntime {
+        runner: &runner,
+        data_root: directory.path(),
+        huggingface_curl_config: None,
+    }
+    .recipe_run_observations()
+    .unwrap();
+
+    assert!(observations.is_empty());
+    assert!(runner.calls.borrow().is_empty());
+}
+
+#[test]
+fn managed_recipe_run_snapshot_rejects_symlinks_malformed_names_and_corrupt_metadata() {
+    for corrupt in [
+        "run-symlink",
+        "name",
+        "marker-symlink",
+        "oversized-marker",
+        "invalid-marker",
+        "invalid-installation-id",
+        "unsafe-health-path",
+    ] {
+        let directory = tempdir().unwrap();
+        let runs = directory.path().join("runs");
+        fs::create_dir_all(&runs).unwrap();
+        match corrupt {
+            "run-symlink" => {
+                let target = directory.path().join("outside");
+                fs::create_dir(&target).unwrap();
+                symlink(target, runs.join("45ea6921-50c9-4971-be2a-4cd04ce05069")).unwrap();
+            }
+            "name" => fs::create_dir(runs.join("not-a-run-uuid")).unwrap(),
+            "marker-symlink" => {
+                let run = runs.join("45ea6921-50c9-4971-be2a-4cd04ce05069");
+                fs::create_dir(&run).unwrap();
+                symlink(
+                    directory.path().join("outside.json"),
+                    run.join("lifecycle.json"),
+                )
+                .unwrap();
+            }
+            "oversized-marker" => {
+                let run = runs.join("45ea6921-50c9-4971-be2a-4cd04ce05069");
+                fs::create_dir(&run).unwrap();
+                fs::write(run.join("lifecycle.json"), vec![b'x'; 16 * 1024 + 1]).unwrap();
+            }
+            "invalid-marker" => {
+                let run = runs.join("45ea6921-50c9-4971-be2a-4cd04ce05069");
+                fs::create_dir(&run).unwrap();
+                fs::write(run.join("lifecycle.json"), b"{}").unwrap();
+            }
+            "invalid-installation-id" => write_managed_run(
+                directory.path(),
+                "45ea6921-50c9-4971-be2a-4cd04ce05069",
+                "not-an-installation-id",
+                8101,
+            ),
+            "unsafe-health-path" => {
+                let installation_id = "cb555393-764b-4eb6-8f15-b416d289428f";
+                write_managed_run(
+                    directory.path(),
+                    "45ea6921-50c9-4971-be2a-4cd04ce05069",
+                    installation_id,
+                    8101,
+                );
+                let mut workload = spec();
+                workload.endpoint.health_path = "/v1/models\r\nInjected: true".to_owned();
+                fs::write(
+                    directory
+                        .path()
+                        .join("installations")
+                        .join(installation_id)
+                        .join("spec.json"),
+                    serde_json::to_vec(&workload).unwrap(),
+                )
+                .unwrap();
+            }
+            _ => unreachable!(),
+        }
+        let runner = ObservationRunner {
+            calls: RefCell::new(vec![]),
+            podman_outputs: RefCell::new(VecDeque::from([ProcessOutput {
+                success: false,
+                stdout: vec![],
+                stderr: b"no such container".to_vec(),
+            }])),
+        };
+
+        assert!(
+            OciRuntime {
+                runner: &runner,
+                data_root: directory.path(),
+                huggingface_curl_config: None,
+            }
+            .recipe_run_observations()
+            .is_err(),
+            "{corrupt}"
+        );
+        assert!(runner.calls.borrow().is_empty(), "{corrupt}");
+    }
+}
+
+#[test]
+fn managed_recipe_run_snapshot_rejects_more_than_64_lifecycle_markers_before_inspection() {
+    let directory = tempdir().unwrap();
+    for value in 1..=65_u128 {
+        write_managed_run(
+            directory.path(),
+            &uuid::Uuid::from_u128(value).to_string(),
+            "cb555393-764b-4eb6-8f15-b416d289428f",
+            8101,
+        );
+    }
+    let runner = ObservationRunner {
+        calls: RefCell::new(vec![]),
+        podman_outputs: RefCell::new(VecDeque::new()),
+    };
+
+    assert!(
+        OciRuntime {
+            runner: &runner,
+            data_root: directory.path(),
+            huggingface_curl_config: None,
+        }
+        .recipe_run_observations()
+        .is_err()
+    );
+    assert!(runner.calls.borrow().is_empty());
+}
+
+#[test]
+fn stopped_historical_directories_do_not_consume_the_64_managed_run_limit() {
+    let directory = tempdir().unwrap();
+    let runs = directory.path().join("runs");
+    fs::create_dir_all(&runs).unwrap();
+    for value in 1..=65_u128 {
+        fs::create_dir(runs.join(uuid::Uuid::from_u128(value).to_string())).unwrap();
+    }
+    let active = "45ea6921-50c9-4971-be2a-4cd04ce05069";
+    write_managed_run(
+        directory.path(),
+        active,
+        "cb555393-764b-4eb6-8f15-b416d289428f",
+        8101,
+    );
+    let runner = ObservationRunner {
+        calls: RefCell::new(vec![]),
+        podman_outputs: RefCell::new(VecDeque::from([ProcessOutput {
+            success: false,
+            stdout: vec![],
+            stderr: b"no such container".to_vec(),
+        }])),
+    };
+
+    let observations = OciRuntime {
+        runner: &runner,
+        data_root: directory.path(),
+        huggingface_curl_config: None,
+    }
+    .recipe_run_observations()
+    .unwrap();
+
+    assert_eq!(observations.len(), 1);
+    assert_eq!(observations[0].run_id, active);
+    assert!(!observations[0].ready);
+}
+
+#[test]
 fn stop_is_idempotent_when_a_gang_rank_never_started() {
     let runner = FakeRunner {
         calls: RefCell::new(vec![]),
@@ -890,6 +1287,23 @@ fn lifecycle_hooks_run_as_typed_hardened_one_shot_containers() {
         .unwrap();
     runtime.stop(run_id).unwrap();
 
+    assert!(
+        !directory
+            .path()
+            .join("runs")
+            .join(run_id)
+            .join("lifecycle.json")
+            .exists()
+    );
+    assert!(
+        directory
+            .path()
+            .join("runs")
+            .join(run_id)
+            .join("runtime.json")
+            .exists()
+    );
+
     let calls = runner.calls.borrow();
     assert_eq!(calls.len(), 4);
     assert_eq!(calls[0].0, Program::Podman);
@@ -911,4 +1325,56 @@ fn lifecycle_hooks_run_as_typed_hardened_one_shot_containers() {
         ["python", "-m", "cleanup"]
     );
     assert!(calls[3].1.iter().any(|value| value == "--read-only"));
+}
+
+#[test]
+fn failed_post_stop_hook_retains_lifecycle_observation_marker() {
+    let runner = FakeRunner {
+        calls: RefCell::new(vec![]),
+        outputs: RefCell::new(VecDeque::from([
+            ProcessOutput {
+                success: true,
+                stdout: vec![],
+                stderr: vec![],
+            },
+            ProcessOutput {
+                success: false,
+                stdout: vec![],
+                stderr: vec![],
+            },
+        ])),
+    };
+    let directory = tempdir().unwrap();
+    let run_id = "45ea6921-50c9-4971-be2a-4cd04ce05069";
+    let installation_id = "cb555393-764b-4eb6-8f15-b416d289428f";
+    let mut workload = spec();
+    workload.lifecycle.post_stop = vec![vec!["false".to_owned()]];
+    write_managed_run(directory.path(), run_id, installation_id, 8101);
+    fs::write(
+        directory
+            .path()
+            .join("installations")
+            .join(installation_id)
+            .join("spec.json"),
+        serde_json::to_vec(&workload).unwrap(),
+    )
+    .unwrap();
+
+    assert!(
+        OciRuntime {
+            runner: &runner,
+            data_root: directory.path(),
+            huggingface_curl_config: None,
+        }
+        .stop(run_id)
+        .is_err()
+    );
+    assert!(
+        directory
+            .path()
+            .join("runs")
+            .join(run_id)
+            .join("lifecycle.json")
+            .exists()
+    );
 }

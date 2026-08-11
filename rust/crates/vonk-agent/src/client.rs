@@ -12,6 +12,7 @@ use crate::{
     config::AgentConfig,
     identity::{IdentityPaths, active_identity_paths},
     inventory::Inventory,
+    oci::{MAX_MANAGED_RECIPE_RUNS, RecipeRunObservation},
     pair::{IssuedResponse, verify_ca_pin},
     supervisor_readiness::AgentRuntimeIdentity,
     workloads::WorkloadSpec,
@@ -62,6 +63,14 @@ struct InventoryRequest<'a> {
     observed_at: chrono::DateTime<chrono::Utc>,
     #[serde(flatten)]
     inventory: &'a Inventory,
+}
+
+#[derive(Serialize)]
+#[serde(deny_unknown_fields)]
+struct RecipeRunObservationsRequest<'a> {
+    schema_version: u8,
+    observed_at: chrono::DateTime<chrono::Utc>,
+    runs: &'a [RecipeRunObservation],
 }
 
 #[derive(Serialize)]
@@ -306,6 +315,41 @@ impl AgentHttpClient {
         }
     }
 
+    pub async fn report_recipe_run_observations(
+        &self,
+        observations: &[RecipeRunObservation],
+    ) -> Result<(), ClientError> {
+        if observations.len() > MAX_MANAGED_RECIPE_RUNS {
+            return Err(ClientError::Protocol);
+        }
+        let mut run_ids = std::collections::BTreeSet::new();
+        for observation in observations {
+            let run_id =
+                uuid::Uuid::parse_str(&observation.run_id).map_err(|_| ClientError::Protocol)?;
+            if run_id.to_string() != observation.run_id
+                || !run_ids.insert(observation.run_id.as_str())
+            {
+                return Err(ClientError::Protocol);
+            }
+        }
+        let response = self
+            .client
+            .post(self.endpoint("/agent/v1/recipe-runs/observations")?)
+            .json(&RecipeRunObservationsRequest {
+                schema_version: 1,
+                observed_at: chrono::Utc::now(),
+                runs: observations,
+            })
+            .send()
+            .await?;
+        if response.status() == StatusCode::NO_CONTENT {
+            Ok(())
+        } else {
+            classify_status(response.status())?;
+            Err(ClientError::Protocol)
+        }
+    }
+
     pub async fn renew(&self, csr: &[u8]) -> Result<IssuedResponse, ClientError> {
         let csr = std::str::from_utf8(csr).map_err(|_| ClientError::Protocol)?;
         if csr.is_empty() || csr.len() > 16 * 1024 {
@@ -413,4 +457,134 @@ fn valid_sha256(value: &str) -> bool {
 
 fn valid_oci_digest(value: &str) -> bool {
     value.strip_prefix("sha256:").is_some_and(valid_sha256)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AgentHttpClient, ClientError};
+    use crate::oci::RecipeRunObservation;
+    use chrono::{DateTime, Utc};
+    use std::{
+        io::{Read, Write},
+        net::TcpListener,
+        thread,
+    };
+    use url::Url;
+
+    fn observation_client(status: u16) -> (AgentHttpClient, thread::JoinHandle<Vec<u8>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 4096];
+            let header_end = loop {
+                let size = stream.read(&mut buffer).unwrap();
+                assert_ne!(size, 0);
+                request.extend_from_slice(&buffer[..size]);
+                if let Some(index) = request.windows(4).position(|value| value == b"\r\n\r\n") {
+                    break index + 4;
+                }
+            };
+            let headers = std::str::from_utf8(&request[..header_end]).unwrap();
+            let content_length = headers
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().unwrap())
+                })
+                .unwrap();
+            while request.len() - header_end < content_length {
+                let size = stream.read(&mut buffer).unwrap();
+                assert_ne!(size, 0);
+                request.extend_from_slice(&buffer[..size]);
+            }
+            write!(
+                stream,
+                "HTTP/1.1 {status} Test\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            )
+            .unwrap();
+            request
+        });
+        (
+            AgentHttpClient {
+                client: reqwest::Client::new(),
+                controller: Url::parse(&format!("http://{address}/")).unwrap(),
+                node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
+            },
+            server,
+        )
+    }
+
+    #[tokio::test]
+    async fn recipe_run_observations_post_strict_bounded_shape_and_accept_only_204() {
+        let observations = vec![RecipeRunObservation {
+            run_id: "45ea6921-50c9-4971-be2a-4cd04ce05069".to_owned(),
+            ready: true,
+        }];
+        let (client, server) = observation_client(204);
+
+        client
+            .report_recipe_run_observations(&observations)
+            .await
+            .unwrap();
+
+        let request = server.join().unwrap();
+        let (headers, body) = request
+            .windows(4)
+            .position(|value| value == b"\r\n\r\n")
+            .map(|index| (&request[..index], &request[index + 4..]))
+            .unwrap();
+        let headers = std::str::from_utf8(headers).unwrap();
+        assert!(headers.starts_with("POST /agent/v1/recipe-runs/observations HTTP/1.1\r\n"));
+        let body: serde_json::Value = serde_json::from_slice(body).unwrap();
+        let mut keys = body
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        keys.sort();
+        assert_eq!(keys, ["observed_at", "runs", "schema_version"]);
+        assert_eq!(body["schema_version"], 1);
+        assert_eq!(
+            body["runs"],
+            serde_json::json!([{
+                "ready": true,
+                "run_id": "45ea6921-50c9-4971-be2a-4cd04ce05069"
+            }])
+        );
+        let observed_at = DateTime::parse_from_rfc3339(body["observed_at"].as_str().unwrap())
+            .unwrap()
+            .with_timezone(&Utc);
+        assert!((Utc::now() - observed_at).num_seconds().abs() < 5);
+
+        let (client, server) = observation_client(200);
+        assert!(matches!(
+            client.report_recipe_run_observations(&observations).await,
+            Err(ClientError::Protocol)
+        ));
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn recipe_run_observations_reject_unbounded_payload_before_transport() {
+        let client = AgentHttpClient {
+            client: reqwest::Client::new(),
+            controller: Url::parse("http://127.0.0.1:9/").unwrap(),
+            node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
+        };
+        let observations = (0..=64)
+            .map(|value| RecipeRunObservation {
+                run_id: uuid::Uuid::from_u128(value).to_string(),
+                ready: false,
+            })
+            .collect::<Vec<_>>();
+
+        assert!(matches!(
+            client.report_recipe_run_observations(&observations).await,
+            Err(ClientError::Protocol)
+        ));
+    }
 }

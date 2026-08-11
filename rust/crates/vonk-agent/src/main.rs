@@ -9,9 +9,9 @@ use std::{
 use clap::{Parser, Subcommand};
 use url::Url;
 use vonk_agent::{
-    client::AgentHttpClient,
+    client::{AgentHttpClient, ClientError},
     config::{AgentConfig, DEFAULT_CONFIG_PATH},
-    executor::{RecipeExecutor, run_once},
+    executor::{LoopError, RecipeExecutor, run_once},
     inventory::InventoryCollector,
     oci::OciRuntime,
     pair::{EnrollmentOutcome, collect_evidence, pair},
@@ -100,6 +100,7 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
         "recipe.uninstall",
     ];
     let mut failures = 0_u32;
+    let mut observation_failures = 0_u32;
     let mut next_inventory = tokio::time::Instant::now();
     loop {
         if tokio::time::Instant::now() >= next_inventory {
@@ -145,14 +146,37 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
                 huggingface_curl_config: config.huggingface_curl_config.as_deref(),
             },
         };
-        let operation = run_once(
-            &client,
-            &mut state,
-            &executor,
-            &capabilities,
-            config.poll_max_seconds.min(60),
-            supervisor_readiness.runtime_identity(),
-        );
+        let observations = executor.runtime.recipe_run_observations()?;
+        let wait_seconds = claim_wait_seconds(config.poll_max_seconds, observations.len());
+        let observation_entropy =
+            SystemTime::now().duration_since(UNIX_EPOCH)?.subsec_nanos() as u64;
+        let operation = async {
+            match client.report_recipe_run_observations(&observations).await {
+                Ok(()) => observation_failures = 0,
+                Err(error) => match observation_failure_action(&error) {
+                    ObservationFailureAction::BackoffThenClaim => {
+                        observation_failures = observation_failures.saturating_add(1);
+                        tokio::time::sleep(backoff_delay(
+                            observation_failures,
+                            observation_entropy,
+                            config.poll_min_seconds,
+                            config.poll_max_seconds,
+                        ))
+                        .await;
+                    }
+                    ObservationFailureAction::Stop => return Err(LoopError::Client(error)),
+                },
+            }
+            run_once(
+                &client,
+                &mut state,
+                &executor,
+                &capabilities,
+                wait_seconds,
+                supervisor_readiness.runtime_identity(),
+            )
+            .await
+        };
         tokio::select! {
             result = operation => match result {
                 Ok(()) => failures = 0,
@@ -173,5 +197,62 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
                 return Ok(());
             }
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ObservationFailureAction {
+    BackoffThenClaim,
+    Stop,
+}
+
+fn observation_failure_action(error: &ClientError) -> ObservationFailureAction {
+    if error.retryable() {
+        ObservationFailureAction::BackoffThenClaim
+    } else {
+        ObservationFailureAction::Stop
+    }
+}
+
+fn claim_wait_seconds(configured_maximum: u64, managed_run_count: usize) -> u64 {
+    let existing_wait = configured_maximum.min(60);
+    if managed_run_count == 0 {
+        existing_wait
+    } else {
+        existing_wait.min(10)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ObservationFailureAction, claim_wait_seconds, observation_failure_action};
+    use vonk_agent::client::ClientError;
+
+    #[test]
+    fn managed_runs_cap_claim_long_poll_at_ten_seconds() {
+        assert_eq!(claim_wait_seconds(60, 1), 10);
+        assert_eq!(claim_wait_seconds(7, 1), 7);
+    }
+
+    #[test]
+    fn no_managed_runs_retain_existing_claim_long_poll_behavior() {
+        assert_eq!(claim_wait_seconds(300, 0), 60);
+        assert_eq!(claim_wait_seconds(7, 0), 7);
+    }
+
+    #[test]
+    fn retryable_observation_failure_backs_off_then_allows_claim() {
+        assert_eq!(
+            observation_failure_action(&ClientError::Retryable),
+            ObservationFailureAction::BackoffThenClaim
+        );
+    }
+
+    #[test]
+    fn non_retryable_observation_failure_stops_the_loop() {
+        assert_eq!(
+            observation_failure_action(&ClientError::Protocol),
+            ObservationFailureAction::Stop
+        );
     }
 }

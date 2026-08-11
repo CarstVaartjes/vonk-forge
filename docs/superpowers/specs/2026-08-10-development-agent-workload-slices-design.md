@@ -166,8 +166,13 @@ The Rust configuration gains two mandatory HTTPS origins:
 - `enrollment_url`, set to `https://enroll.vonk-forge.lan:8443/` and used only
   by `vonk-forge-agent pair`;
 - `controller_url`, set to `https://agents.vonk-forge.lan:8443/` and used after
-  identity issuance for claims, results, presence, recipe specs, source/image
-  transfer, and all other authenticated operations.
+identity issuance for claims, results, presence, recipe specs, source/image
+transfer, complete recipe-run health snapshots, and all other authenticated
+operations. While local recipe runs exist, the Rust agent reports their exact
+run IDs and one bounded endpoint-readiness result at most ten seconds apart.
+The controller projects only the authenticated node's assigned ranks; a
+missing or unhealthy rank is failed without conflating workload health with
+agent presence. Fresh healthy evidence permits automatic route republication.
 
 Both must be canonical root URLs without userinfo, query, or fragment. They may
 be equal for compatible deployments, but the documented development and
@@ -312,9 +317,11 @@ and are never sent to the controller or embedded in the recipe.
 4. Ensure both nodes import the exact same image and model artifacts.
 5. Start the gang, require every rank healthy, publish only the designated
    entrypoint, and run an inference through LiteLLM.
-6. Stop one rank and prove the route is withdrawn and the gang is not reported
-   healthy.
-7. Recover the rank, republish, then restart agent and NAS services and verify
+6. Stop one rank's rootless managed container while its agent remains healthy,
+   then prove the authenticated complete snapshot marks only that rank failed,
+   withdraws the route, and reports the gang unhealthy.
+7. Start that exact managed container again, require a fresh successful health
+   snapshot, republish, then restart agent and NAS services and verify
    reconciliation without rebuilding or redownloading immutable artifacts.
 8. Stop and uninstall the validation deployment, preserving cached immutable
    artifacts according to normal reference-count policy.

@@ -303,24 +303,51 @@ scripts/run-development-slices \
   --stop-after inference-ok
 ```
 
-Stop the second node's supervisor and agent, wait at least 35 seconds, then
-resume the exact runner command with:
+Read the non-secret run ID from the acceptance evidence and stop only the
+second rank's exact rootless managed container. Keep the Rust agent running so
+this proves workload-rank failure rather than loss of agent presence:
+
+```bash
+RUN_ID="$(jq -r '.outputs.run_id' '<EVIDENCE_DIRECTORY>/model-multinode.json)"
+test "$RUN_ID" != null
+ssh dgx-spark-2 sudo -u vonk-agent env \
+  HOME=/var/lib/vonk-forge-agent \
+  XDG_DATA_HOME=/var/lib/vonk-forge-agent \
+  XDG_RUNTIME_DIR=/run/vonk-forge-agent \
+  CONTAINERS_STORAGE_CONF=/etc/vonk-forge-agent/containers-storage.conf \
+  podman stop "vonk-$RUN_ID"
+```
+
+The authenticated agent submits complete local run snapshots no more than ten
+seconds apart while a managed run exists. Resume the exact runner command with:
 
 ```text
 --stop-after route-withdrawn-after-failure
 ```
 
-The resumed runner first records `--stop-after rank-failure-observed`, then
-requires the route to disappear. Restore the second agent, wait for fresh
-inventory, and resume with:
+The resumed runner first records `--stop-after rank-failure-observed`, proves
+both agents remain healthy, and then requires the route to disappear. Recover
+the exact stopped rank without rebuilding or deleting its managed state:
+
+```bash
+ssh dgx-spark-2 sudo -u vonk-agent env \
+  HOME=/var/lib/vonk-forge-agent \
+  XDG_DATA_HOME=/var/lib/vonk-forge-agent \
+  XDG_RUNTIME_DIR=/run/vonk-forge-agent \
+  CONTAINERS_STORAGE_CONF=/etc/vonk-forge-agent/containers-storage.conf \
+  podman start "vonk-$RUN_ID"
+```
+
+Wait for its health endpoint and next authenticated snapshot, then resume with:
 
 ```text
 --stop-after inference-recovered
 ```
 
 This proves both ranks are fresh, the sole route is republished, and inference
-works again. Do not delete a container, cache, model directory, identity, or
-named volume to simulate failure.
+works again. Do not stop an agent, remove a container, delete a cache/model
+directory, replace an identity, or delete a named volume to simulate rank
+failure.
 
 For both model phases, the private qualification SHA-256, build and distribution
 evidence, and per-node runtime artifact evidence are retained by the acceptance
