@@ -38,6 +38,7 @@ def _environment() -> dict[str, str]:
         "ADMIN_GRANT_PRIVATE_KEY_FILE": "/dev/null",
         "PACKAGE_HELPER_GRANT_PRIVATE_KEY_FILE": "/dev/null",
         "PACKAGE_HELPER_RECEIPT_PRIVATE_KEY_FILE": "/dev/null",
+        "HOST_RUNTIME_GRANT_PRIVATE_KEY_FILE": "/dev/null",
         "WORKLOAD_RELEASES_KEY_FILE": "/dev/null",
         "WORKLOAD_SNAPSHOT_KEY_FILE": "/dev/null",
         "WORKLOAD_TIMESTAMP_KEY_FILE": "/dev/null",
@@ -255,6 +256,7 @@ def _settings_result(rendered: dict, tmp_path: Path) -> subprocess.CompletedProc
         "VONK_ADMIN_GRANT_PRIVATE_KEY_FILE": "test-admin-grant-private-key\n",
         "VONK_PACKAGE_HELPER_GRANT_PRIVATE_KEY_FILE": "test-package-grant-key\n",
         "VONK_PACKAGE_HELPER_RECEIPT_PRIVATE_KEY_FILE": "test-package-receipt-key\n",
+        "VONK_HOST_RUNTIME_GRANT_PRIVATE_KEY_FILE": "test-host-runtime-key\n",
     }
     for name, value in tuple(control_environment.items()):
         if name not in secret_values:

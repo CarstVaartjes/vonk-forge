@@ -66,9 +66,10 @@ Production remains selected by the trusted host updater and immutable TUF
 target; `:latest` is never production deployment authority.
 
 Confirm both nodes report `aarch64`, Ubuntu `24.04`, NVIDIA GB10 compute
-capability 12.1, rootless Podman with at least 65,536 subordinate UIDs and
-GIDs for `vonk-agent`, NVIDIA CDI, enough disk/memory, and an active common
-direct fabric. Confirm the NAS is `linux/amd64`, Docker Compose is available,
+capability 12.1, rootless Podman build isolation with at least 65,536
+subordinate UIDs and GIDs for `vonk-agent`, Spark-managed Docker with NVIDIA
+CDI `nvidia.com/gpu=all`, enough disk/memory, and an active common direct TCP
+fabric. Confirm the NAS is `linux/amd64`, Docker Compose is available,
 and the project directory is empty or contains only the supported two-item
 layout.
 
@@ -98,19 +99,28 @@ scripts/dev-runtime-project \
   --registry-hostname '<REGISTRY_HOSTNAME>'
 ```
 
-The generator creates 15 local source files: 14 protected secret/config files
-plus the public `git-signing-key.pub`. The protected `controller-ca-key` is
-required to validate and rotate the controller CA, so include all 15 local
+The generator creates 17 local source files: 14 deployment secret/config files
+plus `controller-ca-key`, `git-signing-key.pub`, and
+`host-runtime-grant-public-key`. The protected `controller-ca-key` and
+`host-runtime-grant-private-key` are required to preserve their respective
+authorities, so include all 17 local
 source files in one encrypted 1Password generation or equivalent backup before
 first deployment. `controller-ca-key` must not be copied to the NAS.
-An existing 14-file local source from an earlier branch head is incomplete: the
-missing private key cannot be reconstructed from `controller-ca`. Create and
-back up a fresh 15-file generation, then use the coordinated PKI rotation below;
-do not replace only the CA or server certificate.
+For the one supported upgrade from the original 15-file source generation,
+rerun the same command once with `--upgrade-host-runtime-authority`. The helper
+accepts only an otherwise complete and valid legacy generation, performs an
+add-only migration by adding the two
+host-runtime authority files, leaves every existing file byte-for-byte
+unchanged, and can recover if power is lost after publishing the private half.
+Back up the resulting 17-file generation before deployment. It rejects a
+public-only key, unknown file, inconsistent generation, or ordinary incomplete
+directory; do not work around that refusal by replacing the CA or server
+certificate.
 
 `dev-runtime-project` validates the complete local generation and projects
-exactly 13 deployment files into the NAS `secrets/` directory; it excludes both
-`controller-ca-key` and `git-signing-key.pub`. The NAS project must contain only
+exactly 14 deployment files into the NAS `secrets/` directory; it excludes
+`controller-ca-key`, `git-signing-key.pub`, and
+`host-runtime-grant-public-key`. The NAS project must contain only
 `docker-compose.yml` and `secrets/`. Pull/redeploy it in the Docker UI and keep
 every named volume. Successful one-shot cohort, initialization, and migration
 containers are expected to exit; PostgreSQL, API, worker, Caddy, and LiteLLM
@@ -151,20 +161,28 @@ sudo apt install vonk-forge-agent
 apt-cache policy vonk-forge-agent
 ```
 
-Do not enable both `dev` and `stable`. Copy only the public `controller-ca` to
-each node and independently record its public DER SHA-256 fingerprint:
+Do not enable both `dev` and `stable`. Complete the NVIDIA Docker/CDI preflight
+from the installation guide. Copy only the public `controller-ca` and public
+`host-runtime-grant-public-key` to each node and independently record the CA's
+public DER SHA-256 fingerprint:
 
 ```bash
 openssl x509 -in '<LOCAL_SECRETS_DIR>/controller-ca' -outform DER | sha256sum
 scp '<LOCAL_SECRETS_DIR>/controller-ca' '<SPARK_1_SSH_TARGET>:/tmp/controller-ca.pem'
 scp '<LOCAL_SECRETS_DIR>/controller-ca' '<SPARK_2_SSH_TARGET>:/tmp/controller-ca.pem'
+scp '<LOCAL_SECRETS_DIR>/host-runtime-grant-public-key' \
+  '<SPARK_1_SSH_TARGET>:/tmp/host-helper-authority.pub'
+scp '<LOCAL_SECRETS_DIR>/host-runtime-grant-public-key' \
+  '<SPARK_2_SSH_TARGET>:/tmp/host-helper-authority.pub'
 ```
 
 On each node, install that certificate as root and set the complete
 `/etc/vonk-forge-agent/agent.toml` inputs from
 [Install the Vonk Forge agent](../operations/install-vonk-agent.md):
-`enrollment_url`, `controller_url`, `ca_path`, the DER `ca_sha256`, and that
-node's unique `node_id`. Use `https://<ENROLLMENT_HOSTNAME>:8443/` for
+`enrollment_url`, `controller_url`, `ca_path`, the DER `ca_sha256`, that
+node's unique `node_id`, `fabric_address`, and `fabric_bandwidth_mbps = 200000`.
+Install the helper key at `/etc/vonk-forge-agent/host-helper-authority.pub` as
+`root:root` mode `0644`. Use `https://<ENROLLMENT_HOSTNAME>:8443/` for
 enrollment and `https://<CONTROLLER_HOSTNAME>:8443/` for authenticated
 controller traffic. Generate a non-secret candidate identity with
 `printf 'spk_%s\n' "$(openssl rand -hex 16)"`, record it, and never reuse it on
@@ -217,7 +235,8 @@ ssh -N \
 Use `http://127.0.0.1:<LOCAL_API_PORT>` as `--api-base` and
 `http://127.0.0.1:<LOCAL_INFERENCE_PORT>` as `--inference-base`. Confirm the
 fleet shows both exact node IDs online, Rust protocol 3, fresh inventory,
-rootless runtime capability, and distinct management/fabric addresses before
+both `build.rootless-podman.v1` and `runtime.spark-docker-nvidia.v1`, and
+distinct management/fabric addresses before
 starting a workload. Retain only bounded API output in the evidence directory.
 
 ## Synthetic lifecycle
@@ -250,6 +269,7 @@ Create `model-qualification-input.json` from fresh read-only observations. It
 contains no credentials: anonymous image platform/label/user/public-pull
 results; accepted license IDs; both certificate-bound node IDs; architecture,
 OS, GPU/compute/CUDA code, rootless Podman status, available memory/disk,
+successful Spark Docker/NVIDIA CDI runtime status (`docker_gpu_runtime: true`),
 management CIDRs, active fabric CIDRs/bandwidth; and the exact artifact
 IDs/revisions/SHA-256/byte counts from
 `config/recipes/development/model-smoke-artifacts.json`. The later agent install
@@ -297,15 +317,15 @@ closed if this real TCP exchange does not complete. The rank-0 coordinator
 remains available while its DS4 process runs so restarting rank 1 repeats the
 same pre-launch exchange. Only rank 0 owns the routed inference endpoint.
 
-The workload containers use rootless `slirp4netns`. Rank 1 therefore does not
-bind the host's `VONK_LOCAL_ADDR` inside its private network namespace; slirp
-selects the container-side source address. `VONK_LOCAL_ADDR` remains the
-bounded controller-supplied rank identity carried in the HELLO and retained in
-evidence, while the socket destination remains the exact
-`VONK_MASTER_ADDR:VONK_MASTER_PORT`. The address-specific rank-0 host
+Accepted workloads use the Spark-provided Docker/NVIDIA runtime on an isolated
+Docker bridge. Rank 1 reaches the exact
+`VONK_MASTER_ADDR:VONK_MASTER_PORT` through host routing/SNAT; it does not bind
+the host's `VONK_LOCAL_ADDR` inside its container namespace.
+`VONK_LOCAL_ADDR` remains the bounded controller-supplied rank identity carried
+in the HELLO and retained in evidence. The address-specific rank-0 host
 publication, host routing, and direct-fabric-only firewall policy enforce the
-physical path. Do not treat the peer address observed inside the slirp
-namespace as proof of a host fabric source address.
+physical path. Do not treat the peer address observed inside the Docker bridge
+as proof of a host fabric source address.
 
 Before starting this phase, configure the GPU-node host firewall for the
 current reserved rendezvous TCP port `29500`. The only allowed flow is
@@ -343,18 +363,18 @@ scripts/run-development-slices \
 ```
 
 Read the non-secret run ID from the acceptance evidence and stop only the
-second rank's exact rootless managed container. Keep the Rust agent running so
-this proves workload-rank failure rather than loss of agent presence:
+second rank's exact Vonk-managed Docker container. Verify all three management
+labels before touching it. Keep the Rust agent running so this proves
+workload-rank failure rather than loss of agent presence:
 
 ```bash
 RUN_ID="$(jq -r '.outputs.run_id' '<EVIDENCE_DIRECTORY>/model-multinode.json)"
 test "$RUN_ID" != null
-ssh dgx-spark-2 sudo -u vonk-agent env \
-  HOME=/var/lib/vonk-forge-agent \
-  XDG_DATA_HOME=/var/lib/vonk-forge-agent \
-  XDG_RUNTIME_DIR=/run/vonk-forge-agent \
-  CONTAINERS_STORAGE_CONF=/etc/vonk-forge-agent/containers-storage.conf \
-  podman stop "vonk-$RUN_ID"
+ssh '<SPARK_2_SSH_TARGET>' sudo docker container inspect \
+  --format '{{index .Config.Labels "ai.vonkforge.managed"}} {{index .Config.Labels "ai.vonkforge.run-id"}} {{index .Config.Labels "ai.vonkforge.runtime-request-sha256"}}' \
+  "vonk-$RUN_ID"
+# Continue only when the output is: true, the exact RUN_ID, and 64 lowercase hex.
+ssh '<SPARK_2_SSH_TARGET>' sudo docker stop "vonk-$RUN_ID"
 ```
 
 The authenticated agent submits complete local run snapshots no more than ten
@@ -369,12 +389,7 @@ both agents remain healthy, and then requires the route to disappear. Recover
 the exact stopped rank without rebuilding or deleting its managed state:
 
 ```bash
-ssh dgx-spark-2 sudo -u vonk-agent env \
-  HOME=/var/lib/vonk-forge-agent \
-  XDG_DATA_HOME=/var/lib/vonk-forge-agent \
-  XDG_RUNTIME_DIR=/run/vonk-forge-agent \
-  CONTAINERS_STORAGE_CONF=/etc/vonk-forge-agent/containers-storage.conf \
-  podman start "vonk-$RUN_ID"
+ssh '<SPARK_2_SSH_TARGET>' sudo docker start "vonk-$RUN_ID"
 ```
 
 Wait for its health endpoint and next authenticated snapshot, then resume with:
@@ -431,10 +446,12 @@ matching full-state restore.
 
 Rotate the PostgreSQL password and database URL only as one coordinated pair.
 Rotate Git signing authority with historical public-key retention. Rotate
-agent/controller PKI, LiteLLM/proxy tokens, and token-signing authority as one
-planned new 15-file local
+agent/controller PKI, host-runtime signing authority, LiteLLM/proxy tokens, and
+token-signing authority as one planned new 17-file local
 source generation: back it up, distribute replacement public trust first,
-schedule re-enrollment/client key change, project the exact 13-file NAS bundle,
+schedule re-enrollment/client key change, install the replacement helper public
+key on every node before switching the private signer, project the exact
+14-file NAS bundle,
 and pull/redeploy. Never overwrite one CA private key or one server certificate
 in isolation and hope the other projections recover.
 

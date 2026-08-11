@@ -5,12 +5,12 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_control.auth import TokenCodec
 from vonk_control.jobs import JobService, StaleAttempt
 from vonk_control.models import Base
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 
 class Clock:

@@ -2,11 +2,16 @@ import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker
 from vonk_control.artifact_sizes import ArtifactSize, StaticArtifactSizeResolver
 from vonk_control.catalog_service import CatalogService, RecipeDraftInput
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.install_admission import InstallAdmissionService
-from vonk_control.inventory_repository import InventoryRepository, InventorySnapshotInput
+from vonk_control.inventory_repository import (
+    InventoryRepository,
+    InventorySnapshotInput,
+)
 from vonk_control.models import (
     AgentNode,
     Base,
@@ -15,8 +20,6 @@ from vonk_control.models import (
     RecipeInstallation,
     ResourceReservation,
 )
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import sessionmaker
 
 MODEL_SOURCE = (
     "Qwen/Qwen3-30B-A3B-Instruct-2507@0123456789abcdef0123456789abcdef01234567"

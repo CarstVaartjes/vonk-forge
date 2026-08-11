@@ -142,7 +142,7 @@ administration account. Both sessions were closed and reopened before testing.
 
 Fresh checks on both nodes showed `docker` in `carst`'s groups and Docker
 Server `29.2.1`. Running
-`docker run --rm --gpus all nvcr.io/nvidia/cuda:13.0.1-devel-ubuntu24.04`
+`docker run --rm --gpus all nvcr.io/nvidia/cuda:13.0.1-devel-ubuntu24.04@sha256:7d2f6a8c2071d911524f95061a0db363e24d27aa51ec831fcccf9e76eb72bc92`
 exposed the NVIDIA GB10 with driver `580.173.02` on each GPU node. A fresh
 `vonkctl nodes status --json` exited `0`; both nodes were healthy with no
 warnings or errors, Docker available, GPU temperature 39 C, and both fabric

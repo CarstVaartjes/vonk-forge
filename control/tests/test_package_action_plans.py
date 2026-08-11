@@ -4,6 +4,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.db import build_engine, session_factory
 from vonk_control.models import (
@@ -19,8 +21,6 @@ from vonk_control.models import (
 from vonk_control.models import AgentOperation as StoredAgentOperation
 from vonk_control.package_services import ProductionPackageProjectionService
 from vonk_control.repository import RepositoryService
-from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 
 
 def test_package_action_plan_persists_bounded_digest_bound_request(tmp_path) -> None:

@@ -11,13 +11,13 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
-from vonk_control.auth import AgentIdentity, AgentSource
-from vonk_control.models import AgentCertificate, AgentNode
-from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
 from sqlalchemy import JSON, bindparam, create_engine, inspect, select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
+from vonk_control.auth import AgentIdentity, AgentSource
+from vonk_control.models import AgentCertificate, AgentNode
+from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
 
 
 def _config(database_url: str) -> Config:

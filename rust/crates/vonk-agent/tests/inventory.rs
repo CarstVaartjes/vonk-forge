@@ -11,6 +11,7 @@ use vonk_agent::{
 struct FakeRunner {
     calls: RefCell<Vec<(Program, Vec<String>)>>,
     gpu_output: &'static [u8],
+    cdi_output: &'static [u8],
 }
 
 impl ProcessRunner for FakeRunner {
@@ -24,6 +25,8 @@ impl ProcessRunner for FakeRunner {
         let stdout = match program {
             Program::NvidiaSmi => self.gpu_output.to_vec(),
             Program::Podman => b"5.4.2\n".to_vec(),
+            Program::Docker => b"Docker version 29.2.1, build test\n".to_vec(),
+            Program::NvidiaCtk => self.cdi_output.to_vec(),
             _ => unreachable!(),
         };
         Ok(ProcessOutput {
@@ -46,6 +49,7 @@ fn inventory_reports_physical_and_available_memory_disk_and_gpu() {
     let runner = FakeRunner {
         calls: RefCell::new(vec![]),
         gpu_output: b"NVIDIA H100, 119808, 110000, 590.44\n",
+        cdi_output: b"nvidia.com/gpu=all\n",
     };
     let inventory = InventoryCollector {
         runner: &runner,
@@ -75,14 +79,19 @@ fn inventory_reports_physical_and_available_memory_disk_and_gpu() {
     assert!(
         inventory
             .capabilities
-            .contains(&"runtime.rootless-podman.v1".to_owned())
+            .contains(&"build.rootless-podman.v1".to_owned())
+    );
+    assert!(
+        inventory
+            .capabilities
+            .contains(&"runtime.spark-docker-nvidia.v1".to_owned())
     );
     assert!(
         inventory
             .capabilities
             .contains(&"fabric.tcp.mbps.200000".to_owned())
     );
-    assert_eq!(runner.calls.borrow().len(), 2);
+    assert_eq!(runner.calls.borrow().len(), 4);
     assert_eq!(
         available_memory_bytes(&runner, &meminfo).unwrap(),
         65432 * 1024
@@ -104,6 +113,7 @@ fn malformed_or_inconsistent_memory_evidence_fails_closed() {
     let runner = FakeRunner {
         calls: RefCell::new(vec![]),
         gpu_output: b"NVIDIA H100, 119808, 110000, 590.44\n",
+        cdi_output: b"nvidia.com/gpu=all\n",
     };
     assert!(
         InventoryCollector {
@@ -131,6 +141,7 @@ fn inventory_uses_host_memory_for_the_unified_memory_gb10() {
     let runner = FakeRunner {
         calls: RefCell::new(vec![]),
         gpu_output: b"NVIDIA GB10, [N/A], [N/A], 580.173.02\n",
+        cdi_output: b"nvidia.com/gpu=all\n",
     };
 
     let inventory = InventoryCollector {
@@ -164,6 +175,35 @@ fn unavailable_memory_on_an_unknown_gpu_fails_closed() {
     let runner = FakeRunner {
         calls: RefCell::new(vec![]),
         gpu_output: b"Unknown GPU, [N/A], [N/A], 580.173.02\n",
+        cdi_output: b"nvidia.com/gpu=all\n",
+    };
+
+    assert!(
+        InventoryCollector {
+            runner: &runner,
+            meminfo_path: &meminfo,
+            store_path: directory.path(),
+            fabric_address: None,
+            fabric_bandwidth_mbps: None,
+        }
+        .collect()
+        .is_err()
+    );
+}
+
+#[test]
+fn inventory_refuses_to_advertise_spark_runtime_without_nvidia_cdi() {
+    let directory = tempdir().unwrap();
+    let meminfo = directory.path().join("meminfo");
+    fs::write(
+        &meminfo,
+        "MemTotal:       123456 kB\nMemAvailable:    65432 kB\n",
+    )
+    .unwrap();
+    let runner = FakeRunner {
+        calls: RefCell::new(vec![]),
+        gpu_output: b"NVIDIA GB10, [N/A], [N/A], 580.173.02\n",
+        cdi_output: b"",
     };
 
     assert!(

@@ -52,6 +52,7 @@ LiteLLM publishes only routes acknowledged by the control plane.
 - [Recipe and workload operations](runbooks/workload-packages.md)
 - [Global catalog import and publication](runbooks/global-catalog.md)
 - [Vonk Forge agent installation](operations/install-vonk-agent.md)
+- [DGX Spark platform-alignment audit](audits/2026-08-12-dgx-spark-platform-alignment.md)
 - [Model switching](runbooks/model-switching.md)
 - [Platform updates](runbooks/platform-update.md)
 - [Security threat model](security/threat-model.md)

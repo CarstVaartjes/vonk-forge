@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from typing import Protocol
 from urllib.parse import urlsplit
 
-
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _HEX_40 = re.compile(r"[0-9a-f]{40}\Z")
 _HEX_64 = re.compile(r"[0-9a-f]{64}\Z")

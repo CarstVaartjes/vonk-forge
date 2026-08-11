@@ -10,11 +10,11 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import AgentOperation, AgentProtocolError
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
 from vonk_control.models import AgentCertificate, AgentNode, Base, Job
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 ROOT = Path(__file__).resolve().parents[3]
 NODE_A = "spk_" + "a" * 32

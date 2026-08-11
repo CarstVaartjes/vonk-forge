@@ -5,12 +5,12 @@ import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import AgentIdentity, AgentSource
 from vonk_control.legacy_route_runtime import ProductionRouteManager, RouteRuntimeError
 from vonk_control.models import AgentCertificate, AgentNode, Base
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 NODE_ID = "spk_" + "0" * 31 + "1"
 SECOND_NODE_ID = "spk_" + "0" * 31 + "2"

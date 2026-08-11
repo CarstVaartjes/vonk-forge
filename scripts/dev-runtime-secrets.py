@@ -41,6 +41,7 @@ DEPLOYMENT_SECRET_NAMES = frozenset(
         "controller-server-key",
         "database-url",
         "git-signing-key",
+        "host-runtime-grant-private-key",
         "litellm-master-key",
         "litellm-upstream-key",
         "management-cidrs",
@@ -49,11 +50,21 @@ DEPLOYMENT_SECRET_NAMES = frozenset(
     }
 )
 LOCAL_SOURCE_SECRET_NAMES = DEPLOYMENT_SECRET_NAMES | frozenset(
-    {"controller-ca-key", "git-signing-key.pub"}
+    {
+        "controller-ca-key",
+        "git-signing-key.pub",
+        "host-runtime-grant-public-key",
+    }
 )
 # Compatibility for the project publisher, which validates the complete local
 # source before publishing its fixed deployment subset.
 RUNTIME_SECRET_NAMES = LOCAL_SOURCE_SECRET_NAMES
+_HOST_RUNTIME_PRIVATE = "host-runtime-grant-private-key"
+_HOST_RUNTIME_PUBLIC = "host-runtime-grant-public-key"
+_LEGACY_RUNTIME_SECRET_NAMES = RUNTIME_SECRET_NAMES - {
+    _HOST_RUNTIME_PRIVATE,
+    _HOST_RUNTIME_PUBLIC,
+}
 
 
 class RuntimeSecretError(RuntimeError):
@@ -311,6 +322,7 @@ def _secret_bundle(
     controller_key = Ed25519PrivateKey.generate()
     server_key = Ed25519PrivateKey.generate()
     signing_key = Ed25519PrivateKey.generate()
+    host_runtime_key = Ed25519PrivateKey.generate()
     agent_ca = _ca_certificate("Vonk Forge Development Agent CA", agent_key)
     controller_ca = _ca_certificate(
         "Vonk Forge Development Controller CA", controller_key
@@ -396,6 +408,10 @@ def _secret_bundle(
         ),
         "git-signing-key": signing_private,
         "git-signing-key.pub": signing_public,
+        "host-runtime-grant-private-key": private_pem(host_runtime_key),
+        "host-runtime-grant-public-key": (
+            host_runtime_key.public_key().public_bytes_raw().hex() + "\n"
+        ).encode("ascii"),
         "litellm-master-key": token(),
         "litellm-upstream-key": token(),
         "management-cidrs": ("\n".join(management_cidrs) + "\n").encode("ascii"),
@@ -433,6 +449,12 @@ def _validate_bundle(
         signing_public = serialization.load_ssh_public_key(
             bundle["git-signing-key.pub"]
         )
+        host_runtime_key = serialization.load_pem_private_key(
+            bundle["host-runtime-grant-private-key"], password=None
+        )
+        host_runtime_public = bytes.fromhex(
+            bundle["host-runtime-grant-public-key"].decode("ascii").strip()
+        )
     except (TypeError, ValueError) as error:
         raise RuntimeSecretError(
             "development secret bundle contains invalid key material"
@@ -446,6 +468,8 @@ def _validate_bundle(
         or not isinstance(server_key, Ed25519PrivateKey)
         or not isinstance(signing_key, Ed25519PrivateKey)
         or not isinstance(signing_public, Ed25519PublicKey)
+        or not isinstance(host_runtime_key, Ed25519PrivateKey)
+        or len(host_runtime_public) != 32
         or not isinstance(agent_public, Ed25519PublicKey)
         or not isinstance(controller_public, Ed25519PublicKey)
         or not isinstance(server_public, Ed25519PublicKey)
@@ -456,6 +480,7 @@ def _validate_bundle(
         != server_key.public_key().public_bytes_raw()
         or signing_key.public_key().public_bytes_raw()
         != signing_public.public_bytes_raw()
+        or host_runtime_key.public_key().public_bytes_raw() != host_runtime_public
         or agent_ca.subject == controller_ca.subject
         or agent_ca.serial_number == controller_ca.serial_number
         or server.issuer != controller_ca.subject
@@ -627,6 +652,72 @@ def _remove_staging(parent: int, name: str, descriptor: int) -> None:
             pass
 
 
+def _host_runtime_authority_pair(
+    retained_private: bytes | None = None,
+) -> tuple[bytes, bytes]:
+    if retained_private is None:
+        key = Ed25519PrivateKey.generate()
+        private = key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    else:
+        try:
+            key = serialization.load_pem_private_key(
+                retained_private, password=None
+            )
+        except (TypeError, ValueError) as error:
+            raise RuntimeSecretError(
+                "development host runtime authority is invalid"
+            ) from error
+        if not isinstance(key, Ed25519PrivateKey):
+            raise RuntimeSecretError(
+                "development host runtime authority is invalid"
+            )
+        private = retained_private
+    public = (key.public_key().public_bytes_raw().hex() + "\n").encode("ascii")
+    return private, public
+
+
+def _upgrade_host_runtime_authority(
+    directory: int,
+    bundle: dict[str, bytes],
+    *,
+    management_cidrs: tuple[str, ...],
+    enroll_hostname: str,
+    agent_hostname: str,
+    registry_hostname: str,
+) -> None:
+    retained = bundle.get(_HOST_RUNTIME_PRIVATE)
+    private, public = _host_runtime_authority_pair(retained)
+    candidate = dict(bundle)
+    candidate[_HOST_RUNTIME_PRIVATE] = private
+    candidate[_HOST_RUNTIME_PUBLIC] = public
+    _validate_bundle(
+        candidate,
+        management_cidrs=management_cidrs,
+        enroll_hostname=enroll_hostname,
+        agent_hostname=agent_hostname,
+        registry_hostname=registry_hostname,
+    )
+    if retained is None:
+        _write_file(directory, _HOST_RUNTIME_PRIVATE, private)
+        os.fsync(directory)
+    _write_file(directory, _HOST_RUNTIME_PUBLIC, public)
+    os.fsync(directory)
+    installed = {
+        name: _read_file(directory, name) for name in RUNTIME_SECRET_NAMES
+    }
+    _validate_bundle(
+        installed,
+        management_cidrs=management_cidrs,
+        enroll_hostname=enroll_hostname,
+        agent_hostname=agent_hostname,
+        registry_hostname=registry_hostname,
+    )
+
+
 def prepare_runtime_secrets(
     secrets_dir: Path,
     *,
@@ -634,6 +725,7 @@ def prepare_runtime_secrets(
     enroll_hostname: str,
     agent_hostname: str,
     registry_hostname: str,
+    upgrade_host_runtime_authority: bool = False,
 ) -> Path:
     enroll = _validate_hostname(enroll_hostname)
     agent = _validate_hostname(agent_hostname)
@@ -651,6 +743,26 @@ def prepare_runtime_secrets(
             existing_descriptor, existing_metadata = existing
             names = set(os.listdir(existing_descriptor))
             if names:
+                recoverable_upgrade = frozenset(names) in {
+                    frozenset(_LEGACY_RUNTIME_SECRET_NAMES),
+                    frozenset(
+                        _LEGACY_RUNTIME_SECRET_NAMES | {_HOST_RUNTIME_PRIVATE}
+                    ),
+                }
+                if upgrade_host_runtime_authority and recoverable_upgrade:
+                    bundle = {
+                        name: _read_file(existing_descriptor, name)
+                        for name in names
+                    }
+                    _upgrade_host_runtime_authority(
+                        existing_descriptor,
+                        bundle,
+                        management_cidrs=cidrs,
+                        enroll_hostname=enroll,
+                        agent_hostname=agent,
+                        registry_hostname=registry,
+                    )
+                    return secrets_dir
                 if names != RUNTIME_SECRET_NAMES:
                     # Validate every present entry before reporting an incomplete bundle.
                     for name in sorted(names):
@@ -772,6 +884,14 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--enroll-hostname", required=True)
     parser.add_argument("--agent-hostname", required=True)
     parser.add_argument("--registry-hostname", required=True)
+    parser.add_argument(
+        "--upgrade-host-runtime-authority",
+        action="store_true",
+        help=(
+            "add only the host runtime signing key pair to a validated "
+            "legacy development secret generation"
+        ),
+    )
     return parser.parse_args()
 
 
@@ -790,6 +910,9 @@ def main() -> int:
             enroll_hostname=arguments.enroll_hostname,
             agent_hostname=arguments.agent_hostname,
             registry_hostname=arguments.registry_hostname,
+            upgrade_host_runtime_authority=(
+                arguments.upgrade_host_runtime_authority
+            ),
         )
         print(destination)
         for line in _public_summary(destination):

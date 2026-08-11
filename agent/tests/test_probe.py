@@ -12,8 +12,8 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-import vonk_agent.probe as probe_module
 import pytest
+import vonk_agent.probe as probe_module
 from vonk_agent import nvidia_tools
 from vonk_agent.deadlines import MonotonicDeadline
 from vonk_agent.nvidia_tools import (

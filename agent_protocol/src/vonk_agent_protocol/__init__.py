@@ -10,6 +10,7 @@ from .contracts import (
 )
 from .host_helper import (
     AgentSlot,
+    ContainerRuntimeAction,
     HostHelperGrantClaims,
     HostHelperOperation,
     HostHelperSignature,
@@ -54,6 +55,7 @@ __all__ = [
     "AgentResult",
     "AgentSlot",
     "ComponentDescriptor",
+    "ContainerRuntimeAction",
     "HostHelperGrantClaims",
     "HostHelperOperation",
     "HostHelperSignature",

@@ -22,7 +22,6 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
-
 NODE_ID = "spk_0123456789abcdef0123456789abcdef"
 PAYLOAD = {
     "schema_version": 1,

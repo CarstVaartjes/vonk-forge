@@ -612,6 +612,10 @@ def build_agent_services(
     """Construct the fail-closed production agent runtime from one provider."""
     from .agent_jobs import AgentJobService
     from .enrollment import EnrollmentService
+    from .host_helper_authority import (
+        HostHelperGrantIssuer,
+        HostRuntimeAuthorityService,
+    )
     from .package_helper_authority import (
         PackageHelperAuthorityService,
         PackageHelperGrantIssuer,
@@ -727,6 +731,7 @@ def build_agent_services(
     )
     operations.set_contact_consumer(presence.observe_in_session)
     helper_authority = None
+    host_runtime_authority = None
     grant_key_path = getattr(settings, "package_helper_grant_private_key_path", None)
     receipt_key_path = getattr(
         settings, "package_helper_receipt_private_key_path", None
@@ -741,6 +746,21 @@ def build_agent_services(
             PackageHelperGrantIssuer.from_private_key_file(grant_key_path, clock=clock),
             PackageObjectReceiptIssuer.from_private_key_file(receipt_key_path),
             workload_target_root=workload_tuf_target_root,
+            clock=clock,
+        )
+    host_runtime_key_path = getattr(
+        settings, "host_runtime_grant_private_key_path", None
+    )
+    if getattr(settings, "deployment_mode", "") == "production" and (
+        host_runtime_key_path is None
+    ):
+        raise RuntimeError("host runtime authority key is unavailable")
+    if host_runtime_key_path is not None:
+        host_runtime_authority = HostRuntimeAuthorityService(
+            sessions,
+            HostHelperGrantIssuer.from_private_key_file(
+                host_runtime_key_path, clock=clock
+            ),
             clock=clock,
         )
     return AgentApiServices(
@@ -759,6 +779,7 @@ def build_agent_services(
         workload_tuf_metadata_root=workload_tuf_metadata_root,
         workload_tuf_target_root=workload_tuf_target_root,
         package_helper_authority=helper_authority,
+        host_runtime_authority=host_runtime_authority,
         fabric_policy=(
             ManagementAddressPolicy.parse(
                 settings.direct_fabric_cidrs,

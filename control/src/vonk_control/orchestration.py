@@ -11,10 +11,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from vonk_agent_protocol import AgentOperation
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import AgentOperation
 
 from .models import Reconciliation, ReconciliationCompletionGeneration
 

@@ -290,6 +290,8 @@ def test_unknown_family_simulator_delivers_signed_releases_without_agent_update_
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Exercise the generic package ABI for a family absent from agent build inputs."""
+    from securesystemslib.signer import CryptoSigner
+    from tuf.api.metadata import Metadata
     from vonk_agent.operations import OperationContext, OperationRegistry
     from vonk_agent.package_trust import WorkloadTrust
     from vonk_agent.packages.adapter import AdapterOperation
@@ -306,8 +308,6 @@ def test_unknown_family_simulator_delivers_signed_releases_without_agent_update_
         WorkloadTrustSigners,
         initialize_workload_trust,
     )
-    from securesystemslib.signer import CryptoSigner
-    from tuf.api.metadata import Metadata
 
     agent_digest_before = hashlib.sha256(
         (ROOT / "agent/src/vonk_agent/main.py").read_bytes()

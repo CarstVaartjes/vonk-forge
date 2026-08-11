@@ -7,6 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 from vonk_control.models import (
     AgentNode,
     Base,
@@ -29,8 +31,6 @@ from vonk_control.updates import (
     PlatformAgentArtifact,
     TargetPlatform,
 )
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 NODE_A = "spk_" + "1" * 32
 NODE_B = "spk_" + "2" * 32

@@ -1,9 +1,12 @@
 from datetime import UTC, datetime, timedelta
 
-from vonk_control.inventory_repository import InventoryRepository, InventorySnapshotInput
-from vonk_control.models import AgentNode, Base
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from vonk_control.inventory_repository import (
+    InventoryRepository,
+    InventorySnapshotInput,
+)
+from vonk_control.models import AgentNode, Base
 
 
 def repository(tmp_path):

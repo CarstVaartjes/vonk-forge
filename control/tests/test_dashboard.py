@@ -123,7 +123,11 @@ def test_dashboard_projects_agent_availability_without_addresses(tmp_path) -> No
             gpu_memory_free_bytes=14_000,
             gpu_count=1,
             artifact_store_read_only=False,
-            capabilities=("recipe.operations.v1", "runtime.rootless-podman.v1"),
+            capabilities=(
+                "recipe.operations.v1",
+                "build.rootless-podman.v1",
+                "runtime.spark-docker-nvidia.v1",
+            ),
             nvidia_driver_version="580.65",
             container_runtime_version="5.4.2",
         )
@@ -146,8 +150,9 @@ def test_dashboard_projects_agent_availability_without_addresses(tmp_path) -> No
     assert nodes["Active"]["inventory_stale"] is False
     assert nodes["Active"]["inventory_age_seconds"] == 10
     assert nodes["Active"]["inventory_capabilities"] == [
+        "build.rootless-podman.v1",
         "recipe.operations.v1",
-        "runtime.rootless-podman.v1",
+        "runtime.spark-docker-nvidia.v1",
     ]
     assert nodes["Active"]["memory_available_bytes"] == 15_000
     assert nodes["Active"]["disk_available_bytes"] == 7_000

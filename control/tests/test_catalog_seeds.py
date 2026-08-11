@@ -1,10 +1,10 @@
 from datetime import UTC, datetime
 
 import pytest
-from vonk_control.catalog_seeds import seed_standard_families
-from vonk_control.models import Base, PackageFamily
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
+from vonk_control.catalog_seeds import seed_standard_families
+from vonk_control.models import Base, PackageFamily
 
 
 @pytest.fixture

@@ -5,12 +5,12 @@ from dataclasses import dataclass, field
 from threading import Lock
 
 import pytest
+from fastapi.testclient import TestClient
 from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.operation_api import admin_openapi_schema
 from vonk_control.package_api import PackageApiServices
-from fastapi.testclient import TestClient
 
 CANDIDATE = "a" * 64
 PREVIEW = "sha256:" + "b" * 64

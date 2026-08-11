@@ -35,6 +35,7 @@ EXPECTED_PROJECT_FILES = {
     "secrets/controller-server-key",
     "secrets/database-url",
     "secrets/git-signing-key",
+    "secrets/host-runtime-grant-private-key",
     "secrets/litellm-master-key",
     "secrets/litellm-upstream-key",
     "secrets/management-cidrs",
@@ -149,6 +150,9 @@ def test_publishes_exact_two_item_project_without_secret_output(tmp_path: Path) 
     ]
     assert _project_listing(destination) == EXPECTED_PROJECT_FILES
     assert not (destination / "secrets" / "git-signing-key.pub").exists()
+    assert not (
+        destination / "secrets" / "host-runtime-grant-public-key"
+    ).exists()
     assert project_lock_name(destination) == project_lock_name(
         Path("/another/local/mount") / destination.name
     )
@@ -169,6 +173,7 @@ def test_publishes_exact_two_item_project_without_secret_output(tmp_path: Path) 
         "controller-server-key",
         "database-url",
         "git-signing-key",
+        "host-runtime-grant-private-key",
         "litellm-master-key",
         "postgres-password",
         "token-signing-key",

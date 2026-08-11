@@ -1,10 +1,10 @@
 import pytest
+from fastapi.testclient import TestClient
 from vonk_control import api as control_api
 from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import TokenCodec
 from vonk_control.metrics import MetricsRegistry
-from fastapi.testclient import TestClient
 
 
 def test_metrics_use_node_id_not_hostname_or_address() -> None:

@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 from vonk_control.jobs import JobService
 from vonk_control.models import Base
 from vonk_control.package_rollout_worker import PackageRolloutWorker
@@ -13,8 +15,6 @@ from vonk_control.settings import Settings, SettingsError, WorkerSettings
 from vonk_control.update_routes import ProductionUpdateRouteBoundary
 from vonk_control.update_worker import UpdateRolloutWorker
 from vonk_control.worker import Worker, assemble_production_worker
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 
 def _jobs(tmp_path) -> JobService:

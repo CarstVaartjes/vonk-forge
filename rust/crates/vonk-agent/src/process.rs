@@ -15,6 +15,8 @@ const OUTPUT_LIMIT: u64 = 64 * 1024;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Program {
     Curl,
+    Docker,
+    NvidiaCtk,
     NvidiaSmi,
     Oras,
     Podman,
@@ -24,6 +26,8 @@ impl Program {
     fn path(self) -> &'static str {
         match self {
             Self::Curl => "/usr/bin/curl",
+            Self::Docker => "/usr/bin/docker",
+            Self::NvidiaCtk => "/usr/bin/nvidia-ctk",
             Self::NvidiaSmi => "/usr/bin/nvidia-smi",
             Self::Oras => "/usr/bin/oras",
             Self::Podman => "/usr/bin/podman",

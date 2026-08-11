@@ -45,6 +45,7 @@ _PROJECTION_FILES = {
         {
             "database-url",
             "git-signing-key",
+            "host-runtime-grant-private-key",
             "admin-grant-private-key",
             "worker-api-token",
             "agent-ca-certificate",
@@ -976,6 +977,9 @@ def stage_runtime_secrets(
 
     database_url = _read_source_secret(source, "database-url")
     signing_key = _read_source_secret(source, "git-signing-key")
+    host_runtime_grant_key = _read_source_secret(
+        source, "host-runtime-grant-private-key"
+    )
     agent_ca_certificate = _read_source_secret(source, "agent-ca-certificate")
     agent_ca_key = _read_source_secret(source, "agent-ca-key")
     agent_proxy_auth = _read_source_secret(source, "agent-proxy-auth")
@@ -1109,6 +1113,7 @@ def stage_runtime_secrets(
             for name, content in (
                 ("database-url", database_url),
                 ("git-signing-key", signing_key),
+                ("host-runtime-grant-private-key", host_runtime_grant_key),
                 ("worker-api-token", worker_token),
                 ("agent-ca-certificate", agent_ca_certificate),
                 ("agent-ca-key", agent_ca_key),

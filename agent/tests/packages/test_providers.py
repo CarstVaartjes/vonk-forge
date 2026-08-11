@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
-
 from vonk_agent.packages.providers import (
     Credential,
     CredentialError,
@@ -22,7 +21,6 @@ from vonk_agent.packages.providers import (
     Validators,
     VerifiedHTTPSProvider,
 )
-
 
 SHA_A = "a" * 64
 

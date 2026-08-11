@@ -111,7 +111,9 @@ fn spec() -> WorkloadSpec {
             interface: "vonk.runtime.v1".to_owned(),
             adapter: "vllm".to_owned(),
             adapter_version: 1,
-            image: format!("registry.example/vonk/vllm@sha256:{DIGEST}"),
+            image: format!(
+                "localhost/vonk/recipe-build-00000000-0000-4000-8000-000000000001@sha256:{DIGEST}"
+            ),
             architecture: "linux/arm64".to_owned(),
             entrypoint: vec!["vllm".to_owned(), "serve".to_owned(), "/models".to_owned()],
             arguments: vec![
@@ -281,21 +283,10 @@ fn workload_schema_rejects_shell_privilege_environment_and_host_paths() {
 }
 
 #[test]
-fn image_is_pulled_and_verified_by_digest() {
+fn accepted_local_image_identity_is_validated_without_runtime_process_access() {
     let runner = FakeRunner {
         calls: RefCell::new(vec![]),
-        outputs: RefCell::new(VecDeque::from([
-            ProcessOutput {
-                success: true,
-                stdout: vec![],
-                stderr: vec![],
-            },
-            ProcessOutput {
-                success: true,
-                stdout: format!("sha256:{DIGEST}\tlinux\tarm64\tv1\t10001:10001\n").into_bytes(),
-                stderr: vec![],
-            },
-        ])),
+        outputs: RefCell::new(VecDeque::new()),
     };
     let directory = tempdir().unwrap();
     OciRuntime {
@@ -305,35 +296,17 @@ fn image_is_pulled_and_verified_by_digest() {
     }
     .verify_image(&spec())
     .unwrap();
-    let calls = runner.calls.borrow();
-    assert_eq!(calls[0].0, Program::Podman);
-    assert_eq!(calls[0].1[0], "pull");
-    assert_eq!(calls[1].1[..3], ["image", "inspect", "--format"]);
-    assert!(calls[1].1[3].contains(".Config.User"));
-    drop(calls);
+    assert!(runner.calls.borrow().is_empty());
 
-    let root_runner = FakeRunner {
-        calls: RefCell::new(vec![]),
-        outputs: RefCell::new(VecDeque::from([
-            ProcessOutput {
-                success: true,
-                stdout: vec![],
-                stderr: vec![],
-            },
-            ProcessOutput {
-                success: true,
-                stdout: format!("sha256:{DIGEST}\tlinux\tarm64\tv1\t\n").into_bytes(),
-                stderr: vec![],
-            },
-        ])),
-    };
+    let mut external = spec();
+    external.runtime.image = format!("registry.example/vonk/vllm@sha256:{DIGEST}");
     assert!(
         OciRuntime {
-            runner: &root_runner,
+            runner: &runner,
             data_root: directory.path(),
             huggingface_curl_config: None,
         }
-        .verify_image(&spec())
+        .verify_image(&external)
         .is_err()
     );
 }
@@ -355,6 +328,7 @@ fn container_arguments_are_typed_and_hardened() {
         "cb555393-764b-4eb6-8f15-b416d289428f",
         "45ea6921-50c9-4971-be2a-4cd04ce05069",
         &Placement {
+            endpoint_address: Some("192.168.1.212".parse::<IpAddr>().unwrap()),
             rank: 1,
             role: "worker".to_owned(),
             world_size: 2,
@@ -369,13 +343,20 @@ fn container_arguments_are_typed_and_hardened() {
 
     for required in [
         "--read-only",
+        "--init",
+        "--pull",
+        "never",
+        "--log-driver",
+        "local",
+        "max-size=10m",
+        "max-file=3",
         "--cap-drop=ALL",
         "--security-opt=no-new-privileges",
-        "--userns=keep-id:uid=10001,gid=10001",
-        "--cgroups=split",
-        "slirp4netns:allow_host_loopback=false",
-        "--device",
-        "nvidia.com/gpu=all",
+        "bridge",
+        "--memory-swap",
+        "--shm-size",
+        "--gpus",
+        "all",
         "VONK_RANK=1",
         "VONK_WORLD_SIZE=2",
         "VONK_MASTER_ADDR=192.168.100.10",
@@ -393,14 +374,14 @@ fn container_arguments_are_typed_and_hardened() {
         );
     }
     assert!(
-        !arguments
-            .iter()
-            .any(|value| value == "--privileged" || value == "--network=host" || value == "--gpus")
+        !arguments.iter().any(|value| value == "--privileged"
+            || value == "--network=host"
+            || value == "--device")
     );
     assert!(
         arguments
             .windows(2)
-            .any(|values| values == ["--publish", "8101:8000"])
+            .any(|values| values == ["--publish", "192.168.1.212:8101:8000"])
     );
     assert!(
         arguments
@@ -436,6 +417,7 @@ fn coordinator_publishes_rendezvous_only_on_declared_master_fabric_address() {
         "cb555393-764b-4eb6-8f15-b416d289428f",
         "45ea6921-50c9-4971-be2a-4cd04ce05069",
         &Placement {
+            endpoint_address: Some("192.168.1.211".parse::<IpAddr>().unwrap()),
             rank: 0,
             role: "entrypoint".to_owned(),
             world_size: 2,
@@ -476,16 +458,6 @@ fn installation_records_and_rechecks_a_content_manifest() {
     let runner = FakeRunner {
         calls: RefCell::new(vec![]),
         outputs: RefCell::new(VecDeque::from([
-            ProcessOutput {
-                success: true,
-                stdout: vec![],
-                stderr: vec![],
-            },
-            ProcessOutput {
-                success: true,
-                stdout: format!("sha256:{DIGEST}\tlinux\tarm64\tv1\t10001:10001\n").into_bytes(),
-                stderr: vec![],
-            },
             ProcessOutput {
                 success: true,
                 stdout: b"200\t\n".to_vec(),
@@ -631,18 +603,7 @@ fn http_artifacts_reject_embedded_credentials_before_curl_runs() {
 
 #[test]
 fn http_artifacts_reject_more_than_five_explicit_redirects() {
-    let mut outputs = VecDeque::from([
-        ProcessOutput {
-            success: true,
-            stdout: vec![],
-            stderr: vec![],
-        },
-        ProcessOutput {
-            success: true,
-            stdout: format!("sha256:{DIGEST}\tlinux\tarm64\tv1\t10001:10001\n").into_bytes(),
-            stderr: vec![],
-        },
-    ]);
+    let mut outputs = VecDeque::new();
     for redirect in 0..6 {
         outputs.push_back(ProcessOutput {
             success: true,
@@ -695,23 +656,11 @@ fn http_artifacts_reject_more_than_five_explicit_redirects() {
 fn http_artifacts_are_https_only_and_byte_limited_without_implicit_redirects() {
     let runner = FakeRunner {
         calls: RefCell::new(vec![]),
-        outputs: RefCell::new(VecDeque::from([
-            ProcessOutput {
-                success: true,
-                stdout: vec![],
-                stderr: vec![],
-            },
-            ProcessOutput {
-                success: true,
-                stdout: format!("sha256:{DIGEST}\tlinux\tarm64\tv1\t10001:10001\n").into_bytes(),
-                stderr: vec![],
-            },
-            ProcessOutput {
-                success: true,
-                stdout: b"200\t\n".to_vec(),
-                stderr: vec![],
-            },
-        ])),
+        outputs: RefCell::new(VecDeque::from([ProcessOutput {
+            success: true,
+            stdout: b"200\t\n".to_vec(),
+            stderr: vec![],
+        }])),
     };
     let directory = tempdir().unwrap();
     let mut workload = spec();
@@ -875,11 +824,7 @@ fn oci_artifacts_run_under_the_declared_staging_budget() {
 fn start_keeps_agent_metadata_outside_workload_writable_state() {
     let runner = FakeRunner {
         calls: RefCell::new(vec![]),
-        outputs: RefCell::new(VecDeque::from([ProcessOutput {
-            success: true,
-            stdout: b"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\n".to_vec(),
-            stderr: vec![],
-        }])),
+        outputs: RefCell::new(VecDeque::new()),
     };
     let directory = tempdir().unwrap();
     let run_id = "45ea6921-50c9-4971-be2a-4cd04ce05069";
@@ -888,11 +833,12 @@ fn start_keeps_agent_metadata_outside_workload_writable_state() {
         data_root: directory.path(),
         huggingface_curl_config: None,
     }
-    .start(
+    .prepare_start(
         &spec(),
         "cb555393-764b-4eb6-8f15-b416d289428f",
         run_id,
         &Placement {
+            endpoint_address: Some("192.168.1.211".parse::<IpAddr>().unwrap()),
             rank: 0,
             role: "entrypoint".to_owned(),
             world_size: 1,
@@ -985,22 +931,11 @@ fn managed_recipe_run_observation_reports_running_healthy_container() {
     );
     server.join().unwrap();
     let calls = runner.calls.borrow();
-    assert_eq!(calls.len(), 2);
-    assert_eq!(calls[0].0, Program::Podman);
-    assert_eq!(
-        calls[0].1,
-        [
-            "container",
-            "inspect",
-            "--format",
-            "{{.State.Running}}\\t{{.Name}}",
-            &format!("vonk-{run_id}"),
-        ]
-    );
-    assert_eq!(calls[1].0, Program::Curl);
-    assert!(calls[1].1.iter().any(|value| value == "--max-time"));
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].0, Program::Curl);
+    assert!(calls[0].1.iter().any(|value| value == "--max-time"));
     assert!(
-        calls[1]
+        calls[0]
             .1
             .iter()
             .any(|value| value == &format!("http://127.0.0.1:{port}/v1/models"))
@@ -1041,7 +976,7 @@ fn managed_recipe_run_observation_reports_running_unhealthy_container() {
 }
 
 #[test]
-fn managed_recipe_run_observation_reports_missing_and_stopped_without_http() {
+fn managed_recipe_run_observation_reports_unreachable_endpoints_without_docker_access() {
     let directory = tempdir().unwrap();
     let first = "45ea6921-50c9-4971-be2a-4cd04ce05069";
     let second = "55ea6921-50c9-4971-be2a-4cd04ce05069";
@@ -1084,7 +1019,7 @@ fn managed_recipe_run_observation_reports_missing_and_stopped_without_http() {
             .calls
             .borrow()
             .iter()
-            .all(|call| call.0 == Program::Podman)
+            .all(|call| call.0 == Program::Curl)
     );
 }
 
@@ -1204,25 +1139,20 @@ fn stop_ignores_forged_valid_legacy_lifecycle_and_hooks() {
     .unwrap();
     let runner = FakeRunner {
         calls: RefCell::new(vec![]),
-        outputs: RefCell::new(VecDeque::from([ProcessOutput {
-            success: true,
-            stdout: vec![],
-            stderr: vec![],
-        }])),
+        outputs: RefCell::new(VecDeque::new()),
     };
 
-    OciRuntime {
+    let plan = OciRuntime {
         runner: &runner,
         data_root: directory.path(),
         huggingface_curl_config: None,
     }
-    .stop(run_id)
+    .prepare_stop(run_id)
     .unwrap();
 
-    let calls = runner.calls.borrow();
-    assert_eq!(calls.len(), 1);
-    assert_eq!(calls[0].0, Program::Podman);
-    assert_eq!(calls[0].1[3..5], ["--time", "30"]);
+    assert_eq!(plan.remove, [run_id, "30"]);
+    assert!(plan.post_stop.is_empty());
+    assert!(runner.calls.borrow().is_empty());
     assert!(!directory.path().join("run-metadata").join(run_id).exists());
 }
 
@@ -1402,64 +1332,29 @@ fn stopped_historical_directories_do_not_consume_the_64_managed_run_limit() {
 fn stop_is_idempotent_when_a_gang_rank_never_started() {
     let runner = FakeRunner {
         calls: RefCell::new(vec![]),
-        outputs: RefCell::new(VecDeque::from([ProcessOutput {
-            success: true,
-            stdout: vec![],
-            stderr: vec![],
-        }])),
+        outputs: RefCell::new(VecDeque::new()),
     };
     let directory = tempdir().unwrap();
     let run_id = "45ea6921-50c9-4971-be2a-4cd04ce05069";
 
-    OciRuntime {
+    let plan = OciRuntime {
         runner: &runner,
         data_root: directory.path(),
         huggingface_curl_config: None,
     }
-    .stop(run_id)
+    .prepare_stop(run_id)
     .unwrap();
 
-    let calls = runner.calls.borrow();
-    assert_eq!(calls[0].0, Program::Podman);
-    assert_eq!(
-        calls[0].1,
-        vec![
-            "rm".to_owned(),
-            "--force".to_owned(),
-            "--ignore".to_owned(),
-            "--time".to_owned(),
-            "30".to_owned(),
-            format!("vonk-{run_id}"),
-        ]
-    );
+    assert_eq!(plan.remove, [run_id, "30"]);
+    assert!(plan.post_stop.is_empty());
+    assert!(runner.calls.borrow().is_empty());
 }
 
 #[test]
 fn lifecycle_hooks_run_as_typed_hardened_one_shot_containers() {
     let runner = FakeRunner {
         calls: RefCell::new(vec![]),
-        outputs: RefCell::new(VecDeque::from([
-            ProcessOutput {
-                success: true,
-                stdout: vec![],
-                stderr: vec![],
-            },
-            ProcessOutput {
-                success: true,
-                stdout: "a".repeat(64).into_bytes(),
-                stderr: vec![],
-            },
-            ProcessOutput {
-                success: true,
-                stdout: vec![],
-                stderr: vec![],
-            },
-            ProcessOutput {
-                success: true,
-                stdout: vec![],
-                stderr: vec![],
-            },
-        ])),
+        outputs: RefCell::new(VecDeque::new()),
     };
     let directory = tempdir().unwrap();
     let runtime = OciRuntime {
@@ -1488,12 +1383,13 @@ fn lifecycle_hooks_run_as_typed_hardened_one_shot_containers() {
     )
     .unwrap();
 
-    runtime
-        .start(
+    let start = runtime
+        .prepare_start(
             &workload,
             installation_id,
             run_id,
             &Placement {
+                endpoint_address: Some("192.168.1.211".parse::<IpAddr>().unwrap()),
                 rank: 0,
                 role: "entrypoint".to_owned(),
                 world_size: 1,
@@ -1505,7 +1401,8 @@ fn lifecycle_hooks_run_as_typed_hardened_one_shot_containers() {
             },
         )
         .unwrap();
-    runtime.stop(run_id).unwrap();
+    let stop = runtime.prepare_stop(run_id).unwrap();
+    runtime.complete_stop(run_id).unwrap();
 
     assert!(
         !directory
@@ -1524,45 +1421,31 @@ fn lifecycle_hooks_run_as_typed_hardened_one_shot_containers() {
             .exists()
     );
 
-    let calls = runner.calls.borrow();
-    assert_eq!(calls.len(), 4);
-    assert_eq!(calls[0].0, Program::Podman);
-    assert_eq!(calls[0].1[0..2], ["run", "--rm"]);
+    assert_eq!(start.pre_start[0][0..2], ["run", "--rm"]);
     assert!(
-        !calls[0]
-            .1
+        !start.pre_start[0]
             .iter()
             .any(|value| value == "--detach" || value == "--name")
     );
     assert_eq!(
-        &calls[0].1[calls[0].1.len() - 3..],
+        &start.pre_start[0][start.pre_start[0].len() - 3..],
         ["python", "-m", "prepare"]
     );
-    assert!(calls[1].1.iter().any(|value| value == "--detach"));
-    assert_eq!(calls[2].1[0], "rm");
+    assert!(start.main.iter().any(|value| value == "--detach"));
+    assert_eq!(stop.remove, [run_id, "30"]);
     assert_eq!(
-        &calls[3].1[calls[3].1.len() - 3..],
+        &stop.post_stop[0][stop.post_stop[0].len() - 3..],
         ["python", "-m", "cleanup"]
     );
-    assert!(calls[3].1.iter().any(|value| value == "--read-only"));
+    assert!(runner.calls.borrow().is_empty());
+    assert!(stop.post_stop[0].iter().any(|value| value == "--read-only"));
 }
 
 #[test]
-fn failed_post_stop_hook_retains_lifecycle_observation_marker() {
+fn post_stop_marker_is_retained_until_host_hook_success_is_finalized() {
     let runner = FakeRunner {
         calls: RefCell::new(vec![]),
-        outputs: RefCell::new(VecDeque::from([
-            ProcessOutput {
-                success: true,
-                stdout: vec![],
-                stderr: vec![],
-            },
-            ProcessOutput {
-                success: false,
-                stdout: vec![],
-                stderr: vec![],
-            },
-        ])),
+        outputs: RefCell::new(VecDeque::new()),
     };
     let directory = tempdir().unwrap();
     let run_id = "45ea6921-50c9-4971-be2a-4cd04ce05069";
@@ -1580,15 +1463,14 @@ fn failed_post_stop_hook_retains_lifecycle_observation_marker() {
     )
     .unwrap();
 
-    assert!(
-        OciRuntime {
-            runner: &runner,
-            data_root: directory.path(),
-            huggingface_curl_config: None,
-        }
-        .stop(run_id)
-        .is_err()
-    );
+    let plan = OciRuntime {
+        runner: &runner,
+        data_root: directory.path(),
+        huggingface_curl_config: None,
+    }
+    .prepare_stop(run_id)
+    .unwrap();
+    assert_eq!(plan.post_stop.len(), 1);
     assert!(
         directory
             .path()

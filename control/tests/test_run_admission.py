@@ -10,8 +10,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import sessionmaker
 from vonk_control.cluster_mappings import ClusterMappingService
-from vonk_control.inventory_repository import InventoryRepository, InventorySnapshotInput
+from vonk_control.inventory_repository import (
+    InventoryRepository,
+    InventorySnapshotInput,
+)
 from vonk_control.models import (
     AgentNode,
     Base,
@@ -23,9 +29,6 @@ from vonk_control.models import (
     ResourceReservation,
 )
 from vonk_control.run_admission import RunAdmissionService, RunPlanConflict
-from sqlalchemy import create_engine
-from sqlalchemy.exc import OperationalError
-from sqlalchemy.orm import sessionmaker
 
 
 def setup(

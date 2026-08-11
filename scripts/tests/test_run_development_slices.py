@@ -70,8 +70,16 @@ class SliceServer(ThreadingHTTPServer):
         self.online = {NODE: True, NODE_2: True}
         self.inventory_stale = {NODE: False, NODE_2: False}
         self.inventory_capabilities = {
-            NODE: ["recipe.operations.v1", "runtime.rootless-podman.v1"],
-            NODE_2: ["recipe.operations.v1", "runtime.rootless-podman.v1"],
+            NODE: [
+                "recipe.operations.v1",
+                "build.rootless-podman.v1",
+                "runtime.spark-docker-nvidia.v1",
+            ],
+            NODE_2: [
+                "recipe.operations.v1",
+                "build.rootless-podman.v1",
+                "runtime.spark-docker-nvidia.v1",
+            ],
         }
         self.last_seen = {
             NODE: "2026-08-11T10:00:00+00:00",
@@ -814,12 +822,17 @@ def test_runner_stops_after_one_terminal_build_retry(
     assert json.loads(evidence_path.read_text())["completed_states"] == STATES[:3]
 
 
-@pytest.mark.parametrize("failure", ("stale", "missing-rootless"))
-def test_runner_requires_fresh_rootless_inventory(
+@pytest.mark.parametrize("failure", ("stale", "missing-build", "missing-runtime"))
+def test_runner_requires_fresh_spark_runtime_inventory(
     tmp_path: Path, server: SliceServer, failure: str
 ) -> None:
     if failure == "stale":
         server.inventory_stale[NODE] = True
+    elif failure == "missing-build":
+        server.inventory_capabilities[NODE] = [
+            "recipe.operations.v1",
+            "runtime.spark-docker-nvidia.v1",
+        ]
     else:
         server.inventory_capabilities[NODE] = ["recipe.operations.v1"]
 

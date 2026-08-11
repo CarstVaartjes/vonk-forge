@@ -5,11 +5,11 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 from vonk_control.models import AgentNode, Base, UpdateRollout, UpdateRolloutNode
 from vonk_control.update_routes import RouteRenewalResult, UpdateRouteError
 from vonk_control.update_worker import UpdateRolloutWorker
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 NODE = "spk_" + "1" * 32
 NOW = datetime(2026, 8, 6, tzinfo=UTC)

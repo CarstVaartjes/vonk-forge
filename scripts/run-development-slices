@@ -739,13 +739,15 @@ class Runner:
 
     @staticmethod
     def _node_ready(node: dict[str, Any] | None) -> bool:
+        capabilities = node.get("inventory_capabilities", ()) if node else ()
         return bool(
             node is not None
             and node.get("agent_online") is True
             and node.get("agent_state") == "active"
             and node.get("compatibility") == "supported"
             and node.get("inventory_stale") is False
-            and "runtime.rootless-podman.v1" in node.get("inventory_capabilities", ())
+            and "build.rootless-podman.v1" in capabilities
+            and "runtime.spark-docker-nvidia.v1" in capabilities
         )
 
     def recipe_resolved(self) -> None:

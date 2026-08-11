@@ -24,6 +24,7 @@ vonk-forge/
     ├── controller-server-key
     ├── database-url
     ├── git-signing-key
+    ├── host-runtime-grant-private-key
     ├── litellm-master-key
     ├── litellm-upstream-key
     ├── management-cidrs
@@ -100,6 +101,7 @@ The operator-owned bundle has narrow service projections:
 | `postgres-password` | PostgreSQL only | Password for the development `control` database role. |
 | `database-url` | initializer, migration, then separate API/worker projections | Matching SQLAlchemy URL for that role. |
 | `git-signing-key` | initializer, then API projection only | Unencrypted Ed25519 SSH private key for development Git signing. |
+| `host-runtime-grant-private-key` | initializer, then API projection only | Signs short-lived, operation-bound grants for the root helper on enrolled GPU nodes. Its matching public key is installed on nodes and is not copied to the NAS. |
 | `agent-ca-certificate`, `agent-ca-key`, `agent-proxy-auth` | initializer, then separated API/Caddy projections | Agent certificate issuance and authenticated proxy boundary. |
 | `controller-ca`, `controller-server-certificate`, `controller-server-key` | operator backup plus Caddy projection | Server trust for the two agent hostnames. |
 | `litellm-master-key`, `litellm-upstream-key` | initializer, then LiteLLM-only projection | User-facing development inference and internal upstream authentication. |
@@ -157,6 +159,15 @@ and expiry dates. It never prints secret values. It creates regular files with
 mode `0600` in an operator-owned mode `0700` directory and refuses an
 incomplete, unknown, symlinked, or inconsistent existing bundle.
 
+If this exact directory is an otherwise valid original 15-file generation,
+upgrade it in place once by repeating the command with
+`--upgrade-host-runtime-authority`. This add-only migration preserves every
+existing key, certificate, token, database credential, byte, and modification
+time, and creates only `host-runtime-grant-private-key` and
+`host-runtime-grant-public-key`. Back up the complete 17-file result before
+publishing. Do not use this switch on a fresh directory or to repair any other
+partial or inconsistent generation; the helper rejects those states.
+
 Publish the accepted Compose and that exact bundle to the mounted NAS share:
 
 ```bash
@@ -201,6 +212,7 @@ The content classes are:
 | `postgres-password` | 64 lowercase hexadecimal characters followed by one newline. |
 | `database-url` | `postgresql+psycopg://control:<postgres-password>@postgres:5432/control` followed by one newline, where `<postgres-password>` is the exact value in `postgres-password`. |
 | `git-signing-key` | One unencrypted Ed25519 OpenSSH private key followed by one newline; the initializer has no interactive passphrase input. |
+| `host-runtime-grant-private-key` | One unencrypted Ed25519 PKCS#8 PEM private key; it never leaves the API projection or encrypted operator backup. |
 | `*-certificate`, `controller-ca` | PEM certificates generated as one validated PKI generation for the configured hostnames. |
 | `agent-ca-key`, `controller-server-key` | Matching unencrypted PEM private keys; never shared with a GPU node. |
 | `agent-proxy-auth`, `litellm-master-key`, `litellm-upstream-key`, `token-signing-key` | Independent URL-safe random tokens followed by one newline. |
@@ -208,7 +220,7 @@ The content classes are:
 
 Do not overwrite existing secret files during a normal redeploy. If you copied
 them through an SMB share or NAS file manager, safely eject/disconnect the
-share after copying and use the NAS file manager to confirm only the 13
+share after copying and use the NAS file manager to confirm only the 14
 expected names appear.
 Back up that exact host bundle before first start and after every rotation, but
 confirm the backup by filename, size, and timestamp only; never reveal the
@@ -281,7 +293,7 @@ In a generic NAS Docker UI (UGREEN calls this a Docker Project):
 
 1. Create or import a project from the NAS-local `vonk-forge/` directory.
 2. Select `docker-compose.yml`; retain its relative `./secrets/...` paths.
-3. Verify that `secrets/` contains exactly the 13 names in the project tree
+3. Verify that `secrets/` contains exactly the 14 names in the project tree
    above, without opening their contents in the UI.
 4. Choose **Pull** then **Redeploy** for the project. Do not choose build or
    restart; there is no build context and restart cannot fetch a moved `:dev`
@@ -480,7 +492,7 @@ as a substitute for restoring PostgreSQL or generated-secret state.
   a blind file-by-file replacement causes an outage. Follow the complete
   rotation window in [Development agent workloads](development-agent-workloads.md#rollback-and-secret-rotation).
 
-Back up all 13 host secret files and every named volume needed for continuity
+Back up all 14 host secret files and every named volume needed for continuity
 to encrypted, access-controlled storage. The repository volume can be cloned
 again from public GitHub, but local `deploy` history, `main`,
 `refs/vonk/deploy-base`, other local refs, and signed changes exist only in its

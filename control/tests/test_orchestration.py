@@ -5,12 +5,12 @@ from copy import deepcopy
 from datetime import UTC, datetime
 
 import pytest
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_control.desired_state import durable_desired_state_observations
 from vonk_control.models import Base, Reconciliation
 from vonk_control.orchestration import ReconciliationOrchestrator
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import sessionmaker
 
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32

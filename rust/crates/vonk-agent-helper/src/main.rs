@@ -16,9 +16,11 @@ use vonk_agent_helper::protocol::{
 
 const GRANT_KEY: &str = "/etc/vonk-forge-agent/host-helper-authority.pub";
 const RELEASE_KEY: &str = "/usr/share/keyrings/vonk-forge-release.pub";
-const NODE_ID_PATH: &str = "/var/lib/vonk-forge/identity/node-id";
+const AGENT_CONFIG: &str = "/etc/vonk-forge-agent/agent.toml";
 const REQUEST_LEDGER: &str = "/var/lib/vonk-forge/helper/requests";
 const DATA_ROOT: &str = "/var/lib/vonk-forge";
+const AGENT_DATA_ROOT: &str = "/var/lib/vonk-forge-agent";
+const RUNTIME_REQUEST_ROOT: &str = "/run/vonk-forge-agent/runtime-requests";
 const AGENT_GROUP: &str = "vonk-agent";
 
 #[derive(Serialize)]
@@ -41,15 +43,19 @@ fn run() -> Result<(), String> {
     let grant_key = load_root_public_key(Path::new(GRANT_KEY))?;
     let release_key = load_root_public_key(Path::new(RELEASE_KEY))?;
     let group_gid = group_gid(Path::new("/etc/group"), AGENT_GROUP)?;
-    let node_id = read_root_text(Path::new(NODE_ID_PATH), 64)?;
+    let agent_uid = user_uid(Path::new("/etc/passwd"), AGENT_GROUP)?;
+    let node_id = node_id_from_config(&read_root_text(Path::new(AGENT_CONFIG), 64 * 1024)?)?;
     let verifier = GrantVerifier::new(&grant_key, group_gid).map_err(display)?;
     let executor = OperationExecutor::new(
-        ManagedRoots::under(Path::new(DATA_ROOT)),
+        ManagedRoots::under(Path::new(DATA_ROOT))
+            .with_agent_data(Path::new(AGENT_DATA_ROOT))
+            .with_runtime_requests(Path::new(RUNTIME_REQUEST_ROOT)),
         &release_key,
         ProcessCommandRunner,
         Some(0),
     )
-    .map_err(display)?;
+    .map_err(display)?
+    .with_runtime_request_owner(agent_uid);
 
     let mut sockets = sd_listen_fds::get().map_err(display)?;
     if sockets.len() != 1 {
@@ -208,6 +214,48 @@ fn group_gid(path: &Path, name: &str) -> Result<u32, String> {
         }
     }
     Err(format!("required group {name} does not exist"))
+}
+
+fn user_uid(path: &Path, name: &str) -> Result<u32, String> {
+    let users = read_root_text(path, 1024 * 1024)?;
+    for line in users.lines() {
+        let fields: Vec<_> = line.split(':').collect();
+        if fields.len() == 7 && fields[0] == name {
+            return fields[2].parse().map_err(display);
+        }
+    }
+    Err(format!("required user {name} does not exist"))
+}
+
+fn node_id_from_config(config: &str) -> Result<String, String> {
+    let mut node_id = None;
+    for line in config.lines() {
+        let line = line.split('#').next().unwrap_or("").trim();
+        let Some((name, value)) = line.split_once('=') else {
+            continue;
+        };
+        if name.trim() != "node_id" {
+            continue;
+        }
+        if node_id.is_some() {
+            return Err("agent configuration has duplicate node ID".to_owned());
+        }
+        let value = value.trim();
+        let value = value
+            .strip_prefix('"')
+            .and_then(|value| value.strip_suffix('"'))
+            .ok_or_else(|| "agent node ID is invalid".to_owned())?;
+        if value.len() != 36
+            || !value.starts_with("spk_")
+            || !value[4..]
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        {
+            return Err("agent node ID is invalid".to_owned());
+        }
+        node_id = Some(value.to_owned());
+    }
+    node_id.ok_or_else(|| "agent configuration has no node ID".to_owned())
 }
 
 fn display(error: impl std::fmt::Display) -> String {

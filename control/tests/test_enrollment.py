@@ -19,6 +19,10 @@ from alembic.migration import MigrationContext
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
+from sqlalchemy import create_engine, delete, event, func, inspect, select, text
+from sqlalchemy.engine import Engine
+from sqlalchemy.exc import DBAPIError, IntegrityError, SQLAlchemyError
+from sqlalchemy.orm import sessionmaker
 from vonk_control.enrollment import (
     EnrollmentDenied,
     EnrollmentService,
@@ -35,10 +39,6 @@ from vonk_control.models import (
     Base,
 )
 from vonk_control.pki import CertificateAuthority, IssuedCertificate
-from sqlalchemy import create_engine, delete, event, func, inspect, select, text
-from sqlalchemy.engine import Engine
-from sqlalchemy.exc import DBAPIError, IntegrityError, SQLAlchemyError
-from sqlalchemy.orm import sessionmaker
 
 NODE_ID = "spk_0123456789abcdef0123456789abcdef"
 OTHER_NODE_ID = "spk_fedcba9876543210fedcba9876543210"

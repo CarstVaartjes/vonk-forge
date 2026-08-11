@@ -66,9 +66,13 @@ not treated as production-ready until its evidence gates are accepted.
 - Python 3.12 or newer
 - [`uv`](https://docs.astral.sh/uv/)
 - SSH access for one-time onboarding and explicit operator recovery only
-- Rootless Podman, `fuse-overlayfs`, and `slirp4netns` on each Vonk Forge GPU
-  node host (installed by `vonk-forge-agent`); Docker is only required on the
-  NAS/service host for the control-plane Compose deployment
+- NVIDIA's DGX OS Docker Engine, NVIDIA driver, and NVIDIA Container Toolkit on
+  each DGX Spark GPU node. These platform-owned components are preconfigured by
+  NVIDIA and are validated, not installed or reconfigured, by Vonk Forge.
+- Rootless Podman, `fuse-overlayfs`, and `slirp4netns` on each GPU node
+  (installed by `vonk-forge-agent`) for isolated recipe builds only. Accepted
+  GPU workloads run through the Spark-managed Docker/NVIDIA runtime behind the
+  signed host-helper boundary.
 
 ## Quick start
 

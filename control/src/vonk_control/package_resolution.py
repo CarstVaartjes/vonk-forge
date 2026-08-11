@@ -8,8 +8,8 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Literal
 
-from vonk_agent_protocol import PackageReleaseGraph, PackageReleaseLock
 from packaging.version import InvalidVersion, Version
+from vonk_agent_protocol import PackageReleaseGraph, PackageReleaseLock
 
 from cluster_profiles.workload_packages import PackageFamily
 

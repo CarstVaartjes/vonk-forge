@@ -45,6 +45,7 @@ x-api-environment: &api-environment
   VONK_ADMIN_GRANT_PRIVATE_KEY_FILE: /run/vonk-api-secrets/admin-grant-private-key.pem
   VONK_PACKAGE_HELPER_GRANT_PRIVATE_KEY_FILE: /run/secrets/package-helper-grant-private-key
   VONK_PACKAGE_HELPER_RECEIPT_PRIVATE_KEY_FILE: /run/secrets/package-helper-receipt-private-key
+  VONK_HOST_RUNTIME_GRANT_PRIVATE_KEY_FILE: /run/secrets/host-runtime-grant-private-key
   VONK_CONTROL_IDENTITY_ROOT: /run/vonk-forge/control-identity
   VONK_CONTROL_PROCESS_IMAGE: ${CONTROL_API_IMAGE:?set a digest-pinned control-api image}
 
@@ -160,7 +161,7 @@ services:
     security_opt: [no-new-privileges:true]
     environment:
       <<: *api-environment
-    secrets: [database-url, token-signing-key, metrics-token, git-signing-key, agent-client-ca, agent-intermediate-certificate, agent-proxy-auth, worker-api-token, package-helper-grant-private-key, package-helper-receipt-private-key]
+    secrets: [database-url, token-signing-key, metrics-token, git-signing-key, agent-client-ca, agent-intermediate-certificate, agent-proxy-auth, worker-api-token, package-helper-grant-private-key, package-helper-receipt-private-key, host-runtime-grant-private-key]
     volumes:
       - ${REPOSITORY_PATH:?set repository path}:/repository
       - control-state:/state
@@ -487,6 +488,8 @@ secrets:
     file: "${PACKAGE_HELPER_GRANT_PRIVATE_KEY_FILE:?set workload package helper grant private key file}"
   package-helper-receipt-private-key:
     file: "${PACKAGE_HELPER_RECEIPT_PRIVATE_KEY_FILE:?set workload package helper receipt private key file}"
+  host-runtime-grant-private-key:
+    file: "${HOST_RUNTIME_GRANT_PRIVATE_KEY_FILE:?set host runtime grant private key file}"
   workload-releases-key:
     file: "${WORKLOAD_RELEASES_KEY_FILE:?set workload TUF releases signing key file}"
   workload-snapshot-key:

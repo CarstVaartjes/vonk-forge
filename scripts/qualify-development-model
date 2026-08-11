@@ -168,6 +168,8 @@ def _validate_node(
         raise Refusal("node.cuda_code")
     if node.get("podman_rootless") is not True:
         raise Refusal("node.rootless_podman")
+    if node.get("docker_gpu_runtime") is not True:
+        raise Refusal("node.spark_docker_nvidia")
     if _int(node.get("memory_available_bytes"), "node.memory") < _int(
         topology.get("minimum_memory_available_bytes"), "topology.memory"
     ):

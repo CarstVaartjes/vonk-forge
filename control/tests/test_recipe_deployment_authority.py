@@ -7,11 +7,11 @@ from pathlib import Path
 from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
+from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.orm import sessionmaker
 from vonk_control.catalog_service import CatalogService, RecipeDraftInput
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.models import AgentNode, Base, ClusterMapping
-from sqlalchemy import create_engine, inspect, text
-from sqlalchemy.orm import sessionmaker
 
 
 def migration_config(database_url: str) -> Config:

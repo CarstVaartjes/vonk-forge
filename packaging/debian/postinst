@@ -98,11 +98,17 @@ install -d -o vonk-agent -g vonk-agent -m 0750 \
     /var/lib/vonk-forge-agent/containers \
     /var/lib/vonk-forge-agent/state \
     /var/lib/vonk-forge-agent/workloads
+install -d -o vonk-agent -g vonk-agent -m 0700 \
+    /var/lib/vonk-forge-agent/image-imports \
+    /var/lib/vonk-forge-agent/installations \
+    /var/lib/vonk-forge-agent/run-metadata \
+    /var/lib/vonk-forge-agent/runs
 install -d -o root -g root -m 0755 /var/lib/vonk-forge/slots
 install -d -o root -g root -m 0700 \
     /var/lib/vonk-forge/helper \
     /var/lib/vonk-forge/helper/requests \
-    /var/lib/vonk-forge/incoming
+    /var/lib/vonk-forge/incoming \
+    /var/lib/vonk-forge/runtime-images
 # The supervisor remains root-owned and non-writable by the runtime account,
 # while the dedicated group may traverse it to read the verified state and
 # execute the active slot selected by the root supervisor.

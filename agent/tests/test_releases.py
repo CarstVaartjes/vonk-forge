@@ -18,9 +18,24 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlsplit
 
+import pytest
 import vonk_agent.oci as oci_module
 import vonk_agent.releases as release_module
-import pytest
+from securesystemslib.signer import CryptoSigner
+from tuf.api.exceptions import DownloadError, DownloadHTTPError
+from tuf.api.metadata import (
+    DelegatedRole,
+    Delegations,
+    Metadata,
+    MetaFile,
+    Root,
+    Snapshot,
+    TargetFile,
+    Targets,
+    Timestamp,
+)
+from tuf.ngclient import FetcherInterface
+from tuf.ngclient._internal.trusted_metadata_set import TrustedMetadataSet
 from vonk_agent import nvidia_tools, update_trust
 from vonk_agent.client import CredentialSnapshot
 from vonk_agent.deadlines import DeadlineBindingError, MonotonicDeadline
@@ -39,21 +54,6 @@ from vonk_agent.releases import (
     verify_release_tree,
 )
 from vonk_agent.update_trust import BoundedHTTPSFetcher, TUFReleaseTrust, TUFTrustError
-from securesystemslib.signer import CryptoSigner
-from tuf.api.exceptions import DownloadError, DownloadHTTPError
-from tuf.api.metadata import (
-    DelegatedRole,
-    Delegations,
-    Metadata,
-    MetaFile,
-    Root,
-    Snapshot,
-    TargetFile,
-    Targets,
-    Timestamp,
-)
-from tuf.ngclient import FetcherInterface
-from tuf.ngclient._internal.trusted_metadata_set import TrustedMetadataSet
 
 VALID_RELEASE = {
     "schema_version": 1,

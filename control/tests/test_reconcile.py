@@ -3,6 +3,8 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 
 import pytest
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_control.git_policy import Eligibility
 from vonk_control.models import Base, Reconciliation
@@ -18,8 +20,6 @@ from vonk_control.reconcile import (
     RepositoryDefinitions,
     resolved_reconciliation_plan,
 )
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import sessionmaker
 
 
 class Policy:

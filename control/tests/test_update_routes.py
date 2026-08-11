@@ -8,6 +8,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_control.litellm import LiteLlmDeployment
 from vonk_control.models import (
@@ -32,8 +34,6 @@ from vonk_control.update_routes import (
     RouteRenewalResult,
     UpdateRouteError,
 )
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
 
 NODE_A = "spk_" + "1" * 32
 NODE_B = "spk_" + "2" * 32

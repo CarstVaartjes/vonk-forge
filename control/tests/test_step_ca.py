@@ -18,6 +18,8 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519
 from cryptography.x509.oid import ExtendedKeyUsageOID, ExtensionOID, NameOID
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 from vonk_control.agent_api import AgentApiServices
 from vonk_control.api import build_agent_services
 from vonk_control.models import Base
@@ -30,8 +32,6 @@ from vonk_control.step_ca import (
     StepCertificateAuthority,
     _validate_crl_freshness,
 )
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 NODE_ID = "spk_0123456789abcdef0123456789abcdef"
 NOW = datetime(2026, 8, 4, 12, tzinfo=UTC)

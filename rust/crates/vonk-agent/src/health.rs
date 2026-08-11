@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{net::IpAddr, time::Duration};
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -28,7 +28,12 @@ pub enum HealthError {
     Transport(#[from] reqwest::Error),
 }
 
-pub async fn wait_ready(port: u16, path: &str, deadline: DateTime<Utc>) -> Result<(), HealthError> {
+pub async fn wait_ready(
+    address: IpAddr,
+    port: u16,
+    path: &str,
+    deadline: DateTime<Utc>,
+) -> Result<(), HealthError> {
     if port < 1024
         || !path.starts_with('/')
         || path.contains("..")
@@ -41,7 +46,7 @@ pub async fn wait_ready(port: u16, path: &str, deadline: DateTime<Utc>) -> Resul
         .connect_timeout(Duration::from_secs(2))
         .timeout(Duration::from_secs(3))
         .build()?;
-    let endpoint = format!("http://127.0.0.1:{port}{path}");
+    let endpoint = readiness_endpoint(address, port, path);
     loop {
         if Utc::now() >= deadline {
             return Err(HealthError::Deadline);
@@ -55,5 +60,29 @@ pub async fn wait_ready(port: u16, path: &str, deadline: DateTime<Utc>) -> Resul
             return Ok(());
         }
         tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+}
+
+pub(crate) fn readiness_endpoint(address: IpAddr, port: u16, path: &str) -> String {
+    match address {
+        IpAddr::V4(address) => format!("http://{address}:{port}{path}"),
+        IpAddr::V6(address) => format!("http://[{address}]:{port}{path}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::readiness_endpoint;
+
+    #[test]
+    fn readiness_uses_the_exact_published_address() {
+        assert_eq!(
+            readiness_endpoint("192.168.1.211".parse().unwrap(), 8101, "/v1/models"),
+            "http://192.168.1.211:8101/v1/models"
+        );
+        assert_eq!(
+            readiness_endpoint("fd00::10".parse().unwrap(), 8101, "/health"),
+            "http://[fd00::10]:8101/health"
+        );
     }
 }

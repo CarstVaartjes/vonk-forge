@@ -28,6 +28,7 @@ from vonk_agent_protocol import (
     AgentProgress,
     AgentProtocolError,
     AgentResult,
+    ContainerRuntimeAction,
     canonical_message,
 )
 from vonk_agent_protocol.workload_packages import (
@@ -49,6 +50,10 @@ from .enrollment import (
     PendingEnrollment,
     RemoteRevocationUncertain,
     RenewalInProgress,
+)
+from .host_helper_authority import (
+    HostHelperAuthorityError,
+    HostRuntimeAuthorityService,
 )
 from .inventory_repository import InventoryRepository, InventorySnapshotInput
 from .models import (
@@ -132,6 +137,7 @@ class AgentApiServices:
     max_workload_tuf_metadata_bytes: int = 2 * 1024 * 1024
     max_workload_tuf_target_bytes: int = 1024 * 1024
     package_helper_authority: PackageHelperAuthorityService | None = None
+    host_runtime_authority: HostRuntimeAuthorityService | None = None
     fabric_policy: ManagementAddressPolicy | None = None
 
 
@@ -1541,6 +1547,36 @@ def install_agent_routes(
         _scope_identity(request)
         required = _require_services(services)
         return _authenticated_identity(request, required)
+
+    def host_runtime_service() -> HostRuntimeAuthorityService:
+        required = services.host_runtime_authority if services is not None else None
+        if required is None:
+            raise HTTPException(
+                status_code=503, detail="host runtime authority unavailable"
+            )
+        return required
+
+    @agent.post("/host-runtime/grant")
+    def host_runtime_grant(body: dict[str, object], request: Request) -> Response:
+        identity = package_helper_identity(request)
+        required = host_runtime_service()
+        try:
+            grant = required.issue_grant(
+                node_id=body["node_id"],
+                job_id=body["job_id"],
+                operation_id=body["operation_id"],
+                attempt=body["attempt"],
+                fence=body["fence"],
+                action=ContainerRuntimeAction(body["action"]),
+                request_sha256=body["request_sha256"],
+                certificate_serial=identity.certificate_serial,
+                expires_in_seconds=body.get("expires_in_seconds", 30),
+            )
+            return _json_response({"grant": grant.to_mapping()})
+        except (KeyError, TypeError, ValueError, HostHelperAuthorityError):
+            raise HTTPException(
+                status_code=409, detail="host runtime authority rejected request"
+            ) from None
 
     @agent.post("/package-helper/receipts")
     def package_helper_receipts(body: dict[str, object], request: Request) -> Response:

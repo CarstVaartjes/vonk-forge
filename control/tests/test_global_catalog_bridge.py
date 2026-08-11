@@ -7,6 +7,8 @@ from pathlib import Path
 
 import httpx
 import pytest
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker
 from vonk_control.catalog_service import CatalogService
 from vonk_control.global_catalog import (
     GlobalCatalogClient,
@@ -22,8 +24,6 @@ from vonk_control.models import (
 )
 from vonk_control.recipe_contract import recipe_content_sha256
 from vonk_control.source_bundles import generate_source_bundle
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import sessionmaker
 
 NOW = datetime(2026, 8, 7, 12, 0, tzinfo=UTC)
 FIXTURE = Path(__file__).parent / "fixtures/global/recipe-v1-minimal.json"

@@ -6,20 +6,27 @@ import hashlib
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import ClassVar
 from uuid import uuid4
 
 from cryptography.hazmat.primitives.asymmetric import ed25519
+from sqlalchemy import select
+from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import AgentProtocolError
 from vonk_agent_protocol.host_helper import (
     HOST_HELPER_AUTHORITY,
     MAX_HOST_HELPER_GRANT_SECONDS,
+    ContainerRuntimeAction,
     HostHelperGrantClaims,
     HostHelperOperation,
     HostHelperSignature,
+    HostOperationKind,
     SignedHostHelperGrant,
     host_helper_grant_signing_bytes,
 )
 
+from .models import AgentOperation as StoredAgentOperation
+from .models import AgentOperationAttempt
 from .package_helper_authority import _load_private_key
 
 
@@ -135,3 +142,129 @@ class HostHelperGrantIssuer:
                 "host helper authority clock must be timezone-aware"
             )
         return int(now.astimezone(UTC).timestamp())
+
+
+class HostRuntimeAuthorityService:
+    """Bind a narrow host-runtime grant to one live agent attempt."""
+
+    _ACTION_KINDS: ClassVar[
+        dict[ContainerRuntimeAction, frozenset[str]]
+    ] = {
+        ContainerRuntimeAction.IMAGE_IMPORT: frozenset({"recipe.image.import.v1"}),
+        ContainerRuntimeAction.IMAGE_INSPECT: frozenset({"recipe.install"}),
+        ContainerRuntimeAction.START: frozenset({"recipe.start"}),
+        # A start attempt may stop its own managed run when readiness fails.
+        ContainerRuntimeAction.STOP: frozenset({"recipe.start", "recipe.stop"}),
+    }
+
+    def __init__(
+        self,
+        sessions: sessionmaker[Session],
+        issuer: HostHelperGrantIssuer,
+        *,
+        clock: Callable[[], datetime] | None = None,
+    ) -> None:
+        if not callable(sessions):
+            raise TypeError("host runtime sessions are invalid")
+        if not isinstance(issuer, HostHelperGrantIssuer):
+            raise TypeError("host runtime grant issuer is invalid")
+        if clock is not None and not callable(clock):
+            raise TypeError("host runtime authority clock is invalid")
+        self._sessions = sessions
+        self._issuer = issuer
+        self._clock = clock or (lambda: datetime.now(UTC))
+
+    @property
+    def public_key_document(self) -> dict[str, object]:
+        return self._issuer.public_key_document()
+
+    def issue_grant(
+        self,
+        *,
+        node_id: str,
+        job_id: str,
+        operation_id: str,
+        attempt: int,
+        fence: str,
+        action: ContainerRuntimeAction,
+        request_sha256: str,
+        certificate_serial: str,
+        expires_in_seconds: int = 30,
+    ) -> SignedHostHelperGrant:
+        if type(action) is not ContainerRuntimeAction:
+            raise HostHelperAuthorityError("container runtime action is invalid")
+        lease_deadline = self._check_attempt(
+            node_id=node_id,
+            job_id=job_id,
+            operation_id=operation_id,
+            attempt=attempt,
+            fence=fence,
+            action=action,
+            certificate_serial=certificate_serial,
+        )
+        grant = self._issuer.issue_grant(
+            node_id=node_id,
+            operation=HostHelperOperation(
+                HostOperationKind.EXECUTE_CONTAINER_RUNTIME_REQUEST,
+                {
+                    "action": action.value,
+                    "job_id": job_id,
+                    "operation_id": operation_id,
+                    "attempt": attempt,
+                    "fence": fence,
+                    "request_sha256": request_sha256,
+                },
+            ),
+            expires_in_seconds=expires_in_seconds,
+        )
+        if grant.claims.expires_at > int(lease_deadline.timestamp()):
+            raise HostHelperAuthorityError(
+                "host runtime grant exceeds the active attempt lease"
+            )
+        return grant
+
+    def _check_attempt(
+        self,
+        *,
+        node_id: str,
+        job_id: str,
+        operation_id: str,
+        attempt: int,
+        fence: str,
+        action: ContainerRuntimeAction,
+        certificate_serial: str,
+    ) -> datetime:
+        now = self._clock()
+        with self._sessions() as session:
+            operation = session.get(StoredAgentOperation, operation_id)
+            current = session.scalar(
+                select(AgentOperationAttempt).where(
+                    AgentOperationAttempt.operation_id == operation_id,
+                    AgentOperationAttempt.attempt == attempt,
+                )
+            )
+            lease_deadline = (
+                None
+                if current is None
+                else current.lease_deadline
+                if current.lease_deadline.tzinfo is not None
+                else current.lease_deadline.replace(tzinfo=UTC)
+            )
+            if (
+                operation is None
+                or current is None
+                or operation.node_id != node_id
+                or operation.parent_job_id != job_id
+                or operation.kind not in self._ACTION_KINDS[action]
+                or operation.state != "running"
+                or operation.current_attempt != attempt
+                or current.state != "running"
+                or current.fence != fence
+                or current.agent_certificate_serial != certificate_serial
+                or lease_deadline is None
+                or lease_deadline <= now
+            ):
+                raise HostHelperAuthorityError(
+                    "container runtime action authority is stale"
+                )
+            return lease_deadline

@@ -6,7 +6,6 @@ import os
 from pathlib import Path
 
 import pytest
-
 from vonk_control import host_state as host_state_module
 from vonk_control.host_state import (
     HostGenerationStore,
@@ -16,7 +15,6 @@ from vonk_control.host_state import (
     PhaseJournal,
     SelectionReceipt,
 )
-
 
 SHA_A = "a" * 64
 SHA_B = "b" * 64
@@ -129,9 +127,10 @@ def test_nested_same_operation_lock_does_not_release_outer_lock(tmp_path: Path) 
     with lock:
         with lock:
             pass
-        with pytest.raises(HostStateConflict, match="operation is active"):
-            with HostOperationLock(root, owner_uid=os.geteuid()):
-                pass
+        with pytest.raises(
+            HostStateConflict, match="operation is active"
+        ), HostOperationLock(root, owner_uid=os.geteuid()):
+            pass
 
 
 def test_candidate_and_active_projections_are_distinct_and_canonical(

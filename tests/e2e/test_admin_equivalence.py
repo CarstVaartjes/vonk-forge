@@ -141,10 +141,10 @@ def _fleet() -> dict[str, object]:
 
 
 def _live_check(token_directory: Path) -> dict[str, object]:
+    from fastapi.testclient import TestClient
     from vonk_control.api import AdminServices, create_app
     from vonk_control.audit import MemoryAuditStore
     from vonk_control.auth import Actor, TokenCodec
-    from fastapi.testclient import TestClient
 
     from cluster_profiles.control_client import ControlClient
 
