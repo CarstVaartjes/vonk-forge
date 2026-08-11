@@ -1,10 +1,15 @@
 //! Rootless, typed recipe image build execution.
 
-use std::{fs, os::unix::ffi::OsStrExt, path::Path, time::Duration};
+use std::{
+    fs,
+    os::unix::{ffi::OsStrExt, fs::PermissionsExt},
+    path::Path,
+    time::Duration,
+};
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use tempfile::Builder;
+use tempfile::{Builder, TempDir};
 use thiserror::Error;
 use uuid::Uuid;
 use vonk_agent_protocol::RecipeBuildRequest;
@@ -50,6 +55,29 @@ pub struct RecipeBuilder<'a, R> {
     pub runtime_root: &'a Path,
 }
 
+struct PodmanBuildStaging(TempDir);
+
+impl PodmanBuildStaging {
+    fn create(root: &Path) -> std::io::Result<Self> {
+        Builder::new().prefix("source-").tempdir_in(root).map(Self)
+    }
+
+    fn path(&self) -> &Path {
+        self.0.path()
+    }
+}
+
+impl Drop for PodmanBuildStaging {
+    fn drop(&mut self) {
+        // Rootless Podman may leave overlay layer directories mode 0555. The
+        // agent owns this operation-private tree, but TempDir cannot remove a
+        // file from a non-writable directory and silently abandons the whole
+        // graphroot. Restore owner traversal/removal before TempDir runs. Do
+        // not follow symlinks created in container-image metadata.
+        let _ = make_owned_directories_removable(self.path());
+    }
+}
+
 impl<R: ProcessRunner> RecipeBuilder<'_, R> {
     pub fn layout_path(&self, operation_id: Uuid) -> std::path::PathBuf {
         self.data_root
@@ -71,7 +99,7 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
         let network = build_network(&request.network)?;
         let staging_root = self.data_root.join("build-staging");
         fs::create_dir_all(&staging_root)?;
-        let staging = Builder::new().prefix("source-").tempdir_in(&staging_root)?;
+        let staging = PodmanBuildStaging::create(&staging_root)?;
         let context = staging.path().join("context");
         let storage = staging.path().join("podman-storage");
         fs::create_dir_all(self.runtime_root)?;
@@ -233,6 +261,20 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
             policy,
         })
     }
+}
+
+fn make_owned_directories_removable(path: &Path) -> std::io::Result<()> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Ok(());
+    }
+    let mut permissions = metadata.permissions();
+    permissions.set_mode(permissions.mode() | 0o700);
+    fs::set_permissions(path, permissions)?;
+    for entry in fs::read_dir(path)? {
+        make_owned_directories_removable(&entry?.path())?;
+    }
+    Ok(())
 }
 
 fn build_network(

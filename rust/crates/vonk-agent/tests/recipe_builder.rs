@@ -1,6 +1,9 @@
 #![forbid(unsafe_code)]
 
-use std::{cell::RefCell, collections::BTreeMap, fs, io::Cursor, path::Path, time::Duration};
+use std::{
+    cell::RefCell, collections::BTreeMap, fs, io::Cursor, os::unix::fs::PermissionsExt, path::Path,
+    time::Duration,
+};
 
 use tempfile::tempdir;
 use uuid::Uuid;
@@ -15,6 +18,7 @@ use vonk_agent_protocol::{
 
 struct Runner {
     calls: RefCell<Vec<(Program, Vec<String>)>>,
+    fail_build: bool,
 }
 
 impl ProcessRunner for Runner {
@@ -44,8 +48,19 @@ impl ProcessRunner for Runner {
                 .unwrap();
             fs::write(output, b"exact oci archive")?;
         }
+        if arguments.iter().any(|value| value == "build") {
+            let storage = arguments
+                .windows(2)
+                .find(|pair| pair[0] == "--root")
+                .map(|pair| Path::new(&pair[1]))
+                .unwrap();
+            let readonly_layer = storage.join("overlay/diff/readonly");
+            fs::create_dir_all(&readonly_layer)?;
+            fs::write(readonly_layer.join("layer"), b"podman layer")?;
+            fs::set_permissions(&readonly_layer, fs::Permissions::from_mode(0o555))?;
+        }
         Ok(ProcessOutput {
-            success: true,
+            success: !(self.fail_build && arguments.iter().any(|value| value == "build")),
             stdout,
             stderr: Vec::new(),
         })
@@ -130,6 +145,7 @@ fn build_uses_only_typed_rootless_podman_arguments_and_records_exact_layout() {
     let (archive, digest) = bundle();
     let runner = Runner {
         calls: RefCell::new(Vec::new()),
+        fail_build: false,
     };
     let root = tempdir().unwrap();
     let runtime = tempdir().unwrap();
@@ -214,6 +230,42 @@ fn build_uses_only_typed_rootless_podman_arguments_and_records_exact_layout() {
         )
         .ends_with("00000000-0000-4000-8000-000000000002/image.oci.tar")
     );
+    assert_eq!(
+        fs::read_dir(root.path().join("build-staging"))
+            .unwrap()
+            .count(),
+        0,
+        "private Podman graphroots must not survive a completed build"
+    );
+}
+
+#[test]
+fn build_removes_readonly_private_graphroot_after_process_failure() {
+    let (archive, digest) = bundle();
+    let runner = Runner {
+        calls: RefCell::new(Vec::new()),
+        fail_build: true,
+    };
+    let root = tempdir().unwrap();
+    let runtime = tempdir().unwrap();
+    let operation = Uuid::parse_str("00000000-0000-4000-8000-000000000004").unwrap();
+
+    let error = RecipeBuilder {
+        runner: &runner,
+        data_root: root.path(),
+        runtime_root: runtime.path(),
+    }
+    .build(&request(archive.len(), digest), operation, &archive)
+    .unwrap_err();
+
+    assert!(matches!(error, RecipeBuildError::Evidence));
+    assert_eq!(
+        fs::read_dir(root.path().join("build-staging"))
+            .unwrap()
+            .count(),
+        0,
+        "private Podman graphroots must not survive a failed build"
+    );
 }
 
 #[test]
@@ -221,6 +273,7 @@ fn build_rejects_declared_public_hosts_before_running_podman() {
     let (archive, digest) = bundle();
     let runner = Runner {
         calls: RefCell::new(Vec::new()),
+        fail_build: false,
     };
     let root = tempdir().unwrap();
     let runtime = tempdir().unwrap();
@@ -248,6 +301,7 @@ fn build_rejects_an_oci_layout_larger_than_declared_output_limit() {
     let (archive, digest) = bundle();
     let runner = Runner {
         calls: RefCell::new(Vec::new()),
+        fail_build: false,
     };
     let root = tempdir().unwrap();
     let runtime = tempdir().unwrap();
