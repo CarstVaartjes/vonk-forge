@@ -24,12 +24,11 @@ TimeoutStopSec=30s
 UMask=0077
 RuntimeDirectory=vonk-forge-agent
 RuntimeDirectoryMode=0700
-NoNewPrivileges=yes
-CapabilityBoundingSet=
+NoNewPrivileges=no
+CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_SETGID CAP_SETUID CAP_SYS_ADMIN
 AmbientCapabilities=
-# Rootless Podman must preserve ordinary SUID/SGID mode bits while unpacking
-# OCI layers. NoNewPrivileges and the empty capability sets keep those files
-# from granting host privilege to this package-dedicated account.
+# The bounding set is the tested minimum required by the distribution's setuid
+# newuidmap/newgidmap helpers. The agent itself receives no ambient capabilities.
 PrivateTmp=yes
 PrivateDevices=yes
 DevicePolicy=closed

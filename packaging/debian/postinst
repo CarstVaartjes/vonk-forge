@@ -13,15 +13,83 @@ if ! getent passwd vonk-agent >/dev/null; then
         --no-create-home --shell /usr/sbin/nologin vonk-agent
 fi
 
-# Vonk uses Podman's single-UID rootless mode so the service can retain
-# NoNewPrivileges=yes. This package-dedicated account must not acquire mappings
-# that would make Podman invoke the setuid newuidmap/newgidmap helpers.
-if [ -f /etc/subuid ]; then
-    sed -i '/^vonk-agent:/d' /etc/subuid
-fi
-if [ -f /etc/subgid ]; then
-    sed -i '/^vonk-agent:/d' /etc/subgid
-fi
+# Podman needs a standard subordinate range to map both OCI image ownership
+# and the required numeric non-root runtime identity. Allocate the first free
+# range from login.defs without disturbing host-managed ranges.
+login_value() {
+    key=$1
+    fallback=$2
+    value=$(awk -v key="$key" '$1 == key && $2 ~ /^[0-9]+$/ { value=$2 } END { print value }' /etc/login.defs)
+    if [ -n "$value" ]; then
+        printf '%s\n' "$value"
+    else
+        printf '%s\n' "$fallback"
+    fi
+}
+
+allocate_subid_range() {
+    file=$1
+    minimum=$2
+    maximum=$3
+    count=$4
+    LC_ALL=C sort -t: -k2,2n "$file" | awk -F: \
+        -v minimum="$minimum" -v maximum="$maximum" -v count="$count" '
+        BEGIN { candidate=minimum; found=0 }
+        $2 ~ /^[0-9]+$/ && $3 ~ /^[0-9]+$/ && $3 > 0 {
+            start=$2
+            after=start+$3
+            if (after <= candidate) next
+            if (start >= candidate+count) {
+                print candidate "-" candidate+count-1
+                found=1
+                exit
+            }
+            if (start <= candidate && after > candidate) candidate=after
+        }
+        END {
+            if (!found && candidate+count-1 <= maximum)
+                print candidate "-" candidate+count-1
+        }'
+}
+
+ensure_subid_range() {
+    file=$1
+    minimum=$2
+    maximum=$3
+    count=$4
+    option=$5
+    agent_uid=$6
+    if awk -F: -v user=vonk-agent -v uid="$agent_uid" -v count="$count" '
+        ($1 == user || $1 == uid) && $3 ~ /^[0-9]+$/ { total += $3 }
+        END { exit !(total >= count) }
+    ' "$file"; then
+        return
+    fi
+    range=$(allocate_subid_range "$file" "$minimum" "$maximum" "$count")
+    if [ -z "$range" ]; then
+        echo "vonk-forge-agent: no subordinate ID range is available" >&2
+        exit 1
+    fi
+    case "$option" in
+        uid) usermod --add-subuids "$range" vonk-agent ;;
+        gid) usermod --add-subgids "$range" vonk-agent ;;
+        *) exit 1 ;;
+    esac
+}
+
+sub_uid_min=$(login_value SUB_UID_MIN 100000)
+sub_uid_max=$(login_value SUB_UID_MAX 600100000)
+sub_uid_count=$(login_value SUB_UID_COUNT 65536)
+sub_gid_min=$(login_value SUB_GID_MIN 100000)
+sub_gid_max=$(login_value SUB_GID_MAX 600100000)
+sub_gid_count=$(login_value SUB_GID_COUNT 65536)
+if [ "$sub_uid_count" -lt 65536 ]; then sub_uid_count=65536; fi
+if [ "$sub_gid_count" -lt 65536 ]; then sub_gid_count=65536; fi
+if [ ! -f /etc/subuid ]; then install -o root -g root -m 0644 /dev/null /etc/subuid; fi
+if [ ! -f /etc/subgid ]; then install -o root -g root -m 0644 /dev/null /etc/subgid; fi
+agent_uid=$(id -u vonk-agent)
+ensure_subid_range /etc/subuid "$sub_uid_min" "$sub_uid_max" "$sub_uid_count" uid "$agent_uid"
+ensure_subid_range /etc/subgid "$sub_gid_min" "$sub_gid_max" "$sub_gid_count" gid "$agent_uid"
 
 install -d -o root -g root -m 0755 /var/lib/vonk-forge
 install -d -o vonk-agent -g vonk-agent -m 0700 /var/lib/vonk-forge-agent
