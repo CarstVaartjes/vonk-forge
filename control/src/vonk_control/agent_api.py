@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -654,6 +655,49 @@ def _sha256_path(path: Path, expected_bytes: int) -> str:
     if read != expected_bytes:
         raise HTTPException(status_code=409, detail="recipe image storage conflicts")
     return digest.hexdigest()
+
+
+def _prepare_recipe_image_upload(
+    artifact_root: Path, layout_sha256: str
+) -> tuple[int, Path]:
+    artifact_root.mkdir(mode=0o750, parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{layout_sha256}.", suffix=".upload", dir=artifact_root
+    )
+    return descriptor, Path(temporary_name)
+
+
+def _flush_and_sync(stream: Any) -> None:
+    stream.flush()
+    os.fsync(stream.fileno())
+
+
+def _commit_recipe_image_upload(
+    temporary: Path,
+    destination: Path,
+    *,
+    expected_bytes: int,
+    layout_sha256: str,
+) -> None:
+    if destination.exists():
+        if (
+            destination.stat().st_size != expected_bytes
+            or _sha256_path(destination, expected_bytes) != layout_sha256
+        ):
+            raise HTTPException(
+                status_code=409, detail="recipe image storage conflicts"
+            )
+        temporary.unlink()
+        return
+    os.chmod(temporary, 0o640)
+    os.replace(temporary, destination)
+
+
+def _unlink_if_present(path: Path) -> None:
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
 
 
 def _open_owned_artifact(
@@ -1669,15 +1713,16 @@ def install_agent_routes(
                 raise HTTPException(
                     status_code=404, detail="recipe build does not exist"
                 )
-        required.artifact_root.mkdir(mode=0o750, parents=True, exist_ok=True)
-        descriptor, temporary_name = tempfile.mkstemp(
-            prefix=f".{layout_sha256}.", suffix=".upload", dir=required.artifact_root
+        descriptor, temporary = await asyncio.to_thread(
+            _prepare_recipe_image_upload,
+            required.artifact_root,
+            layout_sha256,
         )
-        temporary = Path(temporary_name)
         digest = hashlib.sha256()
         received = 0
         try:
-            with os.fdopen(descriptor, "wb") as stream:
+            stream = os.fdopen(descriptor, "wb")
+            try:
                 async for chunk in request.stream():
                     received += len(chunk)
                     if received > expected_bytes:
@@ -1685,26 +1730,22 @@ def install_agent_routes(
                             status_code=413, detail="recipe image is too large"
                         )
                     digest.update(chunk)
-                    stream.write(chunk)
+                    await asyncio.to_thread(stream.write, chunk)
                 if received != expected_bytes or digest.hexdigest() != layout_sha256:
                     raise HTTPException(
                         status_code=422, detail="recipe image digest changed"
                     )
-                stream.flush()
-                os.fsync(stream.fileno())
+                await asyncio.to_thread(_flush_and_sync, stream)
+            finally:
+                await asyncio.to_thread(stream.close)
             destination = required.artifact_root / layout_sha256
-            if destination.exists():
-                if (
-                    destination.stat().st_size != expected_bytes
-                    or _sha256_path(destination, expected_bytes) != layout_sha256
-                ):
-                    raise HTTPException(
-                        status_code=409, detail="recipe image storage conflicts"
-                    )
-                temporary.unlink()
-            else:
-                os.chmod(temporary, 0o640)
-                os.replace(temporary, destination)
+            await asyncio.to_thread(
+                _commit_recipe_image_upload,
+                temporary,
+                destination,
+                expected_bytes=expected_bytes,
+                layout_sha256=layout_sha256,
+            )
             with required.sessions.begin() as session:
                 build = session.get(RecipeBuild, build_id, with_for_update=True)
                 if (
@@ -1720,8 +1761,7 @@ def install_agent_routes(
                 build.image_bytes = expected_bytes
                 build.updated_at = _now(required.clock())
         finally:
-            if temporary.exists():
-                temporary.unlink()
+            await asyncio.to_thread(_unlink_if_present, temporary)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @agent.get("/artifacts/{sha256}")

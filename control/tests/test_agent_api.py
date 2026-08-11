@@ -10,6 +10,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from threading import Event
 
 import pytest
 from cryptography import x509
@@ -17,6 +18,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
@@ -487,6 +489,113 @@ def test_builder_uploads_digest_verified_oci_archive_without_a_registry(
         ).status_code
         == 404
     )
+
+
+def test_recipe_image_fsync_does_not_block_concurrent_agent_requests(
+    agent_system, monkeypatch
+) -> None:
+    client, services, _, clock = agent_system
+    recipe_id = str(uuid.uuid4())
+    revision_id = str(uuid.uuid4())
+    build_id = str(uuid.uuid4())
+    payload = b"exact oci layout"
+    layout_digest = hashlib.sha256(payload).hexdigest()
+    with services.sessions.begin() as session:
+        session.add(
+            LocalRecipe(
+                id=recipe_id,
+                slug="nonblocking-image-upload",
+                title="Nonblocking image upload",
+                description="Concurrent heartbeat fixture",
+                source_kind="local",
+                created_by="administrator",
+                created_at=clock.now,
+                updated_at=clock.now,
+            )
+        )
+        session.add(
+            LocalRecipeRevision(
+                id=revision_id,
+                recipe_id=recipe_id,
+                revision_number=1,
+                lifecycle="resolved",
+                schema_version=1,
+                document={},
+                content_sha256="c" * 64,
+                created_by="administrator",
+                created_at=clock.now,
+            )
+        )
+        session.add(
+            RecipeBuild(
+                id=build_id,
+                recipe_revision_id=revision_id,
+                builder_node_id=NODE_A,
+                source_bundle_sha256="a" * 64,
+                build_input_sha256="b" * 64,
+                state="building",
+                policy_report={"passed": True},
+                plan={},
+                created_at=clock.now,
+                updated_at=clock.now,
+            )
+        )
+    entered = Event()
+    release = Event()
+    health_completed = Event()
+    real_fsync = os.fsync
+
+    def slow_fsync(descriptor: int) -> None:
+        entered.set()
+        assert release.wait(timeout=2)
+        real_fsync(descriptor)
+
+    monkeypatch.setattr("vonk_control.agent_api.os.fsync", slow_fsync)
+    headers = agent_headers(NODE_A, "serial-a") | {
+        "content-type": "application/vnd.oci.image.layout.v1.tar",
+        "x-vonk-image-digest": "sha256:" + "d" * 64,
+        "x-vonk-oci-layout-sha256": layout_digest,
+    }
+
+    def observe_responsiveness() -> bool:
+        assert entered.wait(timeout=1)
+        responsive = health_completed.wait(timeout=0.25)
+        release.set()
+        return responsive
+
+    async def exercise() -> tuple[object, object, bool]:
+        async with AsyncClient(
+            transport=ASGITransport(app=client.app), base_url="http://testserver"
+        ) as async_client:
+
+            async def health_request():
+                response = await async_client.get("/api/v1/healthz")
+                health_completed.set()
+                return response
+
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                observer = pool.submit(observe_responsiveness)
+                upload = asyncio.create_task(
+                    async_client.put(
+                        f"/agent/v1/recipe-builds/{build_id}/image",
+                        headers=headers,
+                        content=payload,
+                    )
+                )
+                health = asyncio.create_task(health_request())
+                try:
+                    upload_response, health_response = await asyncio.gather(
+                        upload, health
+                    )
+                finally:
+                    release.set()
+                return upload_response, health_response, observer.result(timeout=1)
+
+    upload_response, health_response, responsive = asyncio.run(exercise())
+
+    assert responsive
+    assert health_response.status_code == 200
+    assert upload_response.status_code == 204
 
 
 def admin_headers(codec: TokenCodec, role: str = "administrator") -> dict[str, str]:
