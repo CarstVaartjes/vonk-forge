@@ -145,6 +145,20 @@ fn restrictive_umask_still_publishes_reloadable_state() {
     );
 }
 
+#[test]
+fn package_staging_slot_is_available_only_from_stable_state() {
+    let fixture = fixture();
+    assert_eq!(fixture.store.package_staging_slot().unwrap(), Slot::B);
+
+    let b_digest = write_slot(&fixture.paths, Slot::B, &fixture.release, 2, 1, (1, 2));
+    let pending = fixture
+        .store
+        .activate(Slot::B, &b_digest, NOW, &NoCrash)
+        .unwrap();
+    assert_eq!(pending.status, SupervisorStatus::Pending);
+    assert!(fixture.store.package_staging_slot().is_err());
+}
+
 fn ready(
     state: &vonk_agent_supervisor::slots::SupervisorState,
     challenge: String,

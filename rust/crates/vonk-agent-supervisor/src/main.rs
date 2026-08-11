@@ -43,6 +43,7 @@ enum SupervisorCommand {
         #[arg(long)]
         sha256: String,
     },
+    PackageStagingSlot,
     RunAgent,
     Supervise,
 }
@@ -92,6 +93,10 @@ fn run(cli: Cli) -> Result<(), String> {
                 "restart",
                 "vonk-forge-agent-supervisor.service",
             ])?;
+        }
+        SupervisorCommand::PackageStagingSlot => {
+            require_root()?;
+            println!("{}", store.package_staging_slot().map_err(display)?.name());
         }
         SupervisorCommand::RunAgent => {
             if rustix::process::geteuid().as_raw() != agent_uid {

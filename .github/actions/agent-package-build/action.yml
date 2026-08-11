@@ -256,6 +256,43 @@ runs:
           --output-dir lifecycle
         rm -f "$RUNNER_TEMP/vonk-agent-release.pem"
         test ! -e "$RUNNER_TEMP/vonk-agent-release.pem"
+
+        stable_state="$RUNNER_TEMP/vonk-supervisor-stable.json"
+        sudo cp /var/lib/vonk-forge/supervisor/state.json "$stable_state"
+        supervisor_before=$(
+          sha256sum /usr/lib/vonk-forge/vonk-agent-supervisor \
+            | cut -d' ' -f1
+        )
+        sudo python3 - <<'PY'
+        import json
+        from pathlib import Path
+
+        path = Path("/var/lib/vonk-forge/supervisor/state.json")
+        state = json.loads(path.read_bytes())
+        state["status"] = "pending"
+        state["previous_slot"] = "b"
+        state["previous_artifact_sha256"] = "0" * 64
+        state["activation_deadline"] = 4_102_444_800
+        path.write_text(json.dumps(state, sort_keys=True, separators=(",", ":")))
+        PY
+        pending_log="$RUNNER_TEMP/pending-upgrade.log"
+        if sudo env SYSTEMD_OFFLINE=1 dpkg -i \
+          "lifecycle/vonk-forge-agent_${NEXT_VERSION}_arm64.deb" \
+          >"$pending_log" 2>&1; then
+          echo "upgrade over pending supervisor state unexpectedly succeeded" >&2
+          exit 1
+        fi
+        grep -F 'supervisor state is not stable' "$pending_log" >/dev/null
+        test "$(dpkg-query -W -f='${Version}' vonk-forge-agent)" = "$VERSION"
+        supervisor_after=$(
+          sha256sum /usr/lib/vonk-forge/vonk-agent-supervisor \
+            | cut -d' ' -f1
+        )
+        test "$supervisor_before" = "$supervisor_after"
+        test ! -e /var/lib/vonk-forge/slots/b/vonk-agent
+        sudo cp "$stable_state" /var/lib/vonk-forge/supervisor/state.json
+        sudo chmod 0644 /var/lib/vonk-forge/supervisor/state.json
+
         sudo env SYSTEMD_OFFLINE=1 dpkg -i \
           "lifecycle/vonk-forge-agent_${NEXT_VERSION}_arm64.deb"
         grep -Fx '# lifecycle-preserved' \

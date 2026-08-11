@@ -12,6 +12,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 BUILD = ROOT / "scripts/build-agent-deb"
 VERIFY = ROOT / "scripts/verify-agent-deb"
+PREINST = ROOT / "packaging/debian/preinst"
 
 
 def _aarch64_fixture(path: Path, marker: bytes) -> None:
@@ -60,6 +61,43 @@ def _build(
         text=True,
         check=False,
     )
+
+
+def _run_preinst(tmp_path: Path, status: str) -> subprocess.CompletedProcess[str]:
+    test_root = tmp_path / status
+    state = test_root / "var/lib/vonk-forge/supervisor/state.json"
+    state.parent.mkdir(parents=True)
+    state.write_text(f'{{"status":"{status}"}}')
+    state.chmod(0o644)
+    script = tmp_path / f"preinst-{status}"
+    script.write_text(PREINST.read_text().replace("@VERSION@", "0.1.1"))
+    script.chmod(0o755)
+    return subprocess.run(
+        [script, "upgrade", "0.1.0"],
+        env={
+            "LANG": "C.UTF-8",
+            "LC_ALL": "C.UTF-8",
+            "PATH": "/usr/bin:/bin",
+            "VONK_PACKAGE_TEST_ROOT": str(test_root),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_preinst_refuses_to_unpack_over_nonstable_supervisor_state(
+    tmp_path: Path,
+) -> None:
+    stable = _run_preinst(tmp_path, "stable")
+    pending = _run_preinst(tmp_path, "pending")
+    failed = _run_preinst(tmp_path, "failed")
+
+    assert stable.returncode == 0, stable.stderr
+    assert pending.returncode != 0
+    assert failed.returncode != 0
+    assert "supervisor state is not stable" in pending.stderr
+    assert "supervisor state is not stable" in failed.stderr
 
 
 def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> None:
@@ -121,6 +159,7 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
     ).stdout
     assert "curl" in fields
     assert "podman" in fields
+    assert "util-linux" in fields
     assert "uidmap" not in fields
     payload = tmp_path / "payload"
     subprocess.run(
@@ -131,6 +170,8 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
     assert "Environment=HOME=/var/lib/vonk-forge-agent" in unit
     assert "Environment=XDG_RUNTIME_DIR=/run/vonk-forge-agent" in unit
     assert "RestrictNamespaces=user mnt pid ipc uts cgroup net" in unit
+    assert "ProtectProc=invisible" in unit
+    assert "ProcSubset=all" in unit
     assert "DeviceAllow=/dev/fuse rw" in unit
     assert "DeviceAllow=char-231:* rw" in unit
     assert "BindPaths=-/dev/fuse" in unit
