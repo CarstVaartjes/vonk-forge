@@ -1910,9 +1910,20 @@ def production_app() -> FastAPI:
         observations=lambda: durable_desired_state_observations(sessions),
         orchestrator=ReconciliationOrchestrator(sessions, clock=clock),
     )
-    dashboard = DashboardService(repository, sessions)
+    dashboard = DashboardService(
+        repository,
+        sessions,
+        protocol_minimum=generation.protocol_minimum,
+        protocol_maximum=generation.protocol_maximum,
+    )
     metrics = MetricsRegistry()
-    operational_metrics = OperationalMetricsCollector(metrics, sessions, clock=clock)
+    operational_metrics = OperationalMetricsCollector(
+        metrics,
+        sessions,
+        clock=clock,
+        protocol_minimum=generation.protocol_minimum,
+        protocol_maximum=generation.protocol_maximum,
+    )
     commit_eligible = lambda commit: git_policy.eligible(commit).ok
     current_commit = lambda: repository.head(settings.deployment_branch)
     agent_services = build_agent_services(

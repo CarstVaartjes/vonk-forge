@@ -2,10 +2,14 @@ import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from vonk_control.dashboard import DashboardService
-from vonk_control.models import AgentNode, Base, Observation
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from vonk_control.dashboard import DashboardService
+from vonk_control.inventory_repository import (
+    InventoryRepository,
+    InventorySnapshotInput,
+)
+from vonk_control.models import AgentNode, Base, Observation
 
 NOW = datetime(2026, 8, 5, 12, 0, tzinfo=UTC)
 
@@ -83,6 +87,7 @@ def test_dashboard_projects_agent_availability_without_addresses(tmp_path) -> No
                     capabilities=[],
                     agent_implementation="rust",
                     migration_state="complete",
+                    protocol_version=3,
                     last_seen_at=NOW - timedelta(seconds=149),
                 ),
                 AgentNode(
@@ -106,11 +111,29 @@ def test_dashboard_projects_agent_availability_without_addresses(tmp_path) -> No
                 ),
             )
         )
+    InventoryRepository(sessions, clock=lambda: NOW).record(
+        InventorySnapshotInput(
+            node_id=active,
+            observed_at=NOW - timedelta(seconds=10),
+            disk_total_bytes=10_000,
+            disk_free_bytes=7_000,
+            host_memory_total_bytes=20_000,
+            host_memory_free_bytes=15_000,
+            gpu_memory_total_bytes=20_000,
+            gpu_memory_free_bytes=14_000,
+            gpu_count=1,
+            artifact_store_read_only=False,
+            capabilities=("recipe.operations.v1", "runtime.rootless-podman.v1"),
+            nvidia_driver_version="580.65",
+            container_runtime_version="5.4.2",
+        )
+    )
 
     result = DashboardService(
         PresenceRepository(),
         sessions,
         clock=lambda: NOW,
+        protocol_maximum=3,
         agent_online_window_seconds=150,
     ).fleet()
 
@@ -119,6 +142,15 @@ def test_dashboard_projects_agent_availability_without_addresses(tmp_path) -> No
     assert nodes["Active"]["agent_online"] is True
     assert nodes["Active"]["agent_implementation"] == "rust"
     assert nodes["Active"]["agent_migration_state"] == "complete"
+    assert nodes["Active"]["compatibility"] == "supported"
+    assert nodes["Active"]["inventory_stale"] is False
+    assert nodes["Active"]["inventory_age_seconds"] == 10
+    assert nodes["Active"]["inventory_capabilities"] == [
+        "recipe.operations.v1",
+        "runtime.rootless-podman.v1",
+    ]
+    assert nodes["Active"]["memory_available_bytes"] == 15_000
+    assert nodes["Active"]["disk_available_bytes"] == 7_000
     assert nodes["Stale"]["agent_migration_state"] == "required"
     assert nodes["Active"]["agent_last_seen_at"] == (NOW - timedelta(seconds=149)).isoformat()
     assert nodes["Stale"]["agent_state"] == "active"
@@ -131,6 +163,9 @@ def test_dashboard_projects_agent_availability_without_addresses(tmp_path) -> No
     assert nodes["Missing"]["healthy"] is None
     assert nodes["Missing"]["stale"] is True
     assert nodes["Missing"]["probe_age_seconds"] is None
+    assert nodes["Missing"]["inventory_stale"] is True
+    assert nodes["Missing"]["inventory_age_seconds"] is None
+    assert nodes["Missing"]["inventory_capabilities"] == []
     encoded = json.dumps(result, sort_keys=True)
     assert "10.0.0.42" not in encoded
     assert "management-address" not in encoded

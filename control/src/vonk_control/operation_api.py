@@ -896,6 +896,10 @@ class NodeStatus(StrictModel):
     memory_available_bytes: int = Field(ge=0)
     disk_available_bytes: int = Field(ge=0)
     probe_age_seconds: float | None = Field(default=None, ge=0)
+    inventory_observed_at: str | None = None
+    inventory_age_seconds: float | None = Field(default=None, ge=0)
+    inventory_stale: bool = True
+    inventory_capabilities: list[str] = Field(default_factory=list, max_length=64)
     agent_state: str = "unregistered"
     agent_implementation: str | None = None
     agent_migration_state: str | None = None

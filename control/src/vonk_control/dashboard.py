@@ -5,13 +5,14 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .metrics import protocol_version_bucket
 from .models import (
     AgentCertificate,
     AgentNode,
+    NodeInventorySnapshot,
     Observation,
     PackageCandidate,
     PackageRollout,
@@ -52,10 +53,15 @@ class DashboardService:
         protocol_maximum: int = 1,
         agent_online_window_seconds: int = 150,
         health_stale_after_seconds: int = 300,
+        inventory_stale_after_seconds: int = 300,
     ) -> None:
         if protocol_minimum < 1 or protocol_maximum < protocol_minimum:
             raise ValueError("supported protocol range is invalid")
-        if agent_online_window_seconds <= 0 or health_stale_after_seconds <= 0:
+        if (
+            agent_online_window_seconds <= 0
+            or health_stale_after_seconds <= 0
+            or inventory_stale_after_seconds <= 0
+        ):
             raise ValueError("observation windows must be positive")
         self._repository = repository
         self._sessions = sessions
@@ -64,6 +70,7 @@ class DashboardService:
         self._protocol_maximum = protocol_maximum
         self._agent_online_window_seconds = agent_online_window_seconds
         self._health_stale_after_seconds = health_stale_after_seconds
+        self._inventory_stale_after_seconds = inventory_stale_after_seconds
 
     def fleet(self) -> dict[str, object]:
         commit = self._repository.head()
@@ -78,6 +85,29 @@ class DashboardService:
                 node.node_id: node
                 for node in session.scalars(select(AgentNode).order_by(AgentNode.node_id))
             }
+            ranked_inventory = select(
+                NodeInventorySnapshot.id.label("id"),
+                func.row_number()
+                .over(
+                    partition_by=NodeInventorySnapshot.node_id,
+                    order_by=(
+                        NodeInventorySnapshot.observed_at.desc(),
+                        NodeInventorySnapshot.id.desc(),
+                    ),
+                )
+                .label("position"),
+            ).subquery()
+            inventory_rows = list(
+                session.scalars(
+                    select(NodeInventorySnapshot)
+                    .join(
+                        ranked_inventory,
+                        NodeInventorySnapshot.id == ranked_inventory.c.id,
+                    )
+                    .where(ranked_inventory.c.position == 1)
+                    .order_by(NodeInventorySnapshot.node_id)
+                )
+            )
             certificates = list(
                 session.scalars(
                     select(AgentCertificate)
@@ -95,6 +125,9 @@ class DashboardService:
         active_certificates = {}
         for certificate in certificates:
             active_certificates.setdefault(certificate.node_id, certificate)
+        latest_inventory = {}
+        for inventory in inventory_rows:
+            latest_inventory.setdefault(inventory.node_id, inventory)
         latest = {}
         for observation in observations:
             latest.setdefault(observation.node_id, (observation.payload, observation.observed_at))
@@ -142,6 +175,21 @@ class DashboardService:
                 if observed_at is None
                 else max(0.0, (current - observed_at).total_seconds())
             )
+            inventory = latest_inventory.get(node_id)
+            inventory_observed_at = (
+                None if inventory is None else inventory.observed_at
+            )
+            if inventory_observed_at is not None:
+                inventory_observed_at = (
+                    inventory_observed_at.replace(tzinfo=UTC)
+                    if inventory_observed_at.tzinfo is None
+                    else inventory_observed_at.astimezone(UTC)
+                )
+            inventory_age = (
+                None
+                if inventory_observed_at is None
+                else max(0.0, (current - inventory_observed_at).total_seconds())
+            )
             nodes.append({
                 "id": node_id,
                 "display_name": str(raw.get("display_name", node_id)),
@@ -158,9 +206,28 @@ class DashboardService:
                 ),
                 "labels": dict(raw.get("labels", {})) if isinstance(raw.get("labels"), Mapping) else {},
                 "profile": active_profiles.get(node_id),
-                "memory_available_bytes": health.get("memory_available_bytes", 0) if isinstance(health, Mapping) else 0,
-                "disk_available_bytes": health.get("disk_available_bytes", 0) if isinstance(health, Mapping) else 0,
+                "memory_available_bytes": health.get(
+                    "memory_available_bytes",
+                    0 if inventory is None else inventory.host_memory_free_bytes,
+                ) if isinstance(health, Mapping) else 0,
+                "disk_available_bytes": health.get(
+                    "disk_available_bytes",
+                    0 if inventory is None else inventory.disk_free_bytes,
+                ) if isinstance(health, Mapping) else 0,
                 "probe_age_seconds": probe_age,
+                "inventory_observed_at": (
+                    None
+                    if inventory_observed_at is None
+                    else inventory_observed_at.isoformat()
+                ),
+                "inventory_age_seconds": inventory_age,
+                "inventory_stale": (
+                    inventory_age is None
+                    or inventory_age > self._inventory_stale_after_seconds
+                ),
+                "inventory_capabilities": (
+                    [] if inventory is None else list(inventory.capabilities)
+                ),
                 "agent_state": agent_node.state if agent_node is not None else "unregistered",
                 "agent_implementation": None if agent_node is None else agent_node.agent_implementation,
                 "agent_migration_state": None if agent_node is None else agent_node.migration_state,

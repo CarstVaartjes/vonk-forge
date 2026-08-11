@@ -62,6 +62,11 @@ class SliceServer(ThreadingHTTPServer):
         self.operation_kinds: dict[str, str] = {}
         self.nodes = [NODE]
         self.online = {NODE: True, NODE_2: True}
+        self.inventory_stale = {NODE: False, NODE_2: False}
+        self.inventory_capabilities = {
+            NODE: ["recipe.operations.v1", "runtime.rootless-podman.v1"],
+            NODE_2: ["recipe.operations.v1", "runtime.rootless-podman.v1"],
+        }
         self.last_seen = {
             NODE: "2026-08-11T10:00:00+00:00",
             NODE_2: "2026-08-11T10:00:00+00:00",
@@ -124,7 +129,11 @@ class SliceHandler(BaseHTTPRequestHandler):
                             "stale": False,
                             "agent_online": self.server.online[node],
                             "agent_state": "active",
-                            "compatibility": "compatible",
+                            "compatibility": "supported",
+                            "inventory_stale": self.server.inventory_stale[node],
+                            "inventory_capabilities": (
+                                self.server.inventory_capabilities[node]
+                            ),
                             "agent_last_seen_at": self.server.last_seen[node],
                         }
                         for node in self.server.nodes
@@ -732,6 +741,22 @@ def test_runner_refuses_to_advance_past_failed_gate_and_redacts_errors(
     assert ADMIN_TOKEN not in result.stderr
     assert INFERENCE_TOKEN not in result.stderr
     assert "Authorization" not in result.stderr
+
+
+@pytest.mark.parametrize("failure", ("stale", "missing-rootless"))
+def test_runner_requires_fresh_rootless_inventory(
+    tmp_path: Path, server: SliceServer, failure: str
+) -> None:
+    if failure == "stale":
+        server.inventory_stale[NODE] = True
+    else:
+        server.inventory_capabilities[NODE] = ["recipe.operations.v1"]
+
+    result, evidence_path = _run(tmp_path, server)
+
+    assert result.returncode == 1
+    assert "required development inventory is not ready" in result.stderr
+    assert json.loads(evidence_path.read_text())["completed_states"] == []
 
 
 def test_runner_rejects_an_existing_same_slug_recipe_with_different_content(

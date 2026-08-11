@@ -692,6 +692,7 @@ def test_cohort_derived_api_and_worker_identities_match_strict_active_projection
     )
     monkeypatch.setenv("VONK_CONTROL_PROCESS_ROLE", "api")
     api_settings = GenerationStartupSettings.from_env_and_secrets()
+    assert (api_settings.protocol_minimum, api_settings.protocol_maximum) == (1, 3)
     api_identity = GenerationProcessIdentity(
         startup_mode=api_settings.startup_mode,
         operation_id=api_settings.operation_id,

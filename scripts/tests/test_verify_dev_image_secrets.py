@@ -31,7 +31,7 @@ def _embedded_identity_document(**overrides: object) -> dict[str, object]:
         "database_revision": "0020_recipe_catalog_bridge",
         "image_role": "api",
         "platform_version": "0.1.0",
-        "protocol_maximum": 2,
+        "protocol_maximum": 3,
         "protocol_minimum": 1,
         "schema_version": 1,
         "source_commit": SOURCE_COMMIT,

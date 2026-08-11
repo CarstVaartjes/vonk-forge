@@ -38,7 +38,7 @@ def _expected_build_digest(source_commit: str = COMMIT) -> str:
         "channel": "development",
         "database_revision": "0020_recipe_catalog_bridge",
         "platform_version": "0.1.0",
-        "protocol_maximum": 2,
+        "protocol_maximum": 3,
         "protocol_minimum": 1,
         "schema_version": SCHEMA_VERSION,
         "source_commit": source_commit,
@@ -57,7 +57,7 @@ def _identity_document(**overrides: object) -> dict[str, object]:
         "build_digest": _expected_build_digest(),
         "database_revision": "0020_recipe_catalog_bridge",
         "protocol_minimum": 1,
-        "protocol_maximum": 2,
+        "protocol_maximum": 3,
         "image_role": "api",
     }
     document.update(overrides)
@@ -88,7 +88,7 @@ def test_identity_parser_accepts_only_the_canonical_development_identity() -> No
         build_digest=_expected_build_digest(),
         database_revision="0020_recipe_catalog_bridge",
         protocol_minimum=1,
-        protocol_maximum=2,
+        protocol_maximum=3,
         image_role="api",
     )
     assert identity.to_bytes() == raw
@@ -104,7 +104,7 @@ def test_identity_parser_accepts_only_the_canonical_development_identity() -> No
         + b'","build_digest":"sha256:'
         + b"b" * 64
         + b'","channel":"development","database_revision":"0020_recipe_catalog_bridge",'
-        + b'"image_role":"api","platform_version":"0.1.0","protocol_maximum":2,'
+        + b'"image_role":"api","platform_version":"0.1.0","protocol_maximum":3,'
         + b'"protocol_minimum":1,"schema_version":1,"source_commit":"'
         + COMMIT.encode("ascii")
         + b'","source_repository":"'
@@ -118,7 +118,7 @@ def test_identity_parser_accepts_only_the_canonical_development_identity() -> No
         + b'","channel":"development","platform_version":"0.1.0","build_digest":"sha256:'
         + b"a" * 64
         + b'","database_revision":"0020_recipe_catalog_bridge","protocol_minimum":1,'
-        + b'"protocol_maximum":2,"image_role":"api"}\n'),
+        + b'"protocol_maximum":3,"image_role":"api"}\n'),
         ("oversized", b" " * 17000),
         ("hostile integer", b'{"schema_version":' + b"1" * 5000 + b"}\n"),
     ),
@@ -148,7 +148,7 @@ def test_identity_parser_rejects_untrusted_json_encodings(
         {"database_revision": "0021_next_revision"},
         {"protocol_minimum": 0},
         {"protocol_minimum": 3, "protocol_maximum": 2},
-        {"protocol_minimum": 1, "protocol_maximum": 3},
+        {"protocol_minimum": 1, "protocol_maximum": 2},
         {"protocol_maximum": 1000},
         {"image_role": "scheduler"},
     ),
@@ -183,7 +183,7 @@ def test_build_identity_uses_fixed_development_values_and_one_cohort_digest() ->
     assert api.platform_version == "0.1.0"
     assert api.database_revision == "0020_recipe_catalog_bridge"
     assert api.protocol_minimum == 1
-    assert api.protocol_maximum == 2
+    assert api.protocol_maximum == 3
     assert api.image_role == "api"
     assert worker.image_role == "worker"
     assert api.build_digest == worker.build_digest
@@ -243,7 +243,7 @@ def test_verify_cohort_rejects_duplicate_or_missing_development_roles() -> None:
         {"platform_version": "0.1.1"},
         {"database_revision": "0021_next_revision"},
         {"protocol_minimum": 2},
-        {"protocol_maximum": 3},
+        {"protocol_maximum": 2},
         {"source_repository": "https://github.com/CarstVaartjes/vonk-forge-local"},
         {"channel": "development-local"},
     ),
@@ -268,7 +268,7 @@ def test_matching_identities_produce_one_canonical_selected_cohort_document() ->
         "channel": "development",
         "database_revision": "0020_recipe_catalog_bridge",
         "platform_version": "0.1.0",
-        "protocol_maximum": 2,
+        "protocol_maximum": 3,
         "protocol_minimum": 1,
         "schema_version": SCHEMA_VERSION,
         "source_commit": COMMIT,
@@ -302,7 +302,7 @@ def test_matching_identities_produce_one_canonical_selected_cohort_document() ->
         platform_version="0.1.0",
         database_revision="0020_recipe_catalog_bridge",
         protocol_minimum=1,
-        protocol_maximum=2,
+        protocol_maximum=3,
         build_digest=api.build_digest,
         release_digest=expected_release_digest,
         api_identity_digest=expected_api_identity_digest,

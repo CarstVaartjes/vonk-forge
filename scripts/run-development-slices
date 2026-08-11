@@ -707,11 +707,12 @@ class Runner:
     def _node_ready(node: dict[str, Any] | None) -> bool:
         return bool(
             node is not None
-            and node.get("healthy") is True
-            and node.get("stale") is False
             and node.get("agent_online") is True
             and node.get("agent_state") == "active"
-            and node.get("compatibility") == "compatible"
+            and node.get("compatibility") == "supported"
+            and node.get("inventory_stale") is False
+            and "runtime.rootless-podman.v1"
+            in node.get("inventory_capabilities", ())
         )
 
     def recipe_resolved(self) -> None:

@@ -138,6 +138,7 @@ def test_generation_startup_operation_is_required_only_during_preselection(
             "VONK_CONTROL_PROCESS_IMAGE",
         ),
         ("VONK_CONTROL_START_NONCE", "not-a-nonce", "VONK_CONTROL_START_NONCE"),
+        ("VONK_AGENT_PROTOCOL_MAXIMUM", "not-an-integer", "agent protocol range"),
         ("VONK_CONTROL_IDENTITY_ROOT", "relative/identity", "absolute normalized"),
     ),
 )
@@ -202,6 +203,7 @@ def test_development_without_a_cohort_keeps_explicit_local_source_identity(
     assert settings.process_image == (
         f"ghcr.io/example/control-api@sha256:{GENERATION_SHA_A}"
     )
+    assert (settings.protocol_minimum, settings.protocol_maximum) == (1, 1)
 
 
 @pytest.mark.parametrize("role", ("api", "worker"))
@@ -224,6 +226,8 @@ def test_development_generation_startup_derives_role_identity_from_verified_coho
     assert settings.platform_version == selected.platform_version
     assert settings.database_revision == selected.database_revision
     assert settings.start_nonce == selected.start_nonce
+    assert settings.protocol_minimum == selected.protocol_minimum
+    assert settings.protocol_maximum == selected.protocol_maximum
     assert settings.process_image == (
         selected.api_image if role == "api" else selected.worker_image
     )

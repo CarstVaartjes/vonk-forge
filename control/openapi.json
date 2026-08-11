@@ -1915,6 +1915,42 @@
             "title": "Id",
             "type": "string"
           },
+          "inventory_age_seconds": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inventory Age Seconds"
+          },
+          "inventory_capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Inventory Capabilities",
+            "type": "array"
+          },
+          "inventory_observed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inventory Observed At"
+          },
+          "inventory_stale": {
+            "default": true,
+            "title": "Inventory Stale",
+            "type": "boolean"
+          },
           "labels": {
             "additionalProperties": {
               "type": "string"

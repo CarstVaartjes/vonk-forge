@@ -65,7 +65,7 @@ const fleet: Fleet = {
       agent_state: "active",
       certificate_expires_at: "2026-09-01T12:00:00Z",
       certificate_expiry_seconds: 2_350_812,
-      compatibility: "compatible",
+      compatibility: "supported",
       disk_available_bytes: 2_000_000,
       display_name: "Alpha GPU node",
       healthy: true,
@@ -76,6 +76,7 @@ const fleet: Fleet = {
       last_seen_at: "2026-08-05T09:59:48Z",
       lifecycle: "managed",
       memory_available_bytes: 1_000_000,
+      inventory_stale: false,
       probe_age_seconds: 4,
       profile: "production",
       stale: false,
@@ -207,7 +208,7 @@ it("keeps the current fleet page on the generated bounded node status contract",
   expect(row).toHaveTextContent("active");
   expect(row).toHaveTextContent("2026-08-05T09:59:48Z");
   expect(row).toHaveTextContent("2026-09-01T12:00:00Z");
-  expect(row).toHaveTextContent("compatible");
+  expect(row).toHaveTextContent("supported");
   expect(row).not.toHaveTextContent("not-rendered.internal");
 });
 
@@ -224,7 +225,7 @@ it("keeps fleet and enrollment evidence semantic, bounded, and secret-free", asy
   expect(agentRow).toHaveTextContent("Protocol 4");
   expect(agentRow).toHaveTextContent("Python agent");
   expect(agentRow).toHaveTextContent("Migration required");
-  expect(agentRow).toHaveTextContent("compatible");
+  expect(agentRow).toHaveTextContent("supported");
   expect(agentRow).toHaveTextContent("2026-08-05T09:59:48Z");
   expect(agentRow).toHaveTextContent("2026-09-01T12:00:00Z");
 
