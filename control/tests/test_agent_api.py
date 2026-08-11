@@ -2077,6 +2077,42 @@ def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
         assert parent_job is not None and parent_job.status_reason == "probe_failed"
 
 
+def test_invalid_failed_result_is_not_reported_as_an_acknowledged_stale_attempt(
+    agent_system,
+) -> None:
+    client, services, _, clock = agent_system
+    services.operations.enqueue(
+        parent(services.sessions, clock).id, NODE_A, "node.probe", "a" * 40, {}
+    )
+    claim = client.post(
+        "/agent/v1/claim", headers=agent_headers(NODE_A, "serial-a")
+    ).json()
+    result = {
+        key: claim[key]
+        for key in (
+            "schema_version",
+            "job_id",
+            "operation_id",
+            "attempt",
+            "fence",
+            "node_id",
+            "deadline",
+        )
+    } | {"state": "failed", "result": {"reason": "unstructured failure"}}
+
+    response = client.post(
+        "/agent/v1/result", headers=agent_headers(NODE_A, "serial-a"), json=result
+    )
+
+    assert response.status_code == 422
+    with services.sessions() as session:
+        attempt = (
+            session.query(AgentOperationAttempt).filter_by(fence=claim["fence"]).one()
+        )
+        assert attempt.state == "running"
+        assert attempt.result is None
+
+
 def test_agent_validation_errors_are_canonical_json(agent_system) -> None:
     client, _, _, _ = agent_system
 
