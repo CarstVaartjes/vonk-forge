@@ -777,6 +777,7 @@ impl SlotStore {
             .create_new(true)
             .mode(mode)
             .open(&temporary)?;
+        file.set_permissions(fs::Permissions::from_mode(mode))?;
         file.write_all(raw)?;
         file.sync_all()?;
         fs::rename(&temporary, path)?;
