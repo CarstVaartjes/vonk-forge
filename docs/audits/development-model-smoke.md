@@ -130,3 +130,25 @@ After accepted-main images and packages are published, the physical run must:
 
 The acceptance evidence remains local and redacted. It is not committed merely
 because configuration/unit tests pass.
+
+## Development project clean-room audit
+
+On 2026-08-11 a disposable private local directory was used to render the
+mutable `:dev` Compose graph, generate a fresh 12-file runtime-secret bundle,
+publish the exact two-item project, run `docker compose config --quiet`, and run
+the complete synthetic fixture test. The project contained one mode `0600`
+`docker-compose.yml`, one mode `0700` `secrets/` directory, and exactly 12 mode
+`0600` regular secret files. The fixture result was `4 passed`.
+
+Only public audit values were retained:
+
+- rendered Compose SHA-256:
+  `ae9aeb1891ac582165099267ca4fd55767dbae2a1dd4b27f8cb7255566d2df6f`;
+- disposable agent CA SHA-256:
+  `e2d850ca51e1f255bfb1b5a576849c2cc1e69c138367d242a35bb0a6352624d2`;
+- disposable controller CA SHA-256:
+  `2714eb5f1d46a819bb4e2144f8114baddd3f764ddb1af3c2f78720cc26f5c17f`.
+
+The disposable directory, including all private keys and tokens, was moved to
+the workstation trash after validation. These generated fingerprints are
+clean-room evidence only and are not deployment trust values.

@@ -108,3 +108,8 @@ DHCP reservations are recommended for the NAS and GPU nodes because they make
 operations easier, but route publication does not depend on hard-coded per-node
 addresses. There is no subnet scan, mDNS trust, SSH discovery, or automatic
 acceptance. An unaccepted machine cannot join merely by appearing on the LAN.
+
+After all nodes are paired and inventory is fresh, continue with the complete
+[development agent workload acceptance](development-agent-workloads.md). It
+uses the public control and agent APIs; routine workload operation does not use
+the bootstrap SSH path.

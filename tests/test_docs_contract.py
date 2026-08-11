@@ -12,6 +12,9 @@ DEV_NAS = ROOT / "docs/runbooks/development-nas-installation.md"
 COMPOSE_README = ROOT / "deploy/compose/README.md"
 ARCHITECTURE = ROOT / "docs/architecture-overview.md"
 SUPPLY_CHAIN = ROOT / "docs/runbooks/supply-chain.md"
+DEV_WORKLOADS = ROOT / "docs/runbooks/development-agent-workloads.md"
+MODEL_SWITCHING = ROOT / "docs/runbooks/model-switching.md"
+MODEL_CAPACITY = ROOT / "docs/model-capacity-overview.md"
 
 GENERIC_ONBOARDING_DOCS = (
     README,
@@ -178,6 +181,22 @@ def test_development_nas_contract_keeps_only_compose_file_and_secrets_directory(
     assert "└── secrets/" in text
     assert "No `current/`, source tree, Dockerfiles, or `.env` file belongs in this project." in text
 
+    for name in (
+        "agent-ca-certificate",
+        "agent-ca-key",
+        "agent-proxy-auth",
+        "controller-ca",
+        "controller-server-certificate",
+        "controller-server-key",
+        "database-url",
+        "git-signing-key",
+        "litellm-master-key",
+        "litellm-upstream-key",
+        "management-cidrs",
+        "postgres-password",
+    ):
+        assert f"├── {name}" in text or f"└── {name}" in text
+
 
 def test_development_and_production_docs_separate_mutable_dev_from_authoritative_production() -> None:
     readme = _normalized_text(README)
@@ -196,3 +215,78 @@ def test_development_and_production_docs_separate_mutable_dev_from_authoritative
 
     assert "`latest` is informational only" in supply_chain
     assert "host-updater" in supply_chain
+
+
+def test_complete_development_workload_runbook_has_every_operator_phase() -> None:
+    required_headings = (
+        "Scope and placeholders",
+        "Prerequisites and trust boundaries",
+        "PKI and NAS project",
+        "/etc/hosts and firewall",
+        "Package installation and pairing",
+        "Inventory preflight",
+        "Synthetic lifecycle",
+        "Real single-node model",
+        "Real multi-node failure and recovery",
+        "Restart persistence",
+        "Normal stop and uninstall",
+        "Rollback and secret rotation",
+        "Evidence and clean-room audit",
+        "Temporary sudo cleanup",
+    )
+    text = DEV_WORKLOADS.read_text()
+
+    for heading in required_headings:
+        assert f"## {heading}" in text
+
+    assert "scripts/dev-runtime-secrets.py" in text
+    assert "scripts/dev-runtime-project" in text
+    assert "scripts/dev-admin-token" in text
+    assert "docs/operations/agent-package-release.md#install-the-dev-channel" in text
+    assert "vonk-agent pair" in text
+    assert "scripts/qualify-development-model" in text
+    for phase in ("synthetic", "model-single", "model-multinode"):
+        assert f"--phase {phase}" in text
+    for checkpoint in (
+        "inference-ok",
+        "rank-failure-observed",
+        "route-withdrawn-after-failure",
+        "inference-recovered",
+    ):
+        assert f"--stop-after {checkpoint}" in text
+
+
+def test_complete_runbook_keeps_access_loopback_tokens_private_and_evidence_local() -> None:
+    text = DEV_WORKLOADS.read_text()
+    normalized = _normalized_text(DEV_WORKLOADS)
+
+    assert "-L <LOCAL_API_PORT>:127.0.0.1:8080" in text
+    assert "-L <LOCAL_INFERENCE_PORT>:127.0.0.1:4000" in text
+    assert "--admin-token-file" in text
+    assert "--inference-token-file" in text
+    assert "mode `0600`" in normalized
+    assert ".state/development-acceptance/" in text
+    assert "must not be committed" in normalized
+    assert "never print secret values" in normalized.lower()
+    for block in _fenced_blocks(DEV_WORKLOADS, "bash", "sh", "shell"):
+        assert "cat " not in block
+        assert "Get-Content" not in block
+
+
+def test_complete_runbook_documents_exact_cleanup_and_recovery_boundaries() -> None:
+    text = DEV_WORKLOADS.read_text()
+    normalized = _normalized_text(DEV_WORKLOADS)
+
+    assert "pull/redeploy" in normalized
+    assert "named volumes" in normalized
+    assert "pinned Compose" in normalized
+    assert "normal API stop/uninstall" in normalized
+    assert "/etc/sudoers.d/vonktemp" in text
+    assert "/etc/sudoers.d/99-vonk-codex-temporary" in text
+    assert "sudo -n true" in text
+    assert "PASSWORD_REQUIRED" in text
+
+
+def test_related_guides_link_to_the_complete_development_acceptance_path() -> None:
+    for path in (DEV_NAS, NODE_ONBOARDING, MODEL_SWITCHING, MODEL_CAPACITY):
+        assert "development-agent-workloads.md" in path.read_text()
