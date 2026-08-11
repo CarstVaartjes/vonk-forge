@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use chrono::Utc;
 use serde_json::{Value, json};
-use std::path::Path;
+use std::{path::Path, time::Duration};
 
 use crate::supervisor_readiness::AgentRuntimeIdentity;
 use crate::{
@@ -14,7 +14,44 @@ use crate::{
     state::{BeginDecision, StateError, StateStore},
     workloads::{Placement, image_digest},
 };
-use vonk_agent_protocol::{AgentClaim, RecipeOperationRequest, canonical_json, hex_sha256};
+use vonk_agent_protocol::{
+    AgentClaim, AgentDirective, AgentProgress, AgentResult, RecipeOperationRequest, canonical_json,
+    hex_sha256,
+};
+
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
+
+#[async_trait]
+pub trait LoopClient: Clone + Send + Sync + 'static {
+    async fn claim(
+        &self,
+        capabilities: &[&str],
+        wait_seconds: u64,
+        runtime_identity: Option<&AgentRuntimeIdentity>,
+    ) -> Result<Option<AgentClaim>, ClientError>;
+    async fn heartbeat(&self, progress: &AgentProgress) -> Result<AgentDirective, ClientError>;
+    async fn submit_result(&self, result: &AgentResult) -> Result<(), ClientError>;
+}
+
+#[async_trait]
+impl LoopClient for AgentHttpClient {
+    async fn claim(
+        &self,
+        capabilities: &[&str],
+        wait_seconds: u64,
+        runtime_identity: Option<&AgentRuntimeIdentity>,
+    ) -> Result<Option<AgentClaim>, ClientError> {
+        AgentHttpClient::claim(self, capabilities, wait_seconds, runtime_identity).await
+    }
+
+    async fn heartbeat(&self, progress: &AgentProgress) -> Result<AgentDirective, ClientError> {
+        AgentHttpClient::heartbeat(self, progress).await
+    }
+
+    async fn submit_result(&self, result: &AgentResult) -> Result<(), ClientError> {
+        AgentHttpClient::submit_result(self, result).await
+    }
+}
 
 pub struct ExecutionResult {
     pub state: &'static str,
@@ -316,15 +353,38 @@ pub enum LoopError {
     Client(#[from] ClientError),
     #[error(transparent)]
     State(#[from] StateError),
+    #[error("agent heartbeat task failed")]
+    HeartbeatTask,
 }
 
-pub async fn run_once<E: Executor>(
-    client: &AgentHttpClient,
+pub async fn run_once<C: LoopClient, E: Executor>(
+    client: &C,
     state: &mut StateStore,
     executor: &E,
     capabilities: &[&str],
     wait_seconds: u64,
     runtime_identity: Option<&AgentRuntimeIdentity>,
+) -> Result<(), LoopError> {
+    run_once_with_heartbeat_interval(
+        client,
+        state,
+        executor,
+        capabilities,
+        wait_seconds,
+        runtime_identity,
+        HEARTBEAT_INTERVAL,
+    )
+    .await
+}
+
+async fn run_once_with_heartbeat_interval<C: LoopClient, E: Executor>(
+    client: &C,
+    state: &mut StateStore,
+    executor: &E,
+    capabilities: &[&str],
+    wait_seconds: u64,
+    runtime_identity: Option<&AgentRuntimeIdentity>,
+    heartbeat_interval: Duration,
 ) -> Result<(), LoopError> {
     for result in state.pending_results()? {
         client.submit_result(&result).await?;
@@ -338,8 +398,33 @@ pub async fn run_once<E: Executor>(
     };
     let result = match state.begin(&claim, Utc::now()) {
         Ok(BeginDecision::Execute) => {
+            let heartbeat_state = state.reopen()?;
+            let (stop_heartbeat, heartbeat_stop) = tokio::sync::oneshot::channel();
+            let heartbeat_task = tokio::spawn(run_heartbeats(
+                client.clone(),
+                heartbeat_state,
+                claim.clone(),
+                heartbeat_stop,
+                heartbeat_interval,
+            ));
             let executed = executor.execute(&claim).await;
-            state.finish(&claim, executed.state, executed.body)?
+            let _ = stop_heartbeat.send(());
+            let heartbeat_result = heartbeat_task
+                .await
+                .map_err(|_| LoopError::HeartbeatTask)
+                .and_then(|result| result);
+            let cancelled = heartbeat_result.as_ref().copied().unwrap_or(false);
+            let (result_state, result_body) = if cancelled {
+                (
+                    "waiting-for-operator",
+                    json!({"reason": "controller cancellation was observed during execution"}),
+                )
+            } else {
+                (executed.state, executed.body)
+            };
+            let result = state.finish(&claim, result_state, result_body)?;
+            heartbeat_result?;
+            result
         }
         Ok(BeginDecision::Replay(result)) => result,
         Err(StateError::Busy) => return Ok(()),
@@ -348,4 +433,194 @@ pub async fn run_once<E: Executor>(
     client.submit_result(&result).await?;
     state.acknowledge(&result)?;
     Ok(())
+}
+
+async fn run_heartbeats<C: LoopClient>(
+    client: C,
+    mut state: StateStore,
+    claim: AgentClaim,
+    mut stop: tokio::sync::oneshot::Receiver<()>,
+    interval: Duration,
+) -> Result<bool, LoopError> {
+    let mut deadline = claim.deadline;
+    let mut cancellation_observed = false;
+    loop {
+        tokio::select! {
+            _ = &mut stop => return Ok(cancellation_observed),
+            _ = tokio::time::sleep(interval) => {}
+        }
+        let progress = AgentProgress {
+            attempt: claim.attempt,
+            deadline,
+            fence: claim.fence,
+            job_id: claim.job_id,
+            node_id: claim.node_id.clone(),
+            operation_id: claim.operation_id,
+            progress: json!({"phase": "executing"}),
+            schema_version: claim.schema_version,
+        };
+        let directive = client.heartbeat(&progress).await?;
+        state.apply_heartbeat(&progress, &directive)?;
+        deadline = directive.deadline;
+        cancellation_observed |= directive.cancel_requested;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ExecutionResult, Executor, LoopClient, run_once_with_heartbeat_interval};
+    use crate::{
+        client::ClientError, state::StateStore, supervisor_readiness::AgentRuntimeIdentity,
+    };
+    use async_trait::async_trait;
+    use chrono::{Duration as ChronoDuration, FixedOffset, Utc};
+    use serde_json::json;
+    use std::{
+        sync::{Arc, Mutex},
+        thread,
+        time::Duration,
+    };
+    use tempfile::tempdir;
+    use uuid::Uuid;
+    use vonk_agent_protocol::{
+        AgentClaim, AgentDirective, AgentProgress, AgentResult, canonical_json, hex_sha256,
+    };
+
+    const NODE_ID: &str = "spk_0123456789abcdef0123456789abcdef";
+
+    #[derive(Clone)]
+    struct RecordingClient {
+        claim: Arc<Mutex<Option<AgentClaim>>>,
+        fail_heartbeat: bool,
+        heartbeats: Arc<Mutex<Vec<AgentProgress>>>,
+        results: Arc<Mutex<Vec<AgentResult>>>,
+    }
+
+    #[async_trait]
+    impl LoopClient for RecordingClient {
+        async fn claim(
+            &self,
+            _capabilities: &[&str],
+            _wait_seconds: u64,
+            _runtime_identity: Option<&AgentRuntimeIdentity>,
+        ) -> Result<Option<AgentClaim>, ClientError> {
+            Ok(self.claim.lock().unwrap().take())
+        }
+
+        async fn heartbeat(&self, progress: &AgentProgress) -> Result<AgentDirective, ClientError> {
+            self.heartbeats.lock().unwrap().push(progress.clone());
+            if self.fail_heartbeat {
+                return Err(ClientError::Retryable);
+            }
+            Ok(AgentDirective {
+                attempt: progress.attempt,
+                cancel_requested: false,
+                deadline: progress.deadline + ChronoDuration::seconds(30),
+                fence: progress.fence,
+                job_id: progress.job_id,
+                node_id: progress.node_id.clone(),
+                operation_id: progress.operation_id,
+                schema_version: progress.schema_version,
+            })
+        }
+
+        async fn submit_result(&self, result: &AgentResult) -> Result<(), ClientError> {
+            self.results.lock().unwrap().push(result.clone());
+            Ok(())
+        }
+    }
+
+    struct SlowExecutor;
+
+    #[async_trait(?Send)]
+    impl Executor for SlowExecutor {
+        async fn execute(&self, _claim: &AgentClaim) -> ExecutionResult {
+            thread::sleep(Duration::from_millis(90));
+            ExecutionResult {
+                state: "succeeded",
+                body: json!({"status": "ok"}),
+            }
+        }
+    }
+
+    fn claim() -> AgentClaim {
+        let payload = json!({"plan_digest": "a".repeat(64)});
+        AgentClaim {
+            attempt: 1,
+            base_commit: "b".repeat(40),
+            deadline: (Utc::now() + ChronoDuration::seconds(20))
+                .with_timezone(&FixedOffset::east_opt(0).unwrap()),
+            fence: Uuid::parse_str("44d4e914-34df-4962-a802-d1f7dcd928aa").unwrap(),
+            job_id: Uuid::parse_str("84ddf214-f067-4bbf-917e-95df32a07fd8").unwrap(),
+            node_id: NODE_ID.to_owned(),
+            operation: "recipe.install".to_owned(),
+            operation_id: Uuid::parse_str("f450b5ac-5a78-4af5-9670-e874f735e3ee").unwrap(),
+            payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
+            payload,
+            schema_version: 1,
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn long_execution_renews_and_persists_its_lease_before_result() {
+        let directory = tempdir().unwrap();
+        let original = claim();
+        let client = RecordingClient {
+            claim: Arc::new(Mutex::new(Some(original.clone()))),
+            fail_heartbeat: false,
+            heartbeats: Arc::new(Mutex::new(Vec::new())),
+            results: Arc::new(Mutex::new(Vec::new())),
+        };
+        let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
+
+        run_once_with_heartbeat_interval(
+            &client,
+            &mut state,
+            &SlowExecutor,
+            &["recipe.install"],
+            0,
+            None,
+            Duration::from_millis(10),
+        )
+        .await
+        .unwrap();
+
+        let heartbeats = client.heartbeats.lock().unwrap();
+        assert!(heartbeats.len() >= 2);
+        drop(heartbeats);
+        let results = client.results.lock().unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(results[0].deadline > original.deadline);
+        assert!(state.pending_results().unwrap().is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn heartbeat_failure_leaves_a_durable_terminal_result_not_a_busy_attempt() {
+        let directory = tempdir().unwrap();
+        let client = RecordingClient {
+            claim: Arc::new(Mutex::new(Some(claim()))),
+            fail_heartbeat: true,
+            heartbeats: Arc::new(Mutex::new(Vec::new())),
+            results: Arc::new(Mutex::new(Vec::new())),
+        };
+        let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
+
+        let error = run_once_with_heartbeat_interval(
+            &client,
+            &mut state,
+            &SlowExecutor,
+            &["recipe.install"],
+            0,
+            None,
+            Duration::from_millis(10),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            super::LoopError::Client(ClientError::Retryable)
+        ));
+        assert_eq!(state.pending_results().unwrap().len(), 1);
+    }
 }
