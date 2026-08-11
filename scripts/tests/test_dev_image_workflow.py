@@ -520,6 +520,9 @@ def test_complete_local_scan_gates_every_external_publication() -> None:
     assert "docker history --no-trunc" in scan_script
     assert "docker image inspect" in scan_script
     assert "tar --extract" in scan_script
+    assert 'index_queue=("$layout/index.json")' in scan_script
+    assert "application/vnd.oci.image.index.v1+json" in scan_script
+    assert 'index_queue+=("$descriptor_path")' in scan_script
     assert "attestation-manifest" in scan_script
     assert "https://spdx.dev/Document" in scan_script
     assert "https://slsa.dev/provenance/" in scan_script
