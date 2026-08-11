@@ -229,11 +229,43 @@ jobs:
               > "$evidence_root/$role.history.jsonl"
             docker image inspect "$image" \
               > "$evidence_root/$role.config.json"
-            mapfile -t attestation_manifests < <(
-              jq -r '.manifests[] | select(
-                .annotations["vnd.docker.reference.type"] == "attestation-manifest"
-              ) | .digest' "$layout/index.json"
-            )
+            index_queue=("$layout/index.json")
+            attestation_manifests=()
+            declare -A visited_indexes=()
+            while ((${#index_queue[@]} > 0)); do
+              index_document=${index_queue[0]}
+              index_queue=("${index_queue[@]:1}")
+              if [[ -n "${visited_indexes[$index_document]+present}" ]]; then
+                continue
+              fi
+              visited_indexes[$index_document]=1
+              descriptor_lines=$(jq -c '.manifests[]?' "$index_document")
+              while IFS= read -r descriptor; do
+                [[ -n "$descriptor" ]] || continue
+                media_type=$(jq -r '.mediaType // empty' <<< "$descriptor")
+                descriptor_digest=$(jq -r '.digest // empty' <<< "$descriptor")
+                reference_type=$(jq -r \
+                  '.annotations["vnd.docker.reference.type"] // empty' \
+                  <<< "$descriptor")
+                [[ "$descriptor_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+                descriptor_path="$layout/blobs/sha256/${descriptor_digest#sha256:}"
+                [[ -f "$descriptor_path" && ! -L "$descriptor_path" ]]
+                case "$media_type" in
+                  application/vnd.oci.image.index.v1+json)
+                    index_queue+=("$descriptor_path")
+                    ;;
+                  application/vnd.oci.image.manifest.v1+json)
+                    if [[ "$reference_type" == attestation-manifest ]]; then
+                      attestation_manifests+=("$descriptor_digest")
+                    fi
+                    ;;
+                  *)
+                    echo "unexpected OCI descriptor media type" >&2
+                    exit 1
+                    ;;
+                esac
+              done <<< "$descriptor_lines"
+            done
             ((${#attestation_manifests[@]} > 0))
             found_sbom=0
             found_provenance=0
