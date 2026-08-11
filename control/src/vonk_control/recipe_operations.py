@@ -1269,27 +1269,6 @@ def _record_build_evidence(
     build.image_bytes = image_bytes
     build.error = None
     build.updated_at = now
-    raw_digest = image_digest[7:]
-    existing = session.scalar(
-        select(NodeArtifact).where(
-            NodeArtifact.node_id == build.builder_node_id,
-            NodeArtifact.digest == raw_digest,
-        )
-    )
-    if existing is None:
-        session.add(
-            NodeArtifact(
-                node_id=build.builder_node_id,
-                kind="image",
-                digest=raw_digest,
-                source=f"oci-layout:{layout_digest}",
-                size_bytes=image_bytes,
-                state="verified",
-                ref_count=0,
-                verified_at=now,
-                updated_at=now,
-            )
-        )
 
 
 def _record_image_import_evidence(

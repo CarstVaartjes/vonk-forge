@@ -317,27 +317,6 @@ class RecipeBuildService:
                 build.image_bytes = image_bytes
                 build.error = None
                 build.updated_at = now
-            digest = image_digest.removeprefix("sha256:")
-            artifact = session.scalar(
-                select(NodeArtifact).where(
-                    NodeArtifact.node_id == build.builder_node_id,
-                    NodeArtifact.digest == digest,
-                )
-            )
-            if artifact is None:
-                session.add(
-                    NodeArtifact(
-                        node_id=build.builder_node_id,
-                        kind="image",
-                        digest=digest,
-                        source=f"oci-layout:{oci_layout_sha256}",
-                        size_bytes=image_bytes,
-                        state="verified",
-                        ref_count=0,
-                        verified_at=now,
-                        updated_at=now,
-                    )
-                )
         return CompletedRecipeBuild(
             build_id, image_digest, oci_layout_sha256, image_bytes
         )

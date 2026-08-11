@@ -110,7 +110,7 @@ def setup(tmp_path: Path, *, network: dict[str, object] | None = None):
                 architecture="linux-arm64",
                 agent_implementation="rust",
                 migration_state="complete",
-                capabilities=["recipe.build.v1"],
+                capabilities=["recipe.build.v1", "recipe.image.import.v1"],
                 last_seen_at=now,
             )
         )
@@ -138,7 +138,7 @@ def setup(tmp_path: Path, *, network: dict[str, object] | None = None):
             80_000,
             1,
             False,
-            ("recipe.build.v1",),
+            ("recipe.build.v1", "recipe.image.import.v1"),
         )
     )
     catalog = CatalogService(sessions, clock=lambda: now)
@@ -521,7 +521,7 @@ def test_source_check_returns_the_structured_pre_dispatch_policy_report(
     assert report.source_bundle_sha256
 
 
-def test_success_records_one_exact_image_on_builder(tmp_path: Path) -> None:
+def test_success_does_not_claim_isolated_build_image_is_installed(tmp_path: Path) -> None:
     sessions, bundles, now, node_id, revision = setup(tmp_path)
     service = RecipeBuildService(sessions, bundles=bundles)
     plan = service.plan(revision.id, node_id, now=now)
@@ -540,7 +540,7 @@ def test_success_records_one_exact_image_on_builder(tmp_path: Path) -> None:
         artifact = session.scalar(
             select(NodeArtifact).where(NodeArtifact.node_id == node_id)
         )
-        assert artifact is not None and artifact.digest == "b" * 64
+        assert artifact is None
 
 
 def test_build_result_refreshes_upload_evidence_after_a_retried_attempt(
@@ -663,6 +663,9 @@ def test_build_result_accepts_protocol_frozen_empty_findings(tmp_path: Path) -> 
         job = session.get(Job, operation_view.id)
         assert job is not None and job.state == "succeeded"
         assert job.result["node_evidence"][node_id]["policy"]["findings"] == []
+        assert session.scalar(
+            select(NodeArtifact).where(NodeArtifact.node_id == node_id)
+        ) is None
 
 
 def test_distribution_uses_one_build_digest_for_every_missing_node(
@@ -728,7 +731,7 @@ def test_distribution_uses_one_build_digest_for_every_missing_node(
 
     distribution = service.plan_distribution(plan.build_id, mapping_id, generation=1)
 
-    assert [item[0] for item in distribution.targets] == [target]
+    assert [item[0] for item in distribution.targets] == [builder, target]
     assert {item[1]["image_digest"] for item in distribution.targets} == {
         "sha256:" + "b" * 64
     }
