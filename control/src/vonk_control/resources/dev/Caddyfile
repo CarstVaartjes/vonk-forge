@@ -9,10 +9,7 @@ http://127.0.0.1:2019 {
 	respond 404
 }
 
-(agent_edge_guards) {
-	request_body {
-		max_size 1MB
-	}
+(edge_headers) {
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		X-Content-Type-Options "nosniff"
@@ -22,8 +19,35 @@ http://127.0.0.1:2019 {
 	}
 }
 
+(edge_guards) {
+	request_body {
+		max_size 1MB
+	}
+	import edge_headers
+}
+
+(agent_edge_guards) {
+	# Recipe OCI layouts are the only large inbound agent body. The API streams,
+	# hashes, and enforces this same 16 TiB protocol ceiling.
+	@recipe_image_upload {
+		method PUT
+		path /agent/v1/recipe-builds/*/image
+	}
+	@ordinary_agent_request not {
+		method PUT
+		path /agent/v1/recipe-builds/*/image
+	}
+	request_body @ordinary_agent_request {
+		max_size 1MB
+	}
+	request_body @recipe_image_upload {
+		max_size 17592186044416
+	}
+	import edge_headers
+}
+
 https://{$VONK_AGENT_ENROLL_HOSTNAME}:{$VONK_BACKEND_PORT} {
-	import agent_edge_guards
+	import edge_guards
 	tls /run/secrets/controller-server-certificate /run/secrets/controller-server-key
 
 	@managed remote_ip {$VONK_MANAGEMENT_CIDRS}
