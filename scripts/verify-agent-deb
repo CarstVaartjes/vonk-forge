@@ -254,6 +254,7 @@ def _verify_payload(payload: Path, control: Path) -> None:
         or "CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_SETGID CAP_SETUID CAP_SYS_ADMIN"
         not in units["vonk-forge-agent.service"]
         or "AmbientCapabilities=" not in units["vonk-forge-agent.service"]
+        or "ProtectProc=default" not in units["vonk-forge-agent.service"]
         or "CONTAINERS_STORAGE_CONF=/etc/vonk-forge-agent/containers-storage.conf"
         not in units["vonk-forge-agent.service"]
         or "RestrictNamespaces=user mnt pid ipc uts cgroup net"

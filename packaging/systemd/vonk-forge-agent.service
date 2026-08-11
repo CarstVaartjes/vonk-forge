@@ -48,7 +48,9 @@ ProtectKernelLogs=yes
 ProtectControlGroups=yes
 ProtectClock=yes
 ProtectHostname=yes
-ProtectProc=invisible
+# newuidmap/newgidmap must inspect the Podman child under /proc. Other procfs
+# protections remain enabled and the service still runs as the dedicated user.
+ProtectProc=default
 ProcSubset=all
 LockPersonality=yes
 MemoryDenyWriteExecute=no

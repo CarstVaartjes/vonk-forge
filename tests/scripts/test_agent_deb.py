@@ -230,7 +230,7 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
     assert "Environment=HOME=/var/lib/vonk-forge-agent" in unit
     assert "Environment=XDG_RUNTIME_DIR=/run/vonk-forge-agent" in unit
     assert "RestrictNamespaces=user mnt pid ipc uts cgroup net" in unit
-    assert "ProtectProc=invisible" in unit
+    assert "ProtectProc=default" in unit
     assert "ProcSubset=all" in unit
     assert "DeviceAllow=/dev/fuse rw" in unit
     assert "DeviceAllow=char-231:* rw" in unit
