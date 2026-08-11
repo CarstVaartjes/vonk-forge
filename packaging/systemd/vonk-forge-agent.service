@@ -27,6 +27,9 @@ RuntimeDirectoryMode=0700
 NoNewPrivileges=yes
 CapabilityBoundingSet=
 AmbientCapabilities=
+# Rootless Podman must preserve ordinary SUID/SGID mode bits while unpacking
+# OCI layers. NoNewPrivileges and the empty capability sets keep those files
+# from granting host privilege to this package-dedicated account.
 PrivateTmp=yes
 PrivateDevices=yes
 DevicePolicy=closed
@@ -51,7 +54,6 @@ ProcSubset=all
 LockPersonality=yes
 MemoryDenyWriteExecute=no
 RestrictRealtime=yes
-RestrictSUIDSGID=yes
 RestrictNamespaces=user mnt pid ipc uts cgroup net
 Delegate=yes
 RemoveIPC=yes
