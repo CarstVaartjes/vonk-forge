@@ -74,7 +74,9 @@ enough.
 Workload containers use Podman's split-cgroup mode inside the delegated agent
 service. This keeps per-container PID and memory limits enforceable on cgroup
 v2 hosts even though the package account has no interactive systemd user
-session.
+session. The unit keeps the default `/proc` visibility because the setuid
+namespace helpers must inspect Podman's child process; the remaining procfs
+and process-control restrictions stay enabled.
 
 Copy the CA and edit the bootstrap configuration:
 
