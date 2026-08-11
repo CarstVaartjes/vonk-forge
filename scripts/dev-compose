@@ -12,6 +12,7 @@ secrets_helper="$repository_root/scripts/dev-compose-secrets.py"
 api_image='vonk-forge-api:dev-local'
 worker_image='vonk-forge-worker:dev-local'
 project_name=${VONK_DEV_PROJECT_NAME-vonk-forge-dev}
+management_cidrs=${VONK_DEV_MANAGEMENT_CIDRS-127.0.0.1/32}
 workspace=
 overlay=
 
@@ -36,9 +37,12 @@ fi
 if [[ -n ${VONK_DEV_SECRETS_DIR:-} ]]; then
   secrets_dir=$(python3 "$secrets_helper" \
     --repository-root "$repository_root" \
+    --management-cidrs "$management_cidrs" \
     --external-secrets-dir "$VONK_DEV_SECRETS_DIR")
 else
-  secrets_dir=$(python3 "$secrets_helper" --repository-root "$repository_root")
+  secrets_dir=$(python3 "$secrets_helper" \
+    --repository-root "$repository_root" \
+    --management-cidrs "$management_cidrs")
 fi
 
 expected_commit=$(git -C "$repository_root" rev-parse --verify 'HEAD^{commit}')

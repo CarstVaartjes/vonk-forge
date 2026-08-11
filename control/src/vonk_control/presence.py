@@ -42,9 +42,10 @@ def _parse_networks(value: str, *, label: str, required: bool) -> tuple[_Network
         if required:
             raise PresenceError(f"{label} cannot be empty")
         return ()
-    raw_networks = [item.strip() for item in value.split(",")]
-    if any(not item for item in raw_networks):
+    comma_groups = value.split(",")
+    if any(not item.strip() for item in comma_groups):
         raise PresenceError(f"{label} cannot contain an empty network")
+    raw_networks = [network for group in comma_groups for network in group.split()]
     networks: list[_Network] = []
     for raw in raw_networks:
         try:

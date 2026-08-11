@@ -700,7 +700,9 @@ def _fake_docker(tmp_path: Path) -> Path:
     return fake_bin
 
 
-def _existing_secrets(tmp_path: Path) -> Path:
+def _existing_secrets(
+    tmp_path: Path, *, management_cidrs: str = "127.0.0.1/32"
+) -> Path:
     secrets = tmp_path / "secrets"
     subprocess.run(
         (
@@ -709,7 +711,7 @@ def _existing_secrets(tmp_path: Path) -> Path:
             "--secrets-dir",
             str(secrets),
             "--management-cidrs",
-            "127.0.0.1/32",
+            management_cidrs,
             "--enroll-hostname",
             "enroll.vonk-forge.lan",
             "--agent-hostname",
@@ -733,6 +735,7 @@ def _run_dev_compose(
     *arguments: str,
     docker_exit: int = 0,
     image_inspect_exit: int = 0,
+    management_cidrs: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     environment = os.environ | {
         "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
@@ -743,6 +746,8 @@ def _run_dev_compose(
         "VONK_TEST_IMAGE_INSPECT_EXIT": str(image_inspect_exit),
         "VONK_DEV_PROJECT_NAME": "vonk-test-stack",
     }
+    if management_cidrs is not None:
+        environment["VONK_DEV_MANAGEMENT_CIDRS"] = management_cidrs
     return subprocess.run(
         (str(local_script), *arguments),
         cwd=repository,
@@ -826,6 +831,29 @@ def test_dev_compose_script_accepts_the_exact_checked_out_commit(
     assert result.returncode == 0
     rendered = (capture / "rendered-compose.yaml").read_text(encoding="utf-8")
     assert expected_commit in rendered
+
+
+def test_dev_compose_script_accepts_explicit_local_management_cidrs(
+    tmp_path: Path,
+) -> None:
+    management_cidrs = "127.0.0.0/8,172.16.0.0/12"
+    repository, local_script = _script_repository(tmp_path)
+    secrets = _existing_secrets(tmp_path, management_cidrs=management_cidrs)
+    fake_bin = _fake_docker(tmp_path)
+    capture = tmp_path / "capture"
+    capture.mkdir()
+
+    result = _run_dev_compose(
+        repository,
+        local_script,
+        fake_bin,
+        secrets,
+        capture,
+        "config",
+        management_cidrs=management_cidrs,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 @pytest.mark.parametrize(
@@ -1154,7 +1182,7 @@ def test_dev_compose_uses_the_python_runtime_generator_without_ssh_keygen(
     assert (capture / "environment").exists()
     assert (secrets / "git-signing-key").is_file()
     assert (secrets / "git-signing-key.pub").is_file()
-    assert len(tuple(secrets.iterdir())) == 13
+    assert len(tuple(secrets.iterdir())) == 14
 
 
 def test_dev_compose_rejects_an_existing_private_key_without_its_public_mate(

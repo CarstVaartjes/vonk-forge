@@ -62,8 +62,8 @@ https://{$VONK_AGENT_HOSTNAME}:{$VONK_BACKEND_PORT} {
 	}
 	handle @managed {
 		handle @agent_api {
+			request_header -X-Vonk-Agent-*
 			reverse_proxy control-api:8000 {
-				header_up -X-Vonk-Agent-*
 				header_up X-Vonk-Agent-Node {vonk_agent_node}
 				header_up X-Vonk-Agent-Serial {tls_client_serial}
 				header_up X-Vonk-Agent-Fingerprint {tls_client_fingerprint}

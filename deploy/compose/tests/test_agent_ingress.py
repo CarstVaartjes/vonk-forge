@@ -378,8 +378,23 @@ def test_caddy_adapts_three_sni_boundaries_for_admin_enrollment_and_mtls_agents(
     assert client_auth["ca"] == {"provider": "file", "pem_files": ["/run/secrets/agent-client-ca"]}
     agent_routes = agent_site["handle"][0]["routes"]
     agent_proxy = next(route for route in agent_routes if "control-api:8000" in json.dumps(route, sort_keys=True))
-    request_headers = agent_proxy["handle"][0]["routes"][0]["handle"][0]["headers"]["request"]
-    assert request_headers["delete"] == ["X-Vonk-Agent-*"]
+    agent_handlers = agent_proxy["handle"][0]["routes"][0]["handle"]
+    sanitizer_index = next(
+        index
+        for index, handler in enumerate(agent_handlers)
+        if handler.get("handler") == "headers"
+    )
+    proxy_index = next(
+        index
+        for index, handler in enumerate(agent_handlers)
+        if handler.get("handler") == "reverse_proxy"
+    )
+    assert sanitizer_index < proxy_index
+    assert agent_handlers[sanitizer_index]["request"]["delete"] == [
+        "X-Vonk-Agent-*"
+    ]
+    request_headers = agent_handlers[proxy_index]["headers"]["request"]
+    assert "delete" not in request_headers
     replacements = {key.lower(): value for key, value in request_headers["set"].items()}
     assert replacements == {
         "x-vonk-agent-node": ["{vonk_agent_node}"],

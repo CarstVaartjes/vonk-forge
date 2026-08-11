@@ -332,6 +332,9 @@ def test_complete_development_stack_enforces_tls_identity_and_acks_routes(
         **os.environ,
         "VONK_AGENT_PORT": str(agent_port),
         "VONK_DEV_PORT": str(api_port),
+        "VONK_DEV_MANAGEMENT_CIDRS": (
+            "127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+        ),
         "VONK_DEV_PROJECT_NAME": project,
         "VONK_DEV_SECRETS_DIR": str(secrets),
     }
@@ -390,14 +393,32 @@ def test_complete_development_stack_enforces_tls_identity_and_acks_routes(
         approved_certificate = tmp_path / "approved-agent-certificate.pem"
         approved_certificate.write_text(pickup["certificate_pem"], encoding="ascii")
         approved_certificate.chmod(0o600)
+        claim_body = tmp_path / "rust-claim.json"
+        claim_body.write_text(
+            json.dumps(
+                {
+                    "agent_implementation": "rust",
+                    "capabilities": [],
+                    "lease_seconds": 60,
+                    "node_id": NODE_ID,
+                    "protocol_version": 3,
+                    "wait_seconds": 0,
+                }
+            ),
+            encoding="utf-8",
+        )
+        claim_body.chmod(0o600)
 
-        approved_claim_exit, approved_claim_status, _approved_claim_error = _curl_status(
-            hostname=AGENT_HOST,
-            port=agent_port,
-            ca=controller_ca,
-            path="/agent/v1/claim",
-            certificate=approved_certificate,
-            key=enrollment_key,
+        approved_claim_exit, approved_claim_status, _approved_claim_error = (
+            _curl_status(
+                hostname=AGENT_HOST,
+                port=agent_port,
+                ca=controller_ca,
+                path="/agent/v1/claim",
+                body=claim_body,
+                certificate=approved_certificate,
+                key=enrollment_key,
+            )
         )
         assert approved_claim_exit == 0
         assert approved_claim_status == "204"

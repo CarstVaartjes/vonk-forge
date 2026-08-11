@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import AgentIdentity, AgentSource
 from vonk_control.models import AgentCertificate, AgentNode, AgentPresence, Base
 from vonk_control.presence import (
@@ -11,8 +13,6 @@ from vonk_control.presence import (
     ManagementAddressPolicy,
     PresenceError,
 )
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 NODE_ID = "spk_" + "a" * 32
 NOW = datetime(2026, 8, 5, 12, 0, tzinfo=UTC)
@@ -38,6 +38,13 @@ def test_management_address_policy_accepts_only_canonical_bounded_addresses() ->
     ):
         with pytest.raises(PresenceError):
             policy.validate(address)
+
+
+def test_management_address_policy_accepts_secret_file_line_format() -> None:
+    policy = ManagementAddressPolicy.parse("10.0.0.0/24\n2001:db8:42::/64\n")
+
+    assert policy.validate("10.0.0.42") == "10.0.0.42"
+    assert policy.validate("2001:db8:42::2") == "2001:db8:42::2"
 
 
 def test_management_address_policy_rejects_ambiguous_network_policy() -> None:

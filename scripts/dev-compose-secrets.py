@@ -415,6 +415,7 @@ def _arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repository-root", type=Path, required=True)
     parser.add_argument("--external-secrets-dir", type=Path)
+    parser.add_argument("--management-cidrs", default="127.0.0.1/32")
     return parser.parse_args()
 
 
@@ -443,7 +444,7 @@ def main() -> int:
         try:
             destination = module.prepare_runtime_secrets(
                 secrets_path,
-                management_cidrs="127.0.0.1/32",
+                management_cidrs=arguments.management_cidrs,
                 enroll_hostname="enroll.vonk-forge.lan",
                 agent_hostname="agents.vonk-forge.lan",
                 registry_hostname="registry.vonk-forge.lan",
