@@ -6,6 +6,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
@@ -14,9 +17,6 @@ from vonk_control.global_catalog import GlobalRecipeRevision
 from vonk_control.models import Base
 from vonk_control.recipe_contract import recipe_content_sha256
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 
 class Jobs:
@@ -192,6 +192,36 @@ def test_stale_draft_returns_stable_problem(api, recipe_document) -> None:
     assert stale.status_code == 409
     assert stale.json()["code"] == "catalog.stale_revision"
     assert len(stale.json()["request_id"]) == 36
+
+
+def test_resolved_recipe_accepts_a_new_draft_revision(api, recipe_document) -> None:
+    client, headers, _audits = api
+    created = client.post(
+        "/api/v1/catalog/recipes",
+        headers=headers("administrator"),
+        json={"slug": "qwen3-vllm", "document": recipe_document},
+    ).json()
+    resolved = client.post(
+        f"/api/v1/catalog/recipes/{created['recipe_id']}/resolve",
+        headers=headers("administrator"),
+        json={"expected_revision": created["revision_number"]},
+    ).json()
+    changed = copy.deepcopy(recipe_document)
+    changed["metadata"]["title"] = "Changed title"
+
+    drafted = client.put(
+        f"/api/v1/catalog/recipes/{created['recipe_id']}/draft",
+        headers=headers("administrator"),
+        json={
+            "expected_revision": resolved["revision_number"],
+            "document": changed,
+        },
+    )
+
+    assert drafted.status_code == 200
+    assert drafted.json()["lifecycle"] == "draft"
+    assert drafted.json()["revision_number"] == resolved["revision_number"] + 1
+    assert drafted.json()["document"] == changed
 
 
 def test_recipe_body_is_bounded_and_unknown_fields_are_rejected(
