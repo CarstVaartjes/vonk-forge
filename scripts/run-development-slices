@@ -59,7 +59,9 @@ PHASE_STATES = {
     "model-single": MODEL_SINGLE_STATES,
     "model-multinode": MODEL_MULTINODE_STATES,
 }
-ALL_STATES = tuple(dict.fromkeys(state for states in PHASE_STATES.values() for state in states))
+ALL_STATES = tuple(
+    dict.fromkeys(state for states in PHASE_STATES.values() for state in states)
+)
 NODE = re.compile(r"spk_[0-9a-f]{32}\Z")
 MAXIMUM_TOKEN_BYTES = 16 * 1024
 MAXIMUM_EVIDENCE_BYTES = 2 * 1024 * 1024
@@ -314,7 +316,9 @@ class Client:
         try:
             return status, json.loads(body)
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise SliceError(f"request failed: {method} {path} response is invalid") from error
+            raise SliceError(
+                f"request failed: {method} {path} response is invalid"
+            ) from error
 
 
 def _object(value: object | None, label: str) -> dict[str, Any]:
@@ -335,7 +339,9 @@ def _source_bundle(context: Path) -> tuple[bytes, str, int]:
     manifest_files: list[dict[str, object]] = []
     with tarfile.open(fileobj=stream, mode="w", format=tarfile.PAX_FORMAT) as archive:
         for name in sorted(files, key=lambda item: item.encode("utf-8")):
-            if name.startswith("/") or any(part in {"", ".", ".."} for part in name.split("/")):
+            if name.startswith("/") or any(
+                part in {"", ".", ".."} for part in name.split("/")
+            ):
                 raise SliceError("recipe source path is unsafe")
             content = files[name]
             member = tarfile.TarInfo(name)
@@ -394,9 +400,7 @@ def _model_qualification(
         artifact_document = json.loads(
             (MODEL_ROOT / "model-smoke-artifacts.json").read_text()
         )
-        topology = json.loads(
-            (MODEL_ROOT / "model-smoke-multinode.json").read_text()
-        )
+        topology = json.loads((MODEL_ROOT / "model-smoke-multinode.json").read_text())
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
         raise SliceError("model qualification is invalid") from error
     if (
@@ -433,10 +437,7 @@ def _model_qualification(
         != hashlib.sha256(_canonical(topology)).hexdigest()
         or document.get("runtime_image") != source.get("runtime_image")
         or document.get("single_node") != builder_node
-        or (
-            phase == "model-single"
-            and target_nodes != [document.get("single_node")]
-        )
+        or (phase == "model-single" and target_nodes != [document.get("single_node")])
         or (
             phase == "model-multinode"
             and target_nodes != document.get("multinode_nodes")
@@ -556,7 +557,9 @@ class Runner:
         qualification_sha256: str | None = None
         if args.phase == "synthetic":
             if args.qualification_file is not None:
-                raise SliceError("synthetic acceptance does not use model qualification")
+                raise SliceError(
+                    "synthetic acceptance does not use model qualification"
+                )
         else:
             if args.qualification_file is None:
                 raise SliceError("model qualification file is required")
@@ -606,6 +609,7 @@ class Runner:
         label: str,
         *,
         expected_nodes: list[str] | None = None,
+        retry_request_key: str | None = None,
     ) -> tuple[str, str, dict[str, Any]]:
         operation = _object(response, label)
         operation_id = operation.get("id")
@@ -614,8 +618,31 @@ class Runner:
             raise SliceError(f"{label} response is invalid")
         deadline = time.monotonic() + self.args.timeout_seconds
         current = operation
+        retried = False
         terminal_states = {"succeeded", "failed", "waiting-for-operator", "expired"}
-        while current.get("state") not in terminal_states:
+        while True:
+            state = current.get("state")
+            if state == "succeeded":
+                break
+            if state in terminal_states:
+                if retry_request_key is None or retried:
+                    raise SliceError(f"{label} operation ended in {state}")
+                _, retry_payload = self.control.request(
+                    "POST",
+                    f"/api/v1/recipes/operations/{operation_id}/retry",
+                    {"request_key": retry_request_key},
+                )
+                retry = _object(retry_payload, f"{label} retry")
+                retry_operation_id = retry.get("id")
+                if (
+                    not isinstance(retry_operation_id, str)
+                    or retry.get("owner_id") != owner_id
+                ):
+                    raise SliceError(f"{label} retry response is invalid")
+                operation_id = retry_operation_id
+                current = retry
+                retried = True
+                continue
             if time.monotonic() >= deadline:
                 raise SliceError(f"{label} operation timed out")
             time.sleep(self.args.poll_seconds)
@@ -623,13 +650,15 @@ class Runner:
                 "GET", f"/api/v1/recipes/operations/{operation_id}"
             )
             current = _object(payload, label)
-        if current.get("state") != "succeeded":
-            raise SliceError(f"{label} operation ended in {current.get('state')}")
         result = current.get("result")
         if expected_nodes is not None:
-            successful = result.get("successful_nodes") if isinstance(result, dict) else None
+            successful = (
+                result.get("successful_nodes") if isinstance(result, dict) else None
+            )
             failed = result.get("failed_nodes") if isinstance(result, dict) else None
-            node_evidence = result.get("node_evidence") if isinstance(result, dict) else None
+            node_evidence = (
+                result.get("node_evidence") if isinstance(result, dict) else None
+            )
             if (
                 successful != sorted(expected_nodes)
                 or failed != []
@@ -697,11 +726,15 @@ class Runner:
         _, payload = self.control.request("GET", "/api/v1/fleet")
         fleet = _object(payload, "fleet")
         nodes = fleet.get("nodes")
-        by_id = {
-            node.get("id"): node
-            for node in nodes
-            if isinstance(node, dict) and isinstance(node.get("id"), str)
-        } if isinstance(nodes, list) else {}
+        by_id = (
+            {
+                node.get("id"): node
+                for node in nodes
+                if isinstance(node, dict) and isinstance(node.get("id"), str)
+            }
+            if isinstance(nodes, list)
+            else {}
+        )
         return fleet, by_id
 
     @staticmethod
@@ -712,21 +745,24 @@ class Runner:
             and node.get("agent_state") == "active"
             and node.get("compatibility") == "supported"
             and node.get("inventory_stale") is False
-            and "runtime.rootless-podman.v1"
-            in node.get("inventory_capabilities", ())
+            and "runtime.rootless-podman.v1" in node.get("inventory_capabilities", ())
         )
 
     def recipe_resolved(self) -> None:
         _, listed_payload = self.control.request("GET", "/api/v1/catalog/recipes")
         listed = _object(listed_payload, "recipe catalog").get("recipes")
-        existing = next(
-            (
-                item
-                for item in listed
-                if isinstance(item, dict) and item.get("slug") == self.slug
-            ),
-            None,
-        ) if isinstance(listed, list) else None
+        existing = (
+            next(
+                (
+                    item
+                    for item in listed
+                    if isinstance(item, dict) and item.get("slug") == self.slug
+                ),
+                None,
+            )
+            if isinstance(listed, list)
+            else None
+        )
         if existing is None:
             _, created_payload = self.control.request(
                 "POST",
@@ -761,10 +797,9 @@ class Runner:
             "recipe_revision": resolved.get("revision_number"),
             "recipe_content_sha256": resolved.get("content_sha256"),
         }
-        if (
-            not all(isinstance(fields[key], str) for key in fields if key != "recipe_revision")
-            or not isinstance(fields["recipe_revision"], int)
-        ):
+        if not all(
+            isinstance(fields[key], str) for key in fields if key != "recipe_revision"
+        ) or not isinstance(fields["recipe_revision"], int):
             raise SliceError("recipe resolution response is invalid")
         expected_source = self.recipe.get("build", {}).get("context", {}).get("sha256")
         if (
@@ -822,7 +857,10 @@ class Runner:
             },
         )
         operation_id, build_id, result = self.operation(
-            response, "recipe build", expected_nodes=[self.args.builder_node]
+            response,
+            "recipe build",
+            expected_nodes=[self.args.builder_node],
+            retry_request_key=self.request_key("image-built", "build-retry"),
         )
         evidence = result["node_evidence"][self.args.builder_node]
         image_digest = evidence.get("image_digest")
@@ -1052,7 +1090,11 @@ class Runner:
         response = self._inference()
         self.complete(
             "inference-ok",
-            {"inference_response_sha256": hashlib.sha256(_canonical(response)).hexdigest()},
+            {
+                "inference_response_sha256": hashlib.sha256(
+                    _canonical(response)
+                ).hexdigest()
+            },
         )
 
     def _inference(self) -> dict[str, Any]:
@@ -1064,7 +1106,9 @@ class Runner:
         else:
             request = {
                 "model": self.slug,
-                "messages": [{"role": "user", "content": "Reply with exactly: VONK MODEL OK"}],
+                "messages": [
+                    {"role": "user", "content": "Reply with exactly: VONK MODEL OK"}
+                ],
                 "temperature": 0,
                 "max_tokens": 16,
                 "stream": False,
@@ -1079,7 +1123,9 @@ class Runner:
             choices = response.get("choices")
             message = (
                 choices[0].get("message")
-                if isinstance(choices, list) and len(choices) == 1 and isinstance(choices[0], dict)
+                if isinstance(choices, list)
+                and len(choices) == 1
+                and isinstance(choices[0], dict)
                 else None
             )
             content = message.get("content") if isinstance(message, dict) else None
@@ -1176,13 +1222,20 @@ class Runner:
             node = by_id.get(node_id)
             value = node.get("agent_last_seen_at") if self._node_ready(node) else None
             before = initial.get(node_id)
-            if not isinstance(value, str) or not isinstance(before, str) or value <= before:
+            if (
+                not isinstance(value, str)
+                or not isinstance(before, str)
+                or value <= before
+            ):
                 raise SliceError("restart persistence freshness did not advance")
             current[node_id] = value
         self._await_endpoint(published=True)
         response = self._inference()
         digest = fleet.get("evidence_digest")
-        if not isinstance(digest, str) or digest == self.outputs["fleet_evidence_digest"]:
+        if (
+            not isinstance(digest, str)
+            or digest == self.outputs["fleet_evidence_digest"]
+        ):
             raise SliceError("restart persistence fleet evidence did not advance")
         self.complete(
             "restart-persistence-observed",

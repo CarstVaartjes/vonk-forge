@@ -586,82 +586,157 @@ class RecipeOperationService:
         now = self._clock()
         with self._sessions.begin() as session:
             previous = session.get(Job, operation_id, with_for_update=True)
-            if (
-                previous is None
-                or previous.kind != "recipe.install"
-                or previous.state != "failed"
-            ):
-                raise RecipeOperationConflict(
-                    "only failed recipe installs can be retried"
-                )
+            if previous is None:
+                raise RecipeOperationConflict("recipe operation is not retryable")
             previous_plan_digest = _required_string(previous.payload, "plan_digest")
             existing = session.scalar(select(Job).where(Job.request_id == request_id))
             if existing is not None:
                 if (
-                    existing.kind != "recipe.install"
+                    existing.kind != previous.kind
                     or _required_string(existing.payload, "plan_digest")
                     != previous_plan_digest
                 ):
                     raise RecipeOperationConflict("request key was already used")
                 return self._view(existing)
-            owner_id = _required_string(previous.payload, "owner_id")
-            installation = session.get(
-                RecipeInstallation, owner_id, with_for_update=True
-            )
-            if installation is None or installation.state not in {"partial", "failed"}:
-                raise RecipeOperationConflict("recipe installation is not retryable")
-            recipe_revision_id = installation.recipe_revision_id
-            nodes = tuple(
-                session.scalars(
-                    select(InstallationNode)
-                    .where(InstallationNode.installation_id == installation.id)
-                    .order_by(InstallationNode.node_id)
+            if previous.kind == "recipe.build.v1":
+                job = self._retry_build_in_session(
+                    session, previous, actor=actor, request_id=request_id, now=now
                 )
-            )
-            revision = session.get(LocalRecipeRevision, installation.recipe_revision_id)
-            assert revision is not None and revision.content_sha256 is not None
-            recipe_digest = revision.content_sha256
-            installation.state = "installing"
-            installation.updated_at = now
-            for node in session.scalars(
-                select(InstallationNode).where(
-                    InstallationNode.installation_id == installation.id
+            elif previous.kind == "recipe.install" and previous.state == "failed":
+                job = self._retry_install_in_session(
+                    session, previous, actor=actor, request_id=request_id, now=now
                 )
-            ):
-                node.state = "planned"
-            job = self._queue_in_session(
-                session,
-                kind="recipe.install",
-                owner_kind="installation",
-                owner_id=owner_id,
-                plan_digest=previous_plan_digest,
-                actor=actor,
-                request_id=request_id,
-                node_payloads=tuple(
-                    (
-                        node.node_id,
-                        {
-                            "schema_version": 1,
-                            "installation_id": owner_id,
-                            "recipe_revision_id": recipe_revision_id,
-                            "recipe_content_sha256": recipe_digest,
-                            "mapping_id": installation.mapping_id,
-                            "mapping_generation": installation.mapping_generation,
-                            "recipe_build_id": installation.recipe_build_id,
-                            "image_digest": installation.image_digest,
-                            "plan_digest": previous_plan_digest,
-                            "rank": node.rank,
-                            "role": node.role,
-                            "expected_bytes": node.required_bytes,
-                        },
-                    )
-                    for node in nodes
-                ),
-                authority_digest=recipe_digest,
-                now=now,
-            )
+            else:
+                raise RecipeOperationConflict("recipe operation is not retryable")
         self._agent_jobs.notify_available()
         return self.get(job.id)
+
+    def _retry_install_in_session(
+        self,
+        session: Session,
+        previous: Job,
+        *,
+        actor: str,
+        request_id: str,
+        now: datetime,
+    ) -> Job:
+        previous_plan_digest = _required_string(previous.payload, "plan_digest")
+        owner_id = _required_string(previous.payload, "owner_id")
+        installation = session.get(RecipeInstallation, owner_id, with_for_update=True)
+        if installation is None or installation.state not in {"partial", "failed"}:
+            raise RecipeOperationConflict("recipe installation is not retryable")
+        recipe_revision_id = installation.recipe_revision_id
+        nodes = tuple(
+            session.scalars(
+                select(InstallationNode)
+                .where(InstallationNode.installation_id == installation.id)
+                .order_by(InstallationNode.node_id)
+            )
+        )
+        revision = session.get(LocalRecipeRevision, installation.recipe_revision_id)
+        assert revision is not None and revision.content_sha256 is not None
+        recipe_digest = revision.content_sha256
+        installation.state = "installing"
+        installation.updated_at = now
+        for node in nodes:
+            node.state = "planned"
+        return self._queue_in_session(
+            session,
+            kind="recipe.install",
+            owner_kind="installation",
+            owner_id=owner_id,
+            plan_digest=previous_plan_digest,
+            actor=actor,
+            request_id=request_id,
+            node_payloads=tuple(
+                (
+                    node.node_id,
+                    {
+                        "schema_version": 1,
+                        "installation_id": owner_id,
+                        "recipe_revision_id": recipe_revision_id,
+                        "recipe_content_sha256": recipe_digest,
+                        "mapping_id": installation.mapping_id,
+                        "mapping_generation": installation.mapping_generation,
+                        "recipe_build_id": installation.recipe_build_id,
+                        "image_digest": installation.image_digest,
+                        "plan_digest": previous_plan_digest,
+                        "rank": node.rank,
+                        "role": node.role,
+                        "expected_bytes": node.required_bytes,
+                    },
+                )
+                for node in nodes
+            ),
+            authority_digest=recipe_digest,
+            now=now,
+        )
+
+    def _retry_build_in_session(
+        self,
+        session: Session,
+        previous: Job,
+        *,
+        actor: str,
+        request_id: str,
+        now: datetime,
+    ) -> Job:
+        if previous.state not in {"failed", "waiting-for-operator", "expired"}:
+            raise RecipeOperationConflict("recipe build is not retryable")
+        if self._builds is None:
+            raise RecipeOperationConflict("recipe build service is unavailable")
+        owner_id = _required_string(previous.payload, "owner_id")
+        build = session.get(RecipeBuild, owner_id, with_for_update=True)
+        if build is None or build.state not in {"building", "failed"}:
+            raise RecipeOperationConflict("recipe build is not retryable")
+        active = any(
+            job.id != previous.id
+            and job.state in {"queued", "running"}
+            and isinstance(job.payload, Mapping)
+            and job.payload.get("owner_id") == owner_id
+            for job in session.scalars(select(Job).where(Job.kind == "recipe.build.v1"))
+        )
+        if active:
+            raise RecipeOperationConflict("recipe build already has an active retry")
+        payload = dict(build.plan) if isinstance(build.plan, Mapping) else {}
+        try:
+            plan = RecipeBuildPlan(
+                build_id=owner_id,
+                recipe_revision_id=_required_string(payload, "recipe_revision_id"),
+                recipe_content_sha256=_required_string(
+                    payload, "recipe_content_sha256"
+                ),
+                builder_node_id=build.builder_node_id,
+                source_bundle_sha256=_required_string(payload, "source_bundle_sha256"),
+                build_input_sha256=build.build_input_sha256,
+                agent_payload=payload,
+            )
+        except (KeyError, TypeError) as error:
+            raise RecipeOperationConflict(
+                "stored recipe build plan is invalid"
+            ) from error
+        if (
+            payload.get("build_id") != owner_id
+            or payload.get("build_input_sha256") != build.build_input_sha256
+        ):
+            raise RecipeOperationConflict("stored recipe build plan is invalid")
+        self._release(session, "recipe-build", owner_id, now)
+        self._builds.reserve_in_session(session, plan, now=now)
+        build.state = "building"
+        build.error = None
+        build.updated_at = now
+        return self._queue_in_session(
+            session,
+            kind="recipe.build.v1",
+            owner_kind="recipe-build",
+            owner_id=owner_id,
+            plan_digest=build.build_input_sha256,
+            actor=actor,
+            request_id=request_id,
+            node_payloads=((build.builder_node_id, payload),),
+            authority_digest=build.build_input_sha256,
+            now=now,
+        )
 
     def record_node_result(
         self,
