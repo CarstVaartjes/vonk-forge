@@ -7,9 +7,12 @@ use crate::process::{ProcessError, ProcessRunner, Program};
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Inventory {
+    #[serde(rename = "host_memory_total_bytes")]
     pub memory_total_bytes: u64,
+    #[serde(rename = "host_memory_free_bytes")]
     pub memory_available_bytes: u64,
     pub disk_total_bytes: u64,
+    #[serde(rename = "disk_free_bytes")]
     pub disk_available_bytes: u64,
     pub gpu_count: u32,
     pub gpu_memory_total_bytes: u64,

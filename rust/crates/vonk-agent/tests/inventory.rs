@@ -87,6 +87,13 @@ fn inventory_reports_physical_and_available_memory_disk_and_gpu() {
         available_memory_bytes(&runner, &meminfo).unwrap(),
         65432 * 1024
     );
+    let wire = serde_json::to_value(&inventory).unwrap();
+    assert_eq!(wire["host_memory_total_bytes"], 123456 * 1024);
+    assert_eq!(wire["host_memory_free_bytes"], 65432 * 1024);
+    assert_eq!(wire["disk_free_bytes"], inventory.disk_available_bytes);
+    assert!(wire.get("memory_total_bytes").is_none());
+    assert!(wire.get("memory_available_bytes").is_none());
+    assert!(wire.get("disk_available_bytes").is_none());
 }
 
 #[test]

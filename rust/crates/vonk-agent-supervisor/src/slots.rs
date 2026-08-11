@@ -53,6 +53,13 @@ impl Slot {
             Self::B => "b",
         }
     }
+
+    fn other(self) -> Self {
+        match self {
+            Self::A => Self::B,
+            Self::B => Self::A,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -383,6 +390,16 @@ impl SlotStore {
     pub fn load(&self) -> Result<SupervisorState, SupervisorError> {
         self.require_roots()?;
         self.load_unlocked()
+    }
+
+    pub fn package_staging_slot(&self) -> Result<Slot, SupervisorError> {
+        self.require_roots()?;
+        let state = self.load_unlocked()?;
+        if state.status != SupervisorStatus::Stable {
+            return Err(SupervisorError::InvalidTransition);
+        }
+        self.verify_slot(state.active_slot, Some(&state.active_artifact_sha256))?;
+        Ok(state.active_slot.other())
     }
 
     pub fn recover_pointers(&self) -> Result<(), SupervisorError> {

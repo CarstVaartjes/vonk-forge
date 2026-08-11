@@ -45,17 +45,18 @@ state=/var/lib/vonk-forge/supervisor/state.json
 if [ ! -e "$state" ]; then
     target=a
 else
-    current=/var/lib/vonk-forge/supervisor/current
-    if [ ! -L "$current" ]; then
-        echo "vonk-forge-agent: supervisor state has no current slot" >&2
-        exit 1
-    fi
-    active=$(basename -- "$(readlink -- "$current")")
-    case "$active" in
+    saved_umask=$(umask)
+    umask 077
+    exec 9>/var/lib/vonk-forge/supervisor/supervisor.lock
+    umask "$saved_umask"
+    /usr/bin/flock -x 9
+    target=$(
+        /usr/lib/vonk-forge/vonk-agent-supervisor package-staging-slot
+    )
+    case "$target" in
         a|b) ;;
-        *) echo "vonk-forge-agent: supervisor current slot is invalid" >&2; exit 1 ;;
+        *) echo "vonk-forge-agent: package staging slot is invalid" >&2; exit 1 ;;
     esac
-    if [ "$active" = a ]; then target=b; else target=a; fi
 fi
 
 slot=/var/lib/vonk-forge/slots/$target
