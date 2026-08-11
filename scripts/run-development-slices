@@ -1,0 +1,772 @@
+#!/usr/bin/env python3
+"""Run restart-safe development workload acceptance slices through public APIs."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import io
+import json
+import os
+import re
+import stat
+import sys
+import tarfile
+import tempfile
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import uuid
+from pathlib import Path
+from typing import Any
+
+ROOT = Path(__file__).resolve().parents[1]
+SYNTHETIC_ROOT = ROOT / "control/tests/fixtures/recipes/dev-http-smoke"
+STATES = (
+    "inventory-ready",
+    "recipe-resolved",
+    "source-verified",
+    "image-built",
+    "image-distributed",
+    "installed",
+    "running",
+    "route-published",
+    "inference-ok",
+    "stopped",
+    "route-withdrawn",
+    "uninstalled",
+)
+NODE = re.compile(r"spk_[0-9a-f]{32}\Z")
+MAXIMUM_TOKEN_BYTES = 16 * 1024
+MAXIMUM_EVIDENCE_BYTES = 2 * 1024 * 1024
+SOURCE_MEDIA_TYPE = "application/vnd.vonk-forge.source-bundle.v1+tar"
+
+
+class SliceError(RuntimeError):
+    """A bounded, secret-free acceptance failure."""
+
+
+def _canonical(value: object) -> bytes:
+    return (
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n"
+    ).encode("utf-8")
+
+
+def _safe_read(path: Path, *, maximum: int, private: bool) -> bytes:
+    descriptor = -1
+    try:
+        descriptor = os.open(
+            path,
+            os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC,
+        )
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_nlink != 1
+            or before.st_uid != os.geteuid()
+            or not 0 < before.st_size <= maximum
+            or (private and stat.S_IMODE(before.st_mode) & 0o077)
+        ):
+            raise SliceError("private input file is unsafe")
+        content = bytearray()
+        while len(content) <= maximum:
+            chunk = os.read(descriptor, min(4096, maximum + 1 - len(content)))
+            if not chunk:
+                break
+            content.extend(chunk)
+        after = os.fstat(descriptor)
+        identity = (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_mtime_ns,
+            before.st_ctime_ns,
+        )
+        updated = (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+            after.st_ctime_ns,
+        )
+        if len(content) != before.st_size or identity != updated:
+            raise SliceError("private input file changed while read")
+        return bytes(content)
+    except SliceError:
+        raise
+    except OSError as error:
+        raise SliceError("private input file is unavailable") from error
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def _read_token(path: Path) -> str:
+    try:
+        decoded = _safe_read(path, maximum=MAXIMUM_TOKEN_BYTES, private=True).decode(
+            "ascii"
+        )
+    except UnicodeDecodeError as error:
+        raise SliceError("private token file is invalid") from error
+    token = decoded.rstrip("\r\n")
+    if (
+        not token
+        or token != token.strip()
+        or "\n" in token
+        or "\r" in token
+        or any(ord(character) < 0x21 or ord(character) > 0x7E for character in token)
+    ):
+        raise SliceError("private token file is invalid")
+    return token
+
+
+def _atomic_write(path: Path, value: object) -> None:
+    if not path.is_absolute():
+        raise SliceError("evidence path must be absolute")
+    parent = path.parent
+    try:
+        parent_status = parent.stat(follow_symlinks=False)
+    except OSError as error:
+        raise SliceError("evidence directory is unavailable") from error
+    if not stat.S_ISDIR(parent_status.st_mode):
+        raise SliceError("evidence directory is unsafe")
+    if path.exists() or path.is_symlink():
+        status = path.lstat()
+        if (
+            not stat.S_ISREG(status.st_mode)
+            or status.st_nlink != 1
+            or status.st_uid != os.geteuid()
+            or stat.S_IMODE(status.st_mode) & 0o077
+        ):
+            raise SliceError("evidence file is unsafe")
+    content = _canonical(value)
+    if len(content) > MAXIMUM_EVIDENCE_BYTES:
+        raise SliceError("evidence document is too large")
+    descriptor, name = tempfile.mkstemp(prefix=f".{path.name}.", dir=parent)
+    temporary = Path(name)
+    try:
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "wb", closefd=True) as stream:
+            descriptor = -1
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        directory_descriptor = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory_descriptor)
+        finally:
+            os.close(directory_descriptor)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _load_evidence(path: Path, expected: dict[str, object]) -> dict[str, Any]:
+    if not path.exists() and not path.is_symlink():
+        evidence: dict[str, Any] = {
+            "schema_version": 1,
+            "acceptance_id": str(uuid.uuid4()),
+            **expected,
+            "completed_states": [],
+            "outputs": {},
+        }
+        _atomic_write(path, evidence)
+        return evidence
+    try:
+        raw = _safe_read(path, maximum=MAXIMUM_EVIDENCE_BYTES, private=True)
+        evidence = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise SliceError("evidence document is invalid") from error
+    if not isinstance(evidence, dict) or evidence.get("schema_version") != 1:
+        raise SliceError("evidence document is invalid")
+    if any(evidence.get(key) != value for key, value in expected.items()):
+        raise SliceError("evidence inputs do not match this invocation")
+    completed = evidence.get("completed_states")
+    outputs = evidence.get("outputs")
+    acceptance_id = evidence.get("acceptance_id")
+    if (
+        not isinstance(completed, list)
+        or completed != list(STATES[: len(completed)])
+        or not isinstance(outputs, dict)
+        or not isinstance(acceptance_id, str)
+    ):
+        raise SliceError("evidence state is invalid")
+    try:
+        uuid.UUID(acceptance_id)
+    except ValueError as error:
+        raise SliceError("evidence state is invalid") from error
+    return evidence
+
+
+def _base_url(value: str, label: str) -> str:
+    parsed = urllib.parse.urlsplit(value)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise SliceError(f"{label} URL is invalid")
+    return value.rstrip("/")
+
+
+class Client:
+    def __init__(self, base: str, token: str, *, timeout: float) -> None:
+        self.base = base
+        self._token = token
+        self.timeout = timeout
+
+    def request(
+        self,
+        method: str,
+        path: str,
+        payload: object | bytes | None = None,
+        *,
+        content_type: str = "application/json",
+        allowed: tuple[int, ...] = (200, 201, 202),
+    ) -> tuple[int, object | None]:
+        if not path.startswith("/") or "?" in path or "#" in path:
+            raise SliceError("request path is invalid")
+        data: bytes | None
+        if payload is None:
+            data = None
+        elif isinstance(payload, bytes):
+            data = payload
+        else:
+            data = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        request = urllib.request.Request(
+            self.base + path,
+            data=data,
+            method=method,
+            headers={
+                "Authorization": f"Bearer {self._token}",
+                "Content-Type": content_type,
+                "Accept": "application/json",
+            },
+        )
+        try:
+            response = urllib.request.urlopen(request, timeout=self.timeout)
+            status = response.status
+            body = response.read(2 * 1024 * 1024 + 1)
+        except urllib.error.HTTPError as error:
+            status = error.code
+            body = error.read(2 * 1024 * 1024 + 1)
+        except (OSError, urllib.error.URLError) as error:
+            raise SliceError(f"request failed: {method} {path}") from error
+        if status not in allowed:
+            raise SliceError(f"request failed: {method} {path} returned HTTP {status}")
+        if len(body) > 2 * 1024 * 1024:
+            raise SliceError(f"request failed: {method} {path} response is too large")
+        if not body:
+            return status, None
+        try:
+            return status, json.loads(body)
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise SliceError(f"request failed: {method} {path} response is invalid") from error
+
+
+def _object(value: object | None, label: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise SliceError(f"{label} response is invalid")
+    return value
+
+
+def _source_bundle(context: Path) -> tuple[bytes, str, int]:
+    files = {
+        path.relative_to(context).as_posix(): path.read_bytes()
+        for path in sorted(context.rglob("*"))
+        if path.is_file()
+    }
+    if not files:
+        raise SliceError("recipe source context is empty")
+    stream = io.BytesIO()
+    manifest_files: list[dict[str, object]] = []
+    with tarfile.open(fileobj=stream, mode="w", format=tarfile.PAX_FORMAT) as archive:
+        for name in sorted(files, key=lambda item: item.encode("utf-8")):
+            if name.startswith("/") or any(part in {"", ".", ".."} for part in name.split("/")):
+                raise SliceError("recipe source path is unsafe")
+            content = files[name]
+            member = tarfile.TarInfo(name)
+            member.size = len(content)
+            member.mode = 0o644
+            member.uid = member.gid = 0
+            member.uname = member.gname = ""
+            member.mtime = 0
+            archive.addfile(member, io.BytesIO(content))
+            manifest_files.append(
+                {
+                    "path": name,
+                    "mode": 0o644,
+                    "size": len(content),
+                    "sha256": hashlib.sha256(content).hexdigest(),
+                }
+            )
+    canonical_manifest = json.dumps(
+        {
+            "schema_version": 1,
+            "files": manifest_files,
+            "total_bytes": sum(len(content) for content in files.values()),
+        },
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return stream.getvalue(), hashlib.sha256(canonical_manifest).hexdigest(), len(files)
+
+
+class Runner:
+    def __init__(self, args: argparse.Namespace) -> None:
+        self.args = args
+        self.api_base = _base_url(args.api_base, "control API")
+        self.inference_base = _base_url(
+            args.inference_base or args.api_base, "inference API"
+        )
+        admin_token = _read_token(args.admin_token_file)
+        inference_token = _read_token(args.inference_token_file)
+        self.control = Client(self.api_base, admin_token, timeout=args.timeout_seconds)
+        self.inference = Client(
+            self.inference_base, inference_token, timeout=args.timeout_seconds
+        )
+        # Tokens remain only inside the clients and are never persisted or printed.
+        del admin_token, inference_token
+        self.recipe_path = args.recipe or SYNTHETIC_ROOT / "recipe.json"
+        try:
+            self.recipe = json.loads(self.recipe_path.read_text(encoding="utf-8"))
+            self.expected = json.loads(
+                (self.recipe_path.parent / "expected.json").read_text(encoding="utf-8")
+            )
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise SliceError("recipe acceptance input is invalid") from error
+        if not isinstance(self.recipe, dict) or not isinstance(self.expected, dict):
+            raise SliceError("recipe acceptance input is invalid")
+        self.slug = str(self.recipe.get("identity", {}).get("slug", ""))
+        if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,62}", self.slug):
+            raise SliceError("recipe slug is invalid")
+        if args.phase != "synthetic":
+            raise SliceError("requested development phase is not implemented")
+        nodes = [args.builder_node, *args.target_node]
+        if any(NODE.fullmatch(node) is None for node in nodes):
+            raise SliceError("development node identity is invalid")
+        targets = list(dict.fromkeys(args.target_node))
+        if not targets:
+            raise SliceError("at least one target node is required")
+        expected_inputs = {
+            "phase": args.phase,
+            "api_base": self.api_base,
+            "inference_base": self.inference_base,
+            "builder_node": args.builder_node,
+            "target_nodes": targets,
+            "recipe_slug": self.slug,
+        }
+        self.evidence = _load_evidence(args.evidence_file, expected_inputs)
+
+    @property
+    def outputs(self) -> dict[str, Any]:
+        return self.evidence["outputs"]
+
+    def request_key(self, state: str, purpose: str) -> str:
+        namespace = uuid.UUID(self.evidence["acceptance_id"])
+        return str(uuid.uuid5(namespace, f"{state}:{purpose}"))
+
+    def complete(self, state: str, output: dict[str, object] | None = None) -> None:
+        expected = STATES[len(self.evidence["completed_states"])]
+        if state != expected:
+            raise SliceError("acceptance state transition is invalid")
+        if output:
+            self.outputs.update(output)
+        self.evidence["completed_states"].append(state)
+        _atomic_write(self.args.evidence_file, self.evidence)
+
+    def operation(self, response: object | None, label: str) -> tuple[str, str]:
+        operation = _object(response, label)
+        operation_id = operation.get("id")
+        owner_id = operation.get("owner_id")
+        if not isinstance(operation_id, str) or not isinstance(owner_id, str):
+            raise SliceError(f"{label} response is invalid")
+        deadline = time.monotonic() + self.args.timeout_seconds
+        current = operation
+        while current.get("state") not in {"succeeded", "failed"}:
+            if time.monotonic() >= deadline:
+                raise SliceError(f"{label} operation timed out")
+            time.sleep(self.args.poll_seconds)
+            _, payload = self.control.request(
+                "GET", f"/api/v1/recipes/operations/{operation_id}"
+            )
+            current = _object(payload, label)
+        if current.get("state") != "succeeded":
+            raise SliceError(f"{label} operation failed")
+        return operation_id, owner_id
+
+    def run(self) -> None:
+        handlers = {
+            "inventory-ready": self.inventory_ready,
+            "recipe-resolved": self.recipe_resolved,
+            "source-verified": self.source_verified,
+            "image-built": self.image_built,
+            "image-distributed": self.image_distributed,
+            "installed": self.installed,
+            "running": self.running,
+            "route-published": self.route_published,
+            "inference-ok": self.inference_ok,
+            "stopped": self.stopped,
+            "route-withdrawn": self.route_withdrawn,
+            "uninstalled": self.uninstalled,
+        }
+        for state in STATES[len(self.evidence["completed_states"]) :]:
+            handlers[state]()
+            if self.args.stop_after == state:
+                return
+
+    def inventory_ready(self) -> None:
+        _, payload = self.control.request("GET", "/api/v1/fleet")
+        fleet = _object(payload, "fleet")
+        nodes = fleet.get("nodes")
+        by_id = {
+            node.get("id"): node
+            for node in nodes
+            if isinstance(node, dict) and isinstance(node.get("id"), str)
+        } if isinstance(nodes, list) else {}
+        required = {self.args.builder_node, *self.args.target_node}
+        for node_id in required:
+            node = by_id.get(node_id)
+            if (
+                node is None
+                or node.get("healthy") is not True
+                or node.get("stale") is not False
+                or node.get("agent_online") is not True
+                or node.get("agent_state") != "active"
+                or node.get("compatibility") != "compatible"
+            ):
+                raise SliceError("required development inventory is not ready")
+        digest = fleet.get("evidence_digest")
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise SliceError("fleet evidence is invalid")
+        self.complete("inventory-ready", {"fleet_evidence_digest": digest})
+
+    def recipe_resolved(self) -> None:
+        _, listed_payload = self.control.request("GET", "/api/v1/catalog/recipes")
+        listed = _object(listed_payload, "recipe catalog").get("recipes")
+        existing = next(
+            (
+                item
+                for item in listed
+                if isinstance(item, dict) and item.get("slug") == self.slug
+            ),
+            None,
+        ) if isinstance(listed, list) else None
+        if existing is None:
+            _, created_payload = self.control.request(
+                "POST",
+                "/api/v1/catalog/recipes",
+                {"slug": self.slug, "document": self.recipe},
+            )
+            created = _object(created_payload, "recipe creation")
+        else:
+            recipe_id = existing.get("recipe_id")
+            if not isinstance(recipe_id, str):
+                raise SliceError("recipe catalog response is invalid")
+            _, created_payload = self.control.request(
+                "GET", f"/api/v1/catalog/recipes/{recipe_id}"
+            )
+            created = _object(created_payload, "recipe lookup")
+        if created.get("lifecycle") == "resolved":
+            resolved = created
+        else:
+            recipe_id = created.get("recipe_id")
+            revision_number = created.get("revision_number")
+            if not isinstance(recipe_id, str) or not isinstance(revision_number, int):
+                raise SliceError("recipe creation response is invalid")
+            _, resolved_payload = self.control.request(
+                "POST",
+                f"/api/v1/catalog/recipes/{recipe_id}/resolve",
+                {"expected_revision": revision_number},
+            )
+            resolved = _object(resolved_payload, "recipe resolution")
+        fields = {
+            "recipe_id": resolved.get("recipe_id"),
+            "recipe_revision_id": resolved.get("id"),
+            "recipe_revision": resolved.get("revision_number"),
+            "recipe_content_sha256": resolved.get("content_sha256"),
+        }
+        if (
+            not all(isinstance(fields[key], str) for key in fields if key != "recipe_revision")
+            or not isinstance(fields["recipe_revision"], int)
+        ):
+            raise SliceError("recipe resolution response is invalid")
+        self.complete("recipe-resolved", fields)
+
+    def source_verified(self) -> None:
+        archive, digest, file_count = _source_bundle(self.recipe_path.parent / "context")
+        context = self.recipe.get("build", {}).get("context", {})
+        if (
+            not isinstance(context, dict)
+            or context.get("sha256") != digest
+            or context.get("expected_bytes") != len(archive)
+        ):
+            raise SliceError("recipe source identity does not match its document")
+        _, payload = self.control.request(
+            "PUT",
+            f"/api/v1/catalog/source-bundles/{digest}",
+            archive,
+            content_type=SOURCE_MEDIA_TYPE,
+        )
+        stored = _object(payload, "source upload")
+        if stored.get("sha256") != digest or stored.get("file_count") != file_count:
+            raise SliceError("source upload response is invalid")
+        self.complete("source-verified", {"source_bundle_sha256": digest})
+
+    def image_built(self) -> None:
+        revision = self.outputs["recipe_revision_id"]
+        _, policy_payload = self.control.request(
+            "POST", "/api/v1/recipes/source-checks", {"recipe_revision_id": revision}
+        )
+        policy = _object(policy_payload, "source policy")
+        if policy.get("passed") is not True or policy.get("findings") != []:
+            raise SliceError("recipe source policy did not pass")
+        _, preview_payload = self.control.request(
+            "POST",
+            "/api/v1/recipes/build-plans/preview",
+            {"recipe_revision_id": revision, "builder_node_id": self.args.builder_node},
+        )
+        preview = _object(preview_payload, "build preview")
+        build_input = preview.get("build_input_sha256")
+        if not isinstance(build_input, str):
+            raise SliceError("build preview response is invalid")
+        _, response = self.control.request(
+            "POST",
+            "/api/v1/recipes/builds",
+            {
+                "recipe_revision_id": revision,
+                "builder_node_id": self.args.builder_node,
+                "build_input_sha256": build_input,
+                "request_key": self.request_key("image-built", "build"),
+            },
+        )
+        operation_id, build_id = self.operation(response, "recipe build")
+        self.complete(
+            "image-built",
+            {
+                "build_input_sha256": build_input,
+                "recipe_build_id": build_id,
+                "build_operation_id": operation_id,
+            },
+        )
+
+    def image_distributed(self) -> None:
+        mapping_request = {
+            "recipe_revision_id": self.outputs["recipe_revision_id"],
+            "profile_name": "solo",
+            "node_ids": self.args.target_node,
+            "parameters": {},
+        }
+        _, preview_payload = self.control.request(
+            "POST", "/api/v1/recipes/mapping-plans/preview", mapping_request
+        )
+        preview = _object(preview_payload, "mapping preview")
+        placement = preview.get("placement_digest")
+        generation = preview.get("generation")
+        if not isinstance(placement, str) or not isinstance(generation, int):
+            raise SliceError("mapping preview response is invalid")
+        _, mapping_payload = self.control.request(
+            "POST",
+            "/api/v1/recipes/mappings",
+            {
+                **mapping_request,
+                "placement_digest": placement,
+                "request_key": self.request_key("image-distributed", "mapping"),
+            },
+        )
+        mapping = _object(mapping_payload, "mapping")
+        mapping_id = mapping.get("mapping_id")
+        if not isinstance(mapping_id, str) or mapping.get("generation") != generation:
+            raise SliceError("mapping response is invalid")
+        _, response = self.control.request(
+            "POST",
+            "/api/v1/recipes/image-distributions",
+            {
+                "recipe_build_id": self.outputs["recipe_build_id"],
+                "mapping_id": mapping_id,
+                "mapping_generation": generation,
+                "request_key": self.request_key("image-distributed", "distribution"),
+            },
+        )
+        operation_id, _owner = self.operation(response, "image distribution")
+        self.complete(
+            "image-distributed",
+            {
+                "mapping_id": mapping_id,
+                "mapping_generation": generation,
+                "distribution_operation_id": operation_id,
+            },
+        )
+
+    def installed(self) -> None:
+        request = {
+            "mapping_id": self.outputs["mapping_id"],
+            "recipe_build_id": self.outputs["recipe_build_id"],
+        }
+        _, preview_payload = self.control.request(
+            "POST", "/api/v1/recipes/install-plans/preview", request
+        )
+        preview = _object(preview_payload, "install preview")
+        if preview.get("allowed") is not True or not isinstance(
+            preview.get("plan_digest"), str
+        ):
+            raise SliceError("recipe installation is not admitted")
+        _, response = self.control.request(
+            "POST",
+            "/api/v1/recipes/installations",
+            {
+                **request,
+                "plan_digest": preview["plan_digest"],
+                "request_key": self.request_key("installed", "install"),
+            },
+        )
+        operation_id, installation_id = self.operation(response, "recipe installation")
+        self.complete(
+            "installed",
+            {
+                "installation_id": installation_id,
+                "installation_operation_id": operation_id,
+            },
+        )
+
+    def running(self) -> None:
+        request = {"installation_id": self.outputs["installation_id"]}
+        _, preview_payload = self.control.request(
+            "POST", "/api/v1/recipes/run-plans/preview", request
+        )
+        preview = _object(preview_payload, "run preview")
+        if preview.get("allowed") is not True or not isinstance(
+            preview.get("plan_digest"), str
+        ):
+            raise SliceError("recipe run is not admitted")
+        _, response = self.control.request(
+            "POST",
+            "/api/v1/recipes/runs",
+            {
+                **request,
+                "alias": self.slug,
+                "plan_digest": preview["plan_digest"],
+                "request_key": self.request_key("running", "start"),
+            },
+        )
+        operation_id, run_id = self.operation(response, "recipe start")
+        self.complete(
+            "running", {"run_id": run_id, "run_operation_id": operation_id}
+        )
+
+    def _await_endpoint(self, *, published: bool) -> None:
+        deadline = time.monotonic() + self.args.timeout_seconds
+        while True:
+            allowed = (200,) if published else (404,)
+            try:
+                status, payload = self.control.request(
+                    "GET", f"/api/v1/endpoints/{self.slug}", allowed=allowed
+                )
+            except SliceError:
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(self.args.poll_seconds)
+                continue
+            if published:
+                endpoint = _object(payload, "published endpoint")
+                if status == 200 and endpoint.get("alias") == self.slug:
+                    return
+            elif status == 404:
+                return
+            if time.monotonic() >= deadline:
+                raise SliceError("route state did not converge")
+            time.sleep(self.args.poll_seconds)
+
+    def route_published(self) -> None:
+        self._await_endpoint(published=True)
+        self.complete("route-published")
+
+    def inference_ok(self) -> None:
+        request = self.expected.get("request")
+        expected = self.expected.get("response")
+        if not isinstance(request, dict) or not isinstance(expected, dict):
+            raise SliceError("expected inference fixture is invalid")
+        _, response = self.inference.request("POST", "/v1/chat/completions", request)
+        if response != expected:
+            raise SliceError("synthetic inference response did not match")
+        self.complete(
+            "inference-ok",
+            {"inference_response_sha256": hashlib.sha256(_canonical(response)).hexdigest()},
+        )
+
+    def stopped(self) -> None:
+        _, response = self.control.request(
+            "POST",
+            f"/api/v1/recipes/runs/{self.outputs['run_id']}/stop",
+            {"request_key": self.request_key("stopped", "stop")},
+        )
+        operation_id, _owner = self.operation(response, "recipe stop")
+        self.complete("stopped", {"stop_operation_id": operation_id})
+
+    def route_withdrawn(self) -> None:
+        self._await_endpoint(published=False)
+        self.complete("route-withdrawn")
+
+    def uninstalled(self) -> None:
+        _, response = self.control.request(
+            "POST",
+            f"/api/v1/recipes/installations/{self.outputs['installation_id']}/uninstall",
+            {"request_key": self.request_key("uninstalled", "uninstall")},
+        )
+        operation_id, _owner = self.operation(response, "recipe uninstall")
+        self.complete("uninstalled", {"uninstall_operation_id": operation_id})
+
+
+def _arguments() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--api-base", required=True)
+    parser.add_argument("--inference-base")
+    parser.add_argument("--admin-token-file", type=Path, required=True)
+    parser.add_argument("--inference-token-file", type=Path, required=True)
+    parser.add_argument("--phase", required=True, choices=("synthetic",))
+    parser.add_argument("--builder-node", required=True)
+    parser.add_argument("--target-node", action="append", required=True)
+    parser.add_argument("--evidence-file", type=Path, required=True)
+    parser.add_argument("--recipe", type=Path)
+    parser.add_argument("--timeout-seconds", type=float, default=300.0)
+    parser.add_argument("--poll-seconds", type=float, default=1.0)
+    parser.add_argument("--stop-after", choices=STATES, help=argparse.SUPPRESS)
+    args = parser.parse_args()
+    if args.timeout_seconds <= 0 or args.poll_seconds <= 0:
+        parser.error("timeouts must be positive")
+    args.evidence_file = args.evidence_file.resolve()
+    if args.recipe is not None:
+        args.recipe = args.recipe.resolve()
+    return args
+
+
+def main() -> int:
+    try:
+        Runner(_arguments()).run()
+    except SliceError as error:
+        print(f"development slice failed: {error}", file=sys.stderr)
+        return 1
+    print("development slice completed")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

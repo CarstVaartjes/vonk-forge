@@ -39,3 +39,36 @@
   - no `RUN`, package-manager install, or network-download instructions
   - final explicit numeric non-root user `10001:10001`
 - Multi-architecture note: verified on 2026-08-11 with `docker buildx imagetools inspect python:3.12.11-slim-bookworm`, which showed the pinned index includes both `linux/amd64` and `linux/arm64/v8` manifests.
+
+## 2026-08-11 Task 8B runner report
+
+- Added `scripts/run-development-slices` and its fake-service acceptance suite.
+- Corrected the runner boundary to read the existing public fleet and endpoint
+  evidence APIs. Lifecycle mutations still use only catalog and recipe APIs.
+- Kept control administration and inference authentication separate with two
+  private token files.
+
+### RED evidence
+
+- Command: `uv run pytest scripts/tests/test_run_development_slices.py -q`
+- Result: `17 failed`
+- Failure mode: the acceptance runner did not exist.
+
+### GREEN evidence
+
+- Command: `uv run pytest scripts/tests/test_run_development_slices.py -q`
+- Result: `17 passed in 10.96s`
+- Coverage includes the exact 12-state sequence, resume after every completed
+  state, failed-gate refusal, authorization redaction, separate credentials,
+  private regular-file token checks, and atomic mode-`0600` evidence.
+
+- Command: `uv run --project control pytest control/tests/test_development_recipe_fixture.py control/tests/test_recipe_api.py control/tests/test_recipe_operations.py control/tests/test_recipe_routes.py -q`
+- Result: `26 passed in 10.24s`
+
+- Command: `.venv/bin/python -m py_compile scripts/run-development-slices scripts/tests/test_run_development_slices.py`
+- Result: passed.
+
+- Commands: `uv lock --project control --check` and `uv lock --check`
+- Result: both lock graphs resolve successfully. The project-specific lock now
+  records the already-declared PyYAML development dependency required by the
+  development Compose validation suite.

@@ -468,7 +468,9 @@ git commit -m "docs: publish reproducible agent development installation"
 
 **Interfaces:**
 - Produces deterministic tar bytes and SHA-256 via existing `SourceBundle` canonicalization.
-- Drives only public `/api/v1/catalog/*` and `/api/v1/recipes/*` operations.
+- Drives lifecycle mutations only through public `/api/v1/catalog/*` and
+  `/api/v1/recipes/*` operations. It reads public `/api/v1/fleet` and
+  `/api/v1/endpoints/{alias}` evidence to prove inventory and route gates.
 - Persists a local evidence JSON file without bearer tokens or secret values.
 
 - [ ] **Step 1: Write failing fixture-policy tests**
@@ -496,7 +498,12 @@ uv run pytest scripts/tests/test_run_development_slices.py -q
 
 - [ ] **Step 4: Add minimal fixture and runner**
 
-The runner accepts `--api-base`, `--admin-token-file`, `--phase`, `--builder-node`, `--target-node`, `--evidence-file`, and optional real-recipe input. It reads the token once from a regular non-symlink file, never includes it in subprocess arguments, and redacts authorization headers in errors.
+The runner accepts `--api-base`, `--admin-token-file`,
+`--inference-token-file`, `--phase`, `--builder-node`, `--target-node`,
+`--evidence-file`, and optional real-recipe input. It reads each token once from
+a private regular non-symlink file, never includes either token in subprocess
+arguments, and redacts authorization headers in errors. Control administration
+and LiteLLM inference remain separate authorities.
 
 - [ ] **Step 5: Run fixture, API, and operation tests**
 
