@@ -54,13 +54,17 @@ class SliceServer(ThreadingHTTPServer):
         self.requests: list[tuple[str, str, str]] = []
         self.recipe_created = False
         self.recipe_digest = RECIPE_DIGEST
-        self.source_digest = "7a65752ee1a950b3b358c66ceaf2007d0eb824a7842d0a67a5b1e3726957eb80"
+        self.source_digest = (
+            "7a65752ee1a950b3b358c66ceaf2007d0eb824a7842d0a67a5b1e3726957eb80"
+        )
         self.slug = "dev-http-smoke"
         self.route_published = False
         self.operation = 0
         self.operation_nodes: dict[str, list[str]] = {}
         self.operation_kinds: dict[str, str] = {}
-        self.operation_state = "succeeded"
+        self.operation_states: dict[str, str] = {}
+        self.build_operation_state = "succeeded"
+        self.retry_operation_state = "succeeded"
         self.nodes = [NODE]
         self.online = {NODE: True, NODE_2: True}
         self.inventory_stale = {NODE: False, NODE_2: False}
@@ -211,7 +215,9 @@ class SliceHandler(BaseHTTPRequestHandler):
                     "id": operation_id,
                     "kind": "recipe.test",
                     "owner_id": "20000000-0000-4000-8000-000000000001",
-                    "state": self.server.operation_state,
+                    "state": self.server.operation_states.get(
+                        operation_id, "succeeded"
+                    ),
                     "plan_digest": "c" * 64,
                     "nodes": [NODE],
                     "result": {
@@ -383,12 +389,15 @@ class SliceHandler(BaseHTTPRequestHandler):
             self._json(200, response)
         elif path.endswith("/stop"):
             self.server.route_published = False
-            self._operation(
-                "20000000-0000-4000-8000-000000000004", self.server.nodes
-            )
+            self._operation("20000000-0000-4000-8000-000000000004", self.server.nodes)
         elif path.endswith("/uninstall"):
+            self._operation("20000000-0000-4000-8000-000000000005", self.server.nodes)
+        elif path.startswith("/api/v1/recipes/operations/") and path.endswith("/retry"):
             self._operation(
-                "20000000-0000-4000-8000-000000000005", self.server.nodes
+                "20000000-0000-4000-8000-000000000001",
+                [NODE],
+                kind="build",
+                state=self.server.retry_operation_state,
             )
         else:
             owner = {
@@ -414,12 +423,21 @@ class SliceHandler(BaseHTTPRequestHandler):
             self._operation(owner, nodes, kind=kind)
 
     def _operation(
-        self, owner: str, nodes: list[str] | None = None, *, kind: str = "lifecycle"
+        self,
+        owner: str,
+        nodes: list[str] | None = None,
+        *,
+        kind: str = "lifecycle",
+        state: str | None = None,
     ) -> None:
         self.server.operation += 1
         operation_id = f"40000000-0000-4000-8000-{self.server.operation:012d}"
         self.server.operation_nodes[operation_id] = list(nodes or self.server.nodes)
         self.server.operation_kinds[operation_id] = kind
+        if state is None and kind == "build":
+            state = self.server.build_operation_state
+        if state is not None:
+            self.server.operation_states[operation_id] = state
         self._json(
             202,
             {
@@ -643,9 +661,7 @@ def test_model_multinode_runner_proves_failure_recovery_restart_and_cleanup(
     }
     server.fleet_digest = "c" * 64
     server.route_published = True
-    recovered, _ = _run_model(
-        tmp_path, server, "--stop-after", "inference-recovered"
-    )
+    recovered, _ = _run_model(tmp_path, server, "--stop-after", "inference-recovered")
     assert recovered.returncode == 0, recovered.stderr
 
     server.last_seen = {
@@ -660,9 +676,10 @@ def test_model_multinode_runner_proves_failure_recovery_restart_and_cleanup(
     assert evidence["completed_states"] == list(MODEL_MULTINODE_STATES)
     assert evidence["failure_node"] == NODE_2
     assert evidence["outputs"]["restart_fleet_evidence_digest"] == "d" * 64
-    assert evidence["qualification_sha256"] == hashlib.sha256(
-        (tmp_path / "qualification.json").read_bytes()
-    ).hexdigest()
+    assert (
+        evidence["qualification_sha256"]
+        == hashlib.sha256((tmp_path / "qualification.json").read_bytes()).hexdigest()
+    )
     assert server.route_published is False
     assert any(
         path == "/api/v1/endpoints/development-deepseek-smoke"
@@ -679,9 +696,7 @@ def test_model_runner_requires_exact_private_qualification(
     document["multinode_nodes"] = [NODE_2, NODE]
     qualification.write_bytes(_canonical(document))
 
-    result, evidence = _run_model(
-        tmp_path, server, qualification=qualification
-    )
+    result, evidence = _run_model(tmp_path, server, qualification=qualification)
 
     assert result.returncode == 1
     assert result.stderr.strip() == (
@@ -696,9 +711,7 @@ def test_model_runner_rejects_cross_node_artifact_identity_mismatch(
     server.nodes = [NODE, NODE_2]
     server.artifact_set_digests[NODE_2] = "6" * 64
 
-    result, evidence_path = _run_model(
-        tmp_path, server, "--stop-after", "running"
-    )
+    result, evidence_path = _run_model(tmp_path, server, "--stop-after", "running")
 
     assert result.returncode == 1
     assert result.stderr.strip() == (
@@ -744,17 +757,37 @@ def test_runner_refuses_to_advance_past_failed_gate_and_redacts_errors(
     assert "Authorization" not in result.stderr
 
 
-@pytest.mark.parametrize("terminal_state", ("failed", "waiting-for-operator", "expired"))
-def test_runner_stops_immediately_at_every_terminal_operation_state(
+@pytest.mark.parametrize(
+    "terminal_state", ("failed", "waiting-for-operator", "expired")
+)
+def test_runner_retries_every_terminal_build_operation_once(
     tmp_path: Path, server: SliceServer, terminal_state: str
 ) -> None:
-    server.operation_state = terminal_state
+    server.build_operation_state = terminal_state
+
+    result, evidence_path = _run(tmp_path, server)
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(evidence_path.read_text())["completed_states"] == STATES
+    assert (
+        sum(
+            path.endswith("/retry") for _method, path, _authorization in server.requests
+        )
+        == 1
+    )
+
+
+def test_runner_stops_after_one_terminal_build_retry(
+    tmp_path: Path, server: SliceServer
+) -> None:
+    server.build_operation_state = "waiting-for-operator"
+    server.retry_operation_state = "failed"
 
     result, evidence_path = _run(tmp_path, server)
 
     assert result.returncode == 1
     assert result.stderr.strip() == (
-        f"development slice failed: recipe build operation ended in {terminal_state}"
+        "development slice failed: recipe build operation ended in failed"
     )
     assert json.loads(evidence_path.read_text())["completed_states"] == STATES[:3]
 

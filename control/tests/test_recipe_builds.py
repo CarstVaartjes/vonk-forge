@@ -28,6 +28,7 @@ from vonk_control.models import (
     Base,
     ClusterMapping,
     ClusterMappingNode,
+    Job,
     NodeArtifact,
     RecipeBuild,
     RecipeSourceBundle,
@@ -248,6 +249,73 @@ def test_starting_build_atomically_reserves_temporary_disk_and_memory(
             )
             is None
         )
+
+
+@pytest.mark.parametrize(
+    ("operation_state", "build_state"),
+    (
+        ("failed", "failed"),
+        ("waiting-for-operator", "building"),
+        ("expired", "building"),
+    ),
+)
+def test_terminal_build_can_be_retried_once_with_fresh_fencing_and_capacity(
+    tmp_path: Path, operation_state: str, build_state: str
+) -> None:
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    builds = RecipeBuildService(sessions, bundles=bundles)
+    plan = builds.plan(revision.id, node_id, now=now)
+    operations = RecipeOperationService(
+        sessions,
+        install_admission=object(),
+        run_admission=object(),
+        agent_jobs=RecordingQueue(),
+        clock=lambda: now,
+        builds=builds,
+    )
+    first = operations.build(
+        plan,
+        build_input_sha256=plan.build_input_sha256,
+        actor="admin",
+        request_id="initial-build",
+    )
+    with sessions.begin() as session:
+        session.get(Job, first.id).state = operation_state  # type: ignore[union-attr]
+        child = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == first.id)
+        )
+        assert child is not None
+        child.state = operation_state
+        session.get(RecipeBuild, plan.build_id).state = build_state  # type: ignore[union-attr]
+
+    retried = operations.retry(first.id, actor="admin", request_id="retry-build")
+    repeated = operations.retry(first.id, actor="admin", request_id="retry-build")
+
+    assert repeated == retried
+    assert retried.id != first.id
+    assert retried.owner_id == plan.build_id
+    assert retried.state == "running"
+    with sessions() as session:
+        assert session.get(RecipeBuild, plan.build_id).state == "building"  # type: ignore[union-attr]
+        children = tuple(
+            session.scalars(
+                select(AgentOperation).where(
+                    AgentOperation.parent_job_id.in_((first.id, retried.id))
+                )
+            )
+        )
+        assert len(children) == 2
+        assert children[0].id != children[1].id
+        reservations = tuple(
+            session.scalars(
+                select(ResourceReservation).where(
+                    ResourceReservation.owner_kind == "recipe-build",
+                    ResourceReservation.owner_id == plan.build_id,
+                )
+            )
+        )
+        assert sum(item.state == "active" for item in reservations) == 2
+        assert sum(item.state == "released" for item in reservations) == 2
 
 
 def test_build_plan_rejects_disk_below_concurrent_oci_export_peak(
