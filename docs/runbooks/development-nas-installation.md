@@ -237,11 +237,29 @@ repository history.
 
 For a documented repository-only rollback, discover the actual volume name
 from the running API before stopping the project. This remains correct if a NAS
-UI changes the Compose project name:
+UI changes the Compose project name. Replace `<NAS_PROJECT_DIRECTORY>` with the
+absolute NAS-local directory selected by the Docker Project UI. This is a
+site input: the validation below refuses a relative path, a symlinked project
+root, a missing `docker-compose.yml` or `secrets/`, and unexpected top-level
+project entries before it runs a Docker command:
 
 ```bash
 set -euo pipefail
-cd /volume1/docker/vonk-forge
+NAS_PROJECT_DIRECTORY='<NAS_PROJECT_DIRECTORY>'
+case "$NAS_PROJECT_DIRECTORY" in
+  /*) ;;
+  *) echo 'NAS_PROJECT_DIRECTORY must be an absolute path' >&2; exit 1 ;;
+esac
+test -d "$NAS_PROJECT_DIRECTORY"
+test ! -L "$NAS_PROJECT_DIRECTORY"
+test -f "$NAS_PROJECT_DIRECTORY/docker-compose.yml"
+test -d "$NAS_PROJECT_DIRECTORY/secrets"
+mapfile -d '' -t unexpected_entries < <(
+  find "$NAS_PROJECT_DIRECTORY" -mindepth 1 -maxdepth 1 \
+    ! -name docker-compose.yml ! -name secrets -print0
+)
+test "${#unexpected_entries[@]}" -eq 0
+cd -- "$NAS_PROJECT_DIRECTORY"
 expected_commit=REPLACE_WITH_PINNED_40_CHARACTER_COMMIT
 [[ "$expected_commit" =~ ^[0-9a-f]{40}$ ]]
 mapfile -t selected_images < <(
