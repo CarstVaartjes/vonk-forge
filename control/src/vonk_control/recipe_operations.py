@@ -216,28 +216,54 @@ class RecipeOperationService:
                 return self._view(replay)
             if (
                 build is None
-                or build.state != "planned"
                 or build.build_input_sha256 != plan.build_input_sha256
                 or build.builder_node_id != plan.builder_node_id
             ):
                 raise RecipeOperationConflict("recipe build preview is stale")
-            if self._builds is None:
-                raise RecipeOperationConflict("recipe build service is unavailable")
-            self._builds.reserve_in_session(session, plan, now=now)
-            build.state = "building"
-            build.updated_at = now
-            job = self._queue_in_session(
-                session,
-                kind="recipe.build.v1",
-                owner_kind="recipe-build",
-                owner_id=build.id,
-                plan_digest=plan.build_input_sha256,
-                actor=actor,
-                request_id=request_id,
-                node_payloads=((plan.builder_node_id, plan.agent_payload),),
-                authority_digest=plan.build_input_sha256,
-                now=now,
-            )
+            if build.state == "failed":
+                previous = session.scalar(
+                    select(Job)
+                    .where(
+                        Job.kind == "recipe.build.v1",
+                        Job.state.in_(("failed", "waiting-for-operator", "expired")),
+                        Job.payload["owner_id"].as_string() == build.id,
+                        Job.payload["plan_digest"].as_string()
+                        == build.build_input_sha256,
+                    )
+                    .order_by(Job.updated_at.desc())
+                    .limit(1)
+                )
+                if previous is None:
+                    raise RecipeOperationConflict(
+                        "failed recipe build receipt is unavailable"
+                    )
+                job = self._retry_build_in_session(
+                    session,
+                    previous,
+                    actor=actor,
+                    request_id=request_id,
+                    now=now,
+                )
+            else:
+                if build.state != "planned":
+                    raise RecipeOperationConflict("recipe build preview is stale")
+                if self._builds is None:
+                    raise RecipeOperationConflict("recipe build service is unavailable")
+                self._builds.reserve_in_session(session, plan, now=now)
+                build.state = "building"
+                build.updated_at = now
+                job = self._queue_in_session(
+                    session,
+                    kind="recipe.build.v1",
+                    owner_kind="recipe-build",
+                    owner_id=build.id,
+                    plan_digest=plan.build_input_sha256,
+                    actor=actor,
+                    request_id=request_id,
+                    node_payloads=((plan.builder_node_id, plan.agent_payload),),
+                    authority_digest=plan.build_input_sha256,
+                    now=now,
+                )
         self._agent_jobs.notify_available()
         return self.get(job.id)
 
