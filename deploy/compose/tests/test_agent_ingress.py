@@ -126,6 +126,34 @@ def _server_on_port(adapted: dict, port: int) -> dict:
     )
 
 
+def _request_body_routes(value: object) -> list[dict]:
+    routes: list[dict] = []
+
+    def visit(item: object) -> None:
+        if isinstance(item, dict):
+            handlers = item.get("handle")
+            if isinstance(handlers, list):
+                for handler in handlers:
+                    if (
+                        isinstance(handler, dict)
+                        and handler.get("handler") == "request_body"
+                    ):
+                        routes.append(
+                            {
+                                "match": item.get("match"),
+                                "max_size": handler.get("max_size"),
+                            }
+                        )
+            for child in item.values():
+                visit(child)
+        elif isinstance(item, list):
+            for child in item:
+                visit(child)
+
+    visit(value)
+    return routes
+
+
 def _adapted_development_caddy() -> dict:
     result = subprocess.run(
         [
@@ -330,6 +358,49 @@ def test_development_caddy_health_listener_is_exact_and_loopback_only() -> None:
     assert ":2019" not in listeners
     assert "0.0.0.0:2019" not in listeners
     assert "[::]:2019" not in listeners
+
+
+def test_mtls_image_upload_has_a_dedicated_bound_without_widening_other_edges() -> None:
+    environments = (
+        (
+            _adapted_development_caddy(),
+            "agents.test.example",
+            "enroll.test.example",
+        ),
+        (
+            _adapted_caddy(_environment()),
+            "agents.test.example",
+            "enroll.test.example",
+        ),
+    )
+    upload_match = [
+        {
+            "method": ["PUT"],
+            "path": ["/agent/v1/recipe-builds/*/image"],
+        }
+    ]
+    ordinary_match = [{"not": upload_match}]
+
+    for adapted, agent_hostname, enrollment_hostname in environments:
+        backend = _server_on_port(adapted, 8443)
+        agent_site = next(
+            route
+            for route in backend["routes"]
+            if route.get("match") == [{"host": [agent_hostname]}]
+        )
+        enrollment_site = next(
+            route
+            for route in backend["routes"]
+            if route.get("match") == [{"host": [enrollment_hostname]}]
+        )
+
+        assert _request_body_routes(agent_site) == [
+            {"match": ordinary_match, "max_size": 1_000_000},
+            {"match": upload_match, "max_size": 16 * 1024**4},
+        ]
+        assert _request_body_routes(enrollment_site) == [
+            {"match": None, "max_size": 1_000_000}
+        ]
 
 
 def test_caddy_adapts_three_sni_boundaries_for_admin_enrollment_and_mtls_agents() -> None:

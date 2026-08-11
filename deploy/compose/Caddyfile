@@ -3,10 +3,7 @@
 	auto_https disable_redirects
 }
 
-(edge_guards) {
-	request_body {
-		max_size 1MB
-	}
+(edge_headers) {
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		X-Content-Type-Options "nosniff"
@@ -14,6 +11,33 @@
 		Referrer-Policy "no-referrer"
 		-Server
 	}
+}
+
+(edge_guards) {
+	request_body {
+		max_size 1MB
+	}
+	import edge_headers
+}
+
+(agent_edge_guards) {
+	# Recipe OCI layouts are the only large inbound agent body. The API streams,
+	# hashes, and enforces this same 16 TiB protocol ceiling.
+	@recipe_image_upload {
+		method PUT
+		path /agent/v1/recipe-builds/*/image
+	}
+	@ordinary_agent_request not {
+		method PUT
+		path /agent/v1/recipe-builds/*/image
+	}
+	request_body @ordinary_agent_request {
+		max_size 1MB
+	}
+	request_body @recipe_image_upload {
+		max_size 17592186044416
+	}
+	import edge_headers
 }
 
 (control_proxy) {
@@ -79,7 +103,7 @@ https://{$VONK_AGENT_ENROLL_HOSTNAME:enroll.example.invalid}:{$VONK_BACKEND_PORT
 # be conditional on an HTTP path. The subject is mapped strictly to the exact
 # node-ID grammar before it reaches the application.
 https://{$VONK_AGENT_HOSTNAME:agents.example.invalid}:{$VONK_BACKEND_PORT:8443} {
-	import edge_guards
+	import agent_edge_guards
 	tls {
 		client_auth {
 			trust_pool file /run/secrets/agent-client-ca
