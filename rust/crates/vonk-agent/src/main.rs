@@ -140,6 +140,7 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
         }
         let executor = RecipeExecutor {
             client: &client,
+            runtime_root: Path::new("/run/vonk-forge-agent"),
             runtime: OciRuntime {
                 runner: &runner,
                 data_root: &config.data_dir,

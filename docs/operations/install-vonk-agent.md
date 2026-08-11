@@ -45,12 +45,18 @@ key and `dev` source with the complete verification block in
 [Install the `dev` channel](agent-package-release.md#install-the-dev-channel).
 Do not enable both `dev` and `stable` on the same node.
 
-After that one-time repository setup, install or upgrade the package normally:
+After that one-time repository setup, install the package normally:
 
 ```bash
 sudo apt update
 sudo apt install vonk-forge-agent
 ```
+
+This first installation initializes signed slot A. Later apt upgrades stage the
+inactive slot and deliberately keep the current agent active. Use the
+[canary activation procedure](agent-package-release.md#update-and-switch-channels)
+for every upgrade; do not treat `apt install --only-upgrade` as rollout
+completion.
 
 The maintainer script creates the unprivileged account, single-UID rootless
 container storage, signed A/B slots, and disabled network state. It performs no

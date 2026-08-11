@@ -160,8 +160,9 @@ revalidation for `InRelease`, `Release`, and `Packages*`.
 
 This is the one-time repository prerequisite on every development GPU node;
 complete it before installing `vonk-forge-agent`. It does not depend on the NAS
-containers already running. Subsequent accepted packages use the same source
-and need only normal apt update/install or upgrade operations.
+containers already running. Subsequent accepted packages use the same source.
+Apt authenticates and stages an upgrade in the inactive A/B slot; deliberate
+supervisor activation is a separate canary operation described below.
 
 Obtain the development apt fingerprint from an independently authenticated
 operator record, not from the same bucket as the key. Set it explicitly and
@@ -272,6 +273,46 @@ apt-cache policy vonk-forge-agent
 sudo apt update
 sudo apt install --only-upgrade vonk-forge-agent
 ```
+
+On an already initialized node, the package maintainer script writes the new
+signed runtime into the inactive slot and leaves the current runtime active.
+This is intentional: a successful apt transaction proves package installation,
+not workload compatibility or activation. Record the current state, verify the
+staged digest, and activate one canary node:
+
+```bash
+set -euo pipefail
+supervisor=/usr/lib/vonk-forge/vonk-agent-supervisor
+state=/var/lib/vonk-forge/supervisor/state.json
+
+sudo cat "$state"
+slot=$(sudo "$supervisor" package-staging-slot)
+artifact=/var/lib/vonk-forge/slots/$slot/vonk-agent
+digest=$(sudo sha256sum "$artifact" | awk '{print $1}')
+test "${#digest}" = 64
+sudo "$supervisor" activate --slot "$slot" --sha256 "$digest"
+
+for attempt in $(seq 1 60); do
+  status=$(sudo python3 -c \
+    'import json,sys; print(json.load(open(sys.argv[1]))["status"])' "$state")
+  test "$status" = activating || break
+  sleep 1
+done
+sudo cat "$state"
+sudo systemctl is-active vonk-forge-agent-supervisor.service \
+  vonk-forge-agent.service
+```
+
+The final state must be `stable`, its `active_slot` must equal `$slot`, its
+`active_artifact_sha256` must equal `$digest`, and `rollback_performed` must be
+false. Confirm the controller reports that same artifact digest, a fresh
+inventory, and the expected protocol before upgrading the next node. If the
+supervisor rolls back, stop the rollout and retain its state and journal as
+failure evidence; do not repeatedly reactivate the rejected slot.
+
+The first package installation is different: with no prior supervisor state,
+the maintainer script initializes slot A directly. Pairing and service startup
+remain explicit and follow [Install the Vonk Forge agent](install-vonk-agent.md).
 
 Debian orders `X.Y.Z~dev.<workflow-run-number>+g<sha12>` before `X.Y.Z`, so
 moving from a development build for a release line to that final release is an

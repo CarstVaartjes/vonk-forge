@@ -132,11 +132,13 @@ fn build_uses_only_typed_rootless_podman_arguments_and_records_exact_layout() {
         calls: RefCell::new(Vec::new()),
     };
     let root = tempdir().unwrap();
+    let runtime = tempdir().unwrap();
     let operation = Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap();
 
     let evidence = RecipeBuilder {
         runner: &runner,
         data_root: root.path(),
+        runtime_root: runtime.path(),
     }
     .build(&request(archive.len(), digest), operation, &archive)
     .unwrap();
@@ -190,7 +192,15 @@ fn build_uses_only_typed_rootless_podman_arguments_and_records_exact_layout() {
                 .find(|pair| pair[0] == option)
                 .map(|pair| Path::new(&pair[1]))
                 .expect("every Podman call must use per-build storage");
-            assert!(path.starts_with(root.path().join("build-staging")));
+            if option == "--root" {
+                assert!(path.starts_with(root.path().join("build-staging")));
+            } else {
+                assert!(path.starts_with(runtime.path()));
+                assert!(
+                    path.as_os_str().len() <= 50,
+                    "Podman 4.9 rejects runroot paths longer than 50 characters"
+                );
+            }
         }
     }
     assert!(
@@ -213,6 +223,7 @@ fn build_rejects_declared_public_hosts_before_running_podman() {
         calls: RefCell::new(Vec::new()),
     };
     let root = tempdir().unwrap();
+    let runtime = tempdir().unwrap();
     let operation = Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap();
     let mut build_request = request(archive.len(), digest);
     build_request.network = RecipeBuildNetwork {
@@ -223,6 +234,7 @@ fn build_rejects_declared_public_hosts_before_running_podman() {
     let error = RecipeBuilder {
         runner: &runner,
         data_root: root.path(),
+        runtime_root: runtime.path(),
     }
     .build(&build_request, operation, &archive)
     .unwrap_err();
@@ -238,6 +250,7 @@ fn build_rejects_an_oci_layout_larger_than_declared_output_limit() {
         calls: RefCell::new(Vec::new()),
     };
     let root = tempdir().unwrap();
+    let runtime = tempdir().unwrap();
     let operation = Uuid::parse_str("00000000-0000-4000-8000-000000000003").unwrap();
     let mut build_request = request(archive.len(), digest);
     build_request.limits.output_bytes = 8;
@@ -245,6 +258,7 @@ fn build_rejects_an_oci_layout_larger_than_declared_output_limit() {
     let error = RecipeBuilder {
         runner: &runner,
         data_root: root.path(),
+        runtime_root: runtime.path(),
     }
     .build(&build_request, operation, &archive)
     .unwrap_err();
