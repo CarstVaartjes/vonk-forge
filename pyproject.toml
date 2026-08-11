@@ -49,6 +49,9 @@ required-version = "==0.16.1"
 target-version = "py312"
 extend-exclude = ["src/cluster_profiles/generated_control"]
 
+[tool.ruff.lint.per-file-ignores]
+"control/src/vonk_control/resources/dev/litellm-supervisor.py" = ["N999"]
+
 [tool.pytest.ini_options]
 pythonpath = ["src", "."]
 testpaths = ["tests"]

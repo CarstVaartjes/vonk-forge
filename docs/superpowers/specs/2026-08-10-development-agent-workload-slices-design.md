@@ -122,16 +122,17 @@ The NAS `secrets/` directory contains the existing files plus:
 - `litellm-master-key`
 - `litellm-upstream-key`
 - `management-cidrs`
+- `token-signing-key`
 
 `management-cidrs` is integrity-sensitive configuration rather than a secret,
 but it lives in this directory to preserve the two-item NAS project contract.
-The protected local source contains 14 local source files: 13 protected
+The protected local source contains 15 local source files: 14 protected
 secret/config files plus the public `git-signing-key.pub`. The publisher
-validates that complete generation and copies exactly 12 deployment files to
+validates that complete generation and copies exactly 13 deployment files to
 the NAS; `controller-ca-key` and `git-signing-key.pub` are local-only.
-An existing 13-file local source from an earlier branch head is incomplete
+An existing 14-file local source from an earlier branch head is incomplete
 because the missing CA private key cannot be reconstructed. It is replaced by
-a coordinated, backed-up 14-file PKI generation rather than repaired in place.
+a coordinated, backed-up 15-file PKI generation rather than repaired in place.
 
 LiteLLM effective configuration is intentionally database-free. The checked
 route document contains a fixed database marker only as an input-schema guard;
@@ -143,14 +144,18 @@ missing keys and certificates in a gitignored development-secret directory,
 prints fingerprints and expiry dates but never secret values, refuses to
 overwrite existing material, validates existing material before reuse, and
 copies only explicitly selected files to the deployment destination. Operators
-back up all 14 local files as one generation in 1Password. Key generation never
+back up all 15 local files as one generation in 1Password. Key generation never
 occurs on SMB storage or inside a published image.
 
-`dev-init` runs as root only to read Compose file secrets and establish exact
-ownership. It creates separate least-privilege projections:
+Repository initialization and runtime authority projection are separate
+one-shot services. Networked `dev-repository-init` receives no secrets and
+mounts only the selected cohort plus repository volume. The separate
+`network_mode: none` `dev-init` runs as root only to read Compose file secrets
+and establish exact ownership. It does not mount the repository and creates
+these least-privilege projections:
 
 - API: database URL, Git signing key, admin grant key, worker token, agent CA
-  certificate/key, and proxy token;
+  certificate/key, proxy token, and token-signing key;
 - worker: database URL and worker token;
 - migration: database URL;
 - LiteLLM: master key and upstream key only;

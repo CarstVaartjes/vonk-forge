@@ -473,11 +473,17 @@ def _model_qualification(
         dockerfile = (source_context / "Dockerfile").read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as error:
         raise SliceError("model qualification does not match this phase") from error
+    base_stages = [
+        line.strip()
+        for line in dockerfile.splitlines()
+        if line.lstrip().startswith("FROM ")
+    ]
     if (
         len(expected_artifacts) != len(raw_artifacts)
         or len(observed_artifacts) != len(recipe_artifacts)
         or observed_artifacts != expected_artifacts
-        or not dockerfile.startswith(f"FROM {document['runtime_image']}\n")
+        or not base_stages
+        or base_stages[-1] != f"FROM {document['runtime_image']}"
     ):
         raise SliceError("model qualification does not match this phase")
     return document, hashlib.sha256(raw).hexdigest()

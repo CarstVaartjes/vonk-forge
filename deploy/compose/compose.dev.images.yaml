@@ -82,10 +82,40 @@ services:
       dev-worker-cohort: {condition: service_completed_successfully}
     restart: "no"
 
+  dev-repository-init:
+    image: *api-image
+    pull_policy: always
+    user: "0:0"
+    read_only: true
+    cap_drop: [ALL]
+    # Git is deliberately executed as nobody; SETUID/SETGID are used only for
+    # that child identity drop before the repository is reassigned to the API.
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    security_opt: [no-new-privileges:true]
+    command: [python, -m, vonk_control.dev_init]
+    environment:
+      VONK_DEV_INIT_PHASE: repository
+      VONK_DEV_REPOSITORY_URL: https://github.com/CarstVaartjes/vonk-forge.git
+      VONK_DEV_SELECTED_COHORT_FILE: /cohort/selected.json
+      VONK_REPOSITORY_PATH: /repository
+    volumes:
+      - dev-repository:/repository
+      - dev-image-cohort:/cohort:ro
+    tmpfs: [/tmp]
+    networks: [ingress]
+    depends_on:
+      dev-cohort-verify: {condition: service_completed_successfully}
+    restart: "no"
+
   dev-init:
     image: *api-image
     pull_policy: always
     user: "0:0"
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER]
+    security_opt: [no-new-privileges:true]
+    network_mode: none
     command: [python, -m, vonk_control.dev_init]
     environment:
       VONK_CONTROL_IDENTITY_ROOT: /control-identity
@@ -93,17 +123,15 @@ services:
       VONK_DEV_CADDY_SECRET_ROOT: /caddy-secrets
       VONK_DEV_LITELLM_SECRET_ROOT: /litellm-secrets
       VONK_DEV_MIGRATE_SECRET_ROOT: /migrate-secrets
-      VONK_DEV_REPOSITORY_URL: https://github.com/CarstVaartjes/vonk-forge.git
+      VONK_DEV_INIT_PHASE: runtime
       VONK_DEV_RUNTIME_CONFIG_ROOT: /runtime-config
       VONK_DEV_SECRET_SOURCE_ROOT: /host-secrets
       VONK_DEV_WORKER_SECRET_ROOT: /worker-secrets
       VONK_DEV_SELECTED_COHORT_FILE: /cohort/selected.json
-      VONK_REPOSITORY_PATH: /repository
       VONK_ROUTE_ROOT: /routes
       VONK_STATE_PATH: /state
       VONK_SUPERVISOR_ROOT: /supervisor
     volumes:
-      - dev-repository:/repository
       - dev-api-secrets:/api-secrets
       - dev-caddy-secrets:/caddy-secrets
       - dev-litellm-secrets:/litellm-secrets
@@ -138,8 +166,10 @@ services:
         target: /host-secrets/litellm-upstream-key
       - source: management-cidrs
         target: /host-secrets/management-cidrs
+      - source: token-signing-key
+        target: /host-secrets/token-signing-key
     depends_on:
-      dev-cohort-verify: {condition: service_completed_successfully}
+      dev-repository-init: {condition: service_completed_successfully}
     restart: "no"
 
   dev-supervisor-init:
@@ -250,6 +280,7 @@ services:
       VONK_WORKER_API_TOKEN_FILE: /run/secrets/worker-api-token
       VONK_GIT_SIGNING_KEY_FILE: /run/secrets/git-signing-key
       VONK_ADMIN_GRANT_PRIVATE_KEY_FILE: /run/secrets/admin-grant-private-key
+      VONK_TOKEN_SIGNING_KEY_FILE: /run/secrets/token-signing-key
     volumes:
       - dev-repository:/repository
       - dev-control-identity:/control-identity:ro
@@ -362,6 +393,8 @@ secrets:
     file: ./secrets/litellm-upstream-key
   management-cidrs:
     file: ./secrets/management-cidrs
+  token-signing-key:
+    file: ./secrets/token-signing-key
 
 volumes:
   dev-postgres-data: {}

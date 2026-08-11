@@ -12,7 +12,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/dev-admin-token"
-DEVELOPMENT_KEY = b"development-only-signing-key-32b"
+DEVELOPMENT_KEY = b"runtime-generated-development-key"
 
 
 def _payload(token: str) -> dict[str, object]:
@@ -28,6 +28,9 @@ def test_helper_writes_a_private_short_lived_development_admin_token(
     tmp_path: Path,
 ) -> None:
     output = tmp_path / "admin-token"
+    signing_key = tmp_path / "token-signing-key"
+    signing_key.write_bytes(DEVELOPMENT_KEY + b"\n")
+    signing_key.chmod(0o600)
 
     result = subprocess.run(
         (
@@ -35,6 +38,8 @@ def test_helper_writes_a_private_short_lived_development_admin_token(
             str(SCRIPT),
             "--output",
             str(output),
+            "--signing-key-file",
+            str(signing_key),
             "--ttl-seconds",
             "600",
         ),
@@ -59,9 +64,19 @@ def test_helper_refuses_to_replace_an_existing_token(tmp_path: Path) -> None:
     output = tmp_path / "admin-token"
     output.write_text("preserve-me\n", encoding="ascii")
     output.chmod(0o600)
+    signing_key = tmp_path / "token-signing-key"
+    signing_key.write_bytes(DEVELOPMENT_KEY + b"\n")
+    signing_key.chmod(0o600)
 
     result = subprocess.run(
-        (sys.executable, str(SCRIPT), "--output", str(output)),
+        (
+            sys.executable,
+            str(SCRIPT),
+            "--output",
+            str(output),
+            "--signing-key-file",
+            str(signing_key),
+        ),
         cwd=ROOT,
         text=True,
         capture_output=True,
@@ -71,3 +86,29 @@ def test_helper_refuses_to_replace_an_existing_token(tmp_path: Path) -> None:
     assert result.returncode == 1
     assert output.read_text(encoding="ascii") == "preserve-me\n"
     assert "already exists" in result.stderr
+
+
+def test_helper_rejects_an_insecure_signing_key_file(tmp_path: Path) -> None:
+    output = tmp_path / "admin-token"
+    signing_key = tmp_path / "token-signing-key"
+    signing_key.write_bytes(DEVELOPMENT_KEY + b"\n")
+    signing_key.chmod(0o644)
+
+    result = subprocess.run(
+        (
+            sys.executable,
+            str(SCRIPT),
+            "--output",
+            str(output),
+            "--signing-key-file",
+            str(signing_key),
+        ),
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert not output.exists()
+    assert "signing key" in result.stderr

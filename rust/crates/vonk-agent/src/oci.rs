@@ -263,6 +263,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         managed_path(self.data_root, "installations", installation_id)?;
         let models = self.data_root.join("models");
         let state = managed_path(self.data_root, "runs", run_id)?;
+        let metadata = self.run_metadata_path(run_id)?;
         let (runtime_uid, runtime_gid) = spec
             .security
             .user
@@ -316,10 +317,16 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                 format!("VONK_MASTER_PORT={master_port}"),
             ]);
             if placement.rank == 0 {
-                arguments.extend([
-                    "--publish".to_owned(),
-                    format!("{master_port}:{master_port}"),
-                ]);
+                let master_address = placement.master_address.ok_or(OciError::Runtime)?;
+                let publication = match master_address {
+                    IpAddr::V4(address) => {
+                        format!("{address}:{master_port}:{master_port}")
+                    }
+                    IpAddr::V6(address) => {
+                        format!("[{address}]:{master_port}:{master_port}")
+                    }
+                };
+                arguments.extend(["--publish".to_owned(), publication]);
             }
         }
         if !spec.security.devices.is_empty() {
@@ -354,7 +361,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             "--mount".to_owned(),
             format!(
                 "type=bind,src={},dst=/run/vonk/runtime.json,readonly",
-                state.join("runtime.json").display()
+                metadata.join("runtime.json").display()
             ),
         ]);
         arguments.push(spec.runtime.image.clone());
@@ -381,6 +388,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         let state = managed_path(self.data_root, "runs", run_id)?;
         fs::create_dir_all(&state)?;
         fs::set_permissions(&state, fs::Permissions::from_mode(0o700))?;
+        let metadata = self.ensure_run_metadata(run_id)?;
         self.write_runtime_contract(spec, installation_id, run_id, placement)?;
         let arguments = self.start_arguments(spec, installation_id, run_id, placement)?;
         let pre_start = spec
@@ -391,7 +399,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             .collect::<Result<Vec<_>, _>>()?;
         self.run_lifecycle_hooks(&pre_start, spec.lifecycle.stop_timeout_seconds)?;
         atomic_write(
-            &state,
+            &metadata,
             "lifecycle.json",
             &serde_json::to_vec(&RunLifecycle {
                 installation_id: installation_id.to_owned(),
@@ -451,9 +459,9 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                 .map(|hook| hook_arguments(&main, &spec.runtime.image, hook))
                 .collect::<Result<Vec<_>, _>>()?;
             self.run_lifecycle_hooks(&hooks, spec.lifecycle.stop_timeout_seconds)?;
-            let run = managed_path(self.data_root, "runs", run_id)?;
-            fs::remove_file(run.join("lifecycle.json"))?;
-            File::open(run)?.sync_all()?;
+            let metadata = self.run_metadata_path(run_id)?;
+            fs::remove_file(metadata.join("lifecycle.json"))?;
+            File::open(metadata)?.sync_all()?;
         }
         Ok(())
     }
@@ -503,7 +511,12 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
 
         let mut probes = Vec::with_capacity(run_ids.len());
         for run_id in run_ids {
-            let Some((spec, _, placement)) = self.load_run_lifecycle(&run_id)? else {
+            let lifecycle = match self.load_run_lifecycle(&run_id) {
+                Ok(lifecycle) => lifecycle,
+                Err(OciError::Artifact | OciError::Json(_) | OciError::Workload(_)) => continue,
+                Err(error) => return Err(error),
+            };
+            let Some((spec, _, placement)) = lifecycle else {
                 continue;
             };
             if spec.endpoint.health_path.contains(['?', '#', '\0'])
@@ -513,7 +526,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                     .bytes()
                     .all(|byte| byte.is_ascii_graphic())
             {
-                return Err(OciError::Artifact);
+                continue;
             }
             if probes.len() == MAX_MANAGED_RECIPE_RUNS {
                 return Err(OciError::Artifact);
@@ -586,9 +599,22 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         &self,
         run_id: &str,
     ) -> Result<Option<(WorkloadSpec, String, Placement)>, OciError> {
-        let run = managed_path(self.data_root, "runs", run_id)?;
-        let path = run.join("lifecycle.json");
-        let metadata = match fs::symlink_metadata(&path) {
+        let metadata = self.run_metadata_path(run_id)?;
+        let path = metadata.join("lifecycle.json");
+        let Some(record) = self.read_run_lifecycle(&path)? else {
+            return Ok(None);
+        };
+        record.placement.validate()?;
+        if !canonical_uuid(&record.installation_id) {
+            return Err(OciError::Artifact);
+        }
+        managed_path(self.data_root, "installations", &record.installation_id)?;
+        let spec = self.load_spec(&record.installation_id)?;
+        Ok(Some((spec, record.installation_id, record.placement)))
+    }
+
+    fn read_run_lifecycle(&self, path: &Path) -> Result<Option<RunLifecycle>, OciError> {
+        let metadata = match fs::symlink_metadata(path) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(error.into()),
@@ -599,14 +625,36 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         {
             return Err(OciError::Artifact);
         }
-        let record: RunLifecycle = serde_json::from_slice(&read_regular_file(&path, 16 * 1024)?)?;
-        record.placement.validate()?;
-        if !canonical_uuid(&record.installation_id) {
+        let record: RunLifecycle = serde_json::from_slice(&read_regular_file(path, 16 * 1024)?)?;
+        Ok(Some(record))
+    }
+
+    fn run_metadata_path(&self, run_id: &str) -> Result<PathBuf, OciError> {
+        if !canonical_uuid(run_id) {
             return Err(OciError::Artifact);
         }
-        managed_path(self.data_root, "installations", &record.installation_id)?;
-        let spec = self.load_spec(&record.installation_id)?;
-        Ok(Some((spec, record.installation_id, record.placement)))
+        Ok(self.data_root.join("run-metadata").join(run_id))
+    }
+
+    fn ensure_run_metadata(&self, run_id: &str) -> Result<PathBuf, OciError> {
+        let root = self.data_root.join("run-metadata");
+        fs::create_dir_all(&root)?;
+        let root_metadata = fs::symlink_metadata(&root)?;
+        if !root_metadata.file_type().is_dir() || root_metadata.file_type().is_symlink() {
+            return Err(OciError::Artifact);
+        }
+        let metadata = self.run_metadata_path(run_id)?;
+        match fs::create_dir(&metadata) {
+            Ok(()) => fs::set_permissions(&metadata, fs::Permissions::from_mode(0o700))?,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                let metadata_type = fs::symlink_metadata(&metadata)?.file_type();
+                if !metadata_type.is_dir() || metadata_type.is_symlink() {
+                    return Err(OciError::Artifact);
+                }
+            }
+            Err(error) => return Err(error.into()),
+        }
+        Ok(metadata)
     }
 
     fn run_lifecycle_hooks(
@@ -727,7 +775,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         run_id: &str,
         placement: &Placement,
     ) -> Result<(), OciError> {
-        let state = managed_path(self.data_root, "runs", run_id)?;
+        let metadata = self.run_metadata_path(run_id)?;
         let artifacts = spec
             .artifacts
             .iter()
@@ -762,7 +810,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                 master_port: placement.master_port,
             },
         };
-        atomic_write(&state, "runtime.json", &serde_json::to_vec(&contract)?)?;
+        atomic_write(&metadata, "runtime.json", &serde_json::to_vec(&contract)?)?;
         Ok(())
     }
 

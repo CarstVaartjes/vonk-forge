@@ -200,7 +200,7 @@ If cohort verification fails, do not delete secrets or volumes. Retry the pull
 after publication is complete.
 
 A pinned development file is not a one-file rollback. After cohort B advances
-the persisted repository baseline beyond cohort A, `dev-init` deliberately
+the persisted repository baseline beyond cohort A, `dev-repository-init` deliberately
 rejects pinned A as a non-fast-forward accepted baseline. Recovery to A is
 allowed only when A is explicitly documented as database-backward-compatible
 and the operator performs the guarded repository-volume reset in the

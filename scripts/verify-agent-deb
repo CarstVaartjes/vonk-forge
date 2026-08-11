@@ -207,6 +207,7 @@ def _verify_control(control: Path) -> None:
     for required in (
         "adduser",
         "vonk-agent-supervisor initialize",
+        "install -d -o root -g vonk-agent -m 0750 /var/lib/vonk-forge/supervisor",
         "deb-systemd-helper enable",
         "daemon-reload",
     ):

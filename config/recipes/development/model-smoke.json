@@ -6,7 +6,7 @@
   },
   "metadata": {
     "title": "Development DeepSeek model smoke",
-    "description": "Digest-pinned DS4 and DeepSeek smoke profile for one Spark or a two-rank replicated development gang.",
+    "description": "Digest-pinned DS4 and DeepSeek smoke profile for one Spark or a two-rank replicated development gang with a pre-launch TCP fabric exchange.",
     "tags": [
       "deepseek",
       "development",
@@ -21,7 +21,7 @@
   },
   "build": {
     "context": {
-      "sha256": "adda3c053bdfa47e8068ae776908e5feae3563554ce1e3e626e61bfeb20ff030",
+      "sha256": "e28c831f3b5b46fc834cd67baad85f5aa325d4c8ae2cc3d1d330721c849d2801",
       "expected_bytes": 10240,
       "media_type": "application/vnd.vonk-forge.source-bundle.v1+tar"
     },
@@ -167,7 +167,7 @@
     },
     {
       "name": "pair",
-      "description": "Two-rank replicated DS4 gang with one routed entrypoint and exact artifacts on both nodes.",
+      "description": "Two independent DS4 replicas gated by a real TCP rank rendezvous, with one routed entrypoint and exact artifacts on both nodes; DS4 inference itself is not distributed.",
       "node_count": 2,
       "strategy": "data_parallel",
       "parallelism": {
@@ -241,6 +241,7 @@
   "validation": {
     "checks": [
       "container.started",
+      "fabric.rendezvous.completed",
       "endpoint.healthy",
       "inference.completed",
       "route.withdrawn_on_rank_failure",

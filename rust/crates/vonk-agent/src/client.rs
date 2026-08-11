@@ -342,7 +342,9 @@ impl AgentHttpClient {
             })
             .send()
             .await?;
-        if response.status() == StatusCode::NO_CONTENT {
+        if response.status() == StatusCode::NO_CONTENT
+            || (response.status() == StatusCode::NOT_FOUND && observations.is_empty())
+        {
             Ok(())
         } else {
             classify_status(response.status())?;
@@ -566,6 +568,37 @@ mod tests {
             Err(ClientError::Protocol)
         ));
         server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn absent_observation_endpoint_is_optional_only_without_managed_runs() {
+        let (client, server) = observation_client(404);
+
+        client.report_recipe_run_observations(&[]).await.unwrap();
+        server.join().unwrap();
+
+        let observations = vec![RecipeRunObservation {
+            run_id: "45ea6921-50c9-4971-be2a-4cd04ce05069".to_owned(),
+            ready: true,
+        }];
+        let (client, server) = observation_client(404);
+        assert!(matches!(
+            client.report_recipe_run_observations(&observations).await,
+            Err(ClientError::Protocol)
+        ));
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn absent_endpoint_compatibility_does_not_mask_authentication_errors() {
+        for status in [401, 403] {
+            let (client, server) = observation_client(status);
+            assert!(matches!(
+                client.report_recipe_run_observations(&[]).await,
+                Err(ClientError::Authentication)
+            ));
+            server.join().unwrap();
+        }
     }
 
     #[tokio::test]

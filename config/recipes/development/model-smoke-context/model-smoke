@@ -29,6 +29,22 @@ drafter=$(artifact 6971241504 8fa269560dc76fd73e4233ad9b1938b5f65dd363381fd9b1a5
 state=${VONK_STATE_ROOT:?}
 install -d -m 0700 "${state}/kv"
 
+rendezvous_pid=
+if [[ ${VONK_WORLD_SIZE} == 2 ]]; then
+  rendezvous=/opt/vonk/fabric-rendezvous
+  if [[ ${VONK_RANK} == 0 ]]; then
+    "${rendezvous}" coordinator &
+    rendezvous_pid=$!
+    if ! VONK_RENDEZVOUS_PID=${rendezvous_pid} "${rendezvous}" await-worker; then
+      kill "${rendezvous_pid}" 2>/dev/null || true
+      wait "${rendezvous_pid}" 2>/dev/null || true
+      exit 1
+    fi
+  else
+    "${rendezvous}" join
+  fi
+fi
+
 export HOME="${state}"
 export DS4_NO_UPDATE_CHECK=1
 export DS4_SERVED_MODEL_NAME=development-deepseek-smoke
@@ -36,11 +52,35 @@ export DS4_CONT_MTP_MODE=2
 export DS4_CONT_DSPARK=1
 export DS4_DSPARK_MODEL="${drafter}"
 
-exec /opt/ds4/ds4-server \
-  --cuda \
-  -m "${base}" \
-  -c 4096 \
-  --host "${VONK_LISTEN_HOST}" \
-  --port "${VONK_LISTEN_PORT}" \
-  --kv-disk-dir "${state}/kv" \
+ds4=(
+  /opt/ds4/ds4-server
+  --cuda
+  -m "${base}"
+  -c 4096
+  --host "${VONK_LISTEN_HOST}"
+  --port "${VONK_LISTEN_PORT}"
+  --kv-disk-dir "${state}/kv"
   --kv-disk-space-mb 2048
+)
+
+if [[ -z ${rendezvous_pid} ]]; then
+  exec "${ds4[@]}"
+fi
+
+ds4_pid=
+shutdown() {
+  trap - TERM INT
+  [[ -z ${ds4_pid} ]] || kill -TERM "${ds4_pid}" 2>/dev/null || true
+  kill -TERM "${rendezvous_pid}" 2>/dev/null || true
+}
+trap shutdown TERM INT
+"${ds4[@]}" &
+ds4_pid=$!
+set +e
+wait "${ds4_pid}"
+status=$?
+set -e
+kill -TERM "${rendezvous_pid}" 2>/dev/null || true
+wait "${rendezvous_pid}" 2>/dev/null || true
+trap - TERM INT
+exit "${status}"

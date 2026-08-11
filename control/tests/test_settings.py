@@ -486,6 +486,10 @@ def _configure_agent_authority(
             monkeypatch.setenv(name, str(paths[name]))
     else:
         monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
+        monkeypatch.setenv(
+            "VONK_TOKEN_SIGNING_KEY_FILE",
+            str(paths["VONK_TOKEN_SIGNING_KEY_FILE"]),
+        )
     if provider == "builtin":
         for name in (
             "VONK_AGENT_CLIENT_CA_FILE",
@@ -583,6 +587,25 @@ def test_enabled_development_agent_authority_requires_management_cidrs(
     monkeypatch.setenv("VONK_AGENT_BUILTIN_CA_BOOTSTRAP", "1")
 
     with pytest.raises(SettingsError, match="VONK_MANAGEMENT_CIDRS"):
+        Settings.from_env_and_secrets()
+
+
+def test_enabled_development_agent_authority_requires_token_signing_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_agent_authority(
+        tmp_path,
+        monkeypatch,
+        mode="development",
+        provider="builtin",
+    )
+    monkeypatch.delenv("VONK_TOKEN_SIGNING_KEY_FILE")
+    monkeypatch.setenv("VONK_AGENT_RUNTIME", "enabled")
+    monkeypatch.setenv("VONK_AGENT_CA_PROVIDER", "builtin")
+    monkeypatch.setenv("VONK_AGENT_BUILTIN_CA_BOOTSTRAP", "1")
+
+    with pytest.raises(SettingsError, match="VONK_TOKEN_SIGNING_KEY_FILE"):
         Settings.from_env_and_secrets()
 
 

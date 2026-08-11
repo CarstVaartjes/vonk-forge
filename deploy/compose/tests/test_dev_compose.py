@@ -531,9 +531,17 @@ def test_image_template_gates_mutation_on_one_ordered_fail_closed_cohort() -> No
             "required": True,
         }
     }
-    for service_name in ("dev-init", "migrate"):
+    assert (
+        services["dev-repository-init"]["depends_on"]["dev-cohort-verify"]["condition"]
+        == "service_completed_successfully"
+    )
+    assert (
+        services["dev-init"]["depends_on"]["dev-repository-init"]["condition"]
+        == "service_completed_successfully"
+    )
+    for dependency in ("dev-cohort-verify", "dev-init"):
         assert (
-            services[service_name]["depends_on"]["dev-cohort-verify"]["condition"]
+            services["migrate"]["depends_on"][dependency]["condition"]
             == "service_completed_successfully"
         )
 
@@ -1182,7 +1190,7 @@ def test_dev_compose_uses_the_python_runtime_generator_without_ssh_keygen(
     assert (capture / "environment").exists()
     assert (secrets / "git-signing-key").is_file()
     assert (secrets / "git-signing-key.pub").is_file()
-    assert len(tuple(secrets.iterdir())) == 14
+    assert len(tuple(secrets.iterdir())) == 15
 
 
 def test_dev_compose_rejects_an_existing_private_key_without_its_public_mate(

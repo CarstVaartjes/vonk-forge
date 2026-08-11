@@ -17,7 +17,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
-from vonk_agent_protocol import canonical_message
 from fastapi import (
     Body,
     Depends,
@@ -41,6 +40,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import FileResponse
+from vonk_agent_protocol import canonical_message
 
 from .agent_api import (
     AgentApiServices,

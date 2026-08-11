@@ -58,7 +58,11 @@ jobs:
           set -euo pipefail
           uv run --python 3.12 --frozen --with pytest==9.1.1 pytest -q \
             deploy/compose/tests/test_dev_compose.py \
+            deploy/compose/tests/test_dev_compose_secrets.py \
             scripts/tests/test_render_dev_compose.py \
+            scripts/tests/test_dev_runtime_secrets.py \
+            scripts/tests/test_dev_runtime_project.py \
+            scripts/tests/test_dev_admin_token.py \
             scripts/tests/test_verify_dev_image_secrets.py \
             scripts/tests/test_dev_image_acceptance.py \
             scripts/tests/test_dev_image_workflow.py
@@ -169,172 +173,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          runtime_secrets_root=""
-          stack_root=""
-          agent_port=""
-          dev_port=""
-          project_name="vonk-forge-dev-smoke-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          compose() {
-            env -u COMPOSE_FILE -u COMPOSE_PROJECT_NAME \
-              VONK_AGENT_PORT="$agent_port" \
-              VONK_DEV_PORT="$dev_port" \
-              docker compose -p "$project_name" --project-directory "$stack_root" \
-                -f "$stack_root/docker-compose.yml" "$@"
-          }
-          cleanup() {
-            original_status=$?
-            trap - EXIT INT TERM
-            cleanup_status=0
-            if [[ -n "$stack_root" && -f "$stack_root/docker-compose.yml" ]]; then
-              if ! compose down --volumes --remove-orphans; then
-                echo "development stack volume cleanup failed" >&2
-                cleanup_status=1
-              fi
-            fi
-            for image in \
-              ghcr.io/carstvaartjes/vonk-forge-api:dev \
-              ghcr.io/carstvaartjes/vonk-forge-worker:dev; do
-              if docker image inspect "$image" >/dev/null 2>&1 \
-                && ! docker image rm "$image" >/dev/null; then
-                echo "development smoke image cleanup failed" >&2
-                cleanup_status=1
-              fi
-            done
-            for directory in "$runtime_secrets_root" "$stack_root"; do
-              if [[ -n "$directory" ]] && ! rm -rf -- "$directory"; then
-                echo "development smoke directory cleanup failed" >&2
-                cleanup_status=1
-              fi
-            done
-            if (( original_status != 0 )); then
-              exit "$original_status"
-            fi
-            exit "$cleanup_status"
-          }
-          trap cleanup EXIT
-          trap 'exit 130' INT
-          trap 'exit 143' TERM
-          runtime_secrets_root=$(mktemp -d "$RUNNER_TEMP/dev-runtime-secrets.XXXXXX")
-          stack_root=$(mktemp -d "$RUNNER_TEMP/dev-compose-stack.XXXXXX")
-          read -r agent_port dev_port < <(python3 - <<'PY'
-          import socket
-
-          listeners = []
-          ports = []
-          for _ in range(2):
-              listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-              listener.bind(("127.0.0.1", 0))
-              listeners.append(listener)
-              ports.append(str(listener.getsockname()[1]))
-          print(" ".join(ports))
-          for listener in listeners:
-              listener.close()
-          PY
-          )
-          docker tag vonk-forge-api:dev-local ghcr.io/carstvaartjes/vonk-forge-api:dev
-          docker tag vonk-forge-worker:dev-local ghcr.io/carstvaartjes/vonk-forge-worker:dev
-          scripts/dev-runtime-secrets.py \
-            --secrets-dir "$runtime_secrets_root" \
-            --management-cidrs 127.0.0.1/32 \
-            --enroll-hostname enroll.vonk-forge.lan \
-            --agent-hostname agents.vonk-forge.lan \
-            --registry-hostname registry.vonk-forge.lan >/dev/null
-          scripts/dev-runtime-project \
-            --source-compose "$RUNNER_TEMP/accepted/docker-compose.dev.yml" \
-            --secrets-dir "$runtime_secrets_root" \
-            --destination "$stack_root" \
-            --nas-address 127.0.0.1 \
-            --management-cidrs 127.0.0.1/32 \
-            --enroll-hostname enroll.vonk-forge.lan \
-            --agent-hostname agents.vonk-forge.lan \
-            --registry-hostname registry.vonk-forge.lan >/dev/null
-          compose up -d --pull never
-          service_container() {
-            local service=$1 container
-            container=$(compose ps -q "$service")
-            [[ -n "$container" ]] || {
-              echo "missing Compose container for $service" >&2
-              exit 1
-            }
-            printf '%s\n' "$container"
-          }
-          wait_for_healthy() {
-            local service=$1 container state
-            container=$(service_container "$service")
-            for _ in {1..120}; do
-              state=$(docker inspect \
-                --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' \
-                "$container")
-              if [[ "$state" == healthy ]]; then
-                return 0
-              fi
-              if [[ "$state" == exited || "$state" == dead ]]; then
-                break
-              fi
-              sleep 2
-            done
-            echo "$service did not become healthy" >&2
-            return 1
-          }
-          wait_for_completed() {
-            local service=$1 container state
-            container=$(service_container "$service")
-            for _ in {1..120}; do
-              state=$(docker inspect --format '{{.State.Status}} {{.State.ExitCode}}' "$container")
-              if [[ "$state" == 'exited 0' ]]; then
-                return 0
-              fi
-              if [[ "$state" =~ ^exited\ [1-9][0-9]*$ || "$state" == dead\ * ]]; then
-                break
-              fi
-              sleep 2
-            done
-            echo "$service did not complete successfully" >&2
-            return 1
-          }
-          wait_for_healthy postgres
-          wait_for_completed dev-init
-          wait_for_completed migrate
-          wait_for_healthy control-api
-          wait_for_healthy caddy
-          wait_for_healthy litellm
-          curl --fail --silent --show-error \
-            "http://127.0.0.1:$dev_port/api/v1/readyz" >/dev/null
-          enroll_status=$(curl --silent --show-error \
-            --output /dev/null \
-            --write-out '%{http_code}' \
-            --resolve "enroll.vonk-forge.lan:$agent_port:127.0.0.1" \
-            --cacert "$stack_root/secrets/controller-ca" \
-            --request POST \
-            --header 'content-type: application/json' \
-            --data '{}' \
-            "https://enroll.vonk-forge.lan:$agent_port/agent/v1/enroll")
-          case "$enroll_status" in
-            200|400|401|403|405|409|415|422) ;;
-            *)
-              echo "unexpected enrollment response: $enroll_status" >&2
-              exit 1
-              ;;
-          esac
-          mtls_error="$stack_root/mtls-rejection.stderr"
-          set +e
-          mtls_status=$(curl --silent --show-error \
-            --output /dev/null \
-            --write-out '%{http_code}' \
-            --resolve "agents.vonk-forge.lan:$agent_port:127.0.0.1" \
-            --cacert "$stack_root/secrets/controller-ca" \
-            "https://agents.vonk-forge.lan:$agent_port/agent/v1/enroll" \
-            2>"$mtls_error")
-          mtls_exit=$?
-          set -e
-          if [[ "$mtls_status" != 000 ]] \
-            || [[ "$mtls_exit" != 35 && "$mtls_exit" != 56 ]] \
-            || ! grep -Eiq \
-              'certificate (is )?required|alert bad certificate|peer did not return a certificate' \
-              "$mtls_error"; then
-            echo "agents.vonk-forge.lan did not specifically reject the missing client certificate" >&2
-            exit 1
-          fi
+          acceptance_test="deploy/compose/tests/test_dev_complete_stack.py::test_complete_development_stack_enforces_tls_identity_and_acks_routes"
+          uv run --project control --frozen pytest -q --maxfail=1 \
+            "$acceptance_test"
 
       - name: Scan complete local publication inputs
         shell: bash
@@ -432,7 +273,8 @@ jobs:
             --scan-path "$publication_root" \
             --scan-path "$evidence_root" \
             vonk-forge-api:dev-local vonk-forge-worker:dev-local
-          scripts/dev-image-acceptance \
+          uv run --project control --frozen --with-editable . \
+            scripts/dev-image-acceptance \
             --api-image vonk-forge-api:dev-local \
             --worker-image vonk-forge-worker:dev-local \
             --commit "$GITHUB_SHA"

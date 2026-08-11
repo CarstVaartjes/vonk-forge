@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import stat
 import subprocess
 import sys
+import tarfile
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -256,14 +258,16 @@ class SliceHandler(BaseHTTPRequestHandler):
         except RuntimeError:
             return
         digest = self.path.rsplit("/", 1)[-1]
+        with tarfile.open(fileobj=io.BytesIO(body), mode="r:") as archive:
+            files = [member for member in archive.getmembers() if member.isfile()]
         self._json(
             200,
             {
                 "sha256": digest,
                 "archive_bytes": len(body),
-                "total_bytes": 2469,
-                "file_count": 2,
-                "files": ["Dockerfile", "server.py"],
+                "total_bytes": sum(member.size for member in files),
+                "file_count": len(files),
+                "files": [member.name for member in files],
             },
         )
 

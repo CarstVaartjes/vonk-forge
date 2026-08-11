@@ -97,18 +97,18 @@ scripts/dev-runtime-project \
   --registry-hostname '<REGISTRY_HOSTNAME>'
 ```
 
-The generator creates 14 local source files: 13 protected secret/config files
+The generator creates 15 local source files: 14 protected secret/config files
 plus the public `git-signing-key.pub`. The protected `controller-ca-key` is
-required to validate and rotate the controller CA, so include all 14 local
+required to validate and rotate the controller CA, so include all 15 local
 source files in one encrypted 1Password generation or equivalent backup before
 first deployment. `controller-ca-key` must not be copied to the NAS.
-An existing 13-file local source from an earlier branch head is incomplete: the
+An existing 14-file local source from an earlier branch head is incomplete: the
 missing private key cannot be reconstructed from `controller-ca`. Create and
-back up a fresh 14-file generation, then use the coordinated PKI rotation below;
+back up a fresh 15-file generation, then use the coordinated PKI rotation below;
 do not replace only the CA or server certificate.
 
 `dev-runtime-project` validates the complete local generation and projects
-exactly 12 deployment files into the NAS `secrets/` directory; it excludes both
+exactly 13 deployment files into the NAS `secrets/` directory; it excludes both
 `controller-ca-key` and `git-signing-key.pub`. The NAS project must contain only
 `docker-compose.yml` and `secrets/`. Pull/redeploy it in the Docker UI and keep
 every named volume. Successful one-shot cohort, initialization, and migration
@@ -196,6 +196,7 @@ cd '<REPOSITORY_CHECKOUT>'
 install -d -m 0700 '<EVIDENCE_DIRECTORY>'
 scripts/dev-admin-token \
   --output '<EVIDENCE_DIRECTORY>/admin-token' \
+  --signing-key-file '<LOCAL_SECRETS_DIR>/token-signing-key' \
   --ttl-seconds 21600
 test "$(stat -c '%a' '<EVIDENCE_DIRECTORY>/admin-token')" = 600
 test "$(stat -c '%a' '<LOCAL_SECRETS_DIR>/litellm-master-key')" = 600
@@ -284,6 +285,42 @@ command and evidence path, omitting `--stop-after`; the runner proves route and
 inference persistence, then stops, withdraws, and uninstalls normally.
 
 ## Real multi-node failure and recovery
+
+The `pair` profile is a replicated service gang, not distributed DS4 inference.
+Before either independent DS4 server starts, rank 0 opens the published
+`VONK_MASTER_ADDR:VONK_MASTER_PORT` coordinator and rank 1 sends a versioned
+HELLO containing its authenticated `VONK_LOCAL_ADDR`; rank 0 records the
+bounded message and returns a versioned acknowledgement. Both ranks fail
+closed if this real TCP exchange does not complete. The rank-0 coordinator
+remains available while its DS4 process runs so restarting rank 1 repeats the
+same pre-launch exchange. Only rank 0 owns the routed inference endpoint.
+
+The workload containers use rootless `slirp4netns`. Rank 1 therefore does not
+bind the host's `VONK_LOCAL_ADDR` inside its private network namespace; slirp
+selects the container-side source address. `VONK_LOCAL_ADDR` remains the
+bounded controller-supplied rank identity carried in the HELLO and retained in
+evidence, while the socket destination remains the exact
+`VONK_MASTER_ADDR:VONK_MASTER_PORT`. The address-specific rank-0 host
+publication, host routing, and direct-fabric-only firewall policy enforce the
+physical path. Do not treat the peer address observed inside the slirp
+namespace as proof of a host fabric source address.
+
+Before starting this phase, configure the GPU-node host firewall for the
+current reserved rendezvous TCP port `29500`. The only allowed flow is
+`<SPARK_2_FABRIC_IP>` to `<SPARK_1_FABRIC_IP>:29500`. Reject that port from
+every other source and on every management or public interface. The rank-0
+agent publication must be the address-specific mapping
+`<SPARK_1_FABRIC_IP>:29500:29500`, never
+`29500:29500`, `0.0.0.0:29500:29500`, or a management-address mapping. A broad
+listener or firewall rule is an acceptance blocker, not a temporary fallback.
+
+Retain a redacted copy of the effective host-firewall policy and perform one
+positive probe from rank 1 over its direct-fabric address plus negative probes
+from the management path and any public path present at the site. The positive
+probe must reach rank 0 only after its coordinator starts; every negative probe
+must be refused or time out. Use the site's firewall tooling without disabling
+the firewall, adding a wildcard rule, or exposing the rendezvous port on the
+NAS.
 
 Start both ranks and pause after inference through the sole entrypoint:
 
@@ -392,9 +429,10 @@ matching full-state restore.
 
 Rotate the PostgreSQL password and database URL only as one coordinated pair.
 Rotate Git signing authority with historical public-key retention. Rotate
-agent/controller PKI and LiteLLM/proxy tokens as one planned new 14-file local
+agent/controller PKI, LiteLLM/proxy tokens, and token-signing authority as one
+planned new 15-file local
 source generation: back it up, distribute replacement public trust first,
-schedule re-enrollment/client key change, project the exact 12-file NAS bundle,
+schedule re-enrollment/client key change, project the exact 13-file NAS bundle,
 and pull/redeploy. Never overwrite one CA private key or one server certificate
 in isolation and hope the other projections recover.
 

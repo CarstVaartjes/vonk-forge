@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import importlib.machinery
 import importlib.util
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -37,6 +39,7 @@ EXPECTED_PROJECT_FILES = {
     "secrets/litellm-upstream-key",
     "secrets/management-cidrs",
     "secrets/postgres-password",
+    "secrets/token-signing-key",
 }
 
 REQUIRED_SECRET_NAMES = {
@@ -146,6 +149,9 @@ def test_publishes_exact_two_item_project_without_secret_output(tmp_path: Path) 
     ]
     assert _project_listing(destination) == EXPECTED_PROJECT_FILES
     assert not (destination / "secrets" / "git-signing-key.pub").exists()
+    assert project_lock_name(destination) == project_lock_name(
+        Path("/another/local/mount") / destination.name
+    )
     for name in REQUIRED_SECRET_NAMES:
         source = secrets_dir / name
         copied = destination / "secrets" / name
@@ -165,12 +171,18 @@ def test_publishes_exact_two_item_project_without_secret_output(tmp_path: Path) 
         "git-signing-key",
         "litellm-master-key",
         "postgres-password",
+        "token-signing-key",
     ):
         marker = (
             (secrets_dir / name).read_text(encoding="ascii", errors="ignore").strip()
         )
         if marker and marker in (result.stdout + result.stderr):
             pytest.fail(f"secret value from {name} leaked to project command output")
+
+
+def project_lock_name(destination: Path) -> str:
+    project = _load_project_module()
+    return project._publication_lock_path(destination).name
 
 
 def test_replaces_only_validated_project_children_and_rejects_extras(
@@ -411,22 +423,43 @@ def test_rejects_invalid_project_inputs(tmp_path: Path) -> None:
     assert bad_hostname.stdout == ""
 
 
-def test_interrupted_publish_leaves_only_complete_children_and_no_temp_files(
+def _project_contents(destination: Path) -> dict[str, bytes]:
+    return {
+        str(path.relative_to(destination)): path.read_bytes()
+        for path in destination.rglob("*")
+        if path.is_file() and not path.name.startswith(".")
+    }
+
+
+def _second_generation(tmp_path: Path) -> tuple[Path, Path]:
+    source_root = tmp_path / "second-source"
+    source_root.mkdir(mode=0o700)
+    secrets_dir = _prepare_source_secrets(source_root)
+    compose = source_root / "docker-compose.dev.yml"
+    compose.write_bytes(SOURCE_COMPOSE.read_bytes() + b"\n# second generation\n")
+    compose.chmod(0o644)
+    return secrets_dir, compose
+
+
+def test_interrupted_publish_restores_the_complete_previous_generation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    secrets_dir = _prepare_source_secrets(tmp_path)
+    first_secrets = _prepare_source_secrets(tmp_path)
+    second_secrets, second_compose = _second_generation(tmp_path)
     project = _load_project_module()
     destination = tmp_path / "nas-project"
-    destination.mkdir()
-    (destination / "docker-compose.yml").write_text(
-        "previous compose\n", encoding="utf-8"
+    project.publish_project(
+        source_compose=SOURCE_COMPOSE,
+        secrets_dir=first_secrets,
+        destination=destination,
+        nas_address=NAS_ADDRESS,
+        management_cidrs=MANAGEMENT_CIDRS,
+        enroll_hostname=ENROLL_HOSTNAME,
+        agent_hostname=AGENT_HOSTNAME,
+        registry_hostname=REGISTRY_HOSTNAME,
     )
-    secret_destination = destination / "secrets"
-    secret_destination.mkdir()
-    (secret_destination / "postgres-password").write_text(
-        "previous\n", encoding="utf-8"
-    )
+    previous = _project_contents(destination)
     real_replace = os.replace
     replace_calls = 0
 
@@ -447,8 +480,8 @@ def test_interrupted_publish_leaves_only_complete_children_and_no_temp_files(
 
     with pytest.raises(project.ProjectPublicationError):
         project.publish_project(
-            source_compose=SOURCE_COMPOSE,
-            secrets_dir=secrets_dir,
+            source_compose=second_compose,
+            secrets_dir=second_secrets,
             destination=destination,
             nas_address=NAS_ADDRESS,
             management_cidrs=MANAGEMENT_CIDRS,
@@ -457,14 +490,224 @@ def test_interrupted_publish_leaves_only_complete_children_and_no_temp_files(
             registry_hostname=REGISTRY_HOSTNAME,
         )
 
-    compose = (destination / "docker-compose.yml").read_text(encoding="utf-8")
-    assert (
-        compose == "previous compose\n"
-        or "VONK_AGENT_ENROLL_HOSTNAME: enroll.example.test" in compose
+    assert _project_contents(destination) == previous
+    assert sorted(path.name for path in destination.iterdir()) == [
+        "docker-compose.yml",
+        "secrets",
+    ]
+
+
+def test_rerun_recovers_a_process_interruption_before_publishing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class SimulatedProcessExit(BaseException):
+        pass
+
+    first_secrets = _prepare_source_secrets(tmp_path)
+    second_secrets, second_compose = _second_generation(tmp_path)
+    project = _load_project_module()
+    destination = tmp_path / "nas-project"
+    project.publish_project(
+        source_compose=SOURCE_COMPOSE,
+        secrets_dir=first_secrets,
+        destination=destination,
+        nas_address=NAS_ADDRESS,
+        management_cidrs=MANAGEMENT_CIDRS,
+        enroll_hostname=ENROLL_HOSTNAME,
+        agent_hostname=AGENT_HOSTNAME,
+        registry_hostname=REGISTRY_HOSTNAME,
     )
-    password = (secret_destination / "postgres-password").read_text(encoding="utf-8")
-    assert password in {
-        "previous\n",
-        (secrets_dir / "postgres-password").read_text(encoding="utf-8"),
-    }
-    assert not any(path.name.startswith(".") for path in destination.rglob("*"))
+    real_replace = os.replace
+    replace_calls = 0
+
+    def terminate_during_publication(
+        source: str | os.PathLike[str],
+        target: str | os.PathLike[str],
+        *,
+        src_dir_fd: int | None = None,
+        dst_dir_fd: int | None = None,
+    ) -> None:
+        nonlocal replace_calls
+        replace_calls += 1
+        if replace_calls == 3:
+            raise SimulatedProcessExit
+        real_replace(source, target, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd)
+
+    monkeypatch.setattr(project.os, "replace", terminate_during_publication)
+    with pytest.raises(SimulatedProcessExit):
+        project.publish_project(
+            source_compose=second_compose,
+            secrets_dir=second_secrets,
+            destination=destination,
+            nas_address=NAS_ADDRESS,
+            management_cidrs=MANAGEMENT_CIDRS,
+            enroll_hostname=ENROLL_HOSTNAME,
+            agent_hostname=AGENT_HOSTNAME,
+            registry_hostname=REGISTRY_HOSTNAME,
+        )
+
+    assert (destination / ".vonk-forge-publish").is_dir()
+
+    monkeypatch.setattr(project.os, "replace", real_replace)
+    project.publish_project(
+        source_compose=second_compose,
+        secrets_dir=second_secrets,
+        destination=destination,
+        nas_address=NAS_ADDRESS,
+        management_cidrs=MANAGEMENT_CIDRS,
+        enroll_hostname=ENROLL_HOSTNAME,
+        agent_hostname=AGENT_HOSTNAME,
+        registry_hostname=REGISTRY_HOSTNAME,
+    )
+
+    assert (
+        (destination / "docker-compose.yml")
+        .read_bytes()
+        .endswith(b"# second generation\n")
+    )
+    for name in REQUIRED_SECRET_NAMES:
+        assert (destination / "secrets" / name).read_bytes() == (
+            second_secrets / name
+        ).read_bytes()
+    assert sorted(path.name for path in destination.iterdir()) == [
+        "docker-compose.yml",
+        "secrets",
+    ]
+
+
+def test_rerun_discards_partial_cleanup_tombstone_after_successful_publish(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class SimulatedProcessExit(BaseException):
+        pass
+
+    first_secrets = _prepare_source_secrets(tmp_path)
+    second_secrets, second_compose = _second_generation(tmp_path)
+    project = _load_project_module()
+    destination = tmp_path / "nas-project"
+    project.publish_project(
+        source_compose=SOURCE_COMPOSE,
+        secrets_dir=first_secrets,
+        destination=destination,
+        nas_address=NAS_ADDRESS,
+        management_cidrs=MANAGEMENT_CIDRS,
+        enroll_hostname=ENROLL_HOSTNAME,
+        agent_hostname=AGENT_HOSTNAME,
+        registry_hostname=REGISTRY_HOSTNAME,
+    )
+    real_rmtree = shutil.rmtree
+
+    def terminate_during_completed_journal_cleanup(
+        path: str | os.PathLike[str],
+        *args: object,
+        **kwargs: object,
+    ) -> None:
+        cleanup = Path(path)
+        if cleanup.parent == destination and cleanup.name.startswith(
+            ".vonk-forge-publish"
+        ):
+            (cleanup / "manifest.json").unlink(missing_ok=True)
+            raise SimulatedProcessExit
+        real_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr(
+        project.shutil, "rmtree", terminate_during_completed_journal_cleanup
+    )
+    with pytest.raises(SimulatedProcessExit):
+        project.publish_project(
+            source_compose=second_compose,
+            secrets_dir=second_secrets,
+            destination=destination,
+            nas_address=NAS_ADDRESS,
+            management_cidrs=MANAGEMENT_CIDRS,
+            enroll_hostname=ENROLL_HOSTNAME,
+            agent_hostname=AGENT_HOSTNAME,
+            registry_hostname=REGISTRY_HOSTNAME,
+        )
+
+    assert not (destination / ".vonk-forge-publish").exists()
+    assert (destination / ".vonk-forge-publish.cleanup").is_dir()
+
+    monkeypatch.setattr(project.shutil, "rmtree", real_rmtree)
+    project.publish_project(
+        source_compose=second_compose,
+        secrets_dir=second_secrets,
+        destination=destination,
+        nas_address=NAS_ADDRESS,
+        management_cidrs=MANAGEMENT_CIDRS,
+        enroll_hostname=ENROLL_HOSTNAME,
+        agent_hostname=AGENT_HOSTNAME,
+        registry_hostname=REGISTRY_HOSTNAME,
+    )
+
+    assert sorted(path.name for path in destination.iterdir()) == [
+        "docker-compose.yml",
+        "secrets",
+    ]
+    assert (
+        (destination / "docker-compose.yml")
+        .read_bytes()
+        .endswith(b"# second generation\n")
+    )
+
+
+def test_live_publisher_is_rejected_and_stale_journal_recovers_on_rerun(
+    tmp_path: Path,
+) -> None:
+    secrets_dir = _prepare_source_secrets(tmp_path)
+    project = _load_project_module()
+    destination = tmp_path / "nas-project"
+    destination.mkdir(mode=0o700)
+    (destination / "secrets").mkdir(mode=0o700)
+    lock_path = project._publication_lock_path(destination)
+    lock_descriptor = os.open(
+        lock_path,
+        os.O_RDWR | os.O_CREAT | os.O_CLOEXEC | os.O_NOFOLLOW,
+        0o600,
+    )
+    fcntl.flock(lock_descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    active_journal = destination / ".vonk-forge-publish"
+    active_journal.mkdir(mode=0o700)
+    cleanup_tombstone = destination / ".vonk-forge-publish.cleanup"
+    cleanup_tombstone.mkdir(mode=0o700)
+    cleanup_marker = cleanup_tombstone / "partial"
+    cleanup_marker.write_bytes(b"private cleanup data")
+    try:
+        with pytest.raises(
+            project.ProjectPublicationError, match="publisher is active"
+        ):
+            project.publish_project(
+                source_compose=SOURCE_COMPOSE,
+                secrets_dir=secrets_dir,
+                destination=destination,
+                nas_address=NAS_ADDRESS,
+                management_cidrs=MANAGEMENT_CIDRS,
+                enroll_hostname=ENROLL_HOSTNAME,
+                agent_hostname=AGENT_HOSTNAME,
+                registry_hostname=REGISTRY_HOSTNAME,
+            )
+        assert active_journal.is_dir()
+        assert list(active_journal.iterdir()) == []
+        assert cleanup_marker.read_bytes() == b"private cleanup data"
+    finally:
+        fcntl.flock(lock_descriptor, fcntl.LOCK_UN)
+        os.close(lock_descriptor)
+
+    project.publish_project(
+        source_compose=SOURCE_COMPOSE,
+        secrets_dir=secrets_dir,
+        destination=destination,
+        nas_address=NAS_ADDRESS,
+        management_cidrs=MANAGEMENT_CIDRS,
+        enroll_hostname=ENROLL_HOSTNAME,
+        agent_hostname=AGENT_HOSTNAME,
+        registry_hostname=REGISTRY_HOSTNAME,
+    )
+
+    assert sorted(path.name for path in destination.iterdir()) == [
+        "docker-compose.yml",
+        "secrets",
+    ]
+    assert _project_listing(destination) == EXPECTED_PROJECT_FILES

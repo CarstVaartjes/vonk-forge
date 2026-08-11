@@ -182,6 +182,38 @@ fn write_managed_run(root: &Path, run_id: &str, installation_id: &str, port: u16
     .unwrap();
     let run = root.join("runs").join(run_id);
     fs::create_dir_all(&run).unwrap();
+    let metadata = root.join("run-metadata").join(run_id);
+    fs::create_dir_all(&metadata).unwrap();
+    fs::write(
+        metadata.join("lifecycle.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "installation_id": installation_id,
+            "placement": {
+                "rank": 0,
+                "role": "entrypoint",
+                "world_size": 1,
+                "local_address": null,
+                "master_address": null,
+                "master_port": null,
+                "port": port,
+                "reserved_memory_bytes": 1024
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+}
+
+fn write_legacy_run(root: &Path, run_id: &str, installation_id: &str, port: u16) {
+    let installation = root.join("installations").join(installation_id);
+    fs::create_dir_all(&installation).unwrap();
+    fs::write(
+        installation.join("spec.json"),
+        serde_json::to_vec(&spec()).unwrap(),
+    )
+    .unwrap();
+    let run = root.join("runs").join(run_id);
+    fs::create_dir_all(&run).unwrap();
     fs::write(
         run.join("lifecycle.json"),
         serde_json::to_vec(&serde_json::json!({
@@ -384,6 +416,43 @@ fn container_arguments_are_typed_and_hardened() {
             .windows(2)
             .any(|values| values == ["--max-model-len", "32768"])
     );
+}
+
+#[test]
+fn coordinator_publishes_rendezvous_only_on_declared_master_fabric_address() {
+    let runner = FakeRunner {
+        calls: RefCell::new(vec![]),
+        outputs: RefCell::new(VecDeque::new()),
+    };
+    let directory = tempdir().unwrap();
+    let arguments = OciRuntime {
+        runner: &runner,
+        data_root: directory.path(),
+        huggingface_curl_config: None,
+    }
+    .start_arguments(
+        &spec(),
+        "cb555393-764b-4eb6-8f15-b416d289428f",
+        "45ea6921-50c9-4971-be2a-4cd04ce05069",
+        &Placement {
+            rank: 0,
+            role: "entrypoint".to_owned(),
+            world_size: 2,
+            local_address: Some("192.168.100.10".parse::<IpAddr>().unwrap()),
+            master_address: Some("192.168.100.10".parse::<IpAddr>().unwrap()),
+            master_port: Some(29500),
+            port: 8100,
+            reserved_memory_bytes: 64 * 1024 * 1024 * 1024,
+        },
+    )
+    .unwrap();
+
+    assert!(
+        arguments
+            .windows(2)
+            .any(|values| values == ["--publish", "192.168.100.10:29500:29500"])
+    );
+    assert!(!arguments.iter().any(|value| value == "29500:29500"));
 }
 
 #[test]
@@ -802,7 +871,7 @@ fn oci_artifacts_run_under_the_declared_staging_budget() {
 }
 
 #[test]
-fn start_writes_a_bounded_standard_runtime_contract() {
+fn start_keeps_agent_metadata_outside_workload_writable_state() {
     let runner = FakeRunner {
         calls: RefCell::new(vec![]),
         outputs: RefCell::new(VecDeque::from([ProcessOutput {
@@ -839,7 +908,7 @@ fn start_writes_a_bounded_standard_runtime_contract() {
         &fs::read(
             directory
                 .path()
-                .join("runs")
+                .join("run-metadata")
                 .join(run_id)
                 .join("runtime.json"),
         )
@@ -857,6 +926,20 @@ fn start_writes_a_bounded_standard_runtime_contract() {
     );
     assert_eq!(contract["endpoint"]["listen_port"], 8000);
     assert_eq!(contract["placement"]["rank"], 0);
+    assert!(
+        directory
+            .path()
+            .join("run-metadata")
+            .join(run_id)
+            .join("lifecycle.json")
+            .is_file()
+    );
+    assert!(
+        fs::read_dir(directory.path().join("runs").join(run_id))
+            .unwrap()
+            .next()
+            .is_none()
+    );
 }
 
 #[test]
@@ -890,6 +973,14 @@ fn managed_recipe_run_observation_reports_running_healthy_container() {
     assert_eq!(
         serde_json::to_value(&observations).unwrap(),
         serde_json::json!([{"run_id": run_id, "ready": true}])
+    );
+    assert!(
+        directory
+            .path()
+            .join("run-metadata")
+            .join(run_id)
+            .join("lifecycle.json")
+            .is_file()
     );
     server.join().unwrap();
     let calls = runner.calls.borrow();
@@ -1023,7 +1114,119 @@ fn managed_recipe_run_snapshot_skips_safe_historical_directory_without_lifecycle
 }
 
 #[test]
-fn managed_recipe_run_snapshot_rejects_symlinks_malformed_names_and_corrupt_metadata() {
+fn managed_recipe_run_snapshot_skips_one_corrupt_record_and_reports_other_runs() {
+    let directory = tempdir().unwrap();
+    let corrupt = "45ea6921-50c9-4971-be2a-4cd04ce05069";
+    let healthy = "55ea6921-50c9-4971-be2a-4cd04ce05069";
+    let corrupt_run = directory.path().join("runs").join(corrupt);
+    fs::create_dir_all(&corrupt_run).unwrap();
+    let corrupt_metadata = directory.path().join("run-metadata").join(corrupt);
+    fs::create_dir_all(&corrupt_metadata).unwrap();
+    fs::write(corrupt_metadata.join("lifecycle.json"), b"not-json").unwrap();
+    write_managed_run(
+        directory.path(),
+        healthy,
+        "cb555393-764b-4eb6-8f15-b416d289428f",
+        8101,
+    );
+    let runner = ObservationRunner {
+        calls: RefCell::new(vec![]),
+        podman_outputs: RefCell::new(VecDeque::from([ProcessOutput {
+            success: false,
+            stdout: vec![],
+            stderr: b"no such container".to_vec(),
+        }])),
+    };
+
+    let observations = OciRuntime {
+        runner: &runner,
+        data_root: directory.path(),
+        huggingface_curl_config: None,
+    }
+    .recipe_run_observations()
+    .unwrap();
+
+    assert_eq!(observations.len(), 1);
+    assert_eq!(observations[0].run_id, healthy);
+    assert!(!observations[0].ready);
+    assert_eq!(runner.calls.borrow().len(), 1);
+}
+
+#[test]
+fn forged_valid_legacy_lifecycle_is_ignored_and_never_becomes_agent_metadata() {
+    let directory = tempdir().unwrap();
+    let run_id = "45ea6921-50c9-4971-be2a-4cd04ce05069";
+    write_legacy_run(
+        directory.path(),
+        run_id,
+        "cb555393-764b-4eb6-8f15-b416d289428f",
+        8101,
+    );
+    let runner = ObservationRunner {
+        calls: RefCell::new(vec![]),
+        podman_outputs: RefCell::new(VecDeque::from([ProcessOutput {
+            success: false,
+            stdout: vec![],
+            stderr: b"no such container".to_vec(),
+        }])),
+    };
+
+    let observations = OciRuntime {
+        runner: &runner,
+        data_root: directory.path(),
+        huggingface_curl_config: None,
+    }
+    .recipe_run_observations()
+    .unwrap();
+
+    assert!(observations.is_empty());
+    assert!(runner.calls.borrow().is_empty());
+    assert!(!directory.path().join("run-metadata").join(run_id).exists());
+}
+
+#[test]
+fn stop_ignores_forged_valid_legacy_lifecycle_and_hooks() {
+    let directory = tempdir().unwrap();
+    let run_id = "45ea6921-50c9-4971-be2a-4cd04ce05069";
+    let installation_id = "cb555393-764b-4eb6-8f15-b416d289428f";
+    write_legacy_run(directory.path(), run_id, installation_id, 8101);
+    let mut workload = spec();
+    workload.lifecycle.post_stop = vec![vec!["false".to_owned()]];
+    fs::write(
+        directory
+            .path()
+            .join("installations")
+            .join(installation_id)
+            .join("spec.json"),
+        serde_json::to_vec(&workload).unwrap(),
+    )
+    .unwrap();
+    let runner = FakeRunner {
+        calls: RefCell::new(vec![]),
+        outputs: RefCell::new(VecDeque::from([ProcessOutput {
+            success: true,
+            stdout: vec![],
+            stderr: vec![],
+        }])),
+    };
+
+    OciRuntime {
+        runner: &runner,
+        data_root: directory.path(),
+        huggingface_curl_config: None,
+    }
+    .stop(run_id)
+    .unwrap();
+
+    let calls = runner.calls.borrow();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].0, Program::Podman);
+    assert_eq!(calls[0].1[3..5], ["--time", "30"]);
+    assert!(!directory.path().join("run-metadata").join(run_id).exists());
+}
+
+#[test]
+fn managed_recipe_run_snapshot_rejects_malformed_entries_and_skips_corrupt_records() {
     for corrupt in [
         "run-symlink",
         "name",
@@ -1046,21 +1249,36 @@ fn managed_recipe_run_snapshot_rejects_symlinks_malformed_names_and_corrupt_meta
             "marker-symlink" => {
                 let run = runs.join("45ea6921-50c9-4971-be2a-4cd04ce05069");
                 fs::create_dir(&run).unwrap();
+                let metadata = directory
+                    .path()
+                    .join("run-metadata")
+                    .join("45ea6921-50c9-4971-be2a-4cd04ce05069");
+                fs::create_dir_all(&metadata).unwrap();
                 symlink(
                     directory.path().join("outside.json"),
-                    run.join("lifecycle.json"),
+                    metadata.join("lifecycle.json"),
                 )
                 .unwrap();
             }
             "oversized-marker" => {
                 let run = runs.join("45ea6921-50c9-4971-be2a-4cd04ce05069");
                 fs::create_dir(&run).unwrap();
-                fs::write(run.join("lifecycle.json"), vec![b'x'; 16 * 1024 + 1]).unwrap();
+                let metadata = directory
+                    .path()
+                    .join("run-metadata")
+                    .join("45ea6921-50c9-4971-be2a-4cd04ce05069");
+                fs::create_dir_all(&metadata).unwrap();
+                fs::write(metadata.join("lifecycle.json"), vec![b'x'; 16 * 1024 + 1]).unwrap();
             }
             "invalid-marker" => {
                 let run = runs.join("45ea6921-50c9-4971-be2a-4cd04ce05069");
                 fs::create_dir(&run).unwrap();
-                fs::write(run.join("lifecycle.json"), b"{}").unwrap();
+                let metadata = directory
+                    .path()
+                    .join("run-metadata")
+                    .join("45ea6921-50c9-4971-be2a-4cd04ce05069");
+                fs::create_dir_all(&metadata).unwrap();
+                fs::write(metadata.join("lifecycle.json"), b"{}").unwrap();
             }
             "invalid-installation-id" => write_managed_run(
                 directory.path(),
@@ -1099,16 +1317,17 @@ fn managed_recipe_run_snapshot_rejects_symlinks_malformed_names_and_corrupt_meta
             }])),
         };
 
-        assert!(
-            OciRuntime {
-                runner: &runner,
-                data_root: directory.path(),
-                huggingface_curl_config: None,
-            }
-            .recipe_run_observations()
-            .is_err(),
-            "{corrupt}"
-        );
+        let result = OciRuntime {
+            runner: &runner,
+            data_root: directory.path(),
+            huggingface_curl_config: None,
+        }
+        .recipe_run_observations();
+        if matches!(corrupt, "run-symlink" | "name") {
+            assert!(result.is_err(), "{corrupt}");
+        } else {
+            assert!(result.unwrap().is_empty(), "{corrupt}");
+        }
         assert!(runner.calls.borrow().is_empty(), "{corrupt}");
     }
 }
@@ -1290,7 +1509,7 @@ fn lifecycle_hooks_run_as_typed_hardened_one_shot_containers() {
     assert!(
         !directory
             .path()
-            .join("runs")
+            .join("run-metadata")
             .join(run_id)
             .join("lifecycle.json")
             .exists()
@@ -1298,7 +1517,7 @@ fn lifecycle_hooks_run_as_typed_hardened_one_shot_containers() {
     assert!(
         directory
             .path()
-            .join("runs")
+            .join("run-metadata")
             .join(run_id)
             .join("runtime.json")
             .exists()
@@ -1372,7 +1591,7 @@ fn failed_post_stop_hook_retains_lifecycle_observation_marker() {
     assert!(
         directory
             .path()
-            .join("runs")
+            .join("run-metadata")
             .join(run_id)
             .join("lifecycle.json")
             .exists()

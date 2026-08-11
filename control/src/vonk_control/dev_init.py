@@ -51,6 +51,7 @@ _PROJECTION_FILES = {
             "agent-ca-key",
             "agent-proxy-auth",
             "management-cidrs",
+            "token-signing-key",
         }
     ),
     "migration": frozenset({"database-url"}),
@@ -986,6 +987,7 @@ def stage_runtime_secrets(
     litellm_master_key = _read_source_secret(source, "litellm-master-key")
     litellm_upstream_key = _read_source_secret(source, "litellm-upstream-key")
     management_cidrs = _read_source_secret(source, "management-cidrs")
+    token_signing_key = _read_source_secret(source, "token-signing-key")
 
     opened: list[tuple[int, bool] | None] = []
     try:
@@ -1112,6 +1114,7 @@ def stage_runtime_secrets(
                 ("agent-ca-key", agent_ca_key),
                 ("agent-proxy-auth", agent_proxy_auth),
                 ("management-cidrs", management_cidrs),
+                ("token-signing-key", token_signing_key),
             ):
                 _write_projection_secret(
                     api,
@@ -1346,21 +1349,48 @@ def _required_image_environment(name: str) -> str:
 
 def main() -> int:
     """Initialize repository, synthetic state, and disjoint runtime authority."""
-    repository_path = Path(_required_environment("VONK_REPOSITORY_PATH"))
-    repository_url = _required_environment("VONK_DEV_REPOSITORY_URL")
-    secret_source = Path(_required_environment("VONK_DEV_SECRET_SOURCE_ROOT"))
-    api_secret_root = Path(_required_environment("VONK_DEV_API_SECRET_ROOT"))
-    migrate_secret_root = Path(_required_environment("VONK_DEV_MIGRATE_SECRET_ROOT"))
-    worker_secret_root = Path(_required_environment("VONK_DEV_WORKER_SECRET_ROOT"))
-    caddy_secret_root = Path(_required_environment("VONK_DEV_CADDY_SECRET_ROOT"))
-    litellm_secret_root = Path(_required_environment("VONK_DEV_LITELLM_SECRET_ROOT"))
-    runtime_config_root = Path(_required_environment("VONK_DEV_RUNTIME_CONFIG_ROOT"))
+    phase = os.environ.get("VONK_DEV_INIT_PHASE", "all")
+    if phase not in {"all", "repository", "runtime"}:
+        raise DevInitError("VONK_DEV_INIT_PHASE is invalid")
+    repository_inputs: tuple[Path, str] | None = None
+    if phase in {"all", "repository"}:
+        repository_inputs = (
+            Path(_required_environment("VONK_REPOSITORY_PATH")),
+            _required_environment("VONK_DEV_REPOSITORY_URL"),
+        )
+    runtime_paths: tuple[Path, Path, Path, Path, Path, Path, Path] | None = None
+    if phase in {"all", "runtime"}:
+        runtime_paths = (
+            Path(_required_environment("VONK_DEV_SECRET_SOURCE_ROOT")),
+            Path(_required_environment("VONK_DEV_API_SECRET_ROOT")),
+            Path(_required_environment("VONK_DEV_MIGRATE_SECRET_ROOT")),
+            Path(_required_environment("VONK_DEV_WORKER_SECRET_ROOT")),
+            Path(_required_environment("VONK_DEV_CADDY_SECRET_ROOT")),
+            Path(_required_environment("VONK_DEV_LITELLM_SECRET_ROOT")),
+            Path(_required_environment("VONK_DEV_RUNTIME_CONFIG_ROOT")),
+        )
     generation = _development_generation_identity()
-    initialize_repository(
-        repository_path,
-        repository_url,
-        generation.expected_commit,
-    )
+    if phase in {"all", "repository"}:
+        assert repository_inputs is not None
+        repository_path, repository_url = repository_inputs
+        initialize_repository(
+            repository_path,
+            repository_url,
+            generation.expected_commit,
+        )
+        if phase == "repository":
+            return 0
+
+    assert runtime_paths is not None
+    (
+        secret_source,
+        api_secret_root,
+        migrate_secret_root,
+        worker_secret_root,
+        caddy_secret_root,
+        litellm_secret_root,
+        runtime_config_root,
+    ) = runtime_paths
     stage_runtime_secrets(
         secret_source,
         api_secret_root,

@@ -13,12 +13,14 @@ COMPOSE_README = ROOT / "deploy/compose/README.md"
 ARCHITECTURE = ROOT / "docs/architecture-overview.md"
 SUPPLY_CHAIN = ROOT / "docs/runbooks/supply-chain.md"
 DEV_WORKLOADS = ROOT / "docs/runbooks/development-agent-workloads.md"
+DEV_WORKLOAD_ACCEPTANCE = ROOT / "docs/audits/development-agent-workload-acceptance.md"
 DEV_WORKLOADS_DESIGN = (
     ROOT
     / "docs/superpowers/specs/2026-08-10-development-agent-workload-slices-design.md"
 )
 MODEL_SWITCHING = ROOT / "docs/runbooks/model-switching.md"
 MODEL_CAPACITY = ROOT / "docs/model-capacity-overview.md"
+DEVELOPMENT_MODEL_SMOKE = ROOT / "docs/audits/development-model-smoke.md"
 
 GENERIC_ONBOARDING_DOCS = (
     README,
@@ -276,6 +278,36 @@ def test_complete_development_workload_runbook_has_every_operator_phase() -> Non
         assert f"--stop-after {checkpoint}" in text
 
 
+def test_multinode_rendezvous_firewall_is_direct_fabric_only() -> None:
+    section = _normalized_text(DEV_WORKLOADS)
+    acceptance = _normalized_text(DEV_WORKLOAD_ACCEPTANCE)
+
+    assert "TCP port `29500`" in section
+    assert "`<SPARK_2_FABRIC_IP>` to `<SPARK_1_FABRIC_IP>:29500`" in section
+    assert "`<SPARK_1_FABRIC_IP>:29500:29500`" in section
+    assert "never `29500:29500`" in section
+    assert "management or public interface" in section
+    assert (
+        "positive direct-fabric host probe and negative management/public probes"
+        in acceptance
+    )
+
+
+def test_model_smoke_records_public_arm64_fabric_transport_identity() -> None:
+    text = _normalized_text(DEVELOPMENT_MODEL_SMOKE)
+
+    assert "Public multi-architecture OCI index" in text
+    assert (
+        "sha256:fc6dddc4c44b1bfe37f41cae8e67d1693828e8f42a91862816d7953e2c9d3f23"
+        in text
+    )
+    assert "linux/arm64/v8" in text
+    assert (
+        "sha256:97d3fa0415c6749d4b27849c2bf251ac11fe2ec7d3178a2dae4bbf3bd30056fc"
+        in text
+    )
+
+
 def test_model_commands_bind_private_qualification_and_runtime_evidence() -> None:
     blocks = _fenced_blocks(DEV_WORKLOADS, "bash", "sh", "shell")
 
@@ -298,10 +330,10 @@ def test_secret_docs_separate_local_backup_from_exact_nas_projection() -> None:
     design = _normalized_text(DEV_WORKLOADS_DESIGN)
 
     for text in (runbook, design):
-        assert "14 local source files" in text
-        assert "13 protected secret/config files" in text
-        assert "existing 13-file local source" in text
-        assert "exactly 12 deployment files" in text
+        assert "15 local source files" in text
+        assert "14 protected secret/config files" in text
+        assert "existing 14-file local source" in text
+        assert "exactly 13 deployment files" in text
         assert "`controller-ca-key`" in text
         assert "must not be copied to the NAS" in text
 

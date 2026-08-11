@@ -79,17 +79,22 @@ uv sync --dev
 uv run pytest
 ```
 
-For a NAS, create one NAS-local project containing only `docker-compose.yml`
-and `secrets/`. Download the generated development Compose artifact, rename
-`docker-compose.dev.yml` to `docker-compose.yml` once, and keep that file
-unchanged during normal development. Accepted `main` advances the mutable
+For a first installation, follow the concise
+[fresh development installation](docs/runbooks/fresh-development-install.md).
+It covers the NAS, signed agent package, pairing, and first synthetic workload
+in one order. For a NAS, create one NAS-local project containing only
+`docker-compose.yml` and `secrets/`. Download and retain
+`docker-compose.dev.yml` locally; the project publisher installs it as
+`docker-compose.yml`, which remains unchanged during normal development.
+Accepted `main` advances the mutable
 `:dev` channel; operators update development by pulling/redeploying the
 unchanged project file. Keep `docker-compose.pinned.yml` only for explicit
 reproduction or guarded recovery. Signed releases separately publish the full
 `docker-compose.production.yml`. The NAS pulls public images and never
 receives source, Dockerfiles, build contexts, or image archives. Follow the
 [development NAS installation guide](docs/runbooks/development-nas-installation.md)
-for the exact three runtime secret files and generic Compose-project import.
+for the complete 13-file deployed runtime bundle and generic Compose-project
+import.
 
 Repository contributors with the two `dev-local` images already built can run
 the same image-only stack locally:
@@ -179,6 +184,7 @@ reconciled by the repository-less worker.
 ## Documentation
 
 - [Documentation index](docs/README.md)
+- [Fresh development installation](docs/runbooks/fresh-development-install.md)
 - [Architecture overview](docs/architecture-overview.md)
 - [Recipe catalog and WorkloadRun operations](docs/runbooks/workload-packages.md)
 - [NAS pull-only Compose deployment](deploy/compose/README.md)

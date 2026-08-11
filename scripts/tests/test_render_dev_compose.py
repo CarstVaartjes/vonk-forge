@@ -32,6 +32,7 @@ EXPECTED_SECRET_NAMES = {
     "litellm-upstream-key",
     "management-cidrs",
     "postgres-password",
+    "token-signing-key",
 }
 PORT_INTERPOLATIONS = {
     "VONK_AGENT_PORT": "${VONK_AGENT_PORT:-8443}",

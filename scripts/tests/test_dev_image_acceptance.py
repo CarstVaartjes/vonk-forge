@@ -63,6 +63,10 @@ def _fixture_repository(tmp_path: Path) -> Path:
         ROOT / "scripts/verify-dev-image-secrets",
         repository / "scripts/verify-dev-image-secrets",
     )
+    shutil.copy2(
+        ROOT / "scripts/dev-runtime-secrets.py",
+        repository / "scripts/dev-runtime-secrets.py",
+    )
     shutil.copy2(TEMPLATE, repository / "deploy/compose/compose.dev.images.yaml")
     subprocess.run(("git", "init", "-q", "-b", "main", str(repository)), check=True)
     subprocess.run(
@@ -271,7 +275,8 @@ def _successful_lifecycle_tools(tmp_path: Path) -> tuple[Path, Path]:
         'if [[ "$1" == inspect ]]; then\n'
         "  cohort=$(sed -n '1p' \"$state_file\" 2>/dev/null || true)\n"
         '  case "${*: -1}" in\n'
-        "    dev-init-id) if [[ \"$cohort\" == rollback-failed ]]; then printf '%s\\n' 'exited 1'; else printf '%s\\n' 'exited 0'; fi ;;\n"
+        "    dev-repository-init-id) if [[ \"$cohort\" == rollback-failed ]]; then printf '%s\\n' 'exited 1'; else printf '%s\\n' 'exited 0'; fi ;;\n"
+        "    dev-init-id) if [[ \"$cohort\" == rollback-failed ]]; then printf '%s\\n' 'created 0'; else printf '%s\\n' 'exited 0'; fi ;;\n"
         "    migrate-id) if [[ \"$cohort\" == rollback-failed ]]; then printf '%s\\n' 'created 0'; else printf '%s\\n' 'exited 0'; fi ;;\n"
         "    dev-*-id) printf '%s\\n' 'exited 0' ;;\n"
         "    *) printf '%s\\n' 'running 0' ;;\n"
@@ -297,7 +302,7 @@ def _successful_lifecycle_tools(tmp_path: Path) -> tuple[Path, Path]:
         "  esac\n"
         "  exit 0\n"
         "fi\n"
-        'if [[ "$1" == compose && " $* " == *\' logs \'*dev-init* ]]; then\n'
+        'if [[ "$1" == compose && " $* " == *\' logs \'*dev-repository-init* ]]; then\n'
         "  printf '%s\\n' 'development repository accepted baseline is divergent'\n"
         "  exit 0\n"
         "fi\n"
@@ -724,7 +729,7 @@ def test_mixed_cohort_gate_stops_before_initializer_or_migration(
     assert result.returncode == 0, result.stderr
     assert mixed_up < first_full_up
     assert any(
-        " ps --all --services dev-init migrate " in f" {command} "
+        " ps --all --services dev-repository-init dev-init migrate " in f" {command} "
         for command in commands[mixed_up:first_full_up]
     )
     assert any(
@@ -806,6 +811,9 @@ def test_successful_lifecycle_exercises_mutable_redeploy_and_runtime_boundaries(
     assert any(
         "test -r /run/secrets/worker-api-token" in line for line in normalized_commands
     )
+    assert any(
+        "test -r /run/secrets/token-signing-key" in line for line in normalized_commands
+    )
     assert sum("{{json .Mounts}}" in line for line in normalized_commands) == 9
     assert (
         sum(
@@ -836,6 +844,7 @@ def test_successful_lifecycle_exercises_mutable_redeploy_and_runtime_boundaries(
     assert worker_boundary_commands
     assert all("git-signing-key" in line for line in worker_boundary_commands)
     assert all("admin-grant-private-key" in line for line in worker_boundary_commands)
+    assert all("token-signing-key" in line for line in worker_boundary_commands)
     assert any(" down --volumes --remove-orphans " in f" {line} " for line in commands)
 
 

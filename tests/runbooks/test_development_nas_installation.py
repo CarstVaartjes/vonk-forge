@@ -2,6 +2,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNBOOK = ROOT / "docs/runbooks/development-nas-installation.md"
+FRESH_INSTALL = ROOT / "docs/runbooks/fresh-development-install.md"
 COMPOSE_README = ROOT / "deploy/compose/README.md"
 
 
@@ -15,7 +16,8 @@ def test_development_nas_runbook_leads_with_the_mutable_two_item_project() -> No
     assert "Its contents must be exactly:" in text
     assert "├── docker-compose.yml" in text
     assert "└── secrets/" in text
-    assert "docker-compose.dev.yml` as the bare mutable `:dev`" in text
+    assert "give `docker-compose.dev.yml` to `scripts/dev-runtime-project`" in text
+    assert "publishes that artifact as `docker-compose.yml`" in text
     assert "pull/redeploy the unchanged `docker-compose.yml`" in text
     assert "not restart" in text
 
@@ -159,6 +161,33 @@ def test_operator_entry_points_link_to_development_nas_runbook() -> None:
     assert "../../docs/runbooks/development-nas-installation.md" in (
         ROOT / "deploy/compose/README.md"
     ).read_text()
+
+
+def test_fresh_install_is_the_concise_operator_entry_point() -> None:
+    text = _normalized_text(FRESH_INSTALL)
+
+    for required in (
+        "docker-compose.yml",
+        "secrets/",
+        "scripts/dev-runtime-secrets.py",
+        "scripts/dev-runtime-project",
+        "APT `dev` channel setup",
+        "/var/lib/vonk-forge/supervisor/current/vonk-agent pair ... --token-stdin",
+        "scripts/run-development-slices",
+        "--phase synthetic",
+    ):
+        assert required in text
+    assert "No GitHub, GHCR, R2, database, signing, or model credential" in text
+    assert "Do not install a registry token on the NAS" in text
+
+
+def test_readme_and_documentation_index_lead_to_fresh_install() -> None:
+    assert (
+        "docs/runbooks/fresh-development-install.md" in (ROOT / "README.md").read_text()
+    )
+    assert (
+        "runbooks/fresh-development-install.md" in (ROOT / "docs/README.md").read_text()
+    )
 
 
 def test_runtime_secret_directory_is_ignored_from_git() -> None:

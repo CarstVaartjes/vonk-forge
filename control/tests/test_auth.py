@@ -1,9 +1,6 @@
 import pytest
 from vonk_control.auth import Actor, AuthError, TokenCodec
-from vonk_control.development_tokens import (
-    DEVELOPMENT_TOKEN_SIGNING_KEY,
-    issue_development_admin_token,
-)
+from vonk_control.development_tokens import issue_development_admin_token
 
 
 def test_signed_token_round_trip_and_tamper_rejection() -> None:
@@ -22,8 +19,22 @@ def test_codec_rejects_short_signing_key() -> None:
 
 
 def test_dependency_free_development_issuer_matches_control_verifier() -> None:
-    token = issue_development_admin_token(ttl_seconds=60, now=100)
+    signing_key = b"runtime-generated-development-key"
+    token = issue_development_admin_token(
+        signing_key=signing_key,
+        ttl_seconds=60,
+        now=100,
+    )
 
-    assert TokenCodec(DEVELOPMENT_TOKEN_SIGNING_KEY).verify(token, now=101) == Actor(
+    assert TokenCodec(signing_key).verify(token, now=101) == Actor(
         "development-operator", "administrator"
     )
+
+
+def test_dependency_free_development_issuer_rejects_short_signing_key() -> None:
+    with pytest.raises(ValueError, match="32 bytes"):
+        issue_development_admin_token(
+            signing_key=b"short",
+            ttl_seconds=60,
+            now=100,
+        )

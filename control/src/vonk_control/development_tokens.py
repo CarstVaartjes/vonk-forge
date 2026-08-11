@@ -7,10 +7,15 @@ import hashlib
 import hmac
 import json
 
-DEVELOPMENT_TOKEN_SIGNING_KEY = b"development-only-signing-key-32b"
 
-
-def issue_development_admin_token(*, ttl_seconds: int, now: int) -> str:
+def issue_development_admin_token(
+    *,
+    signing_key: bytes,
+    ttl_seconds: int,
+    now: int,
+) -> str:
+    if len(signing_key) < 32:
+        raise ValueError("signing key must contain at least 32 bytes")
     if ttl_seconds <= 0:
         raise ValueError("token lifetime must be positive")
     payload = json.dumps(
@@ -24,9 +29,9 @@ def issue_development_admin_token(*, ttl_seconds: int, now: int) -> str:
     ).encode()
     body = base64.urlsafe_b64encode(payload).rstrip(b"=").decode()
     signature = base64.urlsafe_b64encode(
-        hmac.new(DEVELOPMENT_TOKEN_SIGNING_KEY, body.encode(), hashlib.sha256).digest()
+        hmac.new(signing_key, body.encode(), hashlib.sha256).digest()
     ).rstrip(b"=")
     return f"{body}.{signature.decode()}"
 
 
-__all__ = ["DEVELOPMENT_TOKEN_SIGNING_KEY", "issue_development_admin_token"]
+__all__ = ["issue_development_admin_token"]

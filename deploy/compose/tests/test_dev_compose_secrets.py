@@ -40,6 +40,26 @@ def test_image_template_stages_exact_disjoint_runtime_secret_volumes() -> None:
     rendered = _rendered_image_template()
     services = rendered["services"]
     initializer = services["dev-init"]
+    repository_initializer = services["dev-repository-init"]
+
+    assert initializer["network_mode"] == "none"
+    assert initializer["environment"]["VONK_DEV_INIT_PHASE"] == "runtime"
+    assert "/repository" not in _volumes_by_target(initializer)
+    assert repository_initializer.get("secrets", []) == []
+    assert set(repository_initializer["cap_add"]) == {
+        "CHOWN",
+        "DAC_OVERRIDE",
+        "FOWNER",
+        "SETGID",
+        "SETUID",
+    }
+    assert repository_initializer["environment"]["VONK_DEV_INIT_PHASE"] == (
+        "repository"
+    )
+    assert set(_volumes_by_target(repository_initializer)) == {
+        "/cohort",
+        "/repository",
+    }
 
     expected_environment = {
         "VONK_DEV_API_SECRET_ROOT": "/api-secrets",
@@ -76,7 +96,7 @@ def test_image_template_stages_exact_disjoint_runtime_secret_volumes() -> None:
     }
     assert source_secrets == {
         (name, f"/host-secrets/{name}")
-        for name in {
+        for name in (
             "agent-ca-certificate",
             "agent-ca-key",
             "agent-proxy-auth",
@@ -88,7 +108,8 @@ def test_image_template_stages_exact_disjoint_runtime_secret_volumes() -> None:
             "litellm-master-key",
             "litellm-upstream-key",
             "management-cidrs",
-        }
+            "token-signing-key",
+        )
     }
 
 
@@ -115,6 +136,10 @@ def test_image_template_keeps_private_authority_with_its_exact_service() -> None
     assert secret_consumers["litellm-master-key"] == {"dev-init"}
     assert secret_consumers["litellm-upstream-key"] == {"dev-init"}
     assert secret_consumers["management-cidrs"] == {"dev-init"}
+    assert secret_consumers["token-signing-key"] == {"dev-init"}
+    assert services["control-api"]["environment"]["VONK_TOKEN_SIGNING_KEY_FILE"] == (
+        "/run/secrets/token-signing-key"
+    )
 
     for service_name, service in services.items():
         environment = service.get("environment", {})

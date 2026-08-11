@@ -8,7 +8,7 @@ import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass, fields, is_dataclass
 from datetime import datetime
-from functools import lru_cache
+from functools import cache
 from itertools import pairwise
 from pathlib import Path
 from types import MappingProxyType
@@ -80,7 +80,7 @@ def _schema(name: str) -> dict[str, Any]:
         return json.load(source)
 
 
-@lru_cache(maxsize=None)
+@cache
 def _validator(name: str) -> Any:
     schema = _schema(name)
     validator_class = validators.validator_for(schema)

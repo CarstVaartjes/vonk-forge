@@ -347,7 +347,9 @@ def test_complete_development_stack_enforces_tls_identity_and_acks_routes(
         controller_ca = secrets / "controller-ca"
 
         admin_token = issue_development_admin_token(
-            ttl_seconds=600, now=int(time.time())
+            signing_key=(secrets / "token-signing-key").read_bytes().strip(),
+            ttl_seconds=600,
+            now=int(time.time()),
         )
         grant = _api_json(
             port=api_port,
@@ -398,7 +400,15 @@ def test_complete_development_stack_enforces_tls_identity_and_acks_routes(
             json.dumps(
                 {
                     "agent_implementation": "rust",
-                    "capabilities": [],
+                    "capabilities": [
+                        "agent.runtime.rust.v1",
+                        "recipe.build.v1",
+                        "recipe.image.import.v1",
+                        "recipe.install",
+                        "recipe.start",
+                        "recipe.stop",
+                        "recipe.uninstall",
+                    ],
                     "lease_seconds": 60,
                     "node_id": NODE_ID,
                     "protocol_version": 3,

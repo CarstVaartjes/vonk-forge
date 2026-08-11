@@ -51,6 +51,7 @@ SYNTHETIC_SECRETS = {
     "litellm-master-key": "synthetic-litellm-master-key\n",
     "litellm-upstream-key": "synthetic-litellm-upstream-key\n",
     "management-cidrs": "127.0.0.1/32\n",
+    "token-signing-key": "synthetic-token-signing-key-00000000\n",
 }
 
 

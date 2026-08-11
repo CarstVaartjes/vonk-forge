@@ -41,6 +41,7 @@ DEPLOYMENT_SECRET_NAMES = {
     "litellm-upstream-key",
     "management-cidrs",
     "postgres-password",
+    "token-signing-key",
 }
 LOCAL_SOURCE_SECRET_NAMES = DEPLOYMENT_SECRET_NAMES | {
     "controller-ca-key",
@@ -149,8 +150,8 @@ def test_declares_local_source_and_deployment_secret_boundaries() -> None:
     assert module.LOCAL_SOURCE_SECRET_NAMES == LOCAL_SOURCE_SECRET_NAMES
     assert module.DEPLOYMENT_SECRET_NAMES == DEPLOYMENT_SECRET_NAMES
     assert module.RUNTIME_SECRET_NAMES == LOCAL_SOURCE_SECRET_NAMES
-    assert len(module.LOCAL_SOURCE_SECRET_NAMES) == 14
-    assert len(module.DEPLOYMENT_SECRET_NAMES) == 12
+    assert len(module.LOCAL_SOURCE_SECRET_NAMES) == 15
+    assert len(module.DEPLOYMENT_SECRET_NAMES) == 13
     assert module.LOCAL_SOURCE_SECRET_NAMES - module.DEPLOYMENT_SECRET_NAMES == {
         "controller-ca-key",
         "git-signing-key.pub",
@@ -224,6 +225,10 @@ def test_generates_idempotent_local_runtime_secret_store_without_leaking_values(
     _assert_urlsafe_random_token(
         (secrets_dir / "litellm-upstream-key").read_bytes(),
         name="litellm-upstream-key",
+    )
+    _assert_urlsafe_random_token(
+        (secrets_dir / "token-signing-key").read_bytes(),
+        name="token-signing-key",
     )
     postgres_password = (secrets_dir / "postgres-password").read_text(encoding="ascii")
     assert re.fullmatch(r"[0-9a-f]{64}\n", postgres_password)

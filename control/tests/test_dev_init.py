@@ -782,6 +782,7 @@ def _secret_source(root: Path) -> Path:
         "litellm-master-key": b"litellm-master-key-sentinel\n",
         "litellm-upstream-key": b"litellm-upstream-key-sentinel\n",
         "management-cidrs": b"192.0.2.0/24\n2001:db8::/64\n",
+        "token-signing-key": b"token-signing-key-sentinel-00000000\n",
     }
     for name, content in contents.items():
         (root / name).write_bytes(content)
@@ -855,6 +856,7 @@ def test_stage_runtime_secrets_projects_exact_disjoint_service_authority(
         "database-url",
         "git-signing-key",
         "management-cidrs",
+        "token-signing-key",
         "worker-api-token",
     }
     assert {path.name for path in roots["worker"].iterdir()} == {
@@ -918,6 +920,7 @@ def test_stage_runtime_secrets_assigns_exact_service_owners_when_root(
         "litellm-master-key",
         "litellm-upstream-key",
         "management-cidrs",
+        "token-signing-key",
         "worker-api-token",
     }
     owners: dict[tuple[str, str], tuple[int, int]] = {}
@@ -994,6 +997,7 @@ def test_stage_runtime_secrets_creates_disjoint_service_projections(
         "database-url",
         "git-signing-key",
         "management-cidrs",
+        "token-signing-key",
         "worker-api-token",
     }
     assert {path.name for path in worker_root.iterdir()} == {
@@ -1175,6 +1179,7 @@ def test_stage_runtime_secrets_preserves_generated_credentials_and_refreshes_inp
     (source / "agent-ca-key").write_bytes(b"replacement-agent-ca-key\n")
     (source / "controller-server-key").write_bytes(b"replacement-server-key\n")
     (source / "litellm-master-key").write_bytes(b"replacement-litellm-key\n")
+    (source / "token-signing-key").write_bytes(b"replacement-token-signing-key-0000\n")
     stage_runtime_secrets(
         source,
         api_root,
@@ -1203,6 +1208,9 @@ def test_stage_runtime_secrets_preserves_generated_credentials_and_refreshes_inp
     assert (litellm_root / "litellm-master-key").read_bytes() == (
         b"replacement-litellm-key\n"
     )
+    assert (api_root / "token-signing-key").read_bytes() == (
+        b"replacement-token-signing-key-0000\n"
+    )
     assert {path.name for path in api_root.iterdir()} == {
         "admin-grant-private-key",
         "agent-ca-certificate",
@@ -1211,6 +1219,7 @@ def test_stage_runtime_secrets_preserves_generated_credentials_and_refreshes_inp
         "database-url",
         "git-signing-key",
         "management-cidrs",
+        "token-signing-key",
         "worker-api-token",
     }
     assert {path.name for path in worker_root.iterdir()} == {
@@ -1803,12 +1812,66 @@ def test_main_initializes_repository_synthetic_state_and_runtime_secrets(
     assert generation["api_image"] == API_IMAGE
     assert generation["worker_image"] == WORKER_IMAGE
     assert (api_root / "admin-grant-private-key").is_file()
+    assert (api_root / "token-signing-key").is_file()
     assert (migrate_root / "database-url").is_file()
     assert (worker_root / "worker-api-token").is_file()
     assert (caddy_root / "controller-server-key").is_file()
     assert (litellm_root / "litellm-master-key").is_file()
     assert (runtime_config_root / "Caddyfile").is_file()
     assert all(path.is_dir() for path in (state, routes, supervisor))
+
+
+def test_main_repository_phase_never_requires_or_projects_runtime_authority(
+    tmp_path: Path,
+    local_acceptance: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _origin_path, _publisher, repository_url, expected = _origin(tmp_path)
+    repository = tmp_path / "repository"
+    monkeypatch.setenv("VONK_DEV_INIT_PHASE", "repository")
+    monkeypatch.setenv("VONK_DEV_EXPECTED_COMMIT", expected)
+    monkeypatch.setenv("VONK_DEV_API_IMAGE", API_IMAGE)
+    monkeypatch.setenv("VONK_DEV_WORKER_IMAGE", WORKER_IMAGE)
+    monkeypatch.setenv("VONK_DEV_REPOSITORY_URL", repository_url)
+    monkeypatch.setenv("VONK_REPOSITORY_PATH", str(repository))
+
+    assert main() == 0
+    assert _git(repository, "rev-parse", "main") == expected
+    assert not (tmp_path / "api").exists()
+    assert not (tmp_path / "identity").exists()
+
+
+def test_main_runtime_phase_never_requires_or_mutates_a_repository(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = _set_main_environment(
+        tmp_path,
+        monkeypatch,
+        repository_url="https://must-not-be-used.invalid/repository.git",
+    )
+    paths["source"] = _secret_source(paths["source"])
+    monkeypatch.setenv("VONK_DEV_INIT_PHASE", "runtime")
+    monkeypatch.setenv("VONK_DEV_EXPECTED_COMMIT", "a" * 40)
+    monkeypatch.setenv("VONK_DEV_API_IMAGE", API_IMAGE)
+    monkeypatch.setenv("VONK_DEV_WORKER_IMAGE", WORKER_IMAGE)
+    monkeypatch.delenv("VONK_DEV_REPOSITORY_URL")
+    monkeypatch.delenv("VONK_REPOSITORY_PATH")
+
+    assert main() == 0
+    assert not paths["repository"].exists()
+    assert (paths["api"] / "token-signing-key").is_file()
+    assert (paths["runtime_config"] / "Caddyfile").is_file()
+    assert (paths["identity"] / "active.json").is_file()
+
+
+def test_main_rejects_an_unknown_initialization_phase(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("VONK_DEV_INIT_PHASE", "network-and-secrets")
+
+    with pytest.raises(DevInitError, match="VONK_DEV_INIT_PHASE"):
+        main()
 
 
 def test_main_derives_mutable_repository_and_projection_identity_from_selected_cohort(

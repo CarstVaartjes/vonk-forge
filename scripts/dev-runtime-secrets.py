@@ -45,6 +45,7 @@ DEPLOYMENT_SECRET_NAMES = frozenset(
         "litellm-upstream-key",
         "management-cidrs",
         "postgres-password",
+        "token-signing-key",
     }
 )
 LOCAL_SOURCE_SECRET_NAMES = DEPLOYMENT_SECRET_NAMES | frozenset(
@@ -399,6 +400,7 @@ def _secret_bundle(
         "litellm-upstream-key": token(),
         "management-cidrs": ("\n".join(management_cidrs) + "\n").encode("ascii"),
         "postgres-password": (password + "\n").encode("ascii"),
+        "token-signing-key": token(),
     }
 
 
@@ -571,7 +573,12 @@ def _validate_bundle(
         "ascii"
     ):
         raise RuntimeSecretError("development management CIDRs do not match")
-    for name in ("agent-proxy-auth", "litellm-master-key", "litellm-upstream-key"):
+    for name in (
+        "agent-proxy-auth",
+        "litellm-master-key",
+        "litellm-upstream-key",
+        "token-signing-key",
+    ):
         try:
             value = bundle[name].decode("ascii").strip()
             decoded = base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))

@@ -71,8 +71,15 @@ def _dockerfile() -> str:
 def test_focused_publication_gate_covers_cohort_and_startup_settings() -> None:
     step = _step(_workflow(), "Run focused source and Compose contracts")
 
-    assert "control/tests/test_dev_cohort.py" in step
-    assert "control/tests/test_settings.py" in step
+    for contract in (
+        "deploy/compose/tests/test_dev_compose_secrets.py",
+        "scripts/tests/test_dev_runtime_secrets.py",
+        "scripts/tests/test_dev_runtime_project.py",
+        "scripts/tests/test_dev_admin_token.py",
+        "control/tests/test_dev_cohort.py",
+        "control/tests/test_settings.py",
+    ):
+        assert contract in step
 
 
 def _docker_stage(text: str, name: str) -> str:
@@ -584,27 +591,12 @@ def test_workflow_builds_scans_and_accepts_oci_archives_before_login() -> None:
     assert "--channel dev" in render
     assert 'docker compose -f "$publication_root/docker-compose.pinned.yml" config -q' in render
     assert 'docker compose -f "$publication_root/docker-compose.dev.yml" config -q' in render
-    assert 'docker tag vonk-forge-api:dev-local ghcr.io/carstvaartjes/vonk-forge-api:dev' in smoke
-    assert 'docker tag vonk-forge-worker:dev-local ghcr.io/carstvaartjes/vonk-forge-worker:dev' in smoke
-    assert "scripts/dev-runtime-secrets.py" in smoke
-    assert "scripts/dev-runtime-project" in smoke
-    assert "docker compose" in smoke
-    assert "up -d --pull never" in smoke
-    assert "down --volumes --remove-orphans" in smoke
-    assert "development stack volume cleanup failed" in smoke
-    assert "original_status=$?" in smoke
-    assert 'exit "$original_status"' in smoke
-    assert "|| true" not in smoke
-    assert smoke.index("trap cleanup EXIT") < smoke.index("mktemp -d")
-    for service in ("postgres", "migrate", "control-api", "caddy", "litellm"):
-        assert service in smoke
-    assert "/agent/v1/enroll" in smoke
-    assert "enroll.vonk-forge.lan" in smoke
-    assert "agents.vonk-forge.lan" in smoke
-    assert 'mtls_status=$(curl' in smoke
-    assert '[[ "$mtls_status" != 000 ]]' in smoke
-    assert '[[ "$mtls_exit" != 35 && "$mtls_exit" != 56 ]]' in smoke
-    assert "certificate (is )?required" in smoke
+    assert "deploy/compose/tests/test_dev_complete_stack.py" in smoke
+    assert "test_complete_development_stack_enforces_tls_identity_and_acks_routes" in smoke
+    assert "--maxfail=1" in smoke
+    assert "200|400|401|403|405|409|415|422" not in smoke
+    assert "enroll_status" not in smoke
+    assert "uv run --project control --frozen pytest" in smoke
     assert text.index("Preload pinned runtime dependency") < text.index(
         "Render and validate disposable development Compose artifacts"
     )
@@ -616,10 +608,7 @@ def test_workflow_builds_scans_and_accepts_oci_archives_before_login() -> None:
     )
     assert "scripts/verify-dev-image-secrets" in accept
     assert '--expected-commit "$GITHUB_SHA"' in accept
-    assert (
-        '--expected-repository "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"'
-        in accept
-    )
+    assert '--expected-repository "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"' in accept
     assert "scripts/dev-image-acceptance" in accept
     assert text.index("Scan complete local publication inputs") < text.index("Log in to GHCR")
     assert "Upload accepted publication inputs" in text

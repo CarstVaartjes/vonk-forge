@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import os
 import re
+import secrets
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from .dev_cohort import DevelopmentCohortError, require_selected_cohort
-from .development_tokens import DEVELOPMENT_TOKEN_SIGNING_KEY
 from .presence import ManagementAddressPolicy, PresenceError
 
 
@@ -26,6 +26,7 @@ class StartupMode(StrEnum):
 
 
 _AGENT_PROXY_AUTH_PATTERN = re.compile(rb"[A-Za-z0-9_-]{32,}\Z")
+_EPHEMERAL_DEVELOPMENT_TOKEN_SIGNING_KEY = secrets.token_bytes(32)
 _GENERATION_IDENTITY_ENVIRONMENT = (
     "VONK_CONTROL_GENERATION_ID",
     "VONK_DATABASE_REVISION",
@@ -372,10 +373,10 @@ class Settings:
             if signing_path.is_symlink() or not signing_path.is_file():
                 raise SettingsError("token signing key must be a regular non-symlink file")
             signing_key = signing_path.read_bytes().strip()
-        elif mode == "production":
-            raise SettingsError("VONK_TOKEN_SIGNING_KEY_FILE is required in production")
+        elif mode == "production" or (mode == "development" and agent_enabled):
+            raise SettingsError("VONK_TOKEN_SIGNING_KEY_FILE is required when the agent runtime is enabled")
         else:
-            signing_key = DEVELOPMENT_TOKEN_SIGNING_KEY
+            signing_key = _EPHEMERAL_DEVELOPMENT_TOKEN_SIGNING_KEY
         if len(signing_key) < 32:
             raise SettingsError("token signing key must contain at least 32 bytes")
         metrics_file = os.environ.get("VONK_METRICS_TOKEN_FILE")

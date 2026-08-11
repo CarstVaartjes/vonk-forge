@@ -4,7 +4,7 @@
 
 **Goal:** Fix the four accepted review findings and the date-sensitive agent test while keeping all official development and production release authority inside GitHub Actions.
 
-**Architecture:** The development repository keeps accepted GitHub state on local `main` and mutable NAS-local state on checked-out `deploy`. `dev-init` projects runtime secrets into three service-specific named volumes. The dedicated development release workflow supplies its monotonic GitHub run number to package metadata, while the reusable apt publisher uses Acquire-By-Hash for race-free index switching.
+**Architecture:** The development repository keeps accepted GitHub state on local `main` and mutable NAS-local state on checked-out `deploy`. A networked, secret-free repository initializer is separate from the network-disabled runtime initializer, which projects service-specific authority. The dedicated development release workflow supplies its monotonic GitHub run number to package metadata, while the reusable apt publisher uses Acquire-By-Hash for race-free index switching.
 
 **Tech Stack:** Python 3.12, pytest, Git, Docker Compose YAML, GitHub Actions YAML, Bash, aptly, Debian version semantics.
 
@@ -14,7 +14,9 @@
 - Development package versions are exactly `X.Y.Z~dev.<workflow-run-number>+g<sha12>`; production package versions remain exactly `X.Y.Z`.
 - The dedicated `.github/workflows/agent-release.yml` identity must remain stable because its GitHub `run_number` is the monotonic development ordering authority and is stable across reruns.
 - `main` is the last accepted GitHub baseline; `deploy` is the API's mutable NAS-local development branch.
-- NAS source secret files remain file-backed inputs only to `dev-init`; migration, API, and worker receive separate UID/GID-10001-readable named-volume projections.
+- NAS source secret files remain file-backed inputs only to the network-disabled
+  runtime `dev-init`; migration, API, worker, Caddy, and LiteLLM receive separate
+  least-privilege named-volume projections.
 - Migration receives only `database-url`; it must not receive the Git signing key, generated admin private key, or worker token.
 - Initial apt publication must enable Acquire-By-Hash, and generated publication state must prove the release advertises it and the corresponding SHA256 index paths exist before upload.
 - Production deadline behavior is unchanged; the agent CI repair removes test dependence on scheduler and filesystem timing.

@@ -86,7 +86,7 @@ ln -s "$secrets_dir" "$workspace/secrets"
 overlay="$workspace/docker-compose.local.yaml"
 cat > "$overlay" <<EOF
 services:
-  dev-init:
+  dev-repository-init:
     environment:
       VONK_DEV_LOCAL_ACCEPTANCE: '1'
       VONK_DEV_REPOSITORY_URL: file:///source-origin

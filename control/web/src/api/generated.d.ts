@@ -1179,6 +1179,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/recipes/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Run Status */
+        get: operations["getRecipeRunStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/recipes/runs/{run_id}/stop": {
         parameters: {
             query?: never;
@@ -2870,6 +2887,26 @@ export interface components {
             /** Installation Id */
             installation_id: string;
         };
+        /** RunRankStatusResponse */
+        RunRankStatusResponse: {
+            /** Age Seconds */
+            age_seconds: number;
+            /** Fresh */
+            fresh: boolean;
+            /** Node Id */
+            node_id: string;
+            /**
+             * Observed At
+             * Format: date-time
+             */
+            observed_at: string;
+            /** Rank */
+            rank: number;
+            /** Role */
+            role: string;
+            /** State */
+            state: string;
+        };
         /** RunRequest */
         RunRequest: {
             /** Alias */
@@ -2880,6 +2917,21 @@ export interface components {
             plan_digest: string;
             /** Request Key */
             request_key: string;
+        };
+        /** RunStatusResponse */
+        RunStatusResponse: {
+            /** Alias */
+            alias: string;
+            /** Healthy */
+            healthy: boolean;
+            /** Id */
+            id: string;
+            /** Ranks */
+            ranks: components["schemas"]["RunRankStatusResponse"][];
+            /** Route State */
+            route_state: string;
+            /** State */
+            state: string;
         };
         /** SourceBundleResponse */
         SourceBundleResponse: {
@@ -6750,6 +6802,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OperationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getRecipeRunStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunStatusResponse"];
                 };
             };
             /** @description Validation Error */

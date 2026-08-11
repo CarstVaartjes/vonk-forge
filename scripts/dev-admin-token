@@ -34,7 +34,57 @@ def _ttl(value: str) -> int:
     return ttl
 
 
-def write_token(output: Path, *, ttl_seconds: int) -> Path:
+def _read_signing_key(path: Path) -> bytes:
+    source = Path(os.path.abspath(path))
+    descriptor = -1
+    try:
+        listed = source.stat(follow_symlinks=False)
+        descriptor = os.open(
+            source,
+            os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
+        )
+        opened = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or (listed.st_dev, listed.st_ino) != (opened.st_dev, opened.st_ino)
+            or opened.st_uid != os.geteuid()
+            or opened.st_nlink != 1
+            or stat.S_IMODE(opened.st_mode) != 0o600
+            or not 0 < opened.st_size <= 4096
+        ):
+            raise TokenFileError("development token signing key is unsafe")
+        content = bytearray()
+        while len(content) <= 4096:
+            chunk = os.read(descriptor, min(4097 - len(content), 4096))
+            if not chunk:
+                break
+            content.extend(chunk)
+        after = os.fstat(descriptor)
+        if (
+            len(content) != opened.st_size
+            or (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns)
+            != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+        ):
+            raise TokenFileError("development token signing key changed while reading")
+        signing_key = bytes(content).strip()
+        if len(signing_key) < 32:
+            raise TokenFileError("development token signing key is invalid")
+        return signing_key
+    except TokenFileError:
+        raise
+    except OSError as error:
+        raise TokenFileError("development token signing key is unavailable") from error
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def write_token(
+    output: Path,
+    *,
+    signing_key_file: Path,
+    ttl_seconds: int,
+) -> Path:
     destination = Path(os.path.abspath(output))
     parent = destination.parent
     try:
@@ -50,7 +100,9 @@ def write_token(output: Path, *, ttl_seconds: int) -> Path:
             "token parent directory must be private and operator-owned"
         )
 
+    signing_key = _read_signing_key(signing_key_file)
     token = issue_development_admin_token(
+        signing_key=signing_key,
         ttl_seconds=ttl_seconds,
         now=int(time.time()),
     )
@@ -95,12 +147,14 @@ def write_token(output: Path, *, ttl_seconds: int) -> Path:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--signing-key-file", type=Path, required=True)
     parser.add_argument("--ttl-seconds", type=_ttl, default=21_600)
     arguments = parser.parse_args()
     os.umask(0o077)
     try:
         destination = write_token(
             arguments.output,
+            signing_key_file=arguments.signing_key_file,
             ttl_seconds=arguments.ttl_seconds,
         )
     except TokenFileError as error:

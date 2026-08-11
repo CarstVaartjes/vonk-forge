@@ -15,7 +15,6 @@ from http.client import HTTPConnection
 from pathlib import Path
 
 import pytest
-
 from vonk_control.recipe_contract import recipe_content_sha256, validate_recipe
 from vonk_control.source_bundles import generate_source_bundle
 from vonk_control.source_policy import enforce_build_source_policy

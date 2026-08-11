@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import importlib.util
 import ipaddress
+import json
 import os
 import re
 import secrets
@@ -21,6 +23,8 @@ _DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 _READ_FLAGS = os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC
 _WRITE_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
 _MAX_FILE_BYTES = 2 * 1024 * 1024
+_PUBLICATION_JOURNAL = ".vonk-forge-publish"
+_PUBLICATION_TOMBSTONE = ".vonk-forge-publish.cleanup"
 _LOCAL_STAGING_FILESYSTEMS = frozenset(
     {
         "btrfs",
@@ -50,6 +54,7 @@ _PUBLISHED_SECRET_NAMES = frozenset(
         "litellm-upstream-key",
         "management-cidrs",
         "postgres-password",
+        "token-signing-key",
     }
 )
 
@@ -275,7 +280,12 @@ def _validate_destination(destination: Path) -> tuple[Path, bool]:
             ) from error
     if not stat.S_ISDIR(destination_metadata.st_mode):
         raise ProjectPublicationError("project destination is unsafe")
-    allowed = {"docker-compose.yml", "secrets"}
+    allowed = {
+        "docker-compose.yml",
+        "secrets",
+        _PUBLICATION_JOURNAL,
+        _PUBLICATION_TOMBSTONE,
+    }
     entries = {entry.name for entry in destination.iterdir()}
     if not entries <= allowed:
         raise ProjectPublicationError("project destination contains unexpected entries")
@@ -304,16 +314,259 @@ def _validate_destination(destination: Path) -> tuple[Path, bool]:
     return secret_destination, created
 
 
-def _remove_hidden_temporaries(destination: Path) -> None:
-    for directory in (destination, destination / "secrets"):
-        if not directory.is_dir():
-            continue
-        for child in directory.iterdir():
-            if child.name.startswith("."):
-                if child.is_dir() and not child.is_symlink():
-                    shutil.rmtree(child)
-                else:
-                    child.unlink(missing_ok=True)
+def _publication_lock_path(destination: Path) -> Path:
+    digest = hashlib.sha256(os.fsencode(destination.name)).hexdigest()[:24]
+    return destination.parent / f".vonk-forge-publish-{digest}.lock"
+
+
+def _acquire_publication_lock(destination: Path) -> int:
+    descriptor = -1
+    path = _publication_lock_path(destination)
+    try:
+        descriptor = os.open(
+            path,
+            os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC,
+            0o600,
+        )
+        os.fchmod(descriptor, 0o600)
+        opened = os.fstat(descriptor)
+        listed = path.lstat()
+        if (
+            (opened.st_dev, opened.st_ino) != (listed.st_dev, listed.st_ino)
+            or not stat.S_ISREG(opened.st_mode)
+            or opened.st_uid != os.geteuid()
+            or opened.st_nlink != 1
+        ):
+            raise ProjectPublicationError("publication lock is unsafe")
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise ProjectPublicationError(
+                "another project publisher is active"
+            ) from error
+        return descriptor
+    except ProjectPublicationError:
+        if descriptor >= 0:
+            os.close(descriptor)
+        raise
+    except OSError as error:
+        if descriptor >= 0:
+            os.close(descriptor)
+        raise ProjectPublicationError(
+            "exclusive publication locking is unavailable"
+        ) from error
+
+
+def _release_publication_lock(descriptor: int) -> None:
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
+    finally:
+        os.close(descriptor)
+
+
+def _generation_paths() -> tuple[str, ...]:
+    return ("docker-compose.yml",) + tuple(
+        f"secrets/{name}" for name in sorted(_PUBLISHED_SECRET_NAMES)
+    )
+
+
+def _digest(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()
+
+
+def _read_generation(destination: Path) -> dict[str, bytes]:
+    generation: dict[str, bytes] = {}
+    for relative in _generation_paths():
+        path = destination / relative
+        if path.exists() or path.is_symlink():
+            generation[relative] = _read_regular(path, private=True)
+    return generation
+
+
+def _write_journal_generation(root: Path, generation: dict[str, bytes]) -> None:
+    root.mkdir(mode=0o700)
+    (root / "secrets").mkdir(mode=0o700)
+    for relative, content in generation.items():
+        _write_verified(root / relative, content, 0o600)
+
+
+def _journal_manifest(
+    old_generation: dict[str, bytes], new_generation: dict[str, bytes]
+) -> bytes:
+    manifest = {
+        "schema_version": 1,
+        "old": {name: _digest(content) for name, content in old_generation.items()},
+        "new": {name: _digest(content) for name, content in new_generation.items()},
+    }
+    return (json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n").encode(
+        "ascii"
+    )
+
+
+def _load_recovery_generation(journal: Path) -> dict[str, bytes] | None:
+    manifest_path = journal / "manifest.json"
+    if not manifest_path.exists():
+        return None
+    try:
+        manifest = json.loads(
+            _read_regular(manifest_path, private=True, maximum=64 * 1024)
+        )
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise ProjectPublicationError("publication journal is invalid") from error
+    if (
+        not isinstance(manifest, dict)
+        or manifest.get("schema_version") != 1
+        or not isinstance(manifest.get("old"), dict)
+        or not isinstance(manifest.get("new"), dict)
+    ):
+        raise ProjectPublicationError("publication journal is invalid")
+    allowed = set(_generation_paths())
+    old_hashes = manifest["old"]
+    new_hashes = manifest["new"]
+    if (
+        not set(old_hashes) <= allowed
+        or set(new_hashes) != allowed
+        or any(
+            not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None
+            for value in (*old_hashes.values(), *new_hashes.values())
+        )
+    ):
+        raise ProjectPublicationError("publication journal is invalid")
+    expected_entries = {
+        "manifest.json",
+        "old",
+        "new",
+        "scratch",
+    }
+    if {entry.name for entry in journal.iterdir()} != expected_entries:
+        raise ProjectPublicationError("publication journal is invalid")
+    for generation_name, expected_names in (("old", old_hashes), ("new", new_hashes)):
+        root = journal / generation_name
+        if not root.is_dir() or root.is_symlink():
+            raise ProjectPublicationError("publication journal is invalid")
+        actual_entries = {
+            str(path.relative_to(root)) for path in root.rglob("*")
+        }
+        if actual_entries != set(expected_names) | {"secrets"}:
+            raise ProjectPublicationError("publication journal is invalid")
+        expected_files = set(expected_names)
+        actual_files = {
+            str(path.relative_to(root))
+            for path in root.rglob("*")
+            if path.is_file() and not path.is_symlink()
+        }
+        actual_directories = {
+            str(path.relative_to(root))
+            for path in root.rglob("*")
+            if path.is_dir() and not path.is_symlink()
+        }
+        if actual_files != expected_files or actual_directories != {"secrets"}:
+            raise ProjectPublicationError("publication journal is invalid")
+    scratch = journal / "scratch"
+    if not scratch.is_dir() or scratch.is_symlink():
+        raise ProjectPublicationError("publication journal is invalid")
+    for child in scratch.iterdir():
+        if not child.is_file() or child.is_symlink():
+            raise ProjectPublicationError("publication journal is invalid")
+        child.unlink()
+    old_generation: dict[str, bytes] = {}
+    for relative, expected_digest in old_hashes.items():
+        content = _read_regular(journal / "old" / relative, private=True)
+        if _digest(content) != expected_digest:
+            raise ProjectPublicationError("publication journal failed verification")
+        old_generation[relative] = content
+    return old_generation
+
+
+def _replace_visible(path: Path, content: bytes, scratch: Path) -> None:
+    temporary = scratch / secrets.token_hex(16)
+    try:
+        _write_verified(temporary, content, 0o600)
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _restore_generation(
+    destination: Path, generation: dict[str, bytes], scratch: Path
+) -> None:
+    secret_destination = destination / "secrets"
+    secret_destination.mkdir(mode=0o700, exist_ok=True)
+    for relative in _generation_paths():
+        path = destination / relative
+        if relative in generation:
+            _replace_visible(path, generation[relative], scratch)
+        else:
+            path.unlink(missing_ok=True)
+    restored = _read_generation(destination)
+    if {
+        name: _digest(content) for name, content in restored.items()
+    } != {name: _digest(content) for name, content in generation.items()}:
+        raise ProjectPublicationError("previous project generation cannot be restored")
+
+
+def _recover_publication(destination: Path) -> None:
+    journal = destination / _PUBLICATION_JOURNAL
+    if not journal.exists() and not journal.is_symlink():
+        return
+    if not journal.is_dir() or journal.is_symlink():
+        raise ProjectPublicationError("publication journal is unsafe")
+    old_generation = _load_recovery_generation(journal)
+    if old_generation is None:
+        _retire_publication_journal(destination, journal)
+        return
+    _restore_generation(destination, old_generation, journal / "scratch")
+    _retire_publication_journal(destination, journal)
+
+
+def _remove_publication_tombstone(destination: Path) -> None:
+    tombstone = destination / _PUBLICATION_TOMBSTONE
+    if not tombstone.exists() and not tombstone.is_symlink():
+        return
+    if not tombstone.is_dir() or tombstone.is_symlink():
+        raise ProjectPublicationError("publication cleanup tombstone is unsafe")
+    try:
+        shutil.rmtree(tombstone)
+    except OSError as error:
+        raise ProjectPublicationError(
+            "completed publication cleanup was interrupted; rerun to continue"
+        ) from error
+
+
+def _retire_publication_journal(destination: Path, journal: Path) -> None:
+    tombstone = destination / _PUBLICATION_TOMBSTONE
+    try:
+        os.replace(journal, tombstone)
+        shutil.rmtree(tombstone)
+    except OSError as error:
+        raise ProjectPublicationError(
+            "completed publication cleanup was interrupted; rerun to continue"
+        ) from error
+
+
+def _prepare_publication_journal(
+    destination: Path,
+    old_generation: dict[str, bytes],
+    new_generation: dict[str, bytes],
+) -> Path:
+    journal = destination / _PUBLICATION_JOURNAL
+    try:
+        journal.mkdir(mode=0o700)
+        _write_journal_generation(journal / "old", old_generation)
+        _write_journal_generation(journal / "new", new_generation)
+        (journal / "scratch").mkdir(mode=0o700)
+        pending_manifest = journal / "manifest.pending"
+        _write_verified(
+            pending_manifest,
+            _journal_manifest(old_generation, new_generation),
+            0o600,
+        )
+        os.replace(pending_manifest, journal / "manifest.json")
+    except BaseException:
+        if not (journal / "manifest.json").exists():
+            shutil.rmtree(journal, ignore_errors=True)
+        raise
+    return journal
 
 
 def _filesystem_type_at(descriptor: int) -> str:
@@ -568,6 +821,7 @@ def publish_project(
     staging_directory = -1
     staging_identity = (-1, -1)
     staging_secrets = -1
+    publication_lock = -1
     try:
         staging_name, staging_directory, staging_identity = (
             _create_local_staging_directory(staging_parent)
@@ -590,23 +844,31 @@ def publish_project(
             raise ProjectPublicationError("project staging directory changed")
 
         secret_destination, _created = _validate_destination(destination)
-        suffix = secrets.token_hex(16)
-        compose_temporary = destination / f".docker-compose.yml.{suffix}"
-        temporary_secrets: list[Path] = []
+        publication_lock = _acquire_publication_lock(destination)
+        _remove_publication_tombstone(destination)
+        _recover_publication(destination)
+        old_generation = _read_generation(destination)
+        new_generation = {"docker-compose.yml": staged_compose}
+        new_generation.update(
+            {
+                f"secrets/{name}": staged_secrets[name]
+                for name in sorted(_PUBLISHED_SECRET_NAMES)
+            }
+        )
+        journal = _prepare_publication_journal(
+            destination, old_generation, new_generation
+        )
         try:
-            _write_verified(compose_temporary, staged_compose, 0o600)
-            for name in sorted(_PUBLISHED_SECRET_NAMES):
-                temporary = secret_destination / f".{name}.{suffix}"
-                _write_verified(temporary, staged_secrets[name], 0o600)
-                temporary_secrets.append(temporary)
-            os.replace(compose_temporary, destination / "docker-compose.yml")
-            for name, temporary in zip(
-                sorted(_PUBLISHED_SECRET_NAMES), temporary_secrets, strict=True
-            ):
-                os.replace(temporary, secret_destination / name)
+            for relative in _generation_paths():
+                _replace_visible(
+                    destination / relative,
+                    new_generation[relative],
+                    journal / "scratch",
+                )
             if {entry.name for entry in destination.iterdir()} != {
                 "docker-compose.yml",
                 "secrets",
+                _PUBLICATION_JOURNAL,
             }:
                 raise ProjectPublicationError("published project layout is invalid")
             if {
@@ -615,13 +877,23 @@ def publish_project(
                 raise ProjectPublicationError(
                     "published project secret layout is invalid"
                 )
-        except OSError as error:
-            raise ProjectPublicationError(
-                "project publication was interrupted"
-            ) from error
-        finally:
-            _remove_hidden_temporaries(destination)
+            published = _read_generation(destination)
+            if {
+                name: _digest(content) for name, content in published.items()
+            } != {name: _digest(content) for name, content in new_generation.items()}:
+                raise ProjectPublicationError("published project failed verification")
+        except (OSError, ProjectPublicationError) as error:
+            try:
+                _recover_publication(destination)
+            except ProjectPublicationError as recovery_error:
+                raise ProjectPublicationError(
+                    "project publication was interrupted; rerun to recover"
+                ) from recovery_error
+            raise ProjectPublicationError("project publication was interrupted") from error
+        _retire_publication_journal(destination, journal)
     finally:
+        if publication_lock >= 0:
+            _release_publication_lock(publication_lock)
         if staging_directory >= 0:
             _remove_local_staging(
                 staging_parent,

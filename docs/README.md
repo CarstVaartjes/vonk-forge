@@ -40,6 +40,7 @@ LiteLLM publishes only routes acknowledged by the control plane.
 
 ## Start here
 
+- [Fresh development installation](runbooks/fresh-development-install.md)
 - [Architecture overview](architecture-overview.md)
 - [Source-first local Compose deployment](../deploy/compose/README.md)
 - [Development NAS installation and runtime secrets](runbooks/development-nas-installation.md)

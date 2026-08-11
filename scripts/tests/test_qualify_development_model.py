@@ -1,14 +1,21 @@
 from __future__ import annotations
 
 import copy
+import importlib
 import json
+import os
+import socket
 import subprocess
+import sys
+import time
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 QUALIFIER = ROOT / "scripts" / "qualify-development-model"
+MODEL_CONTEXT = ROOT / "config/recipes/development/model-smoke-context"
+FABRIC_RENDEZVOUS = MODEL_CONTEXT / "fabric-rendezvous"
 NODE_1 = "spk_0123456789abcdef0123456789abcdef"
 NODE_2 = "spk_fedcba9876543210fedcba9876543210"
 IMAGE = (
@@ -136,6 +143,92 @@ def _evidence() -> dict[str, object]:
 def _write(path: Path, value: object) -> Path:
     path.write_text(json.dumps(value, sort_keys=True) + "\n", encoding="utf-8")
     return path
+
+
+def _socketbox(tmp_path: Path) -> Path:
+    command = tmp_path / "socketbox"
+    command.write_text(
+        f"""#!{sys.executable}
+import os
+import pathlib
+import socket
+import subprocess
+import sys
+
+arguments = sys.argv[1:]
+if not arguments or arguments.pop(0) != "nc":
+    raise SystemExit(2)
+listen = any(value in {{"-l", "-lk"}} for value in arguments)
+local = arguments[arguments.index("-s") + 1] if "-s" in arguments else "0.0.0.0"
+timeout = int(arguments[arguments.index("-w") + 1])
+if listen:
+    port = int(arguments[arguments.index("-p") + 1])
+    executable = arguments[arguments.index("-e") + 1]
+    with socket.socket() as server:
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind((local, port))
+        server.listen()
+        while True:
+            connection, _peer = server.accept()
+            with connection:
+                peer_log = os.environ.get("VONK_SOCKETBOX_PEER_LOG")
+                if peer_log:
+                    pathlib.Path(peer_log).write_text(_peer[0] + "\\n", encoding="ascii")
+                request = bytearray()
+                while chunk := connection.recv(4096):
+                    request.extend(chunk)
+                completed = subprocess.run(
+                    [executable],
+                    input=bytes(request),
+                    capture_output=True,
+                    env=os.environ,
+                    check=False,
+                )
+                connection.sendall(completed.stdout)
+else:
+    if "-s" in arguments:
+        print("client source binding is unavailable in rootless networking", file=sys.stderr)
+        raise SystemExit(64)
+    payload = sys.stdin.buffer.read()
+    host = arguments[-2]
+    port = int(arguments[-1])
+    with socket.socket() as client:
+        client.settimeout(timeout)
+        client.connect((host, port))
+        client.sendall(payload)
+        client.shutdown(socket.SHUT_WR)
+        response = bytearray()
+        while chunk := client.recv(4096):
+            response.extend(chunk)
+    sys.stdout.buffer.write(response)
+""",
+        encoding="utf-8",
+    )
+    command.chmod(0o755)
+    return command
+
+
+def _unused_port(address: str) -> int:
+    with socket.socket() as listener:
+        listener.bind((address, 0))
+        return int(listener.getsockname()[1])
+
+
+def _rendezvous_environment(
+    tmp_path: Path, *, rank: int, local_address: str, port: int
+) -> dict[str, str]:
+    return {
+        **os.environ,
+        "VONK_BUSYBOX": str(_socketbox(tmp_path)),
+        "VONK_FABRIC_RENDEZVOUS_SECONDS": "3",
+        "VONK_MASTER_ADDR": "127.0.0.2",
+        "VONK_LOCAL_ADDR": local_address,
+        "VONK_MASTER_PORT": str(port),
+        "VONK_RANK": str(rank),
+        "VONK_SOCKETBOX_PEER_LOG": str(tmp_path / "socketbox-peer"),
+        "VONK_WORLD_SIZE": "2",
+        "VONK_STATE_ROOT": str(tmp_path / f"state-{rank}"),
+    }
 
 
 def _run(
@@ -333,3 +426,108 @@ def test_repository_model_documents_qualify_and_share_exact_identities(
     assert source["runtime_image"].startswith("ghcr.io/")
     assert topology["single_nodes"] == 1
     assert topology["multinode_nodes"] == 2
+
+
+def test_model_pair_lets_rootless_networking_select_source_for_fabric_exchange(
+    tmp_path: Path,
+) -> None:
+    if not FABRIC_RENDEZVOUS.is_file():
+        pytest.fail("model pair has no executable fabric rendezvous")
+    port = _unused_port("127.0.0.2")
+    coordinator = subprocess.Popen(
+        [str(FABRIC_RENDEZVOUS), "coordinator"],
+        env=_rendezvous_environment(
+            tmp_path, rank=0, local_address="127.0.0.2", port=port
+        ),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        deadline = time.monotonic() + 3
+        joined: subprocess.CompletedProcess[str] | None = None
+        while time.monotonic() < deadline:
+            joined = subprocess.run(
+                [str(FABRIC_RENDEZVOUS), "join"],
+                env=_rendezvous_environment(
+                    tmp_path, rank=1, local_address="127.0.0.3", port=port
+                ),
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            if joined.returncode == 0:
+                break
+            time.sleep(0.05)
+
+        assert joined is not None
+        assert joined.returncode == 0, joined.stderr
+        assert joined.stdout == "fabric rendezvous complete: rank 1 of 2\n"
+        marker = tmp_path / "state-0" / "fabric" / "rank-1-ready"
+        deadline = time.monotonic() + 3
+        while not marker.is_file() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert marker.read_text(encoding="utf-8") == (
+            "vonk-fabric-v1 worker rank=1 world=2 address=127.0.0.3\n"
+        )
+        assert (tmp_path / "socketbox-peer").read_text(encoding="ascii") == (
+            "127.0.0.1\n"
+        )
+    finally:
+        coordinator.terminate()
+        coordinator.wait(timeout=3)
+
+
+def test_model_pair_refuses_an_invalid_declared_local_fabric_address(
+    tmp_path: Path,
+) -> None:
+    if not FABRIC_RENDEZVOUS.is_file():
+        pytest.fail("model pair has no executable fabric rendezvous")
+    completed = subprocess.run(
+        [str(FABRIC_RENDEZVOUS), "join"],
+        env=_rendezvous_environment(
+            tmp_path, rank=1, local_address="not-an-address", port=29500
+        ),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode != 0
+    assert "fabric rendezvous failed" in completed.stderr
+
+
+def test_model_recipe_source_bundle_ships_the_fabric_gate() -> None:
+    sys.path.insert(0, str(ROOT / "control/src"))
+    generate_source_bundle = importlib.import_module(
+        "vonk_control.source_bundles"
+    ).generate_source_bundle
+    recipe = json.loads(
+        (ROOT / "config/recipes/development/model-smoke.json").read_text()
+    )
+    dockerfile = (MODEL_CONTEXT / "Dockerfile").read_text(encoding="utf-8")
+    files = {
+        path.relative_to(MODEL_CONTEXT).as_posix(): path.read_bytes()
+        for path in sorted(MODEL_CONTEXT.rglob("*"))
+        if path.is_file()
+    }
+    bundle = generate_source_bundle(files)
+
+    assert "COPY --from=fabric-tools /bin/busybox /opt/vonk/busybox" in dockerfile
+    assert "fabric-rendezvous /opt/vonk/" in dockerfile
+    assert bundle.sha256 == (
+        "e28c831f3b5b46fc834cd67baad85f5aa325d4c8ae2cc3d1d330721c849d2801"
+    )
+    assert recipe["build"]["context"] == {
+        "sha256": bundle.sha256,
+        "expected_bytes": len(bundle.archive),
+        "media_type": "application/vnd.vonk-forge.source-bundle.v1+tar",
+    }
+    assert recipe["validation"]["checks"] == [
+        "container.started",
+        "fabric.rendezvous.completed",
+        "endpoint.healthy",
+        "inference.completed",
+        "route.withdrawn_on_rank_failure",
+        "route.republished_after_recovery",
+    ]
