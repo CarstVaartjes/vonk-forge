@@ -1,0 +1,163 @@
+{
+  "schema_version": 1,
+  "identity": {
+    "publisher": "vonk",
+    "slug": "dev-http-smoke"
+  },
+  "metadata": {
+    "title": "Development HTTP smoke fixture",
+    "description": "Deterministic source-first development smoke fixture with a local OpenAI-shaped HTTP response.",
+    "tags": [
+      "dev",
+      "http",
+      "smoke"
+    ]
+  },
+  "workload": {
+    "family": "dev-http-smoke",
+    "capabilities": [
+      "openai.chat"
+    ]
+  },
+  "build": {
+    "context": {
+      "sha256": "7a65752ee1a950b3b358c66ceaf2007d0eb824a7842d0a67a5b1e3726957eb80",
+      "expected_bytes": 10240,
+      "media_type": "application/vnd.vonk-forge.source-bundle.v1+tar"
+    },
+    "dockerfile": "Dockerfile",
+    "platform": "linux/arm64",
+    "arguments": [],
+    "network": {
+      "mode": "none",
+      "hosts": []
+    },
+    "resources": {
+      "download_bytes": 0,
+      "temporary_bytes": 1048576,
+      "memory_bytes": 134217728,
+      "timeout_seconds": 60
+    }
+  },
+  "parameters": [],
+  "artifacts": [
+    {
+      "id": "weights",
+      "kind": "http.file",
+      "repository": "https://example.invalid/dev-http-smoke/model.bin",
+      "revision": "0123456789abcdef0123456789abcdef01234567",
+      "download_bytes": 1,
+      "installed_bytes": 1,
+      "mount": {
+        "target": "/models",
+        "read_only": true
+      },
+      "roles": [
+        "entrypoint"
+      ]
+    }
+  ],
+  "runtime": {
+    "interface": "vonk.runtime.v1",
+    "adapter": "dev_http_smoke",
+    "adapter_version": 1,
+    "entrypoint": [
+      "python",
+      "/app/server.py"
+    ],
+    "arguments": [],
+    "environment": [],
+    "endpoint": {
+      "protocol": "openai",
+      "port": 8000,
+      "model_aliases": [
+        "dev-http-smoke"
+      ],
+      "health_path": "/health"
+    },
+    "security": {
+      "devices": [],
+      "capabilities": [],
+      "host_network": false,
+      "privileged": false,
+      "user": "10001:10001",
+      "mounts": [
+        {
+          "source": "state",
+          "target": "/state",
+          "read_only": false
+        },
+        {
+          "source": "model",
+          "target": "/models",
+          "read_only": true
+        }
+      ]
+    },
+    "lifecycle": {
+      "pre_start": [],
+      "post_stop": [],
+      "stop_timeout_seconds": 10
+    }
+  },
+  "deployment_profiles": [
+    {
+      "name": "solo",
+      "description": "Single-node deterministic development smoke profile.",
+      "node_count": 1,
+      "strategy": "single",
+      "parallelism": {
+        "tensor": 1,
+        "pipeline": 1,
+        "data": 1,
+        "backend": "local"
+      },
+      "roles": [
+        {
+          "name": "entrypoint",
+          "count": 1,
+          "endpoint_owner": true,
+          "artifacts": [
+            "weights"
+          ],
+          "resources": {
+            "disk": {
+              "image_bytes": 1048576,
+              "artifact_bytes": 1,
+              "staging_bytes": 1048576,
+              "cache_bytes": 0,
+              "rollback_bytes": 0,
+              "safety_margin_bytes": 1048576
+            },
+            "memory": {
+              "kind": "host",
+              "startup_peak_bytes": 67108864,
+              "steady_state_bytes": 33554432,
+              "runtime_growth_bytes": 0,
+              "system_reserve_bytes": 16777216
+            }
+          }
+        }
+      ],
+      "fabric": {
+        "connectivity": "none",
+        "minimum_bandwidth_mbps": 0
+      },
+      "parameter_overrides": {},
+      "measurement": "declared"
+    }
+  ],
+  "validation": {
+    "checks": [
+      "container.started",
+      "endpoint.healthy",
+      "inference.completed"
+    ],
+    "benchmarks": []
+  },
+  "provenance": {
+    "source_kind": "local",
+    "source_reference": null,
+    "attribution": []
+  }
+}

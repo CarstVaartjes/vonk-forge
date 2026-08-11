@@ -1,0 +1,39 @@
+{
+  "health": {
+    "status": "ok",
+    "service": "dev-http-smoke",
+    "model": "dev-http-smoke",
+    "healthy": true
+  },
+  "request": {
+    "model": "dev-http-smoke",
+    "messages": [
+      {
+        "role": "user",
+        "content": "ping"
+      }
+    ],
+    "stream": false
+  },
+  "response": {
+    "id": "chatcmpl-dev-http-smoke",
+    "object": "chat.completion",
+    "created": 1735689600,
+    "model": "dev-http-smoke",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "dev-http-smoke ok"
+        },
+        "finish_reason": "stop"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 1,
+      "completion_tokens": 4,
+      "total_tokens": 5
+    }
+  }
+}
