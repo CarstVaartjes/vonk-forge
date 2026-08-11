@@ -18,7 +18,10 @@ from vonk_control.artifact_sizes import ArtifactSize, StaticArtifactSizeResolver
 from vonk_control.catalog_service import CatalogService, RecipeDraftInput
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.install_admission import InstallAdmissionService
-from vonk_control.inventory_repository import InventoryRepository, InventorySnapshotInput
+from vonk_control.inventory_repository import (
+    InventoryRepository,
+    InventorySnapshotInput,
+)
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
@@ -32,6 +35,7 @@ from vonk_control.models import (
     RecipeInstallation,
     RecipeRun,
     ResourceReservation,
+    RunNode,
 )
 from vonk_control.recipe_operations import (
     RecipeOperationConflict,
@@ -594,6 +598,60 @@ def test_start_stop_and_uninstall_preserve_capacity_safely(tmp_path: Path) -> No
     with sessions() as session:
         installation = session.get(RecipeInstallation, install.owner_id)
         assert installation.state == "uninstalled"
+
+
+def test_run_status_projects_exact_rank_health_without_agent_secrets(
+    tmp_path: Path,
+) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2
+    )
+    install_plan = service.preview_install(mapping_id, build_id)
+    install = service.install(
+        install_plan,
+        plan_digest=install_plan.plan_digest,
+        actor="admin",
+        request_id="9" * 36,
+    )
+    for node_id in nodes:
+        service.record_node_result(
+            install.id, node_id, succeeded=True, evidence={"installed_bytes": 120}
+        )
+    run_plan = service.preview_run(install.owner_id)
+    start = service.start(
+        run_plan,
+        plan_digest=run_plan.plan_digest,
+        alias="qwen",
+        actor="admin",
+        request_id="a" * 36,
+    )
+    with sessions.begin() as session:
+        ranks = tuple(
+            session.scalars(
+                select(RunNode)
+                .where(RunNode.run_id == start.owner_id)
+                .order_by(RunNode.rank)
+            )
+        )
+        ranks[0].state = "running"
+        ranks[0].evidence_digest = "1" * 64
+        ranks[0].updated_at = NOW
+        ranks[1].state = "failed"
+        ranks[1].evidence_digest = "2" * 64
+        ranks[1].updated_at = NOW
+
+    status = service.run_status(start.owner_id)
+
+    assert status.id == start.owner_id
+    assert status.alias == "qwen"
+    assert status.healthy is False
+    assert [rank.state for rank in status.ranks] == ["running", "failed"]
+    assert [rank.fresh for rank in status.ranks] == [True, True]
+    assert [rank.age_seconds for rank in status.ranks] == [0.0, 0.0]
+    with sessions() as session:
+        assert all(
+            session.get(AgentNode, node_id).state == "active" for node_id in nodes
+        )
 
 
 def test_multinode_start_is_bound_to_authenticated_fabric_rendezvous(

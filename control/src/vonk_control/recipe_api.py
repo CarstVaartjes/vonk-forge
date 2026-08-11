@@ -16,6 +16,7 @@ from .recipe_operations import (
     RecipeOperationConflict,
     RecipeOperationService,
     RecipeOperationView,
+    RecipeRunStatus,
 )
 
 _UUID = r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
@@ -32,6 +33,7 @@ RECIPE_OPERATION_IDS = {
     ("post", "/api/v1/recipes/installations"): "installRecipe",
     ("post", "/api/v1/recipes/run-plans/preview"): "previewRecipeRun",
     ("post", "/api/v1/recipes/runs"): "startRecipeRun",
+    ("get", "/api/v1/recipes/runs/{run_id}"): "getRecipeRunStatus",
     ("get", "/api/v1/recipes/operations/{operation_id}"): "getRecipeOperation",
     ("post", "/api/v1/recipes/operations/{operation_id}/retry"): "retryRecipeOperation",
     ("post", "/api/v1/recipes/runs/{run_id}/stop"): "stopRecipeRun",
@@ -169,6 +171,25 @@ class OperationResponse(StrictModel):
     plan_digest: str
     nodes: list[str]
     result: dict[str, object] | None
+
+
+class RunRankStatusResponse(StrictModel):
+    node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
+    rank: int = Field(ge=0)
+    role: str = Field(min_length=1, max_length=64)
+    state: str = Field(min_length=1, max_length=24)
+    observed_at: datetime
+    age_seconds: float = Field(ge=0)
+    fresh: bool
+
+
+class RunStatusResponse(StrictModel):
+    id: str = Field(pattern=_UUID)
+    alias: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]{0,62}$")
+    state: str = Field(min_length=1, max_length=24)
+    route_state: str = Field(pattern=r"^(withdrawn|pending|published|failed)$")
+    healthy: bool
+    ranks: list[RunRankStatusResponse]
 
 
 class InstallPreviewRequest(StrictModel):
@@ -497,6 +518,23 @@ def install_recipe_operation_routes(
             )
         )
         return operation(value)
+
+    @app.get(
+        "/api/v1/recipes/runs/{run_id}",
+        response_model=RunStatusResponse,
+        operation_id="getRecipeRunStatus",
+    )
+    def run_status(
+        run_id: str = Path(pattern=_UUID), actor: Actor = authenticated
+    ) -> dict[str, object]:
+        administrator(actor)
+        try:
+            value: RecipeRunStatus = recipes().run_status(run_id)
+        except KeyError:
+            raise HTTPException(
+                status_code=404, detail="recipe run not found"
+            ) from None
+        return asdict(value)
 
     @app.get(
         "/api/v1/recipes/operations/{operation_id}",

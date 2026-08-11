@@ -7,7 +7,7 @@ import ipaddress
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 from vonk_agent_protocol import canonical_message
@@ -65,6 +65,27 @@ class RecipeOperationView:
     result: dict[str, object] | None
 
 
+@dataclass(frozen=True, slots=True)
+class RecipeRunRankStatus:
+    node_id: str
+    rank: int
+    role: str
+    state: str
+    observed_at: datetime
+    age_seconds: float
+    fresh: bool
+
+
+@dataclass(frozen=True, slots=True)
+class RecipeRunStatus:
+    id: str
+    alias: str
+    state: str
+    route_state: str
+    healthy: bool
+    ranks: tuple[RecipeRunRankStatus, ...]
+
+
 _TERMINAL_JOB_STATES = frozenset({"succeeded", "failed", "expired"})
 
 
@@ -82,7 +103,10 @@ class RecipeOperationService:
         route_withdrawer: Callable[[str], None] | None = None,
         builds: RecipeBuildService | None = None,
         mappings: ClusterMappingService | None = None,
+        run_health_maximum_age_seconds: int = 300,
     ) -> None:
+        if not 1 <= run_health_maximum_age_seconds <= 300:
+            raise ValueError("recipe run health age is invalid")
         self._sessions = sessions
         self._install_admission = install_admission
         self._run_admission = run_admission
@@ -91,6 +115,7 @@ class RecipeOperationService:
         self._route_withdrawer = route_withdrawer or (lambda _run_id: None)
         self._builds = builds
         self._mappings = mappings
+        self._run_health_maximum_age = timedelta(seconds=run_health_maximum_age_seconds)
 
     def preview_mapping(
         self,
@@ -222,6 +247,56 @@ class RecipeOperationService:
 
     def preview_run(self, installation_id: str) -> RunPlan:
         return self._run_admission.plan_run(installation_id, now=self._clock())
+
+    def run_status(self, run_id: str) -> RecipeRunStatus:
+        now = _aware(self._clock())
+        with self._sessions() as session:
+            run = session.get(RecipeRun, run_id)
+            if run is None:
+                raise KeyError(run_id)
+            nodes = tuple(
+                session.scalars(
+                    select(RunNode)
+                    .where(RunNode.run_id == run_id)
+                    .order_by(RunNode.rank)
+                )
+            )
+            expected = run.plan.get("nodes") if isinstance(run.plan, dict) else None
+            exact_ranks = (
+                isinstance(expected, list)
+                and len(expected) == len(nodes)
+                and all(isinstance(item, Mapping) for item in expected)
+                and {
+                    (item.get("node_id"), item.get("rank"), item.get("role"))
+                    for item in expected
+                }
+                == {(node.node_id, node.rank, node.role) for node in nodes}
+            )
+            ranks: list[RecipeRunRankStatus] = []
+            for node in nodes:
+                observed_at = _aware(node.updated_at)
+                age = now - observed_at
+                fresh = timedelta(0) <= age < self._run_health_maximum_age
+                ranks.append(
+                    RecipeRunRankStatus(
+                        node_id=node.node_id,
+                        rank=node.rank,
+                        role=node.role,
+                        state=node.state,
+                        observed_at=observed_at,
+                        age_seconds=max(0.0, age.total_seconds()),
+                        fresh=fresh,
+                    )
+                )
+            return RecipeRunStatus(
+                id=run.id,
+                alias=run.alias,
+                state=run.state,
+                route_state=run.route_state,
+                healthy=bool(exact_ranks)
+                and all(rank.state == "running" and rank.fresh for rank in ranks),
+                ranks=tuple(ranks),
+            )
 
     def install(
         self,
@@ -1182,8 +1257,16 @@ def _validate_start_evidence(
     return expected_endpoint, digest
 
 
+def _aware(value: datetime) -> datetime:
+    return (
+        value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+    ).astimezone(UTC)
+
+
 __all__ = [
     "RecipeOperationConflict",
     "RecipeOperationService",
     "RecipeOperationView",
+    "RecipeRunRankStatus",
+    "RecipeRunStatus",
 ]

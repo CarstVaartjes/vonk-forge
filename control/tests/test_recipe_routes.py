@@ -5,8 +5,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from vonk_control.auth import TokenCodec
 from vonk_control.litellm import LiteLlmPolicyError, LiteLlmPublisher
 from vonk_control.models import (
     AgentNode,
@@ -19,8 +18,12 @@ from vonk_control.models import (
     RecipeBuild,
     RecipeInstallation,
     RecipeRun,
+    Reconciliation,
+    RoutePublication,
+    RoutePublicationOwner,
     RunNode,
 )
+from vonk_control.operation_api import durable_operation_services
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.recipe_routes import (
@@ -29,12 +32,28 @@ from vonk_control.recipe_routes import (
     RecipeRouteService,
 )
 from vonk_control.route_runtime import AtomicRouteBundlePublisher
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 NOW = datetime(2026, 8, 7, 12, tzinfo=UTC)
 
 
+class MutableClock:
+    def __init__(self, now: datetime) -> None:
+        self.now = now
+
+    def __call__(self) -> datetime:
+        return self.now
+
+
 def setup(
-    tmp_path: Path, *, ranks=2, stale=False, failed_rank=False, validate=lambda _: True
+    tmp_path: Path,
+    *,
+    ranks=2,
+    stale=False,
+    failed_rank=False,
+    validate=lambda _: True,
+    clock=None,
 ):
     tmp_path.mkdir(parents=True, exist_ok=True)
     engine = create_engine(f"sqlite:///{tmp_path / 'routes.sqlite'}")
@@ -48,8 +67,6 @@ def setup(
                 state="active",
                 architecture="linux-arm64",
                 capabilities=[],
-                last_seen_at=NOW
-                - (timedelta(seconds=301) if stale else timedelta()),
             )
             for node in nodes
         )
@@ -172,7 +189,7 @@ def setup(
                     reserved_memory_bytes=100,
                     endpoint={"url": f"http://10.0.0.{rank + 2}:8000"},
                     evidence_digest=str(rank + 1) * 64,
-                    updated_at=NOW,
+                    updated_at=NOW - (timedelta(seconds=301) if stale else timedelta()),
                 )
             )
     applied: list[bytes] = []
@@ -183,10 +200,79 @@ def setup(
         sessions,
         publisher=publisher,
         management_policy=ManagementAddressPolicy.parse("10.0.0.0/24"),
-        clock=lambda: NOW,
+        clock=clock or (lambda: NOW),
         maximum_age_seconds=300,
     )
     return service, publisher, applied, run.id
+
+
+def add_running_run(
+    service: RecipeRouteService,
+    source_run_id: str,
+    *,
+    alias: str,
+    route_state: str,
+    identity: int,
+) -> str:
+    node_id = "spk_" + f"{identity:032x}"
+    with service.sessions.begin() as session:
+        source = session.get(RecipeRun, source_run_id)
+        assert source is not None
+        session.add(
+            AgentNode(
+                node_id=node_id,
+                state="active",
+                architecture="linux-arm64",
+                capabilities=[],
+            )
+        )
+        run = RecipeRun(
+            installation_id=source.installation_id,
+            mapping_id=source.mapping_id,
+            mapping_generation=source.mapping_generation,
+            alias=alias,
+            plan_digest=f"{identity:x}" * 64,
+            plan={},
+            state="running",
+            route_state=route_state,
+            actor="admin",
+            created_at=NOW,
+            updated_at=NOW,
+        )
+        session.add(run)
+        session.flush()
+        session.add(
+            RunNode(
+                run_id=run.id,
+                node_id=node_id,
+                rank=0,
+                role="entrypoint",
+                state="running",
+                port=8000,
+                reserved_memory_bytes=100,
+                endpoint={"url": f"http://10.0.0.{identity}:8000"},
+                evidence_digest=f"{identity:x}" * 64,
+                updated_at=NOW,
+            )
+        )
+        return run.id
+
+
+def atomic_service(
+    service: RecipeRouteService, root: Path, clock
+) -> RecipeRouteService:
+    runtime = AtomicRouteBundlePublisher(
+        root,
+        management_policy=ManagementAddressPolicy.parse("10.0.0.0/24"),
+        clock=clock,
+    )
+    return RecipeRouteService(
+        service.sessions,
+        publisher=AtomicRecipeRoutePublisher(runtime, clock=clock),
+        management_policy=ManagementAddressPolicy.parse("10.0.0.0/24"),
+        clock=clock,
+        maximum_age_seconds=300,
+    )
 
 
 def test_all_ranks_must_be_fresh_and_ready_but_only_entrypoint_is_routed(
@@ -231,6 +317,28 @@ def test_stale_or_failed_rank_blocks_gang_publication(
     assert applied == []
 
 
+def test_candidate_rank_identity_must_exactly_match_accepted_plan(
+    tmp_path: Path,
+) -> None:
+    service, _publisher, applied, run_id = setup(tmp_path)
+    with service.sessions.begin() as session:
+        run = session.get(RecipeRun, run_id)
+        run.plan = {
+            "nodes": [
+                {
+                    "node_id": "spk_" + "9" * 32,
+                    "rank": rank,
+                    "role": "entrypoint" if rank == 0 else "worker",
+                }
+                for rank in range(2)
+            ]
+        }
+
+    with pytest.raises(RecipeRouteError, match="accepted plan"):
+        service.publish_run(run_id)
+    assert applied == []
+
+
 def test_invalid_candidate_retains_previous_generation(tmp_path: Path) -> None:
     service, publisher, _applied, run_id = setup(tmp_path)
     accepted = service.publish_run(run_id)
@@ -260,18 +368,32 @@ def test_withdraw_publishes_empty_generation_before_workload_stop(
     assert publisher.active() == empty
 
 
-def test_withdrawn_running_recipe_is_excluded_from_other_route_candidates(
+def test_candidate_contains_published_runs_and_explicit_pending_run_only(
     tmp_path: Path,
 ) -> None:
-    service, _publisher, _applied, run_id = setup(tmp_path)
-    service.publish_run(run_id)
-    service.withdraw_run(run_id)
+    service, _publisher, applied, published_run = setup(tmp_path)
+    service.publish_run(published_run)
+    add_running_run(
+        service,
+        published_run,
+        alias="unpublished",
+        route_state="withdrawn",
+        identity=3,
+    )
+    pending_run = add_running_run(
+        service,
+        published_run,
+        alias="candidate",
+        route_state="pending",
+        identity=4,
+    )
 
-    state, included, policy = service._candidate(exclude_run_id=None)
+    service.publish_run(pending_run)
 
-    assert state.aliases == {}
-    assert included == set()
-    assert policy.models == {}
+    assert [model["model_name"] for model in json.loads(applied[-1])["model_list"]] == [
+        "candidate",
+        "qwen",
+    ]
 
 
 def test_worker_publishes_pending_route_and_records_failure(tmp_path: Path) -> None:
@@ -301,35 +423,6 @@ def test_worker_publishes_pending_route_and_records_failure(tmp_path: Path) -> N
         assert "LiteLlmPolicyError" in failed.route_error
 
 
-def test_worker_withdraws_on_rank_presence_loss_and_republishes_after_recovery(
-    tmp_path: Path,
-) -> None:
-    service, _publisher, applied, run_id = setup(tmp_path)
-    service.publish_run(run_id)
-    worker = RecipeOperationWorker(service.sessions, service, clock=lambda: NOW)
-    with service.sessions.begin() as session:
-        failed_node = session.get(AgentNode, "spk_" + f"{2:032x}")
-        assert failed_node is not None
-        failed_node.last_seen_at = NOW - timedelta(seconds=301)
-
-    assert worker.tick() is True
-    assert json.loads(applied[-1])["model_list"] == []
-    with service.sessions() as session:
-        run = session.get(RecipeRun, run_id)
-        assert run.route_state == "withdrawn"
-        assert run.route_error == "recipe rank presence is unavailable"
-
-    with service.sessions.begin() as session:
-        session.get(AgentNode, "spk_" + f"{2:032x}").last_seen_at = NOW
-
-    assert worker.tick() is True
-    assert json.loads(applied[-1])["model_list"][0]["model_name"] == "qwen"
-    with service.sessions() as session:
-        run = session.get(RecipeRun, run_id)
-        assert run.route_state == "published"
-        assert run.route_error is None
-
-
 def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
     tmp_path: Path,
 ) -> None:
@@ -352,10 +445,127 @@ def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
     # Activation names are checksum-bound; use the active marker's exact name.
     marker = json.loads((tmp_path / "live" / "activation.json").read_text())
     directory = tmp_path / "live" / "generations" / marker["directory"]
-    assert json.loads((directory / "routes.json").read_text())["routes"] == {}
+    routes = json.loads((directory / "routes.json").read_text())
+    assert routes["generation"] == generation.generation
+    assert routes["state"] == "published"
+    assert routes["routes"]["qwen"] == {
+        "address": "10.0.0.2",
+        "evidence_digest": "1" * 64,
+        "node_id": "spk_" + "1".zfill(32),
+        "observed_at": NOW.isoformat(),
+        "operation_id": f"recipe:{run_id}:rank:0",
+        "path": "/v1",
+        "port": 8000,
+        "scheme": "http",
+        "verify_evidence_digest": "1" * 64,
+    }
     assert (
         json.loads((directory / "litellm.json").read_text())["model_list"][0][
             "model_name"
         ]
         == "qwen"
     )
+
+    with service.sessions() as session:
+        owner = session.get(RoutePublicationOwner, 1)
+        assert owner is not None
+        assert owner.owner_generation == generation.generation
+        publication = session.get(RoutePublication, owner.reconciliation_id)
+        reconciliation = session.get(Reconciliation, owner.reconciliation_id)
+        assert publication is not None and publication.state == "completed"
+        assert reconciliation is not None and reconciliation.status == "succeeded"
+
+    projection = durable_operation_services(
+        service.sessions,
+        tmp_path / "live",
+        clock=lambda: NOW,
+        cursors=TokenCodec(b"k" * 32).cursor_codec(),
+    )
+    endpoint = projection.endpoint("qwen")
+    assert endpoint["api_base"] == "http://10.0.0.2:8000/v1"
+    assert endpoint["node_id"] == "spk_" + "1".zfill(32)
+
+
+def test_worker_renews_from_fresh_all_rank_evidence_and_recovers_owner(
+    tmp_path: Path,
+) -> None:
+    clock = MutableClock(NOW)
+    base, _publisher, _applied, run_id = setup(tmp_path / "database", clock=clock)
+    service = atomic_service(base, tmp_path / "live", clock)
+    first = service.publish_run(run_id)
+
+    clock.now = NOW + timedelta(seconds=240)
+    with service.sessions.begin() as session:
+        nodes = tuple(session.query(RunNode).filter_by(run_id=run_id))
+        for index, node in enumerate(nodes):
+            node.updated_at = clock.now
+            node.evidence_digest = f"{index + 5}" * 64
+        session.delete(session.get(RoutePublicationOwner, 1))
+
+    restarted = RecipeOperationWorker(service.sessions, service, clock=clock)
+    assert restarted.tick() is True
+    with service.sessions() as session:
+        run = session.get(RecipeRun, run_id)
+        owner = session.get(RoutePublicationOwner, 1)
+        publication = session.get(RoutePublication, owner.reconciliation_id)
+        assert run.route_generation > first.generation
+        assert publication.lease_expires_at.replace(tzinfo=UTC) == (
+            clock.now + timedelta(seconds=300)
+        )
+
+
+def test_worker_withdraws_when_rank_health_is_stale_while_agent_is_active(
+    tmp_path: Path,
+) -> None:
+    clock = MutableClock(NOW)
+    base, _publisher, _applied, run_id = setup(tmp_path / "database", clock=clock)
+    service = atomic_service(base, tmp_path / "live", clock)
+    service.publish_run(run_id)
+
+    clock.now = NOW + timedelta(seconds=301)
+    worker = RecipeOperationWorker(service.sessions, service, clock=clock)
+    assert worker.tick() is True
+
+    with service.sessions() as session:
+        run = session.get(RecipeRun, run_id)
+        nodes = tuple(session.query(RunNode).filter_by(run_id=run_id))
+        agents = tuple(session.get(AgentNode, node.node_id) for node in nodes)
+        assert run.route_state == "withdrawn"
+        assert all(agent is not None and agent.state == "active" for agent in agents)
+        owner = session.get(RoutePublicationOwner, 1)
+        publication = session.get(RoutePublication, owner.reconciliation_id)
+        assert publication.state == "routes-withdrawn"
+
+
+def test_worker_withdraws_all_stale_runs_in_one_recovered_candidate(
+    tmp_path: Path,
+) -> None:
+    clock = MutableClock(NOW)
+    base, _publisher, _applied, first_run = setup(tmp_path / "database", clock=clock)
+    second_run = add_running_run(
+        base,
+        first_run,
+        alias="second",
+        route_state="pending",
+        identity=3,
+    )
+    service = atomic_service(base, tmp_path / "live", clock)
+    service.publish_run(first_run)
+    service.publish_run(second_run)
+
+    clock.now = NOW + timedelta(seconds=301)
+    assert RecipeOperationWorker(service.sessions, service, clock=clock).tick() is True
+
+    with service.sessions() as session:
+        assert {
+            session.get(RecipeRun, first_run).route_state,
+            session.get(RecipeRun, second_run).route_state,
+        } == {"withdrawn"}
+        publication = session.get(RoutePublication, _recipe_owner_id(session))
+        assert publication.state == "routes-withdrawn"
+
+
+def _recipe_owner_id(session) -> str:
+    owner = session.get(RoutePublicationOwner, 1)
+    assert owner is not None and owner.reconciliation_id is not None
+    return owner.reconciliation_id

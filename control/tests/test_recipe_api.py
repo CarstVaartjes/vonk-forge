@@ -8,7 +8,11 @@ from vonk_control.auth import Actor, TokenCodec
 from vonk_control.cluster_mappings import ClusterMappingPlacement, ClusterMappingPlan
 from vonk_control.install_admission import InstallNodePlan, InstallPlan
 from vonk_control.recipe_builds import RecipeBuildPlan
-from vonk_control.recipe_operations import RecipeOperationView
+from vonk_control.recipe_operations import (
+    RecipeOperationView,
+    RecipeRunRankStatus,
+    RecipeRunStatus,
+)
 from vonk_control.run_admission import RunNodePlan, RunPlan
 from vonk_control.source_policy import SourcePolicyReport
 from fastapi.testclient import TestClient
@@ -181,6 +185,28 @@ class Recipes:
         self.calls.append(("stop", (run_id, kwargs)))
         return RecipeOperationView(
             OPERATION, "recipe.stop", run_id, "running", "c" * 64, (NODE,), None
+        )
+
+    def run_status(self, run_id):
+        if run_id != RUN:
+            raise KeyError(run_id)
+        return RecipeRunStatus(
+            id=RUN,
+            alias="qwen",
+            state="running",
+            route_state="withdrawn",
+            healthy=False,
+            ranks=(
+                RecipeRunRankStatus(
+                    node_id=NODE,
+                    rank=0,
+                    role="entrypoint",
+                    state="failed",
+                    observed_at=NOW,
+                    age_seconds=0.0,
+                    fresh=True,
+                ),
+            ),
         )
 
     def uninstall(self, installation_id, **kwargs):
@@ -411,3 +437,43 @@ def test_start_progress_stop_retry_and_uninstall_routes_are_stable() -> None:
         == "previewRecipeInstall"
     )
     assert paths["/api/v1/recipes/runs"]["post"]["operationId"] == "startRecipeRun"
+
+
+def test_administrator_run_status_is_typed_rank_health_without_secrets() -> None:
+    client, headers, _recipes, _audits = setup()
+
+    response = client.get(f"/api/v1/recipes/runs/{RUN}", headers=headers())
+    denied = client.get(f"/api/v1/recipes/runs/{RUN}", headers=headers("operator"))
+
+    assert response.status_code == 200
+    assert denied.status_code == 403
+    assert response.json() == {
+        "id": RUN,
+        "alias": "qwen",
+        "state": "running",
+        "route_state": "withdrawn",
+        "healthy": False,
+        "ranks": [
+            {
+                "node_id": NODE,
+                "rank": 0,
+                "role": "entrypoint",
+                "state": "failed",
+                "observed_at": "2026-08-07T12:00:00Z",
+                "age_seconds": 0.0,
+                "fresh": True,
+            }
+        ],
+    }
+    assert not {
+        "endpoint",
+        "evidence_digest",
+        "management_address",
+        "certificate",
+        "token",
+    } & set(response.text.split('"'))
+    paths = client.get("/openapi.json").json()["paths"]
+    assert (
+        paths["/api/v1/recipes/runs/{run_id}"]["get"]["operationId"]
+        == "getRecipeRunStatus"
+    )
