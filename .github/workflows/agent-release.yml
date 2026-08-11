@@ -3,6 +3,9 @@ name: Rust Vonk Forge agent development
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "**/README.md"
   workflow_dispatch:
 
 permissions:

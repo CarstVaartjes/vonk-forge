@@ -430,7 +430,10 @@ def test_workflow_is_main_only_publication_without_repository_secrets() -> None:
     validator = _job(text, "build-and-accept")
     publisher = _job(text, "publish-development-images")
 
-    assert "branches: [main]" in text
+    assert (
+        '  push:\n    branches: [main]\n    paths-ignore:\n'
+        '      - "docs/**"\n      - "**/README.md"'
+    ) in text
     assert "workflow_dispatch:" in text
     assert "packages: write" in text
     assert "packages: write" not in validator

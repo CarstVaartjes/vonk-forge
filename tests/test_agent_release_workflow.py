@@ -371,11 +371,14 @@ def assert_agent_key_cleanup_contract(text: str) -> None:
     assert lifecycle_lines[final_build + 2] == (
         'test ! -e "$RUNNER_TEMP/vonk-agent-release.pem"'
     )
-    assert lifecycle_lines[final_build + 3] == (
-        "sudo env SYSTEMD_OFFLINE=1 dpkg -i \\"
+    first_upgrade = lifecycle_lines.index(
+        "sudo env SYSTEMD_OFFLINE=1 dpkg -i \\", final_build + 3
     )
-    assert lifecycle_lines[final_build + 4] == (
+    assert lifecycle_lines[first_upgrade + 1] == (
         '  "lifecycle/vonk-forge-agent_${NEXT_VERSION}_arm64.deb"'
+    )
+    assert "$RUNNER_TEMP/vonk-agent-release.pem" not in "\n".join(
+        lifecycle_lines[final_build + 3 :]
     )
     assert immediate_cleanup in fallback
     assert fallback.splitlines()[1].strip() == "if: ${{ always() }}"
@@ -450,7 +453,10 @@ def test_development_agent_workflow_runs_only_for_exact_main_sources() -> None:
     text = WORKFLOW.read_text()
     metadata = text.split("\n  build-test-sign:\n", 1)[0]
 
-    assert "  push:\n    branches: [main]" in text
+    assert (
+        '  push:\n    branches: [main]\n    paths-ignore:\n'
+        '      - "docs/**"\n      - "**/README.md"'
+    ) in text
     dispatch = text.split("  workflow_dispatch:", 1)[1].split("\n\npermissions:", 1)[0]
     assert "inputs:" not in dispatch
     assert "version:" not in dispatch
