@@ -36,7 +36,7 @@
       "download_bytes": 0,
       "temporary_bytes": 536870912,
       "memory_bytes": 134217728,
-      "timeout_seconds": 60
+      "timeout_seconds": 300
     }
   },
   "parameters": [],

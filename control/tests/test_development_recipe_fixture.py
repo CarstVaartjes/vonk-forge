@@ -26,7 +26,7 @@ EXPECTED_SOURCE_SHA256 = (
     "4220553fbdd61b6bea80e593c9085686862503a9df904e6fbb16d695d26776f5"
 )
 EXPECTED_RECIPE_SHA256 = (
-    "3b14011cda36ec22467c341337b004c8e3fccadfd285a1b66854e9fbaf5a3c2c"
+    "f0b615191dd59e5baf6d988569e41173a48521394f4511b9f3f88ec44abfb0c9"
 )
 EXPECTED_ARTIFACT_SOURCE = (
     "https://raw.githubusercontent.com/CarstVaartjes/vonk-forge/"
@@ -235,6 +235,7 @@ def test_dev_http_smoke_limits_cover_measured_python_slim_build_and_export() -> 
         MEASURED_IMAGE_BYTES + MEASURED_DOCKER_ARCHIVE_BYTES + 128 * 1024 * 1024
     )
     assert build_resources["temporary_bytes"] == BUILD_TRANSIENT_LIMIT_BYTES
+    assert build_resources["timeout_seconds"] == 300
     assert disk["image_bytes"] == BUILD_OUTPUT_LIMIT_BYTES
     assert disk["staging_bytes"] == BUILD_TRANSIENT_LIMIT_BYTES
     assert disk["safety_margin_bytes"] == BUILD_TRANSIENT_LIMIT_BYTES
