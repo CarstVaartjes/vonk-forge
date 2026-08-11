@@ -79,12 +79,15 @@ uv sync --dev
 uv run pytest
 ```
 
-For a NAS, download the generated development Compose artifact and install its
-`docker-compose.pinned.yml` as `docker-compose.yml`; the sibling
-`docker-compose.dev.yml` remains digest-locked despite its readable `dev` tag.
-Signed releases separately publish the full `docker-compose.production.yml`.
-The NAS pulls public images and never receives source, Dockerfiles, build
-contexts, or image archives. Follow the
+For a NAS, create one NAS-local project containing only `docker-compose.yml`
+and `secrets/`. Download the generated development Compose artifact, rename
+`docker-compose.dev.yml` to `docker-compose.yml` once, and keep that file
+unchanged during normal development. Accepted `main` advances the mutable
+`:dev` channel; operators update development by pulling/redeploying the
+unchanged project file. Keep `docker-compose.pinned.yml` only for explicit
+reproduction or guarded recovery. Signed releases separately publish the full
+`docker-compose.production.yml`. The NAS pulls public images and never
+receives source, Dockerfiles, build contexts, or image archives. Follow the
 [development NAS installation guide](docs/runbooks/development-nas-installation.md)
 for the exact three runtime secret files and generic Compose-project import.
 
@@ -98,11 +101,14 @@ scripts/dev-compose down
 ```
 
 This local command never publishes images or deploys to production. Accepted
-`main` commits publish immutable `dev-sha-*` tags and the `dev` convenience
-alias. Signed release tags promote the exact accepted digests to immutable
-`vX.Y.Z` tags and the `latest` convenience alias. Generated Compose and release
-artifacts always use immutable tag-plus-digest references, never a moving
-alias. Production uses the reviewed digest-pinned platform Compose path in
+`main` commits publish immutable `dev-sha-*` tags and the mutable `:dev`
+convenience alias used only for operator-pulled/redeployed development
+projects. Signed release tags promote the exact accepted digests to immutable
+`vX.Y.Z` tags. `latest` is informational only; production selection remains
+authoritative only through the trusted host-updater and TUF-reviewed platform
+target. Generated Compose and release artifacts always use immutable
+tag-plus-digest references, never a moving alias. Production uses the reviewed
+digest-pinned platform Compose path in
 [`deploy/compose/README.md`](deploy/compose/README.md).
 
 The repository deliberately keeps expensive acceptance work local. Pull

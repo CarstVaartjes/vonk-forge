@@ -513,10 +513,10 @@ ghcr.io/carstvaartjes/vonk-forge-worker:latest
 ghcr.io/carstvaartjes/vonk-forge-hermes:latest
 ```
 
-`:latest` is evaluation/discovery only. Production must not use these aliases;
-it requires the version-and-digest references selected from one complete release
-asset by the trusted host updater. Docker does not continuously update running
-containers: changing `latest` remotely has no effect until an operator
-explicitly pulls and recreates containers. Evaluation users must still
-deliberately pull and recreate, and must not mistake that for a production
-update path.
+`:latest` is evaluation/discovery only. It is also informational only:
+production must not use these aliases; it requires the version-and-digest
+references selected from one complete release asset by the trusted host
+updater. Docker does not continuously update running containers: changing
+`latest` remotely has no effect until an operator explicitly pulls and
+recreates containers. Evaluation users must still deliberately pull and
+recreate, and must not mistake that for a production update path.

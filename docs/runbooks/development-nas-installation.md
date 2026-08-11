@@ -25,6 +25,43 @@ Copy only those three development secret files into `secrets/`; do not put a
 checkout, an image archive, or a production secret beside them. The Compose
 file is replaceable, while `secrets/` and Docker named volumes survive normal
 redeploys. The file contains secret *paths*, never secret values.
+No `current/`, source tree, Dockerfiles, or `.env` file belongs in this
+project.
+
+## Clean-machine prerequisites
+
+Before copying anything to the NAS, start from a clean local staging
+directory on an operator workstation:
+
+- Download the accepted workflow artifact containing
+  `docker-compose.dev.yml` and `docker-compose.pinned.yml`.
+- Generate the three runtime secret files locally; validate their filenames,
+  line endings, and sizes before copying them to the NAS.
+- Store encrypted backups of those three files in 1Password or another
+  approved operator secret store, but never paste their contents into shell
+  history, terminal output, screenshots, or ticket comments.
+- Confirm the NAS can pull public GHCR images and that its management-LAN
+  firewall will allow only the required agent ingress described below.
+
+## Prepare management-LAN names and firewall
+
+Do not assume local DNS. Add the same management-LAN names to `/etc/hosts` on
+the NAS and on every GPU node that will pair to this controller:
+
+```text
+<NAS_MANAGEMENT_IP> <ENROLLMENT_HOSTNAME> <CONTROLLER_HOSTNAME> <REGISTRY_HOSTNAME>
+```
+
+Those names are generic inputs, not constants. They are later reused as the
+agent `enrollment_url`, post-certificate `controller_url`, and registry host.
+Operational commands in this repository intentionally use
+`<NAS_MANAGEMENT_IP>` rather than a site-specific constant.
+
+On the NAS firewall, allow the backend agent TLS listener only from the GPU
+node management network, for example `<NODE_MANAGEMENT_CIDR>` to
+`<NAS_MANAGEMENT_IP>:8443`. Keep human control, inference, Grafana, and Hermes
+access on their separate trusted paths; do not widen the management listener
+for convenience.
 
 The publication workflows expose three clearly named files:
 
@@ -91,6 +128,9 @@ UI or put them in the Compose file.
 Do not overwrite existing secret files during a normal redeploy. If an SMB
 client created the files, safely eject/disconnect the share after copying and
 use the NAS file manager to confirm only the three expected names appear.
+Back up those exact host files before first start and after every rotation, but
+confirm the backup by filename, size, and timestamp only; never reveal the
+secret values during the check.
 
 The numeric owners match the pinned images: PostgreSQL is UID/GID `999`, while
 the API and migration run as `10001:10001`. Docker implementations differ in

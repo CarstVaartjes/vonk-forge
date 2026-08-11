@@ -39,20 +39,20 @@ stop issuance before one minute; authorization tokens deliberately allow only
 
 ## Restricted LAN endpoint
 
-Reserve `10.0.0.2` for the NAS and resolve the enrollment, agent, and registry
-names below to that same address only on the management LAN:
+Do not assume local DNS. Pick one NAS management address and use the same
+management-LAN names on the NAS and on every GPU node by writing them to
+`/etc/hosts`:
 
 ```text
-enroll.vonk-forge.lan   10.0.0.2
-agents.vonk-forge.lan   10.0.0.2
-registry.vonk-forge.lan 10.0.0.2
+<NAS_MANAGEMENT_IP> <ENROLLMENT_HOSTNAME> <CONTROLLER_HOSTNAME> <REGISTRY_HOSTNAME>
 ```
 
-Caddy binds backend TLS only to `10.0.0.2:8443`. The NAS firewall permits that
-port only from `10.0.0.0/24`, preferably narrowed to reserved GPU node leases.
-Enrollment exposes only `/agent/v1/enroll`; the agent and registry names require
-the issued mTLS identity. Human control, inference, Grafana, and Hermes routes
-are absent from this listener and remain tailnet-only.
+Caddy binds backend TLS only to `<NAS_MANAGEMENT_IP>:8443`. The NAS firewall
+permits that port only from `<NODE_MANAGEMENT_CIDR>`, preferably narrowed to
+the reserved GPU node leases. Enrollment exposes only `/agent/v1/enroll`; the
+agent and registry names require the issued mTLS identity. Human control,
+inference, Grafana, and Hermes routes are absent from this listener and remain
+tailnet-only.
 
 Install the Caddy backend trust anchor and stable DNS names during each manual
 GPU node hardening/bootstrap. The installed agent initiates outbound long polling;
@@ -65,6 +65,9 @@ DHCP reservations improve operations but are not a correctness dependency.
 Perform this block on the disconnected workstation. Store the root password in
 a separate offline recovery medium. Generate an encrypted online intermediate
 with path length zero and a one-year lifetime; rotate it before expiry.
+Record the backup location in 1Password or the equivalent operator secret
+inventory, but do not print the password values in shell transcripts or paste
+them into issue trackers.
 
 ```sh
 openssl rand -base64 32 > "$OFFLINE_PKI_DIR/root-password"

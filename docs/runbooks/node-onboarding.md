@@ -16,6 +16,26 @@ The commands are dry runs unless `--apply` is present. Journals and sanitized,
 content-addressed evidence live under `.state/node-install`; credentials remain
 behind `secret://` references.
 
+## Clean-machine prerequisites
+
+Before first network trust, prepare one clean operator workstation and one
+clean GPU node install state:
+
+- Export only the public half of the administrator SSH key from 1Password or
+  the equivalent approved secret store; do not reveal or copy the private key
+  into shell output.
+- Add the management-LAN names to `/etc/hosts` on the NAS and on the GPU node:
+
+  ```text
+  <NAS_MANAGEMENT_IP> <ENROLLMENT_HOSTNAME> <CONTROLLER_HOSTNAME> <REGISTRY_HOSTNAME>
+  ```
+
+- Confirm the NAS firewall allows only the GPU node management network to
+  reach `<NAS_MANAGEMENT_IP>:8443`.
+
+These placeholders are per-site inputs. Local DNS is optional; the runbooks in
+this repository assume `/etc/hosts` works even when no LAN DNS exists.
+
 ## Start and inspect
 
 ```bash
@@ -56,6 +76,20 @@ topology.
 If verification or recovery access fails, stop. Restore access through the
 physical console, inspect the journal, and resume only after the trusted facts
 match again.
+
+## Install and pair the agent
+
+After the host record is accepted, install the package and pair the agent by
+following [Install the Vonk Forge agent](../operations/install-vonk-agent.md).
+The controller-side ordering is always:
+
+1. Create one one-use node pairing grant.
+2. Run `vonk-agent pair` with `enrollment_url`, `controller_url`, `ca_path`,
+   and the exact DER SHA-256 CA fingerprint already configured.
+3. Approve the pending enrollment.
+4. Repeat the same `pair` command once to collect the issued certificate.
+5. Start or restart the supervisor and verify the node reports inventory under
+   its certificate-bound `spk_` identity.
 
 ## How an accepted GPU node appears online
 

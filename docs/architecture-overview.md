@@ -8,7 +8,10 @@ uses a GPU node hostname or IP address as identity.
 Each GPU node is independently installed and enrolled. Its stable `spk_…` identity
 comes from the node key and certificate, while its current management address is
 fresh authenticated presence evidence. DHCP reservations are useful operationally
-but are never control-plane authority.
+but are never control-plane authority. Local DNS is optional: operators may map
+`<NAS_MANAGEMENT_IP>` to `<ENROLLMENT_HOSTNAME>`, `<CONTROLLER_HOSTNAME>`, and
+`<REGISTRY_HOSTNAME>` in `/etc/hosts` on the NAS and GPU nodes without changing
+the trust model.
 
 ```mermaid
 flowchart LR
