@@ -610,10 +610,11 @@ mod tests {
                 assert_ne!(size, 0);
                 request.extend_from_slice(&buffer[..size]);
             }
+            let tolerate_response_write_error = response_delay.is_some();
             if let Some(response_delay) = response_delay {
                 thread::sleep(response_delay);
             }
-            write!(
+            let response_write = write!(
                 stream,
                 "HTTP/1.1 {response_status} Test\r\n{}Content-Length: {}\r\nConnection: close\r\n\r\n",
                 response_headers
@@ -622,8 +623,10 @@ mod tests {
                     .collect::<String>(),
                 response_body.len()
             )
-            .unwrap();
-            stream.write_all(&response_body).unwrap();
+            .and_then(|()| stream.write_all(&response_body));
+            if !tolerate_response_write_error {
+                response_write.unwrap();
+            }
             request
         });
         (
