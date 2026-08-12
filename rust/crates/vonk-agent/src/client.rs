@@ -576,56 +576,12 @@ mod tests {
         AgentClaim, AgentDirective, AgentProgress, HostRuntimeAction, canonical_json, hex_sha256,
     };
 
-    fn observation_client(status: u16) -> (AgentHttpClient, thread::JoinHandle<Vec<u8>>) {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut request = Vec::new();
-            let mut buffer = [0_u8; 4096];
-            let header_end = loop {
-                let size = stream.read(&mut buffer).unwrap();
-                assert_ne!(size, 0);
-                request.extend_from_slice(&buffer[..size]);
-                if let Some(index) = request.windows(4).position(|value| value == b"\r\n\r\n") {
-                    break index + 4;
-                }
-            };
-            let headers = std::str::from_utf8(&request[..header_end]).unwrap();
-            let content_length = headers
-                .lines()
-                .find_map(|line| {
-                    let (name, value) = line.split_once(':')?;
-                    name.eq_ignore_ascii_case("content-length")
-                        .then(|| value.trim().parse::<usize>().unwrap())
-                })
-                .unwrap();
-            while request.len() - header_end < content_length {
-                let size = stream.read(&mut buffer).unwrap();
-                assert_ne!(size, 0);
-                request.extend_from_slice(&buffer[..size]);
-            }
-            write!(
-                stream,
-                "HTTP/1.1 {status} Test\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-            )
-            .unwrap();
-            request
-        });
-        (
-            AgentHttpClient {
-                client: reqwest::Client::new(),
-                controller: Url::parse(&format!("http://{address}/")).unwrap(),
-                node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
-            },
-            server,
-        )
-    }
-
-    fn heartbeat_client(
-        response: AgentDirective,
+    fn request_capture_client(
+        response_status: u16,
+        response_headers: Vec<String>,
+        response_body: Vec<u8>,
+        response_delay: Option<Duration>,
     ) -> (AgentHttpClient, thread::JoinHandle<Vec<u8>>) {
-        let response_body = canonical_json(&response).unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         let server = thread::spawn(move || {
@@ -654,9 +610,16 @@ mod tests {
                 assert_ne!(size, 0);
                 request.extend_from_slice(&buffer[..size]);
             }
+            if let Some(response_delay) = response_delay {
+                thread::sleep(response_delay);
+            }
             write!(
                 stream,
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                "HTTP/1.1 {response_status} Test\r\n{}Content-Length: {}\r\nConnection: close\r\n\r\n",
+                response_headers
+                    .iter()
+                    .map(|header| format!("{header}\r\n"))
+                    .collect::<String>(),
                 response_body.len()
             )
             .unwrap();
@@ -673,98 +636,45 @@ mod tests {
         )
     }
 
+    fn observation_client(status: u16) -> (AgentHttpClient, thread::JoinHandle<Vec<u8>>) {
+        request_capture_client(status, Vec::new(), Vec::new(), None)
+    }
+
+    fn heartbeat_client(
+        response: AgentDirective,
+    ) -> (AgentHttpClient, thread::JoinHandle<Vec<u8>>) {
+        let response_body = canonical_json(&response).unwrap();
+        request_capture_client(
+            200,
+            vec!["Content-Type: application/json".to_owned()],
+            response_body,
+            None,
+        )
+    }
+
     fn host_runtime_grant_client() -> (AgentHttpClient, thread::JoinHandle<Vec<u8>>) {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut request = Vec::new();
-            let mut buffer = [0_u8; 4096];
-            let header_end = loop {
-                let size = stream.read(&mut buffer).unwrap();
-                assert_ne!(size, 0);
-                request.extend_from_slice(&buffer[..size]);
-                if let Some(index) = request.windows(4).position(|value| value == b"\r\n\r\n") {
-                    break index + 4;
-                }
-            };
-            let headers = std::str::from_utf8(&request[..header_end]).unwrap();
-            let content_length = headers
-                .lines()
-                .find_map(|line| {
-                    let (name, value) = line.split_once(':')?;
-                    name.eq_ignore_ascii_case("content-length")
-                        .then(|| value.trim().parse::<usize>().unwrap())
-                })
-                .unwrap();
-            while request.len() - header_end < content_length {
-                let size = stream.read(&mut buffer).unwrap();
-                assert_ne!(size, 0);
-                request.extend_from_slice(&buffer[..size]);
-            }
-            write!(
-                stream,
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 12\r\nConnection: close\r\n\r\n{{\"grant\":{{}}}}"
-            )
-            .unwrap();
-            request
-        });
-        (
-            AgentHttpClient {
-                client: reqwest::Client::new(),
-                controller: Url::parse(&format!("http://{address}/")).unwrap(),
-                node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
-            },
-            server,
+        request_capture_client(
+            200,
+            vec!["Content-Type: application/json".to_owned()],
+            br#"{"grant":{}}"#.to_vec(),
+            None,
         )
     }
 
     fn delayed_upload_client(
         response_delay: Duration,
     ) -> (AgentHttpClient, thread::JoinHandle<Vec<u8>>) {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut request = Vec::new();
-            let mut buffer = [0_u8; 4096];
-            let header_end = loop {
-                let size = stream.read(&mut buffer).unwrap();
-                assert_ne!(size, 0);
-                request.extend_from_slice(&buffer[..size]);
-                if let Some(index) = request.windows(4).position(|value| value == b"\r\n\r\n") {
-                    break index + 4;
-                }
-            };
-            let headers = std::str::from_utf8(&request[..header_end]).unwrap();
-            let content_length = headers
-                .lines()
-                .find_map(|line| {
-                    let (name, value) = line.split_once(':')?;
-                    name.eq_ignore_ascii_case("content-length")
-                        .then(|| value.trim().parse::<usize>().unwrap())
-                })
-                .unwrap();
-            while request.len() - header_end < content_length {
-                let size = stream.read(&mut buffer).unwrap();
-                assert_ne!(size, 0);
-                request.extend_from_slice(&buffer[..size]);
-            }
-            thread::sleep(response_delay);
-            let _ = stream.write_all(
-                b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-            );
-            request
-        });
-        let client = reqwest::Client::builder()
+        let (base_client, server) =
+            request_capture_client(204, Vec::new(), Vec::new(), Some(response_delay));
+        let http_client = reqwest::Client::builder()
             .timeout(Duration::from_millis(50))
             .build()
             .unwrap();
         (
             AgentHttpClient {
-                client,
-                controller: Url::parse(&format!("http://{address}/")).unwrap(),
-                node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
+                client: http_client,
+                controller: base_client.controller,
+                node_id: base_client.node_id,
             },
             server,
         )
