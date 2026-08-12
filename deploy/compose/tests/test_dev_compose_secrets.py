@@ -167,7 +167,12 @@ def test_image_template_hands_acknowledgement_volume_to_litellm_only() -> None:
             "required": True,
         }
     }
-    assert initializer["command"][-1].count("os.chown('/supervisor',10002,10001)") == 1
+    command = initializer["command"][-1]
+    assert command.count("os.chown('/supervisor',10002,10001)") == 1
+    assert (
+        "assert (metadata.st_uid,metadata.st_gid,stat.S_IMODE(metadata.st_mode)) "
+        "in {(10001,10001,0o750),(10002,10001,0o750)}"
+    ) in command
     volumes = _volumes_by_target(initializer)
     assert set(volumes) == {"/supervisor"}
     assert volumes["/supervisor"]["source"].endswith("dev-supervisor-state")
