@@ -555,9 +555,20 @@ non-secret.
 
 ## Restart persistence
 
-For the single-node checkpoint, restart the target agent supervisor and stop
-then start the NAS Compose project in its UI. For the multi-node checkpoint,
-restart both supervisors and the NAS project after recovered inference. Keep
+For the single-node checkpoint, restart the target agent supervisor, then use
+the NAS UI durability action **Stop project**, wait until the project is
+stopped, and then **Start project**. Its CLI equivalent, run from the project
+directory, is the ordered project stop followed by the full Compose start:
+
+```bash
+docker compose stop
+docker compose up -d --wait
+```
+
+Do not combine `docker compose restart` with a dependency-reconciling
+`docker compose up`: the cohort reset can then run after API/worker have
+already started. For the multi-node checkpoint, restart both supervisors and
+repeat the same NAS project durability action after recovered inference. Keep
 all named volumes and do not pull a different cohort during this gate.
 
 Wait until the same two `spk_` identities and fresh inventory return. Resume

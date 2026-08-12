@@ -22,6 +22,8 @@ use crate::{
 };
 
 const MAX_BODY_BYTES: usize = 64 * 1024;
+const RECIPE_IMAGE_UPLOAD_TIMEOUT: Duration = Duration::from_secs(60 * 60);
+const HOST_RUNTIME_GRANT_TTL_SECONDS: u16 = 10;
 
 #[derive(Debug, Error)]
 pub enum ClientError {
@@ -249,7 +251,7 @@ impl AgentHttpClient {
             fence: claim.fence,
             action,
             request_sha256,
-            expires_in_seconds: 30,
+            expires_in_seconds: HOST_RUNTIME_GRANT_TTL_SECONDS,
         })
         .map_err(|_| ClientError::Protocol)?;
         let response = self
@@ -338,6 +340,7 @@ impl AgentHttpClient {
             .header("content-length", image_bytes)
             .header("x-vonk-image-digest", image_digest)
             .header("x-vonk-oci-layout-sha256", oci_layout_sha256)
+            .timeout(RECIPE_IMAGE_UPLOAD_TIMEOUT)
             .body(reqwest::Body::wrap_stream(ReaderStream::new(file)))
             .send()
             .await?;
@@ -565,12 +568,20 @@ mod tests {
         io::{Read, Write},
         net::TcpListener,
         thread,
+        time::Duration,
     };
     use url::Url;
     use uuid::Uuid;
-    use vonk_agent_protocol::{AgentDirective, AgentProgress, canonical_json};
+    use vonk_agent_protocol::{
+        AgentClaim, AgentDirective, AgentProgress, HostRuntimeAction, canonical_json, hex_sha256,
+    };
 
-    fn observation_client(status: u16) -> (AgentHttpClient, thread::JoinHandle<Vec<u8>>) {
+    fn request_capture_client(
+        response_status: u16,
+        response_headers: Vec<String>,
+        response_body: Vec<u8>,
+        response_delay: Option<Duration>,
+    ) -> (AgentHttpClient, thread::JoinHandle<Vec<u8>>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         let server = thread::spawn(move || {
@@ -599,11 +610,23 @@ mod tests {
                 assert_ne!(size, 0);
                 request.extend_from_slice(&buffer[..size]);
             }
-            write!(
+            let tolerate_response_write_error = response_delay.is_some();
+            if let Some(response_delay) = response_delay {
+                thread::sleep(response_delay);
+            }
+            let response_write = write!(
                 stream,
-                "HTTP/1.1 {status} Test\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                "HTTP/1.1 {response_status} Test\r\n{}Content-Length: {}\r\nConnection: close\r\n\r\n",
+                response_headers
+                    .iter()
+                    .map(|header| format!("{header}\r\n"))
+                    .collect::<String>(),
+                response_body.len()
             )
-            .unwrap();
+            .and_then(|()| stream.write_all(&response_body));
+            if !tolerate_response_write_error {
+                response_write.unwrap();
+            }
             request
         });
         (
@@ -616,52 +639,45 @@ mod tests {
         )
     }
 
+    fn observation_client(status: u16) -> (AgentHttpClient, thread::JoinHandle<Vec<u8>>) {
+        request_capture_client(status, Vec::new(), Vec::new(), None)
+    }
+
     fn heartbeat_client(
         response: AgentDirective,
     ) -> (AgentHttpClient, thread::JoinHandle<Vec<u8>>) {
         let response_body = canonical_json(&response).unwrap();
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut request = Vec::new();
-            let mut buffer = [0_u8; 4096];
-            let header_end = loop {
-                let size = stream.read(&mut buffer).unwrap();
-                assert_ne!(size, 0);
-                request.extend_from_slice(&buffer[..size]);
-                if let Some(index) = request.windows(4).position(|value| value == b"\r\n\r\n") {
-                    break index + 4;
-                }
-            };
-            let headers = std::str::from_utf8(&request[..header_end]).unwrap();
-            let content_length = headers
-                .lines()
-                .find_map(|line| {
-                    let (name, value) = line.split_once(':')?;
-                    name.eq_ignore_ascii_case("content-length")
-                        .then(|| value.trim().parse::<usize>().unwrap())
-                })
-                .unwrap();
-            while request.len() - header_end < content_length {
-                let size = stream.read(&mut buffer).unwrap();
-                assert_ne!(size, 0);
-                request.extend_from_slice(&buffer[..size]);
-            }
-            write!(
-                stream,
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                response_body.len()
-            )
+        request_capture_client(
+            200,
+            vec!["Content-Type: application/json".to_owned()],
+            response_body,
+            None,
+        )
+    }
+
+    fn host_runtime_grant_client() -> (AgentHttpClient, thread::JoinHandle<Vec<u8>>) {
+        request_capture_client(
+            200,
+            vec!["Content-Type: application/json".to_owned()],
+            br#"{"grant":{}}"#.to_vec(),
+            None,
+        )
+    }
+
+    fn delayed_upload_client(
+        response_delay: Duration,
+    ) -> (AgentHttpClient, thread::JoinHandle<Vec<u8>>) {
+        let (base_client, server) =
+            request_capture_client(204, Vec::new(), Vec::new(), Some(response_delay));
+        let http_client = reqwest::Client::builder()
+            .timeout(Duration::from_millis(50))
+            .build()
             .unwrap();
-            stream.write_all(&response_body).unwrap();
-            request
-        });
         (
             AgentHttpClient {
-                client: reqwest::Client::new(),
-                controller: Url::parse(&format!("http://{address}/")).unwrap(),
-                node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
+                client: http_client,
+                controller: base_client.controller,
+                node_id: base_client.node_id,
             },
             server,
         )
@@ -733,6 +749,39 @@ mod tests {
             Err(ClientError::Protocol)
         ));
         server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn host_runtime_grant_ttl_fits_inside_renewed_operation_lease() {
+        let payload = serde_json::json!({});
+        let claim = AgentClaim {
+            schema_version: 1,
+            job_id: Uuid::parse_str("84ddf214-f067-4bbf-917e-95df32a07fd8").unwrap(),
+            operation_id: Uuid::parse_str("f450b5ac-5a78-4af5-9670-e874f735e3ee").unwrap(),
+            attempt: 1,
+            fence: Uuid::parse_str("44d4e914-34df-4962-a802-d1f7dcd928aa").unwrap(),
+            node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
+            operation: "recipe.image.import.v1".to_owned(),
+            base_commit: "a".repeat(40),
+            payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
+            payload,
+            deadline: DateTime::parse_from_rfc3339("2099-01-01T00:00:00+00:00").unwrap(),
+        };
+        let (client, server) = host_runtime_grant_client();
+
+        client
+            .host_runtime_grant(&claim, HostRuntimeAction::ImageImport, &"c".repeat(64))
+            .await
+            .unwrap();
+        let request = server.join().unwrap();
+        let body = request
+            .windows(4)
+            .position(|value| value == b"\r\n\r\n")
+            .map(|index| &request[index + 4..])
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(body).unwrap();
+
+        assert_eq!(body["expires_in_seconds"], 10);
     }
 
     #[tokio::test]
@@ -835,5 +884,31 @@ mod tests {
             client.report_recipe_run_observations(&observations).await,
             Err(ClientError::Protocol)
         ));
+    }
+
+    #[tokio::test]
+    async fn recipe_image_upload_overrides_the_short_ordinary_request_timeout() {
+        let directory = tempfile::tempdir().unwrap();
+        let archive = directory.path().join("image.docker.tar");
+        std::fs::write(&archive, b"accepted archive").unwrap();
+        let (client, server) = delayed_upload_client(Duration::from_millis(150));
+
+        let result = client
+            .upload_recipe_image(
+                Uuid::parse_str("45ea6921-50c9-4971-be2a-4cd04ce05069").unwrap(),
+                &format!("sha256:{}", "b".repeat(64)),
+                &"a".repeat(64),
+                16,
+                &archive,
+            )
+            .await;
+        let request = server.join().unwrap();
+
+        assert!(
+            result.is_ok(),
+            "large upload inherited ordinary timeout: {result:?}"
+        );
+        assert!(request.starts_with(b"PUT /agent/v1/recipe-builds/"));
+        assert!(request.ends_with(b"accepted archive"));
     }
 }
