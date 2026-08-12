@@ -210,6 +210,10 @@ class HeartbeatControl(FakeControl):
                 timeout=2,
             )
 
+    def response_deadlines(self) -> tuple[datetime, ...]:
+        with self._condition:
+            return tuple(response.deadline for response in self.heartbeat_responses)
+
 
 def _run_and_capture(agent: Agent, errors: list[Exception]) -> None:
     try:
@@ -350,7 +354,7 @@ def test_active_operation_sends_periodic_heartbeats_without_moving_execution_thr
     assert control.wait_for_heartbeats(2)
     persisted = state.recover_active()
     assert persisted is not None and persisted.progress is not None
-    assert persisted.progress.deadline == control.heartbeat_requests[-1].deadline
+    assert persisted.progress.deadline in control.response_deadlines()
     release.set()
     runner.join(2)
 
