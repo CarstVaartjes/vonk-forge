@@ -14,6 +14,7 @@ BUILD = ROOT / "scripts/build-agent-deb"
 VERIFY = ROOT / "scripts/verify-agent-deb"
 PREINST = ROOT / "packaging/debian/preinst"
 POSTINST = ROOT / "packaging/debian/postinst"
+DOCKER_FIREWALL = ROOT / "packaging/bin/vonk-forge-docker-firewall"
 
 
 def _aarch64_fixture(path: Path, marker: bytes) -> None:
@@ -85,6 +86,24 @@ def _run_preinst(tmp_path: Path, status: str) -> subprocess.CompletedProcess[str
         text=True,
         check=False,
     )
+
+
+def _firewall_config(
+    tmp_path: Path, replacement: tuple[str, str] | None = None
+) -> Path:
+    text = """VONK_NAS_MANAGEMENT_IP=192.168.1.231
+VONK_NODE_MANAGEMENT_IP=192.168.1.211
+VONK_NODE_FABRIC_IP=192.168.100.10
+VONK_PEER_FABRIC_IP=192.168.100.11
+VONK_ENDPOINT_HOST_PORTS=8000,8101
+VONK_RENDEZVOUS_PORT=29500"""
+    if replacement is not None:
+        old, new = replacement
+        text = text.replace(old, new)
+    path = tmp_path / "docker-firewall.conf"
+    path.write_text(text + "\n")
+    path.chmod(0o600)
+    return path
 
 
 def _allocate_subid_range(
@@ -221,6 +240,8 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
     assert "podman" in fields
     assert "util-linux" in fields
     assert "uidmap" in fields
+    assert "iptables" in fields
+    assert "iproute2" in fields
     payload = tmp_path / "payload"
     subprocess.run(
         ["/usr/bin/dpkg-deb", "--extract", first_deb, payload], check=True
@@ -250,6 +271,25 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
         in helper_socket.splitlines()
     )
     assert "DirectoryMode=0711" in helper_socket.splitlines()
+    firewall = payload / "usr/lib/vonk-forge/vonk-forge-docker-firewall"
+    assert firewall.is_file()
+    assert os.access(firewall, os.X_OK)
+    firewall_unit = (
+        payload / "lib/systemd/system/vonk-forge-docker-firewall.service"
+    ).read_text()
+    assert "Requires=docker.service" in firewall_unit
+    assert "PartOf=docker.service" in firewall_unit
+    assert "Before=vonk-forge-package-helper.service" in firewall_unit
+    assert "CapabilityBoundingSet=CAP_NET_ADMIN" in firewall_unit
+    assert "RestrictAddressFamilies=AF_UNIX AF_NETLINK" in firewall_unit
+    assert "PrivateNetwork=yes" not in firewall_unit
+    helper_unit = (
+        payload / "lib/systemd/system/vonk-forge-package-helper.service"
+    ).read_text()
+    assert "Requires=vonk-forge-docker-firewall.service" in helper_unit
+    assert (
+        "After=" in helper_unit and "vonk-forge-docker-firewall.service" in helper_unit
+    )
     assert "usermod --add-subuids" in postinst
     assert "usermod --add-subgids" in postinst
     assert "SUB_UID_MIN" in postinst
@@ -262,6 +302,47 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
     assert 'ignore_chown_errors' not in (
         payload / "etc/vonk-forge-agent/containers-storage.conf"
     ).read_text()
+
+
+def test_docker_firewall_rejects_missing_site_configuration(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [DOCKER_FIREWALL, "--config", tmp_path / "missing.conf", "check"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "site configuration" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "message"),
+    (
+        ("192.168.1.211", "192.168.001.211", "invalid IPv4"),
+        ("8000,8101", "8000,8000", "must be unique"),
+        ("VONK_RENDEZVOUS_PORT=29500", "VONK_RENDEZVOUS_PORT=8000", "must differ"),
+        (
+            "VONK_ENDPOINT_HOST_PORTS=8000,8101",
+            "VONK_UNKNOWN=1",
+            "unknown or malformed",
+        ),
+    ),
+)
+def test_docker_firewall_rejects_noncanonical_site_policy(
+    tmp_path: Path, old: str, new: str, message: str
+) -> None:
+    config = _firewall_config(tmp_path, (old, new))
+
+    result = subprocess.run(
+        [DOCKER_FIREWALL, "--config", config, "check"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert message in result.stderr
 
 
 def test_verifier_rejects_tampered_release_sidecar(tmp_path: Path) -> None:

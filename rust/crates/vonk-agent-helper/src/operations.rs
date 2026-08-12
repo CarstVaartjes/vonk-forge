@@ -1326,16 +1326,13 @@ fn valid_publication(value: &str) -> bool {
         };
         (address, ports)
     };
-    let Ok(address) = address.parse::<std::net::IpAddr>() else {
+    let Ok(std::net::IpAddr::V4(address)) = address.parse::<std::net::IpAddr>() else {
         return false;
     };
     if address.is_unspecified()
         || address.is_loopback()
         || address.is_multicast()
-        || match address {
-            std::net::IpAddr::V4(address) => address.is_link_local(),
-            std::net::IpAddr::V6(address) => address.is_unicast_link_local(),
-        }
+        || address.is_link_local()
     {
         return false;
     }
@@ -1429,7 +1426,6 @@ mod tests {
     fn runtime_publications_require_an_explicit_routable_bind_address() {
         assert!(valid_publication("192.168.1.211:8101:8000"));
         assert!(valid_publication("192.168.100.10:29500:29500"));
-        assert!(valid_publication("[fd00::10]:8101:8000"));
 
         for value in [
             "8101:8000",
@@ -1438,6 +1434,7 @@ mod tests {
             "169.254.1.1:8101:8000",
             "[::]:8101:8000",
             "[fe80::1]:8101:8000",
+            "[fd00::10]:8101:8000",
             "192.168.1.211:80:8000",
             "192.168.1.211:8101:80",
         ] {

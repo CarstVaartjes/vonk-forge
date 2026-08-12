@@ -86,7 +86,9 @@ the tested minimum needed for the distribution's setuid
 `CAP_DAC_OVERRIDE`, `CAP_SETUID`, `CAP_SETGID`, and `CAP_SYS_ADMIN`. Existing
 host-managed subordinate ranges are preserved and reused when they are large
 enough. Package installation does not mutate Docker, containerd, NVIDIA CDI,
-the driver, firmware, Netplan, or the Docker group.
+the driver, firmware, Netplan, or the Docker group. It installs but does not
+activate the Docker-aware site firewall; the operator supplies node-specific
+addresses and accepted host ports before the runtime helper can start.
 
 Copy the CA and edit the bootstrap configuration:
 
@@ -158,6 +160,14 @@ one-use grant and repeat this same grant/pair/approve/pair flow.
 
 ## Validate and start
 
+Before enabling the privileged helper, install
+`/etc/vonk-forge-agent/docker-firewall.conf` and enable
+`vonk-forge-docker-firewall.service` with the exact six-key procedure in
+[Development agent workloads](../runbooks/development-agent-workloads.md#etchosts-and-firewall).
+This ordering is mandatory: the helper has a systemd requirement on the
+validated policy and fails closed when the file, Docker chain, or managed rules
+are unavailable.
+
 ```bash
 sudo -u vonk-agent env \
   HOME=/var/lib/vonk-forge-agent \
@@ -169,6 +179,8 @@ sudo awk -F: '$1 == "vonk-agent" { total += $3 } END { exit !(total >= 65536) }'
   /etc/subuid
 sudo awk -F: '$1 == "vonk-agent" { total += $3 } END { exit !(total >= 65536) }' \
   /etc/subgid
+sudo systemctl enable --now vonk-forge-docker-firewall.service
+sudo systemctl is-active vonk-forge-docker-firewall.service
 sudo systemctl enable --now vonk-forge-package-helper.socket
 sudo systemctl enable --now vonk-forge-agent-supervisor.service
 sudo systemctl status vonk-forge-agent.service vonk-forge-agent-supervisor.service
@@ -206,7 +218,9 @@ firewall as described in
 [Development agent workloads](../runbooks/development-agent-workloads.md#etchosts-and-firewall).
 Published Docker ports bypass ordinary UFW `INPUT` policy. Keep NVIDIA's Docker
 firewall integration enabled and enforce source/original-destination rules in
-`DOCKER-USER`; an inactive or UFW-only policy is a start blocker.
+`DOCKER-USER`; an inactive or UFW-only policy is a start blocker. The current
+managed boundary is IPv4-only, and the privileged helper rejects IPv6 workload
+publications.
 
 ## Rotation, recovery, and removal
 
@@ -222,6 +236,6 @@ firewall integration enabled and enforce source/original-destination rules in
 
   ```bash
   sudo systemctl disable --now vonk-forge-agent-supervisor.service \
-    vonk-forge-package-helper.socket
+    vonk-forge-package-helper.socket vonk-forge-docker-firewall.service
   sudo apt remove vonk-forge-agent
   ```

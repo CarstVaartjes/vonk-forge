@@ -151,15 +151,25 @@ def test_spark_workload_firewall_is_docker_aware_and_fresh_install_blocking() ->
     install = _normalized_text(INSTALL_AGENT)
     fresh = _normalized_text(FRESH_DEVELOPMENT_INSTALL)
 
-    assert "Docker diverts published traffic before ordinary UFW `INPUT` rules" in workloads
+    assert (
+        "Docker diverts published traffic before ordinary UFW `INPUT` rules"
+        in workloads
+    )
     assert "`DOCKER-USER`" in workloads
     assert "`--ctorigdst`" in workloads
     assert "`--ctorigdstport`" in workloads
     assert "vonk-forge-managed-v1" in workloads
-    assert "refusing a foreign chain" in workloads
+    assert "refuses a foreign `VONK-FORGE` chain" in workloads
     assert "non-entrypoint rank publishes its health endpoint only" in workloads
     assert "Published Docker ports bypass ordinary UFW `INPUT` policy" in install
     assert "persistent Docker-aware `DOCKER-USER` policy" in fresh
+    assert "vonk-forge-docker-firewall.service" in workloads
+    assert "/etc/vonk-forge-agent/docker-firewall.conf" in workloads
+    assert "systemctl restart docker" in workloads
+    assert "systemctl is-active vonk-forge-docker-firewall.service" in workloads
+    assert "recipe_endpoint_port=8000" not in workloads
+    assert "original published host port" in workloads
+    assert "unlisted Docker-published TCP port" in workloads
 
 
 def test_fresh_spark_install_does_not_claim_nvidia_platform_ownership() -> None:

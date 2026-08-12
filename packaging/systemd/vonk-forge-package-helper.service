@@ -1,8 +1,9 @@
 [Unit]
 Description=Vonk Forge narrow privileged agent helper
 Requires=vonk-forge-package-helper.socket
+Requires=vonk-forge-docker-firewall.service
 Wants=docker.service
-After=local-fs.target docker.service
+After=local-fs.target docker.service vonk-forge-docker-firewall.service
 
 [Service]
 Type=simple

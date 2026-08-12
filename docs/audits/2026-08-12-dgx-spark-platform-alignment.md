@@ -117,9 +117,10 @@ remain visual physical gates.
   releases do not mutate those components.
 
 The current lab has several operational follow-ups, none of which indicates a
-damaged Spark. The two nodes run different accepted development agent package
-versions after the earlier canary, so the next rollout must converge both to
-one exact accepted version. This audit stopped two stale Spark 2 diagnostic
+damaged Spark. Both nodes run the same accepted development agent package and
+active binary after the canary rollout; later accepted packages remain staged
+through the normal APT/A-B procedure rather than being installed merely to
+match a mutable candidate. This audit stopped two stale Spark 2 diagnostic
 sessions, reset their obsolete failed GDM scope, and removed Spark 1's orphaned
 DS4 BuildKit container plus its 11.6 GiB cache volume after verifying that no
 container used it; the completed DS4 images were retained. The human `carst`
@@ -146,6 +147,37 @@ removes the template-only Compose project name so NAS UI and CLI redeploys
 reuse the operator-selected project and its named volumes. The node config was
 restored while that fail-closed path was corrected; Netplan and link state were
 never changed.
+
+A second read-only host pass confirmed that Docker data, Vonk models, and Vonk
+state all reside on the local 4 TB NVMe/ext4 root, with more than 3.2 TB free on
+each node and periodic trim enabled. Docker uses overlay2, systemd cgroups v2,
+AppArmor/seccomp, the stock `172.17.0.0/16` bridge without overlap, and NVIDIA
+CDI; no daemon override was added. The platform's 16 GiB swap file remains in
+place, while accepted Vonk containers set equal memory and memory-swap limits
+so workloads cannot consume host swap. Journals are bounded in practice at
+approximately 100 MiB and accepted workloads use Docker's `local` driver with
+explicit rotation rather than the daemon's unbounded default `json-file`
+policy.
+
+Both factory installations expose the same `/var/lib/docker/engine-id`, even
+though machine IDs, product UUIDs, boot IDs, SSH host keys, hostnames, and Vonk
+certificate-bound node IDs are unique. The daemons are standalone (Swarm is
+inactive), and Vonk never uses Docker's engine ID as node authority, so this is
+not a workload or identity collision. The audit deliberately leaves that
+undocumented NVIDIA factory state untouched; a future Docker-API aggregator or
+Swarm deployment must resolve it with NVIDIA/Docker support before enrollment.
+
+The remaining host boundary is now packaged rather than pasted: a root-owned
+six-key site file drives `vonk-forge-docker-firewall.service`, which is bound to
+Docker's lifecycle and required by the privileged runtime helper. It validates
+the complete IPv4 `DOCKER-USER` chain, protects the recipe's original published
+host ports (not merely its container-internal port), and rejects drift or a
+foreign managed-chain name. Unlisted TCP publications to either node address
+are default-denied, so site-config drift fails closed. IPv6 workload
+publications are rejected until an
+equivalent signed IPv6 policy exists. Its namespace acceptance passed on Spark
+1 without modifying the host firewall; physical canary activation and
+Docker-restart persistence remain part of the package rollout gate.
 
 ## Physical and operational gates
 

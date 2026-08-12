@@ -151,10 +151,13 @@ On every Ubuntu 24.04 ARM64 node:
    DER SHA-256 fingerprint, unique node ID, and (for multi-node use) the
    node's direct-fabric address and measured 200000 Mb/s bandwidth in
    `/etc/vonk-forge-agent/agent.toml`.
-7. Install persistent Docker-aware `DOCKER-USER` policy for the NAS-only model
-   endpoint and peer-only rendezvous flow. UFW `INPUT` policy does not protect
-   Docker-published ports; use the exact original-destination/source contract
-   from the workload runbook and verify it again after Docker or host restart.
+7. Create the root-owned six-key `docker-firewall.conf`, then enable the signed
+   `vonk-forge-docker-firewall.service` before the package-helper socket. It
+   installs persistent Docker-aware `DOCKER-USER` policy for every accepted
+   original published host port and the peer-only rendezvous flow. UFW `INPUT`
+   policy does not protect Docker-published ports; use the exact
+   original-destination/source contract from the workload runbook and run the
+   packaged check after Docker restart and host reboot.
 
 Use the exact commands and minimal configuration in
 [Install the Vonk Forge agent](../operations/install-vonk-agent.md). Do not add
