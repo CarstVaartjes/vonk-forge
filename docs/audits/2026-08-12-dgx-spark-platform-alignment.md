@@ -121,26 +121,26 @@ remain visual physical gates.
   kernel, driver, Docker, and NVIDIA Toolkit updates. Vonk package/image
   releases do not mutate those components.
 
-The current lab has several operational follow-ups, none of which indicates a
-damaged Spark. Both nodes run the same accepted development agent package and
-active binary after the canary rollout; later accepted packages remain staged
-through the normal APT/A-B procedure rather than being installed merely to
-match a mutable candidate. This audit stopped two stale Spark 2 diagnostic
-sessions, reset their obsolete failed GDM scope, and removed Spark 1's orphaned
-DS4 BuildKit container plus its 11.6 GiB cache volume after verifying that no
-container used it; the completed DS4 images were retained. The human `carst`
-account still has root-equivalent Docker-group access from the archived SSH
-controller; remove that membership only after confirming the legacy controller
-is retired and use `sudo docker` for platform probes. The node firewall is
-currently inactive; no Vonk workload is exposed now, but Docker-published
-traffic bypasses ordinary UFW `INPUT` rules. Original-destination and
-source-specific policy must be persisted in `DOCKER-USER` before a runtime port
-is published. Both nodes also retain the working legacy
-`99-dgx-spark-direct-fabric.yaml`; migrate that ownership to NVIDIA Sync only in
-a separate maintenance window, and never add a second Netplan owner. Temporary
-unattended sudo remains installed on the NAS and both
-Sparks for acceptance automation and must be removed as the final physical
-gate.
+The current lab cleanup found no damaged Spark. Both nodes run the same
+accepted development agent package and active binary after the canary rollout;
+later accepted packages remain staged through the normal APT/A-B procedure
+rather than being installed merely to match a mutable candidate. This audit
+stopped two stale Spark 2 diagnostic sessions, reset their obsolete failed GDM
+scope, and removed Spark 1's orphaned DS4 BuildKit container plus its 11.6 GiB
+cache volume after verifying that no container used it; the completed DS4
+images were retained. After confirming that no archived SSH-controller service
+or process remained, the human `carst` account was removed from the Docker
+group on both nodes. Fresh SSH sessions now reject direct Docker access; human
+platform probes use `sudo docker`, and the `vonk-agent` service account remains
+outside the group. The packaged Docker-aware firewall is enabled and active on
+both nodes, and its complete live-policy verifier passed before and after the
+physical lifecycle. No Vonk workload remains exposed after normal cleanup.
+Both nodes retain the working legacy `99-dgx-spark-direct-fabric.yaml`; migrate
+that ownership to NVIDIA Sync only in a separate maintenance window, and never
+add a second Netplan owner. After the final host audit and public website
+deployment, both temporary sudoers paths were removed on the NAS and both
+Sparks; invalidated non-interactive probes returned `PASSWORD_REQUIRED` on all
+three hosts.
 
 The first package rollout converged both nodes to the same signed Rust build
 and exposed one control-plane configuration omission before any workload was
@@ -181,8 +181,21 @@ foreign managed-chain name. Unlisted TCP publications to either node address
 are default-denied, so site-config drift fails closed. IPv6 workload
 publications are rejected until an
 equivalent signed IPv6 policy exists. Its namespace acceptance passed on Spark
-1 without modifying the host firewall; physical canary activation and
-Docker-restart persistence remain part of the package rollout gate.
+1 without modifying the host firewall. Physical canary activation then passed
+on Spark 1 and Spark 2, the packaged verifier passed against each live
+`DOCKER-USER` policy, and ordered supervisor/NAS restarts preserved the same
+two-rank workload and route.
+
+The accepted inventory vocabulary now reports
+`fabric.connected.mbps.200000`, separating observed link connectivity from the
+recipe's selected interface. The final physical pair run used only
+`192.168.100.10` and `192.168.100.11`: rank 0 published rendezvous on the
+former, rank 1 completed the versioned HELLO from the latter, and management
+and unlisted paths remained denied. Stopping and restarting only rank 1
+withdrew and republished the route while the same rank-0 coordinator remained
+alive. See the
+[development workload acceptance record](development-agent-workload-acceptance.md)
+for redacted artifact and operation identities.
 
 ## Physical and operational gates
 
