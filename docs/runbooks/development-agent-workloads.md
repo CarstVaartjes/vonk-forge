@@ -694,13 +694,30 @@ run this on the NAS and both GPU nodes:
 sudo rm -f /etc/sudoers.d/vonktemp \
   /etc/sudoers.d/99-vonk-codex-temporary
 sudo -k
-if sudo -n true 2>/dev/null; then
+for path in \
+  /etc/sudoers.d/vonktemp \
+  /etc/sudoers.d/99-vonk-codex-temporary
+do
+  if test -e "$path" || test -L "$path"; then
+    echo "temporary sudo path remains: $path" >&2
+    exit 1
+  fi
+done
+set +e
+sudo_error=$(LC_ALL=C sudo -n true 2>&1)
+sudo_status=$?
+set -e
+if test "$sudo_status" -ne 1 || \
+  test "$sudo_error" != 'sudo: a password is required'
+then
+  echo "unexpected unattended-sudo result: status $sudo_status" >&2
   exit 1
-else
-  echo PASSWORD_REQUIRED
 fi
+echo PASSWORD_REQUIRED
 ```
 
-`PASSWORD_REQUIRED` is the success result. Disable NAS SSH in its UI afterward
-when that is the site's normal posture. Do not declare the physical acceptance
-complete while either temporary sudo file remains.
+`PASSWORD_REQUIRED` is the success result. A missing `sudo` binary, sudoers
+parse or policy error, unexpected exit status, changed diagnostic, regular
+file, or symlink at either path fails the gate. Disable NAS SSH in its UI
+afterward when that is the site's normal posture. Do not declare the physical
+acceptance complete while either temporary sudo path remains.

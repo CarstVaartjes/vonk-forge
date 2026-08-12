@@ -14,10 +14,13 @@ digests, bounded operation identities, workflow links, and pass/fail outcomes.
 
 ## Accepted publication
 
-The persistent rendezvous correction was independently reviewed in
+The persistent rendezvous correction passed an operator-retained independent
+agent review, then landed through
 [PR #128](https://github.com/CarstVaartjes/vonk-forge/pull/128), merged as
 `72e59f04c678e03261b4bedca6b509eafb6ddf07`, and passed every required PR
-check. Publication then completed only from accepted `main`:
+check. The detailed review transcript remains in the private operator session;
+it is not represented as GitHub review metadata. Publication then completed
+only from accepted `main`:
 
 - [Development images run 31645030311](https://github.com/CarstVaartjes/vonk-forge/actions/runs/31645030311)
   built, smoke-tested, scanned, attested, and published the exact API and worker
@@ -39,7 +42,7 @@ check. Publication then completed only from accepted `main`:
 | Gate | Result and retained evidence | Status |
 | --- | --- | --- |
 | Repository correctness | PR #128 passed Ruff, generated clients, PR contracts, Rust contracts, all four repository shards, all four control shards, Python agent, admin web, catalog/service, and release-policy checks. This final documentation diff also passed all 286 local script tests, whitespace validation, and a bounded secret-pattern scan; it is merged only after its required GitHub checks pass. | Passed |
-| Independent review | PR #128's final independent review found no Critical or Important issue after the same-coordinator recovery test was added; all actionable feedback was resolved before merge. The final documentation-only diff received a separate independent review under the same zero-Critical/Important gate. | Passed |
+| Independent review | The runtime correction and this documentation-only finalization each received an operator-retained independent agent review. These are not GitHub review comments; GitHub proves CI and merge. All actionable findings were resolved, and the final re-review found zero Critical or Important issue. This row is the public redacted outcome; detailed transcripts remain in the private operator session. | Passed |
 | Accepted publication | Exact `main` commit, image manifests, package digest, and successful workflow URLs are listed above. No branch-built or locally published artifact was deployed. | Passed |
 | NAS project | The NAS directory contains exactly `docker-compose.yml` plus `secrets/`. Compose SHA-256 is `f0521b1ce1ccb1ab115857d64005a9a708f1c28ce2fd8e74e09bf63405be54df`; all 14 host secret sources are mode `0600`; API, worker, and migration use distinct read-only secret projections; the five long-running services expose no secret-valued environment variables. Ordered pull/stop/start converged every service healthy on revision `72e59f04`; the final read-only audit found every service up, all health checks green, and zero recent Caddy errors. | Passed |
 | Spark identity | Spark 1 is `spk_42a502cc1a5de4c79aea1b6b6d993c74`, certificate SHA-256 `07:17:D4:E4:87:18:1E:9A:2B:60:E3:FA:B2:09:D8:95:A4:DC:15:EC:B1:EF:98:C4:B2:07:57:5B:C8:A2:3D:B6`; Spark 2 is `spk_ec7897d93866091c4249cc7825fb95c7`, certificate SHA-256 `62:C7:06:2B:C6:77:C6:15:88:B6:66:2C:7C:5F:A4:8D:E6:E7:2B:B6:CF:F0:A6:90:5E:AC:A0:BD:FE:1A:D4:9A`. Both run signed package `0.1.0~dev.91+g950e4845c54e`, slot B, binary SHA-256 `8c06e776691d1153564fdb7410de9866ec41b609cb20697aa816f9dd206437e3`, Rust protocol 3, migration complete, and fresh inventory. Neither the service account nor the human operator retains Docker-group access; a fresh SSH session requires `sudo docker`. | Passed |
