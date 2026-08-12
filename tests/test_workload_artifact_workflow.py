@@ -388,6 +388,21 @@ def test_runtime_manifest_selector_requires_one_attestation(tmp_path: Path) -> N
     assert "BuildKit attestation descriptor is invalid" in result.stderr
 
 
+def test_runtime_manifest_selector_rejects_extra_executable_fields(
+    tmp_path: Path,
+) -> None:
+    runtime_digest = f"sha256:{'a' * 64}"
+    index = _valid_runtime_index(runtime_digest)
+    descriptor = index["manifests"][0]  # type: ignore[index]
+    assert isinstance(descriptor, dict)
+    descriptor["annotations"] = {"unexpected": "metadata"}
+
+    result = _run_runtime_manifest_selector(tmp_path, index)
+
+    assert result.returncode != 0
+    assert "OCI executable descriptor is invalid" in result.stderr
+
+
 @pytest.mark.parametrize(
     "mutate",
     [
