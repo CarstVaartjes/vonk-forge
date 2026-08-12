@@ -191,7 +191,9 @@ Download `workload-artifact-$run_id` into a private temporary directory, run `sc
 
 The validated digest is the one executable child manifest for the requested
 platform. Preserve `oci-index.json` as run-specific BuildKit evidence, but do
-not use its digest as the runtime reference.
+not use its digest as the runtime reference. Require strict OCI-index metadata,
+unambiguous JSON, canonical descriptors, and exactly one BuildKit attestation
+descriptor whose reference annotation equals the selected child digest.
 
 - [ ] **Step 4: Verify trust and runtime metadata independently**
 

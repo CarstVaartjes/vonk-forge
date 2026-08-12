@@ -92,7 +92,10 @@ that would otherwise use the workflow runner's wall clock. The publisher
 requires exactly one executable manifest for the requested platform, verifies
 its bytes, and makes that child manifest—not the outer BuildKit index—the
 accepted runtime identity. GitHub's signed provenance and SBOM attestations
-target that runtime digest.
+target that runtime digest. Index parsing is fail-closed: duplicate JSON keys,
+unexpected top-level metadata, noncanonical descriptors, extra executable
+children, and attestation descriptors that are not explicitly bound to the
+selected child are rejected before any evidence is signed.
 
 The outer index remains evidence because its BuildKit attestation manifest
 truthfully contains run IDs, runner identity, invocation times, and a unique

@@ -382,37 +382,95 @@ jobs:
           else:
               raise SystemExit("raw OCI index does not match build digest")
 
-          document = json.loads(path.read_bytes())
+          def reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+              document: dict[str, object] = {}
+              for key, value in pairs:
+                  if key in document:
+                      raise SystemExit(f"duplicate JSON key in OCI index: {key}")
+                  document[key] = value
+              return document
+
+
+          document = json.loads(
+              path.read_bytes(), object_pairs_hook=reject_duplicate_keys
+          )
           requested = sys.argv[1].split("/")
-          manifests = document.get("manifests")
-          if len(requested) != 2 or not isinstance(manifests, list):
+          if (
+              not isinstance(document, dict)
+              or set(document) != {"schemaVersion", "mediaType", "manifests"}
+              or type(document.get("schemaVersion")) is not int
+              or document.get("schemaVersion") != 2
+              or document.get("mediaType")
+              != "application/vnd.oci.image.index.v1+json"
+          ):
+              raise SystemExit("OCI index metadata is invalid")
+          manifests = document["manifests"]
+          if len(requested) != 2 or not all(requested) or not isinstance(manifests, list):
               raise SystemExit(
                   "OCI index must contain exactly one executable manifest for the requested platform"
               )
           executable = []
+          attestations = []
           for descriptor in manifests:
               if not isinstance(descriptor, dict):
                   raise SystemExit("OCI index descriptor is invalid")
               platform = descriptor.get("platform")
-              if not isinstance(platform, dict):
-                  raise SystemExit("OCI index platform descriptor is invalid")
-              if platform.get("os") == "unknown" and platform.get("architecture") == "unknown":
+              digest = descriptor.get("digest")
+              size = descriptor.get("size")
+              if (
+                  not isinstance(platform, dict)
+                  or set(platform) != {"os", "architecture"}
+                  or not all(isinstance(platform.get(key), str) for key in platform)
+              ):
+                  raise SystemExit("OCI index descriptor is invalid")
+              is_attestation = platform == {
+                  "os": "unknown",
+                  "architecture": "unknown",
+              }
+              descriptor_error = (
+                  "BuildKit attestation descriptor is invalid"
+                  if is_attestation
+                  else "OCI index descriptor is invalid"
+              )
+              if (
+                  descriptor.get("mediaType")
+                  != "application/vnd.oci.image.manifest.v1+json"
+                  or not isinstance(digest, str)
+                  or re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is None
+                  or not isinstance(size, int)
+                  or isinstance(size, bool)
+                  or size <= 0
+              ):
+                  raise SystemExit(descriptor_error)
+              if is_attestation:
+                  attestations.append(descriptor)
                   continue
+              if set(descriptor) != {"mediaType", "digest", "size", "platform"}:
+                  raise SystemExit("OCI executable descriptor is invalid")
               executable.append(descriptor)
           if (
               len(executable) != 1
-              or executable[0].get("mediaType")
-              != "application/vnd.oci.image.manifest.v1+json"
               or executable[0]["platform"].get("os") != requested[0]
               or executable[0]["platform"].get("architecture") != requested[1]
           ):
               raise SystemExit(
                   "OCI index must contain exactly one executable manifest for the requested platform"
               )
-          digest = executable[0].get("digest")
-          if not isinstance(digest, str) or re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is None:
-              raise SystemExit("runtime manifest digest is not canonical")
-          print(digest)
+          runtime_digest = executable[0]["digest"]
+          if len(attestations) != 1:
+              raise SystemExit("BuildKit attestation descriptor is invalid")
+          attestation = attestations[0]
+          if (
+              set(attestation)
+              != {"mediaType", "digest", "size", "annotations", "platform"}
+              or attestation.get("annotations")
+              != {
+                  "vnd.docker.reference.digest": runtime_digest,
+                  "vnd.docker.reference.type": "attestation-manifest",
+              }
+          ):
+              raise SystemExit("BuildKit attestation descriptor is invalid")
+          print(runtime_digest)
           PY
           )
           runtime_reference="${OUTPUT_REPOSITORY}@${runtime_digest}"

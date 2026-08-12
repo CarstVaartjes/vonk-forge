@@ -217,7 +217,9 @@ def test_acceptance_identity_is_the_reproducible_runtime_manifest() -> None:
 
 
 def _run_runtime_manifest_selector(
-    tmp_path: Path, index: dict[str, object], architecture: str = "linux/arm64"
+    tmp_path: Path,
+    index: dict[str, object] | bytes,
+    architecture: str = "linux/arm64",
 ) -> subprocess.CompletedProcess[str]:
     evidence = workflow_step(
         "publish-workload-artifact", "Collect workload artifact evidence"
@@ -229,7 +231,11 @@ def _run_runtime_manifest_selector(
     script = textwrap.dedent(script)
     output = tmp_path / "workload-artifact-output"
     output.mkdir()
-    raw = json.dumps(index, separators=(",", ":")).encode()
+    raw = (
+        index
+        if isinstance(index, bytes)
+        else json.dumps(index, separators=(",", ":")).encode()
+    )
     (output / "oci-index.json").write_bytes(raw + b"\n")
     env = os.environ.copy()
     env["OCI_INDEX_DIGEST"] = "sha256:" + hashlib.sha256(raw).hexdigest()
@@ -244,30 +250,52 @@ def _run_runtime_manifest_selector(
     )
 
 
+def _runtime_descriptor(
+    digest: str, *, os_name: str = "linux", architecture: str = "arm64"
+) -> dict[str, object]:
+    return {
+        "mediaType": "application/vnd.oci.image.manifest.v1+json",
+        "digest": digest,
+        "size": 42,
+        "platform": {"os": os_name, "architecture": architecture},
+    }
+
+
+def _attestation_descriptor(
+    runtime_digest: str,
+    *,
+    digest: str | None = None,
+) -> dict[str, object]:
+    return {
+        "mediaType": "application/vnd.oci.image.manifest.v1+json",
+        "digest": digest or f"sha256:{'b' * 64}",
+        "size": 43,
+        "annotations": {
+            "vnd.docker.reference.digest": runtime_digest,
+            "vnd.docker.reference.type": "attestation-manifest",
+        },
+        "platform": {"os": "unknown", "architecture": "unknown"},
+    }
+
+
+def _valid_runtime_index(runtime_digest: str) -> dict[str, object]:
+    return {
+        "schemaVersion": 2,
+        "mediaType": "application/vnd.oci.image.index.v1+json",
+        "manifests": [
+            _runtime_descriptor(runtime_digest),
+            _attestation_descriptor(runtime_digest),
+        ],
+    }
+
+
 def test_runtime_manifest_selector_accepts_one_requested_executable(
     tmp_path: Path,
 ) -> None:
     runtime_digest = f"sha256:{'a' * 64}"
     result = _run_runtime_manifest_selector(
         tmp_path,
-        {
-            "schemaVersion": 2,
-            "mediaType": "application/vnd.oci.image.index.v1+json",
-            "manifests": [
-                {
-                    "mediaType": "application/vnd.oci.image.manifest.v1+json",
-                    "digest": runtime_digest,
-                    "size": 42,
-                    "platform": {"os": "linux", "architecture": "arm64"},
-                },
-                {
-                    "mediaType": "application/vnd.oci.image.manifest.v1+json",
-                    "digest": f"sha256:{'b' * 64}",
-                    "size": 43,
-                    "platform": {"os": "unknown", "architecture": "unknown"},
-                },
-            ],
-        },
+        _valid_runtime_index(runtime_digest),
     )
 
     assert result.returncode == 0, result.stderr
@@ -278,12 +306,7 @@ def test_runtime_manifest_selector_rejects_multiple_executables(
     tmp_path: Path,
 ) -> None:
     descriptors = [
-        {
-            "mediaType": "application/vnd.oci.image.manifest.v1+json",
-            "digest": f"sha256:{character * 64}",
-            "size": 42,
-            "platform": {"os": "linux", "architecture": "arm64"},
-        }
+        _runtime_descriptor(f"sha256:{character * 64}")
         for character in ("a", "b")
     ]
 
@@ -298,6 +321,103 @@ def test_runtime_manifest_selector_rejects_multiple_executables(
 
     assert result.returncode != 0
     assert "exactly one executable manifest" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "index",
+    [
+        {
+            "schemaVersion": 1,
+            "mediaType": "application/vnd.oci.image.index.v1+json",
+            "manifests": [],
+        },
+        {
+            "schemaVersion": 2.0,
+            "mediaType": "application/vnd.oci.image.index.v1+json",
+            "manifests": [],
+        },
+        {
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.docker.distribution.manifest.list.v2+json",
+            "manifests": [],
+        },
+    ],
+)
+def test_runtime_manifest_selector_rejects_invalid_index_metadata(
+    tmp_path: Path, index: dict[str, object]
+) -> None:
+    result = _run_runtime_manifest_selector(tmp_path, index)
+
+    assert result.returncode != 0
+    assert "OCI index metadata is invalid" in result.stderr
+
+
+def test_runtime_manifest_selector_rejects_duplicate_json_keys(tmp_path: Path) -> None:
+    raw = (
+        b'{"schemaVersion":2,"schemaVersion":1,'
+        b'"mediaType":"application/vnd.oci.image.index.v1+json","manifests":[]}'
+    )
+
+    result = _run_runtime_manifest_selector(tmp_path, raw)
+
+    assert result.returncode != 0
+    assert "duplicate JSON key" in result.stderr
+
+
+def test_runtime_manifest_selector_rejects_wrong_platform_only(tmp_path: Path) -> None:
+    runtime_digest = f"sha256:{'a' * 64}"
+    index = _valid_runtime_index(runtime_digest)
+    index["manifests"][0] = _runtime_descriptor(  # type: ignore[index]
+        runtime_digest, architecture="amd64"
+    )
+
+    result = _run_runtime_manifest_selector(tmp_path, index)
+
+    assert result.returncode != 0
+    assert "exactly one executable manifest" in result.stderr
+
+
+def test_runtime_manifest_selector_requires_one_attestation(tmp_path: Path) -> None:
+    runtime_digest = f"sha256:{'a' * 64}"
+    index = _valid_runtime_index(runtime_digest)
+    index["manifests"] = [_runtime_descriptor(runtime_digest)]
+
+    result = _run_runtime_manifest_selector(tmp_path, index)
+
+    assert result.returncode != 0
+    assert "BuildKit attestation descriptor is invalid" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda descriptor: descriptor.pop("annotations"),
+        lambda descriptor: descriptor.update(
+            mediaType="application/vnd.docker.distribution.manifest.v2+json"
+        ),
+        lambda descriptor: descriptor.update(size=0),
+        lambda descriptor: descriptor.update(digest="sha256:NOT-CANONICAL"),
+        lambda descriptor: descriptor["annotations"].update(  # type: ignore[union-attr]
+            {"vnd.docker.reference.digest": f"sha256:{'c' * 64}"}
+        ),
+        lambda descriptor: descriptor["annotations"].update(  # type: ignore[union-attr]
+            {"vnd.docker.reference.type": "unrelated"}
+        ),
+    ],
+)
+def test_runtime_manifest_selector_rejects_invalid_attestation_descriptor(
+    tmp_path: Path, mutate: object
+) -> None:
+    runtime_digest = f"sha256:{'a' * 64}"
+    index = _valid_runtime_index(runtime_digest)
+    descriptor = index["manifests"][1]  # type: ignore[index]
+    assert isinstance(descriptor, dict)
+    mutate(descriptor)  # type: ignore[operator]
+
+    result = _run_runtime_manifest_selector(tmp_path, index)
+
+    assert result.returncode != 0
+    assert "BuildKit attestation descriptor is invalid" in result.stderr
 
 
 def test_exact_context_and_declared_base_images_are_verified_before_build() -> None:
