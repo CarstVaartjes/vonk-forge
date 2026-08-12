@@ -28,7 +28,7 @@
 
 **Interfaces:**
 - Consumes: accepted `ghcr.io/carstvaartjes/spark-ds4` and public BusyBox digest-pinned images.
-- Produces: target `runtime`, containing `/bin/busybox`, label `ai.vonkforge.runtime-interface=v1`, and user `10001:10001`, without changing the legacy DS4 release.
+- Produces: target `runtime`, containing `/opt/vonk/busybox`, label `ai.vonkforge.runtime-interface=v1`, and user `10001:10001`, without changing the legacy DS4 release.
 
 - [ ] **Step 1: Add the failing runtime-contract assertions**
 
@@ -38,7 +38,7 @@ Add `test_generic_runtime_is_self_contained_without_mutating_the_legacy_release`
 assert hashlib.sha256(legacy).hexdigest() == manifest["files"][legacy_path]
 assert f"FROM {BUSYBOX_BASE} AS fabric-tools" in generic
 assert f"FROM {IMAGE} AS runtime" in generic
-assert "COPY --from=fabric-tools /bin/busybox /bin/busybox" in generic
+assert "COPY --from=fabric-tools /bin/busybox /opt/vonk/busybox" in generic
 assert 'ai.vonkforge.runtime-interface="v1"' in generic
 assert "ARG " not in generic and "RUN " not in generic
 ```
@@ -57,7 +57,7 @@ Create the networkless two-stage composition while leaving the legacy Dockerfile
 FROM docker.io/library/busybox:1.37.0-musl@sha256:fc6dddc4c44b1bfe37f41cae8e67d1693828e8f42a91862816d7953e2c9d3f23 AS fabric-tools
 FROM ghcr.io/carstvaartjes/spark-ds4@sha256:084d9a9ffa47431842c5dec84de97b058034dec0535b2a563bc5db78c9e14615 AS runtime
 LABEL ai.vonkforge.runtime-interface="v1"
-COPY --from=fabric-tools /bin/busybox /bin/busybox
+COPY --from=fabric-tools /bin/busybox /opt/vonk/busybox
 USER 10001:10001
 ENTRYPOINT ["/opt/ds4/ds4-server"]
 ```
@@ -215,7 +215,7 @@ Store only public digests, workflow URLs, source SHA, request digest, SBOM/prove
 
 - [ ] **Step 1: Change qualification tests first**
 
-Require exactly one `FROM`, the accepted generic runtime reference, no `AS` stage, no `COPY --from`, local wrapper copy, `/bin/busybox` as the rendezvous default, and equality among recipe/source/qualification runtime references.
+Require exactly one `FROM`, the accepted generic runtime reference, no `AS` stage, no `COPY --from`, local wrapper copy, `/opt/vonk/busybox` as the rendezvous default, and equality among recipe/source/qualification runtime references.
 
 - [ ] **Step 2: Verify the old wrapper fails the new contract**
 

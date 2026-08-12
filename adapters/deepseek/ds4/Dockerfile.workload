@@ -2,6 +2,6 @@ FROM docker.io/library/busybox:1.37.0-musl@sha256:fc6dddc4c44b1bfe37f41cae8e67d1
 
 FROM ghcr.io/carstvaartjes/spark-ds4@sha256:084d9a9ffa47431842c5dec84de97b058034dec0535b2a563bc5db78c9e14615 AS runtime
 LABEL ai.vonkforge.runtime-interface="v1"
-COPY --from=fabric-tools /bin/busybox /bin/busybox
+COPY --from=fabric-tools /bin/busybox /opt/vonk/busybox
 USER 10001:10001
 ENTRYPOINT ["/opt/ds4/ds4-server"]

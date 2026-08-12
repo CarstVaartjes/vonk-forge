@@ -368,7 +368,7 @@ def test_generic_runtime_is_self_contained_without_mutating_the_legacy_release()
     ]
     assert f"FROM {BUSYBOX_BASE} AS fabric-tools" in generic
     assert f"FROM {IMAGE} AS runtime" in generic
-    assert "COPY --from=fabric-tools /bin/busybox /bin/busybox" in generic
+    assert "COPY --from=fabric-tools /bin/busybox /opt/vonk/busybox" in generic
     assert 'ai.vonkforge.runtime-interface="v1"' in generic
     assert "USER 10001:10001" in generic
     assert "ARG " not in generic

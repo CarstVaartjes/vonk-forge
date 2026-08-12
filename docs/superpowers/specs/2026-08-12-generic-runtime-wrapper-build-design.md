@@ -28,7 +28,8 @@ and networkless.
 
 The accepted DS4 binary image remains byte-identical. A separate reviewed
 Dockerfile composes that exact digest with the exact public BusyBox digest and
-copies only `/bin/busybox` into the final stage. It performs no `RUN`, package
+copies only BusyBox to `/opt/vonk/busybox` in the final stage, matching the
+existing rendezvous wrapper contract. It performs no `RUN`, package
 installation, source download, or compilation. A reviewed
 `release/workloads/*.json` request will publish that derived image to the generic
 `ghcr.io/carstvaartjes/vonk-forge-workloads` repository using the existing
