@@ -54,7 +54,7 @@ Expected: FAIL because `Dockerfile.workload` does not exist.
 Create the networkless two-stage composition while leaving the legacy Dockerfile and runtime manifest unchanged:
 
 ```dockerfile
-FROM docker.io/library/busybox:1.37.0-musl@sha256:fc6dddc4c44b1bfe37f41cae8e67d1693828e8f42a91862816d7953e2c9d3f23 AS fabric-tools
+FROM docker.io/library/busybox@sha256:fc6dddc4c44b1bfe37f41cae8e67d1693828e8f42a91862816d7953e2c9d3f23 AS fabric-tools
 FROM ghcr.io/carstvaartjes/spark-ds4@sha256:084d9a9ffa47431842c5dec84de97b058034dec0535b2a563bc5db78c9e14615 AS runtime
 LABEL ai.vonkforge.runtime-interface="v1"
 COPY --from=fabric-tools /bin/busybox /opt/vonk/busybox

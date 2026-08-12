@@ -42,7 +42,7 @@ RUNTIME_BASE = (
     "@sha256:c3fde347d52d578c84fd644bc177bc7ec333feaf11550d990da4084d7612e4c7"
 )
 BUSYBOX_BASE = (
-    "docker.io/library/busybox:1.37.0-musl"
+    "docker.io/library/busybox"
     "@sha256:fc6dddc4c44b1bfe37f41cae8e67d1693828e8f42a91862816d7953e2c9d3f23"
 )
 
