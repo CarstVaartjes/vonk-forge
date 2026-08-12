@@ -50,4 +50,3 @@ the address-specific rendezvous and inference, stop only rank 1's managed
 container, observe fresh failed-rank state and route withdrawal, start that
 same container, observe HELLO/ack and route republication, and recover
 inference. Restart-persistence and normal API stop/uninstall remain mandatory.
-

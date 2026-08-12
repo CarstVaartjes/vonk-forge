@@ -186,7 +186,7 @@ if not arguments or arguments.pop(0) != "nc":
     raise SystemExit(2)
 listen = any(value in {{"-l", "-lk"}} for value in arguments)
 local = arguments[arguments.index("-s") + 1] if "-s" in arguments else "0.0.0.0"
-timeout = int(arguments[arguments.index("-w") + 1])
+timeout = int(arguments[arguments.index("-w") + 1]) if "-w" in arguments else None
 if listen:
     port = int(arguments[arguments.index("-p") + 1])
     executable = arguments[arguments.index("-e") + 1]
@@ -194,8 +194,13 @@ if listen:
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind((local, port))
         server.listen()
+        if timeout is not None:
+            server.settimeout(timeout)
         while True:
-            connection, _peer = server.accept()
+            try:
+                connection, _peer = server.accept()
+            except TimeoutError:
+                raise SystemExit(124)
             with connection:
                 peer_log = os.environ.get("VONK_SOCKETBOX_PEER_LOG")
                 if peer_log:
@@ -219,6 +224,7 @@ else:
     host = arguments[-2]
     port = int(arguments[-1])
     with socket.socket() as client:
+        assert timeout is not None
         client.settimeout(timeout)
         client.connect((host, port))
         client.sendall(payload)
@@ -241,12 +247,17 @@ def _unused_port(address: str) -> int:
 
 
 def _rendezvous_environment(
-    tmp_path: Path, *, rank: int, local_address: str, port: int
+    tmp_path: Path,
+    *,
+    rank: int,
+    local_address: str,
+    port: int,
+    timeout_seconds: int = 3,
 ) -> dict[str, str]:
     return {
         **os.environ,
         "VONK_BUSYBOX": str(_socketbox(tmp_path)),
-        "VONK_FABRIC_RENDEZVOUS_SECONDS": "3",
+        "VONK_FABRIC_RENDEZVOUS_SECONDS": str(timeout_seconds),
         "VONK_MASTER_ADDR": "127.0.0.2",
         "VONK_LOCAL_ADDR": local_address,
         "VONK_MASTER_PORT": str(port),
@@ -539,6 +550,77 @@ def test_model_pair_lets_rootless_networking_select_source_for_fabric_exchange(
     finally:
         coordinator.terminate()
         coordinator.wait(timeout=3)
+
+
+def test_model_pair_coordinator_survives_an_idle_client_timeout(
+    tmp_path: Path,
+) -> None:
+    port = _unused_port("127.0.0.2")
+    coordinator = subprocess.Popen(
+        [str(FABRIC_RENDEZVOUS), "coordinator"],
+        env=_rendezvous_environment(
+            tmp_path,
+            rank=0,
+            local_address="127.0.0.2",
+            port=port,
+            timeout_seconds=1,
+        ),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        time.sleep(1.25)
+        joined = subprocess.run(
+            [str(FABRIC_RENDEZVOUS), "join"],
+            env=_rendezvous_environment(
+                tmp_path,
+                rank=1,
+                local_address="127.0.0.3",
+                port=port,
+                timeout_seconds=1,
+            ),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        assert coordinator.poll() is None
+        assert joined.returncode == 0, joined.stderr
+        assert joined.stdout == "fabric rendezvous complete: rank 1 of 2\n"
+    finally:
+        if coordinator.poll() is None:
+            coordinator.terminate()
+        coordinator.wait(timeout=3)
+
+
+def test_model_pair_bounds_an_incomplete_worker_message(tmp_path: Path) -> None:
+    handler_environment = _rendezvous_environment(
+        tmp_path,
+        rank=0,
+        local_address="127.0.0.2",
+        port=_unused_port("127.0.0.2"),
+        timeout_seconds=1,
+    )
+    handler_environment["VONK_FABRIC_SERVE"] = "1"
+    handler = subprocess.Popen(
+        [str(FABRIC_RENDEZVOUS)],
+        env=handler_environment,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert handler.wait(timeout=2.5) != 0
+        assert handler.stderr is not None
+        assert "worker sent no complete data" in handler.stderr.read()
+    finally:
+        if handler.stdin is not None:
+            handler.stdin.close()
+        if handler.poll() is None:
+            handler.terminate()
+            handler.wait(timeout=3)
 
 
 def test_model_pair_refuses_an_invalid_declared_local_fabric_address(
