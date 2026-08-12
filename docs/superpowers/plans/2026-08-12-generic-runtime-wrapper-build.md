@@ -189,6 +189,10 @@ Expected: authorization, exact-source verification, read-only CI gate, build, SB
 
 Download `workload-artifact-$run_id` into a private temporary directory, run `scripts/workload-artifact-metadata result` against the reviewed request, and extract `oci_manifest_digest` from `validated-result.json`. Construct `runtime_reference` only from the fixed repository name and that validated digest.
 
+The validated digest is the one executable child manifest for the requested
+platform. Preserve `oci-index.json` as run-specific BuildKit evidence, but do
+not use its digest as the runtime reference.
+
 - [ ] **Step 4: Verify trust and runtime metadata independently**
 
 Run GitHub attestation verification for the OCI subject and inspect the remote manifest/config. Require Linux ARM64, `10001:10001`, `ai.vonkforge.runtime-interface=v1`, the reviewed source revision, and no embedded secret canary. Make the new GHCR package public if its first publication created it as private, then prove anonymous inspection from a process with no registry credential.
@@ -197,7 +201,8 @@ Run GitHub attestation verification for the OCI subject and inspect the remote m
 
 Dispatch the same reviewed request a second time from current `main`, require
 every job to pass, download and independently validate its evidence as above,
-and compare the two `oci_manifest_digest` values. They must match exactly.
+and compare the two executable `oci_manifest_digest` values. They must match
+exactly; the outer index and signed-bundle digests are expected to differ.
 Keep both workflow run IDs and URLs. A mismatch rejects the runtime and stops
 this plan before any recipe or Spark accepts either digest.
 

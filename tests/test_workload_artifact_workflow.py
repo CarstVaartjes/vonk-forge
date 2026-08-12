@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import re
@@ -195,6 +196,110 @@ def test_build_normalizes_digest_affecting_timestamps_to_source_commit() -> None
     assert "rewrite-timestamp=true" in build
 
 
+def test_acceptance_identity_is_the_reproducible_runtime_manifest() -> None:
+    evidence = workflow_step(
+        "publish-workload-artifact", "Collect workload artifact evidence"
+    )
+    result = workflow_step(
+        "publish-workload-artifact", "Create workload artifact result"
+    )
+
+    assert "id: evidence" in evidence
+    assert "OCI_INDEX_DIGEST: ${{ steps.build.outputs.digest }}" in evidence
+    assert "workload-artifact-output/oci-index.json" in evidence
+    assert "exactly one executable manifest for the requested platform" in evidence
+    assert "runtime_digest=" in evidence
+    assert 'printf \'runtime_digest=%s\\n\'' in evidence
+    assert "runtime manifest does not match selected digest" in evidence
+    assert (
+        "OCI_MANIFEST_DIGEST: ${{ steps.evidence.outputs.runtime_digest }}" in result
+    )
+
+
+def _run_runtime_manifest_selector(
+    tmp_path: Path, index: dict[str, object], architecture: str = "linux/arm64"
+) -> subprocess.CompletedProcess[str]:
+    evidence = workflow_step(
+        "publish-workload-artifact", "Collect workload artifact evidence"
+    )
+    marker = '          runtime_digest=$(python - "$ARCHITECTURE" <<\'PY\'\n'
+    script = evidence.split(marker, maxsplit=1)[1].split(
+        "\n          PY\n          )", maxsplit=1
+    )[0]
+    script = textwrap.dedent(script)
+    output = tmp_path / "workload-artifact-output"
+    output.mkdir()
+    raw = json.dumps(index, separators=(",", ":")).encode()
+    (output / "oci-index.json").write_bytes(raw + b"\n")
+    env = os.environ.copy()
+    env["OCI_INDEX_DIGEST"] = "sha256:" + hashlib.sha256(raw).hexdigest()
+    return subprocess.run(
+        [sys.executable, "-", architecture],
+        input=script,
+        cwd=tmp_path,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_runtime_manifest_selector_accepts_one_requested_executable(
+    tmp_path: Path,
+) -> None:
+    runtime_digest = f"sha256:{'a' * 64}"
+    result = _run_runtime_manifest_selector(
+        tmp_path,
+        {
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.oci.image.index.v1+json",
+            "manifests": [
+                {
+                    "mediaType": "application/vnd.oci.image.manifest.v1+json",
+                    "digest": runtime_digest,
+                    "size": 42,
+                    "platform": {"os": "linux", "architecture": "arm64"},
+                },
+                {
+                    "mediaType": "application/vnd.oci.image.manifest.v1+json",
+                    "digest": f"sha256:{'b' * 64}",
+                    "size": 43,
+                    "platform": {"os": "unknown", "architecture": "unknown"},
+                },
+            ],
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == runtime_digest
+
+
+def test_runtime_manifest_selector_rejects_multiple_executables(
+    tmp_path: Path,
+) -> None:
+    descriptors = [
+        {
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "digest": f"sha256:{character * 64}",
+            "size": 42,
+            "platform": {"os": "linux", "architecture": "arm64"},
+        }
+        for character in ("a", "b")
+    ]
+
+    result = _run_runtime_manifest_selector(
+        tmp_path,
+        {
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.oci.image.index.v1+json",
+            "manifests": descriptors,
+        },
+    )
+
+    assert result.returncode != 0
+    assert "exactly one executable manifest" in result.stderr
+
+
 def test_exact_context_and_declared_base_images_are_verified_before_build() -> None:
     publisher = job("publish-workload-artifact")
     source = workflow_step("publish-workload-artifact", "Verify exact source context")
@@ -313,9 +418,11 @@ def test_result_rejects_manifest_or_attestation_evidence_mismatch() -> None:
     )
 
     assert "hashlib.sha256" in evidence
-    assert "OCI_MANIFEST_DIGEST" in evidence
+    assert "OCI_INDEX_DIGEST" in evidence
+    assert "runtime_digest" in evidence
     assert "removeprefix(\"sha256:\")" in evidence
-    assert "raw OCI manifest does not match build digest" in evidence
+    assert "raw OCI index does not match build digest" in evidence
+    assert "runtime manifest does not match selected digest" in evidence
     assert 'jq -e \'if type == "object" or type == "array"' in evidence
     assert "SBOM evidence is empty" in evidence
     assert "provenance evidence is empty" in evidence
@@ -372,7 +479,8 @@ def test_sigstore_attests_provenance_and_sbom_without_tuf_credentials() -> None:
         "actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6" in provenance
     )
     assert "subject-name: ${{ needs.authorize-request.outputs.output_repository }}" in provenance
-    assert "subject-digest: ${{ steps.build.outputs.digest }}" in provenance
+    assert "subject-digest: ${{ steps.evidence.outputs.runtime_digest }}" in provenance
+    assert "steps.build.outputs.digest" not in provenance
     assert "push-to-registry: true" in provenance
     assert (
         "predicate-type: https://vonk-forge.dev/attestations/"
@@ -394,7 +502,8 @@ def test_sigstore_attests_provenance_and_sbom_without_tuf_credentials() -> None:
     assert "provenance-predicate.json" in evidence
     assert "sbom-path: workload-artifact-output/sbom.json" in sbom
     assert "subject-name: ${{ needs.authorize-request.outputs.output_repository }}" in sbom
-    assert "subject-digest: ${{ steps.build.outputs.digest }}" in sbom
+    assert "subject-digest: ${{ steps.evidence.outputs.runtime_digest }}" in sbom
+    assert "steps.build.outputs.digest" not in sbom
     assert "push-to-registry: true" in sbom
     assert workflow().count("id-token: write") == 1
     assert workflow().count("attestations: write") == 1

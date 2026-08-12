@@ -87,11 +87,20 @@ credential on the NAS, a Spark, in Compose, or in a workload image is forbidden.
 
 The publisher derives `SOURCE_DATE_EPOCH` from the authorized workload source
 commit and enables BuildKit's `rewrite-timestamp=true` image-export option.
-This normalizes the OCI config, history, index, and copied-file timestamps that
-would otherwise use the workflow runner's wall clock. Repeating an unchanged
-request with the same BuildKit compatibility path must therefore reproduce the
-same OCI digest; digest drift is a publication failure that must be investigated
-before a recipe accepts either result. These controls follow Docker's
+This normalizes the executable OCI config, history, and copied-file timestamps
+that would otherwise use the workflow runner's wall clock. The publisher
+requires exactly one executable manifest for the requested platform, verifies
+its bytes, and makes that child manifest—not the outer BuildKit index—the
+accepted runtime identity. GitHub's signed provenance and SBOM attestations
+target that runtime digest.
+
+The outer index remains evidence because its BuildKit attestation manifest
+truthfully contains run IDs, runner identity, invocation times, and a unique
+SBOM namespace. Those values must not be normalized or used as recipe identity.
+Repeating an unchanged request with the same BuildKit compatibility path must
+reproduce the same executable manifest digest; digest drift is a publication
+failure that must be investigated before a recipe accepts either result. These
+controls follow Docker's
 [GitHub Actions reproducible-build guidance](https://docs.docker.com/build/ci/github-actions/reproducible-builds/)
 and the upstream
 [BuildKit reproducibility contract](https://github.com/moby/buildkit/blob/master/docs/build-repro.md).
@@ -121,6 +130,7 @@ model downloads, single-node inference and restart persistence, two-node
 fabric rendezvous, rank failure/route withdrawal/recovery, and complete stop,
 route withdrawal, and uninstall cleanup. Before either Spark consumes the
 runtime, two independent accepted-`main` publisher runs for the same request
-must each complete successfully and their validated OCI manifest digests must
-match exactly. A mismatch rejects both candidates and returns the publisher to
-root-cause investigation.
+must each complete successfully and their validated executable OCI manifest
+digests must match exactly. Their outer index and signed-bundle digests are
+expected to remain run-specific. An executable-manifest mismatch rejects both
+candidates and returns the publisher to root-cause investigation.
