@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tarfile
 import threading
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -52,6 +53,7 @@ class SliceServer(ThreadingHTTPServer):
         super().__init__(address, SliceHandler)
         self.fail_path = fail_path
         self.requests: list[tuple[str, str, str]] = []
+        self.request_bodies: list[tuple[str, str, bytes]] = []
         self.recipe_created = False
         self.recipe_digest = RECIPE_DIGEST
         self.recipe_revision = 1
@@ -66,6 +68,7 @@ class SliceServer(ThreadingHTTPServer):
         self.operation_kinds: dict[str, str] = {}
         self.operation_states: dict[str, str] = {}
         self.build_operation_state = "succeeded"
+        self.distribution_operation_state = "succeeded"
         self.retry_operation_state = "succeeded"
         self.add_empty_provider_metadata = False
         self.nodes = [NODE]
@@ -114,6 +117,7 @@ class SliceHandler(BaseHTTPRequestHandler):
         body = self._body()
         authorization = self.headers.get("authorization", "")
         self.server.requests.append((self.command, self.path, authorization))
+        self.server.request_bodies.append((self.command, self.path, body))
         if self.server.fail_path == self.path:
             self._json(
                 409,
@@ -437,10 +441,18 @@ class SliceHandler(BaseHTTPRequestHandler):
         elif path.endswith("/uninstall"):
             self._operation("20000000-0000-4000-8000-000000000005", self.server.nodes)
         elif path.startswith("/api/v1/recipes/operations/") and path.endswith("/retry"):
+            original_operation_id = self.path.rsplit("/", 2)[-2]
+            original_kind = self.server.operation_kinds.get(
+                original_operation_id, "build"
+            )
             self._operation(
-                "20000000-0000-4000-8000-000000000001",
+                (
+                    "20000000-0000-4000-8000-000000000002"
+                    if original_kind == "distribution"
+                    else "20000000-0000-4000-8000-000000000001"
+                ),
                 [NODE],
-                kind="build",
+                kind=original_kind,
                 state=self.server.retry_operation_state,
             )
         else:
@@ -478,6 +490,8 @@ class SliceHandler(BaseHTTPRequestHandler):
         self.server.operation_kinds[operation_id] = kind
         if state is None and kind == "build":
             state = self.server.build_operation_state
+        if state is None and kind == "distribution":
+            state = self.server.distribution_operation_state
         if state is not None:
             self.server.operation_states[operation_id] = state
         self._json(
@@ -856,6 +870,44 @@ def test_runner_stops_after_one_terminal_build_retry(
         "development slice failed: recipe build operation ended in failed"
     )
     assert json.loads(evidence_path.read_text())["completed_states"] == STATES[:3]
+
+
+def test_runner_retries_one_terminal_image_distribution(
+    tmp_path: Path, server: SliceServer
+) -> None:
+    server.distribution_operation_state = "failed"
+
+    result, evidence_path = _run(tmp_path, server)
+
+    assert result.returncode == 0, result.stderr
+    assert sum(path.endswith("/retry") for _, path, _ in server.requests) == 1
+    evidence = json.loads(evidence_path.read_text())
+    expected_retry_key = str(
+        uuid.uuid5(
+            uuid.UUID(evidence["acceptance_id"]),
+            "image-distributed:distribution-retry",
+        )
+    )
+    retry_bodies = [
+        json.loads(body)
+        for method, path, body in server.request_bodies
+        if method == "POST" and path.endswith("/retry")
+    ]
+    assert retry_bodies == [{"request_key": expected_retry_key}]
+    assert evidence["completed_states"] == STATES
+
+
+def test_runner_stops_after_one_terminal_distribution_retry(
+    tmp_path: Path, server: SliceServer
+) -> None:
+    server.distribution_operation_state = "failed"
+    server.retry_operation_state = "failed"
+
+    result, evidence_path = _run(tmp_path, server)
+
+    assert result.returncode == 1
+    assert "image distribution operation ended in failed" in result.stderr
+    assert json.loads(evidence_path.read_text())["completed_states"] == STATES[:4]
 
 
 @pytest.mark.parametrize("failure", ("stale", "missing-build", "missing-runtime"))

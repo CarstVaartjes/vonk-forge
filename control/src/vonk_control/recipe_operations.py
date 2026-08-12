@@ -689,6 +689,10 @@ class RecipeOperationService:
                 job = self._retry_build_in_session(
                     session, previous, actor=actor, request_id=request_id, now=now
                 )
+            elif previous.kind == "recipe.image.import.v1":
+                job = self._retry_image_distribution_in_session(
+                    session, previous, actor=actor, request_id=request_id, now=now
+                )
             elif previous.kind == "recipe.install" and previous.state == "failed":
                 job = self._retry_install_in_session(
                     session, previous, actor=actor, request_id=request_id, now=now
@@ -697,6 +701,85 @@ class RecipeOperationService:
                 raise RecipeOperationConflict("recipe operation is not retryable")
         self._agent_jobs.notify_available()
         return self.get(job.id)
+
+    def _retry_image_distribution_in_session(
+        self,
+        session: Session,
+        previous: Job,
+        *,
+        actor: str,
+        request_id: str,
+        now: datetime,
+    ) -> Job:
+        if previous.state != "failed":
+            raise RecipeOperationConflict("recipe image distribution is not retryable")
+        plan_digest = _required_string(previous.payload, "plan_digest")
+        owner_id = _required_string(previous.payload, "owner_id")
+        active = any(
+            job.id != previous.id
+            and job.state in {"queued", "running"}
+            and isinstance(job.payload, Mapping)
+            and job.payload.get("owner_id") == owner_id
+            and job.payload.get("plan_digest") == plan_digest
+            for job in session.scalars(
+                select(Job).where(Job.kind == "recipe.image.import.v1")
+            )
+        )
+        if active:
+            raise RecipeOperationConflict(
+                "recipe image distribution already has an active retry"
+            )
+        children = tuple(
+            session.scalars(
+                select(AgentOperation)
+                .where(AgentOperation.parent_job_id == previous.id)
+                .order_by(AgentOperation.node_id)
+            )
+        )
+        payload_identities = {
+            (
+                child.payload.get("mapping_id"),
+                child.payload.get("mapping_generation"),
+                child.payload.get("source_node_id"),
+                child.payload.get("image_digest"),
+                child.payload.get("oci_layout_sha256"),
+                child.payload.get("image_bytes"),
+            )
+            for child in children
+            if isinstance(child.payload, Mapping)
+        }
+        if (
+            previous.payload.get("owner_kind") != "image-distribution"
+            or not children
+            or tuple(child.node_id for child in children)
+            != tuple(sorted(previous.targets))
+            or previous.base_commit != plan_digest[:40]
+            or len(payload_identities) != 1
+            or any(
+                child.kind != "recipe.image.import.v1"
+                or child.state not in _TERMINAL_JOB_STATES
+                or child.base_commit != plan_digest[:40]
+                or child.payload_digest
+                != hashlib.sha256(canonical_message(child.payload)).hexdigest()
+                or not _valid_image_import_payload(child.payload, owner_id)
+                for child in children
+            )
+        ):
+            raise RecipeOperationConflict("stored recipe image distribution is invalid")
+        return self._queue_in_session(
+            session,
+            kind="recipe.image.import.v1",
+            owner_kind="image-distribution",
+            owner_id=owner_id,
+            plan_digest=plan_digest,
+            actor=actor,
+            request_id=request_id,
+            node_payloads=tuple(
+                (child.node_id, dict(child.payload)) for child in children
+            ),
+            authority_digest=plan_digest,
+            now=now,
+        )
 
     def _retry_install_in_session(
         self,
@@ -1218,6 +1301,42 @@ def _required_string(value: Mapping[str, object], key: str) -> str:
     if not isinstance(item, str):
         raise RecipeOperationConflict(f"operation {key} is invalid")
     return item
+
+
+def _valid_image_import_payload(value: object, expected_build_id: str) -> bool:
+    expected_fields = {
+        "schema_version",
+        "kind",
+        "build_id",
+        "mapping_id",
+        "mapping_generation",
+        "source_node_id",
+        "image_digest",
+        "oci_layout_sha256",
+        "image_bytes",
+    }
+    if not isinstance(value, Mapping) or set(value) != expected_fields:
+        return False
+    image_digest = value.get("image_digest")
+    layout_digest = value.get("oci_layout_sha256")
+    return (
+        value.get("schema_version") == 1
+        and value.get("kind") == "recipe.image.import.v1"
+        and value.get("build_id") == expected_build_id
+        and isinstance(value.get("mapping_id"), str)
+        and isinstance(value.get("mapping_generation"), int)
+        and value["mapping_generation"] >= 1
+        and isinstance(value.get("source_node_id"), str)
+        and isinstance(image_digest, str)
+        and len(image_digest) == 71
+        and image_digest.startswith("sha256:")
+        and all(character in "0123456789abcdef" for character in image_digest[7:])
+        and isinstance(layout_digest, str)
+        and len(layout_digest) == 64
+        and all(character in "0123456789abcdef" for character in layout_digest)
+        and isinstance(value.get("image_bytes"), int)
+        and value["image_bytes"] > 0
+    )
 
 
 def _record_build_evidence(
