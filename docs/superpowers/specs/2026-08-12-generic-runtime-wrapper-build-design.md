@@ -27,7 +27,8 @@ publisher. Spark-side source builds remain small, single-stage, digest-pinned,
 and networkless.
 
 The accepted DS4 binary image remains byte-identical. A separate reviewed
-Dockerfile composes that exact digest with the exact public BusyBox digest and
+Dockerfile composes that exact digest with the exact public BusyBox digest,
+using canonical digest-only references without tag aliases, and
 copies only BusyBox to `/opt/vonk/busybox` in the final stage, matching the
 existing rendezvous wrapper contract. It performs no `RUN`, package
 installation, source download, or compilation. A reviewed
