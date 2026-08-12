@@ -13,6 +13,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 DOCKERFILE = ROOT / "adapters/deepseek/ds4/Dockerfile"
+GENERIC_DOCKERFILE = ROOT / "adapters/deepseek/ds4/Dockerfile.workload"
 COMPOSE = ROOT / "adapters/deepseek/ds4/compose.yaml"
 RUNTIME_ENV = ROOT / "adapters/deepseek/ds4/config/runtime.env"
 PATCH = ROOT / "adapters/deepseek/ds4/patches/served-model-name.patch"
@@ -39,6 +40,10 @@ BUILD_BASE = (
 RUNTIME_BASE = (
     "nvcr.io/nvidia/cuda:13.0.1-runtime-ubuntu24.04"
     "@sha256:c3fde347d52d578c84fd644bc177bc7ec333feaf11550d990da4084d7612e4c7"
+)
+BUSYBOX_BASE = (
+    "docker.io/library/busybox:1.37.0-musl"
+    "@sha256:fc6dddc4c44b1bfe37f41cae8e67d1693828e8f42a91862816d7953e2c9d3f23"
 )
 
 
@@ -334,9 +339,6 @@ def test_runtime_recipe_uses_the_pinned_cuda_sources_and_safe_runtime_contract()
     assert "DS4_CUDA_SPARK_HBM_CACHE=1" in dockerfile
     assert "compute_121a" in dockerfile
     assert "sm_121a" in dockerfile
-    assert "apt-get install --no-install-recommends -y busybox-static" in dockerfile
-    assert "test -x /bin/busybox" in dockerfile
-    assert 'ai.vonkforge.runtime-interface="v1"' in dockerfile
     assert "DS4_NO_UPDATE_CHECK=1" in dockerfile
     assert "DS4_CUDA_COPY_MODEL" not in dockerfile
     assert "DS4_MODEL_ANON_HUGE=1" not in dockerfile
@@ -354,6 +356,23 @@ def test_runtime_recipe_uses_the_pinned_cuda_sources_and_safe_runtime_contract()
     assert "read_only: true" in compose
     assert "ports:" not in compose
     assert "DS4_IMAGE=ghcr.io/carstvaartjes/spark-ds4:ds4-v0.5.3-q2-0731-health" in runtime_env
+
+
+def test_generic_runtime_is_self_contained_without_mutating_the_legacy_release() -> None:
+    legacy = DOCKERFILE.read_bytes()
+    manifest = json.loads((DOCKERFILE.parent / "runtime-manifest.json").read_text())
+    generic = GENERIC_DOCKERFILE.read_text(encoding="utf-8")
+
+    assert hashlib.sha256(legacy).hexdigest() == manifest["files"][
+        "adapters/deepseek/ds4/Dockerfile"
+    ]
+    assert f"FROM {BUSYBOX_BASE} AS fabric-tools" in generic
+    assert f"FROM {IMAGE} AS runtime" in generic
+    assert "COPY --from=fabric-tools /bin/busybox /bin/busybox" in generic
+    assert 'ai.vonkforge.runtime-interface="v1"' in generic
+    assert "USER 10001:10001" in generic
+    assert "ARG " not in generic
+    assert "RUN " not in generic
 
 
 def test_compose_renders_a_loopback_only_nonrestarting_service() -> None:

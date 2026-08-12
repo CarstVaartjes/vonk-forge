@@ -4,14 +4,14 @@
 
 **Goal:** Publish the DS4 Spark runtime through the generic attested workload-image path and prove its single-stage wrapper on the native two-Spark platform.
 
-**Architecture:** GitHub Actions builds the reusable DS4 runtime, including its static fabric transport, from reviewed source and pinned CUDA bases. The GPU node performs only a small, networkless, single-stage wrapper build from the accepted runtime digest; model weights remain separate content-addressed artifacts on local NVMe.
+**Architecture:** GitHub Actions composes the accepted DS4 runtime digest with a pinned BusyBox stage, copying only its static fabric transport and leaving the DS4 binary byte-identical. The GPU node performs only a small, networkless, single-stage wrapper build from the accepted derived runtime digest; model weights remain separate content-addressed artifacts on local NVMe.
 
 **Tech Stack:** GitHub Actions, Docker Buildx, GHCR, Syft, GitHub attestations, Sigstore, Ubuntu 24.04 ARM64, native Podman 4.9/FUSE-overlayfs, Rust agent, Python control plane and acceptance runner.
 
 ## Global Constraints
 
 - Keep `overlay.force_mask=shared`, `fuse-overlayfs`, private operation graphroots, bounded output, and byte accounting unchanged.
-- Complex runtime construction runs only in `.github/workflows/workload-artifacts.yml`; no local release publication is allowed.
+- Reusable runtime composition runs only in `.github/workflows/workload-artifacts.yml`; no local release publication is allowed.
 - Runtime and base-image references are canonical lowercase digest references; floating tags are forbidden.
 - `ghcr.io/carstvaartjes/vonk-forge-workloads` must be anonymously readable before node installation.
 - Images contain no NAS credentials, runtime tokens, signing keys, model-provider credentials, or model weights.
@@ -20,47 +20,49 @@
 
 ---
 
-### Task 1: Make the DS4 runtime self-contained
+### Task 1: Compose a self-contained DS4 runtime
 
 **Files:**
 - Modify: `tests/adapters/test_ds4_runtime.py`
-- Modify: `adapters/deepseek/ds4/Dockerfile`
+- Create: `adapters/deepseek/ds4/Dockerfile.workload`
 
 **Interfaces:**
-- Consumes: NVIDIA CUDA 13.0.1 digest-pinned build and runtime images.
-- Produces: target `runtime`, containing `/bin/busybox`, label `ai.vonkforge.runtime-interface=v1`, and user `10001:10001`.
+- Consumes: accepted `ghcr.io/carstvaartjes/spark-ds4` and public BusyBox digest-pinned images.
+- Produces: target `runtime`, containing `/bin/busybox`, label `ai.vonkforge.runtime-interface=v1`, and user `10001:10001`, without changing the legacy DS4 release.
 
 - [ ] **Step 1: Add the failing runtime-contract assertions**
 
-Add assertions to `test_container_build_is_pinned_and_non_root`:
+Add `test_generic_runtime_is_self_contained_without_mutating_the_legacy_release`:
 
 ```python
-assert "apt-get install --no-install-recommends -y busybox-static" in dockerfile
-assert "test -x /bin/busybox" in dockerfile
-assert 'ai.vonkforge.runtime-interface="v1"' in dockerfile
-assert dockerfile.rstrip().endswith('ENTRYPOINT ["/opt/ds4/ds4-server"]')
+assert hashlib.sha256(legacy).hexdigest() == manifest["files"][legacy_path]
+assert f"FROM {BUSYBOX_BASE} AS fabric-tools" in generic
+assert f"FROM {IMAGE} AS runtime" in generic
+assert "COPY --from=fabric-tools /bin/busybox /bin/busybox" in generic
+assert 'ai.vonkforge.runtime-interface="v1"' in generic
+assert "ARG " not in generic and "RUN " not in generic
 ```
 
 - [ ] **Step 2: Verify the new contract fails**
 
 Run: `uv run --frozen pytest tests/adapters/test_ds4_runtime.py -q`
 
-Expected: FAIL because the runtime stage does not install or verify BusyBox and lacks the runtime-interface label.
+Expected: FAIL because `Dockerfile.workload` does not exist.
 
-- [ ] **Step 3: Implement the minimal final-stage runtime change**
+- [ ] **Step 3: Implement the minimal derived runtime**
 
-In the final runtime stage, before creating the service user, install and verify the Ubuntu package, clean apt metadata, and add the interface label:
+Create the networkless two-stage composition while leaving the legacy Dockerfile and runtime manifest unchanged:
 
 ```dockerfile
-RUN apt-get update \
-    && apt-get install --no-install-recommends -y busybox-static \
-    && test -x /bin/busybox \
-    && rm -rf /var/lib/apt/lists/*
-
+FROM docker.io/library/busybox:1.37.0-musl@sha256:fc6dddc4c44b1bfe37f41cae8e67d1693828e8f42a91862816d7953e2c9d3f23 AS fabric-tools
+FROM ghcr.io/carstvaartjes/spark-ds4@sha256:084d9a9ffa47431842c5dec84de97b058034dec0535b2a563bc5db78c9e14615 AS runtime
 LABEL ai.vonkforge.runtime-interface="v1"
+COPY --from=fabric-tools /bin/busybox /bin/busybox
+USER 10001:10001
+ENTRYPOINT ["/opt/ds4/ds4-server"]
 ```
 
-Do not add a mutable package repository, credential, model file, or runtime network action.
+Do not add `RUN`, `ARG`, a mutable image, credential, model file, or runtime network action.
 
 - [ ] **Step 4: Verify the adapter and metadata suites**
 
@@ -79,7 +81,7 @@ Expected: all selected tests pass and `git diff --check` exits zero.
 - [ ] **Step 5: Commit, push, review, and merge the runtime source**
 
 ```bash
-git add adapters/deepseek/ds4/Dockerfile tests/adapters/test_ds4_runtime.py
+git add adapters/deepseek/ds4/Dockerfile.workload tests/adapters/test_ds4_runtime.py
 git commit -m "fix(ds4): include fabric transport in runtime"
 git push -u origin fix/ds4-generic-workload-runtime
 ```
@@ -115,7 +117,7 @@ Add a test that loads every `release/workloads/*.json`, parses it with `Workload
 
 ```python
 assert request.context == "adapters/deepseek/ds4"
-assert request.dockerfile == "adapters/deepseek/ds4/Dockerfile"
+assert request.dockerfile == "adapters/deepseek/ds4/Dockerfile.workload"
 assert request.target == "runtime"
 assert request.architecture == "linux/arm64"
 assert request.output_repository == "ghcr.io/carstvaartjes/vonk-forge-workloads"
@@ -129,7 +131,7 @@ Expected: FAIL because `release/workloads/ds4-v0.5.3-spark-runtime.json` does no
 
 - [ ] **Step 4: Create and validate the exact request**
 
-Write canonical JSON with `source_commit` set to the captured `runtime_source_sha`, `context_digest` set to the captured Git-archive digest, target `runtime`, both CUDA base references copied exactly from the Dockerfile, and required SBOM/provenance booleans. Validate it:
+Write canonical JSON with `source_commit` set to the captured `runtime_source_sha`, `context_digest` set to the captured Git-archive digest, target `runtime`, the exact DS4 and BusyBox base references copied from `Dockerfile.workload`, and required SBOM/provenance booleans. Validate it:
 
 ```bash
 scripts/workload-artifact-metadata request \

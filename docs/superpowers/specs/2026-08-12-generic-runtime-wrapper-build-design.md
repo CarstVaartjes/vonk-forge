@@ -22,13 +22,15 @@ wrapper.
 
 ## Decision
 
-Complex runtime construction belongs in the existing GitHub workload-artifact
+Reusable runtime composition belongs in the existing GitHub workload-artifact
 publisher. Spark-side source builds remain small, single-stage, digest-pinned,
 and networkless.
 
-The DS4 runtime Dockerfile will install the static transport utility in its
-final runtime stage. A reviewed `release/workloads/*.json` request will publish
-that image to the generic
+The accepted DS4 binary image remains byte-identical. A separate reviewed
+Dockerfile composes that exact digest with the exact public BusyBox digest and
+copies only `/bin/busybox` into the final stage. It performs no `RUN`, package
+installation, source download, or compilation. A reviewed
+`release/workloads/*.json` request will publish that derived image to the generic
 `ghcr.io/carstvaartjes/vonk-forge-workloads` repository using the existing
 workflow. The workflow already requires an accepted `main` source commit,
 digest-pinned base images, exact source-context identity, a read-only CI gate,
@@ -62,8 +64,9 @@ release.
 
 ## Publication Sequence
 
-The request binds an earlier accepted source commit, so publication is
-intentionally two-stage:
+The legacy DS4 Dockerfile and runtime manifest remain byte-for-byte unchanged
+until the replacement is qualified. The request binds an earlier accepted
+source commit, so publication is intentionally two-stage:
 
 1. merge and pass CI for the runtime Dockerfile and tests;
 2. calculate that commit's Git-archive context digest;
@@ -91,8 +94,9 @@ credential on the NAS, a Spark, in Compose, or in a workload image is forbidden.
 
 ## Verification
 
-Automated tests must prove the final DS4 stage contains the static transport
-utility, the development wrapper is single-stage, all runtime references are
+Automated tests must prove the derived DS4 stage copies the static transport
+utility from the pinned BusyBox stage without networked build steps, the legacy
+release remains immutable, the development wrapper is single-stage, all runtime references are
 digest-pinned and internally consistent, the generic build request validates,
 and the workflow retains its source/CI/attestation boundaries.
 
