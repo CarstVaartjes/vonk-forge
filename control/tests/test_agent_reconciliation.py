@@ -1569,6 +1569,7 @@ def test_recipe_route_owner_is_not_executed_as_a_reconciliation_plan(tmp_path) -
         "targets": [],
     }
     now = datetime(2026, 8, 5, tzinfo=UTC)
+    recipe_owner_created_at = now + timedelta(seconds=1)
     with sessions.begin() as session:
         session.add(
             Reconciliation(
@@ -1582,7 +1583,7 @@ def test_recipe_route_owner_is_not_executed_as_a_reconciliation_plan(tmp_path) -
                 resolved_plan=None,
                 current_phase="completed",
                 route_withdrawal_generation=0,
-                created_at=now,
+                created_at=recipe_owner_created_at,
             )
         )
         session.add(
