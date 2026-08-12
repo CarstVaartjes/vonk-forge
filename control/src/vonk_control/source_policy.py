@@ -256,8 +256,10 @@ def _inspect_copy(
             )
         ]
     sources: list[str] = []
+    copies_from_stage = False
     for token in tokens:
         if token.startswith("--from="):
+            copies_from_stage = True
             source = token.removeprefix("--from=")
             pinned = _PINNED_IMAGE.fullmatch(source)
             if pinned is not None and pinned.group(1) == "0" * 64:
@@ -282,7 +284,12 @@ def _inspect_copy(
             sources.append(token)
     for source in sources[:-1]:
         source_path = PurePosixPath(source)
-        if source.startswith(("/", "~")) or ".." in source_path.parts or "$" in source:
+        if (
+            (source.startswith("/") and not copies_from_stage)
+            or source.startswith("~")
+            or ".." in source_path.parts
+            or "$" in source
+        ):
             findings.append(
                 _finding(
                     "dockerfile.copy_path",
