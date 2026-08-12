@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Allow large recipe-image uploads to outlive the agent's 75-second ordinary-request timeout while retaining a hard one-hour upload bound.
+**Goal:** Allow large recipe-image transfers to complete without ordinary-request timeout failures or near-expiry host-runtime grant rejection.
 
-**Architecture:** Keep the existing shared `reqwest::Client` and its 75-second default. Override the timeout only on the authenticated recipe-image `PUT`; the existing operation heartbeat task continues to renew the controller lease while the upload is in progress.
+**Architecture:** Keep the existing shared `reqwest::Client` and its 75-second default. Override the timeout only on the authenticated recipe-image `PUT`; the existing operation heartbeat task continues to renew the controller lease while the upload is in progress. Request a 10-second one-use host-runtime grant so it fits safely inside the 30-second renewed operation lease without weakening the controller's strict lease bound.
 
 **Tech Stack:** Rust 2024, Tokio, reqwest, existing loopback TCP test server, Cargo workspace tests.
 
@@ -13,6 +13,7 @@
 - Ordinary claim, inventory, result, metadata, and range-download requests retain the existing 75-second timeout.
 - Recipe-image upload has a one-hour total timeout and no unbounded request path.
 - Existing media type, content length, digest, identity, authority, and controller-side atomic-file checks remain unchanged.
+- Host-runtime grants request exactly 10 seconds of validity and remain strictly bounded by the active operation lease.
 - No chunked/resumable protocol or controller schema change is part of this repair.
 - Production code is not written until the focused regression test has failed for the expected timeout reason.
 
@@ -154,7 +155,102 @@ git add rust/crates/vonk-agent/src/client.rs
 git commit -m "fix(agent): bound large recipe image uploads"
 ```
 
-### Task 2: Publish and physically verify the accepted repair
+### Task 2: Keep the one-use runtime grant inside the renewed lease
+
+**Files:**
+- Modify: `rust/crates/vonk-agent/src/client.rs`
+- Test: `rust/crates/vonk-agent/src/client.rs`
+
+**Interfaces:**
+- Consumes: `AgentHttpClient::host_runtime_grant(&AgentClaim, HostRuntimeAction, &str)` and the controller's existing strict grant-expiry validation.
+- Produces: `const HOST_RUNTIME_GRANT_TTL_SECONDS: u16 = 10` serialized as `expires_in_seconds` only for one-use host-runtime grants.
+
+- [ ] **Step 1: Write the failing real-transport test**
+
+Add a loopback helper beside `heartbeat_client` that reads the complete request and returns `{"grant":{}}` with status 200. Add a test that constructs a valid `AgentClaim`, requests an `ImageImport` grant, parses the captured request body, and asserts the exact TTL:
+
+```rust
+#[tokio::test]
+async fn host_runtime_grant_ttl_fits_inside_renewed_operation_lease() {
+    let payload = serde_json::json!({});
+    let claim = AgentClaim {
+        schema_version: 1,
+        job_id: Uuid::parse_str("84ddf214-f067-4bbf-917e-95df32a07fd8").unwrap(),
+        operation_id: Uuid::parse_str("f450b5ac-5a78-4af5-9670-e874f735e3ee").unwrap(),
+        attempt: 1,
+        fence: Uuid::parse_str("44d4e914-34df-4962-a802-d1f7dcd928aa").unwrap(),
+        node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
+        operation: "recipe.image.import.v1".to_owned(),
+        base_commit: "a".repeat(40),
+        payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
+        payload,
+        deadline: DateTime::parse_from_rfc3339("2099-01-01T00:00:00+00:00").unwrap(),
+    };
+    let (client, server) = host_runtime_grant_client();
+
+    client
+        .host_runtime_grant(&claim, HostRuntimeAction::ImageImport, &"c".repeat(64))
+        .await
+        .unwrap();
+    let request = server.join().unwrap();
+    let body = request
+        .windows(4)
+        .position(|value| value == b"\r\n\r\n")
+        .map(|index| &request[index + 4..])
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(body).unwrap();
+
+    assert_eq!(body["expires_in_seconds"], 10);
+}
+```
+
+- [ ] **Step 2: Run the focused test and verify RED**
+
+Run:
+
+```bash
+cargo test -p vonk-agent client::tests::host_runtime_grant_ttl_fits_inside_renewed_operation_lease -- --exact --nocapture
+```
+
+Expected: FAIL with left value `30` and right value `10`, proving the test observes the existing production request.
+
+- [ ] **Step 3: Implement the minimal TTL change**
+
+Add beside the other client constants:
+
+```rust
+const HOST_RUNTIME_GRANT_TTL_SECONDS: u16 = 10;
+```
+
+Replace only the `expires_in_seconds: 30` literal in `host_runtime_grant` with:
+
+```rust
+expires_in_seconds: HOST_RUNTIME_GRANT_TTL_SECONDS,
+```
+
+Do not relax the controller authority check or lengthen operation leases.
+
+- [ ] **Step 4: Verify GREEN and the surrounding crate**
+
+Run:
+
+```bash
+cargo test -p vonk-agent client::tests::host_runtime_grant_ttl_fits_inside_renewed_operation_lease -- --exact --nocapture
+cargo test -p vonk-agent
+cargo fmt --all -- --check
+cargo clippy -p vonk-agent --all-targets --all-features -- -D warnings
+```
+
+Expected: all commands succeed without warnings.
+
+- [ ] **Step 5: Commit the repair**
+
+```bash
+git add rust/crates/vonk-agent/src/client.rs
+git commit -m "fix(agent): fit runtime grants inside active leases"
+```
+
+### Task 3: Publish and physically verify the accepted repair
 
 **Files:**
 - Modify: `docs/runbooks/development-agent-workloads.md`
