@@ -186,7 +186,7 @@ if not arguments or arguments.pop(0) != "nc":
     raise SystemExit(2)
 listen = any(value in {{"-l", "-lk"}} for value in arguments)
 local = arguments[arguments.index("-s") + 1] if "-s" in arguments else "0.0.0.0"
-timeout = int(arguments[arguments.index("-w") + 1])
+timeout = int(arguments[arguments.index("-w") + 1]) if "-w" in arguments else None
 if listen:
     port = int(arguments[arguments.index("-p") + 1])
     executable = arguments[arguments.index("-e") + 1]
@@ -194,23 +194,25 @@ if listen:
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind((local, port))
         server.listen()
+        if timeout is not None:
+            server.settimeout(timeout)
         while True:
-            connection, _peer = server.accept()
+            try:
+                connection, _peer = server.accept()
+            except TimeoutError:
+                raise SystemExit(124)
             with connection:
                 peer_log = os.environ.get("VONK_SOCKETBOX_PEER_LOG")
                 if peer_log:
                     pathlib.Path(peer_log).write_text(_peer[0] + "\\n", encoding="ascii")
-                request = bytearray()
-                while chunk := connection.recv(4096):
-                    request.extend(chunk)
-                completed = subprocess.run(
+                subprocess.run(
                     [executable],
-                    input=bytes(request),
-                    capture_output=True,
+                    stdin=connection,
+                    stdout=connection,
+                    stderr=subprocess.PIPE,
                     env=os.environ,
                     check=False,
                 )
-                connection.sendall(completed.stdout)
 else:
     if "-s" in arguments:
         print("client source binding is unavailable in rootless networking", file=sys.stderr)
@@ -219,6 +221,7 @@ else:
     host = arguments[-2]
     port = int(arguments[-1])
     with socket.socket() as client:
+        assert timeout is not None
         client.settimeout(timeout)
         client.connect((host, port))
         client.sendall(payload)
@@ -241,12 +244,17 @@ def _unused_port(address: str) -> int:
 
 
 def _rendezvous_environment(
-    tmp_path: Path, *, rank: int, local_address: str, port: int
+    tmp_path: Path,
+    *,
+    rank: int,
+    local_address: str,
+    port: int,
+    timeout_seconds: int = 3,
 ) -> dict[str, str]:
     return {
         **os.environ,
         "VONK_BUSYBOX": str(_socketbox(tmp_path)),
-        "VONK_FABRIC_RENDEZVOUS_SECONDS": "3",
+        "VONK_FABRIC_RENDEZVOUS_SECONDS": str(timeout_seconds),
         "VONK_MASTER_ADDR": "127.0.0.2",
         "VONK_LOCAL_ADDR": local_address,
         "VONK_MASTER_PORT": str(port),
@@ -538,6 +546,110 @@ def test_model_pair_lets_rootless_networking_select_source_for_fabric_exchange(
         )
     finally:
         coordinator.terminate()
+        coordinator.wait(timeout=3)
+
+
+def test_model_pair_coordinator_accepts_recovery_after_an_idle_client_timeout(
+    tmp_path: Path,
+) -> None:
+    port = _unused_port("127.0.0.2")
+    coordinator = subprocess.Popen(
+        [str(FABRIC_RENDEZVOUS), "coordinator"],
+        env=_rendezvous_environment(
+            tmp_path,
+            rank=0,
+            local_address="127.0.0.2",
+            port=port,
+            timeout_seconds=1,
+        ),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        worker_environment = _rendezvous_environment(
+            tmp_path,
+            rank=1,
+            local_address="127.0.0.3",
+            port=port,
+            timeout_seconds=3,
+        )
+        joins: list[subprocess.CompletedProcess[str]] = []
+        for idle_seconds in (0.0, 1.25):
+            time.sleep(idle_seconds)
+            joined = subprocess.run(
+                [str(FABRIC_RENDEZVOUS), "join"],
+                env=worker_environment,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            joins.append(joined)
+            assert joined.returncode == 0, joined.stderr
+
+        assert coordinator.poll() is None
+        assert [joined.stdout for joined in joins] == [
+            "fabric rendezvous complete: rank 1 of 2\n",
+            "fabric rendezvous complete: rank 1 of 2\n",
+        ]
+    finally:
+        if coordinator.poll() is None:
+            coordinator.terminate()
+        coordinator.wait(timeout=3)
+
+
+def test_model_pair_recovers_after_an_incomplete_worker_message(tmp_path: Path) -> None:
+    port = _unused_port("127.0.0.2")
+    coordinator = subprocess.Popen(
+        [str(FABRIC_RENDEZVOUS), "coordinator"],
+        env=_rendezvous_environment(
+            tmp_path,
+            rank=0,
+            local_address="127.0.0.2",
+            port=port,
+            timeout_seconds=1,
+        ),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    incomplete: socket.socket | None = None
+    try:
+        deadline = time.monotonic() + 2
+        while True:
+            try:
+                incomplete = socket.create_connection(("127.0.0.2", port), timeout=1)
+                break
+            except ConnectionRefusedError:
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.02)
+        incomplete.sendall(b"vonk-fabric-v1 worker rank=1")
+        incomplete.settimeout(2)
+        assert incomplete.recv(1) == b""
+
+        joined = subprocess.run(
+            [str(FABRIC_RENDEZVOUS), "join"],
+            env=_rendezvous_environment(
+                tmp_path,
+                rank=1,
+                local_address="127.0.0.3",
+                port=port,
+                timeout_seconds=1,
+            ),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        assert coordinator.poll() is None
+        assert joined.returncode == 0, joined.stderr
+        assert joined.stdout == "fabric rendezvous complete: rank 1 of 2\n"
+    finally:
+        if incomplete is not None:
+            incomplete.close()
+        if coordinator.poll() is None:
+            coordinator.terminate()
         coordinator.wait(timeout=3)
 
 

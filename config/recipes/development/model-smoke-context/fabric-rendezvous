@@ -45,7 +45,8 @@ master_message="vonk-fabric-v1 master rank=0 world=2 address=${master_address} p
 if [[ ${VONK_FABRIC_SERVE:-} == 1 ]]; then
   [[ ${rank} == 0 && ${local_address} == "${master_address}" ]] ||
     fail "coordinator identity is invalid"
-  IFS= read -r worker_message || fail "worker sent no data"
+  IFS= read -r -t "${timeout_seconds}" worker_message ||
+    fail "worker sent no complete data"
   prefix='vonk-fabric-v1 worker rank=1 world=2 address='
   [[ ${worker_message} == "${prefix}"* ]] || fail "worker message is invalid"
   worker_address=${worker_message#"${prefix}"}
@@ -68,7 +69,7 @@ case ${1:-} in
     rm -f "${marker}"
     export VONK_FABRIC_SERVE=1
     exec "${busybox}" nc -n -lk -s 0.0.0.0 -p "${master_port}" \
-      -w "${timeout_seconds}" -e "${self}"
+      -e "${self}"
     ;;
   await-worker)
     [[ ${rank} == 0 && ${local_address} == "${master_address}" ]] ||
