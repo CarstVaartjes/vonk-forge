@@ -193,9 +193,20 @@ Download `workload-artifact-$run_id` into a private temporary directory, run `sc
 
 Run GitHub attestation verification for the OCI subject and inspect the remote manifest/config. Require Linux ARM64, `10001:10001`, `ai.vonkforge.runtime-interface=v1`, the reviewed source revision, and no embedded secret canary. Make the new GHCR package public if its first publication created it as private, then prove anonymous inspection from a process with no registry credential.
 
-- [ ] **Step 5: Record immutable evidence**
+- [ ] **Step 5: Rebuild independently and require the same digest**
 
-Store only public digests, workflow URLs, source SHA, request digest, SBOM/provenance digests, architecture, user, labels, and anonymous-pull result in `.state/development-acceptance/ds4-generic-runtime.json` with mode `0600`.
+Dispatch the same reviewed request a second time from current `main`, require
+every job to pass, download and independently validate its evidence as above,
+and compare the two `oci_manifest_digest` values. They must match exactly.
+Keep both workflow run IDs and URLs. A mismatch rejects the runtime and stops
+this plan before any recipe or Spark accepts either digest.
+
+- [ ] **Step 6: Record immutable evidence**
+
+Store only public digests, both workflow URLs, source SHA, request digest,
+SBOM/provenance digests for both runs, architecture, user, labels, digest-match
+result, and anonymous-pull result in
+`.state/development-acceptance/ds4-generic-runtime.json` with mode `0600`.
 
 ---
 

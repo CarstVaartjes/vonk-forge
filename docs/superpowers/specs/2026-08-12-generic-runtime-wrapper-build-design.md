@@ -119,4 +119,8 @@ Physical acceptance must prove anonymous ARM64 image retrieval, rootless
 single-stage build on native Podman 4.9, Docker/NVIDIA runtime import, exact
 model downloads, single-node inference and restart persistence, two-node
 fabric rendezvous, rank failure/route withdrawal/recovery, and complete stop,
-route withdrawal, and uninstall cleanup.
+route withdrawal, and uninstall cleanup. Before either Spark consumes the
+runtime, two independent accepted-`main` publisher runs for the same request
+must each complete successfully and their validated OCI manifest digests must
+match exactly. A mismatch rejects both candidates and returns the publisher to
+root-cause investigation.
