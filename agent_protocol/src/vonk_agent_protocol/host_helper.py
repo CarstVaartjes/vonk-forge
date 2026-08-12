@@ -43,6 +43,7 @@ class RestartUnit(StrEnum):
 class ContainerRuntimeAction(StrEnum):
     IMAGE_IMPORT = "image-import"
     IMAGE_INSPECT = "image-inspect"
+    RUN_INSPECT = "run-inspect"
     START = "start"
     STOP = "stop"
 

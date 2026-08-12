@@ -337,6 +337,7 @@ fn runtime_operation(request: &HostRuntimeRequest, digest: String) -> HostOperat
         action: match request.action {
             HostRuntimeAction::ImageImport => ContainerRuntimeAction::ImageImport,
             HostRuntimeAction::ImageInspect => ContainerRuntimeAction::ImageInspect,
+            HostRuntimeAction::RunInspect => ContainerRuntimeAction::RunInspect,
             HostRuntimeAction::Start => ContainerRuntimeAction::Start,
             HostRuntimeAction::Stop => ContainerRuntimeAction::Stop,
         },
@@ -556,15 +557,38 @@ fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
                 || value.starts_with("--device")
         }));
     }
+    let inspect = runtime_request(HostRuntimeAction::RunInspect, request.arguments.clone());
+    let inspect_digest = write_runtime_request(&roots, &inspect);
+    executor
+        .execute(&runtime_operation(&inspect, inspect_digest.clone()))
+        .unwrap();
+    let accepted_container = runner.runtime_container.lock().unwrap().clone().unwrap();
     *runner.runtime_running.lock().unwrap() = false;
     assert!(
         executor
-            .execute(&runtime_operation(
-                &request,
-                hex_sha256(&canonical_json(&request).unwrap()),
-            ))
+            .execute(&runtime_operation(&inspect, inspect_digest.clone()))
             .is_err()
     );
+    *runner.runtime_container.lock().unwrap() = None;
+    assert!(
+        executor
+            .execute(&runtime_operation(&inspect, inspect_digest))
+            .is_err()
+    );
+    assert_eq!(
+        runner
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(program, arguments)| {
+                program == std::path::Path::new("/usr/bin/docker")
+                    && arguments.first().is_some_and(|value| value == "run")
+            })
+            .count(),
+        1
+    );
+    *runner.runtime_container.lock().unwrap() = Some(accepted_container);
 
     let stop = runtime_request(
         HostRuntimeAction::Stop,

@@ -353,7 +353,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         if self
                             .execute_host_runtime(
                                 claim,
-                                HostRuntimeAction::Start,
+                                HostRuntimeAction::RunInspect,
                                 runtime_guard_arguments.clone(),
                             )
                             .await

@@ -186,6 +186,18 @@ def test_runtime_authority_binds_active_attempt_action_and_request() -> None:
     assert grant.claims.operation.values["request_sha256"] == "e" * 64
     assert grant.claims.operation.values["action"] == "start"
 
+    inspect = service.issue_grant(
+        node_id="spk_" + "1" * 32,
+        job_id="20000000-0000-4000-8000-000000000002",
+        operation_id="30000000-0000-4000-8000-000000000003",
+        attempt=2,
+        fence="40000000-0000-4000-8000-000000000004",
+        action=ContainerRuntimeAction.RUN_INSPECT,
+        request_sha256="f" * 64,
+        certificate_serial="certificate-1",
+    )
+    assert inspect.claims.operation.values["action"] == "run-inspect"
+
 
 def test_runtime_authority_rejects_action_not_owned_by_active_operation() -> None:
     with pytest.raises(HostHelperAuthorityError, match="action"):

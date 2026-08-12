@@ -152,6 +152,7 @@ class HostRuntimeAuthorityService:
     ] = {
         ContainerRuntimeAction.IMAGE_IMPORT: frozenset({"recipe.image.import.v1"}),
         ContainerRuntimeAction.IMAGE_INSPECT: frozenset({"recipe.install"}),
+        ContainerRuntimeAction.RUN_INSPECT: frozenset({"recipe.start"}),
         ContainerRuntimeAction.START: frozenset({"recipe.start"}),
         # A start attempt may stop its own managed run when readiness fails.
         ContainerRuntimeAction.STOP: frozenset({"recipe.start", "recipe.stop"}),

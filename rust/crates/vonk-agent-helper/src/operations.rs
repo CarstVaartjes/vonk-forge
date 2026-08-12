@@ -491,6 +491,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let expected_action = match action {
             ContainerRuntimeAction::ImageImport => HostRuntimeAction::ImageImport,
             ContainerRuntimeAction::ImageInspect => HostRuntimeAction::ImageInspect,
+            ContainerRuntimeAction::RunInspect => HostRuntimeAction::RunInspect,
             ContainerRuntimeAction::Start => HostRuntimeAction::Start,
             ContainerRuntimeAction::Stop => HostRuntimeAction::Stop,
         };
@@ -507,6 +508,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 self.runtime_image_import(request.operation_id, &request.arguments)
             }
             HostRuntimeAction::ImageInspect => self.runtime_image_inspect(&request.arguments),
+            HostRuntimeAction::RunInspect => self.runtime_run_inspect(&request.arguments),
             HostRuntimeAction::Start => self.runtime_start(&request.arguments),
             HostRuntimeAction::Stop => {
                 if request.arguments.get(1).map(String::as_str) == Some("run") {
@@ -697,6 +699,35 @@ impl<R: CommandRunner> OperationExecutor<R> {
             .unwrap_or("");
         if !output.success || validated.detached && !lower_hex(identifier, 64) {
             return Err(OperationError::CommandFailed);
+        }
+        Ok(())
+    }
+
+    fn runtime_run_inspect(&self, arguments: &[String]) -> Result<(), OperationError> {
+        let (image_digest, docker) = arguments
+            .split_first()
+            .ok_or(OperationError::InvalidOperation)?;
+        let validated = validate_docker_run(docker, &self.roots)?;
+        if image_digest != &validated.image_digest || !validated.detached {
+            return Err(OperationError::InvalidOperation);
+        }
+        let inspected = self.inspect_runtime_image(&validated.image)?;
+        self.require_image_receipt(image_digest, &validated.image, &inspected.0)?;
+        let semantic_digest = hex_sha256(
+            &canonical_json(&validated.arguments).map_err(|_| OperationError::InvalidOperation)?,
+        );
+        let existing = self.run_docker(&[
+            "container".to_owned(),
+            "inspect".to_owned(),
+            "--format".to_owned(),
+            "{{.State.Running}}\t{{index .Config.Labels \"ai.vonkforge.runtime-request-sha256\"}}\t{{index .Config.Labels \"ai.vonkforge.managed\"}}\t{{index .Config.Labels \"ai.vonkforge.run-id\"}}".to_owned(),
+            format!("vonk-{}", validated.run_id),
+        ])?;
+        let expected = format!("true\t{semantic_digest}\ttrue\t{}", validated.run_id);
+        if !existing.success
+            || std::str::from_utf8(&existing.stdout).ok().map(str::trim) != Some(expected.as_str())
+        {
+            return Err(OperationError::InvalidArtifact);
         }
         Ok(())
     }

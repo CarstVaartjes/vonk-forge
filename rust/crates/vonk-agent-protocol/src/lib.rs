@@ -16,6 +16,7 @@ pub const MAX_HOST_RUNTIME_ARGUMENTS: usize = 512;
 pub enum HostRuntimeAction {
     ImageImport,
     ImageInspect,
+    RunInspect,
     Start,
     Stop,
 }

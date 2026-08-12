@@ -63,7 +63,7 @@ running operation attempt. The requested action must match the operation:
 |---|---|
 | `recipe.image.import.v1` | import and verify one Docker-loadable image archive |
 | `recipe.install` | inspect one accepted image |
-| `recipe.start` | run one managed workload or lifecycle hook; stop that managed run on failed readiness |
+| `recipe.start` | run one managed workload or lifecycle hook; inspect that exact managed run during readiness; stop it on failed readiness |
 | `recipe.stop` | remove one managed workload or lifecycle hook |
 
 Uninstall removes only agent-owned installation metadata. Docker image garbage
@@ -100,12 +100,14 @@ arguments rather than accepting argv. In particular it enforces:
 The helper captures bounded diagnostics internally but returns only typed
 status/evidence to the agent. User-provided strings never become shell input.
 
-During readiness, the agent replays the exact controller-authorized start
-request every ten seconds as an idempotent liveness check. The helper accepts
-that replay only while the same labeled managed container is still running; an
-exited or substituted container fails readiness immediately. This guard does
-not restart or replace a workload and remains separate from the renewable
-controller lease needed for long artifact verification and model startup.
+During readiness, the agent sends the exact hardened run request every ten
+seconds under a distinct controller-authorized `run-inspect` action. The helper
+validates the complete request and accepts it only while the same labeled
+managed container is still running; an absent, exited, or substituted container
+fails readiness immediately. `run-inspect` has no create/start/stop path, so the
+guard cannot restart or replace a workload. It remains separate from the
+renewable controller lease needed for long artifact verification and model
+startup.
 
 ## Build boundary
 
