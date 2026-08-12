@@ -56,6 +56,7 @@ pub enum RestartUnit {
 pub enum ContainerRuntimeAction {
     ImageImport,
     ImageInspect,
+    RunInspect,
     Start,
     Stop,
 }

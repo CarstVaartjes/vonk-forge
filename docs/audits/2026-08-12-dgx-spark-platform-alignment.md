@@ -22,6 +22,11 @@ fence, action, and SHA-256. It compiles fixed Docker arguments, verifies the
 imported Linux/ARM64 image and numeric non-root user, and rejects privileged
 mode, host networking, arbitrary mounts/devices, raw InfiniBand, added
 capabilities, socket mounts, and unbounded resources.
+Accepted containers keep a read-only root and receive only a bounded writable
+`/tmp` tmpfs for standard lock/temporary files. Readiness also revalidates the
+exact managed Docker container every ten seconds, so a process that exits
+before its health endpoint appears cannot be kept alive indefinitely by a
+legitimately renewed long-start lease.
 
 ## Observed platform baseline
 

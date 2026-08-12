@@ -553,6 +553,15 @@ runner in the phase evidence file. Keep the qualification document and phase
 evidence private even though their recorded public artifact identities are
 non-secret.
 
+Managed model containers retain a read-only root filesystem. The signed host
+helper adds exactly one 1 GiB `/tmp` tmpfs with `rw,nosuid,nodev,mode=1777` for
+runtime lock and temporary files; do not replace it with a writable root or an
+unbounded host mount. While the health endpoint is pending, the agent verifies
+every ten seconds under the inspect-only signed helper action that the same
+labeled container is still running. That action cannot create or restart a
+missing container. An absent or exited container must fail the operation and be
+cleaned up rather than waiting on continued lease renewals.
+
 ## Restart persistence
 
 For the single-node checkpoint, restart the target agent supervisor, then use

@@ -63,7 +63,7 @@ running operation attempt. The requested action must match the operation:
 |---|---|
 | `recipe.image.import.v1` | import and verify one Docker-loadable image archive |
 | `recipe.install` | inspect one accepted image |
-| `recipe.start` | run one managed workload or lifecycle hook; stop that managed run on failed readiness |
+| `recipe.start` | run one managed workload or lifecycle hook; inspect that exact managed run during readiness; stop it on failed readiness |
 | `recipe.stop` | remove one managed workload or lifecycle hook |
 
 Uninstall removes only agent-owned installation metadata. Docker image garbage
@@ -81,6 +81,8 @@ arguments rather than accepting argv. In particular it enforces:
   non-root image user;
 - `--read-only`, `--cap-drop=ALL`, `no-new-privileges`, no privileged or host
   namespaces, Docker init, and restart policy `no`;
+- one bounded `/tmp` tmpfs with `rw,nosuid,nodev,mode=1777`; this preserves the
+  read-only root while supporting ordinary runtime lock and temporary files;
 - `--pull never` after digest-bound import and inspection, plus Docker's
   rotating `local` log driver with fixed size/file bounds;
 - bounded memory and PIDs;
@@ -97,6 +99,15 @@ arguments rather than accepting argv. In particular it enforces:
 
 The helper captures bounded diagnostics internally but returns only typed
 status/evidence to the agent. User-provided strings never become shell input.
+
+During readiness, the agent sends the exact hardened run request every ten
+seconds under a distinct controller-authorized `run-inspect` action. The helper
+validates the complete request and accepts it only while the same labeled
+managed container is still running; an absent, exited, or substituted container
+fails readiness immediately. `run-inspect` has no create/start/stop path, so the
+guard cannot restart or replace a workload. It remains separate from the
+renewable controller lease needed for long artifact verification and model
+startup.
 
 ## Build boundary
 
