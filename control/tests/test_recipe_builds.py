@@ -668,7 +668,7 @@ def test_build_result_accepts_protocol_frozen_empty_findings(tmp_path: Path) -> 
         ) is None
 
 
-def test_distribution_uses_one_build_digest_for_every_missing_node(
+def test_distribution_reimports_one_build_digest_for_every_mapped_node(
     tmp_path: Path,
 ) -> None:
     sessions, bundles, now, builder, revision = setup(tmp_path)
@@ -690,6 +690,19 @@ def test_distribution_uses_one_build_digest_for_every_missing_node(
                 state="active",
                 architecture="linux-arm64",
                 capabilities=["recipe.image.import.v1"],
+            )
+        )
+        session.add(
+            NodeArtifact(
+                node_id=builder,
+                kind="image",
+                digest="b" * 64,
+                source="oci-layout:" + "c" * 64,
+                size_bytes=500,
+                state="verified",
+                ref_count=0,
+                verified_at=now,
+                updated_at=now,
             )
         )
         mapping = ClusterMapping(

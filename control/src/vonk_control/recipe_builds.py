@@ -19,7 +19,6 @@ from .models import (
     ClusterMapping,
     ClusterMappingNode,
     LocalRecipeRevision,
-    NodeArtifact,
     RecipeBuild,
     RecipeSourceBundle,
     ResourceReservation,
@@ -432,22 +431,11 @@ class RecipeBuildService:
                     .order_by(ClusterMappingNode.rank)
                 )
             )
-            raw_digest = build.image_digest.removeprefix("sha256:")
-            present = set(
-                session.scalars(
-                    select(NodeArtifact.node_id).where(
-                        NodeArtifact.node_id.in_([item.node_id for item in nodes]),
-                        NodeArtifact.kind == "image",
-                        NodeArtifact.digest == raw_digest,
-                        NodeArtifact.size_bytes == build.image_bytes,
-                        NodeArtifact.state == "verified",
-                    )
-                )
-            )
             targets: list[tuple[str, dict[str, object]]] = []
             for item in nodes:
-                if item.node_id in present:
-                    continue
+                # A durable artifact row records accepted evidence, not current
+                # Docker cache state. Re-importing the immutable layout makes a
+                # new mapping self-healing after image pruning or runtime changes.
                 node = session.get(AgentNode, item.node_id)
                 if (
                     node is None
