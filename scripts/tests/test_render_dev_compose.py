@@ -83,6 +83,7 @@ def test_pinned_render_uses_one_verified_cohort_identity_for_every_service(
     _, output = _rendered_pinned(tmp_path)
 
     text = output.read_text(encoding="utf-8")
+    assert not text.startswith("name:")
     assert text.count(API_IMAGE) == 1
     assert text.count(WORKER_IMAGE) == 1
     assert PINNED_BASELINE in text
@@ -100,6 +101,7 @@ def test_dev_render_is_bare_mutable_and_removes_pinned_compatibility_input(
     _, output = _rendered_dev(tmp_path)
 
     text = output.read_text(encoding="utf-8")
+    assert not text.startswith("name:")
     assert text.count(API_DEV_IMAGE) == 1
     assert text.count(WORKER_DEV_IMAGE) == 1
     assert "@sha256:" not in "\n".join(
