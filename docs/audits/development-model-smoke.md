@@ -1,9 +1,9 @@
 # Development model smoke qualification
 
-Date: 2026-08-11
+Date: 2026-08-12
 
-Status: configuration and automated gates complete; physical qualification is
-deliberately pending the accepted-main deployment and an anonymous GHCR pull.
+Status: generic runtime publication and automated gates complete; physical
+qualification is deliberately pending the accepted-main wrapper deployment.
 No result in this document claims that the new agent path has run the model.
 
 ## Selected lane
@@ -39,12 +39,13 @@ deferrals remain recorded in
 | --- | --- |
 | DS4 source | `https://github.com/Entrpi/ds4` at `4ad370b4a338efe9723a386673c0e04f6e214108` |
 | Source archive | SHA-256 `7db338d0a441fed36c5e4e7af44ff670e8bfe567e88d482f00ff6a3dc0e5dbe3` |
-| Runtime image | `ghcr.io/carstvaartjes/spark-ds4@sha256:084d9a9ffa47431842c5dec84de97b058034dec0535b2a563bc5db78c9e14615` |
-| BusyBox transport | Public multi-architecture OCI index `docker.io/library/busybox:1.37.0-musl@sha256:fc6dddc4c44b1bfe37f41cae8e67d1693828e8f42a91862816d7953e2c9d3f23`; `linux/arm64/v8` child `sha256:97d3fa0415c6749d4b27849c2bf251ac11fe2ec7d3178a2dae4bbf3bd30056fc` |
+| Runtime image | `ghcr.io/carstvaartjes/vonk-forge-workloads@sha256:96993dcbb8f262c6fbcc41fd005498934b476b040486a6618898d4135b6d0817` |
+| BusyBox transport | Included in the accepted generic runtime from the Public multi-architecture OCI index `docker.io/library/busybox:1.37.0-musl@sha256:fc6dddc4c44b1bfe37f41cae8e67d1693828e8f42a91862816d7953e2c9d3f23`; `linux/arm64/v8` child `sha256:97d3fa0415c6749d4b27849c2bf251ac11fe2ec7d3178a2dae4bbf3bd30056fc` |
 | Base GGUF | 86,720,111,488 bytes; SHA-256 `ca22ae2f838e14077c22bc1c1417b71b45b5e5a3687bd96c2ac6e17fdb6261c0` |
 | Drafter GGUF | 6,971,241,504 bytes; SHA-256 `8fa269560dc76fd73e4233ad9b1938b5f65dd363381fd9b1a5c6183f7d12d686` |
 | Model bytes per node | 93,691,352,992 |
-| Source bundle | 10,240 bytes; canonical manifest SHA-256 `e28c831f3b5b46fc834cd67baad85f5aa325d4c8ae2cc3d1d330721c849d2801` |
+| Source bundle | 10,240 bytes; canonical manifest SHA-256 `629ed1747ce076754e8acfbca6fd279d263529d09055c517e17aebbcc5fd0e9e` |
+| Recipe content | Canonical JSON SHA-256 `1e2ca9b77732d561cecafec6492bd57900dbf2f9d8c16a500b0ea47606c4f247` |
 
 The checked source, artifact, topology, and recipe documents live under
 [`config/recipes/development`](../../config/recipes/development). Both profiles
@@ -52,10 +53,17 @@ use the same two `http.file` identities. Each URL contains an immutable
 Hugging Face commit, and the agent independently enforces the final file size
 and `sha256:` revision before installation.
 
-An anonymous registry inspection on 2026-08-11 resolved the exact BusyBox pin
-as an OCI index and listed the arm64/v8 child above. The development recipe
-copies only that pinned transport binary into its final arm64 image; mutable
-BusyBox tags are not deployment identity.
+Independent accepted-main publisher runs
+[`31610534569`](https://github.com/CarstVaartjes/vonk-forge/actions/runs/31610534569)
+and
+[`31610540920`](https://github.com/CarstVaartjes/vonk-forge/actions/runs/31610540920)
+produced the same executable ARM64 runtime manifest above. Their outer indexes
+and signed bundles remained run-specific. Independent verification required
+the numeric `10001:10001` user, runtime-interface label, reviewed DS4 source,
+no model weights or secret build inputs, valid signed provenance and SBOM, and
+an anonymous pull. The Spark-side wrapper now has one digest-pinned `FROM` and
+copies only the local model and rendezvous wrappers; BusyBox is already present
+at `/opt/vonk/busybox` in the accepted runtime.
 
 DS4 source is MIT licensed. The qualifier also requires explicit acknowledgement
 of the upstream DeepSeek/model terms. A credential is not embedded in the
@@ -129,18 +137,14 @@ digest, model identity, rank, world size, endpoint, and memory reservation.
 
 ## Current publication gate
 
-An anonymous manifest request for the pinned DS4 image returned HTTP 401 on
-2026-08-11. GitHub reports the personal `spark-ds4` container package as
-private. The attempted API visibility update returned HTTP 404 and made no
-change. Consequently a truthful physical evidence document must currently set
-`public_pull` to false, and the qualifier correctly refuses it as
-`image.public_pull`.
-
-Before the physical slice, an owner must change that package's visibility to
-public in GitHub Packages. The runbook requires repeating the anonymous raw
-manifest inspection, recording its digest/platform, and only then setting
-`public_pull` to true. This is a deployment prerequisite, not a reason to put a
-GHCR token in a container or on a Spark.
+The generic `vonk-forge-workloads` package is anonymously readable. Its
+accepted executable manifest is the matching child identity from both
+independent publications, not either run-specific outer BuildKit index. The
+checked source document, sole wrapper `FROM`, and private qualification output
+must all retain that exact reference. Any anonymous-pull regression, manifest
+drift, mutable reference, or identity mismatch blocks the physical slice; it
+is never worked around by placing a GHCR token on the NAS, a Spark, or in an
+image.
 
 ## Physical acceptance still required
 
