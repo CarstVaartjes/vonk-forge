@@ -978,6 +978,7 @@ def test_dependencies_prefer_generic_fleet_when_repository_contains_one(tmp_path
         REPOSITORY_ROOT, repository,
         ignore=shutil.ignore_patterns(
             ".git",
+            ".state",
             ".venv",
             ".worktrees",
             "node_modules",

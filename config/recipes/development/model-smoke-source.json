@@ -3,7 +3,7 @@
   "repository": "https://github.com/Entrpi/ds4",
   "commit": "4ad370b4a338efe9723a386673c0e04f6e214108",
   "archive_sha256": "7db338d0a441fed36c5e4e7af44ff670e8bfe567e88d482f00ff6a3dc0e5dbe3",
-  "runtime_image": "ghcr.io/carstvaartjes/spark-ds4@sha256:084d9a9ffa47431842c5dec84de97b058034dec0535b2a563bc5db78c9e14615",
+  "runtime_image": "ghcr.io/carstvaartjes/vonk-forge-workloads@sha256:96993dcbb8f262c6fbcc41fd005498934b476b040486a6618898d4135b6d0817",
   "runtime_interface_label": "v1",
   "runtime_user": "10001:10001",
   "license_id": "ds4-mit"

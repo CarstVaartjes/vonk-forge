@@ -1,8 +1,5 @@
-FROM docker.io/library/busybox:1.37.0-musl@sha256:fc6dddc4c44b1bfe37f41cae8e67d1693828e8f42a91862816d7953e2c9d3f23 AS fabric-tools
-
-FROM ghcr.io/carstvaartjes/spark-ds4@sha256:084d9a9ffa47431842c5dec84de97b058034dec0535b2a563bc5db78c9e14615
+FROM ghcr.io/carstvaartjes/vonk-forge-workloads@sha256:96993dcbb8f262c6fbcc41fd005498934b476b040486a6618898d4135b6d0817
 LABEL ai.vonkforge.runtime-interface="v1"
-COPY --from=fabric-tools /bin/busybox /opt/vonk/busybox
 COPY --chmod=0755 model-smoke fabric-rendezvous /opt/vonk/
 USER 10001:10001
 ENTRYPOINT []

@@ -56,7 +56,7 @@ docker buildx imagetools inspect \
 docker buildx imagetools inspect \
   ghcr.io/carstvaartjes/vonk-forge-worker:dev
 docker buildx imagetools inspect \
-  ghcr.io/carstvaartjes/spark-ds4@sha256:084d9a9ffa47431842c5dec84de97b058034dec0535b2a563bc5db78c9e14615
+  ghcr.io/carstvaartjes/vonk-forge-workloads@sha256:96993dcbb8f262c6fbcc41fd005498934b476b040486a6618898d4135b6d0817
 ```
 
 All three inspections must work anonymously. A private package is a blocker;
@@ -412,8 +412,11 @@ IDs/revisions/SHA-256/byte counts from
 independently downloads within the byte budget and hashes every HTTP artifact;
 the qualification document is not a substitute for that receipt.
 
-Fail closed unless the DS4 package is anonymously public and every fact is
-current, then qualify:
+Fail closed unless the exact generic DS4 runtime above is anonymously public,
+the checked source runtime and the wrapper's sole `FROM` match it, and every
+fact is current. The wrapper build is networkless and single-stage; it copies
+only the local model and rendezvous wrappers because the accepted runtime
+already provides `/opt/vonk/busybox`. Then qualify:
 
 ```bash
 cd '<REPOSITORY_CHECKOUT>'

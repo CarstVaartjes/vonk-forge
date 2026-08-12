@@ -253,8 +253,8 @@ Use `scripts/qualify-development-model` with the public runtime reference, exist
 
 ```bash
 uv run --frozen pytest scripts/tests/test_qualify_development_model.py -q
-uv run --frozen ruff check scripts scripts/tests
-cargo test -p vonk-agent --manifest-path rust/Cargo.toml
+uvx --from ruff==0.16.1 ruff check scripts scripts/tests
+cargo test -p vonk-agent --manifest-path Cargo.toml
 git diff --check
 ```
 
@@ -316,9 +316,9 @@ uv run --frozen ruff check .
 uv run --project control --frozen pytest control/tests -q
 uv run --project agent --frozen pytest agent/tests -q
 uv run --frozen pytest scripts/tests tests -q
-cargo fmt --manifest-path rust/Cargo.toml --all -- --check
-cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets -- -D warnings
-cargo test --manifest-path rust/Cargo.toml --workspace
+cargo fmt --manifest-path Cargo.toml --all -- --check
+cargo clippy --manifest-path Cargo.toml --workspace --all-targets -- -D warnings
+cargo test --manifest-path Cargo.toml --workspace
 git diff --check
 ```
 

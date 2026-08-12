@@ -19,8 +19,8 @@ FABRIC_RENDEZVOUS = MODEL_CONTEXT / "fabric-rendezvous"
 NODE_1 = "spk_0123456789abcdef0123456789abcdef"
 NODE_2 = "spk_fedcba9876543210fedcba9876543210"
 IMAGE = (
-    "ghcr.io/carstvaartjes/spark-ds4@"
-    "sha256:084d9a9ffa47431842c5dec84de97b058034dec0535b2a563bc5db78c9e14615"
+    "ghcr.io/carstvaartjes/vonk-forge-workloads@"
+    "sha256:96993dcbb8f262c6fbcc41fd005498934b476b040486a6618898d4135b6d0817"
 )
 ARTIFACTS = [
     {
@@ -372,7 +372,9 @@ def test_qualifier_emits_canonical_identity_bound_output(tmp_path: Path) -> None
             "node.fabric_identity",
         ),
         (
-            lambda value: value["nodes"][1].update(runtime_image=IMAGE.replace("084d", "184d")),
+            lambda value: value["nodes"][1].update(
+                runtime_image=IMAGE.replace("9699", "a699", 1)
+            ),
             "image.identity",
         ),
     ],
@@ -395,7 +397,11 @@ def test_qualifier_rejects_unsafe_or_inconsistent_evidence(
     ("field", "value", "reason"),
     [
         ("commit", "main", "source.commit"),
-        ("runtime_image", "ghcr.io/carstvaartjes/spark-ds4:dev", "source.runtime_image"),
+        (
+            "runtime_image",
+            "ghcr.io/carstvaartjes/vonk-forge-workloads:dev",
+            "source.runtime_image",
+        ),
     ],
 )
 def test_qualifier_rejects_mutable_source_or_image_refs(
@@ -439,6 +445,34 @@ def test_repository_model_documents_qualify_and_share_exact_identities(
     recipe = json.loads(
         (ROOT / "config/recipes/development/model-smoke.json").read_text()
     )
+    dockerfile = (MODEL_CONTEXT / "Dockerfile").read_text(encoding="utf-8")
+    from_instructions = [
+        line.strip()
+        for line in dockerfile.splitlines()
+        if line.lstrip().startswith("FROM ")
+    ]
+
+    assert from_instructions == [f"FROM {IMAGE}"]
+    assert all(" AS " not in instruction for instruction in from_instructions)
+    assert "COPY --from" not in dockerfile
+    assert "COPY --chmod=0755 model-smoke fabric-rendezvous /opt/vonk/" in dockerfile
+    recipe_runtime_image = from_instructions[0].removeprefix("FROM ")
+
+    completed = _run(
+        tmp_path,
+        source=source,
+        artifacts=artifacts,
+        topology=topology,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    qualification = json.loads((tmp_path / "qualification.json").read_text())
+    assert (
+        recipe_runtime_image
+        == source["runtime_image"]
+        == qualification["runtime_image"]
+        == IMAGE
+    )
 
     assert recipe["artifacts"] == [
         {
@@ -453,7 +487,6 @@ def test_repository_model_documents_qualify_and_share_exact_identities(
         }
         for item in artifacts["artifacts"]
     ]
-    assert source["runtime_image"].startswith("ghcr.io/")
     assert topology["single_nodes"] == 1
     assert topology["multinode_nodes"] == 2
 
@@ -543,10 +576,10 @@ def test_model_recipe_source_bundle_ships_the_fabric_gate() -> None:
     }
     bundle = generate_source_bundle(files)
 
-    assert "COPY --from=fabric-tools /bin/busybox /opt/vonk/busybox" in dockerfile
     assert "fabric-rendezvous /opt/vonk/" in dockerfile
-    assert bundle.sha256 == (
-        "e28c831f3b5b46fc834cd67baad85f5aa325d4c8ae2cc3d1d330721c849d2801"
+    assert (
+        "busybox=${VONK_BUSYBOX:-/opt/vonk/busybox}"
+        in FABRIC_RENDEZVOUS.read_text(encoding="utf-8")
     )
     assert recipe["build"]["context"] == {
         "sha256": bundle.sha256,
