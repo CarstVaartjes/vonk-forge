@@ -23,6 +23,7 @@ ENROLL_HOSTNAME = "enroll.example.test"
 AGENT_HOSTNAME = "agents.example.test"
 REGISTRY_HOSTNAME = "registry.example.test"
 MANAGEMENT_CIDRS = "192.0.2.0/24,2001:db8::/64"
+DIRECT_FABRIC_CIDRS = "198.51.100.0/24,2001:db8:1::/64"
 NAS_ADDRESS = "192.0.2.10"
 
 EXPECTED_PROJECT_FILES = {
@@ -92,6 +93,8 @@ def _run_project(
             NAS_ADDRESS,
             "--management-cidrs",
             MANAGEMENT_CIDRS,
+            "--direct-fabric-cidrs",
+            DIRECT_FABRIC_CIDRS,
             "--enroll-hostname",
             ENROLL_HOSTNAME,
             "--agent-hostname",
@@ -166,8 +169,12 @@ def test_publishes_exact_two_item_project_without_secret_output(tmp_path: Path) 
             == hashlib.sha256(source.read_bytes()).digest()
         )
     compose = (destination / "docker-compose.yml").read_text(encoding="utf-8")
+    assert not compose.startswith("name:")
     assert "VONK_AGENT_ENROLL_HOSTNAME: enroll.example.test" in compose
     assert "VONK_AGENT_HOSTNAME: agents.example.test" in compose
+    assert compose.count(
+        'VONK_DIRECT_FABRIC_CIDRS: "198.51.100.0/24,2001:db8:1::/64"'
+    ) == 2
     for name in (
         "agent-proxy-auth",
         "controller-server-key",
@@ -276,6 +283,7 @@ def test_permits_validated_copy_to_a_mounted_destination(tmp_path: Path) -> None
         destination=destination,
         nas_address=NAS_ADDRESS,
         management_cidrs=MANAGEMENT_CIDRS,
+        direct_fabric_cidrs=DIRECT_FABRIC_CIDRS,
         enroll_hostname=ENROLL_HOSTNAME,
         agent_hostname=AGENT_HOSTNAME,
         registry_hostname=REGISTRY_HOSTNAME,
@@ -303,6 +311,7 @@ def test_rejects_nonlocal_project_staging_root(
             destination=destination,
             nas_address=NAS_ADDRESS,
             management_cidrs=MANAGEMENT_CIDRS,
+            direct_fabric_cidrs=DIRECT_FABRIC_CIDRS,
             enroll_hostname=ENROLL_HOSTNAME,
             agent_hostname=AGENT_HOSTNAME,
             registry_hostname=REGISTRY_HOSTNAME,
@@ -339,6 +348,7 @@ def test_revalidates_created_local_staging_directory(
             destination=destination,
             nas_address=NAS_ADDRESS,
             management_cidrs=MANAGEMENT_CIDRS,
+            direct_fabric_cidrs=DIRECT_FABRIC_CIDRS,
             enroll_hostname=ENROLL_HOSTNAME,
             agent_hostname=AGENT_HOSTNAME,
             registry_hostname=REGISTRY_HOSTNAME,
@@ -388,6 +398,7 @@ def test_local_staging_writes_stay_on_pinned_directory_after_path_swap(
             destination=destination,
             nas_address=NAS_ADDRESS,
             management_cidrs=MANAGEMENT_CIDRS,
+            direct_fabric_cidrs=DIRECT_FABRIC_CIDRS,
             enroll_hostname=ENROLL_HOSTNAME,
             agent_hostname=AGENT_HOSTNAME,
             registry_hostname=REGISTRY_HOSTNAME,
@@ -421,11 +432,37 @@ def test_rejects_invalid_project_inputs(tmp_path: Path) -> None:
         "--registry-hostname",
         "bad_host.example",
     )
+    overlapping_fabric = _run_project(
+        tmp_path / "overlapping-fabric",
+        secrets_dir,
+        SOURCE_COMPOSE,
+        "--direct-fabric-cidrs",
+        "192.0.2.0/25",
+    )
 
     assert bad_address.returncode == 1
     assert bad_address.stdout == ""
     assert bad_hostname.returncode == 1
     assert bad_hostname.stdout == ""
+    assert overlapping_fabric.returncode == 1
+    assert overlapping_fabric.stdout == ""
+
+
+def test_requires_an_explicit_single_node_fabric_choice(tmp_path: Path) -> None:
+    secrets_dir = _prepare_source_secrets(tmp_path)
+    destination = tmp_path / "single-node"
+
+    result = _run_project(
+        destination,
+        secrets_dir,
+        SOURCE_COMPOSE,
+        "--direct-fabric-cidrs",
+        "none",
+    )
+
+    assert result.returncode == 0, result.stderr
+    compose = (destination / "docker-compose.yml").read_text(encoding="utf-8")
+    assert compose.count('VONK_DIRECT_FABRIC_CIDRS: ""') == 2
 
 
 def _project_contents(destination: Path) -> dict[str, bytes]:
@@ -460,6 +497,7 @@ def test_interrupted_publish_restores_the_complete_previous_generation(
         destination=destination,
         nas_address=NAS_ADDRESS,
         management_cidrs=MANAGEMENT_CIDRS,
+        direct_fabric_cidrs=DIRECT_FABRIC_CIDRS,
         enroll_hostname=ENROLL_HOSTNAME,
         agent_hostname=AGENT_HOSTNAME,
         registry_hostname=REGISTRY_HOSTNAME,
@@ -490,6 +528,7 @@ def test_interrupted_publish_restores_the_complete_previous_generation(
             destination=destination,
             nas_address=NAS_ADDRESS,
             management_cidrs=MANAGEMENT_CIDRS,
+            direct_fabric_cidrs=DIRECT_FABRIC_CIDRS,
             enroll_hostname=ENROLL_HOSTNAME,
             agent_hostname=AGENT_HOSTNAME,
             registry_hostname=REGISTRY_HOSTNAME,
@@ -519,6 +558,7 @@ def test_rerun_recovers_a_process_interruption_before_publishing(
         destination=destination,
         nas_address=NAS_ADDRESS,
         management_cidrs=MANAGEMENT_CIDRS,
+        direct_fabric_cidrs=DIRECT_FABRIC_CIDRS,
         enroll_hostname=ENROLL_HOSTNAME,
         agent_hostname=AGENT_HOSTNAME,
         registry_hostname=REGISTRY_HOSTNAME,
@@ -547,6 +587,7 @@ def test_rerun_recovers_a_process_interruption_before_publishing(
             destination=destination,
             nas_address=NAS_ADDRESS,
             management_cidrs=MANAGEMENT_CIDRS,
+            direct_fabric_cidrs=DIRECT_FABRIC_CIDRS,
             enroll_hostname=ENROLL_HOSTNAME,
             agent_hostname=AGENT_HOSTNAME,
             registry_hostname=REGISTRY_HOSTNAME,
@@ -561,6 +602,7 @@ def test_rerun_recovers_a_process_interruption_before_publishing(
         destination=destination,
         nas_address=NAS_ADDRESS,
         management_cidrs=MANAGEMENT_CIDRS,
+        direct_fabric_cidrs=DIRECT_FABRIC_CIDRS,
         enroll_hostname=ENROLL_HOSTNAME,
         agent_hostname=AGENT_HOSTNAME,
         registry_hostname=REGISTRY_HOSTNAME,
@@ -598,6 +640,7 @@ def test_rerun_discards_partial_cleanup_tombstone_after_successful_publish(
         destination=destination,
         nas_address=NAS_ADDRESS,
         management_cidrs=MANAGEMENT_CIDRS,
+        direct_fabric_cidrs=DIRECT_FABRIC_CIDRS,
         enroll_hostname=ENROLL_HOSTNAME,
         agent_hostname=AGENT_HOSTNAME,
         registry_hostname=REGISTRY_HOSTNAME,
@@ -627,6 +670,7 @@ def test_rerun_discards_partial_cleanup_tombstone_after_successful_publish(
             destination=destination,
             nas_address=NAS_ADDRESS,
             management_cidrs=MANAGEMENT_CIDRS,
+            direct_fabric_cidrs=DIRECT_FABRIC_CIDRS,
             enroll_hostname=ENROLL_HOSTNAME,
             agent_hostname=AGENT_HOSTNAME,
             registry_hostname=REGISTRY_HOSTNAME,
@@ -642,6 +686,7 @@ def test_rerun_discards_partial_cleanup_tombstone_after_successful_publish(
         destination=destination,
         nas_address=NAS_ADDRESS,
         management_cidrs=MANAGEMENT_CIDRS,
+        direct_fabric_cidrs=DIRECT_FABRIC_CIDRS,
         enroll_hostname=ENROLL_HOSTNAME,
         agent_hostname=AGENT_HOSTNAME,
         registry_hostname=REGISTRY_HOSTNAME,
@@ -689,6 +734,7 @@ def test_live_publisher_is_rejected_and_stale_journal_recovers_on_rerun(
                 destination=destination,
                 nas_address=NAS_ADDRESS,
                 management_cidrs=MANAGEMENT_CIDRS,
+                direct_fabric_cidrs=DIRECT_FABRIC_CIDRS,
                 enroll_hostname=ENROLL_HOSTNAME,
                 agent_hostname=AGENT_HOSTNAME,
                 registry_hostname=REGISTRY_HOSTNAME,
@@ -706,6 +752,7 @@ def test_live_publisher_is_rejected_and_stale_journal_recovers_on_rerun(
         destination=destination,
         nas_address=NAS_ADDRESS,
         management_cidrs=MANAGEMENT_CIDRS,
+        direct_fabric_cidrs=DIRECT_FABRIC_CIDRS,
         enroll_hostname=ENROLL_HOSTNAME,
         agent_hostname=AGENT_HOSTNAME,
         registry_hostname=REGISTRY_HOSTNAME,

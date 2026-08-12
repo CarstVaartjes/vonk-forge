@@ -244,6 +244,7 @@ services:
       VONK_INTERNAL_API_URL: http://control-api:8000
       VONK_DEV_SELECTED_COHORT_FILE: /cohort/selected.json
       VONK_MANAGEMENT_CIDRS_FILE: /run/secrets/management-cidrs
+      VONK_DIRECT_FABRIC_CIDRS: ""
       VONK_WORKER_API_TOKEN_FILE: /run/secrets/worker-api-token
     volumes:
       - dev-repository:/repository:ro
@@ -275,6 +276,7 @@ services:
       VONK_AGENT_CA_PROVIDER: builtin
       VONK_AGENT_BUILTIN_CA_BOOTSTRAP: "1"
       VONK_MANAGEMENT_CIDRS_FILE: /run/secrets/management-cidrs
+      VONK_DIRECT_FABRIC_CIDRS: ""
       VONK_AGENT_CLIENT_CA_FILE: /run/secrets/agent-ca-certificate
       VONK_AGENT_INTERMEDIATE_CERTIFICATE_FILE: /run/secrets/agent-ca-certificate
       VONK_AGENT_INTERMEDIATE_KEY_FILE: /run/secrets/agent-ca-key

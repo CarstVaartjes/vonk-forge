@@ -25,6 +25,7 @@ Choose these values once and use them consistently:
 ```text
 NAS address:            <NAS_MANAGEMENT_IP>
 GPU-node network:       <NODE_MANAGEMENT_CIDR>
+Direct-fabric networks: <DIRECT_FABRIC_CIDRS_OR_NONE>
 Enrollment name:        <ENROLLMENT_HOSTNAME>
 Agent controller name:  <CONTROLLER_HOSTNAME>
 Reserved registry name: <REGISTRY_HOSTNAME>
@@ -39,6 +40,10 @@ printf 'spk_%s\n' "$(openssl rand -hex 16)"
 Never reuse a node identity. The examples in this repository use
 `enroll.vonk-forge.lan`, `agents.vonk-forge.lan`, and
 `registry.vonk-forge.lan`, but those names are not product defaults.
+For a multi-node fleet, record the canonical comma-separated CIDRs configured
+by NVIDIA Sync, for example `192.168.100.0/24,192.168.101.0/24`. They must not
+overlap the management network. For an intentionally single-node installation,
+record the literal `none` and omit both fabric fields from the agent config.
 
 ## 2. Download the accepted Compose artifact
 
@@ -75,6 +80,7 @@ scripts/dev-runtime-project \
   --destination '<MOUNTED_NAS_PARENT>/vonk-forge' \
   --nas-address '<NAS_MANAGEMENT_IP>' \
   --management-cidrs '<NODE_MANAGEMENT_CIDR>' \
+  --direct-fabric-cidrs '<DIRECT_FABRIC_CIDRS_OR_NONE>' \
   --enroll-hostname '<ENROLLMENT_HOSTNAME>' \
   --agent-hostname '<CONTROLLER_HOSTNAME>' \
   --registry-hostname '<REGISTRY_HOSTNAME>'

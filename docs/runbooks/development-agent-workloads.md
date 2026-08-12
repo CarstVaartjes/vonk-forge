@@ -94,6 +94,7 @@ scripts/dev-runtime-project \
   --destination '<MOUNTED_NAS_PARENT>/vonk-forge' \
   --nas-address '<NAS_MANAGEMENT_IP>' \
   --management-cidrs '<NODE_MANAGEMENT_CIDR>' \
+  --direct-fabric-cidrs '<DIRECT_FABRIC_CIDRS_OR_NONE>' \
   --enroll-hostname '<ENROLLMENT_HOSTNAME>' \
   --agent-hostname '<CONTROLLER_HOSTNAME>' \
   --registry-hostname '<REGISTRY_HOSTNAME>'
@@ -106,6 +107,9 @@ plus `controller-ca-key`, `git-signing-key.pub`, and
 authorities, so include all 17 local
 source files in one encrypted 1Password generation or equivalent backup before
 first deployment. `controller-ca-key` must not be copied to the NAS.
+For two-node acceptance, pass the canonical NVIDIA Sync direct networks and
+configure each agent with one address from those networks plus its measured
+bandwidth. The publisher rejects any direct network that overlaps management.
 For the one supported upgrade from the original 15-file source generation,
 rerun the same command once with `--upgrade-host-runtime-authority`. The helper
 accepts only an otherwise complete and valid legacy generation, performs an
@@ -569,6 +573,7 @@ scripts/dev-runtime-project \
   --destination "$ACCEPTANCE_ROOT/project" \
   --nas-address '<NAS_MANAGEMENT_IP>' \
   --management-cidrs '<NODE_MANAGEMENT_CIDR>' \
+  --direct-fabric-cidrs '<DIRECT_FABRIC_CIDRS_OR_NONE>' \
   --enroll-hostname '<ENROLLMENT_HOSTNAME>' \
   --agent-hostname '<CONTROLLER_HOSTNAME>' \
   --registry-hostname '<REGISTRY_HOSTNAME>'
