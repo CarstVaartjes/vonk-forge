@@ -23,6 +23,7 @@ use crate::{
 
 const MAX_BODY_BYTES: usize = 64 * 1024;
 const RECIPE_IMAGE_UPLOAD_TIMEOUT: Duration = Duration::from_secs(60 * 60);
+const HOST_RUNTIME_GRANT_TTL_SECONDS: u16 = 10;
 
 #[derive(Debug, Error)]
 pub enum ClientError {
@@ -250,7 +251,7 @@ impl AgentHttpClient {
             fence: claim.fence,
             action,
             request_sha256,
-            expires_in_seconds: 30,
+            expires_in_seconds: HOST_RUNTIME_GRANT_TTL_SECONDS,
         })
         .map_err(|_| ClientError::Protocol)?;
         let response = self
@@ -571,7 +572,9 @@ mod tests {
     };
     use url::Url;
     use uuid::Uuid;
-    use vonk_agent_protocol::{AgentDirective, AgentProgress, canonical_json};
+    use vonk_agent_protocol::{
+        AgentClaim, AgentDirective, AgentProgress, HostRuntimeAction, canonical_json, hex_sha256,
+    };
 
     fn observation_client(status: u16) -> (AgentHttpClient, thread::JoinHandle<Vec<u8>>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -658,6 +661,52 @@ mod tests {
             )
             .unwrap();
             stream.write_all(&response_body).unwrap();
+            request
+        });
+        (
+            AgentHttpClient {
+                client: reqwest::Client::new(),
+                controller: Url::parse(&format!("http://{address}/")).unwrap(),
+                node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
+            },
+            server,
+        )
+    }
+
+    fn host_runtime_grant_client() -> (AgentHttpClient, thread::JoinHandle<Vec<u8>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 4096];
+            let header_end = loop {
+                let size = stream.read(&mut buffer).unwrap();
+                assert_ne!(size, 0);
+                request.extend_from_slice(&buffer[..size]);
+                if let Some(index) = request.windows(4).position(|value| value == b"\r\n\r\n") {
+                    break index + 4;
+                }
+            };
+            let headers = std::str::from_utf8(&request[..header_end]).unwrap();
+            let content_length = headers
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().unwrap())
+                })
+                .unwrap();
+            while request.len() - header_end < content_length {
+                let size = stream.read(&mut buffer).unwrap();
+                assert_ne!(size, 0);
+                request.extend_from_slice(&buffer[..size]);
+            }
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 12\r\nConnection: close\r\n\r\n{{\"grant\":{{}}}}"
+            )
+            .unwrap();
             request
         });
         (
@@ -787,6 +836,39 @@ mod tests {
             Err(ClientError::Protocol)
         ));
         server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn host_runtime_grant_ttl_fits_inside_renewed_operation_lease() {
+        let payload = serde_json::json!({});
+        let claim = AgentClaim {
+            schema_version: 1,
+            job_id: Uuid::parse_str("84ddf214-f067-4bbf-917e-95df32a07fd8").unwrap(),
+            operation_id: Uuid::parse_str("f450b5ac-5a78-4af5-9670-e874f735e3ee").unwrap(),
+            attempt: 1,
+            fence: Uuid::parse_str("44d4e914-34df-4962-a802-d1f7dcd928aa").unwrap(),
+            node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
+            operation: "recipe.image.import.v1".to_owned(),
+            base_commit: "a".repeat(40),
+            payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
+            payload,
+            deadline: DateTime::parse_from_rfc3339("2099-01-01T00:00:00+00:00").unwrap(),
+        };
+        let (client, server) = host_runtime_grant_client();
+
+        client
+            .host_runtime_grant(&claim, HostRuntimeAction::ImageImport, &"c".repeat(64))
+            .await
+            .unwrap();
+        let request = server.join().unwrap();
+        let body = request
+            .windows(4)
+            .position(|value| value == b"\r\n\r\n")
+            .map(|index| &request[index + 4..])
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(body).unwrap();
+
+        assert_eq!(body["expires_in_seconds"], 10);
     }
 
     #[tokio::test]
