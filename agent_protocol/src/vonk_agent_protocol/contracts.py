@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.resources
+import ipaddress
 import json
 import re
 from collections.abc import Mapping
@@ -10,6 +11,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from types import MappingProxyType
 from typing import Any
+from urllib.parse import parse_qsl, urlsplit
 from uuid import UUID
 
 from jsonschema import Draft202012Validator, FormatChecker
@@ -27,6 +29,12 @@ UNSAFE_KEY = re.compile(
     r"password|secret|token|authorization|private.?key|command|shell|environment",
     re.IGNORECASE,
 )
+MODEL_REVISION = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64}|sha256:[0-9a-f]{64})\Z")
+MODEL_REPOSITORY = re.compile(
+    r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}"
+    r"(?:/[A-Za-z0-9][A-Za-z0-9._-]{0,127}){1,7}\Z"
+)
+MODEL_QUERY_COMPONENT = re.compile(r"[A-Za-z0-9._~-]{1,128}\Z")
 
 
 def _ascii_case_pattern(token: str, *, initial_upper: bool = False) -> str:
@@ -151,6 +159,7 @@ def _validate_safe_keys(
     secret_value: bool = False,
     operation: AgentOperation | None = None,
     path: tuple[str | int, ...] = (),
+    typed_result_strings: bool = False,
 ) -> None:
     if isinstance(value, Mapping):
         for key, item in value.items():
@@ -169,6 +178,7 @@ def _validate_safe_keys(
                 secret_value=field_name == "secrets",
                 operation=operation,
                 path=(*path, key),
+                typed_result_strings=typed_result_strings,
             )
     elif isinstance(value, (list, tuple)):
         for index, item in enumerate(value):
@@ -178,6 +188,7 @@ def _validate_safe_keys(
                 secret_value=secret_value,
                 operation=operation,
                 path=(*path, index),
+                typed_result_strings=typed_result_strings,
             )
     elif isinstance(value, str):
         if secret_value:
@@ -187,8 +198,12 @@ def _validate_safe_keys(
         if field_name == "platform_target_name":
             if VERSIONED_PLATFORM_TARGET.fullmatch(value) is None:
                 raise AgentProtocolError("platform target identifier is not canonical")
-        elif operation is AgentOperation.RECIPE_BUILD and _typed_build_string(
-            path, value
+        elif (
+            operation is AgentOperation.RECIPE_BUILD and _typed_build_string(path, value)
+        ) or (
+            typed_result_strings
+            and ("/" in value or "\\" in value)
+            and _typed_result_string(path, value)
         ):
             return
         elif "/" in value or "\\" in value:
@@ -220,12 +235,106 @@ def _typed_build_string(path: tuple[str | int, ...], value: str) -> bool:
     )
 
 
+def _typed_result_string(path: tuple[str | int, ...], value: str) -> bool:
+    if path in {("endpoint",), ("evidence", "endpoint")}:
+        return _recipe_endpoint(value)
+    if path == ("evidence", "model_identity"):
+        return _model_identity(value)
+    return False
+
+
+def _recipe_endpoint(value: str) -> bool:
+    try:
+        parsed = urlsplit(value)
+        hostname = parsed.hostname
+        port = parsed.port
+        address = ipaddress.ip_address(hostname) if hostname is not None else None
+    except ValueError:
+        return False
+    return bool(
+        parsed.scheme == "http"
+        and hostname
+        and port is not None
+        and 1 <= port <= 65535
+        and parsed.username is None
+        and parsed.password is None
+        and parsed.path in {"", "/"}
+        and not parsed.query
+        and not parsed.fragment
+        and address is not None
+        and not address.is_loopback
+        and not address.is_unspecified
+        and not address.is_multicast
+    )
+
+
+def _model_identity(value: str) -> bool:
+    repository, marker, revision = value.rpartition("@")
+    if (
+        marker != "@"
+        or not 1 <= len(repository) <= 512
+        or MODEL_REVISION.fullmatch(revision) is None
+        or "\\" in repository
+    ):
+        return False
+    if MODEL_REPOSITORY.fullmatch(repository) is not None:
+        return True
+    try:
+        parsed = urlsplit(repository)
+        _ = parsed.port
+    except ValueError:
+        return False
+    return bool(
+        parsed.scheme == "https"
+        and parsed.hostname
+        and parsed.username is None
+        and parsed.password is None
+        and parsed.path not in {"", "/"}
+        and _safe_model_query(parsed.query)
+        and not parsed.fragment
+    )
+
+
+def _safe_model_query(query: str) -> bool:
+    if not query:
+        return True
+    if len(query) > 256:
+        return False
+    try:
+        fields = parse_qsl(
+            query,
+            keep_blank_values=True,
+            strict_parsing=True,
+            max_num_fields=8,
+        )
+    except ValueError:
+        return False
+    return bool(
+        fields
+        and all(
+            len(key) <= 64
+            and MODEL_QUERY_COMPONENT.fullmatch(key) is not None
+            and (not value or MODEL_QUERY_COMPONENT.fullmatch(value) is not None)
+            and UNSAFE_KEY.search(key) is None
+            for key, value in fields
+        )
+    )
+
+
 def _validate_bounded_document(
-    value: Any, *, name: str, operation: AgentOperation | None = None
+    value: Any,
+    *,
+    name: str,
+    operation: AgentOperation | None = None,
+    typed_result_strings: bool = False,
 ) -> Any:
     if not isinstance(value, Mapping):
         raise AgentProtocolError(f"{name} must be a JSON object")
-    _validate_safe_keys(value, operation=operation)
+    _validate_safe_keys(
+        value,
+        operation=operation,
+        typed_result_strings=typed_result_strings,
+    )
     copied = _canonical_copy(value, name=name)
     if len(canonical_message(copied)) > MAX_DOCUMENT_BYTES:
         raise AgentProtocolError(f"{name} is too large")
@@ -466,7 +575,13 @@ class AgentResult:
         if self.state not in {"succeeded", "failed", "waiting-for-operator"}:
             raise AgentProtocolError("result state is not supported")
         object.__setattr__(
-            self, "result", _validate_bounded_document(self.result, name="result")
+            self,
+            "result",
+            _validate_bounded_document(
+                self.result,
+                name="result",
+                typed_result_strings=True,
+            ),
         )
 
     @classmethod
