@@ -22,6 +22,7 @@ use crate::{
 };
 
 const MAX_BODY_BYTES: usize = 64 * 1024;
+const RECIPE_IMAGE_UPLOAD_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
 #[derive(Debug, Error)]
 pub enum ClientError {
@@ -338,6 +339,7 @@ impl AgentHttpClient {
             .header("content-length", image_bytes)
             .header("x-vonk-image-digest", image_digest)
             .header("x-vonk-oci-layout-sha256", oci_layout_sha256)
+            .timeout(RECIPE_IMAGE_UPLOAD_TIMEOUT)
             .body(reqwest::Body::wrap_stream(ReaderStream::new(file)))
             .send()
             .await?;
@@ -565,6 +567,7 @@ mod tests {
         io::{Read, Write},
         net::TcpListener,
         thread,
+        time::Duration,
     };
     use url::Url;
     use uuid::Uuid;
@@ -660,6 +663,57 @@ mod tests {
         (
             AgentHttpClient {
                 client: reqwest::Client::new(),
+                controller: Url::parse(&format!("http://{address}/")).unwrap(),
+                node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
+            },
+            server,
+        )
+    }
+
+    fn delayed_upload_client(
+        response_delay: Duration,
+    ) -> (AgentHttpClient, thread::JoinHandle<Vec<u8>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 4096];
+            let header_end = loop {
+                let size = stream.read(&mut buffer).unwrap();
+                assert_ne!(size, 0);
+                request.extend_from_slice(&buffer[..size]);
+                if let Some(index) = request.windows(4).position(|value| value == b"\r\n\r\n") {
+                    break index + 4;
+                }
+            };
+            let headers = std::str::from_utf8(&request[..header_end]).unwrap();
+            let content_length = headers
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().unwrap())
+                })
+                .unwrap();
+            while request.len() - header_end < content_length {
+                let size = stream.read(&mut buffer).unwrap();
+                assert_ne!(size, 0);
+                request.extend_from_slice(&buffer[..size]);
+            }
+            thread::sleep(response_delay);
+            let _ = stream.write_all(
+                b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            );
+            request
+        });
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_millis(50))
+            .build()
+            .unwrap();
+        (
+            AgentHttpClient {
+                client,
                 controller: Url::parse(&format!("http://{address}/")).unwrap(),
                 node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
             },
@@ -835,5 +889,31 @@ mod tests {
             client.report_recipe_run_observations(&observations).await,
             Err(ClientError::Protocol)
         ));
+    }
+
+    #[tokio::test]
+    async fn recipe_image_upload_overrides_the_short_ordinary_request_timeout() {
+        let directory = tempfile::tempdir().unwrap();
+        let archive = directory.path().join("image.docker.tar");
+        std::fs::write(&archive, b"accepted archive").unwrap();
+        let (client, server) = delayed_upload_client(Duration::from_millis(150));
+
+        let result = client
+            .upload_recipe_image(
+                Uuid::parse_str("45ea6921-50c9-4971-be2a-4cd04ce05069").unwrap(),
+                &format!("sha256:{}", "b".repeat(64)),
+                &"a".repeat(64),
+                16,
+                &archive,
+            )
+            .await;
+        let request = server.join().unwrap();
+
+        assert!(
+            result.is_ok(),
+            "large upload inherited ordinary timeout: {result:?}"
+        );
+        assert!(request.starts_with(b"PUT /agent/v1/recipe-builds/"));
+        assert!(request.ends_with(b"accepted archive"));
     }
 }
