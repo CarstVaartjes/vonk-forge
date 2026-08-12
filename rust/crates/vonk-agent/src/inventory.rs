@@ -115,7 +115,7 @@ impl<R: ProcessRunner> InventoryCollector<'_, R> {
             "runtime.vonk.v1".to_owned(),
         ];
         if let Some(speed) = self.fabric_bandwidth_mbps {
-            capabilities.push(format!("fabric.tcp.mbps.{speed}"));
+            capabilities.push(format!("fabric.connected.mbps.{speed}"));
         }
         Ok(Inventory {
             memory_total_bytes,
