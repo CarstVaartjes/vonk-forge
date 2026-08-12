@@ -35,6 +35,25 @@ def test_digest_pinned_non_root_source_passes(recipe: dict[str, object]) -> None
     assert report.dockerfile == "Dockerfile"
 
 
+def test_absolute_copy_source_from_named_stage_passes(
+    recipe: dict[str, object],
+) -> None:
+    bundle = bundle_for(
+        recipe,
+        "FROM docker.io/library/busybox@sha256:"
+        + "a" * 64
+        + " AS tools\n"
+        + "FROM ghcr.io/example/runtime@sha256:"
+        + "b" * 64
+        + "\nCOPY --from=tools /bin/busybox /opt/runtime/busybox\n"
+        + "USER 10001:10001\n",
+    )
+
+    report = enforce_build_source_policy(recipe, bundle)
+
+    assert report.passed is True
+
+
 @pytest.mark.parametrize(
     ("dockerfile", "code"),
     [
@@ -54,6 +73,12 @@ def test_digest_pinned_non_root_source_passes(recipe: dict[str, object]) -> None
             + "a" * 64
             + "\nRUN --mount=type=secret echo x\nUSER 10001\n",
             "dockerfile.secret_mount",
+        ),
+        (
+            "FROM ghcr.io/example/x@sha256:"
+            + "a" * 64
+            + "\nCOPY /etc/passwd /opt/runtime/passwd\nUSER 10001\n",
+            "dockerfile.copy_path",
         ),
         (
             "FROM ghcr.io/example/x@sha256:" + "a" * 64 + "\nUSER root\n",
