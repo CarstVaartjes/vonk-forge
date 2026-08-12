@@ -81,6 +81,8 @@ arguments rather than accepting argv. In particular it enforces:
   non-root image user;
 - `--read-only`, `--cap-drop=ALL`, `no-new-privileges`, no privileged or host
   namespaces, Docker init, and restart policy `no`;
+- one bounded `/tmp` tmpfs with `rw,nosuid,nodev,mode=1777`; this preserves the
+  read-only root while supporting ordinary runtime lock and temporary files;
 - `--pull never` after digest-bound import and inspection, plus Docker's
   rotating `local` log driver with fixed size/file bounds;
 - bounded memory and PIDs;
@@ -97,6 +99,13 @@ arguments rather than accepting argv. In particular it enforces:
 
 The helper captures bounded diagnostics internally but returns only typed
 status/evidence to the agent. User-provided strings never become shell input.
+
+During readiness, the agent replays the exact controller-authorized start
+request every ten seconds as an idempotent liveness check. The helper accepts
+that replay only while the same labeled managed container is still running; an
+exited or substituted container fails readiness immediately. This guard does
+not restart or replace a workload and remains separate from the renewable
+controller lease needed for long artifact verification and model startup.
 
 ## Build boundary
 

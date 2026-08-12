@@ -251,6 +251,8 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             "--restart".to_owned(),
             "no".to_owned(),
             "--read-only".to_owned(),
+            "--tmpfs".to_owned(),
+            "/tmp:rw,nosuid,nodev,mode=1777,size=1073741824".to_owned(),
             "--init".to_owned(),
             "--pull".to_owned(),
             "never".to_owned(),

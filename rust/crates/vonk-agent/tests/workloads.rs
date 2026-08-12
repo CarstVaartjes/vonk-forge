@@ -384,6 +384,11 @@ fn container_arguments_are_typed_and_hardened() {
             .any(|values| values == ["--publish", "192.168.1.212:8101:8000"])
     );
     assert!(
+        arguments.windows(2).any(|values| {
+            values == ["--tmpfs", "/tmp:rw,nosuid,nodev,mode=1777,size=1073741824"]
+        })
+    );
+    assert!(
         arguments
             .iter()
             .any(|value| value.ends_with("dst=/models,readonly"))

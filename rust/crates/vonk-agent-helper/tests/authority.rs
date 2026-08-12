@@ -218,6 +218,7 @@ fn authority_rejects_expiry_bad_signature_and_users_outside_agent_group() {
 struct RecordingRunner {
     calls: SharedCalls,
     runtime_container: Arc<Mutex<Option<(String, String)>>>,
+    runtime_running: Arc<Mutex<bool>>,
 }
 
 type SharedCalls = Arc<Mutex<Vec<(PathBuf, Vec<String>)>>>;
@@ -254,7 +255,11 @@ impl CommandRunner for RecordingRunner {
                         .get(3)
                         .is_some_and(|format| format.contains(".State.Running")) =>
                 {
-                    format!("true\t{digest}\ttrue\t{run_id}\n").into_bytes()
+                    format!(
+                        "{}\t{digest}\ttrue\t{run_id}\n",
+                        self.runtime_running.lock().unwrap()
+                    )
+                    .into_bytes()
                 }
                 Some((_digest, run_id)) => format!("true\t{run_id}\n").into_bytes(),
                 None => {
@@ -278,12 +283,14 @@ impl CommandRunner for RecordingRunner {
             if let (Some(digest), Some(run_id)) = (digest, run_id) {
                 *self.runtime_container.lock().unwrap() =
                     Some((digest.to_owned(), run_id.to_owned()));
+                *self.runtime_running.lock().unwrap() = true;
             }
             "e".repeat(64).into_bytes()
         } else if executable == std::path::Path::new("/usr/bin/docker")
             && arguments.first().is_some_and(|value| value == "rm")
         {
             *self.runtime_container.lock().unwrap() = None;
+            *self.runtime_running.lock().unwrap() = false;
             Vec::new()
         } else if arguments.get(2).is_some_and(|value| value == "Package") {
             b"vonk-forge-agent\n".to_vec()
@@ -436,6 +443,8 @@ fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
         "--restart".to_owned(),
         "no".to_owned(),
         "--read-only".to_owned(),
+        "--tmpfs".to_owned(),
+        "/tmp:rw,nosuid,nodev,mode=1777,size=1073741824".to_owned(),
         "--init".to_owned(),
         "--pull".to_owned(),
         "never".to_owned(),
@@ -527,6 +536,9 @@ fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
         );
         assert!(docker_run.1.contains(&image.to_owned()));
         assert!(!docker_run.1.contains(&image_reference));
+        assert!(docker_run.1.windows(2).any(|values| {
+            values == ["--tmpfs", "/tmp:rw,nosuid,nodev,mode=1777,size=1073741824"]
+        }));
         assert!(
             docker_run
                 .1
@@ -544,6 +556,15 @@ fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
                 || value.starts_with("--device")
         }));
     }
+    *runner.runtime_running.lock().unwrap() = false;
+    assert!(
+        executor
+            .execute(&runtime_operation(
+                &request,
+                hex_sha256(&canonical_json(&request).unwrap()),
+            ))
+            .is_err()
+    );
 
     let stop = runtime_request(
         HostRuntimeAction::Stop,

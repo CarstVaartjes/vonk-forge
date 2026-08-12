@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use chrono::{DateTime, FixedOffset, Utc};
 use serde_json::{Value, json};
-use std::{path::Path, time::Duration};
+use std::{future::Future, path::Path, time::Duration};
 
 use crate::supervisor_readiness::AgentRuntimeIdentity;
 use crate::{
@@ -105,6 +105,17 @@ impl<R> RecipeExecutor<'_, R> {
         }
         .execute(claim, action, arguments)
         .await
+    }
+}
+
+async fn wait_ready_with_runtime_guard<R, G>(readiness: R, runtime_guard: G) -> bool
+where
+    R: Future<Output = Result<(), crate::health::HealthError>>,
+    G: Future<Output = bool>,
+{
+    tokio::select! {
+        result = readiness => result.is_ok(),
+        running = runtime_guard => running,
     }
 }
 
@@ -327,6 +338,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 }
                 let mut arguments = vec![plan.image_digest];
                 arguments.extend(plan.main);
+                let runtime_guard_arguments = arguments.clone();
                 if self
                     .execute_host_runtime(claim, HostRuntimeAction::Start, arguments)
                     .await
@@ -335,14 +347,32 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     let _ = self.runtime.complete_stop(&run_id);
                     return failed("container runtime could not start the workload");
                 }
-                if wait_ready(
-                    request.endpoint_address,
-                    request.port,
-                    &spec.endpoint.health_path,
-                    lease_deadline,
+                let runtime_guard = async {
+                    loop {
+                        tokio::time::sleep(Duration::from_secs(10)).await;
+                        if self
+                            .execute_host_runtime(
+                                claim,
+                                HostRuntimeAction::Start,
+                                runtime_guard_arguments.clone(),
+                            )
+                            .await
+                            .is_err()
+                        {
+                            return false;
+                        }
+                    }
+                };
+                if !wait_ready_with_runtime_guard(
+                    wait_ready(
+                        request.endpoint_address,
+                        request.port,
+                        &spec.endpoint.health_path,
+                        lease_deadline,
+                    ),
+                    runtime_guard,
                 )
                 .await
-                .is_err()
                 {
                     let _ = self
                         .execute_host_runtime(
@@ -621,7 +651,10 @@ async fn run_heartbeats<C: LoopClient>(
 
 #[cfg(test)]
 mod tests {
-    use super::{ExecutionResult, Executor, LoopClient, run_once_with_heartbeat_interval};
+    use super::{
+        ExecutionResult, Executor, LoopClient, run_once_with_heartbeat_interval,
+        wait_ready_with_runtime_guard,
+    };
     use crate::{
         client::ClientError, state::StateStore, supervisor_readiness::AgentRuntimeIdentity,
     };
@@ -639,6 +672,20 @@ mod tests {
     };
 
     const NODE_ID: &str = "spk_0123456789abcdef0123456789abcdef";
+
+    #[tokio::test]
+    async fn exited_runtime_ends_a_still_pending_readiness_probe() {
+        let readiness = std::future::pending::<Result<(), crate::health::HealthError>>();
+
+        assert!(!wait_ready_with_runtime_guard(readiness, async { false }).await);
+    }
+
+    #[tokio::test]
+    async fn successful_readiness_ends_a_still_running_runtime_guard() {
+        let runtime_guard = std::future::pending::<bool>();
+
+        assert!(wait_ready_with_runtime_guard(async { Ok(()) }, runtime_guard).await);
+    }
 
     #[derive(Clone)]
     struct RecordingClient {
