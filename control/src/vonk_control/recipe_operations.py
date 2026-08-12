@@ -758,6 +758,9 @@ class RecipeOperationService:
             or any(
                 child.kind != "recipe.image.import.v1"
                 or child.state not in _TERMINAL_JOB_STATES
+                or child.base_commit != plan_digest[:40]
+                or child.payload_digest
+                != hashlib.sha256(canonical_message(child.payload)).hexdigest()
                 or not _valid_image_import_payload(child.payload, owner_id)
                 for child in children
             )

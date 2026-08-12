@@ -69,7 +69,7 @@ class RecordingQueue:
             parent_job_id=parent_job_id,
             node_id=node_id,
             kind=operation,
-            payload_digest="f" * 64,
+            payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
             payload=dict(payload),
             base_commit=base_commit,
             state="queued",
@@ -578,6 +578,8 @@ def test_failed_image_distribution_retry_requeues_exact_persisted_group(
         "authority",
         "child-kind",
         "child-state",
+        "child-authority",
+        "child-digest",
         "child-payload",
     ),
 )
@@ -633,6 +635,10 @@ def test_image_distribution_retry_rejects_malformed_persisted_group(
             child.kind = "recipe.install"
         elif tamper == "child-state":
             child.state = "queued"
+        elif tamper == "child-authority":
+            child.base_commit = "0" * 40
+        elif tamper == "child-digest":
+            child.payload_digest = "0" * 64
         else:
             payload = dict(child.payload)
             del payload["image_digest"]
