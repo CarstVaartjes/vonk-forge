@@ -77,6 +77,14 @@ node management network, for example `<NODE_MANAGEMENT_CIDR>` to
 access on their separate trusted paths; do not widen the management listener
 for convenience.
 
+Record the direct-fabric CIDRs separately from the management CIDR. The
+project publisher requires an explicit choice: pass the canonical
+comma-separated NVIDIA Sync networks for a multi-node fleet, or the literal
+`none` for an intentionally single-node installation. It rejects overlap,
+duplicates, host-bit CIDRs, and an omitted choice. The rendered API and worker
+receive only this public network policy; no node credential is added to
+Compose.
+
 The publication workflows expose three clearly named files:
 
 | File | Published by | Graph and image reference |
@@ -93,6 +101,10 @@ running project: after a successful publication, pull/redeploy the unchanged
 pinned file is deliberately an exception for
 reproduction or recovery; this development guide never installs the production
 graph or its much larger production credential set.
+The publisher removes the template's local-development project name so Docker
+Compose uses the project name selected by the NAS UI or the directory name.
+This preserves the same named volumes when an operator later uses the CLI;
+never add a second hard-coded `name:` field.
 
 The operator-owned bundle has narrow service projections:
 
@@ -177,13 +189,15 @@ scripts/dev-runtime-project \
   --destination '<MOUNTED_NAS_PARENT>/vonk-forge' \
   --nas-address '<NAS_MANAGEMENT_IP>' \
   --management-cidrs '<NODE_MANAGEMENT_CIDR>' \
+  --direct-fabric-cidrs '<DIRECT_FABRIC_CIDRS_OR_NONE>' \
   --enroll-hostname '<ENROLLMENT_HOSTNAME>' \
   --agent-hostname '<CONTROLLER_HOSTNAME>' \
   --registry-hostname '<REGISTRY_HOSTNAME>'
 ```
 
 This is the supported copy operation: it renders only the site hostnames,
-verifies every source and destination byte, and permits only
+the explicit direct-fabric policy, verifies every source and destination byte,
+and permits only
 `docker-compose.yml` plus `secrets/` at the destination. The helper takes a
 nonblocking exclusive Linux file lock in a stable hidden sibling of the project
 before inspecting or recovering a transaction. The lock remains outside the

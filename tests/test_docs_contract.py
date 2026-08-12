@@ -259,6 +259,12 @@ def test_development_nas_contract_keeps_only_compose_file_and_secrets_directory(
     ):
         assert f"├── {name}" in text or f"└── {name}" in text
 
+    assert "--direct-fabric-cidrs '<DIRECT_FABRIC_CIDRS_OR_NONE>'" in text
+    assert "the literal `none`" in text
+    assert "must not overlap the management network" in _normalized_text(
+        FRESH_DEVELOPMENT_INSTALL
+    )
+
 
 def test_development_and_production_docs_separate_mutable_dev_from_authoritative_production() -> None:
     readme = _normalized_text(README)

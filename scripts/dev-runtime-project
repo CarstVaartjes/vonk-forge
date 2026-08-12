@@ -92,20 +92,41 @@ def _validate_hostname(value: str) -> str:
     return hostname
 
 
-def _validate_cidrs(value: str) -> tuple[str, ...]:
+def _validate_cidrs(value: str, *, kind: str = "management") -> tuple[str, ...]:
     values = [part.strip() for part in value.split(",")]
     if not values or any(not part for part in values):
-        raise ProjectPublicationError("development management CIDRs are invalid")
+        raise ProjectPublicationError(f"development {kind} CIDRs are invalid")
     try:
         networks = tuple(ipaddress.ip_network(part, strict=True) for part in values)
     except ValueError as error:
         raise ProjectPublicationError(
-            "development management CIDRs are invalid"
+            f"development {kind} CIDRs are invalid"
         ) from error
     normalized = tuple(str(network) for network in networks)
     if len(set(normalized)) != len(normalized):
-        raise ProjectPublicationError("development management CIDRs are duplicated")
+        raise ProjectPublicationError(f"development {kind} CIDRs are duplicated")
     return normalized
+
+
+def _validate_direct_fabric_cidrs(
+    value: str, *, management_cidrs: tuple[str, ...]
+) -> tuple[str, ...]:
+    if value == "none":
+        return ()
+    direct = _validate_cidrs(value, kind="direct-fabric")
+    management_networks = tuple(
+        ipaddress.ip_network(cidr, strict=True) for cidr in management_cidrs
+    )
+    direct_networks = tuple(ipaddress.ip_network(cidr, strict=True) for cidr in direct)
+    if any(
+        management.version == fabric.version and management.overlaps(fabric)
+        for management in management_networks
+        for fabric in direct_networks
+    ):
+        raise ProjectPublicationError(
+            "development direct-fabric CIDRs overlap management CIDRs"
+        )
+    return direct
 
 
 def _open_parent_without_symlinks(path: Path) -> int:
@@ -214,17 +235,32 @@ def _validate_source_directory(path: Path) -> None:
         os.close(parent)
 
 
-def _render_compose(source: bytes, *, enroll: str, agent: str) -> bytes:
+def _render_compose(
+    source: bytes, *, enroll: str, agent: str, direct_fabric_cidrs: tuple[str, ...]
+) -> bytes:
     try:
         text = source.decode("utf-8")
     except UnicodeDecodeError as error:
         raise ProjectPublicationError("source Compose file is not UTF-8") from error
     old_enroll = "VONK_AGENT_ENROLL_HOSTNAME: enroll.vonk-forge.lan"
     old_agent = "VONK_AGENT_HOSTNAME: agents.vonk-forge.lan"
-    if text.count(old_enroll) != 1 or text.count(old_agent) != 1:
+    old_fabric = 'VONK_DIRECT_FABRIC_CIDRS: ""'
+    old_project = "name: vonk-forge-dev\n\n"
+    if (
+        text.count(old_project) != 1
+        or not text.startswith(old_project)
+        or text.count(old_enroll) != 1
+        or text.count(old_agent) != 1
+        or text.count(old_fabric) != 2
+    ):
         raise ProjectPublicationError("source Compose hostname contract is unexpected")
-    rendered = text.replace(old_enroll, f"VONK_AGENT_ENROLL_HOSTNAME: {enroll}")
+    rendered = text.removeprefix(old_project)
+    rendered = rendered.replace(old_enroll, f"VONK_AGENT_ENROLL_HOSTNAME: {enroll}")
     rendered = rendered.replace(old_agent, f"VONK_AGENT_HOSTNAME: {agent}")
+    rendered = rendered.replace(
+        old_fabric,
+        f'VONK_DIRECT_FABRIC_CIDRS: "{",".join(direct_fabric_cidrs)}"',
+    )
     return rendered.encode("utf-8")
 
 
@@ -784,6 +820,7 @@ def publish_project(
     destination: Path,
     nas_address: str,
     management_cidrs: str,
+    direct_fabric_cidrs: str,
     enroll_hostname: str,
     agent_hostname: str,
     registry_hostname: str,
@@ -796,6 +833,9 @@ def publish_project(
     agent = _validate_hostname(agent_hostname)
     registry = _validate_hostname(registry_hostname)
     cidrs = _validate_cidrs(management_cidrs)
+    fabric_cidrs = _validate_direct_fabric_cidrs(
+        direct_fabric_cidrs, management_cidrs=cidrs
+    )
     _validate_source_directory(secrets_dir)
     runtime = _runtime_module()
     source_bundle = {
@@ -815,7 +855,12 @@ def publish_project(
             "source secret bundle does not match project inputs"
         ) from error
     compose_source = _read_regular(source_compose, private=False)
-    compose = _render_compose(compose_source, enroll=enroll, agent=agent)
+    compose = _render_compose(
+        compose_source,
+        enroll=enroll,
+        agent=agent,
+        direct_fabric_cidrs=fabric_cidrs,
+    )
 
     staging_parent = _open_local_staging_parent(Path(tempfile.gettempdir()))
     staging_name = ""
@@ -914,6 +959,7 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--destination", type=Path, required=True)
     parser.add_argument("--nas-address", required=True)
     parser.add_argument("--management-cidrs", required=True)
+    parser.add_argument("--direct-fabric-cidrs", required=True)
     parser.add_argument("--enroll-hostname", required=True)
     parser.add_argument("--agent-hostname", required=True)
     parser.add_argument("--registry-hostname", required=True)
@@ -930,6 +976,7 @@ def main() -> int:
             destination=arguments.destination,
             nas_address=arguments.nas_address,
             management_cidrs=arguments.management_cidrs,
+            direct_fabric_cidrs=arguments.direct_fabric_cidrs,
             enroll_hostname=arguments.enroll_hostname,
             agent_hostname=arguments.agent_hostname,
             registry_hostname=arguments.registry_hostname,

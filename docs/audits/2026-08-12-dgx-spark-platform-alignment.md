@@ -136,6 +136,17 @@ unattended sudo remains installed on the NAS and both
 Sparks for acceptance automation and must be removed as the final physical
 gate.
 
+The first package rollout converged both nodes to the same signed Rust build
+and exposed one control-plane configuration omission before any workload was
+started: the development Compose publisher had no explicit direct-fabric CIDR
+input, so the controller correctly rejected newly advertised fabric addresses.
+The publisher now requires canonical, management-disjoint fabric CIDRs (or an
+explicit single-node `none`), renders them into both API and worker policy, and
+removes the template-only Compose project name so NAS UI and CLI redeploys
+reuse the operator-selected project and its named volumes. The node config was
+restored while that fail-closed path was corrected; Netplan and link state were
+never changed.
+
 ## Physical and operational gates
 
 Before declaring a fresh Spark production-ready, verify the supplied 240 W
