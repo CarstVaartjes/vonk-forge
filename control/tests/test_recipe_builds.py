@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+import vonk_control.recipe_builds as recipe_builds_module
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import (
@@ -182,6 +183,37 @@ def test_build_identity_changes_when_builder_runtime_changes(tmp_path: Path) -> 
 
     assert second.build_id != first.build_id
     assert second.build_input_sha256 != first.build_input_sha256
+
+
+def test_build_identity_changes_when_archive_format_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    service = RecipeBuildService(sessions, bundles=bundles)
+
+    first = service.plan(revision.id, node_id, now=now)
+    monkeypatch.setattr(
+        recipe_builds_module, "BUILD_ARTIFACT_FORMAT", "future-archive-v2"
+    )
+    second = service.plan(revision.id, node_id, now=now)
+
+    assert second.build_id != first.build_id
+    assert second.build_input_sha256 != first.build_input_sha256
+
+
+def test_build_reservation_rejects_changed_builder_runtime(tmp_path: Path) -> None:
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    service = RecipeBuildService(sessions, bundles=bundles)
+    plan = service.plan(revision.id, node_id, now=now)
+    with sessions.begin() as session:
+        node = session.get(AgentNode, node_id)
+        assert node is not None
+        node.agent_sha256 = "2" * 64
+
+    with sessions.begin() as session, pytest.raises(
+        RecipeBuildError, match="runtime identity changed"
+    ):
+        service.reserve_in_session(session, plan, now=now)
 
 
 def test_build_rejects_builder_without_runtime_identity(tmp_path: Path) -> None:

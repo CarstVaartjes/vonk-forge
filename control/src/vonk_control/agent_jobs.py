@@ -34,6 +34,7 @@ from .models import (
     Job,
     NodeMutationLease,
     Observation,
+    RecipeBuild,
     Reconciliation,
     ReconciliationOperation,
     UpdateAuthorizationIntent,
@@ -41,6 +42,7 @@ from .models import (
     UpdateRolloutNode,
 )
 from .models import AgentOperation as StoredOperation
+from .recipe_builds import BUILD_ARTIFACT_FORMAT
 
 AgentFence = str | AgentClaim | AgentProgress | AgentResult
 ResultConsumer = Callable[
@@ -1092,6 +1094,14 @@ class AgentJobService:
                 protocol_version is None or protocol_version < 2 or capabilities is None
             ):
                 return None
+            if (
+                operation.kind == AgentOperation.RECIPE_BUILD.value
+                and not self._recipe_build_runtime_matches(session, operation, node)
+            ):
+                self._reject_recipe_build_claim(
+                    session, operation, certificate_serial, now
+                )
+                return None
             if operation.kind in _MUTATING_OPERATIONS:
                 active_mutation = session.scalar(
                     select(StoredOperation.id)
@@ -1172,6 +1182,65 @@ class AgentJobService:
                 payload=operation.payload,
                 deadline=deadline,
             )
+
+    @staticmethod
+    def _recipe_build_runtime_matches(
+        session: Session, operation: StoredOperation, node: AgentNode
+    ) -> bool:
+        build_id = operation.payload.get("build_id")
+        build = session.get(RecipeBuild, build_id) if isinstance(build_id, str) else None
+        report = build.policy_report if build is not None else None
+        return bool(
+            build is not None
+            and build.builder_node_id == operation.node_id == node.node_id
+            and isinstance(report, dict)
+            and report.get("builder_agent_sha256") == node.agent_sha256
+            and report.get("artifact_format") == BUILD_ARTIFACT_FORMAT
+        )
+
+    def _reject_recipe_build_claim(
+        self,
+        session: Session,
+        operation: StoredOperation,
+        certificate_serial: str,
+        now: datetime,
+    ) -> None:
+        operation.current_attempt += 1
+        operation.state = "failed"
+        operation.retry_disposition = None
+        operation.retry_disposition_attempt = None
+        operation.updated_at = now
+        reason = {"reason": "builder runtime identity changed before claim"}
+        fence = str(uuid.uuid4())
+        attempt = AgentOperationAttempt(
+            operation_id=operation.id,
+            attempt=operation.current_attempt,
+            fence=fence,
+            lease_deadline=now,
+            agent_certificate_serial=certificate_serial,
+            state="failed",
+            result=reason,
+        )
+        session.add(attempt)
+        session.flush()
+        if self._result_consumer is not None:
+            self._result_consumer(
+                session,
+                operation,
+                attempt,
+                AgentResult(
+                    schema_version=1,
+                    job_id=operation.parent_job_id,
+                    operation_id=operation.id,
+                    attempt=attempt.attempt,
+                    fence=fence,
+                    node_id=operation.node_id,
+                    deadline=_aware(now),
+                    state="failed",
+                    result=reason,
+                ),
+            )
+        self._aggregate_parent(session, operation.parent_job_id)
 
     @staticmethod
     def _lock_platform_update_claim(session: Session, operation_id: str) -> None:
