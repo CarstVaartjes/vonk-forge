@@ -151,6 +151,11 @@ Before each creation, atomically checkpoint its exact preview digest. After the
 response, atomically checkpoint its operation and owner run IDs. If those IDs
 already exist on resume, validate their canonical UUIDs and exact digest/owner
 association, then poll the operation directly without previewing or creating.
+If only the digest exists, replay its exact request tuple first. Accept a
+committed idempotent response; only an authoritative stale-digest response with
+the request key still unused may replace the checkpoint with one fresh preview
+and one submission. Cover committed-response loss and uncommitted interruption
+for both `start` and `start-retry`.
 
 - [ ] **Step 4: Run the recovery test and verify GREEN**
 

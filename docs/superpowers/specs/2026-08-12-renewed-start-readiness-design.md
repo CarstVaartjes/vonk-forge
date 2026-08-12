@@ -84,7 +84,13 @@ purpose's exact plan digest before creation. After a creation response it
 atomically checkpoints the returned operation and run IDs. A resumed runner
 with those IDs polls the operation directly and never re-previews or resubmits
 that purpose. A runner interrupted after checkpointing the digest but before
-receiving IDs replays that exact digest and deterministic request key.
+receiving IDs first replays that exact digest and deterministic request key. If
+the controller returns the committed operation, the runner checkpoints its
+IDs. If the controller instead reports the digest stale after finding no
+idempotency record for the key, the runner checkpoints one fresh preview and
+submits it once with the same key. Any other key conflict is terminal. This
+covers both committed-response loss and an interrupted, uncommitted creation
+without guessing whether the POST took effect.
 
 If the initial operation is terminally failed, waiting-for-operator, or
 expired, the runner:

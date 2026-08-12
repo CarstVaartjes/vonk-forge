@@ -1148,6 +1148,12 @@ class Runner:
         plan_digest = self.outputs.get(plan_key)
         operation_id = self.outputs.get(operation_key)
         run_id = self.outputs.get(run_key)
+        recovering_digest_only = (
+            isinstance(plan_digest, str)
+            and SHA256.fullmatch(plan_digest) is not None
+            and operation_id is None
+            and run_id is None
+        )
         if not isinstance(plan_digest, str) or SHA256.fullmatch(plan_digest) is None:
             if (
                 plan_digest is not None
@@ -1181,16 +1187,45 @@ class Runner:
             ):
                 raise SliceError("checkpointed recipe start does not match")
             return operation
-        _, response = self.control.request(
+        request_key = self.request_key("running", purpose)
+        status, response = self.control.request(
             "POST",
             "/api/v1/recipes/runs",
             {
                 **request,
                 "alias": self.slug,
                 "plan_digest": plan_digest,
-                "request_key": self.request_key("running", purpose),
+                "request_key": request_key,
             },
+            allowed=(200, 201, 202, 409) if recovering_digest_only else (200, 201, 202),
         )
+        if status == 409:
+            conflict = _object(response, "recipe start conflict")
+            if conflict.get("detail") != "submitted plan digest does not match preview":
+                raise SliceError("checkpointed recipe start request key conflicts")
+            _, preview_payload = self.control.request(
+                "POST", "/api/v1/recipes/run-plans/preview", request
+            )
+            preview = _object(preview_payload, "run preview")
+            replacement_digest = preview.get("plan_digest")
+            if (
+                preview.get("allowed") is not True
+                or not isinstance(replacement_digest, str)
+                or SHA256.fullmatch(replacement_digest) is None
+            ):
+                raise SliceError("recipe run is not admitted")
+            plan_digest = replacement_digest
+            self._checkpoint({plan_key: plan_digest})
+            _, response = self.control.request(
+                "POST",
+                "/api/v1/recipes/runs",
+                {
+                    **request,
+                    "alias": self.slug,
+                    "plan_digest": plan_digest,
+                    "request_key": request_key,
+                },
+            )
         operation = _object(response, "recipe start")
         operation_id = operation.get("id")
         run_id = operation.get("owner_id")
