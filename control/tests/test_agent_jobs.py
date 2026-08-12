@@ -24,7 +24,9 @@ from vonk_control.models import (
     Job,
     Observation,
     RecipeBuild,
+    ResourceReservation,
 )
+from vonk_control.recipe_operations import RecipeOperationService
 
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
@@ -618,6 +620,7 @@ def test_recipe_build_is_rejected_when_builder_runtime_changed_before_claim(
             "container_socket": False,
         },
     }
+    parent_job = parent(sessions, clock)
     with sessions.begin() as session:
         session.add(
             RecipeBuild(
@@ -637,7 +640,36 @@ def test_recipe_build_is_rejected_when_builder_runtime_changed_before_claim(
                 updated_at=clock.now,
             )
         )
-    parent_job = parent(sessions, clock)
+        session.add(
+            ResourceReservation(
+                node_id=NODE_A,
+                kind="disk",
+                resource_key="c" * 64,
+                amount_bytes=4096,
+                owner_kind="recipe-build",
+                owner_id=build_id,
+                state="active",
+                plan_digest="c" * 64,
+                created_at=clock.now,
+            )
+        )
+        stored_parent = session.get(Job, parent_job.id)
+        assert stored_parent is not None
+        stored_parent.kind = "recipe.build.v1"
+        stored_parent.payload = {
+            "schema_version": 1,
+            "owner_kind": "recipe-build",
+            "owner_id": build_id,
+            "plan_digest": "c" * 64,
+        }
+    recipe_operations = RecipeOperationService(
+        sessions,
+        install_admission=object(),
+        run_admission=object(),
+        agent_jobs=jobs,
+        clock=clock,
+    )
+    jobs.set_result_consumer(recipe_operations.consume_agent_result)
     operation = jobs.enqueue(
         parent_job.id,
         NODE_A,
@@ -668,9 +700,89 @@ def test_recipe_build_is_rejected_when_builder_runtime_changed_before_claim(
         stored = session.get(AgentOperation, operation.id)
         parent_row = session.get(Job, parent_job.id)
         node = session.get(AgentNode, NODE_A)
+        build = session.get(RecipeBuild, build_id)
+        reservation = session.scalar(
+            select(ResourceReservation).where(
+                ResourceReservation.owner_id == build_id
+            )
+        )
         assert stored is not None and stored.state == "failed"
         assert parent_row is not None and parent_row.state == "failed"
         assert node is not None and node.agent_sha256 == "e" * 64
+        assert build is not None and build.state == "failed"
+        assert reservation is not None and reservation.state == "released"
+
+
+def test_recipe_build_requires_runtime_identity_on_the_current_claim(service) -> None:
+    jobs, sessions, clock = service
+    build_id = "00000000-0000-4000-8000-000000000019"
+    revision_id = "00000000-0000-4000-8000-000000000011"
+    payload = {
+        "schema_version": 1,
+        "kind": "recipe.build.v1",
+        "build_id": build_id,
+        "recipe_revision_id": revision_id,
+        "recipe_content_sha256": "a" * 64,
+        "source_bundle_sha256": "b" * 64,
+        "source_bundle_bytes": 4096,
+        "build_input_sha256": "c" * 64,
+        "dockerfile": "Dockerfile",
+        "platform": "linux/arm64",
+        "arguments": [],
+        "network": {"mode": "none", "hosts": []},
+        "limits": {
+            "cpu_cores": 8,
+            "memory_bytes": 1024,
+            "temporary_bytes": 4096,
+            "processes": 64,
+            "timeout_seconds": 600,
+            "output_bytes": 2048,
+            "gpu": 0,
+            "privileged": False,
+            "host_mounts": False,
+            "container_socket": False,
+        },
+    }
+    with sessions.begin() as session:
+        session.add(
+            RecipeBuild(
+                id=build_id,
+                recipe_revision_id=revision_id,
+                builder_node_id=NODE_A,
+                source_bundle_sha256="b" * 64,
+                build_input_sha256="c" * 64,
+                state="building",
+                policy_report={
+                    "passed": True,
+                    "builder_agent_sha256": "f" * 64,
+                    "artifact_format": "docker-archive-v1",
+                },
+                plan=payload,
+                created_at=clock.now,
+                updated_at=clock.now,
+            )
+        )
+    parent_job = parent(sessions, clock)
+    operation = jobs.enqueue(
+        parent_job.id,
+        NODE_A,
+        "recipe.build.v1",
+        COMMIT,
+        payload,
+    )
+
+    claim = jobs.claim(
+        NODE_A,
+        "serial-a",
+        30,
+        protocol_version=2,
+        capabilities=["recipe.build.v1"],
+    )
+
+    assert claim is None
+    with sessions() as session:
+        stored = session.get(AgentOperation, operation.id)
+        assert stored is not None and stored.state == "failed"
 
 
 def test_update_enqueue_persists_one_signed_payload_and_claims_its_reserved_fence(
