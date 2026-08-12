@@ -37,7 +37,7 @@ from vonk_control.models import (
 from vonk_control.node_leases import NodeLeaseService
 from vonk_control.orchestration import OperationNode
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
-from vonk_control.route_runtime import ActivationMarker
+from vonk_control.route_runtime import RECIPE_ROUTE_AUTHORITY_ID, ActivationMarker
 
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
@@ -1556,6 +1556,53 @@ def test_completed_owner_is_withdrawn_immediately_when_authority_is_lost(
         assert reconciliation.current_phase == "waiting-for-operator"
         assert job is not None and job.state == "waiting-for-operator"
         assert publication is not None and publication.state == "routes-withdrawn"
+
+
+def test_recipe_route_owner_is_not_executed_as_a_reconciliation_plan(tmp_path) -> None:
+    service, sessions, _queue, _publisher, reconciliation_id, _job_id = (
+        _execution_fixture(tmp_path)
+    )
+    graph = {
+        "base_commit": "recipe",
+        "nodes": [],
+        "schema_version": 1,
+        "targets": [],
+    }
+    now = datetime(2026, 8, 5, tzinfo=UTC)
+    with sessions.begin() as session:
+        session.add(
+            Reconciliation(
+                id=RECIPE_ROUTE_AUTHORITY_ID,
+                base_commit="recipe",
+                status="succeeded",
+                summary={"authority": "recipe-routes"},
+                graph=graph,
+                graph_digest=_json_digest(graph),
+                plan_digest="d" * 64,
+                resolved_plan=None,
+                current_phase="completed",
+                route_withdrawal_generation=0,
+                created_at=now,
+            )
+        )
+        session.add(
+            RoutePublicationOwner(
+                singleton_id=1,
+                reconciliation_id=RECIPE_ROUTE_AUTHORITY_ID,
+                owner_generation=1,
+                updated_at=now,
+            )
+        )
+
+    assert service.tick() is False
+
+    with sessions() as session:
+        recipe_authority = session.get(Reconciliation, RECIPE_ROUTE_AUTHORITY_ID)
+        reconciliation = session.get(Reconciliation, reconciliation_id)
+        assert recipe_authority is not None
+        assert recipe_authority.current_phase == "completed"
+        assert reconciliation is not None
+        assert reconciliation.current_phase == "planned"
 
 
 def test_failed_prefetch_still_withdraws_completed_owner(tmp_path) -> None:

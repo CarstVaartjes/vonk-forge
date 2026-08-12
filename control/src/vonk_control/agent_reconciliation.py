@@ -39,6 +39,7 @@ from .orchestration import (
     validate_persisted_resolved_plan,
 )
 from .route_runtime import (
+    RECIPE_ROUTE_AUTHORITY_ID,
     AcceptedEndpointEvidence,
     ActivationMarker,
     PublishedRoute,
@@ -1222,6 +1223,8 @@ class AgentReconciliationService:
                     RoutePublicationOwner.singleton_id == 1
                 )
             )
+            if owner_id == RECIPE_ROUTE_AUTHORITY_ID:
+                return None
             if owner_id is None:
                 owner_id = session.scalar(
                     select(Reconciliation.id)

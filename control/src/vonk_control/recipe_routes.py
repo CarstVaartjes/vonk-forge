@@ -6,7 +6,6 @@ import hashlib
 import ipaddress
 import json
 import re
-import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
@@ -24,14 +23,11 @@ from .models import (
     RunNode,
 )
 from .presence import ManagementAddressPolicy, PresenceError
-from .route_runtime import ActivationMarker
+from .route_runtime import RECIPE_ROUTE_AUTHORITY_ID, ActivationMarker
 from .routes import RouteState
 
 _ALIAS = re.compile(r"[a-z0-9][a-z0-9._-]{0,62}\Z")
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
-_RECIPE_AUTHORITY_ID = str(
-    uuid.uuid5(uuid.NAMESPACE_URL, "https://vonkforge.ai/local-recipes")
-)
 _HEALTH_RECOVERY_ERROR = "recipe rank health requires recovery"
 
 
@@ -91,7 +87,7 @@ class _AtomicRecipeGeneration(LiteLlmGeneration):
 class AtomicRecipeRoutePublisher:
     """Adapt recipe routes to the controller's one atomic live bundle."""
 
-    _AUTHORITY_ID = _RECIPE_AUTHORITY_ID
+    _AUTHORITY_ID = RECIPE_ROUTE_AUTHORITY_ID
 
     def __init__(self, publisher: object, *, clock: Callable[[], datetime]) -> None:
         if not callable(getattr(publisher, "publish_compiled", None)):
@@ -360,8 +356,9 @@ class RecipeRouteService:
         with self.sessions() as session:
             owner = session.get(RoutePublicationOwner, 1)
             publication = (
-                session.get(RoutePublication, _RECIPE_AUTHORITY_ID)
-                if owner is not None and owner.reconciliation_id == _RECIPE_AUTHORITY_ID
+                session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)
+                if owner is not None
+                and owner.reconciliation_id == RECIPE_ROUTE_AUTHORITY_ID
                 else None
             )
             current_expiry = (
@@ -425,10 +422,10 @@ class RecipeRouteService:
             "schema_version": 1,
             "targets": [],
         }
-        reconciliation = session.get(Reconciliation, _RECIPE_AUTHORITY_ID)
+        reconciliation = session.get(Reconciliation, RECIPE_ROUTE_AUTHORITY_ID)
         if reconciliation is None:
             reconciliation = Reconciliation(
-                id=_RECIPE_AUTHORITY_ID,
+                id=RECIPE_ROUTE_AUTHORITY_ID,
                 base_commit="recipe",
                 status="succeeded",
                 summary={"authority": "recipe-routes"},
@@ -447,7 +444,7 @@ class RecipeRouteService:
             reconciliation.plan_digest = marker.plan_digest
             reconciliation.current_phase = "completed"
             reconciliation.terminal_reason = None
-        publication = session.get(RoutePublication, _RECIPE_AUTHORITY_ID)
+        publication = session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)
         values = {
             "state": state,
             "generation": marker.generation,
@@ -463,7 +460,7 @@ class RecipeRouteService:
         }
         if publication is None:
             publication = RoutePublication(
-                reconciliation_id=_RECIPE_AUTHORITY_ID, **values
+                reconciliation_id=RECIPE_ROUTE_AUTHORITY_ID, **values
             )
             session.add(publication)
         else:
@@ -474,13 +471,13 @@ class RecipeRouteService:
             session.add(
                 RoutePublicationOwner(
                     singleton_id=1,
-                    reconciliation_id=_RECIPE_AUTHORITY_ID,
+                    reconciliation_id=RECIPE_ROUTE_AUTHORITY_ID,
                     owner_generation=marker.generation,
                     updated_at=now,
                 )
             )
         else:
-            owner.reconciliation_id = _RECIPE_AUTHORITY_ID
+            owner.reconciliation_id = RECIPE_ROUTE_AUTHORITY_ID
             owner.owner_generation = marker.generation
             owner.updated_at = now
 
