@@ -115,6 +115,16 @@ def test_publication_waits_for_successful_read_only_ci_on_the_exact_commit() -> 
     assert "needs: [authorize-request, read-only-ci-gate]" in publisher
 
 
+def test_publish_job_does_not_install_or_cache_unused_uv_environment() -> None:
+    text = workflow()
+    authorization = job("authorize-request")
+    publisher = job("publish-workload-artifact")
+
+    assert "setup-uv@" in authorization
+    assert "setup-uv@" not in publisher
+    assert text.count("setup-uv@") == 1
+
+
 def test_only_build_job_can_write_packages_and_token_is_not_a_build_input() -> None:
     text = workflow()
     authorization = job("authorize-request")
