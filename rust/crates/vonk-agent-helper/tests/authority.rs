@@ -568,18 +568,35 @@ fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
             ))
             .is_err()
     );
+    let calls = runner.calls.lock().unwrap();
+    let docker_stops = calls
+        .iter()
+        .filter(|(program, arguments)| {
+            program == std::path::Path::new("/usr/bin/docker")
+                && arguments.first().is_some_and(|value| value == "stop")
+        })
+        .map(|(_, arguments)| arguments.clone())
+        .collect::<Vec<_>>();
     assert_eq!(
-        runner
-            .calls
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|(program, arguments)| {
-                program == std::path::Path::new("/usr/bin/docker")
-                    && arguments.first().is_some_and(|value| value == "rm")
-            })
-            .count(),
-        1
+        docker_stops,
+        vec![vec![
+            "stop".to_owned(),
+            "--timeout".to_owned(),
+            "30".to_owned(),
+            format!("vonk-{run_id}"),
+        ]]
+    );
+    let docker_removes = calls
+        .iter()
+        .filter(|(program, arguments)| {
+            program == std::path::Path::new("/usr/bin/docker")
+                && arguments.first().is_some_and(|value| value == "rm")
+        })
+        .map(|(_, arguments)| arguments.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        docker_removes,
+        vec![vec!["rm".to_owned(), format!("vonk-{run_id}")]]
     );
 }
 
