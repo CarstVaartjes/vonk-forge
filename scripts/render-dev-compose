@@ -32,6 +32,7 @@ IMAGE_TOKENS = {
     "__VONK_WORKER_IMAGE__": "worker image",
 }
 COMMIT_TOKEN = "__VONK_EXPECTED_COMMIT__"
+PROJECT_DECLARATION = "name: vonk-forge-dev\n\n"
 PINNED_EXTENSION = f'x-pinned-expected-commit: "{COMMIT_TOKEN}"\n'
 PINNED_COMPATIBILITY_BLOCK = (
     "# Compatibility input for the current pinned renderer. Task 5 must retain this\n"
@@ -99,6 +100,10 @@ def _validate_inputs(
     _validate_image(api_image, "api", commit, channel)
     _validate_image(worker_image, "worker", commit, channel)
     text = template.read_text(encoding="utf-8")
+    if text.count(PROJECT_DECLARATION) != 1 or not text.startswith(
+        PROJECT_DECLARATION
+    ):
+        raise ValueError("template must contain the development project name once")
     for token, label in IMAGE_TOKENS.items():
         if text.count(token) != 1:
             raise ValueError(f"template must contain the {label} token exactly once")
@@ -128,19 +133,17 @@ def _render_template(
         rendered = rendered.replace(COMMIT_TOKEN, commit, 1)
     if UNRESOLVED_TOKEN.search(rendered):
         raise ValueError("template contains unresolved __VONK_*__ token")
+    rendered = rendered.removeprefix(PROJECT_DECLARATION)
+    validated = rendered
     for name, expression in ALLOWED_COMPOSE_INTERPOLATIONS.items():
-        if rendered.count(expression) != 1 or rendered.count(name) != 1:
+        if validated.count(expression) != 1 or validated.count(name) != 1:
             raise ValueError(
                 f"template must contain exactly one {expression} expression for {name}"
             )
-        rendered = rendered.replace(expression, "", 1)
-    if "$" in rendered:
+        validated = validated.replace(expression, "", 1)
+    if "$" in validated:
         raise ValueError("template contains unsupported Compose interpolation")
-    return text.replace("__VONK_API_IMAGE__", api_image).replace(
-        "__VONK_WORKER_IMAGE__", worker_image
-    ).replace(PINNED_COMPATIBILITY_BLOCK, "", 1) if channel == "dev" else text.replace(
-        "__VONK_API_IMAGE__", api_image
-    ).replace("__VONK_WORKER_IMAGE__", worker_image).replace(COMMIT_TOKEN, commit or "", 1)
+    return rendered
 
 
 def _write_synthetic_secrets(root: Path) -> None:
