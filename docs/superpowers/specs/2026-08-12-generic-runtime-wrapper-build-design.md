@@ -1,6 +1,6 @@
 # Generic Runtime and Spark Wrapper Build Design
 
-**Date:** 2026-08-12  
+**Date:** 2026-08-12
 **Status:** Accepted under the operator's delegated best-judgement approval
 
 ## Problem
