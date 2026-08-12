@@ -73,6 +73,15 @@ fabric. Confirm the NAS is `linux/amd64`, Docker Compose is available,
 and the project directory is empty or contains only the supported two-item
 layout.
 
+The packaged builder keeps every temporary Podman graph below the
+mode-`0700` `/var/lib/vonk-forge-agent` ancestor and uses
+`overlay.force_mask=shared` with `/usr/bin/fuse-overlayfs`. The force mask lets
+the parent agent traverse subordinate-UID image directories and account for
+every byte; `fuse-overlayfs` presents the image's original permissions inside
+the build container. These settings are one boundary: do not remove the force
+mask, make the private ancestor traversable by other host users, or ignore
+permission errors during storage accounting.
+
 ## PKI and NAS project
 
 Follow [Development NAS installation](development-nas-installation.md) from a
@@ -129,6 +138,30 @@ exactly 14 deployment files into the NAS `secrets/` directory; it excludes
 every named volume. Successful one-shot cohort, initialization, and migration
 containers are expected to exit; PostgreSQL, API, worker, Caddy, and LiteLLM
 must then be healthy. Never print secret values while diagnosing them.
+
+A development pull/redeploy replaces the single `control-api` replica. During
+that bounded interval, in-flight agent requests may produce Caddy `EOF`,
+`lookup control-api ... no such host`, and HTTP 502 log entries. Agents retry;
+these entries are not by themselves a DNS defect. Before any workload action,
+require the replacement API to be ready, Docker DNS to resolve its current
+address, both certificate-bound agents to report fresh inventory, and no new
+Caddy proxy errors after readiness:
+
+```bash
+cd '<NAS_PROJECT_DIRECTORY>'
+sudo docker compose -p vonk-forge ps -a
+curl --fail --silent --show-error \
+  'http://127.0.0.1:8080/api/v1/readyz'
+sudo docker compose -p vonk-forge exec -T caddy \
+  getent hosts control-api
+sudo docker compose -p vonk-forge logs --since 30s caddy
+```
+
+All successful one-shots must show exit code 0, readiness must return
+`{"status":"ready"}`, and `getent` must return one project-network address.
+Wait through at least one subsequent agent claim/observation interval and
+repeat the log and fleet checks. Continuing 502s, absent DNS, or stale agents
+are blockers; do not start or resume a recipe until they are resolved.
 
 ## /etc/hosts and firewall
 
