@@ -20,9 +20,9 @@ SHA_B = "sha256:" + "b" * 64
 SHA_C = "sha256:" + "c" * 64
 SHA_D = "sha256:" + "d" * 64
 DS4_REQUEST = ROOT / "release/workloads/ds4-v0.5.3-spark-runtime.json"
-DS4_SOURCE_COMMIT = "7041fcf7250dc8e8c7718e2d476b93b4dab2cfc9"
+DS4_SOURCE_COMMIT = "b7737737aa2cd1246aa265687c8ba3d49d935bc3"
 DS4_CONTEXT_DIGEST = (
-    "sha256:8ca70004e787d609e12dd3422f534fb942290ce39ee83a97e0fed5fa3cbc8649"
+    "sha256:a64b8fdccff10eaa9896902bbefa0015377ee54f9c67d548c4b3e3b40705b5bf"
 )
 DS4_IMAGE = (
     "ghcr.io/carstvaartjes/spark-ds4@sha256:"
