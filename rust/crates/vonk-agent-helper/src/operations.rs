@@ -769,14 +769,17 @@ impl<R: CommandRunner> OperationExecutor<R> {
         if std::str::from_utf8(&existing.stdout).ok().map(str::trim) != Some(expected.as_str()) {
             return Err(OperationError::InvalidArtifact);
         }
-        let output = self.run_docker(&[
-            "rm".to_owned(),
-            "--force".to_owned(),
-            "--time".to_owned(),
+        let stopped = self.run_docker(&[
+            "stop".to_owned(),
+            "--timeout".to_owned(),
             timeout.to_string(),
-            name,
+            name.clone(),
         ])?;
-        if !output.success {
+        if !stopped.success {
+            return Err(OperationError::CommandFailed);
+        }
+        let removed = self.run_docker(&["rm".to_owned(), name])?;
+        if !removed.success {
             return Err(OperationError::CommandFailed);
         }
         Ok(())
