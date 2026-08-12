@@ -215,6 +215,50 @@ def test_direct_result_construction_rejects_client_filesystem_paths() -> None:
         )
 
 
+def test_recipe_start_result_accepts_only_typed_endpoint_and_model_identity_uris() -> None:
+    raw = valid_attempt()
+    revision = "sha256:" + "a" * 64
+    result = {
+        "endpoint": "http://192.168.1.211:8000",
+        "evidence": {
+            "endpoint": "http://192.168.1.211:8000",
+            "model_identity": (
+                "https://models.example.invalid/organization/model.bin@" + revision
+            ),
+        },
+    }
+
+    parsed = AgentResult.parse(raw | {"state": "succeeded", "result": result})
+
+    assert parsed.result["endpoint"] == "http://192.168.1.211:8000"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("endpoint", "/var/lib/vonk-forge/result.json"),
+        ("endpoint", "http://192.168.1.211:8000/private"),
+        ("endpoint", "http://worker.example.invalid:8000"),
+        ("endpoint", "http://192.168.1.211:0"),
+        ("model_identity", "/models/private@sha256:" + "a" * 64),
+        ("model_identity", "../private@sha256:" + "a" * 64),
+        (
+            "model_identity",
+            "https://user:password@example.invalid/model@sha256:" + "a" * 64,
+        ),
+    ],
+)
+def test_typed_recipe_result_uri_fields_reject_path_or_credential_confusion(
+    field: str, value: str
+) -> None:
+    result = {field: value}
+    if field == "model_identity":
+        result = {"evidence": result}
+
+    with pytest.raises(AgentProtocolError, match="path"):
+        AgentResult.parse(valid_attempt() | {"state": "succeeded", "result": result})
+
+
 def test_direct_progress_construction_enforces_protocol_boundary() -> None:
     raw = valid_attempt()
 
