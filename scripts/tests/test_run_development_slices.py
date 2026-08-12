@@ -70,6 +70,9 @@ class SliceServer(ThreadingHTTPServer):
         self.build_operation_state = "succeeded"
         self.distribution_operation_state = "succeeded"
         self.retry_operation_state = "succeeded"
+        self.start_operation_states: list[str] = []
+        self.run = 0
+        self.run_states: dict[str, tuple[str, str]] = {}
         self.add_empty_provider_metadata = False
         self.nodes = [NODE]
         self.online = {NODE: True, NODE_2: True}
@@ -260,6 +263,14 @@ class SliceHandler(BaseHTTPRequestHandler):
                 )
                 self._json(self.server.withdrawn_endpoint_status, {"detail": detail})
         elif self.path.startswith("/api/v1/recipes/runs/"):
+            run_id = self.path.rsplit("/", 1)[-1]
+            run_state, route_state = self.server.run_states.get(
+                run_id,
+                (
+                    "running",
+                    "published" if self.server.route_published else "withdrawn",
+                ),
+            )
             ranks = [
                 {
                     "node_id": node,
@@ -275,12 +286,10 @@ class SliceHandler(BaseHTTPRequestHandler):
             self._json(
                 200,
                 {
-                    "id": self.path.rsplit("/", 1)[-1],
+                    "id": run_id,
                     "alias": self.server.slug,
-                    "state": "running",
-                    "route_state": (
-                        "published" if self.server.route_published else "withdrawn"
-                    ),
+                    "state": run_state,
+                    "route_state": route_state,
                     "healthy": all(rank["state"] == "running" for rank in ranks),
                     "ranks": ranks,
                 },
@@ -437,6 +446,8 @@ class SliceHandler(BaseHTTPRequestHandler):
             self._json(200, response)
         elif path.endswith("/stop"):
             self.server.route_published = False
+            run_id = path.rsplit("/", 2)[-2]
+            self.server.run_states[run_id] = ("stopped", "withdrawn")
             self._operation("20000000-0000-4000-8000-000000000004", self.server.nodes)
         elif path.endswith("/uninstall"):
             self._operation("20000000-0000-4000-8000-000000000005", self.server.nodes)
@@ -460,13 +471,27 @@ class SliceHandler(BaseHTTPRequestHandler):
                 "/api/v1/recipes/builds": "20000000-0000-4000-8000-000000000001",
                 "/api/v1/recipes/image-distributions": "20000000-0000-4000-8000-000000000002",
                 "/api/v1/recipes/installations": "20000000-0000-4000-8000-000000000003",
-                "/api/v1/recipes/runs": "20000000-0000-4000-8000-000000000004",
             }.get(path)
+            if path == "/api/v1/recipes/runs":
+                self.server.run += 1
+                owner = f"20000000-0000-4000-8001-{self.server.run:012d}"
             if owner is None:
                 self._json(404, {"detail": "not found"})
                 return
             if path == "/api/v1/recipes/runs":
-                self.server.route_published = True
+                start_state = (
+                    self.server.start_operation_states.pop(0)
+                    if self.server.start_operation_states
+                    else "succeeded"
+                )
+                if start_state == "succeeded":
+                    self.server.route_published = True
+                    self.server.run_states[owner] = ("running", "published")
+                else:
+                    self.server.route_published = False
+                    self.server.run_states[owner] = ("stopped", "withdrawn")
+            else:
+                start_state = None
             kind = {
                 "/api/v1/recipes/builds": "build",
                 "/api/v1/recipes/image-distributions": "distribution",
@@ -474,7 +499,7 @@ class SliceHandler(BaseHTTPRequestHandler):
                 "/api/v1/recipes/runs": "start",
             }[path]
             nodes = [NODE] if kind == "build" else self.server.nodes
-            self._operation(owner, nodes, kind=kind)
+            self._operation(owner, nodes, kind=kind, state=start_state)
 
     def _operation(
         self,
@@ -703,6 +728,69 @@ def test_runner_accepts_litellm_empty_provider_metadata(
     assert result.returncode == 0, result.stderr
     evidence = json.loads(evidence_path.read_text())
     assert evidence["completed_states"] == STATES[:9]
+
+
+def test_runner_recovers_once_after_cleaned_failed_start(
+    tmp_path: Path, server: SliceServer
+) -> None:
+    server.start_operation_states = ["failed", "succeeded"]
+
+    result, evidence_path = _run(tmp_path, server, "--stop-after", "inference-ok")
+
+    assert result.returncode == 0, result.stderr
+    evidence = json.loads(evidence_path.read_text())
+    assert evidence["completed_states"] == STATES[:9]
+    assert evidence["outputs"]["failed_run_id"] == (
+        "20000000-0000-4000-8001-000000000001"
+    )
+    assert evidence["outputs"]["failed_run_operation_id"] == (
+        "40000000-0000-4000-8000-000000000004"
+    )
+    assert evidence["outputs"]["run_id"] == ("20000000-0000-4000-8001-000000000002")
+    run_creations = [
+        json.loads(body)
+        for method, path, body in server.request_bodies
+        if method == "POST" and path == "/api/v1/recipes/runs"
+    ]
+    assert len(run_creations) == 2
+    expected_retry_key = str(
+        uuid.uuid5(uuid.UUID(evidence["acceptance_id"]), "running:start-retry")
+    )
+    assert run_creations[1]["request_key"] == expected_retry_key
+    assert (
+        sum(
+            path == "/api/v1/recipes/run-plans/preview"
+            for method, path, _body in server.request_bodies
+            if method == "POST"
+        )
+        == 2
+    )
+    assert not any(
+        path.endswith("/retry") for _method, path, _body in server.request_bodies
+    )
+
+
+def test_runner_does_not_retry_a_failed_replacement_start(
+    tmp_path: Path, server: SliceServer
+) -> None:
+    server.start_operation_states = ["failed", "failed", "succeeded"]
+
+    result, evidence_path = _run(tmp_path, server, "--stop-after", "inference-ok")
+
+    assert result.returncode == 1
+    assert "recipe start operation ended in failed" in result.stderr
+    evidence = json.loads(evidence_path.read_text())
+    assert evidence["completed_states"] == STATES[:6]
+    assert "run_id" not in evidence["outputs"]
+    run_creations = [
+        json.loads(body)
+        for method, path, body in server.request_bodies
+        if method == "POST" and path == "/api/v1/recipes/runs"
+    ]
+    assert len(run_creations) == 2
+    assert not any(
+        path.endswith("/retry") for _method, path, _body in server.request_bodies
+    )
 
 
 def test_runner_accepts_documented_maintenance_route_withdrawal(

@@ -638,6 +638,42 @@ class Runner:
         expected_nodes: list[str] | None = None,
         retry_request_key: str | None = None,
     ) -> tuple[str, str, dict[str, Any]]:
+        operation_id, owner_id, current = self._terminal_operation(
+            response,
+            label,
+            retry_request_key=retry_request_key,
+        )
+        state = current.get("state")
+        if state != "succeeded":
+            raise SliceError(f"{label} operation ended in {state}")
+        result = current.get("result")
+        if expected_nodes is not None:
+            successful = (
+                result.get("successful_nodes") if isinstance(result, dict) else None
+            )
+            failed = result.get("failed_nodes") if isinstance(result, dict) else None
+            node_evidence = (
+                result.get("node_evidence") if isinstance(result, dict) else None
+            )
+            if (
+                successful != sorted(expected_nodes)
+                or failed != []
+                or not isinstance(node_evidence, dict)
+                or set(node_evidence) != set(expected_nodes)
+                or any(not isinstance(value, dict) for value in node_evidence.values())
+            ):
+                raise SliceError(f"{label} rank evidence does not match")
+        if not isinstance(result, dict):
+            raise SliceError(f"{label} result evidence is missing")
+        return operation_id, owner_id, result
+
+    def _terminal_operation(
+        self,
+        response: object | None,
+        label: str,
+        *,
+        retry_request_key: str | None = None,
+    ) -> tuple[str, str, dict[str, Any]]:
         operation = _object(response, label)
         operation_id = operation.get("id")
         owner_id = operation.get("owner_id")
@@ -653,7 +689,7 @@ class Runner:
                 break
             if state in terminal_states:
                 if retry_request_key is None or retried:
-                    raise SliceError(f"{label} operation ended in {state}")
+                    break
                 _, retry_payload = self.control.request(
                     "POST",
                     f"/api/v1/recipes/operations/{operation_id}/retry",
@@ -677,26 +713,7 @@ class Runner:
                 "GET", f"/api/v1/recipes/operations/{operation_id}"
             )
             current = _object(payload, label)
-        result = current.get("result")
-        if expected_nodes is not None:
-            successful = (
-                result.get("successful_nodes") if isinstance(result, dict) else None
-            )
-            failed = result.get("failed_nodes") if isinstance(result, dict) else None
-            node_evidence = (
-                result.get("node_evidence") if isinstance(result, dict) else None
-            )
-            if (
-                successful != sorted(expected_nodes)
-                or failed != []
-                or not isinstance(node_evidence, dict)
-                or set(node_evidence) != set(expected_nodes)
-                or any(not isinstance(value, dict) for value in node_evidence.values())
-            ):
-                raise SliceError(f"{label} rank evidence does not match")
-        if not isinstance(result, dict):
-            raise SliceError(f"{label} result evidence is missing")
-        return operation_id, owner_id, result
+        return operation_id, owner_id, current
 
     def run(self) -> None:
         handlers = {
@@ -1056,24 +1073,21 @@ class Runner:
 
     def running(self) -> None:
         request = {"installation_id": self.outputs["installation_id"]}
-        _, preview_payload = self.control.request(
-            "POST", "/api/v1/recipes/run-plans/preview", request
+
+        response = self._create_run(request, purpose="start")
+        failed_start: dict[str, str] = {}
+        initial_operation_id, initial_run_id, terminal = self._terminal_operation(
+            response, "recipe start"
         )
-        preview = _object(preview_payload, "run preview")
-        if preview.get("allowed") is not True or not isinstance(
-            preview.get("plan_digest"), str
-        ):
-            raise SliceError("recipe run is not admitted")
-        _, response = self.control.request(
-            "POST",
-            "/api/v1/recipes/runs",
-            {
-                **request,
-                "alias": self.slug,
-                "plan_digest": preview["plan_digest"],
-                "request_key": self.request_key("running", "start"),
-            },
-        )
+        if terminal.get("state") != "succeeded":
+            self._await_cleaned_run(initial_run_id)
+            failed_start = {
+                "failed_run_id": initial_run_id,
+                "failed_run_operation_id": initial_operation_id,
+            }
+            response = self._create_run(request, purpose="start-retry")
+        else:
+            response = terminal
         operation_id, run_id, result = self.operation(
             response, "recipe start", expected_nodes=self.targets
         )
@@ -1102,6 +1116,7 @@ class Runner:
         self.complete(
             "running",
             {
+                **failed_start,
                 "run_id": run_id,
                 "run_operation_id": operation_id,
                 "artifact_set_digest": artifact_set_digests.pop(),
@@ -1111,6 +1126,42 @@ class Runner:
                 ).hexdigest(),
             },
         )
+
+    def _create_run(self, request: dict[str, object], *, purpose: str) -> object | None:
+        _, preview_payload = self.control.request(
+            "POST", "/api/v1/recipes/run-plans/preview", request
+        )
+        preview = _object(preview_payload, "run preview")
+        if preview.get("allowed") is not True or not isinstance(
+            preview.get("plan_digest"), str
+        ):
+            raise SliceError("recipe run is not admitted")
+        _, response = self.control.request(
+            "POST",
+            "/api/v1/recipes/runs",
+            {
+                **request,
+                "alias": self.slug,
+                "plan_digest": preview["plan_digest"],
+                "request_key": self.request_key("running", purpose),
+            },
+        )
+        return response
+
+    def _await_cleaned_run(self, run_id: str) -> None:
+        deadline = time.monotonic() + self.args.timeout_seconds
+        while True:
+            _, payload = self.control.request("GET", f"/api/v1/recipes/runs/{run_id}")
+            status = _object(payload, "failed recipe run status")
+            if (
+                status.get("id") == run_id
+                and status.get("state") == "stopped"
+                and status.get("route_state") == "withdrawn"
+            ):
+                return
+            if time.monotonic() >= deadline:
+                raise SliceError("failed recipe run cleanup did not converge")
+            time.sleep(self.args.poll_seconds)
 
     def _await_endpoint(self, *, published: bool) -> None:
         deadline = time.monotonic() + self.args.timeout_seconds
