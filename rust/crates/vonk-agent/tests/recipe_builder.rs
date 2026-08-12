@@ -196,6 +196,7 @@ fn build_exports_a_docker_load_archive_from_the_rootless_builder() {
         for option in [
             "overlay.ignore_chown_errors=true",
             "overlay.mount_program=/usr/bin/fuse-overlayfs",
+            "overlay.force_mask=shared",
         ] {
             assert!(
                 arguments.iter().any(|value| value == option),

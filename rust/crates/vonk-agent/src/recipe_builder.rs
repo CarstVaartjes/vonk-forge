@@ -125,15 +125,8 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
         // with the portable CFS quota and nproc ulimit forms.
         let cpu_period = 100_000_u64;
         let cpu_quota = u64::from(request.limits.cpu_cores) * cpu_period;
-        let mut arguments = vec![
-            "--root".to_owned(),
-            storage.display().to_string(),
-            "--runroot".to_owned(),
-            runroot.path().display().to_string(),
-            "--storage-opt".to_owned(),
-            "overlay.ignore_chown_errors=true".to_owned(),
-            "--storage-opt".to_owned(),
-            "overlay.mount_program=/usr/bin/fuse-overlayfs".to_owned(),
+        let mut arguments = podman_storage_arguments(&storage, runroot.path());
+        arguments.extend([
             "build".to_owned(),
             "--no-cache".to_owned(),
             "--platform".to_owned(),
@@ -149,7 +142,7 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
             format!("--memory={}b", request.limits.memory_bytes),
             format!("--ulimit=nproc={0}:{0}", request.limits.processes),
             format!("--network={network}"),
-        ];
+        ]);
         for argument in &request.arguments {
             arguments.push("--build-arg".to_owned());
             arguments.push(format!("{}={}", argument.name, scalar(&argument.value)?));
@@ -167,25 +160,17 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
         if !output.success {
             return Err(RecipeBuildError::Evidence);
         }
-        let inspected = self.runner.run(
-            Program::Podman,
-            &[
-                "--root".to_owned(),
-                storage.display().to_string(),
-                "--runroot".to_owned(),
-                runroot.path().display().to_string(),
-                "--storage-opt".to_owned(),
-                "overlay.ignore_chown_errors=true".to_owned(),
-                "--storage-opt".to_owned(),
-                "overlay.mount_program=/usr/bin/fuse-overlayfs".to_owned(),
-                "image".to_owned(),
-                "inspect".to_owned(),
-                "--format".to_owned(),
-                "{{.Os}}\t{{.Architecture}}\t{{index .Config.Labels \"ai.vonkforge.runtime-interface\"}}\t{{.Config.User}}".to_owned(),
-                tag.clone(),
-            ],
-            Duration::from_secs(60),
-        )?;
+        let mut inspect_arguments = podman_storage_arguments(&storage, runroot.path());
+        inspect_arguments.extend([
+            "image".to_owned(),
+            "inspect".to_owned(),
+            "--format".to_owned(),
+            "{{.Os}}\t{{.Architecture}}\t{{index .Config.Labels \"ai.vonkforge.runtime-interface\"}}\t{{.Config.User}}".to_owned(),
+            tag.clone(),
+        ]);
+        let inspected =
+            self.runner
+                .run(Program::Podman, &inspect_arguments, Duration::from_secs(60))?;
         inspect_image(&inspected.stdout)?;
         let build_root = self.data_root.join("builds");
         fs::create_dir_all(&build_root)?;
@@ -193,26 +178,20 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
         fs::create_dir(&operation_root)?;
         let layout = self.layout_path(operation_id);
         let digest_file = staging.path().join("image.digest");
+        let mut push_arguments = podman_storage_arguments(&storage, runroot.path());
+        push_arguments.extend([
+            "push".to_owned(),
+            "--digestfile".to_owned(),
+            digest_file.display().to_string(),
+            tag.clone(),
+            // Spark's supported runtime is Docker. Export a docker-save
+            // archive so the privileged helper can use Docker's native
+            // load path without exposing the daemon to the rootless builder.
+            format!("docker-archive:{}", layout.display()),
+        ]);
         let saved = self.runner.run_bounded_directory_with_output_limit(
             Program::Podman,
-            &[
-                "--root".to_owned(),
-                storage.display().to_string(),
-                "--runroot".to_owned(),
-                runroot.path().display().to_string(),
-                "--storage-opt".to_owned(),
-                "overlay.ignore_chown_errors=true".to_owned(),
-                "--storage-opt".to_owned(),
-                "overlay.mount_program=/usr/bin/fuse-overlayfs".to_owned(),
-                "push".to_owned(),
-                "--digestfile".to_owned(),
-                digest_file.display().to_string(),
-                tag.clone(),
-                // Spark's supported runtime is Docker. Export a docker-save
-                // archive so the privileged helper can use Docker's native
-                // load path without exposing the daemon to the rootless builder.
-                format!("docker-archive:{}", layout.display()),
-            ],
+            &push_arguments,
             Duration::from_secs(600),
             &operation_root,
             request.limits.temporary_bytes,
@@ -241,23 +220,11 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
             return Err(RecipeBuildError::Process(ProcessError::StorageLimit));
         }
         let oci_layout_sha256 = sha256_file(&layout)?;
-        let _ = self.runner.run(
-            Program::Podman,
-            &[
-                "--root".to_owned(),
-                storage.display().to_string(),
-                "--runroot".to_owned(),
-                runroot.path().display().to_string(),
-                "--storage-opt".to_owned(),
-                "overlay.ignore_chown_errors=true".to_owned(),
-                "--storage-opt".to_owned(),
-                "overlay.mount_program=/usr/bin/fuse-overlayfs".to_owned(),
-                "image".to_owned(),
-                "rm".to_owned(),
-                tag,
-            ],
-            Duration::from_secs(60),
-        );
+        let mut remove_arguments = podman_storage_arguments(&storage, runroot.path());
+        remove_arguments.extend(["image".to_owned(), "rm".to_owned(), tag]);
+        let _ = self
+            .runner
+            .run(Program::Podman, &remove_arguments, Duration::from_secs(60));
         Ok(RecipeBuildEvidence {
             build_input_sha256: request.build_input_sha256.clone(),
             image_bytes,
@@ -290,6 +257,21 @@ fn build_network(
     } else {
         Err(RecipeBuildError::NetworkPolicy)
     }
+}
+
+fn podman_storage_arguments(storage: &Path, runroot: &Path) -> Vec<String> {
+    vec![
+        "--root".to_owned(),
+        storage.display().to_string(),
+        "--runroot".to_owned(),
+        runroot.display().to_string(),
+        "--storage-opt".to_owned(),
+        "overlay.ignore_chown_errors=true".to_owned(),
+        "--storage-opt".to_owned(),
+        "overlay.mount_program=/usr/bin/fuse-overlayfs".to_owned(),
+        "--storage-opt".to_owned(),
+        "overlay.force_mask=shared".to_owned(),
+    ]
 }
 
 fn scalar(value: &serde_json::Value) -> Result<String, RecipeBuildError> {
