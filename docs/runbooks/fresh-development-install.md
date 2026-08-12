@@ -11,6 +11,13 @@ GPU nodes receive only the public controller CA and their own locally generated
 identity. No GitHub, GHCR, R2, database, signing, or model credential is copied
 to a GPU node or baked into an image.
 
+NVIDIA Sync owns supported cluster networking and node-to-node SSH. DGX
+Dashboard owns DGX OS, firmware, kernel, driver, Docker, and NVIDIA Toolkit
+updates. This fresh-install path validates those platform prerequisites but
+does not replace or reconfigure them. Do not run the archived SSH-controller
+node policy, `disable-earlyoom`, runtime-release, or manual Netplan workflows
+as part of a fresh install.
+
 ## 1. Record the site values
 
 Choose these values once and use them consistently:
@@ -138,6 +145,10 @@ On every Ubuntu 24.04 ARM64 node:
    DER SHA-256 fingerprint, unique node ID, and (for multi-node use) the
    node's direct-fabric address and measured 200000 Mb/s bandwidth in
    `/etc/vonk-forge-agent/agent.toml`.
+7. Install persistent Docker-aware `DOCKER-USER` policy for the NAS-only model
+   endpoint and peer-only rendezvous flow. UFW `INPUT` policy does not protect
+   Docker-published ports; use the exact original-destination/source contract
+   from the workload runbook and verify it again after Docker or host restart.
 
 Use the exact commands and minimal configuration in
 [Install the Vonk Forge agent](../operations/install-vonk-agent.md). Do not add

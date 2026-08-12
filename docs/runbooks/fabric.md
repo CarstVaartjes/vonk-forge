@@ -7,17 +7,17 @@ override. This applies only to local-to-GPU node commands. The pinned
 GPU node-1-to-GPU node-2 fabric SSH command remains a nested remote command and is
 not replaced by the developer-machine selector.
 
-This runbook configures a two-Vonk Forge GPU node, directly cabled ConnectX-7 fabric.
-The selected path is the official NVIDIA DGX Spark CLI/manual fallback from
-NVIDIA `dgx-spark-playbooks` commit `1fb66f059ee427c5a3678b3117ef73aab042b458`.
-It deliberately does not use the Mac administration key for node-to-node
-access and does not enable SSH agent forwarding. The direct fabric must never
-receive a default route.
+This runbook records a two-Vonk Forge GPU node, directly cabled ConnectX-7
+fabric. The existing site was configured before the current NVIDIA Sync
+workflow, using the official NVIDIA DGX Spark CLI/manual fallback from NVIDIA
+`dgx-spark-playbooks` commit `1fb66f059ee427c5a3678b3117ef73aab042b458`.
+The direct fabric must never receive a default route.
 
-For a fresh DGX Spark cluster, prefer NVIDIA Sync's Cluster Assistant and
-retain its generated validation report. The manual Netplan procedure below is
-the accepted fallback for this existing installation; do not layer it on top
-of Sync-managed Netplan. Regardless of how addresses are configured, Vonk's
+NVIDIA Sync owns fresh fabric configuration and node-to-node SSH. Use its
+Cluster Assistant, review its proposed changes, and retain its generated
+validation report. The historical Netplan and SSH commands have been removed
+from the operational path so they cannot be mistaken for fresh-install
+instructions. Regardless of how addresses are configured, Vonk's
 current container workload contract uses TCP over one declared direct-fabric
 address per node. The host-level RDMA/NCCL measurements in this runbook prove
 the physical platform, but Vonk does not pass raw InfiniBand devices into
@@ -30,7 +30,7 @@ captured.
 
 ## Evidence and safety gate
 
-Before applying the manual plan, retain all of the following:
+The historical change record retained all of the following:
 
 - a photo of the label on the *single* QSFP112 DAC cable, including its part
   number,
@@ -71,11 +71,9 @@ for host in vonk-node-1 vonk-node-2; do
 done
 ```
 
-The cable PN remains an undocumented OEM/customer identifier. The selected
-manual path may proceed only through the staged preflight below; it requires
-both functions to be `UP` at 200000 Mb/s and preserves the management default
-route. Any cable or link warning, failed preflight, Netplan error, route
-change, or failed postcheck is a hard stop. Do not apply a manual workaround.
+The cable PN remains an undocumented OEM/customer identifier. Any cable or
+link warning, failed NVIDIA Sync validation, route change, or failed postcheck
+is a hard stop. Do not apply a manual workaround.
 
 ## Historical helper constraint for this manual rollout
 
@@ -85,10 +83,14 @@ rollout. The reviewed helper revision at the time copied
 `Host * IdentityFile` rule, which did not meet this site's key separation.
 That historical finding is not a blanket ban on current Sync releases: for a
 fresh site, review the current generated SSH and Netplan changes, use Cluster
-Assistant when they meet policy, and choose the manual fallback only when they
-do not.
+Assistant when they meet policy, and stop for operator review when they do not.
 
-## Selected manual CLI rollout
+## Historical manual CLI rollout record
+
+This section records the values used in 2026; it is not an installation
+procedure. `nodes/bin/configure-direct-fabric --apply` is retired and refuses
+to write Netplan. The helper retains read-only emit/check/postcheck modes and a
+narrow rollback for a file that an older revision of this helper itself owned.
 
 The official two-GPU node playbook assigns the active `f1` function pair to two
 point-to-point subnets. The staged plan uses the current Linux MTU/default,
@@ -102,113 +104,28 @@ live validation.
 | GPU node 2/worker | `enp1s0f1np1` | `rocep1s0f1` | `192.168.100.11/24` | 1500 |
 | GPU node 2/worker | `enP2p1s0f1np1` | `roceP2p1s0f1` | `192.168.101.11/24` | 1500 |
 
-`nodes/bin/configure-direct-fabric` is an audited, idempotent installer. It
-only manages `/etc/netplan/99-vonk-node-direct-fabric.yaml`, refuses to mix
-with `99-nvidia-sync-cluster.yaml`, requires both functions to be up at
-200000 Mb/s, sets `dhcp4: false` on both fabric interfaces, verifies that the
-management default route is not on the fabric, and uses `netplan try` for both
-installation and rollback. It has no SSH or private-key handling.
+The archived helper emits the former
+`/etc/netplan/99-vonk-node-direct-fabric.yaml` shape for comparison and refuses
+to mix ownership with `99-nvidia-sync-cluster.yaml` or any other Netplan
+document that mentions either selected CX-7 interface. Its rollback uses
+`netplan try` and applies only when its exact managed file exists. It has no SSH
+or private-key handling.
 
-### Stage and inspect the worker first
-
-The following first two commands only stage the reviewed script and run its
-read-only preflight. They do not change either GPU node. Do not add `-A` or enable
-agent forwarding.
-
-```bash
-scp -o ForwardAgent=no nodes/bin/configure-direct-fabric \
-  vonk-node-2:/tmp/configure-direct-fabric
-ssh -o BatchMode=yes -o ForwardAgent=no vonk-node-2 \
-  'bash /tmp/configure-direct-fabric --node node2 --check'
-```
-
-If—and only if—the preflight prints a pass result with a Wi-Fi/10 GbE
-management default route, the controller/user can make the first approved
-change on the worker:
-
-```bash
-ssh -t -o BatchMode=yes -o ForwardAgent=no vonk-node-2 \
-  'sudo bash /tmp/configure-direct-fabric --node node2 --apply'
-```
-
-Review `netplan try` at the console and accept only if management remains
-reachable. If it is not accepted, it automatically rolls back. Do not continue
-to GPU node 1 if worker application, route preservation, or local validation
-fails. Before staging the head, the worker must prove its own addresses, MTU,
-RoCEv2 GID-to-netdev binding, and absence of a fabric default route:
-
-```bash
-ssh -o BatchMode=yes -o ForwardAgent=no vonk-node-2 \
-  'sudo bash /tmp/configure-direct-fabric --node node2 --local-postcheck'
-```
-
-After the worker result is recorded, repeat the same staged preflight and
-interactive application for the head:
-
-```bash
-scp -o ForwardAgent=no nodes/bin/configure-direct-fabric \
-  vonk-node-1:/tmp/configure-direct-fabric
-ssh -o BatchMode=yes -o ForwardAgent=no vonk-node-1 \
-  'bash /tmp/configure-direct-fabric --node node1 --check'
-ssh -t -o BatchMode=yes -o ForwardAgent=no vonk-node-1 \
-  'sudo bash /tmp/configure-direct-fabric --node node1 --apply'
-```
-
-### Separate head-to-worker cluster key
-
-Only after both Netplan applications and both postchecks pass, generate the
-Ed25519 key on GPU node 1. The private key never leaves GPU node 1; only its public
-key is transferred through the controller. This workflow does not copy the Mac
-administration key and does not forward an agent.
-
-```bash
-ssh -o BatchMode=yes -o ForwardAgent=no vonk-node-1 '
-  set -euo pipefail
-  key="$HOME/.ssh/vonk_node_fabric_ed25519"
-  test ! -e "$key" && test ! -e "$key.pub"
-  umask 077
-  ssh-keygen -q -t ed25519 -N "" -f "$key" \
-    -C "node1-to-node2-fabric"
-  cat "$key.pub"
-' > /tmp/vonk_node_fabric_ed25519.pub
-```
-
-Install the public key on GPU node 2 with the two GPU node 1 fabric addresses as
-source restriction and OpenSSH's `restrict` option. `restrict` denies agent,
-port, X11, and PTY forwarding while still permitting the noninteractive SSH
-processes required for cluster work.
-
-```bash
-{
-  printf 'restrict,from="192.168.100.10,192.168.101.10" '
-  cat /tmp/vonk_node_fabric_ed25519.pub
-} | ssh -o BatchMode=yes -o ForwardAgent=no vonk-node-2 '
-  set -euo pipefail
-  umask 077
-  install -d -m 0700 "$HOME/.ssh"
-  cat >> "$HOME/.ssh/authorized_keys"
-  chmod 0600 "$HOME/.ssh/authorized_keys"
-'
-```
-
-On GPU node 1, create a narrow fabric-only alias (the user and home path must
-match the live account):
-
-```sshconfig
-Host vonk-node-2-fabric
-    HostName 192.168.100.11
-    User carst
-    BindAddress 192.168.100.10
-    IdentityFile ~/.ssh/vonk_node_fabric_ed25519
-    IdentitiesOnly yes
-    ForwardAgent no
-```
-
-Verify from GPU node 1 with `ssh -o ForwardAgent=no vonk-node-2-fabric hostname`.
-Do not add `Host *`, do not add the fabric key to an agent, and do not copy its
-private component to GPU node 2 or the Mac.
+The current two lab nodes predate NVIDIA Sync Cluster Assistant and still have
+`/etc/netplan/99-dgx-spark-direct-fabric.yaml`. That is a foreign owner by
+design: the fallback helper must refuse to add its own file while this legacy
+document exists. The nodes also retain a narrow historical head-to-worker key.
+Keep both untouched during workload rollout. Migrate network and node-to-node
+SSH ownership together in a separate console-backed maintenance window through
+NVIDIA Sync, which will own `99-nvidia-sync-cluster.yaml`; never rename the
+legacy file to bypass the guard or recreate the old key flow on a fresh cluster.
 
 ### Manual rollback
+
+This recovery applies only to
+`/etc/netplan/99-vonk-node-direct-fabric.yaml`, a file created by an older
+helper revision. It intentionally refuses the current lab's foreign
+`99-dgx-spark-direct-fabric.yaml`; migrate that file through NVIDIA Sync.
 
 Run the single reviewed controller sequence from the repository root:
 
@@ -270,15 +187,14 @@ keyboard-interactive, and agent forwarding, uses strict host checking, and
 returned `node-2297`. The verified worker host Ed25519 fingerprint is
 `SHA256:Q/0cf26vxC6Z+xH6pfB5uoGNXfIEum6KOFVhnl4nngg`.
 
-The controller must capture the following output from both nodes after the
-manual configuration completes. It is read-only except for the already-approved
-manual operation.
+For an existing site, capture the following read-only output from both nodes
+and retain the NVIDIA Sync validation report when Sync owns the cluster. Do not
+copy, rename, or rewrite any Netplan file during evidence collection.
 
 ```bash
 for host in vonk-node-1 vonk-node-2; do
   ssh -o BatchMode=yes -o ForwardAgent=no "$host" '
     set -euo pipefail
-    sudo cat /etc/netplan/99-vonk-node-direct-fabric.yaml
     ip -br link
     ip -br addr
     ip route
@@ -298,17 +214,6 @@ for host in vonk-node-1 vonk-node-2; do
     done
   '
 done
-```
-
-Run the script's exact bidirectional check from each node after both plans are
-accepted; it validates route selection, no fabric default route, IPv4-to-RoCEv2
-GID mapping, normal ping, and a non-fragmenting MTU-sized ping.
-
-```bash
-ssh -o BatchMode=yes -o ForwardAgent=no vonk-node-2 \
-  'sudo bash /tmp/configure-direct-fabric --node node2 --postcheck'
-ssh -o BatchMode=yes -o ForwardAgent=no vonk-node-1 \
-  'sudo bash /tmp/configure-direct-fabric --node node1 --postcheck'
 ```
 
 For every configured interface pair, verify the address listed in Netplan maps
@@ -337,7 +242,12 @@ or link-local GIDs.
 
 ## RDMA, latency, error-counter, and NCCL acceptance
 
-Run `scripts/validate-fabric --inventory inventory/cluster.toml --output
+This is a historical deep-validation path for the existing manually configured
+site. A fresh cluster uses NVIDIA Sync's generated network inspection and speed
+report; do not install host CUDA, MPI, NCCL, or benchmark source trees merely
+to reproduce this old evidence.
+
+On the existing site, run `scripts/validate-fabric --inventory inventory/cluster.toml --output
 inventory/reports/rdma-nccl.json` from the controller only after the recorded
 postchecks pass. The wrapper is fail-closed: it validates the exact 200000 Mb/s
 physical-link state, net-device MTU 1500, both recorded HCA/GID/netdev
@@ -349,12 +259,12 @@ operation. It stops on a failed command, wrong transport/path, a result below
 its floor, any monitored counter growth, NCCL `NET/Socket`, or NCCL selecting
 only one active HCA. It never enables agent forwarding.
 
-The documented source installation follows NVIDIA `dgx-spark-playbooks` commit
+The recorded source installation followed NVIDIA `dgx-spark-playbooks` commit
 `1fb66f059ee427c5a3678b3117ef73aab042b458`. Each GPU node has OpenMPI packages
 `libopenmpi-dev` and `openmpi-bin` at `4.1.6-7ubuntu2`, CUDA 13 nvcc, NCCL
 `v2.30.7-1` commit `73cf112295c33aee2b895f329f592f2a9b4b0f97`, and nccl-tests
-commit `a0b82b2260cf5152b9f8c061bbf7eaf0ba096432`. Build them normally as the
-host user with `/usr/local/cuda/bin/nvcc`,
+commit `a0b82b2260cf5152b9f8c061bbf7eaf0ba096432`. The accepted historical build
+used the host user and `/usr/local/cuda/bin/nvcc`,
 `NVCC_GENCODE='-gencode=arch=compute_121,code=sm_121'`, and `MPI=1`.
 `validate-fabric` does not build, clean, lock, or otherwise stage those source
 trees; it verifies the completed pinned artifacts before testing the fabric.

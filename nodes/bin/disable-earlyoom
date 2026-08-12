@@ -133,34 +133,6 @@ if [[ "$mode" == --check ]]; then
   exit 2
 fi
 
-if (( EUID != 0 )); then
-  printf 'ERROR: --apply requires root; run through sudo\n' >&2
-  exit 1
-fi
-
-if [[ "$active_output" != inactive ]]; then
-  systemctl stop earlyoom
-fi
-if [[ "$enabled_output" != masked && "$enabled_output" != masked-runtime ]]; then
-  systemctl disable earlyoom
-fi
-
-capture_state
-print_state after
-classify_state
-printf 'classification=%s\n' "$classification"
-case "$classification" in
-  absent)
-    printf 'PASS: earlyoom is absent\n'
-    ;;
-  disabled)
-    printf 'PASS: earlyoom is disabled and inactive\n'
-    ;;
-  masked)
-    printf 'PASS: earlyoom is masked and inactive\n'
-    ;;
-  *)
-    printf 'ERROR: earlyoom did not reach an accepted exact final state\n' >&2
-    exit 3
-    ;;
-esac
+printf '%s\n' \
+  'ERROR: refusing to mutate a platform-managed earlyoom service; stop workload admission and review the current NVIDIA platform policy' >&2
+exit 3

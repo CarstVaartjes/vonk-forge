@@ -1,5 +1,10 @@
 # Runtime release deployment
 
+This is an archived SSH-controller compatibility tool, retained only for
+explicit migration and recovery of the retired `vonkctl-legacy` path. It is
+not part of a fresh install or the outbound-agent recipe runtime. Do not use it
+to deploy a new Spark workload.
+
 Use `scripts/deploy-runtime-release` from the developer machine to install the
 selected workload's checked adapter release on exactly its resolved GPU node
 nodes. For V2 repositories, targets come from `inventory/fleet.toml` and the

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import ctypes
+import fcntl
 import hashlib
 import json
 import os
+import signal
 import subprocess
 import sys
 import uuid
@@ -51,6 +54,81 @@ REQUIRED_CAPABILITIES = (
     "workload.verify",
 )
 AGENT_CAPABILITIES = ("node.probe", *REQUIRED_CAPABILITIES)
+
+
+def _provide_linux_process_apis(monkeypatch: pytest.MonkeyPatch) -> None:
+    libc = ctypes.CDLL(None, use_errno=True)
+    if not hasattr(os, "memfd_create"):
+        create_memfd = libc.memfd_create
+        create_memfd.argtypes = [ctypes.c_char_p, ctypes.c_uint]
+        create_memfd.restype = ctypes.c_int
+
+        def memfd_create(name: str, flags: int = 0) -> int:
+            ctypes.set_errno(0)
+            descriptor = create_memfd(os.fsencode(name), flags)
+            if descriptor < 0:
+                error = ctypes.get_errno()
+                raise OSError(error, os.strerror(error), name)
+            return descriptor
+
+        monkeypatch.setattr(os, "memfd_create", memfd_create, raising=False)
+    if not hasattr(os, "pidfd_open"):
+        open_pidfd = libc.pidfd_open
+        open_pidfd.argtypes = [ctypes.c_int, ctypes.c_uint]
+        open_pidfd.restype = ctypes.c_int
+
+        def pidfd_open(pid: int, flags: int = 0) -> int:
+            ctypes.set_errno(0)
+            descriptor = open_pidfd(pid, flags)
+            if descriptor < 0:
+                error = ctypes.get_errno()
+                raise OSError(error, os.strerror(error), pid)
+            return descriptor
+
+        monkeypatch.setattr(os, "pidfd_open", pidfd_open, raising=False)
+    if not hasattr(signal, "pidfd_send_signal"):
+        send_pidfd_signal = libc.pidfd_send_signal
+        send_pidfd_signal.argtypes = [
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_void_p,
+            ctypes.c_uint,
+        ]
+        send_pidfd_signal.restype = ctypes.c_int
+
+        def pidfd_send_signal(
+            pidfd: int,
+            sig: int,
+            siginfo: None = None,
+            flags: int = 0,
+        ) -> None:
+            if siginfo is not None:
+                raise TypeError("siginfo must be None")
+            ctypes.set_errno(0)
+            if send_pidfd_signal(pidfd, sig, None, flags) != 0:
+                error = ctypes.get_errno()
+                raise OSError(error, os.strerror(error))
+
+        monkeypatch.setattr(
+            signal, "pidfd_send_signal", pidfd_send_signal, raising=False
+        )
+    for module, values in (
+        (os, {"MFD_CLOEXEC": 0x0001, "MFD_ALLOW_SEALING": 0x0002}),
+        (
+            fcntl,
+            {
+                "F_ADD_SEALS": 1033,
+                "F_GET_SEALS": 1034,
+                "F_SEAL_SEAL": 0x0001,
+                "F_SEAL_SHRINK": 0x0002,
+                "F_SEAL_GROW": 0x0004,
+                "F_SEAL_WRITE": 0x0008,
+            },
+        ),
+    ):
+        for name, value in values.items():
+            if not hasattr(module, name):
+                monkeypatch.setattr(module, name, value, raising=False)
 
 
 def _git(root: Path, *arguments: str) -> str:
@@ -523,7 +601,9 @@ def test_every_emitted_payload_is_accepted_by_the_exact_agent_parser(
 
 def test_generated_workload_graph_executes_through_production_agent_boundaries(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _provide_linux_process_apis(monkeypatch)
     repository, commit, _ = _repository(tmp_path / "repository", 1)
     plan = _resolve(repository, commit, _observations(1))
     agent_source = Path(__file__).parents[2] / "agent" / "src"
@@ -641,7 +721,7 @@ def test_generated_workload_graph_executes_through_production_agent_boundaries(
                     workloads=workloads,
                 ),
             )
-            assert executed.result.state == "succeeded"
+            assert executed.result.state == "succeeded", executed.result.result
             statuses.append(executed["evidence"]["status"])
         assert statuses == ["prepared", "started", "healthy", "verified"]
     finally:

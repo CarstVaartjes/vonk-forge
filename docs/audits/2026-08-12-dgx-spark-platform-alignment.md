@@ -32,18 +32,42 @@ capabilities, socket mounts, and unbounded resources.
 | Kernel | 6.17.0-1029-nvidia | 6.17.0-1029-nvidia | Same NVIDIA kernel. |
 | Driver | 580.173.02 | 580.173.02 | Same driver; do not downgrade from the Dashboard-managed state. |
 | Docker | 29.2.1, overlay2, systemd cgroups | same | Stock daemon configuration retained. |
-| NVIDIA Container Toolkit | 1.19.1 | 1.19.1 | CDI available; Spark 1 passed an official CUDA `--gpus all` container probe. Spark 2 must pass the same canary before rollout. |
+| NVIDIA Container Toolkit | 1.19.1 | 1.19.1 | CDI available; both nodes passed the pinned, no-pull CUDA `--gpus all` container probe. |
 | GPU | NVIDIA GB10 | NVIDIA GB10 | Unified memory is accounted from host `MemAvailable`; `nvidia-smi` memory `N/A` is expected. |
 | Direct fabric | 192.168.100.10 and 192.168.101.10 | 192.168.100.11 and 192.168.101.11 | Both functions up at 200000 Mb/s, no fabric default route. |
 | Agent services | active | active | No Spark 1 failed units; Spark 2 had only an unrelated stale graphical-session scope. |
 | Storage | local NVMe ext4 | local NVMe ext4 | Suitable for image/model state; no SMB runtime storage. |
 | Time / reboot | synchronized; no reboot required | synchronized; no reboot required | Meets certificate and signed-operation prerequisites. |
+| Host security | Secure Boot and AppArmor active; cgroup v2/systemd | same | Retain the NVIDIA/Ubuntu security baseline. |
+| NVMe health | 4 TB Samsung, 100% spare, 0% used, no media/error-log entries | same | Local ext4 runtime state is healthy; periodic trim is active. |
+| Idle temperature | 40°C GPU / 40–41°C NVMe | 39°C GPU / 40–41°C NVMe | Cool and below any thermal warning; physical ambient remains an operator check. |
 
 No `/etc/docker/daemon.json` customization was introduced. A named `nvidia`
 runtime is not required when the installed NVIDIA Toolkit CDI path and
 `docker run --gpus all` work. Vonk must not run `nvidia-ctk runtime configure`,
 replace the daemon configuration, or install a second container engine for GPU
 serving.
+
+The broader repository review also found two explicitly archived surfaces.
+The retired SSH-controller DeepSeek adapters use host networking, and the
+two-node adapter also uses host IPC for its historical NCCL/RoCE path. Those
+are legacy exceptions, not accepted recipe inputs; fresh installation never
+deploys them, while source and runtime policy reject those settings. The old
+node-policy helper can classify `earlyoom`, but no longer stops or disables a
+platform service. The former manual fabric helper's `--apply` action likewise
+refuses to write Netplan; only NVIDIA Sync owns fresh fabric configuration,
+while the helper retains read-only evidence and narrow rollback behavior for
+its own historical file. The archived SSH hardener remains an explicit
+site-security operation guarded by a verified administrator key and recovery
+channel; it is not NVIDIA Sync cluster setup.
+
+Both NVMe devices reported historical unsafe-shutdown counters (5 and 9). They
+also reported zero critical warnings, zero media errors, zero error-log
+entries, no thermal warning time, and 0% endurance used. Preserve the counters
+as a trend baseline and investigate only if they increase unexpectedly; they
+do not currently indicate storage damage. Software could not authenticate the
+physical power brick, so use of the supplied 240 W adapter and 5–30°C ambient
+remain visual physical gates.
 
 ## Cross-surface corrections
 
@@ -66,10 +90,22 @@ serving.
   multi-node admission. Current Vonk containers use TCP over the declared
   direct address. Host RDMA benchmarks remain useful platform evidence, but
   raw RDMA and GPUDirect RDMA are not exposed or claimed.
+- Endpoint isolation: only the endpoint owner receives a management-address
+  publication. Non-entrypoint ranks bind their health endpoint to the accepted
+  private fabric address, preventing an unrouted worker from exposing its
+  unauthenticated model API on the management LAN.
+- Memory: the DS4 recipe reserves its measured whole-host 120 GB peak and the
+  controller retains a separate 4 GB floor. Qualification uses the same 124 GB
+  threshold; it does not double-count another recipe-level host reserve.
 - Installation: the Debian package depends on ordinary build/runtime support
   packages such as `acl`, Podman, and uidmap, but it does not own Docker,
   containerd, the NVIDIA driver/toolkit, firmware, or Netplan. Fresh installs
   validate those NVIDIA-owned prerequisites before package installation.
+- Services: offline `systemd-analyze security` rates the packaged Rust agent,
+  A/B supervisor, and privileged helper `4.8 OK`, `1.4 OK`, and `1.7 OK`.
+  The agent's larger surface is the reviewed rootless-build namespace/device
+  boundary; the Docker socket remains inaccessible to it and available only
+  through the narrow root helper.
 - Secrets: the host-runtime private signing key exists only in the NAS API
   projection and encrypted operator backup. GPU nodes receive only its public
   key at `/etc/vonk-forge-agent/host-helper-authority.pub`.
@@ -90,9 +126,13 @@ container used it; the completed DS4 images were retained. The human `carst`
 account still has root-equivalent Docker-group access from the archived SSH
 controller; remove that membership only after confirming the legacy controller
 is retired and use `sudo docker` for platform probes. The node firewall is
-currently inactive; no Vonk workload is exposed now, but the address- and
-source-specific acceptance rules must be active before a runtime port is
-published. Temporary unattended sudo remains installed on the NAS and both
+currently inactive; no Vonk workload is exposed now, but Docker-published
+traffic bypasses ordinary UFW `INPUT` rules. Original-destination and
+source-specific policy must be persisted in `DOCKER-USER` before a runtime port
+is published. Both nodes also retain the working legacy
+`99-dgx-spark-direct-fabric.yaml`; migrate that ownership to NVIDIA Sync only in
+a separate maintenance window, and never add a second Netplan owner. Temporary
+unattended sudo remains installed on the NAS and both
 Sparks for acceptance automation and must be removed as the final physical
 gate.
 

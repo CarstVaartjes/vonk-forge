@@ -530,7 +530,11 @@ class RecipeOperationService:
                             "role": node.role,
                             "port": node.port,
                             "reserved_memory_bytes": node.required_memory_bytes,
-                            "endpoint_address": presences[node.node_id],
+                            "endpoint_address": (
+                                presences[node.node_id]
+                                if node.endpoint_owner
+                                else node.fabric_address
+                            ),
                             "world_size": world_size,
                             "local_address": node.fabric_address
                             if world_size > 1

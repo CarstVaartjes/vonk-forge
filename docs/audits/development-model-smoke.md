@@ -94,6 +94,15 @@ it is not treated as evidence that the new agent cache is populated.
 Spark 1 is clean. This distinction prevents qualification from silently relying
 on manually installed legacy state.
 
+The measured DS4 start reduced host `MemAvailable` by 119,038,607,360 bytes and
+left 7,968,821,248 bytes available. The checked recipe therefore rounds the
+whole-host measured peak up to 120,000,000,000 bytes and sets its additional
+`system_reserve_bytes` to zero: the measurement already includes host impact.
+The controller independently retains its 4,000,000,000-byte global floor, so
+qualification and admission both require exactly 124,000,000,000 bytes before
+start. Adding another recipe reserve would double-count the host allowance and
+reject both healthy 128 GB unified-memory Sparks.
+
 ## Qualification behavior
 
 Run `scripts/qualify-development-model` with a fresh JSON evidence document.
@@ -138,16 +147,19 @@ GHCR token in a container or on a Spark.
 After accepted-main images and packages are published, the physical run must:
 
 1. qualify a fresh two-node evidence document;
-2. execute the one-node profile through inference, restart persistence, stop,
+2. install and retain Docker-aware `DOCKER-USER` policy that allows the NAS to
+   the routed management endpoint, confines rendezvous to the direct peer, and
+   rejects the worker endpoint on its management address;
+3. execute the one-node profile through inference, restart persistence, stop,
    route withdrawal, and uninstall;
-3. execute the replicated two-rank profile, prove the pre-launch TCP fabric
+4. execute the replicated two-rank profile, prove the pre-launch TCP fabric
    exchange and both exact start receipts before publication;
-4. verify the management labels and stop the designated worker rank's exact
+5. verify the management labels and stop the designated worker rank's exact
    Docker-managed container while
    its Rust agent remains healthy, observe the next authenticated run snapshot
    mark only that rank failed and withdraw the route, start the same container,
    then observe fresh health and automatic republication;
-5. restart both agents and the NAS stack, prove fresh identities and inference
+6. restart both agents and the NAS stack, prove fresh identities and inference
    without rebuilding, then stop and uninstall normally.
 
 The acceptance evidence remains local and redacted. It is not committed merely

@@ -78,17 +78,8 @@ case "$action:$earlyoom_rc" in
         exit 0
         ;;
     --apply:2)
-        if ! "$earlyoom_bin" --apply >/dev/null 2>&1; then
-            emit_result failed
-            exit 3
-        fi
-        check_earlyoom
-        if [[ "$earlyoom_rc" -ne 0 ]]; then
-            emit_result noncompliant
-            exit 3
-        fi
-        emit_result changed
-        exit 0
+        emit_result operator-action-required
+        exit 3
         ;;
     *)
         emit_result failed

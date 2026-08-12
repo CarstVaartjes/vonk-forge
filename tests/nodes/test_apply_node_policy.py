@@ -60,21 +60,24 @@ def _run(
     )
 
 
-def test_policy_apply_is_idempotent_and_reports_stable_digest(tmp_path: Path) -> None:
+def test_policy_apply_refuses_platform_mutation_and_reports_stable_digest(
+    tmp_path: Path,
+) -> None:
     helper, state, actions = _fake_earlyoom(tmp_path)
 
     first = _run(DEFAULT_POLICY, "--apply", helper, state, actions)
     second = _run(DEFAULT_POLICY, "--apply", helper, state, actions)
 
-    assert first.returncode == 0, first.stderr
-    assert second.returncode == 0, second.stderr
+    assert first.returncode == 3, first.stderr
+    assert second.returncode == 3, second.stderr
     first_result = json.loads(first.stdout)
     second_result = json.loads(second.stdout)
-    assert first_result["status"] == "changed"
-    assert second_result["status"] == "unchanged"
+    assert first_result["status"] == "operator-action-required"
+    assert second_result["status"] == "operator-action-required"
     assert first_result["policy_sha256"] == second_result["policy_sha256"]
     assert len(first_result["policy_sha256"]) == 64
-    assert actions.read_text() == "apply\n"
+    assert state.read_text() == "change-required\n"
+    assert actions.read_text() == ""
 
 
 def test_policy_check_reports_change_without_mutating(tmp_path: Path) -> None:

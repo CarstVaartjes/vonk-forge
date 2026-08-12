@@ -120,8 +120,8 @@ ca_path = "/etc/vonk-forge-agent/controller-ca.pem"
 ca_sha256 = "<64_LOWERCASE_HEX_FROM_SHA256SUM>"
 node_id = "<NODE_ID>"
 # Required for multi-node admission; use one address from the common direct
-# TCP fabric configured by NVIDIA Sync/Cluster Assistant or the accepted
-# manual fallback.
+# TCP fabric configured by NVIDIA Sync/Cluster Assistant, or a grandfathered
+# existing site whose unchanged fabric has separate accepted evidence.
 fabric_address = "<NODE_FABRIC_IP>"
 fabric_bandwidth_mbps = 200000
 ```
@@ -200,6 +200,13 @@ must succeed because the service identity cannot read Docker, while the root
 check proves the NVIDIA-managed daemon socket exists. Workload images are
 transferred by immutable digest, imported by the signed helper, and run through
 Docker with NVIDIA CDI only when the recipe requests a GPU.
+
+Before accepting a recipe start, configure a persistent Docker-aware host
+firewall as described in
+[Development agent workloads](../runbooks/development-agent-workloads.md#etchosts-and-firewall).
+Published Docker ports bypass ordinary UFW `INPUT` policy. Keep NVIDIA's Docker
+firewall integration enabled and enforce source/original-destination rules in
+`DOCKER-USER`; an inactive or UFW-only policy is a start blocker.
 
 ## Rotation, recovery, and removal
 

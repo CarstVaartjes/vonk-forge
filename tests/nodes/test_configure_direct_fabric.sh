@@ -59,7 +59,11 @@ if grep -Eq 'id_ed25519_shared|Host \*|ssh-copy-id|scp .*id_ed25519' "$script"; 
   exit 1
 fi
 
-grep -Fq 'netplan generate' "$script"
+grep -Fq -- '--apply is retired; use NVIDIA Sync Cluster Assistant' "$script"
+if grep -Eq '^apply\(\)' "$script"; then
+  printf 'script still contains a manual fabric installation path\n' >&2
+  exit 1
+fi
 grep -Fq 'netplan try' "$script"
 grep -Fq 'ip route show default dev' "$script"
 grep -Fq 'ForwardAgent=no' "$script"
