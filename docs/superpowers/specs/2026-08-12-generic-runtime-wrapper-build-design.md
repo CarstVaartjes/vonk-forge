@@ -83,6 +83,19 @@ source commit, so publication is intentionally two-stage:
 The new GHCR package must be public before a GPU node may pull it. A registry
 credential on the NAS, a Spark, in Compose, or in a workload image is forbidden.
 
+## Reproducible Image Assembly
+
+The publisher derives `SOURCE_DATE_EPOCH` from the authorized workload source
+commit and enables BuildKit's `rewrite-timestamp=true` image-export option.
+This normalizes the OCI config, history, index, and copied-file timestamps that
+would otherwise use the workflow runner's wall clock. Repeating an unchanged
+request with the same BuildKit compatibility path must therefore reproduce the
+same OCI digest; digest drift is a publication failure that must be investigated
+before a recipe accepts either result. These controls follow Docker's
+[GitHub Actions reproducible-build guidance](https://docs.docker.com/build/ci/github-actions/reproducible-builds/)
+and the upstream
+[BuildKit reproducibility contract](https://github.com/moby/buildkit/blob/master/docs/build-repro.md).
+
 ## Failure Handling
 
 - A source/context mismatch, stale source commit, mutable base, failed CI gate,
@@ -106,4 +119,8 @@ Physical acceptance must prove anonymous ARM64 image retrieval, rootless
 single-stage build on native Podman 4.9, Docker/NVIDIA runtime import, exact
 model downloads, single-node inference and restart persistence, two-node
 fabric rendezvous, rank failure/route withdrawal/recovery, and complete stop,
-route withdrawal, and uninstall cleanup.
+route withdrawal, and uninstall cleanup. Before either Spark consumes the
+runtime, two independent accepted-`main` publisher runs for the same request
+must each complete successfully and their validated OCI manifest digests must
+match exactly. A mismatch rejects both candidates and returns the publisher to
+root-cause investigation.

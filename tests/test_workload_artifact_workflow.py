@@ -182,6 +182,19 @@ def test_build_publishes_digest_only_with_sbom_and_provenance() -> None:
     assert "sha256sum" in result
 
 
+def test_build_normalizes_digest_affecting_timestamps_to_source_commit() -> None:
+    source = workflow_step("publish-workload-artifact", "Verify exact source context")
+    build = workflow_step(
+        "publish-workload-artifact", "Build digest-only OCI artifact"
+    )
+
+    assert 'git -C workload-source show -s --format=%ct "$SOURCE_COMMIT"' in source
+    assert "source commit timestamp is invalid" in source
+    assert "source_date_epoch=" in source
+    assert "SOURCE_DATE_EPOCH: ${{ steps.source.outputs.source_date_epoch }}" in build
+    assert "rewrite-timestamp=true" in build
+
+
 def test_exact_context_and_declared_base_images_are_verified_before_build() -> None:
     publisher = job("publish-workload-artifact")
     source = workflow_step("publish-workload-artifact", "Verify exact source context")
