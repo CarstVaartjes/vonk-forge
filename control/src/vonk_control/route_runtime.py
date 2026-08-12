@@ -54,6 +54,10 @@ _MARKER_FIELDS = {
     "directory",
     "manifest_sha256",
 }
+
+RECIPE_ROUTE_AUTHORITY_ID = str(
+    uuid.uuid5(uuid.NAMESPACE_URL, "https://vonkforge.ai/local-recipes")
+)
 _ACK_FIELDS = {
     "acknowledged_at",
     "activation_sha256",
