@@ -174,31 +174,32 @@ grep -Fq 'ERROR: unexpected earlyoom state; refusing to change it' \
 run_check invalid_enabled_rc 3 unexpected
 run_check invalid_active_rc 3 unexpected
 
-apply_script="$fixture_dir/disable-earlyoom-apply-test"
-sed 's/if (( EUID != 0 )); then/if false; then/' "$script" > "$apply_script"
-chmod +x "$apply_script"
-
-run_apply() {
+run_apply_refusal() {
   local initial_state="$1"
-  local expected_classification="$2"
-  local expected_actions="$3"
   local state_file="$fixture_dir/$initial_state.state"
   local action_log="$fixture_dir/$initial_state.actions"
   local output_file="$fixture_dir/$initial_state.apply.out"
+  local rc
 
   printf '%s\n' "$initial_state" > "$state_file"
   : > "$action_log"
+  set +e
   PATH="$fixture_dir:$PATH" \
     EARLYOOM_TEST_STATE="$initial_state" \
     EARLYOOM_TEST_STATE_FILE="$state_file" \
     EARLYOOM_TEST_ACTION_LOG="$action_log" \
-    bash "$apply_script" --apply > "$output_file" 2>&1
-  grep -Fq "classification=$expected_classification" "$output_file"
-  test "$(cat "$action_log")" = "$expected_actions"
+    bash "$script" --apply > "$output_file" 2>&1
+  rc=$?
+  set -e
+  test "$rc" -eq 3
+  grep -Fq 'ERROR: refusing to mutate a platform-managed earlyoom service' \
+    "$output_file"
+  test ! -s "$action_log"
+  test "$(cat "$state_file")" = "$initial_state"
 }
 
-run_apply enabled_active disabled $'stop\ndisable'
-run_apply disabled_active disabled $'stop\ndisable'
-run_apply masked_active masked 'stop'
+run_apply_refusal enabled_active
+run_apply_refusal disabled_active
+run_apply_refusal masked_active
 
 printf 'earlyoom safeguard: PASS\n'

@@ -41,6 +41,12 @@ behavior for recovery context. Commands in this archived section require the
 separately named `vonkctl-legacy` launcher; they are not supported by routine
 `vonkctl`.
 
+Its checked adapter Compose files can contain host networking and host IPC;
+host networking and host IPC are legacy runtime exceptions for the historical
+NCCL/RoCE implementation. They are not accepted recipe policy. The supported
+outbound-agent path rejects host networking, host IPC, raw InfiniBand, Docker
+socket access, and added capabilities.
+
 ## Archived local-controller behavior
 
 Developer-machine SSH selection is cross-platform. macOS and native Linux use

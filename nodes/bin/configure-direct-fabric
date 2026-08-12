@@ -18,9 +18,10 @@ usage() {
 Usage: configure-direct-fabric --node node1|node2 --emit-netplan|--check|--apply|--local-postcheck|--postcheck|--rollback
 
 --emit-netplan prints the reviewed persistent Netplan document without changing
-anything. --check and --local-postcheck are read-only. --apply and --rollback
-require root and use netplan try so a console/controller can reject an unsafe
-route change.
+anything. --check, --local-postcheck, and --postcheck are read-only. --apply is
+retired and always refuses because NVIDIA Sync owns fresh fabric configuration.
+--rollback remains available only to remove a plan previously owned by this
+helper, requires root, and uses netplan try.
 USAGE
 }
 
@@ -133,8 +134,18 @@ assert_interfaces_present() {
 }
 
 assert_no_foreign_fabric_plan() {
+    local interface plan
     [[ ! -e "$netplan_directory/99-nvidia-sync-cluster.yaml" ]] || \
         fail 'NVIDIA Sync cluster Netplan exists; do not mix managed and manual fabric plans'
+    for plan in "$netplan_directory"/*.yaml "$netplan_directory"/*.yml; do
+        [[ -e "$plan" && "$plan" != "$managed_netplan" ]] || continue
+        [[ -r "$plan" ]] || fail "cannot inspect foreign Netplan as the current user: $plan"
+        for interface in "${interfaces[@]}"; do
+            if grep -Fq -- "$interface" "$plan"; then
+                fail "foreign Netplan claims fabric interface $interface: $plan"
+            fi
+        done
+    done
     if [[ -e "$managed_netplan" ]] && ! cmp -s "$managed_netplan" <(emit_netplan); then
         fail "existing managed Netplan differs: $managed_netplan"
     fi
@@ -197,45 +208,10 @@ restore_plan_and_runtime() {
     printf '%s\n' 'ROLLBACK: restored previous Netplan and runtime state'
 }
 
-install_candidate_plan() {
-    local candidate
-    candidate="$(mktemp "$netplan_directory/.99-vonk-node-direct-fabric.XXXXXX")"
-    emit_netplan > "$candidate"
-    chmod 0600 "$candidate"
-    install -m 0600 "$candidate" "$managed_netplan"
-    rm -f "$candidate"
-}
-
-apply() {
-    local prior_plan had_prior_plan=false
-    require_root
-    check
-    capture_runtime_state
-    prior_plan="$(mktemp "$netplan_directory/.99-vonk-node-direct-fabric.previous.XXXXXX")"
-    if [[ -e "$managed_netplan" ]]; then
-        cp -p "$managed_netplan" "$prior_plan"
-        had_prior_plan=true
-    fi
-    install_candidate_plan
-
-    if ! netplan generate; then
-        restore_plan_without_runtime_change "$prior_plan" "$had_prior_plan"
-        rm -f "$prior_plan"
-        fail 'netplan generate failed; candidate was removed'
-    fi
-    printf '%s\n' 'ACTION REQUIRED: review netplan try and accept only if management remains reachable.'
-    if ! netplan try; then
-        restore_plan_and_runtime "$prior_plan" "$had_prior_plan"
-        rm -f "$prior_plan"
-        fail 'netplan try was rejected or failed; candidate was removed'
-    fi
-    if ! management_route_is_preserved || ! no_fabric_default_routes; then
-        restore_plan_and_runtime "$prior_plan" "$had_prior_plan"
-        rm -f "$prior_plan"
-        fail 'candidate changed routing unexpectedly; candidate was removed'
-    fi
-    rm -f "$prior_plan"
-    printf 'PASS: Netplan accepted without a fabric default route\n'
+retired_apply() {
+    printf '%s\n' \
+        'ERROR: --apply is retired; use NVIDIA Sync Cluster Assistant for fabric configuration' >&2
+    exit 3
 }
 
 gid_for_ipv4() {
@@ -332,7 +308,7 @@ rollback() {
 case "$action" in
     --emit-netplan) emit_netplan ;;
     --check) check ;;
-    --apply) apply ;;
+    --apply) retired_apply ;;
     --local-postcheck) local_postcheck ;;
     --postcheck) postcheck ;;
     --rollback) rollback ;;

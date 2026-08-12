@@ -778,6 +778,49 @@ def test_multinode_start_is_bound_to_authenticated_fabric_rendezvous(
         }
         assert {child.payload["master_port"] for child in children} == {29500}
         assert {child.payload["world_size"] for child in children} == {2}
+        assert [child.payload["endpoint_address"] for child in children] == [
+            "192.168.1.211",
+            "192.168.100.3",
+        ]
+
+
+def test_multinode_worker_endpoint_is_never_published_on_management_lan(
+    tmp_path: Path,
+) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2
+    )
+    install_plan = service.preview_install(mapping_id, build_id)
+    install = service.install(
+        install_plan,
+        plan_digest=install_plan.plan_digest,
+        actor="admin",
+        request_id="a" * 35 + "1",
+    )
+    for node in nodes:
+        service.record_node_result(
+            install.id, node, succeeded=True, evidence={"installed_bytes": 120}
+        )
+
+    run_plan = service.preview_run(install.owner_id)
+    start = service.start(
+        run_plan,
+        plan_digest=run_plan.plan_digest,
+        alias="qwen-gang",
+        actor="admin",
+        request_id="a" * 35 + "2",
+    )
+
+    with sessions() as session:
+        children = {
+            child.node_id: child
+            for child in session.scalars(
+                select(AgentOperation).where(AgentOperation.parent_job_id == start.id)
+            )
+        }
+    assert children[nodes[0]].payload["endpoint_address"] == "192.168.1.211"
+    assert children[nodes[1]].payload["endpoint_address"] == "192.168.100.3"
+    assert children[nodes[1]].payload["endpoint_address"] != "192.168.1.212"
 
 
 def test_failed_multinode_start_queues_idempotent_stop_for_every_rank(

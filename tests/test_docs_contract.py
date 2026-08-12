@@ -21,6 +21,10 @@ DEV_WORKLOADS_DESIGN = (
 MODEL_SWITCHING = ROOT / "docs/runbooks/model-switching.md"
 MODEL_CAPACITY = ROOT / "docs/model-capacity-overview.md"
 DEVELOPMENT_MODEL_SMOKE = ROOT / "docs/audits/development-model-smoke.md"
+FRESH_DEVELOPMENT_INSTALL = ROOT / "docs/runbooks/fresh-development-install.md"
+PLATFORM_UPDATE = ROOT / "docs/runbooks/platform-update.md"
+RUNTIME_RELEASE = ROOT / "docs/runbooks/runtime-release.md"
+VONKCTL = ROOT / "docs/runbooks/vonkctl.md"
 
 GENERIC_ONBOARDING_DOCS = (
     README,
@@ -140,6 +144,34 @@ def test_agent_install_documents_explicit_agent_ingress_hosts_and_firewall() -> 
     assert "https://<ENROLLMENT_HOSTNAME>:8443/" in text
     assert "https://<CONTROLLER_HOSTNAME>:8443/" in text
     assert "reject all other sources" in normalized
+
+
+def test_spark_workload_firewall_is_docker_aware_and_fresh_install_blocking() -> None:
+    workloads = _normalized_text(DEV_WORKLOADS)
+    install = _normalized_text(INSTALL_AGENT)
+    fresh = _normalized_text(FRESH_DEVELOPMENT_INSTALL)
+
+    assert "Docker diverts published traffic before ordinary UFW `INPUT` rules" in workloads
+    assert "`DOCKER-USER`" in workloads
+    assert "`--ctorigdst`" in workloads
+    assert "`--ctorigdstport`" in workloads
+    assert "vonk-forge-managed-v1" in workloads
+    assert "refusing a foreign chain" in workloads
+    assert "non-entrypoint rank publishes its health endpoint only" in workloads
+    assert "Published Docker ports bypass ordinary UFW `INPUT` policy" in install
+    assert "persistent Docker-aware `DOCKER-USER` policy" in fresh
+
+
+def test_fresh_spark_install_does_not_claim_nvidia_platform_ownership() -> None:
+    fresh = _normalized_text(FRESH_DEVELOPMENT_INSTALL)
+    platform = _normalized_text(PLATFORM_UPDATE)
+    runtime_release = _normalized_text(RUNTIME_RELEASE)
+    legacy = _normalized_text(VONKCTL)
+
+    assert "NVIDIA Sync owns supported cluster networking and node-to-node SSH" in fresh
+    assert "must not stop, disable, mask, or install `earlyoom`" in platform
+    assert "archived SSH-controller compatibility tool" in runtime_release
+    assert "host networking and host IPC are legacy runtime exceptions" in legacy
 
 
 def test_onboarding_preserves_the_one_use_grant_pair_approve_pair_sequence() -> None:

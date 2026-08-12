@@ -195,10 +195,11 @@ sudo docker pull \
   nvcr.io/nvidia/cuda:13.0.1-devel-ubuntu24.04@sha256:7d2f6a8c2071d911524f95061a0db363e24d27aa51ec831fcccf9e76eb72bc92
 ```
 
-The validator still intentionally
-runs with sudo even though `carst` now belongs to the Docker group: it also
-reads the root-only kernel log and validates privileged storage/filesystem
-state, failing closed on read errors or storage/filesystem errors.
+The validator intentionally runs with sudo: it reads the root-only kernel log
+and validates privileged storage/filesystem state, failing closed on read
+errors or storage/filesystem errors. Do not rely on Docker-group membership;
+remove legacy human membership after the old SSH controller is retired and use
+`sudo docker` for explicit platform probes.
 
 ```bash
 scp nodes/bin/validate-platform-update-root \
@@ -330,89 +331,26 @@ to `tpm2_getcap` or fwupd on either running node. Exact local TPM interrogation
 was therefore unavailable; both Dashboards independently reported the systems
 current with no available update.
 
-## Disable the earlyoom userspace killer
+## Historical earlyoom compatibility gate
 
-DeepSeek uses most of each GPU node's unified memory. An independently acting
-`earlyoom` service could kill a distributed worker before the runtime can
-preserve useful diagnostics, so it must not be active or enabled. This check
-is deliberately separate from swap and memory-capacity admission controls.
+DeepSeek uses most of each Spark's unified memory, so an independently acting
+userspace OOM killer is incompatible with the measured workload envelope.
+Vonk treats this as a read-only admission gate, not as ownership of an Ubuntu
+or NVIDIA service. Current automation must not stop, disable, mask, or install
+`earlyoom`.
 
-The live pre-change probe on 2026-08-01 found `earlyoom` absent on both nodes:
-`systemctl is-enabled` returned `not-found` with exit code 4,
-`systemctl is-active` returned `inactive` with exit code 4, `LoadState` was
-`not-found`, and `dpkg-query` returned exit code 1. The exact evidence is in
-`inventory/reports/earlyoom.json`. Absence is an accepted safe state and is
-not rewritten as `disabled`; the package must not be installed merely to
-disable it.
+`nodes/bin/disable-earlyoom --check` retains the historical exact-state
+classifier. Absence, or an installed but inactive and non-enabled service, is
+accepted. An active/enabled service, a static unit, or a package/unit
+disagreement blocks workload admission. Its legacy `--apply` spelling now
+refuses the mutation. If a future DGX OS release introduces or enables such a
+service, preserve the node state, consult that release's NVIDIA guidance, and
+resolve the policy deliberately before retrying admission.
 
-Use the audited script to classify the full state. It treats these outcomes
-as safe:
-
-- absent: unit `not-found`, package absent, service inactive;
-- disabled: loaded package, `disabled` and `inactive` with their documented
-  non-zero `systemctl` status codes;
-- masked: `masked` or `masked-runtime` and inactive.
-
-A static unit, a package/unit disagreement, or any other combination is an
-unexpected state and fails without modification. An installed active or
-enabled service requires `--apply`, which stops before disabling and then
-re-reads every state. The script is idempotent.
-
-Stage and validate the worker first, comparing its checksum with the local
-artifact:
-
-```bash
-scp nodes/bin/disable-earlyoom vonk-node-2:/tmp/disable-earlyoom
-ssh -o BatchMode=yes vonk-node-2 \
-  'chmod 0700 /tmp/disable-earlyoom && sha256sum /tmp/disable-earlyoom'
-shasum -a 256 nodes/bin/disable-earlyoom
-```
-
-After the hashes match, run this one audited command in an interactive worker
-session:
-
-```bash
-sudo bash /tmp/disable-earlyoom --apply
-```
-
-It must exit zero and print a `PASS` line. Record a fresh after-state with
-exact exit codes before staging and repeating the same procedure on
-`vonk-node-1`. Never claim an after-state from the pre-change observation.
-
-If an installed service was changed and the decision is explicitly reversed,
-restore its recorded prior state rather than using one generic rollback:
-
-```bash
-# Prior state: enabled and running
-sudo systemctl unmask earlyoom && sudo systemctl enable --now earlyoom
-
-# Prior state: disabled but running
-sudo systemctl start earlyoom
-
-# Prior state: masked but running
-sudo systemctl unmask earlyoom && sudo systemctl start earlyoom && \
-  sudo systemctl mask earlyoom
-```
-
-Do not run these commands for the observed absent state; there is nothing to
-roll back. After both nodes pass, remove `/tmp/disable-earlyoom` from each
-node and mark the evidence document complete.
-
-### Completed earlyoom record
-
-The audited apply path ran on GPU node 2 first and GPU node 1 second. Both executions
-classified the service as `absent` and printed `PASS: earlyoom is absent; no
-change required`; both commands exited zero. No package, unit, or host
-configuration was changed. The exact interactive execution times were not
-recorded and are left null rather than inferred.
-
-Independent post-action probes at `2026-08-01T21:42:43Z` on GPU node 2 and
-`2026-08-01T21:42:44Z` on GPU node 1 reproduced the before state and exact exit
-codes: `LoadState=not-found`/0, `is-enabled=not-found`/4,
-`is-active=inactive`/4, and absent package/1. The worker and head therefore
-both meet the DeepSeek earlyoom gate without a mutation. The staged script
-used SHA-256
-`e9a16bce353cf85600b48dc4641db64635035c67328b8f10a2cb9d06d377657f`.
+The 2026-08-01 and 2026-08-12 live probes found `earlyoom` absent and
+`systemd-oomd` inactive on both nodes. No package, unit, or host configuration
+was changed. The older evidence remains in `inventory/reports/earlyoom.json`
+as a historical record, not a procedure to replay.
 
 ## NAS-to-GPU node platform skew
 

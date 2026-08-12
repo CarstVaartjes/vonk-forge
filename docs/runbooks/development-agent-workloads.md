@@ -149,6 +149,87 @@ loopback-only. Verify port 8443 is reachable from each GPU node, enrollment TLS
 chains to `controller-ca`, and the post-enrollment hostname rejects clients
 without an accepted certificate.
 
+This NAS rule does not protect ports published by Docker on a Spark. Docker
+diverts published traffic before ordinary UFW `INPUT` rules, so an active UFW
+policy alone is not acceptance evidence. Keep Docker's own firewall management
+enabled and put site policy in the `DOCKER-USER` chain (or an equivalent
+Docker-aware persistent firewall manager). Do not set Docker's `iptables` or
+`ip6tables` daemon options to false and do not replace NVIDIA's daemon
+configuration.
+
+Before any real workload starts, install and persist these exact host rules on
+each possible endpoint owner:
+
+- allow only `<NAS_MANAGEMENT_IP>` to the node's original management
+  destination and the recipe endpoint port, then drop every other source to
+  that original destination and port;
+- on rank 0, allow only the declared peer fabric address to the original local
+  fabric destination and TCP rendezvous port `29500`, then drop every other
+  source to that destination and port;
+- drop externally forwarded traffic to a non-entrypoint rank's original fabric
+  destination and recipe endpoint port. The local agent performs readiness on
+  the host and does not require a remote client allowance.
+
+Rules in `DOCKER-USER` see packets after destination NAT. Match the original
+published address and port with conntrack (`--ctorigdst` and
+`--ctorigdstport`), not the container's changing bridge address. Include an
+`ESTABLISHED,RELATED` return before the new-flow rules and a final return so
+unrelated Docker workloads are unaffected. After every Docker restart or host
+reboot, verify the dedicated chain is still the first site-policy jump from
+`DOCKER-USER` before permitting a workload start.
+
+For the current IPv4 development recipe, the following is the canonical rule
+shape. Run it only while no Vonk workload is active, once per node with that
+node's values, then persist the resulting chain through the site's existing
+firewall manager. The marker check makes reruns idempotent while refusing a
+foreign chain with the same name. Do not paste unvalidated user input into
+these variables.
+
+```bash
+set -euo pipefail
+nas_management_ip='<NAS_MANAGEMENT_IP>'
+node_management_ip='<THIS_NODE_MANAGEMENT_IP>'
+node_fabric_ip='<THIS_NODE_SELECTED_FABRIC_IP>'
+peer_fabric_ip='<PEER_SELECTED_FABRIC_IP>'
+recipe_endpoint_port=8000
+rendezvous_port=29500
+
+sudo iptables -w -n -L DOCKER-USER >/dev/null
+if sudo iptables -w -n -L VONK-FORGE >/dev/null 2>&1; then
+  sudo iptables -w -C VONK-FORGE -m comment \
+    --comment vonk-forge-managed-v1 -j RETURN
+else
+  sudo iptables -w -N VONK-FORGE
+fi
+sudo iptables -w -F VONK-FORGE
+while sudo iptables -w -D DOCKER-USER -j VONK-FORGE 2>/dev/null; do :; done
+sudo iptables -w -I DOCKER-USER 1 -j VONK-FORGE
+sudo iptables -w -A VONK-FORGE -m conntrack \
+  --ctstate ESTABLISHED,RELATED -j RETURN
+sudo iptables -w -A VONK-FORGE -p tcp -s "$nas_management_ip" \
+  -m conntrack --ctorigdst "$node_management_ip" \
+  --ctorigdstport "$recipe_endpoint_port" -j RETURN
+sudo iptables -w -A VONK-FORGE -p tcp \
+  -m conntrack --ctorigdst "$node_management_ip" \
+  --ctorigdstport "$recipe_endpoint_port" -j DROP
+sudo iptables -w -A VONK-FORGE -p tcp \
+  -m conntrack --ctorigdst "$node_fabric_ip" \
+  --ctorigdstport "$recipe_endpoint_port" -j DROP
+sudo iptables -w -A VONK-FORGE -p tcp -s "$peer_fabric_ip" \
+  -m conntrack --ctorigdst "$node_fabric_ip" \
+  --ctorigdstport "$rendezvous_port" -j RETURN
+sudo iptables -w -A VONK-FORGE -p tcp \
+  -m conntrack --ctorigdst "$node_fabric_ip" \
+  --ctorigdstport "$rendezvous_port" -j DROP
+sudo iptables -w -A VONK-FORGE -m comment \
+  --comment vonk-forge-managed-v1 -j RETURN
+sudo iptables -w -S DOCKER-USER
+sudo iptables -w -S VONK-FORGE
+```
+
+If the site uses IPv6 publications, define and test an equivalent `ip6tables`
+policy before enabling them. Do not infer that the IPv4 chain protects IPv6.
+
 ## Package installation and pairing
 
 On each GPU node, follow the signed APT steps in
@@ -318,7 +399,10 @@ remains available while its DS4 process runs so restarting rank 1 repeats the
 same pre-launch exchange. Only rank 0 owns the routed inference endpoint.
 
 Accepted workloads use the Spark-provided Docker/NVIDIA runtime on an isolated
-Docker bridge. Rank 1 reaches the exact
+Docker bridge. Only the endpoint-owning rank publishes its model endpoint on
+its management address for the NAS gateway. Every non-entrypoint rank publishes
+its health endpoint only on its controller-accepted direct-fabric address, so
+it is never exposed on the management LAN. Rank 1 reaches the exact
 `VONK_MASTER_ADDR:VONK_MASTER_PORT` through host routing/SNAT; it does not bind
 the host's `VONK_LOCAL_ADDR` inside its container namespace.
 `VONK_LOCAL_ADDR` remains the bounded controller-supplied rank identity carried
@@ -327,7 +411,7 @@ publication, host routing, and direct-fabric-only firewall policy enforce the
 physical path. Do not treat the peer address observed inside the Docker bridge
 as proof of a host fabric source address.
 
-Before starting this phase, configure the GPU-node host firewall for the
+Before starting this phase, verify the Docker-aware GPU-node host firewall for the
 current reserved rendezvous TCP port `29500`. The only allowed flow is
 `<SPARK_2_FABRIC_IP>` to `<SPARK_1_FABRIC_IP>:29500`. Reject that port from
 every other source and on every management or public interface. The rank-0
@@ -336,13 +420,15 @@ agent publication must be the address-specific mapping
 `29500:29500`, `0.0.0.0:29500:29500`, or a management-address mapping. A broad
 listener or firewall rule is an acceptance blocker, not a temporary fallback.
 
-Retain a redacted copy of the effective host-firewall policy and perform one
+Retain a redacted copy of `iptables -S DOCKER-USER` and the dedicated site
+chain, and perform one
 positive probe from rank 1 over its direct-fabric address plus negative probes
 from the management path and any public path present at the site. The positive
 probe must reach rank 0 only after its coordinator starts; every negative probe
-must be refused or time out. Use the site's firewall tooling without disabling
-the firewall, adding a wildcard rule, or exposing the rendezvous port on the
-NAS.
+must be refused or time out. Also prove the non-entrypoint model port is absent
+from its management address. Use the site's persistent firewall tooling
+without disabling Docker's firewall management, adding a wildcard rule, or
+exposing the rendezvous port on the NAS.
 
 Start both ranks and pause after inference through the sole entrypoint:
 

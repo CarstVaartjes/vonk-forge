@@ -141,6 +141,31 @@ def _evidence() -> dict[str, object]:
     }
 
 
+def test_checked_recipe_memory_envelope_matches_healthy_spark_qualification() -> None:
+    recipe = json.loads(
+        (ROOT / "config/recipes/development/model-smoke.json").read_text()
+    )
+    topology = json.loads(
+        (ROOT / "config/recipes/development/model-smoke-multinode.json").read_text()
+    )
+    global_memory_floor = 4_000_000_000
+    required = set()
+    for profile in recipe["deployment_profiles"]:
+        for role in profile["roles"]:
+            memory = role["resources"]["memory"]
+            required.add(
+                max(
+                    memory["startup_peak_bytes"],
+                    memory["steady_state_bytes"]
+                    + memory["runtime_growth_bytes"],
+                )
+                + memory["system_reserve_bytes"]
+                + global_memory_floor
+            )
+
+    assert required == {topology["minimum_memory_available_bytes"]}
+
+
 def _write(path: Path, value: object) -> Path:
     path.write_text(json.dumps(value, sort_keys=True) + "\n", encoding="utf-8")
     return path

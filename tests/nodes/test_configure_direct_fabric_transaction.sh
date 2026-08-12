@@ -55,7 +55,11 @@ case "$1" in
   generate) exit "${NETPLAN_GENERATE_RC:-0}" ;;
   try)
     if [[ "${NETPLAN_TRY_RC:-0}" != 0 ]]; then exit "$NETPLAN_TRY_RC"; fi
-    printf 'configured\n' > "$DIRECT_FABRIC_TEST_STATE"
+    if [[ -e "$DIRECT_FABRIC_NETPLAN_DIRECTORY/99-vonk-node-direct-fabric.yaml" ]]; then
+      printf 'configured\n' > "$DIRECT_FABRIC_TEST_STATE"
+    else
+      printf 'baseline\n' > "$DIRECT_FABRIC_TEST_STATE"
+    fi
     ;;
   apply)
     if [[ -e "$DIRECT_FABRIC_NETPLAN_DIRECTORY/99-vonk-node-direct-fabric.yaml" ]]; then
@@ -81,25 +85,17 @@ run_script() {
 }
 
 managed_plan="$netplan_dir/99-vonk-node-direct-fabric.yaml"
-if NETPLAN_GENERATE_RC=7 run_script --apply > "$fixture_dir/generate-fail.out" 2>&1; then
-  printf 'apply accepted a netplan generate failure\n' >&2
+if run_script --apply > "$fixture_dir/apply-retired.out" 2>&1; then
+  printf 'retired manual apply path was accepted\n' >&2
   exit 1
 fi
 test ! -e "$managed_plan"
 test "$(cat "$state_file")" = baseline
-grep -Fq 'restored previous Netplan and runtime state' "$fixture_dir/generate-fail.out"
+grep -Fq -- '--apply is retired; use NVIDIA Sync Cluster Assistant' \
+  "$fixture_dir/apply-retired.out"
 
-if NETPLAN_TRY_RC=8 run_script --apply > "$fixture_dir/try-fail.out" 2>&1; then
-  printf 'apply accepted a rejected netplan try\n' >&2
-  exit 1
-fi
-test ! -e "$managed_plan"
-test "$(cat "$state_file")" = baseline
-grep -Fq 'restored previous Netplan and runtime state' "$fixture_dir/try-fail.out"
-
-run_script --apply > "$fixture_dir/apply.out"
-test -f "$managed_plan"
-grep -Fq 'PASS: Netplan accepted without a fabric default route' "$fixture_dir/apply.out"
+run_script --emit-netplan > "$managed_plan"
+printf 'configured\n' > "$state_file"
 run_script --local-postcheck > "$fixture_dir/local.out"
 grep -Fq 'PASS: local fabric validation passed for node2' "$fixture_dir/local.out"
 
@@ -111,6 +107,14 @@ test -f "$managed_plan"
 test "$(cat "$state_file")" = configured
 grep -Fq 'restored previous Netplan and runtime state' "$fixture_dir/rollback-try-fail.out"
 
+run_script --rollback > "$fixture_dir/rollback.out"
+test ! -e "$managed_plan"
+test "$(cat "$state_file")" = baseline
+grep -Fq 'PASS: manual fabric plan removed' "$fixture_dir/rollback.out"
+
+run_script --emit-netplan > "$managed_plan"
+printf 'configured\n' > "$state_file"
+
 printf 'wrong-interface\n' > "$sys_ib/rocep1s0f1/ports/1/gid_attrs/ndevs/3"
 if run_script --local-postcheck > "$fixture_dir/gid-binding.out" 2>&1; then
   printf 'local validation accepted a GID bound to the wrong netdev\n' >&2
@@ -118,5 +122,19 @@ if run_script --local-postcheck > "$fixture_dir/gid-binding.out" 2>&1; then
 fi
 grep -Fq 'no RoCE v2 GID maps rocep1s0f1/enp1s0f1np1 to 192.168.100.11' \
   "$fixture_dir/gid-binding.out"
+
+cat > "$netplan_dir/99-dgx-spark-direct-fabric.yaml" <<'EOF'
+network:
+  version: 2
+  ethernets:
+    enp1s0f1np1:
+      addresses: [192.168.100.11/24]
+EOF
+if run_script --check > "$fixture_dir/foreign-owner.out" 2>&1; then
+  printf 'preflight accepted a foreign Netplan owner for a fabric interface\n' >&2
+  exit 1
+fi
+grep -Fq 'foreign Netplan claims fabric interface enp1s0f1np1' \
+  "$fixture_dir/foreign-owner.out"
 
 printf 'direct fabric transaction and binding safeguards: PASS\n'
