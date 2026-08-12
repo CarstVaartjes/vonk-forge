@@ -1,0 +1,19 @@
+{
+  "architecture": "linux/arm64",
+  "attestations": {
+    "provenance": true,
+    "sbom": true
+  },
+  "base_images": [
+    "docker.io/library/busybox@sha256:fc6dddc4c44b1bfe37f41cae8e67d1693828e8f42a91862816d7953e2c9d3f23",
+    "ghcr.io/carstvaartjes/spark-ds4@sha256:084d9a9ffa47431842c5dec84de97b058034dec0535b2a563bc5db78c9e14615"
+  ],
+  "context": "adapters/deepseek/ds4",
+  "context_digest": "sha256:8ca70004e787d609e12dd3422f534fb942290ce39ee83a97e0fed5fa3cbc8649",
+  "dockerfile": "adapters/deepseek/ds4/Dockerfile.workload",
+  "kind": "workload-artifact-build-request",
+  "output_repository": "ghcr.io/carstvaartjes/vonk-forge-workloads",
+  "schema_version": 1,
+  "source_commit": "7041fcf7250dc8e8c7718e2d476b93b4dab2cfc9",
+  "target": "runtime"
+}
