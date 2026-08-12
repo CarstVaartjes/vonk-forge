@@ -22,6 +22,20 @@ fn agent_accepts_a_pinned_non_root_dockerfile() {
 }
 
 #[test]
+fn agent_accepts_an_absolute_copy_source_from_a_named_stage() {
+    let report = inspect_build_source(
+        &files(&format!(
+            "FROM docker.io/library/busybox@sha256:{} AS tools\nFROM ghcr.io/vonkforge/runtime@sha256:{}\nCOPY --from=tools /bin/busybox /opt/vonk/busybox\nUSER 10001:10001\n",
+            "a".repeat(64),
+            "b".repeat(64),
+        )),
+        "Dockerfile",
+    );
+
+    assert!(report.passed, "{:?}", report.findings);
+}
+
+#[test]
 fn agent_rejects_dockerfile_escape_and_build_privilege() {
     for (dockerfile, code) in [
         (
@@ -49,6 +63,13 @@ fn agent_rejects_dockerfile_escape_and_build_privilege() {
         (
             &format!(
                 "FROM ubuntu@sha256:{}\nCOPY ../secret /x\nUSER 10001\n",
+                "a".repeat(64)
+            ),
+            "dockerfile.copy_escape",
+        ),
+        (
+            &format!(
+                "FROM ubuntu@sha256:{}\nCOPY /etc/passwd /x\nUSER 10001\n",
                 "a".repeat(64)
             ),
             "dockerfile.copy_escape",
