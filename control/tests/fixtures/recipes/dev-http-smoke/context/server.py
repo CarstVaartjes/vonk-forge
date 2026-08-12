@@ -32,6 +32,16 @@ EXPECTED_RESPONSE = {
 }
 
 
+def is_expected_request(payload: object) -> bool:
+    if not isinstance(payload, dict) or not set(payload) <= set(EXPECTED_REQUEST):
+        return False
+    return (
+        payload.get("model") == EXPECTED_REQUEST["model"]
+        and payload.get("messages") == EXPECTED_REQUEST["messages"]
+        and payload.get("stream", False) is False
+    )
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "dev-http-smoke/1.0"
 
@@ -47,7 +57,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         length = int(self.headers.get("Content-Length", "0"))
         payload = json.loads(self.rfile.read(length) or b"{}")
-        if payload != EXPECTED_REQUEST:
+        if not is_expected_request(payload):
             self._write_json(
                 400,
                 {

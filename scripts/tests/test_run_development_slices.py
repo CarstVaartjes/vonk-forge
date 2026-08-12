@@ -44,7 +44,7 @@ NODE = "spk_0123456789abcdef0123456789abcdef"
 NODE_2 = "spk_fedcba9876543210fedcba9876543210"
 ADMIN_TOKEN = "admin-secret-marker"
 INFERENCE_TOKEN = "inference-secret-marker"
-RECIPE_DIGEST = "f0b615191dd59e5baf6d988569e41173a48521394f4511b9f3f88ec44abfb0c9"
+RECIPE_DIGEST = "585b83a971181a32e3605463ce7f7f3eb5c94ac4658b207da1d4ef7de378a947"
 
 
 class SliceServer(ThreadingHTTPServer):
@@ -849,9 +849,7 @@ def test_runner_revises_an_existing_same_slug_recipe_with_different_content(
     server.recipe_created = True
     server.recipe_digest = "9" * 64
 
-    result, evidence_path = _run(
-        tmp_path, server, "--stop-after", "recipe-resolved"
-    )
+    result, evidence_path = _run(tmp_path, server, "--stop-after", "recipe-resolved")
 
     assert result.returncode == 0, result.stderr
     evidence = json.loads(evidence_path.read_text())

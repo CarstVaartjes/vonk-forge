@@ -23,10 +23,10 @@ FIXTURE_ROOT = Path(__file__).parent / "fixtures/recipes/dev-http-smoke"
 CONTEXT_ROOT = FIXTURE_ROOT / "context"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 EXPECTED_SOURCE_SHA256 = (
-    "4220553fbdd61b6bea80e593c9085686862503a9df904e6fbb16d695d26776f5"
+    "3bcb427bb551833bfece49d1724935d7ddf5e93bd802aa74a3e806023da39caf"
 )
 EXPECTED_RECIPE_SHA256 = (
-    "f0b615191dd59e5baf6d988569e41173a48521394f4511b9f3f88ec44abfb0c9"
+    "585b83a971181a32e3605463ce7f7f3eb5c94ac4658b207da1d4ef7de378a947"
 )
 EXPECTED_ARTIFACT_SOURCE = (
     "https://raw.githubusercontent.com/CarstVaartjes/vonk-forge/"
@@ -37,7 +37,7 @@ EXPECTED_ARTIFACT_SHA256 = (
     "8f9e3902c909d7698aac45b2d9195c4baea090ee35b11705f05ea10c856bd230"
 )
 EXPECTED_ARCHIVE_BYTES = 10240
-EXPECTED_TOTAL_BYTES = 2504
+EXPECTED_TOTAL_BYTES = 2860
 MEASURED_IMAGE_BYTES = 150_054_446
 MEASURED_DOCKER_ARCHIVE_BYTES = 154_805_248
 BUILD_OUTPUT_LIMIT_BYTES = 256 * 1024 * 1024
@@ -48,7 +48,7 @@ ROOTLESS_PODMAN_PHYSICAL_GATE = (
 )
 EXPECTED_FILE_SHA256 = {
     "Dockerfile": "701a82b82b5056c17eb3dcf1e6c4d281e359ad771bc29a84c94715327e8f8257",
-    "server.py": "c0e5517d35e8e19328e925210120d2374d751df6958a10ab67aaa9adf55d8c50",
+    "server.py": "9e085a1b4802b07b218d9a08e96e9674c1c7811b03091b59c609f97231c9800d",
 }
 EXPECTED_BASE_IMAGE = (
     "python:3.12.11-slim-bookworm@sha256:"
@@ -170,7 +170,9 @@ def running_fixture_server() -> Iterator[int]:
                 continue
             if status == 200 and isinstance(payload, dict):
                 break
-            last_error = AssertionError(f"unexpected health response: {status} {payload!r}")
+            last_error = AssertionError(
+                f"unexpected health response: {status} {payload!r}"
+            )
             time.sleep(0.1)
         else:
             stdout, stderr = process.communicate(timeout=1)
@@ -216,7 +218,9 @@ def test_dev_http_smoke_bundle_policy_is_exact_and_bounded() -> None:
     lowered = dockerfile.lower()
 
     assert [item.path for item in bundle.manifest.files] == ["Dockerfile", "server.py"]
-    assert {item.path: item.sha256 for item in bundle.manifest.files} == EXPECTED_FILE_SHA256
+    assert {
+        item.path: item.sha256 for item in bundle.manifest.files
+    } == EXPECTED_FILE_SHA256
     assert dockerfile.splitlines()[0] == f"FROM {EXPECTED_BASE_IMAGE}"
     assert final_instruction == "USER 10001:10001"
     assert "RUN " not in dockerfile
@@ -265,6 +269,55 @@ def test_dev_http_smoke_server_matches_expected_health_and_inference() -> None:
         )
         assert status == 200
         assert response == expected["response"]
+
+
+def test_dev_http_smoke_server_accepts_openai_default_non_streaming_request() -> None:
+    expected = fixture_expected()
+    request = dict(expected["request"])
+    request.pop("stream")
+
+    with running_fixture_server() as port:
+        status, response = _request_json(
+            "127.0.0.2",
+            port,
+            "POST",
+            "/v1/chat/completions",
+            request,
+        )
+
+    assert status == 200
+    assert response == expected["response"]
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"stream": True},
+        {"unexpected": "field"},
+    ],
+)
+def test_dev_http_smoke_server_rejects_noncanonical_requests(
+    override: dict[str, object],
+) -> None:
+    request = dict(fixture_expected()["request"])
+    request.update(override)
+
+    with running_fixture_server() as port:
+        status, response = _request_json(
+            "127.0.0.2",
+            port,
+            "POST",
+            "/v1/chat/completions",
+            request,
+        )
+
+    assert status == 400
+    assert response == {
+        "error": {
+            "message": "unexpected request",
+            "type": "invalid_request_error",
+        }
+    }
 
 
 def test_dev_http_smoke_build_import_and_host_published_port_with_rootless_podman(
