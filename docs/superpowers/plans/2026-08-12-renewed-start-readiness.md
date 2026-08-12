@@ -118,6 +118,7 @@ git commit -m "fix: honor renewed leases during workload start"
 - Consumes: run status `state=stopped` and `route_state=withdrawn` from `GET /api/v1/recipes/runs/{run_id}`.
 - Produces: one replacement `POST /api/v1/recipes/runs` using `request_key("running", "start-retry")` and a fresh preview digest.
 - Produces: evidence fields `failed_run_id` and `failed_run_operation_id` when replacement recovery is used; existing `run_id` and `run_operation_id` identify the successful replacement.
+- Produces: restart checkpoints `<purpose>_plan_digest`, `<purpose>_operation_id`, and `<purpose>_run_id` for purposes `start` and `start_retry`.
 
 - [ ] **Step 1: Write the failing successful-recovery test**
 
@@ -146,6 +147,11 @@ run until it is exactly stopped/withdrawn, submit one replacement with purpose
 `start-retry`, and require normal successful node evidence. Record the original
 failed identifiers only after the replacement succeeds.
 
+Before each creation, atomically checkpoint its exact preview digest. After the
+response, atomically checkpoint its operation and owner run IDs. If those IDs
+already exist on resume, validate their canonical UUIDs and exact digest/owner
+association, then poll the operation directly without previewing or creating.
+
 - [ ] **Step 4: Run the recovery test and verify GREEN**
 
 Run the command from Step 2. Expected: PASS.
@@ -167,22 +173,28 @@ uv run --project control --frozen pytest scripts/tests/test_run_development_slic
 Expected before the final guard: FAIL if more than one replacement is allowed.
 Expected after the minimal guard: PASS.
 
-- [ ] **Step 7: Verify the script suite and formatting**
+- [ ] **Step 7: Write the failing multi-invocation restart test**
+
+Add a three-invocation regression that interrupts operation polling after the
+initial and replacement responses. Change the fake preview digest before each
+resume and assert that only two previews and two creations occur in total.
+
+- [ ] **Step 8: Verify the script suite and formatting**
 
 Run:
 
 ```bash
 uv run --project control --frozen pytest scripts/tests/test_run_development_slices.py -q
-uv run --project control --frozen ruff check scripts/run-development-slices scripts/tests/test_run_development_slices.py
-uv run --project control --frozen ruff format --check scripts/run-development-slices scripts/tests/test_run_development_slices.py
+uvx --from ruff==0.16.1 ruff check --force-exclude scripts/run-development-slices scripts/tests/test_run_development_slices.py
+uvx --from ruff==0.16.1 ruff format --check scripts/run-development-slices scripts/tests/test_run_development_slices.py
 ```
 
 Expected: all commands exit 0.
 
-- [ ] **Step 8: Commit the acceptance recovery**
+- [ ] **Step 9: Commit the acceptance recovery**
 
 ```bash
-git add scripts/run-development-slices scripts/tests/test_run_development_slices.py
+git add docs/superpowers/specs/2026-08-12-renewed-start-readiness-design.md docs/superpowers/plans/2026-08-12-renewed-start-readiness.md scripts/run-development-slices scripts/tests/test_run_development_slices.py
 git commit -m "fix: recover cleaned development starts once"
 ```
 

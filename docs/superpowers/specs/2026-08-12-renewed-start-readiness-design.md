@@ -78,8 +78,16 @@ the executor interface without changing their behavior.
 ## Acceptance Recovery Design
 
 The development slice runner continues to submit the initial run with its
-existing deterministic request key. If that operation is terminally failed,
-waiting-for-operator, or expired, the runner:
+existing deterministic request key. Run-plan previews contain volatile
+admission and inventory evidence, so the runner atomically checkpoints each
+purpose's exact plan digest before creation. After a creation response it
+atomically checkpoints the returned operation and run IDs. A resumed runner
+with those IDs polls the operation directly and never re-previews or resubmits
+that purpose. A runner interrupted after checkpointing the digest but before
+receiving IDs replays that exact digest and deterministic request key.
+
+If the initial operation is terminally failed, waiting-for-operator, or
+expired, the runner:
 
 1. polls the failed run until the controller reports `state=stopped` and
    `route_state=withdrawn`;
@@ -89,6 +97,11 @@ waiting-for-operator, or expired, the runner:
 4. requires that replacement operation to succeed without another retry; and
 5. records the failed operation ID, failed run ID, replacement operation ID,
    and replacement run ID in the private acceptance evidence.
+
+The replacement uses the same digest-before-creation and IDs-after-response
+checkpoint protocol under its distinct `running:start-retry` purpose. This
+makes both creation boundaries restart-safe without relying on a new volatile
+preview or consuming a third start.
 
 If cleanup does not converge or the replacement fails, the runner exits and
 does not mark `running` complete. An initially successful run remains unchanged.
@@ -106,6 +119,10 @@ does not mark `running` complete. An initially successful run remains unchanged.
   key while retaining failed-attempt evidence.
 - A second runner test must prove a failed replacement remains terminal and is
   never retried again.
+- A multi-invocation runner test must interrupt polling after both initial and
+  replacement creation, change the preview digest between invocations, and
+  prove that checkpointed operations are polled directly with no extra preview
+  or creation.
 - The Rust workspace tests, script tests, lint/format checks, and GitHub Actions
   gates must pass before deployment.
 

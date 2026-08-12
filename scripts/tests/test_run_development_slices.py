@@ -52,6 +52,7 @@ class SliceServer(ThreadingHTTPServer):
     def __init__(self, address, *, fail_path: str | None = None):
         super().__init__(address, SliceHandler)
         self.fail_path = fail_path
+        self.fail_once_path: str | None = None
         self.requests: list[tuple[str, str, str]] = []
         self.request_bodies: list[tuple[str, str, bytes]] = []
         self.recipe_created = False
@@ -66,11 +67,14 @@ class SliceServer(ThreadingHTTPServer):
         self.operation = 0
         self.operation_nodes: dict[str, list[str]] = {}
         self.operation_kinds: dict[str, str] = {}
+        self.operation_owners: dict[str, str] = {}
         self.operation_states: dict[str, str] = {}
+        self.operation_plan_digests: dict[str, str] = {}
         self.build_operation_state = "succeeded"
         self.distribution_operation_state = "succeeded"
         self.retry_operation_state = "succeeded"
         self.start_operation_states: list[str] = []
+        self.run_plan_digest = "f" * 64
         self.run = 0
         self.run_states: dict[str, tuple[str, str]] = {}
         self.add_empty_provider_metadata = False
@@ -131,6 +135,10 @@ class SliceHandler(BaseHTTPRequestHandler):
                     )
                 },
             )
+            raise RuntimeError("handled failure")
+        if self.server.fail_once_path == self.path:
+            self.server.fail_once_path = None
+            self._json(503, {"detail": "temporary test interruption"})
             raise RuntimeError("handled failure")
         return body
 
@@ -232,11 +240,15 @@ class SliceHandler(BaseHTTPRequestHandler):
                 {
                     "id": operation_id,
                     "kind": "recipe.test",
-                    "owner_id": "20000000-0000-4000-8000-000000000001",
+                    "owner_id": self.server.operation_owners.get(
+                        operation_id, "20000000-0000-4000-8000-000000000001"
+                    ),
                     "state": self.server.operation_states.get(
                         operation_id, "succeeded"
                     ),
-                    "plan_digest": "c" * 64,
+                    "plan_digest": self.server.operation_plan_digests.get(
+                        operation_id, "f" * 64
+                    ),
                     "nodes": [NODE],
                     "result": {
                         "successful_nodes": sorted(nodes),
@@ -413,7 +425,12 @@ class SliceHandler(BaseHTTPRequestHandler):
                 {"build_input_sha256": "e" * 64, "source_bundle_sha256": "f" * 64},
             )
         elif path.endswith(("install-plans/preview", "run-plans/preview")):
-            self._json(200, {"allowed": True, "plan_digest": "f" * 64, "nodes": []})
+            plan_digest = (
+                self.server.run_plan_digest
+                if path.endswith("run-plans/preview")
+                else "f" * 64
+            )
+            self._json(200, {"allowed": True, "plan_digest": plan_digest, "nodes": []})
         elif path == "/v1/chat/completions":
             if payload.get("model") == "dev-http-smoke":
                 response = json.loads(
@@ -499,7 +516,13 @@ class SliceHandler(BaseHTTPRequestHandler):
                 "/api/v1/recipes/runs": "start",
             }[path]
             nodes = [NODE] if kind == "build" else self.server.nodes
-            self._operation(owner, nodes, kind=kind, state=start_state)
+            self._operation(
+                owner,
+                nodes,
+                kind=kind,
+                state=start_state,
+                plan_digest=payload.get("plan_digest", "f" * 64),
+            )
 
     def _operation(
         self,
@@ -508,11 +531,14 @@ class SliceHandler(BaseHTTPRequestHandler):
         *,
         kind: str = "lifecycle",
         state: str | None = None,
+        plan_digest: str = "f" * 64,
     ) -> None:
         self.server.operation += 1
         operation_id = f"40000000-0000-4000-8000-{self.server.operation:012d}"
         self.server.operation_nodes[operation_id] = list(nodes or self.server.nodes)
         self.server.operation_kinds[operation_id] = kind
+        self.server.operation_owners[operation_id] = owner
+        self.server.operation_plan_digests[operation_id] = plan_digest
         if state is None and kind == "build":
             state = self.server.build_operation_state
         if state is None and kind == "distribution":
@@ -526,7 +552,7 @@ class SliceHandler(BaseHTTPRequestHandler):
                 "kind": "recipe.test",
                 "owner_id": owner,
                 "state": "queued",
-                "plan_digest": "f" * 64,
+                "plan_digest": plan_digest,
                 "nodes": list(nodes or self.server.nodes),
                 "result": None,
             },
@@ -791,6 +817,73 @@ def test_runner_does_not_retry_a_failed_replacement_start(
     assert not any(
         path.endswith("/retry") for _method, path, _body in server.request_bodies
     )
+
+
+def test_runner_resumes_checkpointed_starts_without_repreviewing(
+    tmp_path: Path, server: SliceServer
+) -> None:
+    initial_operation = (
+        "/api/v1/recipes/operations/40000000-0000-4000-8000-000000000004"
+    )
+    replacement_operation = (
+        "/api/v1/recipes/operations/40000000-0000-4000-8000-000000000005"
+    )
+    server.start_operation_states = ["failed", "succeeded"]
+    server.fail_once_path = initial_operation
+
+    first, evidence_path = _run(tmp_path, server, "--stop-after", "inference-ok")
+
+    assert first.returncode == 1
+    after_first = json.loads(evidence_path.read_text())
+    assert after_first["completed_states"] == STATES[:6]
+    assert after_first["outputs"]["start_plan_digest"] == "f" * 64
+    assert (
+        after_first["outputs"]["start_operation_id"]
+        == initial_operation.rsplit("/", 1)[-1]
+    )
+    assert after_first["outputs"]["start_run_id"] == (
+        "20000000-0000-4000-8001-000000000001"
+    )
+
+    server.run_plan_digest = "e" * 64
+    server.fail_once_path = replacement_operation
+    second, _ = _run(tmp_path, server, "--stop-after", "inference-ok")
+
+    assert second.returncode == 1
+    after_second = json.loads(evidence_path.read_text())
+    assert after_second["completed_states"] == STATES[:6]
+    assert "start_retry_plan_digest" in after_second["outputs"], second.stderr
+    assert after_second["outputs"]["start_retry_plan_digest"] == "e" * 64
+    assert (
+        after_second["outputs"]["start_retry_operation_id"]
+        == (replacement_operation.rsplit("/", 1)[-1])
+    )
+    assert after_second["outputs"]["start_retry_run_id"] == (
+        "20000000-0000-4000-8001-000000000002"
+    )
+
+    server.run_plan_digest = "d" * 64
+    third, _ = _run(tmp_path, server, "--stop-after", "inference-ok")
+
+    assert third.returncode == 0, third.stderr
+    evidence = json.loads(evidence_path.read_text())
+    assert evidence["completed_states"] == STATES[:9]
+    run_previews = [
+        body
+        for method, path, body in server.request_bodies
+        if method == "POST" and path == "/api/v1/recipes/run-plans/preview"
+    ]
+    run_creations = [
+        json.loads(body)
+        for method, path, body in server.request_bodies
+        if method == "POST" and path == "/api/v1/recipes/runs"
+    ]
+    assert len(run_previews) == 2
+    assert [creation["plan_digest"] for creation in run_creations] == [
+        "f" * 64,
+        "e" * 64,
+    ]
+    assert len(run_creations) == 2
 
 
 def test_runner_accepts_documented_maintenance_route_withdrawal(
