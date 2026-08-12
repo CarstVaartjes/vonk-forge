@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import re
@@ -195,6 +196,245 @@ def test_build_normalizes_digest_affecting_timestamps_to_source_commit() -> None
     assert "rewrite-timestamp=true" in build
 
 
+def test_acceptance_identity_is_the_reproducible_runtime_manifest() -> None:
+    evidence = workflow_step(
+        "publish-workload-artifact", "Collect workload artifact evidence"
+    )
+    result = workflow_step(
+        "publish-workload-artifact", "Create workload artifact result"
+    )
+
+    assert "id: evidence" in evidence
+    assert "OCI_INDEX_DIGEST: ${{ steps.build.outputs.digest }}" in evidence
+    assert "workload-artifact-output/oci-index.json" in evidence
+    assert "exactly one executable manifest for the requested platform" in evidence
+    assert "runtime_digest=" in evidence
+    assert 'printf \'runtime_digest=%s\\n\'' in evidence
+    assert "runtime manifest does not match selected digest" in evidence
+    assert (
+        "OCI_MANIFEST_DIGEST: ${{ steps.evidence.outputs.runtime_digest }}" in result
+    )
+
+
+def _run_runtime_manifest_selector(
+    tmp_path: Path,
+    index: dict[str, object] | bytes,
+    architecture: str = "linux/arm64",
+) -> subprocess.CompletedProcess[str]:
+    evidence = workflow_step(
+        "publish-workload-artifact", "Collect workload artifact evidence"
+    )
+    marker = '          runtime_digest=$(python - "$ARCHITECTURE" <<\'PY\'\n'
+    script = evidence.split(marker, maxsplit=1)[1].split(
+        "\n          PY\n          )", maxsplit=1
+    )[0]
+    script = textwrap.dedent(script)
+    output = tmp_path / "workload-artifact-output"
+    output.mkdir()
+    raw = (
+        index
+        if isinstance(index, bytes)
+        else json.dumps(index, separators=(",", ":")).encode()
+    )
+    (output / "oci-index.json").write_bytes(raw + b"\n")
+    env = os.environ.copy()
+    env["OCI_INDEX_DIGEST"] = "sha256:" + hashlib.sha256(raw).hexdigest()
+    return subprocess.run(
+        [sys.executable, "-", architecture],
+        input=script,
+        cwd=tmp_path,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _runtime_descriptor(
+    digest: str, *, os_name: str = "linux", architecture: str = "arm64"
+) -> dict[str, object]:
+    return {
+        "mediaType": "application/vnd.oci.image.manifest.v1+json",
+        "digest": digest,
+        "size": 42,
+        "platform": {"os": os_name, "architecture": architecture},
+    }
+
+
+def _attestation_descriptor(
+    runtime_digest: str,
+    *,
+    digest: str | None = None,
+) -> dict[str, object]:
+    return {
+        "mediaType": "application/vnd.oci.image.manifest.v1+json",
+        "digest": digest or f"sha256:{'b' * 64}",
+        "size": 43,
+        "annotations": {
+            "vnd.docker.reference.digest": runtime_digest,
+            "vnd.docker.reference.type": "attestation-manifest",
+        },
+        "platform": {"os": "unknown", "architecture": "unknown"},
+    }
+
+
+def _valid_runtime_index(runtime_digest: str) -> dict[str, object]:
+    return {
+        "schemaVersion": 2,
+        "mediaType": "application/vnd.oci.image.index.v1+json",
+        "manifests": [
+            _runtime_descriptor(runtime_digest),
+            _attestation_descriptor(runtime_digest),
+        ],
+    }
+
+
+def test_runtime_manifest_selector_accepts_one_requested_executable(
+    tmp_path: Path,
+) -> None:
+    runtime_digest = f"sha256:{'a' * 64}"
+    result = _run_runtime_manifest_selector(
+        tmp_path,
+        _valid_runtime_index(runtime_digest),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == runtime_digest
+
+
+def test_runtime_manifest_selector_rejects_multiple_executables(
+    tmp_path: Path,
+) -> None:
+    descriptors = [
+        _runtime_descriptor(f"sha256:{character * 64}")
+        for character in ("a", "b")
+    ]
+
+    result = _run_runtime_manifest_selector(
+        tmp_path,
+        {
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.oci.image.index.v1+json",
+            "manifests": descriptors,
+        },
+    )
+
+    assert result.returncode != 0
+    assert "exactly one executable manifest" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "index",
+    [
+        {
+            "schemaVersion": 1,
+            "mediaType": "application/vnd.oci.image.index.v1+json",
+            "manifests": [],
+        },
+        {
+            "schemaVersion": 2.0,
+            "mediaType": "application/vnd.oci.image.index.v1+json",
+            "manifests": [],
+        },
+        {
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.docker.distribution.manifest.list.v2+json",
+            "manifests": [],
+        },
+    ],
+)
+def test_runtime_manifest_selector_rejects_invalid_index_metadata(
+    tmp_path: Path, index: dict[str, object]
+) -> None:
+    result = _run_runtime_manifest_selector(tmp_path, index)
+
+    assert result.returncode != 0
+    assert "OCI index metadata is invalid" in result.stderr
+
+
+def test_runtime_manifest_selector_rejects_duplicate_json_keys(tmp_path: Path) -> None:
+    raw = (
+        b'{"schemaVersion":2,"schemaVersion":1,'
+        b'"mediaType":"application/vnd.oci.image.index.v1+json","manifests":[]}'
+    )
+
+    result = _run_runtime_manifest_selector(tmp_path, raw)
+
+    assert result.returncode != 0
+    assert "duplicate JSON key" in result.stderr
+
+
+def test_runtime_manifest_selector_rejects_wrong_platform_only(tmp_path: Path) -> None:
+    runtime_digest = f"sha256:{'a' * 64}"
+    index = _valid_runtime_index(runtime_digest)
+    index["manifests"][0] = _runtime_descriptor(  # type: ignore[index]
+        runtime_digest, architecture="amd64"
+    )
+
+    result = _run_runtime_manifest_selector(tmp_path, index)
+
+    assert result.returncode != 0
+    assert "exactly one executable manifest" in result.stderr
+
+
+def test_runtime_manifest_selector_requires_one_attestation(tmp_path: Path) -> None:
+    runtime_digest = f"sha256:{'a' * 64}"
+    index = _valid_runtime_index(runtime_digest)
+    index["manifests"] = [_runtime_descriptor(runtime_digest)]
+
+    result = _run_runtime_manifest_selector(tmp_path, index)
+
+    assert result.returncode != 0
+    assert "BuildKit attestation descriptor is invalid" in result.stderr
+
+
+def test_runtime_manifest_selector_rejects_extra_executable_fields(
+    tmp_path: Path,
+) -> None:
+    runtime_digest = f"sha256:{'a' * 64}"
+    index = _valid_runtime_index(runtime_digest)
+    descriptor = index["manifests"][0]  # type: ignore[index]
+    assert isinstance(descriptor, dict)
+    descriptor["annotations"] = {"unexpected": "metadata"}
+
+    result = _run_runtime_manifest_selector(tmp_path, index)
+
+    assert result.returncode != 0
+    assert "OCI executable descriptor is invalid" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda descriptor: descriptor.pop("annotations"),
+        lambda descriptor: descriptor.update(
+            mediaType="application/vnd.docker.distribution.manifest.v2+json"
+        ),
+        lambda descriptor: descriptor.update(size=0),
+        lambda descriptor: descriptor.update(digest="sha256:NOT-CANONICAL"),
+        lambda descriptor: descriptor["annotations"].update(  # type: ignore[union-attr]
+            {"vnd.docker.reference.digest": f"sha256:{'c' * 64}"}
+        ),
+        lambda descriptor: descriptor["annotations"].update(  # type: ignore[union-attr]
+            {"vnd.docker.reference.type": "unrelated"}
+        ),
+    ],
+)
+def test_runtime_manifest_selector_rejects_invalid_attestation_descriptor(
+    tmp_path: Path, mutate: object
+) -> None:
+    runtime_digest = f"sha256:{'a' * 64}"
+    index = _valid_runtime_index(runtime_digest)
+    descriptor = index["manifests"][1]  # type: ignore[index]
+    assert isinstance(descriptor, dict)
+    mutate(descriptor)  # type: ignore[operator]
+
+    result = _run_runtime_manifest_selector(tmp_path, index)
+
+    assert result.returncode != 0
+    assert "BuildKit attestation descriptor is invalid" in result.stderr
+
+
 def test_exact_context_and_declared_base_images_are_verified_before_build() -> None:
     publisher = job("publish-workload-artifact")
     source = workflow_step("publish-workload-artifact", "Verify exact source context")
@@ -313,9 +553,11 @@ def test_result_rejects_manifest_or_attestation_evidence_mismatch() -> None:
     )
 
     assert "hashlib.sha256" in evidence
-    assert "OCI_MANIFEST_DIGEST" in evidence
+    assert "OCI_INDEX_DIGEST" in evidence
+    assert "runtime_digest" in evidence
     assert "removeprefix(\"sha256:\")" in evidence
-    assert "raw OCI manifest does not match build digest" in evidence
+    assert "raw OCI index does not match build digest" in evidence
+    assert "runtime manifest does not match selected digest" in evidence
     assert 'jq -e \'if type == "object" or type == "array"' in evidence
     assert "SBOM evidence is empty" in evidence
     assert "provenance evidence is empty" in evidence
@@ -372,7 +614,8 @@ def test_sigstore_attests_provenance_and_sbom_without_tuf_credentials() -> None:
         "actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6" in provenance
     )
     assert "subject-name: ${{ needs.authorize-request.outputs.output_repository }}" in provenance
-    assert "subject-digest: ${{ steps.build.outputs.digest }}" in provenance
+    assert "subject-digest: ${{ steps.evidence.outputs.runtime_digest }}" in provenance
+    assert "steps.build.outputs.digest" not in provenance
     assert "push-to-registry: true" in provenance
     assert (
         "predicate-type: https://vonk-forge.dev/attestations/"
@@ -394,7 +637,8 @@ def test_sigstore_attests_provenance_and_sbom_without_tuf_credentials() -> None:
     assert "provenance-predicate.json" in evidence
     assert "sbom-path: workload-artifact-output/sbom.json" in sbom
     assert "subject-name: ${{ needs.authorize-request.outputs.output_repository }}" in sbom
-    assert "subject-digest: ${{ steps.build.outputs.digest }}" in sbom
+    assert "subject-digest: ${{ steps.evidence.outputs.runtime_digest }}" in sbom
+    assert "steps.build.outputs.digest" not in sbom
     assert "push-to-registry: true" in sbom
     assert workflow().count("id-token: write") == 1
     assert workflow().count("attestations: write") == 1

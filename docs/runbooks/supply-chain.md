@@ -94,9 +94,14 @@ The authorities are deliberately separate:
    paths, a digest-pinned base image, target architecture, and output repository.
 2. `.github/workflows/workload-artifacts.yml` is a build-only publisher. After
    the read-only CI gate, its job-scoped package token may push the resulting OCI
-   artifact by digest and attach SBOM and provenance evidence. The token is not
-   a BuildKit input. The job has no platform or workload TUF key and cannot
-   change NAS desired state.
+   artifact by digest. It selects and verifies the single executable manifest
+   for the requested platform. It rejects ambiguous JSON and malformed index or
+   descriptor metadata, and requires exactly one canonical BuildKit attestation
+   manifest whose reference annotation binds it to that executable child. It
+   then attaches signed SBOM and provenance evidence to the stable runtime
+   digest. The run-specific outer BuildKit index remains evidence and is never
+   the runtime identity. The token is not a BuildKit input. The job has no
+   platform or workload TUF key and cannot change NAS desired state.
 3. The NAS promotion service independently verifies the request digest, source
    identity, OCI manifest digest, SBOM, provenance, family policy, and validation
    evidence. A successful build is only a promotion candidate; it is not an
@@ -142,3 +147,9 @@ scripts/workload-artifact-metadata result result.json \
 That validation proves metadata binding only. W13 promotion remains responsible
 for verifying the registry subject, signed provenance, SBOM, family policy, and
 qualification evidence before workload TUF authorization.
+
+Before promotion, dispatch an unchanged reviewed request twice from accepted
+`main`, validate both workflow artifacts, and require their executable
+`oci_manifest_digest` values to match. BuildKit index digests, invocation
+provenance, SBOM namespaces, and signed-bundle digests are run-specific and may
+differ. An executable-manifest mismatch rejects both candidates.

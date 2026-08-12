@@ -340,26 +340,143 @@ jobs:
           sbom: true
           provenance: mode=max
       - name: Collect workload artifact evidence
+        id: evidence
         shell: bash
         env:
           ARCHITECTURE: ${{ needs.authorize-request.outputs.architecture }}
           BASE_IMAGES: ${{ needs.authorize-request.outputs.base_images }}
           BUILD_REQUEST_DIGEST: ${{ needs.authorize-request.outputs.request_digest }}
           CONTEXT_DIGEST: ${{ needs.authorize-request.outputs.context_digest }}
-          OCI_MANIFEST_DIGEST: ${{ steps.build.outputs.digest }}
+          OCI_INDEX_DIGEST: ${{ steps.build.outputs.digest }}
           OUTPUT_REPOSITORY: ${{ needs.authorize-request.outputs.output_repository }}
           SOURCE_COMMIT: ${{ needs.authorize-request.outputs.source_commit }}
           TARGET: ${{ needs.authorize-request.outputs.target }}
         run: |
           set -euo pipefail
-          case "$OCI_MANIFEST_DIGEST" in
+          case "$OCI_INDEX_DIGEST" in
             sha256:????????????????????????????????????????????????????????????????) ;;
-            *) echo "build did not return a sha256 manifest digest" >&2; exit 2 ;;
+            *) echo "build did not return a sha256 index digest" >&2; exit 2 ;;
           esac
           install -d -m 0700 workload-artifact-output
-          reference="${OUTPUT_REPOSITORY}@${OCI_MANIFEST_DIGEST}"
-          docker buildx imagetools inspect "$reference" --raw \
+          index_reference="${OUTPUT_REPOSITORY}@${OCI_INDEX_DIGEST}"
+          docker buildx imagetools inspect "$index_reference" --raw \
+            > workload-artifact-output/oci-index.json
+          runtime_digest=$(python - "$ARCHITECTURE" <<'PY'
+          import hashlib
+          import json
+          import os
+          import re
+          import sys
+          from pathlib import Path
+
+          path = Path("workload-artifact-output/oci-index.json")
+          raw = path.read_bytes()
+          expected = os.environ["OCI_INDEX_DIGEST"].removeprefix("sha256:")
+          if len(expected) != 64 or any(c not in "0123456789abcdef" for c in expected):
+              raise SystemExit("OCI index digest is not canonical")
+          candidates = (raw, raw[:-1]) if raw.endswith(b"\n") else (raw,)
+          for candidate in candidates:
+              if hashlib.sha256(candidate).hexdigest() == expected:
+                  path.write_bytes(candidate)
+                  break
+          else:
+              raise SystemExit("raw OCI index does not match build digest")
+
+          def reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+              document: dict[str, object] = {}
+              for key, value in pairs:
+                  if key in document:
+                      raise SystemExit(f"duplicate JSON key in OCI index: {key}")
+                  document[key] = value
+              return document
+
+
+          document = json.loads(
+              path.read_bytes(), object_pairs_hook=reject_duplicate_keys
+          )
+          requested = sys.argv[1].split("/")
+          if (
+              not isinstance(document, dict)
+              or set(document) != {"schemaVersion", "mediaType", "manifests"}
+              or type(document.get("schemaVersion")) is not int
+              or document.get("schemaVersion") != 2
+              or document.get("mediaType")
+              != "application/vnd.oci.image.index.v1+json"
+          ):
+              raise SystemExit("OCI index metadata is invalid")
+          manifests = document["manifests"]
+          if len(requested) != 2 or not all(requested) or not isinstance(manifests, list):
+              raise SystemExit(
+                  "OCI index must contain exactly one executable manifest for the requested platform"
+              )
+          executable = []
+          attestations = []
+          for descriptor in manifests:
+              if not isinstance(descriptor, dict):
+                  raise SystemExit("OCI index descriptor is invalid")
+              platform = descriptor.get("platform")
+              digest = descriptor.get("digest")
+              size = descriptor.get("size")
+              if (
+                  not isinstance(platform, dict)
+                  or set(platform) != {"os", "architecture"}
+                  or not all(isinstance(platform.get(key), str) for key in platform)
+              ):
+                  raise SystemExit("OCI index descriptor is invalid")
+              is_attestation = platform == {
+                  "os": "unknown",
+                  "architecture": "unknown",
+              }
+              descriptor_error = (
+                  "BuildKit attestation descriptor is invalid"
+                  if is_attestation
+                  else "OCI index descriptor is invalid"
+              )
+              if (
+                  descriptor.get("mediaType")
+                  != "application/vnd.oci.image.manifest.v1+json"
+                  or not isinstance(digest, str)
+                  or re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is None
+                  or not isinstance(size, int)
+                  or isinstance(size, bool)
+                  or size <= 0
+              ):
+                  raise SystemExit(descriptor_error)
+              if is_attestation:
+                  attestations.append(descriptor)
+                  continue
+              if set(descriptor) != {"mediaType", "digest", "size", "platform"}:
+                  raise SystemExit("OCI executable descriptor is invalid")
+              executable.append(descriptor)
+          if (
+              len(executable) != 1
+              or executable[0]["platform"].get("os") != requested[0]
+              or executable[0]["platform"].get("architecture") != requested[1]
+          ):
+              raise SystemExit(
+                  "OCI index must contain exactly one executable manifest for the requested platform"
+              )
+          runtime_digest = executable[0]["digest"]
+          if len(attestations) != 1:
+              raise SystemExit("BuildKit attestation descriptor is invalid")
+          attestation = attestations[0]
+          if (
+              set(attestation)
+              != {"mediaType", "digest", "size", "annotations", "platform"}
+              or attestation.get("annotations")
+              != {
+                  "vnd.docker.reference.digest": runtime_digest,
+                  "vnd.docker.reference.type": "attestation-manifest",
+              }
+          ):
+              raise SystemExit("BuildKit attestation descriptor is invalid")
+          print(runtime_digest)
+          PY
+          )
+          runtime_reference="${OUTPUT_REPOSITORY}@${runtime_digest}"
+          docker buildx imagetools inspect "$runtime_reference" --raw \
             > workload-artifact-output/oci-manifest.json
+          export RUNTIME_MANIFEST_DIGEST="$runtime_digest"
           python - <<'PY'
           import hashlib
           import os
@@ -367,21 +484,20 @@ jobs:
 
           path = Path("workload-artifact-output/oci-manifest.json")
           raw = path.read_bytes()
-          expected = os.environ["OCI_MANIFEST_DIGEST"].removeprefix("sha256:")
-          if len(expected) != 64 or any(c not in "0123456789abcdef" for c in expected):
-              raise SystemExit("OCI manifest digest is not canonical")
+          expected = os.environ["RUNTIME_MANIFEST_DIGEST"].removeprefix("sha256:")
           candidates = (raw, raw[:-1]) if raw.endswith(b"\n") else (raw,)
           for candidate in candidates:
               if hashlib.sha256(candidate).hexdigest() == expected:
                   path.write_bytes(candidate)
                   break
           else:
-              raise SystemExit("raw OCI manifest does not match build digest")
+              raise SystemExit("runtime manifest does not match selected digest")
           PY
-          docker buildx imagetools inspect "$reference" --format '{{ json .SBOM.SPDX }}' \
+          printf 'runtime_digest=%s\n' "$runtime_digest" >> "$GITHUB_OUTPUT"
+          docker buildx imagetools inspect "$index_reference" --format '{{ json .SBOM.SPDX }}' \
             | jq -e -S -c 'select(type == "object" and (.spdxVersion | type == "string") and (.SPDXID | type == "string"))' \
             > workload-artifact-output/sbom.json
-          docker buildx imagetools inspect "$reference" --format '{{ json .Provenance.SLSA }}' \
+          docker buildx imagetools inspect "$index_reference" --format '{{ json .Provenance.SLSA }}' \
             | jq -e -S -c 'select(type == "object" and length > 0)' \
             > workload-artifact-output/provenance.json
           jq -e 'if type == "object" or type == "array" then length > 0 else false end' \
@@ -395,6 +511,8 @@ jobs:
             --arg build_request_digest "$BUILD_REQUEST_DIGEST" \
             --arg buildkit_provenance_digest "$buildkit_provenance_digest" \
             --arg context_digest "$CONTEXT_DIGEST" \
+            --arg oci_index_digest "$OCI_INDEX_DIGEST" \
+            --arg runtime_manifest_digest "$runtime_digest" \
             --arg source_commit "$SOURCE_COMMIT" \
             --arg target "$TARGET" \
             '{
@@ -406,6 +524,8 @@ jobs:
               target: $target,
               architecture: $architecture,
               base_images: $base_images,
+              oci_index_digest: $oci_index_digest,
+              runtime_manifest_digest: $runtime_manifest_digest,
               buildkit_provenance_digest: $buildkit_provenance_digest
             }' > workload-artifact-output/provenance-predicate.json
       - name: Sign workload provenance
@@ -413,7 +533,7 @@ jobs:
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
           subject-name: ${{ needs.authorize-request.outputs.output_repository }}
-          subject-digest: ${{ steps.build.outputs.digest }}
+          subject-digest: ${{ steps.evidence.outputs.runtime_digest }}
           predicate-type: https://vonk-forge.dev/attestations/workload-artifact-build/v1
           predicate-path: workload-artifact-output/provenance-predicate.json
           push-to-registry: true
@@ -422,14 +542,14 @@ jobs:
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
           subject-name: ${{ needs.authorize-request.outputs.output_repository }}
-          subject-digest: ${{ steps.build.outputs.digest }}
+          subject-digest: ${{ steps.evidence.outputs.runtime_digest }}
           sbom-path: workload-artifact-output/sbom.json
           push-to-registry: true
       - name: Create workload artifact result
         shell: bash
         env:
           BUILD_REQUEST_DIGEST: ${{ needs.authorize-request.outputs.request_digest }}
-          OCI_MANIFEST_DIGEST: ${{ steps.build.outputs.digest }}
+          OCI_MANIFEST_DIGEST: ${{ steps.evidence.outputs.runtime_digest }}
           OUTPUT_REPOSITORY: ${{ needs.authorize-request.outputs.output_repository }}
           PROVENANCE_BUNDLE: ${{ steps.provenance-attestation.outputs.bundle-path }}
           PROVENANCE_ATTESTATION_ID: ${{ steps.provenance-attestation.outputs.attestation-id }}
@@ -486,6 +606,7 @@ jobs:
           retention-days: 30
           if-no-files-found: error
           path: |
+            workload-artifact-output/oci-index.json
             workload-artifact-output/oci-manifest.json
             workload-artifact-output/provenance.json
             workload-artifact-output/provenance-predicate.json
