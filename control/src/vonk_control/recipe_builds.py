@@ -33,6 +33,7 @@ from .source_policy import (
 
 _OCI_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_BUILD_ARTIFACT_FORMAT = "docker-archive-v1"
 
 
 class RecipeBuildError(ValueError):
@@ -124,6 +125,8 @@ class RecipeBuildService:
             if node is None:
                 raise RecipeBuildError("build.node_unknown", "builder GPU node is unknown")
             _validate_builder(node)
+            assert node.agent_sha256 is not None
+            builder_agent_sha256 = node.agent_sha256
             document = copy.deepcopy(revision.document)
             build = document.get("build")
             context = build.get("context") if isinstance(build, dict) else None
@@ -194,6 +197,8 @@ class RecipeBuildService:
             "recipe_revision_id": revision.id,
             "recipe_content_sha256": revision.content_sha256,
             "source_bundle_sha256": source_sha256,
+            "builder_agent_sha256": builder_agent_sha256,
+            "artifact_format": _BUILD_ARTIFACT_FORMAT,
             "build": build,
         }
         build_input_sha256 = _digest(build_identity)
@@ -230,6 +235,8 @@ class RecipeBuildService:
             "source_bundle_sha256": policy.source_bundle_sha256,
             "dockerfile": policy.dockerfile,
             "findings": [asdict(item) for item in policy.findings],
+            "builder_agent_sha256": builder_agent_sha256,
+            "artifact_format": _BUILD_ARTIFACT_FORMAT,
         }
         with self._sessions.begin() as session:
             existing = session.scalar(
@@ -478,6 +485,8 @@ def _validate_builder(node: AgentNode) -> None:
         or node.architecture != "linux-arm64"
         or node.agent_implementation != "rust"
         or node.migration_state != "complete"
+        or not isinstance(node.agent_sha256, str)
+        or _SHA256.fullmatch(node.agent_sha256) is None
         or "recipe.build.v1" not in node.capabilities
     ):
         raise RecipeBuildError(
