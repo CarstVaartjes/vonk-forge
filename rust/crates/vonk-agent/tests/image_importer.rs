@@ -10,7 +10,7 @@ use vonk_agent_protocol::{RecipeImageImportRequest, hex_sha256};
 #[test]
 fn exact_layout_is_verified_before_requesting_host_import() {
     let root = tempdir().unwrap();
-    let archive = root.path().join("image.oci.tar");
+    let archive = root.path().join("image.docker.tar");
     fs::write(&archive, b"exact oci layout").unwrap();
     let request = RecipeImageImportRequest {
         build_id: Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
@@ -46,9 +46,29 @@ fn exact_layout_is_verified_before_requesting_host_import() {
 }
 
 #[test]
+fn staging_uses_the_docker_load_archive_name() {
+    let root = tempdir().unwrap();
+    let operation_id = Uuid::parse_str("00000000-0000-4000-8000-000000000009").unwrap();
+
+    let archive = ImageImporter {
+        data_root: root.path(),
+    }
+    .staging_path(operation_id)
+    .unwrap();
+
+    assert_eq!(
+        archive,
+        root.path()
+            .join("image-imports")
+            .join(operation_id.to_string())
+            .join("image.docker.tar")
+    );
+}
+
+#[test]
 fn changed_archive_is_rejected_before_host_authority() {
     let root = tempdir().unwrap();
-    let archive = root.path().join("image.oci.tar");
+    let archive = root.path().join("image.docker.tar");
     fs::write(&archive, b"changed").unwrap();
     let request = RecipeImageImportRequest {
         build_id: Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),

@@ -242,7 +242,7 @@ def setup_services(tmp_path: Path, *, nodes: int = 1, engine=None):
                 node_id=node_id,
                 kind="image",
                 digest="1" * 64,
-                source="oci-layout:" + "3" * 64,
+                source="docker-archive:" + "3" * 64,
                 size_bytes=30,
                 state="verified",
                 ref_count=0,

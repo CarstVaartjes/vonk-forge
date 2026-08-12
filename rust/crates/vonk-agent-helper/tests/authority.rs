@@ -1,6 +1,6 @@
 use std::fs::{self, OpenOptions};
 use std::io::Write;
-use std::os::unix::fs::{OpenOptionsExt, symlink};
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt, symlink};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -237,7 +237,7 @@ impl CommandRunner for RecordingRunner {
             && arguments.first().is_some_and(|value| value == "load")
         {
             format!(
-                "Loaded image: localhost/vonk/recipe-build-{}\n",
+                "Loaded image: localhost/vonk/recipe-build-{}:latest\n",
                 "20000000-0000-4000-8000-000000000002"
             )
             .into_bytes()
@@ -351,6 +351,60 @@ fn runtime_request(action: HostRuntimeAction, arguments: Vec<String>) -> HostRun
         fence: Uuid::parse_str("30000000-0000-4000-8000-000000000003").unwrap(),
         arguments,
     }
+}
+
+#[test]
+fn accepted_docker_archive_is_loaded_and_receipted_by_exact_digest() {
+    let (_temp, roots, runner, release) = fixture();
+    let operation_id = Uuid::parse_str("20000000-0000-4000-8000-000000000002").unwrap();
+    let image = format!("localhost/vonk/recipe-build-{operation_id}");
+    let archive_root = roots
+        .agent_data
+        .join("image-imports")
+        .join(operation_id.to_string());
+    fs::create_dir_all(&archive_root).unwrap();
+    let archive = archive_root.join("image.docker.tar");
+    let body = b"exact docker archive";
+    fs::write(&archive, body).unwrap();
+    fs::set_permissions(&archive, fs::Permissions::from_mode(0o600)).unwrap();
+    let image_digest = format!("sha256:{}", "c".repeat(64));
+    let request = runtime_request(
+        HostRuntimeAction::ImageImport,
+        vec![
+            archive.display().to_string(),
+            hex_sha256(body),
+            body.len().to_string(),
+            image_digest.clone(),
+            image.clone(),
+        ],
+    );
+    let request_digest = write_runtime_request(&roots, &request);
+    let executor = OperationExecutor::new(
+        roots.clone(),
+        release.public_key().as_ref(),
+        runner.clone(),
+        None,
+    )
+    .unwrap();
+
+    executor
+        .execute(&runtime_operation(&request, request_digest))
+        .unwrap();
+
+    assert_eq!(
+        fs::read_to_string(
+            roots
+                .runtime_image_receipts
+                .join(image_digest.trim_start_matches("sha256:"))
+        )
+        .unwrap(),
+        format!("{image}\nsha256:{}\n", "d".repeat(64))
+    );
+    let calls = runner.calls.lock().unwrap();
+    assert!(calls.iter().any(|(program, arguments)| {
+        program == std::path::Path::new("/usr/bin/docker")
+            && arguments == &["load", "--input", archive.to_str().unwrap()]
+    }));
 }
 
 #[test]

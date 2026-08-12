@@ -44,9 +44,9 @@ impl ProcessRunner for Runner {
             let output = arguments
                 .last()
                 .unwrap()
-                .strip_prefix("oci-archive:")
+                .strip_prefix("docker-archive:")
                 .unwrap();
-            fs::write(output, b"exact oci archive")?;
+            fs::write(output, b"exact docker archive")?;
         }
         if arguments.iter().any(|value| value == "build") {
             let storage = arguments
@@ -141,7 +141,7 @@ fn request(bundle_bytes: usize, digest: String) -> RecipeBuildRequest {
 }
 
 #[test]
-fn build_uses_only_typed_rootless_podman_arguments_and_records_exact_layout() {
+fn build_exports_a_docker_load_archive_from_the_rootless_builder() {
     let (archive, digest) = bundle();
     let runner = Runner {
         calls: RefCell::new(Vec::new()),
@@ -160,7 +160,7 @@ fn build_uses_only_typed_rootless_podman_arguments_and_records_exact_layout() {
     .unwrap();
 
     assert_eq!(evidence.image_digest, format!("sha256:{}", "d".repeat(64)));
-    assert_eq!(evidence.image_bytes, 17);
+    assert_eq!(evidence.image_bytes, 20);
     let calls = runner.calls.borrow();
     let build = &calls[0];
     assert_eq!(build.0, Program::Podman);
@@ -225,10 +225,10 @@ fn build_uses_only_typed_rootless_podman_arguments_and_records_exact_layout() {
                 .1
                 .last()
                 .unwrap()
-                .strip_prefix("oci-archive:")
+                .strip_prefix("docker-archive:")
                 .unwrap()
         )
-        .ends_with("00000000-0000-4000-8000-000000000002/image.oci.tar")
+        .ends_with("00000000-0000-4000-8000-000000000002/image.docker.tar")
     );
     assert_eq!(
         fs::read_dir(root.path().join("build-staging"))
@@ -297,7 +297,7 @@ fn build_rejects_declared_public_hosts_before_running_podman() {
 }
 
 #[test]
-fn build_rejects_an_oci_layout_larger_than_declared_output_limit() {
+fn build_rejects_a_docker_archive_larger_than_declared_output_limit() {
     let (archive, digest) = bundle();
     let runner = Runner {
         calls: RefCell::new(Vec::new()),

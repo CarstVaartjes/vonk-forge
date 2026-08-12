@@ -39,7 +39,7 @@ impl ImageImporter<'_> {
             .join("image-imports")
             .join(operation_id.to_string());
         fs::create_dir_all(&root)?;
-        Ok(root.join("image.oci.tar"))
+        Ok(root.join("image.docker.tar"))
     }
 
     pub fn verify(

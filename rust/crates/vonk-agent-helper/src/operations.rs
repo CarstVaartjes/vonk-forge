@@ -585,7 +585,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         if !archive.is_absolute()
             || archive.parent() != Some(expected_parent.as_path())
             || canonical_parent.parent() != Some(canonical_import_root.as_path())
-            || archive.file_name().and_then(|value| value.to_str()) != Some("image.oci.tar")
+            || archive.file_name().and_then(|value| value.to_str()) != Some("image.docker.tar")
             || !lower_hex(archive_sha256, 64)
             || !valid_oci_digest(image_digest)
             || !valid_local_image(image)
@@ -609,7 +609,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 .is_some_and(|value| {
                     value
                         .lines()
-                        .any(|line| line == format!("Loaded image: {image}"))
+                        .any(|line| line == format!("Loaded image: {image}:latest"))
                 })
         {
             return Err(OperationError::CommandFailed);

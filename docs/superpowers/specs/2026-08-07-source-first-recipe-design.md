@@ -117,8 +117,8 @@ derived local build record containing at least:
 - inspection, SBOM, scan, and reproducibility evidence when available; and
 - bounded logs with secrets and credentials removed.
 
-The local artifact store or NAS may retain the OCI layout as a cache. It does
-not need to expose the registry protocol.
+The local artifact store or NAS may retain the exact runtime-import archive as
+a cache. It does not need to expose the registry protocol.
 
 ### Cluster-mapping authority
 
@@ -427,19 +427,22 @@ as the builder. The agent builds through a rootless isolated builder with:
   destinations blocked; and
 - sanitized bounded logs.
 
-The build produces an OCI layout and immutable result digest. Static inspection
-verifies architecture, configured user, entrypoint, layers, labels, and policy.
-The build result is not yet an installation or runtime authorization.
+The build produces an OCI image and immutable result digest. It exports that
+image in the selected host runtime's import format; DGX Spark uses a
+Docker-loadable archive. Static inspection verifies architecture, configured
+user, entrypoint, layers, labels, and policy. The build result is not yet an
+installation or runtime authorization.
 
 ### Distribute the exact image
 
 For a multi-node deployment, Vonk never rebuilds independently on each GPU node.
-It transfers the exact OCI layout from the local cache or builder to every
-target node through the existing authenticated artifact operation, then
-verifies the manifest digest after import. All ranks therefore run identical
-image bytes even if the original Dockerfile was not perfectly reproducible.
+It transfers the exact runtime-import archive from the local cache or builder
+to every target node through the existing authenticated artifact operation,
+then verifies the image identity after import. All ranks therefore run
+identical image bytes even if the original Dockerfile was not perfectly
+reproducible.
 
-The controller may retain the layout on the service host or builder according
+The controller may retain the archive on the service host or builder according
 to local cache policy. This is an implementation detail, not a public registry
 requirement.
 

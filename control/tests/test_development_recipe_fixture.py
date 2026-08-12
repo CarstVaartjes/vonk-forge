@@ -289,7 +289,7 @@ def test_dev_http_smoke_build_import_and_host_published_port_with_rootless_podma
     identity = f"{os.getpid()}-{host_port}"
     image = f"localhost/vonk/dev-http-smoke-acceptance:{identity}"
     container = f"vonk-dev-http-smoke-{identity}"
-    archive = tmp_path / "image.oci.tar"
+    archive = tmp_path / "image.docker.tar"
 
     try:
         subprocess.run(
@@ -310,7 +310,7 @@ def test_dev_http_smoke_build_import_and_host_published_port_with_rootless_podma
             [
                 podman,
                 "save",
-                "--format=oci-archive",
+                "--format=docker-archive",
                 "--output",
                 str(archive),
                 image,
