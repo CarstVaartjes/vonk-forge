@@ -1,6 +1,6 @@
 use std::{net::IpAddr, time::Duration};
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, FixedOffset, Utc};
 use serde::Serialize;
 use thiserror::Error;
 
@@ -32,7 +32,7 @@ pub async fn wait_ready(
     address: IpAddr,
     port: u16,
     path: &str,
-    deadline: DateTime<Utc>,
+    lease_deadline: tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
 ) -> Result<(), HealthError> {
     if port < 1024
         || !path.starts_with('/')
@@ -48,7 +48,7 @@ pub async fn wait_ready(
         .build()?;
     let endpoint = readiness_endpoint(address, port, path);
     loop {
-        if Utc::now() >= deadline {
+        if Utc::now() >= lease_deadline.borrow().with_timezone(&Utc) {
             return Err(HealthError::Deadline);
         }
         if let Ok(response) = client.get(&endpoint).send().await
@@ -72,7 +72,14 @@ pub(crate) fn readiness_endpoint(address: IpAddr, port: u16, path: &str) -> Stri
 
 #[cfg(test)]
 mod tests {
-    use super::readiness_endpoint;
+    use super::{readiness_endpoint, wait_ready};
+    use chrono::{Duration as ChronoDuration, FixedOffset, Utc};
+    use std::{
+        io::{Read, Write},
+        net::TcpListener,
+        thread,
+        time::Duration,
+    };
 
     #[test]
     fn readiness_uses_the_exact_published_address() {
@@ -84,5 +91,42 @@ mod tests {
             readiness_endpoint("fd00::10".parse().unwrap(), 8101, "/health"),
             "http://[fd00::10]:8101/health"
         );
+    }
+
+    #[tokio::test]
+    async fn readiness_honors_a_controller_renewed_deadline() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 1024];
+            while request.windows(4).all(|value| value != b"\r\n\r\n") {
+                let size = stream.read(&mut buffer).unwrap();
+                assert_ne!(size, 0);
+                request.extend_from_slice(&buffer[..size]);
+            }
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK")
+                .unwrap();
+        });
+        let original_deadline = (Utc::now() + ChronoDuration::milliseconds(50))
+            .with_timezone(&FixedOffset::east_opt(0).unwrap());
+        let (deadline_sender, deadline_receiver) = tokio::sync::watch::channel(original_deadline);
+        tokio::time::sleep(Duration::from_millis(60)).await;
+        deadline_sender.send_replace(
+            (Utc::now() + ChronoDuration::seconds(30))
+                .with_timezone(&FixedOffset::east_opt(0).unwrap()),
+        );
+
+        wait_ready(
+            "127.0.0.1".parse().unwrap(),
+            port,
+            "/health",
+            deadline_receiver,
+        )
+        .await
+        .unwrap();
+        server.join().unwrap();
     }
 }
