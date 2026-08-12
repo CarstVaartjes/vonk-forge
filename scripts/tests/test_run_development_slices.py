@@ -60,12 +60,14 @@ class SliceServer(ThreadingHTTPServer):
         )
         self.slug = "dev-http-smoke"
         self.route_published = False
+        self.withdrawn_endpoint_status = 404
         self.operation = 0
         self.operation_nodes: dict[str, list[str]] = {}
         self.operation_kinds: dict[str, str] = {}
         self.operation_states: dict[str, str] = {}
         self.build_operation_state = "succeeded"
         self.retry_operation_state = "succeeded"
+        self.add_empty_provider_metadata = False
         self.nodes = [NODE]
         self.online = {NODE: True, NODE_2: True}
         self.inventory_stale = {NODE: False, NODE_2: False}
@@ -247,7 +249,12 @@ class SliceHandler(BaseHTTPRequestHandler):
                     },
                 )
             else:
-                self._json(404, {"detail": "not found"})
+                detail = (
+                    "endpoint publication unavailable"
+                    if self.server.withdrawn_endpoint_status == 503
+                    else "not found"
+                )
+                self._json(self.server.withdrawn_endpoint_status, {"detail": detail})
         elif self.path.startswith("/api/v1/recipes/runs/"):
             ranks = [
                 {
@@ -402,6 +409,11 @@ class SliceHandler(BaseHTTPRequestHandler):
                         / "control/tests/fixtures/recipes/dev-http-smoke/expected.json"
                     ).read_text()
                 )["response"]
+                if self.server.add_empty_provider_metadata:
+                    response["choices"][0]["provider_specific_fields"] = {}
+                    response["choices"][0]["message"]["provider_specific_fields"] = {
+                        "refusal": None
+                    }
             else:
                 response = {
                     "id": "chatcmpl-model-smoke",
@@ -665,6 +677,30 @@ def test_runner_completes_exact_public_lifecycle_without_secret_leaks(
         path == "/api/v1/recipes/image-distributions"
         for _method, path, _authorization in server.requests
     )
+
+
+def test_runner_accepts_litellm_empty_provider_metadata(
+    tmp_path: Path, server: SliceServer
+) -> None:
+    server.add_empty_provider_metadata = True
+
+    result, evidence_path = _run(tmp_path, server, "--stop-after", "inference-ok")
+
+    assert result.returncode == 0, result.stderr
+    evidence = json.loads(evidence_path.read_text())
+    assert evidence["completed_states"] == STATES[:9]
+
+
+def test_runner_accepts_documented_maintenance_route_withdrawal(
+    tmp_path: Path, server: SliceServer
+) -> None:
+    server.withdrawn_endpoint_status = 503
+
+    result, evidence_path = _run(tmp_path, server, "--stop-after", "route-withdrawn")
+
+    assert result.returncode == 0, result.stderr
+    evidence = json.loads(evidence_path.read_text())
+    assert evidence["completed_states"] == STATES[:11]
 
 
 def test_model_multinode_runner_proves_failure_recovery_restart_and_cleanup(
