@@ -260,7 +260,7 @@ def test_agent_posts_authenticated_runtime_and_fabric_inventory(agent_system) ->
         "gpu_memory_free_bytes": 800,
         "gpu_count": 1,
         "artifact_store_read_only": False,
-        "capabilities": ["runtime.vonk.v1", "fabric.tcp.mbps.200000"],
+        "capabilities": ["runtime.vonk.v1", "fabric.connected.mbps.200000"],
         "fabric_address": "192.168.100.2",
         "fabric_bandwidth_mbps": 200000,
         "nvidia_driver_version": "580.65.06",

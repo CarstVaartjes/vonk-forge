@@ -89,7 +89,7 @@ fn inventory_reports_physical_and_available_memory_disk_and_gpu() {
     assert!(
         inventory
             .capabilities
-            .contains(&"fabric.tcp.mbps.200000".to_owned())
+            .contains(&"fabric.connected.mbps.200000".to_owned())
     );
     assert_eq!(runner.calls.borrow().len(), 4);
     assert_eq!(
