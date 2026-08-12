@@ -172,6 +172,7 @@ fn inspect_copy(
     findings: &mut Vec<SourceFinding>,
 ) {
     let mut tokens = argument.split_ascii_whitespace().collect::<Vec<_>>();
+    let copies_from_stage = tokens.iter().any(|value| value.starts_with("--from="));
     if let Some(from) = tokens
         .iter()
         .find_map(|value| value.strip_prefix("--from="))
@@ -215,9 +216,10 @@ fn inspect_copy(
             .collect::<Vec<_>>()
     };
     if sources.is_empty()
-        || sources
-            .iter()
-            .any(|value| value.starts_with('/') || value.split('/').any(|part| part == ".."))
+        || sources.iter().any(|value| {
+            (value.starts_with('/') && !copies_from_stage)
+                || value.split('/').any(|part| part == "..")
+        })
     {
         findings.push(finding(
             "dockerfile.copy_escape",
