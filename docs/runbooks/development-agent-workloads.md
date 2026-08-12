@@ -438,8 +438,14 @@ scripts/run-development-slices \
   --builder-node '<SPARK_1_NODE_ID>' \
   --target-node '<SPARK_1_NODE_ID>' \
   --evidence-file '<EVIDENCE_DIRECTORY>/model-single.json' \
+  --timeout-seconds 1800 \
   --stop-after inference-ok
 ```
+
+The timeout covers a cold 2,592,110,592-byte runtime-image build and transfer.
+It does not describe container size plus model size: the 86,720,111,488-byte
+base and 6,971,241,504-byte drafter remain separate immutable cache objects.
+An exact verified cache hit must not download either model again.
 
 Now perform the restart actions in the next section. Resume with the identical
 command and evidence path, omitting `--stop-after`; the runner proves route and
@@ -488,6 +494,23 @@ from its management address. Use the site's persistent firewall tooling
 without disabling Docker's firewall management, adding a wildcard rule, or
 exposing the rendezvous port on the NAS.
 
+The positive probe is a protocol exchange, not `nc -z` or another empty TCP
+connection. After rank 0 is listening, run this on rank 1 with the accepted
+addresses substituted:
+
+```bash
+worker_hello='vonk-fabric-v1 worker rank=1 world=2 address=<SPARK_2_FABRIC_IP>'
+expected_ack='vonk-fabric-v1 master rank=0 world=2 address=<SPARK_1_FABRIC_IP> port=29500'
+actual_ack="$({
+  printf '%s\n' "$worker_hello"
+} | nc -n -s '<SPARK_2_FABRIC_IP>' -w 5 '<SPARK_1_FABRIC_IP>' 29500)"
+test "$actual_ack" = "$expected_ack"
+```
+
+An empty or partial client is intentionally rejected after the bounded
+`VONK_FABRIC_RENDEZVOUS_SECONDS` read timeout. It is not positive-path
+evidence and must not terminate the persistent coordinator.
+
 Start both ranks and pause after inference through the sole entrypoint:
 
 ```bash
@@ -503,6 +526,7 @@ scripts/run-development-slices \
   --target-node '<SPARK_2_NODE_ID>' \
   --failure-node '<SPARK_2_NODE_ID>' \
   --evidence-file '<EVIDENCE_DIRECTORY>/model-multinode.json' \
+  --timeout-seconds 1800 \
   --stop-after inference-ok
 ```
 

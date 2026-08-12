@@ -1,34 +1,56 @@
 # Development agent workload acceptance record
 
-Date: 2026-08-11
+Date: 2026-08-13
 
-Status: in progress. This record is intentionally incomplete until accepted
-GitHub artifacts, the NAS, and both physical Sparks pass every row below. A
-healthy API or a passing repository suite alone is not completion.
+Status: accepted. Repository, publication, NAS, both physical Sparks, synthetic
+and real-model lifecycles, two-rank failure/recovery, restart persistence,
+normal cleanup, public documentation, and temporary-access removal passed.
 
 Private evidence JSON, tokens, qualification inputs, certificates, keys, model
-contents, and command output containing host-specific secrets stay in the
-operator's protected evidence directory. This committed record contains only
-public artifact identities, redacted digests, check/run URLs, and pass/fail
-outcomes.
+contents, and command output containing host-specific secrets remain in the
+operator's mode-`0600` evidence directory. This committed record contains only
+public artifact identities, certificate fingerprints, redacted evidence
+digests, bounded operation identities, workflow links, and pass/fail outcomes.
+
+## Accepted publication
+
+The persistent rendezvous correction was independently reviewed in
+[PR #128](https://github.com/CarstVaartjes/vonk-forge/pull/128), merged as
+`72e59f04c678e03261b4bedca6b509eafb6ddf07`, and passed every required PR
+check. Publication then completed only from accepted `main`:
+
+- [Development images run 31645030311](https://github.com/CarstVaartjes/vonk-forge/actions/runs/31645030311)
+  built, smoke-tested, scanned, attested, and published the exact API and worker
+  archives before advancing `:dev`.
+- The accepted API manifest is
+  `sha256:f12d269bf2cb915b5d640cfe14710a556eee97938e2a45c0fdea350c687166a8`;
+  the worker manifest is
+  `sha256:254cc75ede909e0205f7d202c699b01d6eb9749296b5c78d0bfc3ed4ecaca02b`.
+- [Rust agent run 31645030289](https://github.com/CarstVaartjes/vonk-forge/actions/runs/31645030289)
+  lifecycle-tested, signed, and published
+  `0.1.0~dev.92+g72e59f04c678` with package SHA-256
+  `301ea87dc04d5bed01db8e679d20d4700b750340d370598f9fc69e57167dddb2`.
+  The accepted source change did not alter the agent contract, so the physical
+  run retained the already activated capability-fix package rather than
+  interrupting a workload for package churn.
 
 ## Required evidence matrix
 
-| Gate | Reproducible procedure | Required retained evidence | Status |
-| --- | --- | --- | --- |
-| Repository correctness | Run the Python control, agent, repository, Rust, systemd, supply-chain, documentation, secret-scan, and complete-stack commands from the implementation plan | Exact clean commit plus command summaries | Pending final clean-commit run |
-| Independent review | Review the final diff after all fixes and resolve every actionable finding | Reviewer result and zero unresolved threads | Pending |
-| Accepted publication | Merge through a pull request; allow only GitHub Actions on accepted `main` to publish `:dev`, development APT, and Compose artifacts | PR, accepted commit, workflow URLs, image/package/artifact digests | Pending |
-| NAS project | Follow [Development NAS installation](../runbooks/development-nas-installation.md) using exactly `docker-compose.yml` plus `secrets/`; pull and redeploy in the NAS UI | Compose checksum, selected cohort, service health, secret-boundary checks | Pending |
-| Spark identity | Follow [Install the Vonk agent](../operations/install-vonk-agent.md) and [Node onboarding](../runbooks/node-onboarding.md) for both nodes | Stable `spk_` IDs, certificate fingerprints, package versions, fresh inventory | Pending |
-| Synthetic lifecycle, pass 1 | Run the `synthetic` phase in [Development agent workloads](../runbooks/development-agent-workloads.md) | Exact build/import/install/start/route/inference/stop/uninstall evidence | Pending |
-| Synthetic restart replay | Restart both agents and the NAS stack, then repeat the identical synthetic acceptance | Same identities, retained immutable content, no unnecessary rebuild/redownload | Pending |
-| Real single-node model | Qualify the public DS4 lane and run `model-single` | Qualification digest, exact image/artifact identities, inference, restart, stop/uninstall | Pending public DS4 pull and accepted deployment |
-| Real two-node gang | Run `model-multinode` with both exact target nodes after applying the direct-fabric-only rendezvous firewall rule | Rank-0 address-specific `MASTER_ADDR:29500:29500` publication, Docker-bridge egress through the declared fabric route, positive direct-fabric host probe and negative management/public probes, bounded local-address HELLO/ack, equal image/artifact-set identities, all-rank readiness, sole entrypoint inference | Pending |
-| Rank failure/recovery | Verify the management labels, stop only the selected Docker workload container while its Rust agent remains healthy, then start that same container | Fresh failed-rank snapshot, route withdrawal, fresh recovery snapshot, republication, recovered inference | Pending |
-| Restart persistence | Restart both Rust supervisors and the NAS project without changing cohort or deleting state | Advanced freshness, same identities, serving route, inference without rebuild | Pending |
-| Normal cleanup | Stop and uninstall through the API; retain only normally reference-counted immutable caches | Terminal operation evidence and no active validation workload | Pending |
-| Temporary sudo removal | Remove both temporary sudoers filenames on NAS and Sparks and prove `sudo -n true` fails | `PASSWORD_REQUIRED` on all three hosts | Pending; remove last |
+| Gate | Result and retained evidence | Status |
+| --- | --- | --- |
+| Repository correctness | PR #128 passed Ruff, generated clients, PR contracts, Rust contracts, all four repository shards, all four control shards, Python agent, admin web, catalog/service, and release-policy checks. This final documentation diff also passed all 286 local script tests, whitespace validation, and a bounded secret-pattern scan; it is merged only after its required GitHub checks pass. | Passed |
+| Independent review | PR #128's final independent review found no Critical or Important issue after the same-coordinator recovery test was added; all actionable feedback was resolved before merge. The final documentation-only diff received a separate independent review under the same zero-Critical/Important gate. | Passed |
+| Accepted publication | Exact `main` commit, image manifests, package digest, and successful workflow URLs are listed above. No branch-built or locally published artifact was deployed. | Passed |
+| NAS project | The NAS directory contains exactly `docker-compose.yml` plus `secrets/`. Compose SHA-256 is `f0521b1ce1ccb1ab115857d64005a9a708f1c28ce2fd8e74e09bf63405be54df`; all 14 host secret sources are mode `0600`; API, worker, and migration use distinct read-only secret projections; the five long-running services expose no secret-valued environment variables. Ordered pull/stop/start converged every service healthy on revision `72e59f04`; the final read-only audit found every service up, all health checks green, and zero recent Caddy errors. | Passed |
+| Spark identity | Spark 1 is `spk_42a502cc1a5de4c79aea1b6b6d993c74`, certificate SHA-256 `07:17:D4:E4:87:18:1E:9A:2B:60:E3:FA:B2:09:D8:95:A4:DC:15:EC:B1:EF:98:C4:B2:07:57:5B:C8:A2:3D:B6`; Spark 2 is `spk_ec7897d93866091c4249cc7825fb95c7`, certificate SHA-256 `62:C7:06:2B:C6:77:C6:15:88:B6:66:2C:7C:5F:A4:8D:E6:E7:2B:B6:CF:F0:A6:90:5E:AC:A0:BD:FE:1A:D4:9A`. Both run signed package `0.1.0~dev.91+g950e4845c54e`, slot B, binary SHA-256 `8c06e776691d1153564fdb7410de9866ec41b609cb20697aa816f9dd206437e3`, Rust protocol 3, migration complete, and fresh inventory. Neither the service account nor the human operator retains Docker-group access; a fresh SSH session requires `sudo docker`. | Passed |
+| Synthetic lifecycle, pass 1 | Physical run `0bc959ef-3496-4106-abd7-0c2ca7c5b07b` completed all 12 states from inventory through normal uninstall with image `sha256:b77a3294aeedf13093f8b10aed7c33126f722a286a3cfd99ceec6e8d0dbfd9e8`. | Passed |
+| Synthetic replay | A second physical run, `8c5d1f4b-5b6e-497a-8f0b-be9a5964ec22`, reused the same immutable source/image identity after control and agent restarts and again completed all 12 states. | Passed |
+| Real single-node model | The public DS4 lane qualified against both nodes. Run `eff35b3c-7ed1-4f19-a199-dd2748275be2` built a 2,592,110,592-byte wrapper, performed inference, survived the restart checkpoint, and completed normal stop/withdraw/uninstall. Model files remained separate immutable cache objects. | Passed |
+| Real two-node gang | Recipe revision 6 used source bundle `daefe17329880a18fb57c34dc76a42997b4393a4d019ae3ebcc22e42fdc5b69a` and wrapper image `sha256:4dec50e77c98a42e9729416252c81b0e16487ae398f20a767f10dd747bd61aad`. Run `df3f38fe-7ae4-4cbd-96b4-bff1e812940f` had rank 0 publish only `192.168.1.211:8000` and `192.168.100.10:29500`, while rank 1 published only `192.168.100.11:8000`. The packaged firewall check passed on both nodes; a complete direct-fabric HELLO received the exact acknowledgement; management-path rendezvous and rank-1 management-port probes were rejected. Sole-entrypoint inference passed. | Passed |
+| Rank failure/recovery | After exact three-label verification, only rank 1's managed container was stopped while its Rust agent remained active. Fresh evidence withdrew the route with HTTP 503. Starting that same container repeated rendezvous, restored both fresh ranks, republished the route, and produced recovered inference without build/install/cache mutation. The same rank-0 coordinator process remained alive throughout. | Passed |
+| Restart persistence | Both A/B supervisors and the NAS project were restarted; NAS used ordered stop/start without a pull and retained the exact API image ID. Fleet evidence advanced to `34f73aad8cabbef6f18ff54062f5baf8be0444758c4a1f77f2b35eea8a343972`; the same run and route produced inference without rebuild or model download. | Passed |
+| Normal cleanup | Stop operation `7502e2e4-3b27-420e-baba-09571afa5266` and uninstall operation `228177e6-ff88-48fa-b985-b6cc9e88d403` completed. Both nodes have zero Vonk-managed containers, the endpoint returns HTTP 503, and the exact 86,720,111,488-byte base plus 6,971,241,504-byte drafter cache objects remain on each node. | Passed |
+| Temporary sudo removal | After the final host audit and website deployment, `/etc/sudoers.d/vonktemp` and `/etc/sudoers.d/99-vonk-codex-temporary` were removed if present on the NAS and both Sparks. Sudo timestamps were invalidated; fresh `sudo -n true` probes returned `PASSWORD_REQUIRED` on all three hosts. | Passed |
 
 ## Failure rules
 
@@ -36,11 +58,10 @@ outcomes.
 - Do not deploy branch-built or locally published release artifacts.
 - Do not put runtime secrets in an image, Compose environment value, log, audit
   record, or committed evidence file.
-- Do not simulate a rank failure by stopping its agent or deleting a container,
+- Do not simulate rank failure by stopping an agent or deleting a container,
   cache, identity, named volume, or model directory.
-- Do not remove temporary unattended sudo until every earlier physical gate is
-  complete; remove it even if a later cleanup attempt fails.
+- Remove temporary unattended sudo only after every physical and publication
+  action that needs it, and verify removal even if a later non-host task fails.
 
-The final update to this record must replace every `Pending` status with a
-specific result or a truthful blocking reason and must link the accepted public
-GitHub evidence without exposing private deployment evidence.
+Every required row has an observed passing result. Any future rollout creates
+a new dated evidence record rather than changing these accepted identities.

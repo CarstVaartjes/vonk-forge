@@ -11,6 +11,13 @@ GPU nodes receive only the public controller CA and their own locally generated
 identity. No GitHub, GHCR, R2, database, signing, or model credential is copied
 to a GPU node or baked into an image.
 
+Plan local NVMe capacity for images and model artifacts separately. The
+qualified DS4 wrapper image is about 2.59 GB. Its immutable base and drafter
+model files are separate cache objects of 86,720,111,488 and 6,971,241,504
+bytes respectively (93,691,352,992 bytes total). Updating or rebuilding the
+wrapper does not put those model files in the container and does not redownload
+an already verified cache object.
+
 NVIDIA Sync owns supported cluster networking and node-to-node SSH. DGX
 Dashboard owns DGX OS, firmware, kernel, driver, Docker, and NVIDIA Toolkit
 updates. This fresh-install path validates those platform prerequisites but
