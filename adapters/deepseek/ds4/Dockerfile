@@ -34,7 +34,13 @@ LABEL org.opencontainers.image.source="https://github.com/Entrpi/ds4.git" \
       io.node.ds4.source-archive-sha256="${DS4_SOURCE_ARCHIVE_SHA256}" \
       io.node.ds4.patch-sha256="${DS4_PATCH_SHA256}" \
       io.node.ds4.cuda-build-target="compute_121a/sm_121a;DS4_CUDA_SPARK_HBM_CACHE=1" \
-      io.node.ds4.served-model-id="deepseek"
+      io.node.ds4.served-model-id="deepseek" \
+      ai.vonkforge.runtime-interface="v1"
+
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y busybox-static \
+    && test -x /bin/busybox \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --gid 10001 ds4 \
     && useradd --uid 10001 --gid 10001 --home-dir /var/lib/ds4 --create-home --shell /usr/sbin/nologin ds4 \

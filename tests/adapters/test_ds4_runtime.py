@@ -334,6 +334,9 @@ def test_runtime_recipe_uses_the_pinned_cuda_sources_and_safe_runtime_contract()
     assert "DS4_CUDA_SPARK_HBM_CACHE=1" in dockerfile
     assert "compute_121a" in dockerfile
     assert "sm_121a" in dockerfile
+    assert "apt-get install --no-install-recommends -y busybox-static" in dockerfile
+    assert "test -x /bin/busybox" in dockerfile
+    assert 'ai.vonkforge.runtime-interface="v1"' in dockerfile
     assert "DS4_NO_UPDATE_CHECK=1" in dockerfile
     assert "DS4_CUDA_COPY_MODEL" not in dockerfile
     assert "DS4_MODEL_ANON_HUGE=1" not in dockerfile
