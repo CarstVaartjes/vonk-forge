@@ -490,6 +490,158 @@ def test_partial_install_fails_as_a_group_and_can_retry(tmp_path: Path) -> None:
         service.retry(first.id, actor="admin", request_id="3" * 35 + "4")
 
 
+def test_failed_image_distribution_retry_requeues_exact_persisted_group(
+    tmp_path: Path,
+) -> None:
+    sessions, service, queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2
+    )
+    plan_digest = "4" * 64
+    payloads = tuple(
+        (
+            node_id,
+            {
+                "schema_version": 1,
+                "kind": "recipe.image.import.v1",
+                "build_id": build_id,
+                "mapping_id": mapping_id,
+                "mapping_generation": 1,
+                "source_node_id": nodes[0],
+                "image_digest": "sha256:" + "1" * 64,
+                "oci_layout_sha256": "3" * 64,
+                "image_bytes": 30,
+            },
+        )
+        for node_id in nodes
+    )
+    first = service._queue(
+        kind="recipe.image.import.v1",
+        owner_kind="image-distribution",
+        owner_id=build_id,
+        plan_digest=plan_digest,
+        actor="admin",
+        request_id="4" * 36,
+        node_payloads=payloads,
+        authority_digest=plan_digest,
+    )
+    service.record_node_result(
+        first.id,
+        nodes[0],
+        succeeded=True,
+        evidence={
+            "build_id": build_id,
+            "image_bytes": 30,
+            "image_digest": "sha256:" + "1" * 64,
+            "oci_layout_sha256": "3" * 64,
+        },
+    )
+    service.record_node_result(
+        first.id,
+        nodes[1],
+        succeeded=False,
+        evidence={"reason": "helper grant expired"},
+    )
+
+    retry = service.retry(first.id, actor="admin", request_id="5" * 36)
+    replay = service.retry(first.id, actor="admin", request_id="5" * 36)
+
+    assert retry.id != first.id
+    assert replay == retry
+    assert retry.kind == "recipe.image.import.v1"
+    assert retry.owner_id == build_id
+    assert retry.plan_digest == plan_digest
+    assert retry.nodes == tuple(sorted(nodes))
+    assert queue.available == 2
+    with sessions() as session:
+        retried_job = session.get(Job, retry.id)
+        assert retried_job is not None
+        assert retried_job.base_commit == plan_digest[:40]
+        retried_children = tuple(
+            session.scalars(
+                select(AgentOperation)
+                .where(AgentOperation.parent_job_id == retry.id)
+                .order_by(AgentOperation.node_id)
+            )
+        )
+        assert tuple(
+            (child.node_id, child.payload) for child in retried_children
+        ) == tuple(sorted(payloads))
+    with pytest.raises(RecipeOperationConflict, match="active retry"):
+        service.retry(first.id, actor="admin", request_id="6" * 36)
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    (
+        "owner-kind",
+        "targets",
+        "authority",
+        "child-kind",
+        "child-state",
+        "child-payload",
+    ),
+)
+def test_image_distribution_retry_rejects_malformed_persisted_group(
+    tmp_path: Path, tamper: str
+) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    plan_digest = "7" * 64
+    first = service._queue(
+        kind="recipe.image.import.v1",
+        owner_kind="image-distribution",
+        owner_id=build_id,
+        plan_digest=plan_digest,
+        actor="admin",
+        request_id="7" * 36,
+        node_payloads=(
+            (
+                nodes[0],
+                {
+                    "schema_version": 1,
+                    "kind": "recipe.image.import.v1",
+                    "build_id": build_id,
+                    "mapping_id": mapping_id,
+                    "mapping_generation": 1,
+                    "source_node_id": nodes[0],
+                    "image_digest": "sha256:" + "1" * 64,
+                    "oci_layout_sha256": "3" * 64,
+                    "image_bytes": 30,
+                },
+            ),
+        ),
+        authority_digest=plan_digest,
+    )
+    service.record_node_result(
+        first.id,
+        nodes[0],
+        succeeded=False,
+        evidence={"reason": "helper grant expired"},
+    )
+    with sessions.begin() as session:
+        job = session.get(Job, first.id)
+        child = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == first.id)
+        )
+        assert job is not None and child is not None
+        if tamper == "owner-kind":
+            job.payload = {**job.payload, "owner_kind": "recipe-build"}
+        elif tamper == "targets":
+            job.targets = []
+        elif tamper == "authority":
+            job.base_commit = "0" * 40
+        elif tamper == "child-kind":
+            child.kind = "recipe.install"
+        elif tamper == "child-state":
+            child.state = "queued"
+        else:
+            payload = dict(child.payload)
+            del payload["image_digest"]
+            child.payload = payload
+
+    with pytest.raises(RecipeOperationConflict, match="stored.*invalid"):
+        service.retry(first.id, actor="admin", request_id="8" * 36)
+
+
 def test_failed_install_retry_state_rolls_back_when_queue_write_fails(
     tmp_path: Path,
 ) -> None:
