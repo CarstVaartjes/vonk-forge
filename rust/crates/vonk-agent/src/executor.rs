@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use chrono::Utc;
+use chrono::{DateTime, FixedOffset, Utc};
 use serde_json::{Value, json};
 use std::{path::Path, time::Duration};
 
@@ -61,14 +61,22 @@ pub struct ExecutionResult {
 
 #[async_trait(?Send)]
 pub trait Executor {
-    async fn execute(&self, claim: &AgentClaim) -> ExecutionResult;
+    async fn execute(
+        &self,
+        claim: &AgentClaim,
+        lease_deadline: tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
+    ) -> ExecutionResult;
 }
 
 pub struct RejectingExecutor;
 
 #[async_trait(?Send)]
 impl Executor for RejectingExecutor {
-    async fn execute(&self, claim: &AgentClaim) -> ExecutionResult {
+    async fn execute(
+        &self,
+        claim: &AgentClaim,
+        _lease_deadline: tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
+    ) -> ExecutionResult {
         ExecutionResult {
             state: "waiting-for-operator",
             body: json!({"operation": claim.operation, "reason": "operation is not enabled by this agent build"}),
@@ -102,7 +110,11 @@ impl<R> RecipeExecutor<'_, R> {
 
 #[async_trait(?Send)]
 impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
-    async fn execute(&self, claim: &AgentClaim) -> ExecutionResult {
+    async fn execute(
+        &self,
+        claim: &AgentClaim,
+        lease_deadline: tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
+    ) -> ExecutionResult {
         let request = match RecipeOperationRequest::parse(claim) {
             Ok(request) => request,
             Err(_) => return failed("recipe operation payload is invalid"),
@@ -327,7 +339,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     request.endpoint_address,
                     request.port,
                     &spec.endpoint.health_path,
-                    claim.deadline.with_timezone(&Utc),
+                    lease_deadline,
                 )
                 .await
                 .is_err()
@@ -507,14 +519,18 @@ async fn run_once_with_heartbeat_interval<C: LoopClient, E: Executor>(
         Ok(BeginDecision::Execute) => {
             let heartbeat_state = state.reopen()?;
             let (stop_heartbeat, heartbeat_stop) = tokio::sync::oneshot::channel();
+            let (lease_deadline_sender, lease_deadline) =
+                tokio::sync::watch::channel(claim.deadline);
             let heartbeat_task = tokio::spawn(run_heartbeats(
                 client.clone(),
                 heartbeat_state,
                 claim.clone(),
+                lease_deadline_sender,
                 heartbeat_stop,
                 heartbeat_interval,
             ));
-            let executed = normalize_execution_result(&claim, executor.execute(&claim).await);
+            let executed =
+                normalize_execution_result(&claim, executor.execute(&claim, lease_deadline).await);
             let _ = stop_heartbeat.send(());
             let heartbeat_result = heartbeat_task
                 .await
@@ -574,6 +590,7 @@ async fn run_heartbeats<C: LoopClient>(
     client: C,
     mut state: StateStore,
     claim: AgentClaim,
+    lease_deadline: tokio::sync::watch::Sender<DateTime<FixedOffset>>,
     mut stop: tokio::sync::oneshot::Receiver<()>,
     interval: Duration,
 ) -> Result<bool, LoopError> {
@@ -596,6 +613,7 @@ async fn run_heartbeats<C: LoopClient>(
         };
         let directive = client.heartbeat(&progress).await?;
         state.apply_heartbeat(&progress, &directive)?;
+        lease_deadline.send_replace(directive.deadline);
         deadline = directive.deadline;
         cancellation_observed |= directive.cancel_requested;
     }
@@ -608,7 +626,7 @@ mod tests {
         client::ClientError, state::StateStore, supervisor_readiness::AgentRuntimeIdentity,
     };
     use async_trait::async_trait;
-    use chrono::{Duration as ChronoDuration, FixedOffset, Utc};
+    use chrono::{DateTime, Duration as ChronoDuration, FixedOffset, Utc};
     use serde_json::json;
     use std::{
         sync::{Arc, Mutex},
@@ -667,11 +685,16 @@ mod tests {
     struct HeartbeatGatedExecutor {
         heartbeats: Arc<Mutex<Vec<AgentProgress>>>,
         minimum: usize,
+        observed_deadline: Arc<Mutex<Option<DateTime<FixedOffset>>>>,
     }
 
     #[async_trait(?Send)]
     impl Executor for HeartbeatGatedExecutor {
-        async fn execute(&self, _claim: &AgentClaim) -> ExecutionResult {
+        async fn execute(
+            &self,
+            _claim: &AgentClaim,
+            lease_deadline: tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
+        ) -> ExecutionResult {
             tokio::time::timeout(Duration::from_secs(2), async {
                 loop {
                     if self.heartbeats.lock().unwrap().len() >= self.minimum {
@@ -682,6 +705,7 @@ mod tests {
             })
             .await
             .expect("heartbeat task did not make progress");
+            *self.observed_deadline.lock().unwrap() = Some(*lease_deadline.borrow());
             ExecutionResult {
                 state: "succeeded",
                 body: json!({"status": "ok"}),
@@ -693,7 +717,11 @@ mod tests {
 
     #[async_trait(?Send)]
     impl Executor for FailedExecutor {
-        async fn execute(&self, _claim: &AgentClaim) -> ExecutionResult {
+        async fn execute(
+            &self,
+            _claim: &AgentClaim,
+            _lease_deadline: tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
+        ) -> ExecutionResult {
             ExecutionResult {
                 state: "failed",
                 body: json!({"reason": "rootless image build failed"}),
@@ -733,7 +761,9 @@ mod tests {
         let executor = HeartbeatGatedExecutor {
             heartbeats,
             minimum: 2,
+            observed_deadline: Arc::new(Mutex::new(None)),
         };
+        let observed_deadline = executor.observed_deadline.clone();
         let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
 
         run_once_with_heartbeat_interval(
@@ -754,6 +784,7 @@ mod tests {
         let results = client.results.lock().unwrap();
         assert_eq!(results.len(), 1);
         assert!(results[0].deadline > original.deadline);
+        assert!(observed_deadline.lock().unwrap().unwrap() > original.deadline);
         assert!(state.pending_results().unwrap().is_empty());
     }
 
@@ -770,6 +801,7 @@ mod tests {
         let executor = HeartbeatGatedExecutor {
             heartbeats,
             minimum: 1,
+            observed_deadline: Arc::new(Mutex::new(None)),
         };
         let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
 
