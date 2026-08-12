@@ -222,9 +222,22 @@ runs:
         trap 'echo "lifecycle check failed at line ${LINENO}: ${BASH_COMMAND}" >&2' ERR
         sudo apt-get update
         sudo apt-get install --no-install-recommends -y \
-          fuse-overlayfs podman slirp4netns uidmap
+          fuse-overlayfs iproute2 iptables podman shellcheck slirp4netns uidmap
+        shellcheck \
+          packaging/bin/vonk-forge-docker-firewall \
+          tests/scripts/test_docker_firewall.sh
+        sudo tests/scripts/test_docker_firewall.sh
         package="dist/vonk-forge-agent_${VERSION}_arm64.deb"
         sudo env SYSTEMD_OFFLINE=1 dpkg -i "$package"
+        sudo systemd-analyze verify \
+          /lib/systemd/system/vonk-forge-docker-firewall.service \
+          /lib/systemd/system/vonk-forge-package-helper.service
+        systemd-analyze security --offline=yes --no-pager \
+          vonk-forge-docker-firewall.service \
+          vonk-forge-package-helper.service \
+          > dist/vonk-forge-package-systemd-security.txt
+        test "$(grep -Fc 'Overall exposure level' \
+          dist/vonk-forge-package-systemd-security.txt)" = 2
         getent passwd vonk-agent >/dev/null
         sudo awk -F: '$1 == "vonk-agent" { total += $3 } END { exit !(total >= 65536) }' \
           /etc/subuid

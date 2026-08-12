@@ -28,6 +28,9 @@ def test_shell_suite(suite: Path) -> None:
         timeout=60,
     )
 
+    if completed.returncode == 77:
+        pytest.skip(completed.stderr.strip() or "suite prerequisites are unavailable")
+
     assert completed.returncode == 0, (
         f"{_suite_id(suite)} exited {completed.returncode}\n"
         f"stdout:\n{completed.stdout}\n"

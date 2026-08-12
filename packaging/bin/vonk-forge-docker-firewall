@@ -1,0 +1,226 @@
+#!/bin/sh
+set -eu
+
+chain=VONK-FORGE
+marker=vonk-forge-managed-v1
+iptables_bin=${VONK_FIREWALL_IPTABLES:-/usr/sbin/iptables}
+ip_bin=${VONK_FIREWALL_IP:-/usr/sbin/ip}
+
+fail() {
+    echo "vonk-forge-docker-firewall: $*" >&2
+    exit 1
+}
+
+usage() {
+    echo "usage: vonk-forge-docker-firewall --config PATH apply|check" >&2
+    exit 64
+}
+
+[ "${1:-}" = --config ] || usage
+config=${2:-}
+action=${3:-}
+[ "$#" -eq 3 ] || usage
+case "$action" in apply|check) ;; *) usage ;; esac
+
+[ -e "$config" ] || fail "site configuration is missing: $config"
+[ ! -L "$config" ] || fail "site configuration must not be a symlink"
+[ -f "$config" ] || fail "site configuration is not a regular file"
+[ "$(stat -c %h -- "$config")" = 1 ] || fail "site configuration has multiple links"
+[ "$(stat -c %u -- "$config")" = "$(id -u)" ] || fail "site configuration has the wrong owner"
+permissions=$(stat -c %A -- "$config")
+[ "$(printf '%s' "$permissions" | cut -c6)" != w ] || fail "site configuration is group-writable"
+[ "$(printf '%s' "$permissions" | cut -c9)" != w ] || fail "site configuration is world-writable"
+
+nas_management_ip=
+node_management_ip=
+node_fabric_ip=
+peer_fabric_ip=
+endpoint_ports=
+rendezvous_port=
+seen_nas=0
+seen_management=0
+seen_fabric=0
+seen_peer=0
+seen_endpoints=0
+seen_rendezvous=0
+
+while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+        ''|'#'*) continue ;;
+        VONK_NAS_MANAGEMENT_IP=*)
+            [ "$seen_nas" -eq 0 ] || fail "duplicate VONK_NAS_MANAGEMENT_IP"
+            nas_management_ip=${line#*=}; seen_nas=1 ;;
+        VONK_NODE_MANAGEMENT_IP=*)
+            [ "$seen_management" -eq 0 ] || fail "duplicate VONK_NODE_MANAGEMENT_IP"
+            node_management_ip=${line#*=}; seen_management=1 ;;
+        VONK_NODE_FABRIC_IP=*)
+            [ "$seen_fabric" -eq 0 ] || fail "duplicate VONK_NODE_FABRIC_IP"
+            node_fabric_ip=${line#*=}; seen_fabric=1 ;;
+        VONK_PEER_FABRIC_IP=*)
+            [ "$seen_peer" -eq 0 ] || fail "duplicate VONK_PEER_FABRIC_IP"
+            peer_fabric_ip=${line#*=}; seen_peer=1 ;;
+        VONK_ENDPOINT_HOST_PORTS=*)
+            [ "$seen_endpoints" -eq 0 ] || fail "duplicate VONK_ENDPOINT_HOST_PORTS"
+            endpoint_ports=${line#*=}; seen_endpoints=1 ;;
+        VONK_RENDEZVOUS_PORT=*)
+            [ "$seen_rendezvous" -eq 0 ] || fail "duplicate VONK_RENDEZVOUS_PORT"
+            rendezvous_port=${line#*=}; seen_rendezvous=1 ;;
+        *) fail "site configuration contains an unknown or malformed line" ;;
+    esac
+done < "$config"
+
+valid_ipv4() {
+    value=$1
+    old_ifs=$IFS
+    IFS=.
+    # shellcheck disable=SC2086 # Deliberate field split under dot-only IFS.
+    set -- $value
+    IFS=$old_ifs
+    [ "$#" -eq 4 ] || return 1
+    [ "$value" = "$1.$2.$3.$4" ] || return 1
+    for octet in "$@"; do
+        case "$octet" in
+            0|[1-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5]) ;;
+            *) return 1 ;;
+        esac
+    done
+}
+
+for value in "$nas_management_ip" "$node_management_ip" "$node_fabric_ip" "$peer_fabric_ip"; do
+    valid_ipv4 "$value" || fail "site configuration contains an invalid IPv4 address"
+done
+[ "$nas_management_ip" != "$node_management_ip" ] || fail "NAS and node management addresses must differ"
+[ "$nas_management_ip" != "$node_fabric_ip" ] || fail "NAS and node fabric addresses must differ"
+[ "$nas_management_ip" != "$peer_fabric_ip" ] || fail "NAS and peer fabric addresses must differ"
+[ "$node_fabric_ip" != "$peer_fabric_ip" ] || fail "fabric addresses must differ"
+[ "$node_management_ip" != "$node_fabric_ip" ] || fail "management and fabric addresses must differ"
+[ "$node_management_ip" != "$peer_fabric_ip" ] || fail "management and peer fabric addresses must differ"
+
+valid_port() {
+    case "$1" in ''|*[!0-9]*|0*) return 1 ;; esac
+    [ "$1" -ge 1024 ] 2>/dev/null && [ "$1" -le 65535 ] 2>/dev/null
+}
+valid_port "$rendezvous_port" || fail "rendezvous port is invalid"
+[ -n "$endpoint_ports" ] || fail "at least one endpoint host port is required"
+old_ifs=$IFS
+IFS=,
+# shellcheck disable=SC2086 # Deliberate field split under comma-only IFS.
+set -- $endpoint_ports
+IFS=$old_ifs
+canonical_ports=
+for port in "$@"; do
+    valid_port "$port" || fail "endpoint host port is invalid"
+    [ "$port" != "$rendezvous_port" ] || fail "endpoint and rendezvous ports must differ"
+    case ",$canonical_ports," in *,$port,*) fail "endpoint host ports must be unique" ;; esac
+    if [ -z "$canonical_ports" ]; then canonical_ports=$port; else canonical_ports=$canonical_ports,$port; fi
+done
+[ "$canonical_ports" = "$endpoint_ports" ] || fail "endpoint host ports are not canonical"
+
+[ "$(id -u)" -eq 0 ] || fail "must run as root"
+[ -x "$iptables_bin" ] || fail "iptables is unavailable"
+[ -x "$ip_bin" ] || fail "iproute2 is unavailable"
+
+local_interface() {
+    address=$1
+    interface=$(
+        "$ip_bin" -4 -o address show \
+            | awk -v address="$address" '
+                {
+                    value=$4
+                    sub(/\/.*/, "", value)
+                    if (value == address) print $2
+                }'
+    )
+    [ -n "$interface" ] || fail "node address is not assigned locally: $address"
+    case "$interface" in *'
+'*) fail "node address is assigned more than once: $address" ;; esac
+    printf '%s\n' "$interface"
+}
+
+management_interface=$(local_interface "$node_management_ip")
+fabric_interface=$(local_interface "$node_fabric_ip")
+[ "$management_interface" != "$fabric_interface" ] \
+    || fail "management and fabric addresses must use different interfaces"
+exec 9>/run/lock/vonk-forge-docker-firewall.lock
+/usr/bin/flock -x 9
+
+ipt() {
+    "$iptables_bin" -w "$@"
+}
+
+require_rule() {
+    ipt -C "$chain" "$@" >/dev/null 2>&1 || fail "managed firewall rule is missing"
+}
+
+verify_rules() {
+    [ "$(local_interface "$node_management_ip")" = "$management_interface" ] \
+        || fail "node management interface changed during policy application"
+    [ "$(local_interface "$node_fabric_ip")" = "$fabric_interface" ] \
+        || fail "node fabric interface changed during policy application"
+    ipt -n -L DOCKER-USER >/dev/null 2>&1 || fail "Docker DOCKER-USER chain is unavailable"
+    ipt -n -L "$chain" >/dev/null 2>&1 || fail "managed firewall chain is unavailable"
+    first_jump=$(ipt -S DOCKER-USER | sed -n '/^-A DOCKER-USER /{p;q;}')
+    [ "$first_jump" = "-A DOCKER-USER -j $chain" ] || fail "managed firewall jump is not first"
+    require_rule -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
+    old_ifs=$IFS
+    IFS=,
+    # shellcheck disable=SC2086 # Deliberate field split under comma-only IFS.
+    set -- $endpoint_ports
+    IFS=$old_ifs
+    for port in "$@"; do
+        require_rule -i "$management_interface" -p tcp -s "$nas_management_ip" -m conntrack \
+            --ctorigdst "$node_management_ip" --ctorigdstport "$port" -j RETURN
+        require_rule -p tcp -m conntrack --ctorigdst "$node_management_ip" \
+            --ctorigdstport "$port" -j DROP
+        require_rule -p tcp -m conntrack --ctorigdst "$node_fabric_ip" \
+            --ctorigdstport "$port" -j DROP
+    done
+    require_rule -i "$fabric_interface" -p tcp -s "$peer_fabric_ip" -m conntrack \
+        --ctorigdst "$node_fabric_ip" --ctorigdstport "$rendezvous_port" -j RETURN
+    require_rule -p tcp -m conntrack --ctorigdst "$node_fabric_ip" \
+        --ctorigdstport "$rendezvous_port" -j DROP
+    require_rule -p tcp -m conntrack --ctorigdst "$node_management_ip" -j DROP
+    require_rule -p tcp -m conntrack --ctorigdst "$node_fabric_ip" -j DROP
+    require_rule -m comment --comment "$marker" -j RETURN
+    expected=$((6 + 3 * $#))
+    actual=$(ipt -S "$chain" | awk -v chain="$chain" '$1 == "-A" && $2 == chain { count++ } END { print count+0 }')
+    [ "$actual" -eq "$expected" ] || fail "managed firewall chain contains unexpected rules"
+}
+
+if [ "$action" = check ]; then
+    verify_rules
+    exit 0
+fi
+
+ipt -n -L DOCKER-USER >/dev/null 2>&1 || fail "Docker DOCKER-USER chain is unavailable"
+if ipt -n -L "$chain" >/dev/null 2>&1; then
+    ipt -C "$chain" -m comment --comment "$marker" -j RETURN >/dev/null 2>&1 \
+        || fail "refusing foreign $chain chain"
+else
+    ipt -N "$chain"
+fi
+ipt -F "$chain"
+while ipt -D DOCKER-USER -j "$chain" >/dev/null 2>&1; do :; done
+ipt -I DOCKER-USER 1 -j "$chain"
+ipt -A "$chain" -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
+old_ifs=$IFS
+IFS=,
+# shellcheck disable=SC2086 # Deliberate field split under comma-only IFS.
+set -- $endpoint_ports
+IFS=$old_ifs
+for port in "$@"; do
+    ipt -A "$chain" -i "$management_interface" -p tcp -s "$nas_management_ip" -m conntrack \
+        --ctorigdst "$node_management_ip" --ctorigdstport "$port" -j RETURN
+    ipt -A "$chain" -p tcp -m conntrack --ctorigdst "$node_management_ip" \
+        --ctorigdstport "$port" -j DROP
+    ipt -A "$chain" -p tcp -m conntrack --ctorigdst "$node_fabric_ip" \
+        --ctorigdstport "$port" -j DROP
+done
+ipt -A "$chain" -i "$fabric_interface" -p tcp -s "$peer_fabric_ip" -m conntrack \
+    --ctorigdst "$node_fabric_ip" --ctorigdstport "$rendezvous_port" -j RETURN
+ipt -A "$chain" -p tcp -m conntrack --ctorigdst "$node_fabric_ip" \
+    --ctorigdstport "$rendezvous_port" -j DROP
+ipt -A "$chain" -p tcp -m conntrack --ctorigdst "$node_management_ip" -j DROP
+ipt -A "$chain" -p tcp -m conntrack --ctorigdst "$node_fabric_ip" -j DROP
+ipt -A "$chain" -m comment --comment "$marker" -j RETURN
+verify_rules

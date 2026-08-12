@@ -148,6 +148,9 @@ fi
 
 deb-systemd-helper enable vonk-forge-package-helper.socket >/dev/null || true
 deb-systemd-helper enable vonk-forge-agent-supervisor.service >/dev/null || true
+if [ -f /etc/vonk-forge-agent/docker-firewall.conf ]; then
+    deb-systemd-helper enable vonk-forge-docker-firewall.service >/dev/null || true
+fi
 if [ -d /run/systemd/system ]; then
     systemctl --system daemon-reload >/dev/null || true
 fi

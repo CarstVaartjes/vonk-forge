@@ -165,74 +165,92 @@ Before any real workload starts, install and persist these exact host rules on
 each possible endpoint owner:
 
 - allow only `<NAS_MANAGEMENT_IP>` to the node's original management
-  destination and the recipe endpoint port, then drop every other source to
-  that original destination and port;
+  destination and every configured original published host port, then drop
+  every other source to each original destination and port;
 - on rank 0, allow only the declared peer fabric address to the original local
   fabric destination and TCP rendezvous port `29500`, then drop every other
   source to that destination and port;
 - drop externally forwarded traffic to a non-entrypoint rank's original fabric
-  destination and recipe endpoint port. The local agent performs readiness on
-  the host and does not require a remote client allowance.
+  destination and configured original published host port. The local agent
+  performs readiness on the host and does not require a remote client
+  allowance.
 
 Rules in `DOCKER-USER` see packets after destination NAT. Match the original
 published address and port with conntrack (`--ctorigdst` and
 `--ctorigdstport`), not the container's changing bridge address. Include an
-`ESTABLISHED,RELATED` return before the new-flow rules and a final return so
-unrelated Docker workloads are unaffected. After every Docker restart or host
+`ESTABLISHED,RELATED` return before the new-flow rules. These are dedicated
+workload nodes: after the explicit allowances, deny every unlisted
+Docker-published TCP port whose original destination is either node address,
+then return traffic for other destinations. After every Docker restart or host
 reboot, verify the dedicated chain is still the first site-policy jump from
 `DOCKER-USER` before permitting a workload start.
 
-For the current IPv4 development recipe, the following is the canonical rule
-shape. Run it only while no Vonk workload is active, once per node with that
-node's values, then persist the resulting chain through the site's existing
-firewall manager. The marker check makes reruns idempotent while refusing a
-foreign chain with the same name. Do not paste unvalidated user input into
-these variables.
+The signed agent package owns the canonical IPv4 rule shape through
+`vonk-forge-docker-firewall.service`. Do not copy ad-hoc `iptables` commands
+from an old installation. Create this root-owned site file separately on each
+node; the addresses differ per node and `VONK_ENDPOINT_HOST_PORTS` is the
+comma-separated list of original published host ports accepted by installed
+recipes. The current development recipe publishes host port `8000`. If a later
+accepted recipe declares another host port, add it before installation and
+reload the service before permitting that recipe to start.
+
+```ini
+VONK_NAS_MANAGEMENT_IP=<NAS_MANAGEMENT_IP>
+VONK_NODE_MANAGEMENT_IP=<THIS_NODE_MANAGEMENT_IP>
+VONK_NODE_FABRIC_IP=<THIS_NODE_SELECTED_FABRIC_IP>
+VONK_PEER_FABRIC_IP=<PEER_SELECTED_FABRIC_IP>
+VONK_ENDPOINT_HOST_PORTS=8000
+VONK_RENDEZVOUS_PORT=29500
+```
+
+Install and activate it only while no Vonk workload is running:
 
 ```bash
-set -euo pipefail
-nas_management_ip='<NAS_MANAGEMENT_IP>'
-node_management_ip='<THIS_NODE_MANAGEMENT_IP>'
-node_fabric_ip='<THIS_NODE_SELECTED_FABRIC_IP>'
-peer_fabric_ip='<PEER_SELECTED_FABRIC_IP>'
-recipe_endpoint_port=8000
-rendezvous_port=29500
-
-sudo iptables -w -n -L DOCKER-USER >/dev/null
-if sudo iptables -w -n -L VONK-FORGE >/dev/null 2>&1; then
-  sudo iptables -w -C VONK-FORGE -m comment \
-    --comment vonk-forge-managed-v1 -j RETURN
-else
-  sudo iptables -w -N VONK-FORGE
-fi
-sudo iptables -w -F VONK-FORGE
-while sudo iptables -w -D DOCKER-USER -j VONK-FORGE 2>/dev/null; do :; done
-sudo iptables -w -I DOCKER-USER 1 -j VONK-FORGE
-sudo iptables -w -A VONK-FORGE -m conntrack \
-  --ctstate ESTABLISHED,RELATED -j RETURN
-sudo iptables -w -A VONK-FORGE -p tcp -s "$nas_management_ip" \
-  -m conntrack --ctorigdst "$node_management_ip" \
-  --ctorigdstport "$recipe_endpoint_port" -j RETURN
-sudo iptables -w -A VONK-FORGE -p tcp \
-  -m conntrack --ctorigdst "$node_management_ip" \
-  --ctorigdstport "$recipe_endpoint_port" -j DROP
-sudo iptables -w -A VONK-FORGE -p tcp \
-  -m conntrack --ctorigdst "$node_fabric_ip" \
-  --ctorigdstport "$recipe_endpoint_port" -j DROP
-sudo iptables -w -A VONK-FORGE -p tcp -s "$peer_fabric_ip" \
-  -m conntrack --ctorigdst "$node_fabric_ip" \
-  --ctorigdstport "$rendezvous_port" -j RETURN
-sudo iptables -w -A VONK-FORGE -p tcp \
-  -m conntrack --ctorigdst "$node_fabric_ip" \
-  --ctorigdstport "$rendezvous_port" -j DROP
-sudo iptables -w -A VONK-FORGE -m comment \
-  --comment vonk-forge-managed-v1 -j RETURN
+sudo install -o root -g root -m 0600 /dev/null \
+  /etc/vonk-forge-agent/docker-firewall.conf
+sudoedit /etc/vonk-forge-agent/docker-firewall.conf
+sudo systemctl enable --now vonk-forge-docker-firewall.service
+sudo systemctl is-active vonk-forge-docker-firewall.service
+sudo /usr/lib/vonk-forge/vonk-forge-docker-firewall \
+  --config /etc/vonk-forge-agent/docker-firewall.conf check
 sudo iptables -w -S DOCKER-USER
 sudo iptables -w -S VONK-FORGE
 ```
 
-If the site uses IPv6 publications, define and test an equivalent `ip6tables`
-policy before enabling them. Do not infer that the IPv4 chain protects IPv6.
+The parser accepts only those six keys, canonical IPv4 addresses and ports,
+and a root-owned non-writable regular file. It also requires the node's
+management and fabric addresses to be assigned exactly once on two different
+local interfaces; allow rules are bound to those derived ingress interfaces.
+The service requires the
+Spark-managed Docker daemon, refuses a foreign `VONK-FORGE` chain, inserts its
+`vonk-forge-managed-v1` jump first, and validates the complete rule count after
+each application. The privileged runtime helper requires this service, so a
+missing or invalid site policy prevents a Docker workload launch without
+blocking offline package installation or pairing. A recipe port omitted from
+`VONK_ENDPOINT_HOST_PORTS` remains covered by the node-address default drop: the
+run becomes unreachable and fails acceptance, but the unlisted Docker-published
+TCP port is never exposed.
+
+Prove lifecycle coupling once during fresh-node acceptance, with no Vonk or
+other irreplaceable Docker workload active:
+
+```bash
+sudo systemctl restart docker
+sudo systemctl is-active vonk-forge-docker-firewall.service
+sudo /usr/lib/vonk-forge/vonk-forge-docker-firewall \
+  --config /etc/vonk-forge-agent/docker-firewall.conf check
+```
+
+The check must pass after the Docker restart and after a host reboot. Stopping
+the policy leaves its existing rules in place; Docker restart clears and then
+recreates its chains, and the coupled unit reapplies Vonk policy before the
+runtime helper can start. Vonk containers use `--restart no`, so they cannot
+race policy restoration.
+
+IPv6 workload publications are unsupported by this contract and are rejected
+by the privileged helper. Do not infer that the IPv4 chain protects IPv6; add
+an equivalent signed `ip6tables` service and acceptance suite before widening
+the helper boundary.
 
 ## Package installation and pairing
 

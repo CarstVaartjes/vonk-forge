@@ -379,9 +379,17 @@ def build(
             source("packaging/config/containers-storage.conf"),
             0o644,
         )
+        firewall_helper = source("packaging/bin/vonk-forge-docker-firewall")
+        install_file(
+            stage,
+            "usr/lib/vonk-forge/vonk-forge-docker-firewall",
+            firewall_helper,
+            0o555,
+        )
         for name in (
             "vonk-forge-agent.service",
             "vonk-forge-agent-supervisor.service",
+            "vonk-forge-docker-firewall.service",
             "vonk-forge-package-helper.service",
             "vonk-forge-package-helper.socket",
         ):
@@ -391,7 +399,11 @@ def build(
                 source(f"packaging/systemd/{name}"),
                 0o644,
             )
-        documents = evidence(version, epoch, binaries)
+        documents = evidence(
+            version,
+            epoch,
+            {**binaries, "vonk-forge-docker-firewall": firewall_helper},
+        )
         for name, raw in documents.items():
             install_file(stage, f"usr/share/doc/{PACKAGE}/{name}", raw, 0o644)
 

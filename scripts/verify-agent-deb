@@ -23,14 +23,20 @@ REQUIRED_ELF = {
     "usr/lib/vonk-forge/vonk-agent-helper",
     "usr/lib/vonk-forge/vonk-agent-supervisor",
 }
+REQUIRED_EXECUTABLE = {
+    *REQUIRED_ELF,
+    "usr/lib/vonk-forge/vonk-forge-docker-firewall",
+}
 REQUIRED_PAYLOAD = {
     *REQUIRED_ELF,
     "etc/vonk-forge-agent/agent.toml",
     "etc/vonk-forge-agent/containers-storage.conf",
     "lib/systemd/system/vonk-forge-agent.service",
     "lib/systemd/system/vonk-forge-agent-supervisor.service",
+    "lib/systemd/system/vonk-forge-docker-firewall.service",
     "lib/systemd/system/vonk-forge-package-helper.service",
     "lib/systemd/system/vonk-forge-package-helper.socket",
+    "usr/lib/vonk-forge/vonk-forge-docker-firewall",
     "usr/lib/vonk-forge/release/manifest-a.json",
     "usr/lib/vonk-forge/release/manifest-b.json",
     "usr/lib/vonk-forge/release/artifact.sig",
@@ -99,7 +105,7 @@ def verify(deb: Path) -> dict[str, object]:
         raise VerificationError("package architecture is not arm64")
     if PACKAGE_VERSION.fullmatch(fields["Version"]) is None:
         raise VerificationError("package version is not canonical")
-    for dependency in ("acl", "podman", "uidmap"):
+    for dependency in ("acl", "iproute2", "iptables", "podman", "uidmap"):
         if (
             re.search(
                 rf"(?:^|,\s*){dependency}(?:\s*\([^)]*\))?(?:,|$)",
@@ -189,10 +195,10 @@ def _verify_members(members: dict[str, tarfile.TarInfo]) -> None:
         member = members[name]
         if not member.isfile():
             raise VerificationError(f"package member type is unsafe: {name}")
-    for name in REQUIRED_ELF:
+    for name in REQUIRED_EXECUTABLE:
         if stat.S_IMODE(members[name].mode) != 0o555:
             raise VerificationError(f"binary mode is unsafe: {name}")
-    for name in REQUIRED_PAYLOAD - REQUIRED_ELF:
+    for name in REQUIRED_PAYLOAD - REQUIRED_EXECUTABLE:
         if stat.S_IMODE(members[name].mode) != 0o644:
             raise VerificationError(f"data mode is unsafe: {name}")
 
@@ -249,6 +255,7 @@ def _verify_payload(payload: Path, control: Path) -> None:
         for name in (
             "vonk-forge-agent.service",
             "vonk-forge-agent-supervisor.service",
+            "vonk-forge-docker-firewall.service",
             "vonk-forge-package-helper.service",
             "vonk-forge-package-helper.socket",
         )
@@ -293,11 +300,32 @@ def _verify_payload(payload: Path, control: Path) -> None:
     for boundary in (
         "Wants=docker.service",
         "After=local-fs.target docker.service",
+        "Requires=vonk-forge-package-helper.socket",
+        "Requires=vonk-forge-docker-firewall.service",
+        "vonk-forge-docker-firewall.service",
         "BindReadOnlyPaths=-/run/docker.sock -/run/vonk-forge-agent/runtime-requests -/var/lib/vonk-forge-agent/image-imports",
         "ReadWritePaths=-/var/lib/vonk-forge-agent/models -/var/lib/vonk-forge-agent/runs -/var/lib/vonk-forge-agent/run-metadata",
     ):
         if boundary not in helper:
             raise VerificationError("helper Spark runtime boundary is invalid")
+    firewall = units["vonk-forge-docker-firewall.service"]
+    for boundary in (
+        "Requires=docker.service",
+        "BindsTo=docker.service",
+        "PartOf=docker.service",
+        "Before=vonk-forge-package-helper.service",
+        "NoNewPrivileges=yes",
+        "CapabilityBoundingSet=CAP_NET_ADMIN",
+        "AmbientCapabilities=",
+        "PrivateDevices=yes",
+        "ProtectSystem=strict",
+        "RestrictNamespaces=yes",
+        "RestrictAddressFamilies=AF_UNIX AF_NETLINK",
+    ):
+        if boundary not in firewall:
+            raise VerificationError("Docker firewall lifecycle boundary is invalid")
+    if "PrivateNetwork=yes" in firewall:
+        raise VerificationError("Docker firewall is isolated from the host namespace")
     expected_md5: dict[str, str] = {}
     for line in (control / "md5sums").read_text(encoding="ascii").splitlines():
         digest, name = line.split(maxsplit=1)
@@ -439,7 +467,7 @@ def _verify_evidence(payload: Path, version: str) -> None:
         raise VerificationError("SPDX SBOM is invalid")
     expected = {
         Path(name).name: hashlib.sha256((payload / name).read_bytes()).hexdigest()
-        for name in REQUIRED_ELF
+        for name in REQUIRED_EXECUTABLE
     }
     cyclone_components = documents["sbom.cdx.json"].get("components")
     if not isinstance(cyclone_components, list):
