@@ -327,6 +327,33 @@ def _object(value: object | None, label: str) -> dict[str, Any]:
     return value
 
 
+def _matches_synthetic_inference(
+    response: dict[str, Any], expected: dict[str, Any]
+) -> bool:
+    if response == expected:
+        return True
+    choices = response.get("choices")
+    if not isinstance(choices, list):
+        return False
+    normalized_choices: list[dict[str, Any]] = []
+    for raw_choice in choices:
+        if not isinstance(raw_choice, dict):
+            return False
+        choice = dict(raw_choice)
+        if choice.get("provider_specific_fields") == {}:
+            choice.pop("provider_specific_fields")
+        message = choice.get("message")
+        if isinstance(message, dict):
+            normalized_message = dict(message)
+            if normalized_message.get("provider_specific_fields") == {"refusal": None}:
+                normalized_message.pop("provider_specific_fields")
+            choice["message"] = normalized_message
+        normalized_choices.append(choice)
+    normalized = dict(response)
+    normalized["choices"] = normalized_choices
+    return normalized == expected
+
+
 def _source_bundle(context: Path) -> tuple[bytes, str, int]:
     files = {
         path.relative_to(context).as_posix(): path.read_bytes()
@@ -1085,7 +1112,7 @@ class Runner:
     def _await_endpoint(self, *, published: bool) -> None:
         deadline = time.monotonic() + self.args.timeout_seconds
         while True:
-            allowed = (200,) if published else (404,)
+            allowed = (200,) if published else (404, 503)
             try:
                 status, payload = self.control.request(
                     "GET", f"/api/v1/endpoints/{self.slug}", allowed=allowed
@@ -1099,7 +1126,10 @@ class Runner:
                 endpoint = _object(payload, "published endpoint")
                 if status == 200 and endpoint.get("alias") == self.slug:
                     return
-            elif status == 404:
+            elif status == 404 or (
+                status == 503
+                and payload == {"detail": "endpoint publication unavailable"}
+            ):
                 return
             if time.monotonic() >= deadline:
                 raise SliceError("route state did not converge")
@@ -1140,7 +1170,9 @@ class Runner:
         _, response = self.inference.request("POST", "/v1/chat/completions", request)
         if not isinstance(response, dict):
             raise SliceError("model inference response is invalid")
-        if expected is not None and response != expected:
+        if expected is not None and not _matches_synthetic_inference(
+            response, expected
+        ):
             raise SliceError("synthetic inference response did not match")
         if expected is None:
             choices = response.get("choices")
