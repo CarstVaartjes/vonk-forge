@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from types import MappingProxyType
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 from uuid import UUID
 
 from jsonschema import Draft202012Validator, FormatChecker
@@ -34,6 +34,7 @@ MODEL_REPOSITORY = re.compile(
     r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}"
     r"(?:/[A-Za-z0-9][A-Za-z0-9._-]{0,127}){1,7}\Z"
 )
+MODEL_QUERY_COMPONENT = re.compile(r"[A-Za-z0-9._~-]{1,128}\Z")
 
 
 def _ascii_case_pattern(token: str, *, initial_upper: bool = False) -> str:
@@ -158,6 +159,7 @@ def _validate_safe_keys(
     secret_value: bool = False,
     operation: AgentOperation | None = None,
     path: tuple[str | int, ...] = (),
+    typed_result_strings: bool = False,
 ) -> None:
     if isinstance(value, Mapping):
         for key, item in value.items():
@@ -176,6 +178,7 @@ def _validate_safe_keys(
                 secret_value=field_name == "secrets",
                 operation=operation,
                 path=(*path, key),
+                typed_result_strings=typed_result_strings,
             )
     elif isinstance(value, (list, tuple)):
         for index, item in enumerate(value):
@@ -185,6 +188,7 @@ def _validate_safe_keys(
                 secret_value=secret_value,
                 operation=operation,
                 path=(*path, index),
+                typed_result_strings=typed_result_strings,
             )
     elif isinstance(value, str):
         if secret_value:
@@ -197,7 +201,9 @@ def _validate_safe_keys(
         elif (
             operation is AgentOperation.RECIPE_BUILD and _typed_build_string(path, value)
         ) or (
-            ("/" in value or "\\" in value) and _typed_result_string(path, value)
+            typed_result_strings
+            and ("/" in value or "\\" in value)
+            and _typed_result_string(path, value)
         ):
             return
         elif "/" in value or "\\" in value:
@@ -284,17 +290,51 @@ def _model_identity(value: str) -> bool:
         and parsed.username is None
         and parsed.password is None
         and parsed.path not in {"", "/"}
-        and not parsed.query
+        and _safe_model_query(parsed.query)
         and not parsed.fragment
     )
 
 
+def _safe_model_query(query: str) -> bool:
+    if not query:
+        return True
+    if len(query) > 256:
+        return False
+    try:
+        fields = parse_qsl(
+            query,
+            keep_blank_values=True,
+            strict_parsing=True,
+            max_num_fields=8,
+        )
+    except ValueError:
+        return False
+    return bool(
+        fields
+        and all(
+            len(key) <= 64
+            and MODEL_QUERY_COMPONENT.fullmatch(key) is not None
+            and (not value or MODEL_QUERY_COMPONENT.fullmatch(value) is not None)
+            and UNSAFE_KEY.search(key) is None
+            for key, value in fields
+        )
+    )
+
+
 def _validate_bounded_document(
-    value: Any, *, name: str, operation: AgentOperation | None = None
+    value: Any,
+    *,
+    name: str,
+    operation: AgentOperation | None = None,
+    typed_result_strings: bool = False,
 ) -> Any:
     if not isinstance(value, Mapping):
         raise AgentProtocolError(f"{name} must be a JSON object")
-    _validate_safe_keys(value, operation=operation)
+    _validate_safe_keys(
+        value,
+        operation=operation,
+        typed_result_strings=typed_result_strings,
+    )
     copied = _canonical_copy(value, name=name)
     if len(canonical_message(copied)) > MAX_DOCUMENT_BYTES:
         raise AgentProtocolError(f"{name} is too large")
@@ -535,7 +575,13 @@ class AgentResult:
         if self.state not in {"succeeded", "failed", "waiting-for-operator"}:
             raise AgentProtocolError("result state is not supported")
         object.__setattr__(
-            self, "result", _validate_bounded_document(self.result, name="result")
+            self,
+            "result",
+            _validate_bounded_document(
+                self.result,
+                name="result",
+                typed_result_strings=True,
+            ),
         )
 
     @classmethod
