@@ -993,6 +993,9 @@ class Runner:
                 response,
                 "image distribution",
                 expected_nodes=distribution_nodes,
+                retry_request_key=self.request_key(
+                    "image-distributed", "distribution-retry"
+                ),
             )
             distribution_evidence = result["node_evidence"]
             for node_id in distribution_nodes:
