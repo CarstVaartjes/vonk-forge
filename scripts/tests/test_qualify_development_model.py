@@ -205,17 +205,14 @@ if listen:
                 peer_log = os.environ.get("VONK_SOCKETBOX_PEER_LOG")
                 if peer_log:
                     pathlib.Path(peer_log).write_text(_peer[0] + "\\n", encoding="ascii")
-                request = bytearray()
-                while chunk := connection.recv(4096):
-                    request.extend(chunk)
-                completed = subprocess.run(
+                subprocess.run(
                     [executable],
-                    input=bytes(request),
-                    capture_output=True,
+                    stdin=connection,
+                    stdout=connection,
+                    stderr=subprocess.PIPE,
                     env=os.environ,
                     check=False,
                 )
-                connection.sendall(completed.stdout)
 else:
     if "-s" in arguments:
         print("client source binding is unavailable in rootless networking", file=sys.stderr)
@@ -552,7 +549,7 @@ def test_model_pair_lets_rootless_networking_select_source_for_fabric_exchange(
         coordinator.wait(timeout=3)
 
 
-def test_model_pair_coordinator_survives_an_idle_client_timeout(
+def test_model_pair_coordinator_accepts_recovery_after_an_idle_client_timeout(
     tmp_path: Path,
 ) -> None:
     port = _unused_port("127.0.0.2")
@@ -570,7 +567,67 @@ def test_model_pair_coordinator_survives_an_idle_client_timeout(
         stderr=subprocess.PIPE,
     )
     try:
-        time.sleep(1.25)
+        worker_environment = _rendezvous_environment(
+            tmp_path,
+            rank=1,
+            local_address="127.0.0.3",
+            port=port,
+            timeout_seconds=3,
+        )
+        joins: list[subprocess.CompletedProcess[str]] = []
+        for idle_seconds in (0.0, 1.25):
+            time.sleep(idle_seconds)
+            joined = subprocess.run(
+                [str(FABRIC_RENDEZVOUS), "join"],
+                env=worker_environment,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            joins.append(joined)
+            assert joined.returncode == 0, joined.stderr
+
+        assert coordinator.poll() is None
+        assert [joined.stdout for joined in joins] == [
+            "fabric rendezvous complete: rank 1 of 2\n",
+            "fabric rendezvous complete: rank 1 of 2\n",
+        ]
+    finally:
+        if coordinator.poll() is None:
+            coordinator.terminate()
+        coordinator.wait(timeout=3)
+
+
+def test_model_pair_recovers_after_an_incomplete_worker_message(tmp_path: Path) -> None:
+    port = _unused_port("127.0.0.2")
+    coordinator = subprocess.Popen(
+        [str(FABRIC_RENDEZVOUS), "coordinator"],
+        env=_rendezvous_environment(
+            tmp_path,
+            rank=0,
+            local_address="127.0.0.2",
+            port=port,
+            timeout_seconds=1,
+        ),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    incomplete: socket.socket | None = None
+    try:
+        deadline = time.monotonic() + 2
+        while True:
+            try:
+                incomplete = socket.create_connection(("127.0.0.2", port), timeout=1)
+                break
+            except ConnectionRefusedError:
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.02)
+        incomplete.sendall(b"vonk-fabric-v1 worker rank=1")
+        incomplete.settimeout(2)
+        assert incomplete.recv(1) == b""
+
         joined = subprocess.run(
             [str(FABRIC_RENDEZVOUS), "join"],
             env=_rendezvous_environment(
@@ -589,38 +646,11 @@ def test_model_pair_coordinator_survives_an_idle_client_timeout(
         assert joined.returncode == 0, joined.stderr
         assert joined.stdout == "fabric rendezvous complete: rank 1 of 2\n"
     finally:
+        if incomplete is not None:
+            incomplete.close()
         if coordinator.poll() is None:
             coordinator.terminate()
         coordinator.wait(timeout=3)
-
-
-def test_model_pair_bounds_an_incomplete_worker_message(tmp_path: Path) -> None:
-    handler_environment = _rendezvous_environment(
-        tmp_path,
-        rank=0,
-        local_address="127.0.0.2",
-        port=_unused_port("127.0.0.2"),
-        timeout_seconds=1,
-    )
-    handler_environment["VONK_FABRIC_SERVE"] = "1"
-    handler = subprocess.Popen(
-        [str(FABRIC_RENDEZVOUS)],
-        env=handler_environment,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    try:
-        assert handler.wait(timeout=2.5) != 0
-        assert handler.stderr is not None
-        assert "worker sent no complete data" in handler.stderr.read()
-    finally:
-        if handler.stdin is not None:
-            handler.stdin.close()
-        if handler.poll() is None:
-            handler.terminate()
-            handler.wait(timeout=3)
 
 
 def test_model_pair_refuses_an_invalid_declared_local_fabric_address(
