@@ -1719,6 +1719,11 @@ def install_agent_routes(
         _scope_identity(request)
         required = _require_services(services)
         identity = _authenticated_identity(request, required)
+        media_type = request.headers.get("content-type", "").partition(";")[0].strip()
+        if media_type.lower() != "application/x-tar":
+            raise HTTPException(
+                status_code=415, detail="Docker image archive media type is required"
+            )
         if (
             re.fullmatch(
                 r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",

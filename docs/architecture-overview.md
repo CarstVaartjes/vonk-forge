@@ -115,8 +115,9 @@ bounded build context; the controller validates the Dockerfile and any Compose
 policy, checks fresh builder disk and memory capacity, and queues a typed
 `recipe.build.v1` operation. One compatible GPU-node agent performs the
 rootless Podman build without a Docker socket, host mounts, devices, secrets, or
-privilege, then records the exact OCI image digest and layout digest. The
-declared OCI output bound follows the recipe's temporary build envelope, so
+privilege, then records the exact OCI image digest and immutable archive
+digest. The declared archive output bound follows the recipe's temporary build
+envelope, so
 large CUDA-based images are not constrained by a small log-size constant;
 diagnostic stdout/stderr remains independently capped.
 
@@ -137,10 +138,10 @@ private or metadata endpoints. Networkless recipes and cached pinned bases are
 the supported initial build path.
 
 Installation maps a resolved recipe profile to exact node identities and ranks.
-The controller transfers that one verified OCI layout over the authenticated
-agent channel and each target re-verifies it before import, so a three-node
-profile never rebuilds independently on the other two nodes. Model weights and
-other declared artifacts are installed separately, with disk checks before
+The controller transfers that one verified Docker-loadable archive over the
+authenticated agent channel and each target re-verifies it before import, so a
+three-node profile never rebuilds independently on the other two nodes. Model
+weights and other declared artifacts are installed separately, with disk checks before
 installation and memory/VRAM, active-workload, and direct-fabric checks before
 start. Multi-node v1 uses ordinary TCP over the declared direct-fabric
 addresses; it does not claim GPUDirect RDMA support. The resulting workload

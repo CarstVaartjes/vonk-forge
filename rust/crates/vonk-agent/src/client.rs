@@ -332,7 +332,9 @@ impl AgentHttpClient {
         let response = self
             .client
             .put(self.endpoint(&format!("/agent/v1/recipe-builds/{build_id}/image"))?)
-            .header("content-type", "application/vnd.oci.image.layout.v1.tar")
+            // The historical evidence field names the immutable layout digest,
+            // while Spark's native Docker runtime consumes a docker-save tar.
+            .header("content-type", "application/x-tar")
             .header("content-length", image_bytes)
             .header("x-vonk-image-digest", image_digest)
             .header("x-vonk-oci-layout-sha256", oci_layout_sha256)

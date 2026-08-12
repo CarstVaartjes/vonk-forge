@@ -61,7 +61,7 @@ running operation attempt. The requested action must match the operation:
 
 | Agent operation | Permitted helper action |
 |---|---|
-| `recipe.image.import.v1` | import and verify one OCI archive |
+| `recipe.image.import.v1` | import and verify one Docker-loadable image archive |
 | `recipe.install` | inspect one accepted image |
 | `recipe.start` | run one managed workload or lifecycle hook; stop that managed run on failed readiness |
 | `recipe.stop` | remove one managed workload or lifecycle hook |
@@ -102,9 +102,13 @@ status/evidence to the agent. User-provided strings never become shell input.
 
 Recipe builds continue to use operation-private rootless Podman storage with
 no Docker socket, GPU, host mount, privileged mode, or private-network access.
-The resulting OCI archive is uploaded by digest. The target node downloads the
-exact archive, verifies size and SHA-256 before requesting authority, and the
-helper verifies the Docker-loaded image identity before reporting success.
+The resulting OCI image is exported through Podman's `docker-archive`
+transport and uploaded by archive digest. The target node downloads the exact
+Docker-loadable archive, verifies size and SHA-256 before requesting authority,
+and the helper verifies the Docker-loaded image identity before reporting
+success. The v1 wire/database field `oci_layout_sha256` is retained for
+compatibility; for this Spark Docker backend it binds the complete immutable
+Docker archive, not an OCI-layout tar.
 
 This split follows Spark's supported runtime without granting an untrusted
 Dockerfile access to the rootful host daemon.

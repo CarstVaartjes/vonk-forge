@@ -1314,7 +1314,7 @@ def _record_image_import_evidence(
                 node_id=operation.node_id,
                 kind="image",
                 digest=raw_digest,
-                source=f"oci-layout:{build.oci_layout_sha256}",
+                source=f"docker-archive:{build.oci_layout_sha256}",
                 size_bytes=build.image_bytes,
                 state="verified",
                 ref_count=0,

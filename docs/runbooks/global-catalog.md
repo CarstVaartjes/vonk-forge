@@ -30,8 +30,9 @@ for an explicit loopback development server.
 
 1. Run the recipe locally on its declared node count. Vonk selects one builder,
    validates the source bundle, builds the Dockerfile once in the rootless
-   isolated builder, and transfers the resulting OCI layout to the mapped
-   nodes. Capture a v1 JSON test report bound to the exact local recipe hash,
+   isolated builder, exports the resulting OCI image as a Docker-loadable
+   archive, and transfers that exact archive to the mapped nodes. Capture a v1
+   JSON test report bound to the exact local recipe hash,
    source-bundle digest, and resulting image digest. It must record successful
    `container.started`, `endpoint.healthy`, and `inference.completed` checks.
 2. Open the resolved local recipe and attach that JSON under **Publish through

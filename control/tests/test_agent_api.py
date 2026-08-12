@@ -408,14 +408,14 @@ def test_builder_can_download_only_its_authorized_canonical_source_bundle(
     assert client.get(f"/agent/v1/source-bundles/{bundle.sha256}").status_code == 401
 
 
-def test_builder_uploads_digest_verified_oci_archive_without_a_registry(
+def test_builder_uploads_digest_verified_docker_archive_without_a_registry(
     agent_system,
 ) -> None:
     client, services, _, clock = agent_system
     recipe_id = str(uuid.uuid4())
     revision_id = str(uuid.uuid4())
     build_id = str(uuid.uuid4())
-    payload = b"exact oci layout"
+    payload = b"exact docker archive"
     layout_digest = hashlib.sha256(payload).hexdigest()
     image_digest = "sha256:" + "d" * 64
     with services.sessions.begin() as session:
@@ -424,7 +424,7 @@ def test_builder_uploads_digest_verified_oci_archive_without_a_registry(
                 id=recipe_id,
                 slug="image-upload",
                 title="Image upload",
-                description="Exact OCI upload fixture",
+                description="Exact Docker archive upload fixture",
                 source_kind="local",
                 created_by="administrator",
                 created_at=clock.now,
@@ -459,10 +459,18 @@ def test_builder_uploads_digest_verified_oci_archive_without_a_registry(
             )
         )
     headers = agent_headers(NODE_A, "serial-a") | {
-        "content-type": "application/vnd.oci.image.layout.v1.tar",
+        "content-type": "application/x-tar",
         "x-vonk-image-digest": image_digest,
         "x-vonk-oci-layout-sha256": layout_digest,
     }
+
+    rejected = client.put(
+        f"/agent/v1/recipe-builds/{build_id}/image",
+        headers=headers
+        | {"content-type": "application/vnd.oci.image.layout.v1.tar"},
+        content=payload,
+    )
+    assert rejected.status_code == 415
 
     response = client.put(
         f"/agent/v1/recipe-builds/{build_id}/image",
@@ -482,6 +490,7 @@ def test_builder_uploads_digest_verified_oci_archive_without_a_registry(
             f"/agent/v1/recipe-builds/{build_id}/image",
             headers=agent_headers(NODE_B, "serial-b")
             | {
+                "content-type": "application/x-tar",
                 "x-vonk-image-digest": image_digest,
                 "x-vonk-oci-layout-sha256": layout_digest,
             },
@@ -498,7 +507,7 @@ def test_recipe_image_fsync_does_not_block_concurrent_agent_requests(
     recipe_id = str(uuid.uuid4())
     revision_id = str(uuid.uuid4())
     build_id = str(uuid.uuid4())
-    payload = b"exact oci layout"
+    payload = b"exact docker archive"
     layout_digest = hashlib.sha256(payload).hexdigest()
     with services.sessions.begin() as session:
         session.add(
@@ -552,7 +561,7 @@ def test_recipe_image_fsync_does_not_block_concurrent_agent_requests(
 
     monkeypatch.setattr("vonk_control.agent_api.os.fsync", slow_fsync)
     headers = agent_headers(NODE_A, "serial-a") | {
-        "content-type": "application/vnd.oci.image.layout.v1.tar",
+        "content-type": "application/x-tar",
         "x-vonk-image-digest": "sha256:" + "d" * 64,
         "x-vonk-oci-layout-sha256": layout_digest,
     }

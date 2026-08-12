@@ -45,6 +45,8 @@ pub struct RecipeBuildEvidence {
     pub build_input_sha256: String,
     pub image_bytes: u64,
     pub image_digest: String,
+    // Protocol-v1 name retained for compatibility; Spark binds the complete
+    // docker-save archive here.
     pub oci_layout_sha256: String,
     pub policy: SourcePolicyReport,
 }
@@ -83,7 +85,7 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
         self.data_root
             .join("builds")
             .join(operation_id.to_string())
-            .join("image.oci.tar")
+            .join("image.docker.tar")
     }
 
     pub fn build(
@@ -206,7 +208,10 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
                 "--digestfile".to_owned(),
                 digest_file.display().to_string(),
                 tag.clone(),
-                format!("oci-archive:{}", layout.display()),
+                // Spark's supported runtime is Docker. Export a docker-save
+                // archive so the privileged helper can use Docker's native
+                // load path without exposing the daemon to the rootless builder.
+                format!("docker-archive:{}", layout.display()),
             ],
             Duration::from_secs(600),
             &operation_root,

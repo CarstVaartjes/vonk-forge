@@ -697,7 +697,7 @@ def test_distribution_reimports_one_build_digest_for_every_mapped_node(
                 node_id=builder,
                 kind="image",
                 digest="b" * 64,
-                source="oci-layout:" + "c" * 64,
+                source="docker-archive:" + "c" * 64,
                 size_bytes=500,
                 state="verified",
                 ref_count=0,

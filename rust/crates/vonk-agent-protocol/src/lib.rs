@@ -278,6 +278,8 @@ pub struct RecipeImageImportRequest {
     pub kind: String,
     pub mapping_generation: u64,
     pub mapping_id: Uuid,
+    // Protocol-v1 name retained for compatibility. Docker-backed nodes bind
+    // the complete docker-save archive digest in this field.
     pub oci_layout_sha256: String,
     pub schema_version: u8,
     pub source_node_id: String,

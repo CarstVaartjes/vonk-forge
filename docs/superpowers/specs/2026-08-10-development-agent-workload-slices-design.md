@@ -270,14 +270,14 @@ fields while requiring negligible GPU and disk resources.
 
 This fixture is test-only operational data, not a special runtime capability.
 It traverses the same API, database, agent job, source policy, rootless Podman,
-OCI archive, health, and route code used by real recipes.
+Docker-loadable image archive, health, and route code used by real recipes.
 
 ### Lifecycle
 
 1. Create and resolve the local recipe.
 2. Upload and verify its source bundle.
 3. Select Spark 1 as builder and request a build.
-4. Upload the exact digest-bound OCI archive to controller state.
+4. Upload the exact digest-bound Docker-loadable archive to controller state.
 5. Create a mapping and distribute/import the exact image to the selected
    target.
 6. Install, start, health-check, and publish the LiteLLM route.

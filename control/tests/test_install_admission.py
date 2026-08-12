@@ -100,7 +100,7 @@ def setup(tmp_path, *, free=200, read_only=False, observed_age=0):
                 node_id=node_id,
                 kind="image",
                 digest="1" * 64,
-                source="oci-layout:" + "2" * 64,
+                source="docker-archive:" + "2" * 64,
                 size_bytes=30,
                 state="verified",
                 ref_count=0,
