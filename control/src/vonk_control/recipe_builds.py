@@ -33,6 +33,7 @@ from .source_policy import (
 
 _OCI_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+BUILD_ARTIFACT_FORMAT = "docker-archive-v1"
 
 
 class RecipeBuildError(ValueError):
@@ -124,6 +125,8 @@ class RecipeBuildService:
             if node is None:
                 raise RecipeBuildError("build.node_unknown", "builder GPU node is unknown")
             _validate_builder(node)
+            assert node.agent_sha256 is not None
+            builder_agent_sha256 = node.agent_sha256
             document = copy.deepcopy(revision.document)
             build = document.get("build")
             context = build.get("context") if isinstance(build, dict) else None
@@ -194,6 +197,8 @@ class RecipeBuildService:
             "recipe_revision_id": revision.id,
             "recipe_content_sha256": revision.content_sha256,
             "source_bundle_sha256": source_sha256,
+            "builder_agent_sha256": builder_agent_sha256,
+            "artifact_format": BUILD_ARTIFACT_FORMAT,
             "build": build,
         }
         build_input_sha256 = _digest(build_identity)
@@ -230,6 +235,8 @@ class RecipeBuildService:
             "source_bundle_sha256": policy.source_bundle_sha256,
             "dockerfile": policy.dockerfile,
             "findings": [asdict(item) for item in policy.findings],
+            "builder_agent_sha256": builder_agent_sha256,
+            "artifact_format": BUILD_ARTIFACT_FORMAT,
         }
         with self._sessions.begin() as session:
             existing = session.scalar(
@@ -323,6 +330,26 @@ class RecipeBuildService:
     def reserve_in_session(
         self, session: Session, plan: RecipeBuildPlan, *, now: datetime
     ) -> None:
+        build = session.get(RecipeBuild, plan.build_id, with_for_update=True)
+        expected_agent = (
+            build.policy_report.get("builder_agent_sha256")
+            if build is not None and isinstance(build.policy_report, dict)
+            else None
+        )
+        expected_format = (
+            build.policy_report.get("artifact_format")
+            if build is not None and isinstance(build.policy_report, dict)
+            else None
+        )
+        if (
+            build is None
+            or build.builder_node_id != plan.builder_node_id
+            or build.build_input_sha256 != plan.build_input_sha256
+            or expected_format != BUILD_ARTIFACT_FORMAT
+        ):
+            raise RecipeBuildError(
+                "build.plan_invalid", "stored build identity is invalid"
+            )
         try:
             snapshot = self._inventory.latest(
                 plan.builder_node_id, now=now, maximum_age=self._inventory_max_age
@@ -335,6 +362,10 @@ class RecipeBuildService:
         if node is None:
             raise RecipeBuildError("build.node_unknown", "builder GPU node is unknown")
         _validate_builder(node)
+        if node.agent_sha256 != expected_agent:
+            raise RecipeBuildError(
+                "build.runtime_changed", "builder runtime identity changed"
+            )
         if snapshot.stale:
             raise RecipeBuildError(
                 "build.inventory_stale", "builder inventory is stale"
@@ -478,6 +509,8 @@ def _validate_builder(node: AgentNode) -> None:
         or node.architecture != "linux-arm64"
         or node.agent_implementation != "rust"
         or node.migration_state != "complete"
+        or not isinstance(node.agent_sha256, str)
+        or _SHA256.fullmatch(node.agent_sha256) is None
         or "recipe.build.v1" not in node.capabilities
     ):
         raise RecipeBuildError(

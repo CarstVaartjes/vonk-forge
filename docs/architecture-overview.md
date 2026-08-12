@@ -116,8 +116,10 @@ policy, checks fresh builder disk and memory capacity, and queues a typed
 `recipe.build.v1` operation. One compatible GPU-node agent performs the
 rootless Podman build without a Docker socket, host mounts, devices, secrets, or
 privilege, then records the exact OCI image digest and immutable archive
-digest. The declared archive output bound follows the recipe's temporary build
-envelope, so
+digest. The durable build identity also binds the builder agent's reported
+binary SHA-256 and the Docker-archive format. An accepted result therefore
+cannot be reused after a builder implementation or export-format change. The
+declared archive output bound follows the recipe's temporary build envelope, so
 large CUDA-based images are not constrained by a small log-size constant;
 diagnostic stdout/stderr remains independently capped.
 

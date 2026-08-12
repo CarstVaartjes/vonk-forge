@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+import vonk_control.recipe_builds as recipe_builds_module
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import (
@@ -110,6 +111,7 @@ def setup(tmp_path: Path, *, network: dict[str, object] | None = None):
                 architecture="linux-arm64",
                 agent_implementation="rust",
                 migration_state="complete",
+                agent_sha256="1" * 64,
                 capabilities=["recipe.build.v1", "recipe.image.import.v1"],
                 last_seen_at=now,
             )
@@ -166,6 +168,65 @@ def test_build_plan_is_typed_sandboxed_and_durable(tmp_path: Path) -> None:
     with sessions() as session:
         stored = session.get(RecipeBuild, plan.build_id)
         assert stored is not None and stored.state == "planned"
+
+
+def test_build_identity_changes_when_builder_runtime_changes(tmp_path: Path) -> None:
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    service = RecipeBuildService(sessions, bundles=bundles)
+
+    first = service.plan(revision.id, node_id, now=now)
+    with sessions.begin() as session:
+        node = session.get(AgentNode, node_id)
+        assert node is not None
+        node.agent_sha256 = "2" * 64
+    second = service.plan(revision.id, node_id, now=now)
+
+    assert second.build_id != first.build_id
+    assert second.build_input_sha256 != first.build_input_sha256
+
+
+def test_build_identity_changes_when_archive_format_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    service = RecipeBuildService(sessions, bundles=bundles)
+
+    first = service.plan(revision.id, node_id, now=now)
+    monkeypatch.setattr(
+        recipe_builds_module, "BUILD_ARTIFACT_FORMAT", "future-archive-v2"
+    )
+    second = service.plan(revision.id, node_id, now=now)
+
+    assert second.build_id != first.build_id
+    assert second.build_input_sha256 != first.build_input_sha256
+
+
+def test_build_reservation_rejects_changed_builder_runtime(tmp_path: Path) -> None:
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    service = RecipeBuildService(sessions, bundles=bundles)
+    plan = service.plan(revision.id, node_id, now=now)
+    with sessions.begin() as session:
+        node = session.get(AgentNode, node_id)
+        assert node is not None
+        node.agent_sha256 = "2" * 64
+
+    with sessions.begin() as session, pytest.raises(
+        RecipeBuildError, match="runtime identity changed"
+    ):
+        service.reserve_in_session(session, plan, now=now)
+
+
+def test_build_rejects_builder_without_runtime_identity(tmp_path: Path) -> None:
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    with sessions.begin() as session:
+        node = session.get(AgentNode, node_id)
+        assert node is not None
+        node.agent_sha256 = None
+
+    with pytest.raises(RecipeBuildError, match="inactive or incompatible"):
+        RecipeBuildService(sessions, bundles=bundles).plan(
+            revision.id, node_id, now=now
+        )
 
 
 def test_build_plan_passes_the_installed_agent_claim_boundary(tmp_path: Path) -> None:
