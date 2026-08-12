@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tarfile
 import threading
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -52,6 +53,7 @@ class SliceServer(ThreadingHTTPServer):
         super().__init__(address, SliceHandler)
         self.fail_path = fail_path
         self.requests: list[tuple[str, str, str]] = []
+        self.request_bodies: list[tuple[str, str, bytes]] = []
         self.recipe_created = False
         self.recipe_digest = RECIPE_DIGEST
         self.recipe_revision = 1
@@ -115,6 +117,7 @@ class SliceHandler(BaseHTTPRequestHandler):
         body = self._body()
         authorization = self.headers.get("authorization", "")
         self.server.requests.append((self.command, self.path, authorization))
+        self.server.request_bodies.append((self.command, self.path, body))
         if self.server.fail_path == self.path:
             self._json(
                 409,
@@ -878,7 +881,20 @@ def test_runner_retries_one_terminal_image_distribution(
 
     assert result.returncode == 0, result.stderr
     assert sum(path.endswith("/retry") for _, path, _ in server.requests) == 1
-    assert json.loads(evidence_path.read_text())["completed_states"] == STATES
+    evidence = json.loads(evidence_path.read_text())
+    expected_retry_key = str(
+        uuid.uuid5(
+            uuid.UUID(evidence["acceptance_id"]),
+            "image-distributed:distribution-retry",
+        )
+    )
+    retry_bodies = [
+        json.loads(body)
+        for method, path, body in server.request_bodies
+        if method == "POST" and path.endswith("/retry")
+    ]
+    assert retry_bodies == [{"request_key": expected_retry_key}]
+    assert evidence["completed_states"] == STATES
 
 
 def test_runner_stops_after_one_terminal_distribution_retry(
