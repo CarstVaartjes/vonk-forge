@@ -108,6 +108,25 @@ _ROTATION_DIGEST_KEYS = frozenset(
         "new_verifier_sha256",
     }
 )
+_OAUTH_ROTATION_PREFIX = ".tailscale-oauth-rotation-"
+_OAUTH_ROTATION_NAME = re.compile(r"\.tailscale-oauth-rotation-[0-9a-f]{32}\Z")
+_OAUTH_CLIENT_ID = "tailscale-oauth-client-id"
+_OAUTH_CLIENT_SECRET = "tailscale-oauth-client-secret"
+_OAUTH_OLD_CLIENT_ID = "old-client-id"
+_OAUTH_OLD_CLIENT_SECRET = "old-client-secret"
+_OAUTH_NEW_CLIENT_ID = "new-client-id"
+_OAUTH_NEW_CLIENT_SECRET = "new-client-secret"
+_OAUTH_ROTATION_JOURNAL = "journal"
+_OAUTH_ROTATION_JOURNAL_TEMPORARY = ".journal.tmp"
+_OAUTH_ROTATION_COMMITTED = "committed"
+_OAUTH_ROTATION_DIGEST_KEYS = frozenset(
+    {
+        "old_client_id_sha256",
+        "old_client_secret_sha256",
+        "new_client_id_sha256",
+        "new_client_secret_sha256",
+    }
+)
 
 
 class RuntimeSecretError(RuntimeError):
@@ -442,7 +461,12 @@ def _create_owned_file(directory: int, name: str, content: bytes) -> _OwnedEntry
                 os.close(descriptor)
 
 
-def _read_rotation_file(directory: int, name: str) -> tuple[bytes, _OwnedEntry]:
+def _read_rotation_file(
+    directory: int,
+    name: str,
+    *,
+    error_message: str = "development administrator rotation state is invalid",
+) -> tuple[bytes, _OwnedEntry]:
     descriptor = -1
     succeeded = False
     try:
@@ -457,9 +481,7 @@ def _read_rotation_file(directory: int, name: str) -> tuple[bytes, _OwnedEntry]:
             or stat.S_IMODE(before.st_mode) != _PRIVATE_MODE
             or not 0 <= before.st_size <= _MAX_SECRET_BYTES
         ):
-            raise RuntimeSecretError(
-                "development administrator rotation state is invalid"
-            )
+            raise RuntimeSecretError(error_message)
         content = bytearray()
         while len(content) <= _MAX_SECRET_BYTES:
             chunk = os.read(descriptor, min(4096, _MAX_SECRET_BYTES + 1 - len(content)))
@@ -484,23 +506,24 @@ def _read_rotation_file(directory: int, name: str) -> tuple[bytes, _OwnedEntry]:
             after.st_ctime_ns,
         )
         if len(content) != before.st_size or identity != updated:
-            raise RuntimeSecretError(
-                "development administrator rotation state is invalid"
-            )
+            raise RuntimeSecretError(error_message)
         succeeded = True
         return bytes(content), _owned_entry(name, before, descriptor)
     except RuntimeSecretError:
         raise
     except OSError as error:
-        raise RuntimeSecretError(
-            "development administrator rotation state is invalid"
-        ) from error
+        raise RuntimeSecretError(error_message) from error
     finally:
         if descriptor >= 0 and not succeeded:
             os.close(descriptor)
 
 
-def _create_owned_directory(directory: int, name: str) -> tuple[int, _OwnedEntry]:
+def _create_owned_directory(
+    directory: int,
+    name: str,
+    *,
+    error_message: str = "development administrator rotation cannot be created",
+) -> tuple[int, _OwnedEntry]:
     descriptor = -1
     owned: _OwnedEntry | None = None
     try:
@@ -516,9 +539,7 @@ def _create_owned_directory(directory: int, name: str) -> tuple[int, _OwnedEntry
             or opened.st_nlink != 2
             or stat.S_IMODE(opened.st_mode) != 0o700
         ):
-            raise RuntimeSecretError(
-                "development administrator rotation cannot be created"
-            )
+            raise RuntimeSecretError(error_message)
         return descriptor, owned
     except Exception as error:
         if owned is not None:
@@ -530,9 +551,7 @@ def _create_owned_directory(directory: int, name: str) -> tuple[int, _OwnedEntry
             descriptor = -1
         if isinstance(error, RuntimeSecretError):
             raise
-        raise RuntimeSecretError(
-            "development administrator rotation cannot be created"
-        ) from error
+        raise RuntimeSecretError(error_message) from error
 
 
 def _acquire_mutation_lock(directory: int) -> None:
@@ -563,12 +582,37 @@ def _acquire_mutation_lock(directory: int) -> None:
         ) from error
 
 
-def _read_external_secret(path: Path) -> bytes:
-    parent = _open_private_parent(path)
+def _read_external_secret_pair(first: Path, second: Path) -> tuple[bytes, bytes]:
+    message = "Tailscale OAuth input files are unsafe, empty, or aliased"
+    first_parent = _open_private_parent(first)
+    second_parent = -1
+    first_entry: _OwnedEntry | None = None
+    second_entry: _OwnedEntry | None = None
     try:
-        return _read_file(parent, path.name)
+        first_content, first_entry = _read_rotation_file(
+            first_parent, first.name, error_message=message
+        )
+        second_parent = _open_private_parent(second)
+        second_content, second_entry = _read_rotation_file(
+            second_parent, second.name, error_message=message
+        )
+        if (
+            not first_content
+            or not second_content
+            or (first_entry.device, first_entry.inode)
+            == (second_entry.device, second_entry.inode)
+            or first_content == second_content
+        ):
+            raise RuntimeSecretError(message)
+        return first_content, second_content
     finally:
-        os.close(parent)
+        if second_entry is not None:
+            _close_owned_entry(second_entry)
+        if first_entry is not None:
+            _close_owned_entry(first_entry)
+        if second_parent >= 0:
+            os.close(second_parent)
+        os.close(first_parent)
 
 
 def _unlink_if_present(directory: int, name: str) -> None:
@@ -1613,6 +1657,351 @@ def _rotate_admin_password(
             os.close(transaction)
 
 
+def _oauth_rotation_journal(
+    old_client_id: bytes,
+    old_client_secret: bytes,
+    new_client_id: bytes,
+    new_client_secret: bytes,
+) -> bytes:
+    return (
+        json.dumps(
+            {
+                "old_client_id_sha256": _sha256(old_client_id),
+                "old_client_secret_sha256": _sha256(old_client_secret),
+                "new_client_id_sha256": _sha256(new_client_id),
+                "new_client_secret_sha256": _sha256(new_client_secret),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n"
+    ).encode("ascii")
+
+
+def _parse_oauth_rotation_journal(content: bytes) -> dict[str, str]:
+    message = "development Tailscale OAuth rotation state is invalid"
+    try:
+        document = json.loads(content.decode("ascii"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise RuntimeSecretError(message) from error
+    if (
+        not isinstance(document, dict)
+        or set(document) != _OAUTH_ROTATION_DIGEST_KEYS
+        or any(
+            not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None
+            for value in document.values()
+        )
+    ):
+        raise RuntimeSecretError(message)
+    return document
+
+
+def _open_oauth_rotation_transaction(
+    directory: int, name: str
+) -> tuple[int, _OwnedEntry, dict[str, tuple[bytes, _OwnedEntry]]]:
+    message = "development Tailscale OAuth rotation state is invalid"
+    opened = _open_existing_directory(directory, name)
+    if opened is None:
+        raise RuntimeSecretError(message)
+    transaction, metadata = opened
+    entries: dict[str, tuple[bytes, _OwnedEntry]] = {}
+    allowed = {
+        _OAUTH_ROTATION_JOURNAL_TEMPORARY,
+        _OAUTH_ROTATION_JOURNAL,
+        _OAUTH_OLD_CLIENT_ID,
+        _OAUTH_OLD_CLIENT_SECRET,
+        _OAUTH_NEW_CLIENT_ID,
+        _OAUTH_NEW_CLIENT_SECRET,
+        _OAUTH_ROTATION_COMMITTED,
+    }
+    try:
+        if metadata.st_nlink != 2:
+            raise RuntimeSecretError(message)
+        names = set(os.listdir(transaction))
+        if _OAUTH_ROTATION_JOURNAL not in names:
+            if not names <= {_OAUTH_ROTATION_JOURNAL_TEMPORARY}:
+                raise RuntimeSecretError(message)
+        elif (
+            _OAUTH_ROTATION_JOURNAL_TEMPORARY in names
+            or not names <= allowed - {_OAUTH_ROTATION_JOURNAL_TEMPORARY}
+        ):
+            raise RuntimeSecretError(message)
+        for child in sorted(names):
+            entries[child] = _read_rotation_file(
+                transaction, child, error_message=message
+            )
+        return transaction, _owned_entry(name, metadata, transaction), entries
+    except BaseException:
+        for _content, entry in entries.values():
+            _close_owned_entry(entry)
+        os.close(transaction)
+        raise
+
+
+def _restore_oauth_destination(
+    directory: int,
+    transaction: int,
+    entries: dict[str, tuple[bytes, _OwnedEntry]],
+    *,
+    destination_name: str,
+    backup_name: str,
+    old_digest: str,
+    new_digest: str,
+) -> None:
+    message = "development Tailscale OAuth rotation state is invalid"
+    current = _read_file(directory, destination_name)
+    current_digest = _sha256(current)
+    if current_digest == old_digest:
+        return
+    backup = entries.get(backup_name)
+    if (
+        current_digest != new_digest
+        or backup is None
+        or _sha256(backup[0]) != old_digest
+    ):
+        raise RuntimeSecretError(message)
+    _replace_owned_rotation_file(
+        transaction,
+        backup[1],
+        directory,
+        destination_name,
+    )
+
+
+def _resume_oauth_rotation(directory: int, name: str) -> None:
+    message = "development Tailscale OAuth rotation state is invalid"
+    transaction = -1
+    transaction_entry: _OwnedEntry | None = None
+    entries: dict[str, tuple[bytes, _OwnedEntry]] = {}
+    try:
+        transaction, transaction_entry, entries = _open_oauth_rotation_transaction(
+            directory, name
+        )
+        journal_content = entries.get(_OAUTH_ROTATION_JOURNAL, (None, None))[0]
+        if journal_content is None:
+            _remove_rotation_transaction(
+                directory, transaction, transaction_entry, entries
+            )
+            return
+        journal = _parse_oauth_rotation_journal(journal_content)
+        expected_payloads = {
+            _OAUTH_OLD_CLIENT_ID: journal["old_client_id_sha256"],
+            _OAUTH_OLD_CLIENT_SECRET: journal["old_client_secret_sha256"],
+            _OAUTH_NEW_CLIENT_ID: journal["new_client_id_sha256"],
+            _OAUTH_NEW_CLIENT_SECRET: journal["new_client_secret_sha256"],
+        }
+        if any(
+            child in entries and _sha256(entries[child][0]) != expected_digest
+            for child, expected_digest in expected_payloads.items()
+        ) or (
+            _OAUTH_ROTATION_COMMITTED in entries
+            and entries[_OAUTH_ROTATION_COMMITTED][0] != b""
+        ):
+            raise RuntimeSecretError(message)
+        committed = _OAUTH_ROTATION_COMMITTED in entries
+        current_client_id = _read_file(directory, _OAUTH_CLIENT_ID)
+        current_client_secret = _read_file(directory, _OAUTH_CLIENT_SECRET)
+        if committed:
+            if (
+                _sha256(current_client_id) != journal["new_client_id_sha256"]
+                or _sha256(current_client_secret)
+                != journal["new_client_secret_sha256"]
+            ):
+                raise RuntimeSecretError(message)
+        else:
+            _restore_oauth_destination(
+                directory,
+                transaction,
+                entries,
+                destination_name=_OAUTH_CLIENT_ID,
+                backup_name=_OAUTH_OLD_CLIENT_ID,
+                old_digest=journal["old_client_id_sha256"],
+                new_digest=journal["new_client_id_sha256"],
+            )
+            _restore_oauth_destination(
+                directory,
+                transaction,
+                entries,
+                destination_name=_OAUTH_CLIENT_SECRET,
+                backup_name=_OAUTH_OLD_CLIENT_SECRET,
+                old_digest=journal["old_client_secret_sha256"],
+                new_digest=journal["new_client_secret_sha256"],
+            )
+            if (
+                _sha256(_read_file(directory, _OAUTH_CLIENT_ID))
+                != journal["old_client_id_sha256"]
+                or _sha256(_read_file(directory, _OAUTH_CLIENT_SECRET))
+                != journal["old_client_secret_sha256"]
+            ):
+                raise RuntimeSecretError(message)
+        _remove_rotation_transaction(
+            directory, transaction, transaction_entry, entries
+        )
+    finally:
+        for _content, entry in entries.values():
+            _close_owned_entry(entry)
+        if transaction_entry is not None:
+            _close_owned_entry(transaction_entry)
+            transaction = -1
+        elif transaction >= 0:
+            os.close(transaction)
+
+
+def _recover_rotations(directory: int) -> None:
+    extras = set(os.listdir(directory)) - RUNTIME_SECRET_NAMES
+    oauth_transactions = [
+        name for name in extras if _OAUTH_ROTATION_NAME.fullmatch(name) is not None
+    ]
+    if oauth_transactions:
+        if len(extras) != 1 or len(oauth_transactions) != 1:
+            raise RuntimeSecretError(
+                "development Tailscale OAuth rotation state is invalid"
+            )
+        try:
+            _resume_oauth_rotation(directory, oauth_transactions[0])
+        except RuntimeSecretError:
+            raise
+        except OSError as error:
+            raise RuntimeSecretError(
+                "development Tailscale OAuth rotation recovery was interrupted"
+            ) from error
+    _recover_admin_rotation(directory)
+
+
+def _rotate_tailscale_oauth(
+    directory: int,
+    bundle: dict[str, bytes],
+    *,
+    new_client_id: bytes,
+    new_client_secret: bytes,
+    management_cidrs: tuple[str, ...],
+    enroll_hostname: str,
+    agent_hostname: str,
+    registry_hostname: str,
+) -> None:
+    old_client_id = bundle[_OAUTH_CLIENT_ID]
+    old_client_secret = bundle[_OAUTH_CLIENT_SECRET]
+    if new_client_id == old_client_id or new_client_secret == old_client_secret:
+        raise RuntimeSecretError(
+            "replacement Tailscale OAuth credentials must both be new"
+        )
+    candidate = dict(bundle)
+    candidate[_OAUTH_CLIENT_ID] = new_client_id
+    candidate[_OAUTH_CLIENT_SECRET] = new_client_secret
+    _validate_bundle(
+        candidate,
+        management_cidrs=management_cidrs,
+        enroll_hostname=enroll_hostname,
+        agent_hostname=agent_hostname,
+        registry_hostname=registry_hostname,
+    )
+    transaction = -1
+    transaction_entry: _OwnedEntry | None = None
+    entries: dict[str, tuple[bytes, _OwnedEntry]] = {}
+    journal_durable = False
+    transaction_name = _OAUTH_ROTATION_PREFIX + secrets.token_hex(16)
+    try:
+        transaction, transaction_entry = _create_owned_directory(
+            directory,
+            transaction_name,
+            error_message="development Tailscale OAuth rotation cannot be created",
+        )
+        os.fsync(directory)
+        journal_content = _oauth_rotation_journal(
+            old_client_id,
+            old_client_secret,
+            new_client_id,
+            new_client_secret,
+        )
+        journal_entry = _create_owned_file(
+            transaction,
+            _OAUTH_ROTATION_JOURNAL_TEMPORARY,
+            journal_content,
+        )
+        entries[_OAUTH_ROTATION_JOURNAL_TEMPORARY] = (
+            journal_content,
+            journal_entry,
+        )
+        os.replace(
+            _OAUTH_ROTATION_JOURNAL_TEMPORARY,
+            _OAUTH_ROTATION_JOURNAL,
+            src_dir_fd=transaction,
+            dst_dir_fd=transaction,
+        )
+        entries.pop(_OAUTH_ROTATION_JOURNAL_TEMPORARY)
+        journal_entry.name = _OAUTH_ROTATION_JOURNAL
+        entries[_OAUTH_ROTATION_JOURNAL] = (journal_content, journal_entry)
+        os.fsync(transaction)
+        journal_durable = True
+        staged = (
+            (_OAUTH_OLD_CLIENT_ID, old_client_id),
+            (_OAUTH_OLD_CLIENT_SECRET, old_client_secret),
+            (_OAUTH_NEW_CLIENT_ID, new_client_id),
+            (_OAUTH_NEW_CLIENT_SECRET, new_client_secret),
+        )
+        for name, content in staged:
+            entry = _create_owned_file(transaction, name, content)
+            entries[name] = (content, entry)
+        os.fsync(transaction)
+        os.replace(
+            _OAUTH_NEW_CLIENT_ID,
+            _OAUTH_CLIENT_ID,
+            src_dir_fd=transaction,
+            dst_dir_fd=directory,
+        )
+        os.fsync(transaction)
+        os.fsync(directory)
+        os.replace(
+            _OAUTH_NEW_CLIENT_SECRET,
+            _OAUTH_CLIENT_SECRET,
+            src_dir_fd=transaction,
+            dst_dir_fd=directory,
+        )
+        os.fsync(transaction)
+        os.fsync(directory)
+        installed = {name: _read_file(directory, name) for name in RUNTIME_SECRET_NAMES}
+        _validate_bundle(
+            installed,
+            management_cidrs=management_cidrs,
+            enroll_hostname=enroll_hostname,
+            agent_hostname=agent_hostname,
+            registry_hostname=registry_hostname,
+        )
+        committed_entry = _create_owned_file(
+            transaction, _OAUTH_ROTATION_COMMITTED, b""
+        )
+        entries[_OAUTH_ROTATION_COMMITTED] = (b"", committed_entry)
+        os.fsync(transaction)
+        _resume_oauth_rotation(directory, transaction_name)
+    except Exception as error:
+        if not journal_durable and transaction >= 0 and transaction_entry is not None:
+            try:
+                _remove_rotation_transaction(
+                    directory, transaction, transaction_entry, entries
+                )
+            except (OSError, RuntimeSecretError):
+                pass
+        elif journal_durable:
+            try:
+                _resume_oauth_rotation(directory, transaction_name)
+            except (OSError, RuntimeSecretError):
+                pass
+        if isinstance(error, RuntimeSecretError) and not journal_durable:
+            raise
+        raise RuntimeSecretError(
+            "development Tailscale OAuth rotation was interrupted; "
+            "the previous credentials were restored or will be restored on rerun"
+        ) from error
+    finally:
+        for _content, entry in entries.values():
+            _close_owned_entry(entry)
+        if transaction_entry is not None:
+            _close_owned_entry(transaction_entry)
+            transaction = -1
+        elif transaction >= 0:
+            os.close(transaction)
+
+
 def prepare_runtime_secrets(
     secrets_dir: Path,
     *,
@@ -1625,6 +2014,7 @@ def prepare_runtime_secrets(
     upgrade_host_runtime_authority: bool = False,
     upgrade_browser_access: bool = False,
     rotate_admin_password: bool = False,
+    rotate_tailscale_oauth: bool = False,
 ) -> Path:
     if (
         sum(
@@ -1632,6 +2022,7 @@ def prepare_runtime_secrets(
                 upgrade_host_runtime_authority,
                 upgrade_browser_access,
                 rotate_admin_password,
+                rotate_tailscale_oauth,
             )
         )
         > 1
@@ -1641,9 +2032,11 @@ def prepare_runtime_secrets(
     agent = _validate_hostname(agent_hostname)
     registry = _validate_hostname(registry_hostname)
     cidrs = _validate_cidrs(management_cidrs)
-    tailscale_oauth_client_id = _read_external_secret(tailscale_oauth_client_id_file)
-    tailscale_oauth_client_secret = _read_external_secret(
-        tailscale_oauth_client_secret_file
+    tailscale_oauth_client_id, tailscale_oauth_client_secret = (
+        _read_external_secret_pair(
+            tailscale_oauth_client_id_file,
+            tailscale_oauth_client_secret_file,
+        )
     )
     parent = _open_private_parent(secrets_dir)
     existing_descriptor = -1
@@ -1657,7 +2050,7 @@ def prepare_runtime_secrets(
             existing_descriptor, existing_metadata = existing
             if os.listdir(existing_descriptor):
                 _acquire_mutation_lock(existing_descriptor)
-            _recover_admin_rotation(existing_descriptor)
+            _recover_rotations(existing_descriptor)
             names = set(os.listdir(existing_descriptor))
             if names:
                 if upgrade_browser_access:
@@ -1728,10 +2121,21 @@ def prepare_runtime_secrets(
                         agent_hostname=agent,
                         registry_hostname=registry,
                     )
+                elif rotate_tailscale_oauth:
+                    _rotate_tailscale_oauth(
+                        existing_descriptor,
+                        bundle,
+                        new_client_id=tailscale_oauth_client_id,
+                        new_client_secret=tailscale_oauth_client_secret,
+                        management_cidrs=cidrs,
+                        enroll_hostname=enroll,
+                        agent_hostname=agent,
+                        registry_hostname=registry,
+                    )
                 return secrets_dir
         else:
             existing_metadata = None
-        if upgrade_browser_access or rotate_admin_password:
+        if upgrade_browser_access or rotate_admin_password or rotate_tailscale_oauth:
             raise RuntimeSecretError(
                 "development secret operation requires an existing generation"
             )
@@ -1861,6 +2265,11 @@ def _arguments() -> argparse.Namespace:
         action="store_true",
         help="rotate only the administrator password and verifier",
     )
+    operations.add_argument(
+        "--rotate-tailscale-oauth",
+        action="store_true",
+        help="atomically rotate only the Tailscale OAuth client credential pair",
+    )
     return parser.parse_args()
 
 
@@ -1886,6 +2295,7 @@ def main() -> int:
             upgrade_host_runtime_authority=(arguments.upgrade_host_runtime_authority),
             upgrade_browser_access=arguments.upgrade_browser_access,
             rotate_admin_password=arguments.rotate_admin_password,
+            rotate_tailscale_oauth=arguments.rotate_tailscale_oauth,
         )
         print(destination)
         for line in _public_summary(destination):

@@ -43,7 +43,13 @@ loss, administrator password loss, and break-glass loopback.
 - **OAuth compromise:** revoke the client under Tailscale **Trust
   credentials**, revoke the affected gateway node and Service approval, create
   one replacement client with only `auth_keys` write and
-  `tag:vonk-gateway`, then follow the authoritative
+  `tag:vonk-gateway`, capture both replacement values in private mode-`0600`
+  files, and run the development generator's atomic
+  `--rotate-tailscale-oauth` operation against the complete validated local
+  generation. Republish with `scripts/dev-runtime-project`, choose **Pull**
+  then **Redeploy**, and preserve every named volume. The transaction changes
+  only the two OAuth files and rolls back an interrupted install. Then follow
+  the authoritative
   [browser-access recovery instructions](development-nas-installation.md#rotation-and-recovery).
   Do not rotate an application credential unless that authority was also
   exposed.

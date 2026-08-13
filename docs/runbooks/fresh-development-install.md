@@ -79,8 +79,11 @@ restarting containers alone does not fetch a moved `:dev` tag.
 
 First complete the exact numbered Tailscale console and safe OAuth-file steps
 in [Prepare private Tailscale browser access](development-nas-installation.md#prepare-private-tailscale-browser-access).
-Grant only `auth_keys` write to `tag:vonk-gateway`, merge the exact
-`svc:vonk-forge:443` grant and auto-approval, and leave Funnel disabled. Save
+In order: enable **MagicDNS** and **HTTPS certificates**, define exact Service
+`svc:vonk-forge` with endpoint `tcp:443`, create the Trust-credentials OAuth
+client, grant only `auth_keys` write to `tag:vonk-gateway`, then merge the exact
+Service grant and auto-approval. Leave Funnel disabled and do not add a LAN
+browser port. Save
 the ID and secret only in the two mode `0600` local input files; never put
 their values in command arguments or output.
 

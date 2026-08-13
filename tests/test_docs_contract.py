@@ -411,14 +411,18 @@ def test_secret_docs_separate_local_backup_from_exact_nas_projection() -> None:
     runbook = _normalized_text(DEV_WORKLOADS)
     design = _normalized_text(DEV_WORKLOADS_DESIGN)
 
-    for text in (runbook, design):
-        assert "17 local source files" in text
-        assert "14 deployment secret/config files" in text
-        assert "15-file" in text
-        assert "add-only" in text
-        assert "exactly 14 deployment files" in text
-        assert "`controller-ca-key`" in text
-        assert "must not be copied to the NAS" in text
+    assert "exactly 21 local source files" in runbook
+    assert "exactly 17 deployment files" in runbook
+    assert "four local-only files" in runbook
+    assert "15-file" in runbook
+    assert "add-only" in runbook
+
+    # This dated design records the accepted boundary at that historical slice.
+    assert "17 local source files" in design
+    assert "14 deployment secret/config files" in design
+    assert "exactly 14 deployment files" in design
+    assert "`controller-ca-key`" in design
+    assert "must not be copied to the NAS" in design
 
 
 def test_design_records_intentionally_database_free_litellm_runtime() -> None:
@@ -458,6 +462,25 @@ def test_complete_runbook_documents_exact_cleanup_and_recovery_boundaries() -> N
     assert "/etc/sudoers.d/99-vonk-codex-temporary" in text
     assert "sudo -n true" in text
     assert "PASSWORD_REQUIRED" in text
+
+
+def test_complete_runbook_uses_current_browser_secret_generation_contract() -> None:
+    text = DEV_WORKLOADS.read_text()
+    normalized = _normalized_text(DEV_WORKLOADS)
+
+    assert "--tailscale-oauth-client-id-file" in text
+    assert "--tailscale-oauth-client-secret-file" in text
+    assert "exactly 21 local source files" in normalized
+    assert "exactly 17 deployment files" in normalized
+    for local_only in (
+        "`admin-password`",
+        "`controller-ca-key`",
+        "`git-signing-key.pub`",
+        "`host-runtime-grant-public-key`",
+    ):
+        assert local_only in text
+    assert "--upgrade-browser-access" in text
+    assert "Pull** then **Redeploy" in text
 
 
 def test_related_guides_link_to_the_complete_development_acceptance_path() -> None:
@@ -525,6 +548,7 @@ def test_security_and_recovery_docs_split_network_and_application_authority() ->
         "break-glass loopback",
     ):
         assert required in recovery
+    assert "--rotate-tailscale-oauth" in recovery
 
 
 def test_development_updates_do_not_replace_the_production_trust_boundary() -> None:

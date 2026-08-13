@@ -65,6 +65,8 @@ LOCAL_SOURCE_SECRET_NAMES = DEPLOYMENT_SECRET_NAMES | {
 
 OAUTH_CLIENT_ID = b"synthetic-tailscale-client-id\n"
 OAUTH_CLIENT_SECRET = b"synthetic-tailscale-client-secret\n"
+ROTATED_OAUTH_CLIENT_ID = b"rotated-tailscale-client-id\n"
+ROTATED_OAUTH_CLIENT_SECRET = b"rotated-tailscale-client-secret\n"
 BROWSER_ACCESS_SECRET_NAMES = {
     "admin-password",
     "admin-password-verifier",
@@ -76,6 +78,7 @@ ROTATION_PASSWORD = "admin-password"
 ROTATION_VERIFIER = "admin-password-verifier"
 ROTATION_JOURNAL = "journal"
 ROTATION_MANIFEST_TEMPORARY = ".journal.tmp"
+OAUTH_ROTATION_PREFIX = ".tailscale-oauth-rotation-"
 
 
 def _rotation_child(transaction: Path, kind: str) -> Path:
@@ -92,6 +95,15 @@ def _write_oauth_inputs(root: Path) -> tuple[Path, Path]:
     client_secret.write_bytes(OAUTH_CLIENT_SECRET)
     client_id.chmod(0o600)
     client_secret.chmod(0o600)
+    return client_id, client_secret
+
+
+def _write_oauth_values(
+    root: Path, client_id_value: bytes, client_secret_value: bytes
+) -> tuple[Path, Path]:
+    client_id, client_secret = _write_oauth_inputs(root)
+    client_id.write_bytes(client_id_value)
+    client_secret.write_bytes(client_secret_value)
     return client_id, client_secret
 
 
@@ -191,15 +203,21 @@ def _assert_no_sensitive_output(
 
 def _secret_state(
     secrets_dir: Path, names: set[str] | frozenset[str]
-) -> dict[str, tuple[bytes, int, int]]:
-    return {
-        name: (
-            (secrets_dir / name).read_bytes(),
-            (secrets_dir / name).stat().st_dev,
-            (secrets_dir / name).stat().st_ino,
+) -> dict[str, tuple[bytes, int, int, int, int, int, int]]:
+    state: dict[str, tuple[bytes, int, int, int, int, int, int]] = {}
+    for name in names:
+        path = secrets_dir / name
+        metadata = path.stat()
+        state[name] = (
+            path.read_bytes(),
+            metadata.st_dev,
+            metadata.st_ino,
+            metadata.st_uid,
+            metadata.st_gid,
+            stat.S_IMODE(metadata.st_mode),
+            metadata.st_nlink,
         )
-        for name in names
-    }
+    return state
 
 
 def _descriptor_count() -> int:
@@ -1660,6 +1678,361 @@ def test_rotate_admin_password_changes_only_the_credential_pair_when_explicit(
     )
     assert old_password not in rotated.stdout + rotated.stderr
     assert old_verifier not in rotated.stdout + rotated.stderr
+
+
+def test_rotate_tailscale_oauth_changes_only_the_oauth_pair_when_explicit(
+    tmp_path: Path,
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    created = _run_generator(secrets_dir)
+    assert created.returncode == 0, created.stderr
+    before = _secret_state(secrets_dir, LOCAL_SOURCE_SECRET_NAMES)
+    replacement = _write_oauth_values(
+        tmp_path / "replacement-oauth-inputs",
+        ROTATED_OAUTH_CLIENT_ID,
+        ROTATED_OAUTH_CLIENT_SECRET,
+    )
+
+    rotated = _run_generator(
+        secrets_dir,
+        "--rotate-tailscale-oauth",
+        oauth_files=replacement,
+    )
+
+    assert rotated.returncode == 0, rotated.stderr
+    assert {path.name for path in secrets_dir.iterdir()} == LOCAL_SOURCE_SECRET_NAMES
+    after = _secret_state(secrets_dir, LOCAL_SOURCE_SECRET_NAMES)
+    assert {name for name in after if after[name] != before[name]} == {
+        "tailscale-oauth-client-id",
+        "tailscale-oauth-client-secret",
+    }
+    assert after["tailscale-oauth-client-id"][0] == ROTATED_OAUTH_CLIENT_ID
+    assert (
+        after["tailscale-oauth-client-secret"][0]
+        == ROTATED_OAUTH_CLIENT_SECRET
+    )
+    for name in LOCAL_SOURCE_SECRET_NAMES - {
+        "tailscale-oauth-client-id",
+        "tailscale-oauth-client-secret",
+    }:
+        assert after[name] == before[name]
+    assert ROTATED_OAUTH_CLIENT_ID.decode().strip() not in (
+        rotated.stdout + rotated.stderr
+    )
+    assert ROTATED_OAUTH_CLIENT_SECRET.decode().strip() not in (
+        rotated.stdout + rotated.stderr
+    )
+
+
+def test_rotate_tailscale_oauth_rejects_aliased_inputs_without_mutation(
+    tmp_path: Path,
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    created = _run_generator(secrets_dir)
+    assert created.returncode == 0, created.stderr
+    before = _secret_state(secrets_dir, LOCAL_SOURCE_SECRET_NAMES)
+    replacement = _write_oauth_values(
+        tmp_path / "replacement-oauth-inputs",
+        ROTATED_OAUTH_CLIENT_ID,
+        ROTATED_OAUTH_CLIENT_SECRET,
+    )
+
+    refused = _run_generator(
+        secrets_dir,
+        "--rotate-tailscale-oauth",
+        oauth_files=(replacement[0], replacement[0]),
+    )
+
+    assert refused.returncode == 1
+    assert refused.stdout == ""
+    assert _secret_state(secrets_dir, LOCAL_SOURCE_SECRET_NAMES) == before
+    assert ROTATED_OAUTH_CLIENT_ID.decode().strip() not in refused.stderr
+
+
+def test_rotate_tailscale_oauth_rejects_unchanged_credentials_without_mutation(
+    tmp_path: Path,
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    created = _run_generator(secrets_dir)
+    assert created.returncode == 0, created.stderr
+    before = _secret_state(secrets_dir, LOCAL_SOURCE_SECRET_NAMES)
+
+    refused = _run_generator(secrets_dir, "--rotate-tailscale-oauth")
+
+    assert refused.returncode == 1
+    assert refused.stdout == ""
+    assert _secret_state(secrets_dir, LOCAL_SOURCE_SECRET_NAMES) == before
+    assert OAUTH_CLIENT_ID.decode().strip() not in refused.stderr
+    assert OAUTH_CLIENT_SECRET.decode().strip() not in refused.stderr
+
+
+@pytest.mark.parametrize(
+    "fault", ["empty", "mode", "symlink", "directory", "hardlink"]
+)
+def test_rotate_tailscale_oauth_rejects_unsafe_inputs_without_mutation(
+    tmp_path: Path, fault: str
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    created = _run_generator(secrets_dir)
+    assert created.returncode == 0, created.stderr
+    before = _secret_state(secrets_dir, LOCAL_SOURCE_SECRET_NAMES)
+    replacement = _write_oauth_values(
+        tmp_path / "replacement-oauth-inputs",
+        ROTATED_OAUTH_CLIENT_ID,
+        ROTATED_OAUTH_CLIENT_SECRET,
+    )
+    client_id, client_secret = replacement
+    if fault == "empty":
+        client_secret.write_bytes(b"")
+    elif fault == "mode":
+        client_secret.chmod(0o640)
+    elif fault == "symlink":
+        client_secret.unlink()
+        client_secret.symlink_to(client_id)
+    elif fault == "directory":
+        client_secret.unlink()
+        client_secret.mkdir(mode=0o700)
+    else:
+        client_secret.unlink()
+        os.link(client_id, client_secret)
+
+    refused = _run_generator(
+        secrets_dir,
+        "--rotate-tailscale-oauth",
+        oauth_files=replacement,
+    )
+
+    assert refused.returncode == 1
+    assert refused.stdout == ""
+    assert _secret_state(secrets_dir, LOCAL_SOURCE_SECRET_NAMES) == before
+    assert ROTATED_OAUTH_CLIENT_ID.decode().strip() not in refused.stderr
+    assert ROTATED_OAUTH_CLIENT_SECRET.decode().strip() not in refused.stderr
+
+
+@pytest.mark.parametrize(
+    ("option", "input_name"),
+    (
+        ("--tailscale-oauth-client-id-file", "client-id"),
+        ("--tailscale-oauth-client-secret-file", "client-secret"),
+    ),
+)
+def test_rotate_tailscale_oauth_rejects_a_partial_input_pair(
+    tmp_path: Path, option: str, input_name: str
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    created = _run_generator(secrets_dir)
+    assert created.returncode == 0, created.stderr
+    before = _secret_state(secrets_dir, LOCAL_SOURCE_SECRET_NAMES)
+    replacement_root = tmp_path / "replacement-oauth-inputs"
+    replacement = _write_oauth_values(
+        replacement_root,
+        ROTATED_OAUTH_CLIENT_ID,
+        ROTATED_OAUTH_CLIENT_SECRET,
+    )
+    input_path = replacement[0] if input_name == "client-id" else replacement[1]
+
+    refused = subprocess.run(
+        (
+            sys.executable,
+            str(SCRIPT),
+            "--secrets-dir",
+            str(secrets_dir),
+            "--management-cidrs",
+            MANAGEMENT_CIDRS,
+            "--enroll-hostname",
+            ENROLL_HOSTNAME,
+            "--agent-hostname",
+            AGENT_HOSTNAME,
+            "--registry-hostname",
+            REGISTRY_HOSTNAME,
+            option,
+            str(input_path),
+            "--rotate-tailscale-oauth",
+        ),
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert refused.returncode == 2
+    assert refused.stdout == ""
+    assert _secret_state(secrets_dir, LOCAL_SOURCE_SECRET_NAMES) == before
+    assert ROTATED_OAUTH_CLIENT_ID.decode().strip() not in refused.stderr
+    assert ROTATED_OAUTH_CLIENT_SECRET.decode().strip() not in refused.stderr
+
+
+def test_rotate_tailscale_oauth_rolls_back_an_injected_second_install_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    created = _run_generator(secrets_dir)
+    assert created.returncode == 0, created.stderr
+    before = _secret_state(secrets_dir, LOCAL_SOURCE_SECRET_NAMES)
+    replacement = _write_oauth_values(
+        tmp_path / "replacement-oauth-inputs",
+        ROTATED_OAUTH_CLIENT_ID,
+        ROTATED_OAUTH_CLIENT_SECRET,
+    )
+    runtime = _load_module()
+    real_replace = runtime.os.replace
+
+    def fail_second_install(
+        source: str,
+        destination: str,
+        *,
+        src_dir_fd: int | None = None,
+        dst_dir_fd: int | None = None,
+    ) -> None:
+        if (
+            source == "new-client-secret"
+            and destination == "tailscale-oauth-client-secret"
+        ):
+            raise OSError("synthetic OAuth install failure")
+        real_replace(
+            source,
+            destination,
+            src_dir_fd=src_dir_fd,
+            dst_dir_fd=dst_dir_fd,
+        )
+
+    monkeypatch.setattr(runtime.os, "replace", fail_second_install)
+
+    with pytest.raises(runtime.RuntimeSecretError):
+        runtime.prepare_runtime_secrets(
+            secrets_dir,
+            **_prepare_arguments(replacement, rotate_tailscale_oauth=True),
+        )
+
+    after = _secret_state(secrets_dir, LOCAL_SOURCE_SECRET_NAMES)
+    for name in LOCAL_SOURCE_SECRET_NAMES - {
+        "tailscale-oauth-client-id",
+        "tailscale-oauth-client-secret",
+    }:
+        assert after[name] == before[name]
+    assert after["tailscale-oauth-client-id"][0] == before[
+        "tailscale-oauth-client-id"
+    ][0]
+    assert after["tailscale-oauth-client-secret"][0] == before[
+        "tailscale-oauth-client-secret"
+    ][0]
+    _assert_regular_private_file(secrets_dir / "tailscale-oauth-client-id")
+    _assert_regular_private_file(secrets_dir / "tailscale-oauth-client-secret")
+    assert {path.name for path in secrets_dir.iterdir()} == LOCAL_SOURCE_SECRET_NAMES
+
+
+def test_rotate_tailscale_oauth_recovers_a_crash_by_restoring_the_old_pair(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    created = _run_generator(secrets_dir)
+    assert created.returncode == 0, created.stderr
+    before = {
+        name: (secrets_dir / name).read_bytes() for name in LOCAL_SOURCE_SECRET_NAMES
+    }
+    original_inputs = _write_oauth_values(
+        tmp_path / "original-oauth-inputs",
+        OAUTH_CLIENT_ID,
+        OAUTH_CLIENT_SECRET,
+    )
+    replacement = _write_oauth_values(
+        tmp_path / "replacement-oauth-inputs",
+        ROTATED_OAUTH_CLIENT_ID,
+        ROTATED_OAUTH_CLIENT_SECRET,
+    )
+    runtime = _load_module()
+    real_replace = runtime.os.replace
+
+    def crash_during_second_install(
+        source: str,
+        destination: str,
+        *,
+        src_dir_fd: int | None = None,
+        dst_dir_fd: int | None = None,
+    ) -> None:
+        if (
+            source == "new-client-secret"
+            and destination == "tailscale-oauth-client-secret"
+        ):
+            raise SyntheticRotationCrash
+        real_replace(
+            source,
+            destination,
+            src_dir_fd=src_dir_fd,
+            dst_dir_fd=dst_dir_fd,
+        )
+
+    monkeypatch.setattr(runtime.os, "replace", crash_during_second_install)
+    with pytest.raises(SyntheticRotationCrash):
+        runtime.prepare_runtime_secrets(
+            secrets_dir,
+            **_prepare_arguments(replacement, rotate_tailscale_oauth=True),
+        )
+    assert any(
+        path.name.startswith(".tailscale-oauth-rotation-")
+        for path in secrets_dir.iterdir()
+    )
+
+    monkeypatch.setattr(runtime.os, "replace", real_replace)
+    runtime.prepare_runtime_secrets(
+        secrets_dir,
+        **_prepare_arguments(original_inputs),
+    )
+
+    assert {path.name for path in secrets_dir.iterdir()} == LOCAL_SOURCE_SECRET_NAMES
+    assert {
+        name: (secrets_dir / name).read_bytes() for name in LOCAL_SOURCE_SECRET_NAMES
+    } == before
+
+
+@pytest.mark.parametrize("state", ["prejournal", "postjournal"])
+def test_rotate_tailscale_oauth_recovery_rejects_foreign_transaction_state(
+    tmp_path: Path, state: str
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    created = _run_generator(secrets_dir)
+    assert created.returncode == 0, created.stderr
+    before = _secret_state(secrets_dir, LOCAL_SOURCE_SECRET_NAMES)
+    transaction = secrets_dir / (OAUTH_ROTATION_PREFIX + "c" * 32)
+    transaction.mkdir(mode=0o700)
+    if state == "postjournal":
+        runtime = _load_module()
+        journal = transaction / "journal"
+        journal.write_bytes(
+            runtime._oauth_rotation_journal(
+                OAUTH_CLIENT_ID,
+                OAUTH_CLIENT_SECRET,
+                ROTATED_OAUTH_CLIENT_ID,
+                ROTATED_OAUTH_CLIENT_SECRET,
+            )
+        )
+        journal.chmod(0o600)
+    foreign = transaction / "old-client-id"
+    foreign.write_bytes(b"synthetic-foreign-state\n")
+    foreign.chmod(0o600)
+
+    refused = _run_generator(secrets_dir)
+
+    assert refused.returncode == 1
+    assert refused.stdout == ""
+    assert transaction.exists()
+    assert foreign.read_bytes() == b"synthetic-foreign-state\n"
+    assert _secret_state(secrets_dir, LOCAL_SOURCE_SECRET_NAMES) == before
 
 
 @pytest.mark.parametrize(

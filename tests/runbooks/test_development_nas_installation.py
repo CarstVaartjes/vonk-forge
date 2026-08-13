@@ -95,10 +95,13 @@ def test_development_nas_runbook_documents_private_browser_prerequisites() -> No
 
     for required in (
         "Tailscale admin console",
+        "MagicDNS",
+        "HTTPS certificates",
         "Trust credentials",
         "`auth_keys` write",
         "`tag:vonk-gateway`",
         "`svc:vonk-forge`",
+        "`tcp:443`",
         "HTTPS-only Serve",
         "Tailscale Funnel remains disabled",
         "no human-facing LAN port",
@@ -107,6 +110,11 @@ def test_development_nas_runbook_documents_private_browser_prerequisites() -> No
         "mode `0600`",
     ):
         assert required in text
+
+    prerequisites = text.index("MagicDNS")
+    service = text.index("`svc:vonk-forge`")
+    grants = text.index("Merge the `tag:vonk-gateway`")
+    assert prerequisites < service < grants
 
 
 def test_development_nas_runbook_documents_exact_browser_secret_boundary() -> None:
@@ -140,6 +148,7 @@ def test_existing_install_browser_upgrade_and_normal_journey_are_complete() -> N
         "Log in as exact subject `admin`",
         "Logout",
         "`--rotate-admin-password`",
+        "`--rotate-tailscale-oauth`",
         "revokes every existing browser session",
         "Tailscale state",
     ):
@@ -238,6 +247,9 @@ def test_operator_entry_points_link_to_development_nas_runbook() -> None:
 
 def test_fresh_install_is_the_concise_operator_entry_point() -> None:
     text = _normalized_text(FRESH_INSTALL)
+    setup = text.split("## 3. Generate and publish the NAS project", 1)[1].split(
+        "## 4. Configure names and start the NAS stack", 1
+    )[0]
 
     for required in (
         "docker-compose.yml",
@@ -248,10 +260,17 @@ def test_fresh_install_is_the_concise_operator_entry_point() -> None:
         "/var/lib/vonk-forge/supervisor/current/vonk-agent pair ... --token-stdin",
         "scripts/run-development-slices",
         "--phase synthetic",
+        "MagicDNS",
+        "HTTPS certificates",
+        "`svc:vonk-forge`",
+        "`tcp:443`",
     ):
         assert required in text
     assert "No GitHub, GHCR, R2, database, signing, or model credential" in text
     assert "Do not install a registry token on the NAS" in text
+    assert setup.index("MagicDNS") < setup.index("`svc:vonk-forge`") < setup.index(
+        "Service grant and auto-approval"
+    )
 
 
 def test_readme_and_documentation_index_lead_to_fresh_install() -> None:

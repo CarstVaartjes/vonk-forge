@@ -156,12 +156,19 @@ def test_control_recovery_uses_only_the_journaled_host_boundary() -> None:
 def test_tailscale_runbook_documents_the_exact_private_browser_service() -> None:
     text = TAILSCALE_RUNBOOK.read_text()
     normalized = " ".join(text.split())
+    policy = normalized.split("## Identity and access policy", 1)[1].split(
+        "## Secrets and unattended startup", 1
+    )[0]
+    setup = policy.split("Before creating credentials or policy", 1)[1]
 
     for required in (
         "Trust credentials",
+        "MagicDNS",
+        "HTTPS certificates",
         "`auth_keys` write scope",
         "`tag:vonk-gateway`",
         "`svc:vonk-forge`",
+        "`tcp:443`",
         "HTTPS 443 -> http://caddy:8080",
         "HTTPS-only",
         "Funnel",
@@ -171,6 +178,9 @@ def test_tailscale_runbook_documents_the_exact_private_browser_service() -> None
         assert required in normalized
     assert "PASTE_TAILSCALE" not in text
     assert "No Windows hosts-file entry" in normalized
+    assert setup.index("MagicDNS") < setup.index(
+        "`svc:vonk-forge`"
+    ) < setup.index("Merge the reviewed sections")
 
 
 def test_hermes_secret_mode_matches_the_authoritative_nas_guide() -> None:

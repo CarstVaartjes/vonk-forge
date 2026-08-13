@@ -14,13 +14,17 @@ no repository credential. Tailnet reachability and Vonk Forge application
 authentication are independent gates: an authorized tailnet user must still
 complete the application administrator login at `svc:vonk-forge`.
 
-The gateway never receives a GitHub token. Create a separate OAuth client under
-Trust credentials with only `auth_keys` write scope and `tag:vonk-gateway` as its
-only tag. Define these exact Services in the admin console:
+Before creating credentials or policy, enable **MagicDNS** and **HTTPS
+certificates** under the Tailscale admin console's DNS settings. Then define
+these exact Services and endpoints in the Services page:
 
 - `svc:vonk-forge`, endpoint `tcp:443`;
 - `svc:hermes-dashboard`, endpoint `tcp:443`; and
 - `svc:hermes-api`, endpoint `tcp:443`.
+
+The gateway never receives a GitHub token. After the Services exist, create a
+separate OAuth client under Trust credentials with only `auth_keys` write scope
+and `tag:vonk-gateway` as its only tag.
 
 Merge the reviewed sections of `deploy/compose/tailscale/grants.example.hujson`
 into tailnet policy after replacing the GitHub-login placeholder. Administrators
@@ -145,5 +149,8 @@ before startup when possible.
 If state cannot be restored, recreate the project with the OAuth files. Verify
 exactly one current tagged node advertises all three Services and revoke the
 orphan. For compromise, revoke OAuth, the node, and its tag/Service approvals;
-then rotate and recover through reviewed policy. Never add a temporary LAN
-human endpoint.
+for development, capture both replacement values and run the documented
+`--rotate-tailscale-oauth` transaction before republishing and choosing
+**Pull** then **Redeploy** with every named volume preserved. Production uses
+its selected-generation secret and host-updater boundary. Never add a
+temporary LAN human endpoint.
