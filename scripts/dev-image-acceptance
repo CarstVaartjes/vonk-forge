@@ -258,6 +258,18 @@ services:
       VONK_DEV_REPOSITORY_URL: file:///source-origin
     volumes:
       - $origin_dir:/source-origin:ro
+  caddy:
+    environment:
+      VONK_CONTROL_HOSTNAME_FILE: ""
+      VONK_CONTROL_HOSTNAME: vonk-forge.acceptance.ts.net
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          wget -q --spider -T 3 http://127.0.0.1:2019/healthz &&
+          wget -q --spider -T 3
+          --header='Host: vonk-forge.acceptance.ts.net'
+          http://127.0.0.1:8080/healthz
 EOF
 }
 
