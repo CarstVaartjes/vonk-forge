@@ -12,7 +12,7 @@ from vonk_control.source_policy import enforce_build_source_policy
 ROOT = Path(__file__).resolve().parents[2]
 RECIPE_ROOT = ROOT / "config/recipes/development"
 CONTEXT = RECIPE_ROOT / "mia-deepseek-v4-flash-context"
-UPSTREAM_COMMIT = "3c9576c52ab71d89e22fe4621e0d32300a59039a"
+UPSTREAM_COMMIT = "103af68cad84a153c8e6bd3b15e6414a12b71e05"
 MODEL_REVISION = "9e165c30e2704aec5d9d593cce3eebd58bbef1cb"
 RUNTIME_IMAGE = (
     "ghcr.io/anemll/dspark-vllm-gx10"
@@ -29,6 +29,7 @@ PATCH_SHA256 = {
     "hotfix-dsv4-flashmla-workspace-50298.sh": "a7f557b264d247fbc65bfe49cc6d05e0780e4c6bebcdaf3633ace55338fa4268",
     "hotfix-dsv4-grammar-advance.sh": "99f5e0d3737a8a074c4c85b7348882a91a4d96a12bcf0d65de4d1c751a4d8abd",
     "hotfix-dsv4-issue27-partial-prefill-concurrency.py": "e87e14a6dc45ccbbdea2940d9594f239f6d8dbda7b82d7a094f45bcaa2dfb450",
+    "hotfix-dsv4-issue43-decode-fairness-and-diag.py": "f362f6289fabefd17d41007637e99a503f5b282dbb13b21cd203a3c30b844de6",
     "hotfix-dsv4-issue26-hybrid-swa-min.py": "acdf9aa2705de248333b3ba6ddeb20aea67b5582f408552e407c7a670b20ee82",
     "hotfix-dsv4-suppress-stops-in-reasoning.py": "89df901d5d5853e79d71d48e1f2f1a4302ac688b5e2d3788c8551a7fe8477f21",
 }
@@ -213,12 +214,26 @@ def test_source_context_is_immutable_offline_and_contains_exact_upstream_hotfixe
 
     for filename, expected_sha256 in PATCH_SHA256.items():
         payload = (CONTEXT / "patches" / filename).read_bytes()
-        if filename == "hotfix-dsv4-issue27-partial-prefill-concurrency.py":
-            # Upstream omits only this file's final newline; the source bundle
-            # normalizes it while preserving every source character.
+        if filename in {
+            "hotfix-dsv4-issue27-partial-prefill-concurrency.py",
+            "hotfix-dsv4-issue43-decode-fairness-and-diag.py",
+        }:
+            # Upstream omits these files' final newlines; the source bundle
+            # normalizes them while preserving every source character.
             payload = payload.removesuffix(b"\n")
         assert hashlib.sha256(payload).hexdigest() == expected_sha256
         assert filename in dockerfile
+    assert (
+        dockerfile.index("hotfix-dsv4-issue27-partial-prefill-concurrency.py")
+        < dockerfile.index("hotfix-dsv4-issue43-decode-fairness-and-diag.py")
+        < dockerfile.index("hotfix-dsv4-issue26-hybrid-swa-min.py")
+    )
+    patched_scheduler = (
+        "/usr/local/lib/python3.12/dist-packages/vllm/v1/core/sched/scheduler.py"
+    )
+    assert dockerfile.index(patched_scheduler) > dockerfile.index(
+        "hotfix-dsv4-issue43-decode-fairness-and-diag.py"
+    )
     encoder = (CONTEXT / "encoding/encoding_dsv4.py").read_bytes()
     assert hashlib.sha256(encoder).hexdigest() == (
         "abc0d26120250dda0ae077dc64aa28836026e61e970854aaeb792445e6a0dde6"

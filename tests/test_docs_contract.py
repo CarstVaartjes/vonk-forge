@@ -393,7 +393,7 @@ def test_latest_mia_runbook_is_exact_reproducible_and_secret_free() -> None:
     normalized = _normalized_text(MIA_TWO_SPARK)
 
     for value in (
-        "3c9576c52ab71d89e22fe4621e0d32300a59039a",
+        "103af68cad84a153c8e6bd3b15e6414a12b71e05",
         "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
         "166898660330",
         "VONK_HOST_ENDPOINT_PORTS=8888",

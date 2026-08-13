@@ -18,12 +18,14 @@ RUN set -eux; \
     bash /opt/vonk/patches/hotfix-dsv4-flashmla-workspace-50298.sh; \
     bash /opt/vonk/patches/hotfix-dsv4-grammar-advance.sh; \
     python3 /opt/vonk/patches/hotfix-dsv4-issue27-partial-prefill-concurrency.py; \
+    python3 /opt/vonk/patches/hotfix-dsv4-issue43-decode-fairness-and-diag.py; \
     python3 /opt/vonk/patches/hotfix-dsv4-issue26-hybrid-swa-min.py; \
     python3 /opt/vonk/patches/hotfix-dsv4-suppress-stops-in-reasoning.py; \
     python3 /opt/vonk/apply-reasoning-default.py; \
     python3 -m py_compile \
       /opt/vonk/resolve-model.py \
       /opt/vonk/resolve-roce.py \
+      /usr/local/lib/python3.12/dist-packages/vllm/v1/core/sched/scheduler.py \
       /usr/local/lib/python3.12/dist-packages/vllm/tokenizers/deepseek_v4_encoding.py \
       /usr/local/lib/python3.12/dist-packages/vllm/tokenizers/deepseek_v4.py
 LABEL ai.vonkforge.runtime-interface="v1"
