@@ -41,6 +41,15 @@ _FIXTURE_IMAGE_INSPECTION = (
 )
 
 
+def test_cohort_harness_uses_an_explicit_browser_authority_without_tailscale() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+
+    assert 'VONK_CONTROL_HOSTNAME_FILE: ""' in source
+    assert "VONK_CONTROL_HOSTNAME: vonk-forge.acceptance.ts.net" in source
+    assert "http://127.0.0.1:2019/healthz" in source
+    assert "Host: vonk-forge.acceptance.ts.net" in source
+
+
 def _install_successful_curl(fake_bin: Path, log: Path) -> None:
     curl = fake_bin / "curl"
     curl.write_text(
