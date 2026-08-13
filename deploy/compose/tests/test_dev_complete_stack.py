@@ -62,6 +62,38 @@ def _require_local_images() -> None:
             pytest.skip(f"the prebuilt {image} acceptance image is required")
 
 
+def _browser_response(
+    project: str, *, hostname: str, path: str
+) -> tuple[int, str]:
+    code = (
+        "import http.client, sys; "
+        "connection = http.client.HTTPConnection('caddy', 8080, timeout=5); "
+        "connection.request('GET', sys.argv[2], headers={'Host': sys.argv[1]}); "
+        "response = connection.getresponse(); "
+        "print(response.status); "
+        "print(response.read().decode('utf-8'))"
+    )
+    result = _run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--network",
+            f"{project}_ingress",
+            "--entrypoint",
+            "python",
+            API_IMAGE,
+            "-c",
+            code,
+            hostname,
+            path,
+        ],
+        timeout=20,
+    )
+    status, body = result.stdout.split("\n", 1)
+    return int(status), body
+
+
 def test_failed_subprocess_reports_bounded_stdout_and_stderr() -> None:
     with pytest.raises(AssertionError) as failure:
         _run(
@@ -367,6 +399,25 @@ def test_complete_development_stack_enforces_tls_identity_and_acks_routes(
 
     try:
         _run([str(COMPOSE), "up", "-d"], environment=environment, timeout=240)
+        browser_hostname = environment["VONK_CONTROL_HOSTNAME"]
+        root_status, root_html = _browser_response(
+            project, hostname=browser_hostname, path="/"
+        )
+        assert root_status == 200
+        assert "<title>Vonk Forge Control</title>" in root_html
+        session_status, _session_body = _browser_response(
+            project, hostname=browser_hostname, path="/api/v1/auth/session"
+        )
+        assert session_status == 401
+        agent_status, _agent_body = _browser_response(
+            project, hostname=browser_hostname, path="/agent/v1/claim"
+        )
+        assert agent_status == 404
+        rejected_status, _rejected_body = _browser_response(
+            project, hostname="noncanonical.invalid", path="/"
+        )
+        assert rejected_status == 421
+
         certificate, key = _write_client_identity(secrets, tmp_path)
         controller_ca = secrets / "controller-ca"
 

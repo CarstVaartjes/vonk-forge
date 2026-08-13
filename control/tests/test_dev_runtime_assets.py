@@ -420,6 +420,24 @@ def test_caddy_entrypoint_stages_runtime_files_as_uid_10000(
     assert result.returncode == 0, result.stderr
     assert "A" * 32 not in result.stdout + result.stderr
 
+    absent_command = list(command)
+    absent_index = absent_command.index("--env")
+    while absent_command[absent_index + 1] != (
+        "VONK_CONTROL_HOSTNAME=vonk-forge.tailnet.test.ts.net"
+    ):
+        absent_index = absent_command.index("--env", absent_index + 1)
+    del absent_command[absent_index:absent_index + 2]
+    absent = subprocess.run(
+        absent_command,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=False,
+        timeout=30,
+        text=True,
+    )
+    assert absent.returncode != 0
+    assert "VONK_CONTROL_HOSTNAME" in absent.stderr
+
     invalid_command = list(command)
     invalid_command[invalid_command.index(
         "VONK_CONTROL_HOSTNAME=vonk-forge.tailnet.test.ts.net"
