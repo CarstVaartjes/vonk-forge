@@ -13,7 +13,7 @@ def config(url: str) -> Config:
 
 def test_admission_state_is_linear_head() -> None:
     script = ScriptDirectory.from_config(config("sqlite://"))
-    assert script.get_heads() == ["0020_recipe_catalog_bridge"]
+    assert script.get_heads() == ["0021_browser_authentication"]
     assert script.get_revision("0017_admission_and_run_state").down_revision == "0016_recipe_deployment_authority"
 
 

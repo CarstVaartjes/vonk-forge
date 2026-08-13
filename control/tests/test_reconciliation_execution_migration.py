@@ -359,10 +359,10 @@ def test_latest_migration_is_the_sole_linear_head() -> None:
     scripts = ScriptDirectory.from_config(config)
     heads = scripts.get_heads()
 
-    assert heads == ["0020_recipe_catalog_bridge"]
+    assert heads == ["0021_browser_authentication"]
     revision = ScriptDirectory.from_config(config).get_revision(heads[0])
     assert revision is not None
-    assert revision.down_revision == "0019_rust_agent_migration"
+    assert revision.down_revision == "0020_recipe_catalog_bridge"
     assert [item.revision for item in reversed(tuple(scripts.walk_revisions()))] == [
         "0001_operational_state",
         "0002_agent_operations",
@@ -384,6 +384,7 @@ def test_latest_migration_is_the_sole_linear_head() -> None:
             "0018_agent_inventory_runtime",
             "0019_rust_agent_migration",
             "0020_recipe_catalog_bridge",
+            "0021_browser_authentication",
         ]
 
 
