@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Vonk Forge cluster workload-profile contracts"
 requires-python = ">=3.12"
 dependencies = [
+  "argon2-cffi==25.1.0",
   "attrs==26.1.0",
   "httpx==0.28.1",
   "jsonschema>=4.23",
