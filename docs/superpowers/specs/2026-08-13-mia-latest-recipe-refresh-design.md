@@ -9,7 +9,7 @@ Mia recipe from GitHub
 
 Add a source-first Vonk recipe for the official text-only
 `MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark` lane at commit
-`3c9576c52ab71d89e22fe4621e0d32300a59039a`. It runs one real tensor-parallel
+`103af68cad84a153c8e6bd3b15e6414a12b71e05`. It runs one real tensor-parallel
 vLLM service across exactly two DGX Sparks. It does not reuse the existing
 two-replica DS4 smoke profile and does not rewrite the historically accepted
 legacy Mia adapter.
@@ -20,7 +20,7 @@ hotfix is digest-bound.
 
 ## Exact upstream inputs
 
-- Git source: `3c9576c52ab71d89e22fe4621e0d32300a59039a`.
+- Git source: `103af68cad84a153c8e6bd3b15e6414a12b71e05`.
 - Model: `deepseek-ai/DeepSeek-V4-Flash-0731` revision
   `9e165c30e2704aec5d9d593cce3eebd58bbef1cb`.
 - Model snapshot size: `166898660330` bytes from the immutable Hugging Face
@@ -109,5 +109,5 @@ recovery, stop, and uninstall. Existing historical evidence is not reused.
 ## Provenance
 
 - [Official repository](https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark)
-- [Selected commit](https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark/tree/3c9576c52ab71d89e22fe4621e0d32300a59039a)
-- [Selected Compose recipe](https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark/blob/3c9576c52ab71d89e22fe4621e0d32300a59039a/docker-compose.dspark.yml)
+- [Selected commit](https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark/tree/103af68cad84a153c8e6bd3b15e6414a12b71e05)
+- [Selected Compose recipe](https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark/blob/103af68cad84a153c8e6bd3b15e6414a12b71e05/docker-compose.dspark.yml)
