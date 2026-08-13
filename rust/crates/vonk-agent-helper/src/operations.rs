@@ -24,6 +24,8 @@ const MAX_ARTIFACT_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_RUNTIME_ARCHIVE_BYTES: u64 = 1024 * 1024 * 1024 * 1024;
 const MAX_COMMAND_OUTPUT_BYTES: u64 = 4096;
 const MAX_RUNTIME_REQUEST_BYTES: u64 = 64 * 1024;
+const DOCKER_FIREWALL: &str = "/usr/lib/vonk-forge/vonk-forge-docker-firewall";
+const DOCKER_FIREWALL_CONFIG: &str = "/etc/vonk-forge-agent/docker-firewall.conf";
 
 #[derive(Debug, Error)]
 pub enum OperationError {
@@ -101,6 +103,7 @@ impl CommandRunner for ProcessCommandRunner {
                     | "/usr/bin/systemctl"
                     | "/usr/bin/systemd-run"
                     | "/usr/lib/vonk-forge/vonk-agent-supervisor"
+                    | DOCKER_FIREWALL
                     | "/usr/bin/docker"
                     | "/usr/bin/setfacl"
             )
@@ -654,6 +657,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         if image_digest != &validated.image_digest {
             return Err(OperationError::InvalidOperation);
         }
+        self.require_host_endpoint_firewall(&validated)?;
         let inspected = self.inspect_runtime_image(&validated.image)?;
         self.require_image_receipt(image_digest, &validated.image, &inspected.0)?;
         let semantic_digest = hex_sha256(
@@ -703,6 +707,31 @@ impl<R: CommandRunner> OperationExecutor<R> {
         Ok(())
     }
 
+    fn require_host_endpoint_firewall(
+        &self,
+        run: &ValidatedDockerRun,
+    ) -> Result<(), OperationError> {
+        let Some(port) = run.host_endpoint_port else {
+            return Ok(());
+        };
+        let output = self
+            .runner
+            .run(
+                Path::new(DOCKER_FIREWALL),
+                &[
+                    "--config".to_owned(),
+                    DOCKER_FIREWALL_CONFIG.to_owned(),
+                    "check-host-port".to_owned(),
+                    port.to_string(),
+                ],
+            )
+            .map_err(|_| OperationError::CommandFailed)?;
+        if !output.success {
+            return Err(OperationError::CommandFailed);
+        }
+        Ok(())
+    }
+
     fn runtime_run_inspect(&self, arguments: &[String]) -> Result<(), OperationError> {
         let (image_digest, docker) = arguments
             .split_first()
@@ -711,6 +740,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         if image_digest != &validated.image_digest || !validated.detached {
             return Err(OperationError::InvalidOperation);
         }
+        self.require_host_endpoint_firewall(&validated)?;
         let inspected = self.inspect_runtime_image(&validated.image)?;
         self.require_image_receipt(image_digest, &validated.image, &inspected.0)?;
         let semantic_digest = hex_sha256(
@@ -1043,6 +1073,7 @@ struct ValidatedDockerRun {
     models: PathBuf,
     state: PathBuf,
     runtime_contract: PathBuf,
+    host_endpoint_port: Option<u16>,
 }
 
 fn validate_docker_run(
@@ -1066,7 +1097,11 @@ fn validate_docker_run(
     let mut log_max_file = false;
     let mut cap_drop = false;
     let mut no_new_privileges = false;
-    let mut network = false;
+    let mut network: Option<&str> = None;
+    let mut ipc_host = false;
+    let mut infiniband = false;
+    let mut memlock = false;
+    let mut stack = false;
     let mut pids = false;
     let mut memory: Option<u64> = None;
     let mut memory_swap: Option<u64> = None;
@@ -1074,6 +1109,7 @@ fn validate_docker_run(
     let mut user: Option<(u32, Option<u32>)> = None;
     let mut publishes = 0_usize;
     let mut environments = 0_usize;
+    let mut listen_port = None;
     let mut gpu = false;
     let mut models = None;
     let mut state = None;
@@ -1146,12 +1182,37 @@ fn validate_docker_run(
                 }
                 restart = true;
             }
-            "--network" if !network => {
+            "--network" if network.is_none() => {
                 index += 1;
-                if arguments.get(index).map(String::as_str) != Some("bridge") {
+                network = match arguments.get(index).map(String::as_str) {
+                    Some("bridge") => Some("bridge"),
+                    Some("host") => Some("host"),
+                    _ => return Err(OperationError::InvalidOperation),
+                };
+            }
+            "--ipc" if !ipc_host => {
+                index += 1;
+                if arguments.get(index).map(String::as_str) != Some("host") {
                     return Err(OperationError::InvalidOperation);
                 }
-                network = true;
+                ipc_host = true;
+            }
+            "--device" if !infiniband => {
+                index += 1;
+                if arguments.get(index).map(String::as_str)
+                    != Some("/dev/infiniband:/dev/infiniband")
+                {
+                    return Err(OperationError::InvalidOperation);
+                }
+                infiniband = true;
+            }
+            "--ulimit" if !memlock || !stack => {
+                index += 1;
+                match arguments.get(index).map(String::as_str) {
+                    Some("memlock=-1:-1") if !memlock => memlock = true,
+                    Some("stack=67108864:67108864") if !stack => stack = true,
+                    _ => return Err(OperationError::InvalidOperation),
+                }
             }
             "--pids-limit" if !pids => {
                 index += 1;
@@ -1203,12 +1264,21 @@ fn validate_docker_run(
             }
             "--env" if environments < 160 => {
                 index += 1;
-                if !valid_environment(
-                    arguments
-                        .get(index)
-                        .ok_or(OperationError::InvalidOperation)?,
-                ) {
+                let value = arguments
+                    .get(index)
+                    .ok_or(OperationError::InvalidOperation)?;
+                if !valid_environment(value) {
                     return Err(OperationError::InvalidOperation);
+                }
+                if let Some(value) = value.strip_prefix("VONK_LISTEN_PORT=") {
+                    let parsed = value
+                        .parse::<u16>()
+                        .ok()
+                        .filter(|port| (1024..=65535).contains(port))
+                        .ok_or(OperationError::InvalidOperation)?;
+                    if listen_port.replace(parsed).is_some() {
+                        return Err(OperationError::InvalidOperation);
+                    }
                 }
                 environments += 1;
             }
@@ -1276,13 +1346,17 @@ fn validate_docker_run(
         || !log_max_file
         || !cap_drop
         || !no_new_privileges
-        || !network
+        || network.is_none()
         || !pids
         || memory.is_none()
         || memory_swap != memory
         || shm_size.is_none_or(|value| value > memory.unwrap_or_default())
-        || (detach && publishes == 0)
+        || (detach && network == Some("bridge") && publishes == 0)
+        || (network == Some("host") && publishes != 0)
+        || (network == Some("host") && listen_port.is_none())
         || (!detach && publishes != 0)
+        || (network == Some("host") && (!ipc_host || !infiniband || !memlock || !stack || !gpu))
+        || (network == Some("bridge") && (ipc_host || infiniband || memlock || stack))
         || environments == 0
         || state.parent() != Some(roots.agent_data.join("runs").as_path())
         || runtime_contract.parent().and_then(Path::parent)
@@ -1322,6 +1396,7 @@ fn validate_docker_run(
         models,
         state,
         runtime_contract,
+        host_endpoint_port: (network == Some("host")).then_some(listen_port).flatten(),
     })
 }
 

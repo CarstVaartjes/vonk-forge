@@ -252,6 +252,7 @@ def test_delivery_authorizes_release_only_for_exact_git_commit(
     delivery = WorkloadTrustDelivery(
         metadata_root=metadata_root,
         target_root=target_root,
+        clock=lambda: NOW,
     )
 
     assert delivery.authorize_release(trusted.digest, lock_bytes, COMMIT) is True

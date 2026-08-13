@@ -47,7 +47,10 @@ packages = ["src/cluster_profiles"]
 [tool.ruff]
 required-version = "==0.16.1"
 target-version = "py312"
-extend-exclude = ["src/cluster_profiles/generated_control"]
+extend-exclude = [
+    "config/recipes/development/mia-deepseek-v4-flash-context",
+    "src/cluster_profiles/generated_control",
+]
 
 [tool.ruff.lint.per-file-ignores]
 "control/src/vonk_control/resources/dev/litellm-supervisor.py" = ["N999"]

@@ -237,6 +237,11 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
     ) -> Result<Vec<String>, OciError> {
         spec.validate()?;
         placement.validate()?;
+        if spec.security.host_network
+            && (placement.world_size < 2 || placement.port != spec.endpoint.port)
+        {
+            return Err(OciError::Runtime);
+        }
         managed_path(self.data_root, "installations", installation_id)?;
         let models = self.data_root.join("models");
         let state = managed_path(self.data_root, "runs", run_id)?;
@@ -265,7 +270,11 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             "--cap-drop=ALL".to_owned(),
             "--security-opt=no-new-privileges".to_owned(),
             "--network".to_owned(),
-            "bridge".to_owned(),
+            if spec.security.host_network {
+                "host".to_owned()
+            } else {
+                "bridge".to_owned()
+            },
             "--pids-limit".to_owned(),
             "4096".to_owned(),
             "--memory".to_owned(),
@@ -276,16 +285,6 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             shared_memory_bytes.to_string(),
             "--user".to_owned(),
             spec.security.user.clone(),
-            "--publish".to_owned(),
-            match placement.endpoint_address {
-                Some(IpAddr::V4(address)) => {
-                    format!("{address}:{}:{}", placement.port, spec.endpoint.port)
-                }
-                Some(IpAddr::V6(address)) => {
-                    format!("[{address}]:{}:{}", placement.port, spec.endpoint.port)
-                }
-                None => format!("{}:{}", placement.port, spec.endpoint.port),
-            },
             "--env".to_owned(),
             format!("VONK_RANK={}", placement.rank),
             "--env".to_owned(),
@@ -301,6 +300,31 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             "--env".to_owned(),
             format!("VONK_LISTEN_PORT={}", spec.endpoint.port),
         ];
+        if spec.security.host_network {
+            arguments.extend([
+                "--ipc".to_owned(),
+                "host".to_owned(),
+                "--device".to_owned(),
+                "/dev/infiniband:/dev/infiniband".to_owned(),
+                "--ulimit".to_owned(),
+                "memlock=-1:-1".to_owned(),
+                "--ulimit".to_owned(),
+                "stack=67108864:67108864".to_owned(),
+            ]);
+        } else {
+            arguments.extend([
+                "--publish".to_owned(),
+                match placement.endpoint_address {
+                    Some(IpAddr::V4(address)) => {
+                        format!("{address}:{}:{}", placement.port, spec.endpoint.port)
+                    }
+                    Some(IpAddr::V6(address)) => {
+                        format!("[{address}]:{}:{}", placement.port, spec.endpoint.port)
+                    }
+                    None => format!("{}:{}", placement.port, spec.endpoint.port),
+                },
+            ]);
+        }
         if let Some(master) = placement.master_address {
             arguments.extend(["--env".to_owned(), format!("VONK_MASTER_ADDR={master}")]);
         }
@@ -312,7 +336,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                 "--env".to_owned(),
                 format!("VONK_MASTER_PORT={master_port}"),
             ]);
-            if placement.rank == 0 {
+            if placement.rank == 0 && !spec.security.host_network {
                 let master_address = placement.master_address.ok_or(OciError::Runtime)?;
                 let publication = match master_address {
                     IpAddr::V4(address) => {

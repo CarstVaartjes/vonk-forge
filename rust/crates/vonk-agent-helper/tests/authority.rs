@@ -475,6 +475,8 @@ fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
         "192.168.100.10:29500:29500".to_owned(),
         "--env".to_owned(),
         "VONK_RANK=0".to_owned(),
+        "--env".to_owned(),
+        "VONK_LISTEN_PORT=8888".to_owned(),
         "--mount".to_owned(),
         format!(
             "type=bind,src={},dst=/models,readonly",
@@ -642,6 +644,157 @@ fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
     assert_eq!(
         docker_removes,
         vec![vec!["rm".to_owned(), format!("vonk-{run_id}")]]
+    );
+}
+
+#[test]
+fn accepted_direct_fabric_runtime_has_the_only_supported_host_shape() {
+    let (_temp, roots, runner, release) = fixture();
+    let run_id = "40000000-0000-4000-8000-000000000004";
+    let image = "localhost/vonk/recipe-build-20000000-0000-4000-8000-000000000002";
+    let image_digest = format!("sha256:{}", "c".repeat(64));
+    let image_reference = format!("{image}@{image_digest}");
+    let image_id = format!("sha256:{}", "d".repeat(64));
+    let state = roots.agent_data.join("runs").join(run_id);
+    let metadata = roots.agent_data.join("run-metadata").join(run_id);
+    fs::create_dir_all(&state).unwrap();
+    fs::create_dir_all(&metadata).unwrap();
+    fs::write(metadata.join("runtime.json"), b"{}").unwrap();
+    fs::create_dir_all(&roots.runtime_image_receipts).unwrap();
+    fs::write(
+        roots
+            .runtime_image_receipts
+            .join(image_digest.trim_start_matches("sha256:")),
+        format!("{image}\n{image_id}\n"),
+    )
+    .unwrap();
+    let docker_arguments = vec![
+        "run".to_owned(),
+        "--detach".to_owned(),
+        "--name".to_owned(),
+        format!("vonk-{run_id}"),
+        "--restart".to_owned(),
+        "no".to_owned(),
+        "--read-only".to_owned(),
+        "--tmpfs".to_owned(),
+        "/tmp:rw,nosuid,nodev,mode=1777,size=1073741824".to_owned(),
+        "--init".to_owned(),
+        "--pull".to_owned(),
+        "never".to_owned(),
+        "--log-driver".to_owned(),
+        "local".to_owned(),
+        "--log-opt".to_owned(),
+        "max-size=10m".to_owned(),
+        "--log-opt".to_owned(),
+        "max-file=3".to_owned(),
+        "--cap-drop=ALL".to_owned(),
+        "--security-opt=no-new-privileges".to_owned(),
+        "--network".to_owned(),
+        "host".to_owned(),
+        "--ipc".to_owned(),
+        "host".to_owned(),
+        "--device".to_owned(),
+        "/dev/infiniband:/dev/infiniband".to_owned(),
+        "--ulimit".to_owned(),
+        "memlock=-1:-1".to_owned(),
+        "--ulimit".to_owned(),
+        "stack=67108864:67108864".to_owned(),
+        "--pids-limit".to_owned(),
+        "4096".to_owned(),
+        "--memory".to_owned(),
+        "1000000000".to_owned(),
+        "--memory-swap".to_owned(),
+        "1000000000".to_owned(),
+        "--shm-size".to_owned(),
+        "134217728".to_owned(),
+        "--user".to_owned(),
+        "10001:10001".to_owned(),
+        "--env".to_owned(),
+        "VONK_RANK=0".to_owned(),
+        "--env".to_owned(),
+        "VONK_LISTEN_PORT=8888".to_owned(),
+        "--mount".to_owned(),
+        format!(
+            "type=bind,src={},dst=/models,readonly",
+            roots.agent_data.join("models").display()
+        ),
+        "--mount".to_owned(),
+        format!("type=bind,src={},dst=/state", state.display()),
+        "--mount".to_owned(),
+        format!(
+            "type=bind,src={},dst=/run/vonk/runtime.json,readonly",
+            metadata.join("runtime.json").display()
+        ),
+        "--gpus".to_owned(),
+        "all".to_owned(),
+        image_reference,
+        "/opt/vonk/mia-deepseek-v4-flash".to_owned(),
+    ];
+    let mut arguments = vec![image_digest];
+    arguments.extend(docker_arguments);
+    let request = runtime_request(HostRuntimeAction::Start, arguments);
+    let digest = write_runtime_request(&roots, &request);
+    let executor = OperationExecutor::new(
+        roots.clone(),
+        release.public_key().as_ref(),
+        runner.clone(),
+        None,
+    )
+    .unwrap();
+
+    executor
+        .execute(&runtime_operation(&request, digest))
+        .unwrap();
+    let inspect = runtime_request(HostRuntimeAction::RunInspect, request.arguments.clone());
+    let inspect_digest = write_runtime_request(&roots, &inspect);
+    executor
+        .execute(&runtime_operation(&inspect, inspect_digest))
+        .unwrap();
+
+    let calls = runner.calls.lock().unwrap();
+    let docker_run = calls
+        .iter()
+        .find(|(program, arguments)| {
+            program == std::path::Path::new("/usr/bin/docker")
+                && arguments.first().is_some_and(|value| value == "run")
+        })
+        .unwrap();
+    assert_eq!(
+        calls
+            .iter()
+            .filter(|(program, arguments)| {
+                program == std::path::Path::new("/usr/lib/vonk-forge/vonk-forge-docker-firewall")
+                    && arguments
+                        == &[
+                            "--config",
+                            "/etc/vonk-forge-agent/docker-firewall.conf",
+                            "check-host-port",
+                            "8888",
+                        ]
+            })
+            .count(),
+        2
+    );
+    for exact_pair in [
+        ["--network", "host"],
+        ["--ipc", "host"],
+        ["--device", "/dev/infiniband:/dev/infiniband"],
+        ["--ulimit", "memlock=-1:-1"],
+        ["--ulimit", "stack=67108864:67108864"],
+    ] {
+        assert!(
+            docker_run.1.windows(2).any(|values| values == exact_pair),
+            "missing {exact_pair:?} in {:?}",
+            docker_run.1
+        );
+    }
+    assert!(!docker_run.1.iter().any(|value| value == "--publish"));
+    assert!(!docker_run.1.iter().any(|value| value == "--privileged"));
+    assert!(
+        !docker_run
+            .1
+            .iter()
+            .any(|value| value.contains("docker.sock"))
     );
 }
 

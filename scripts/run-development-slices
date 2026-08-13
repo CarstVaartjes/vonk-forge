@@ -427,16 +427,21 @@ def _model_qualification(
     builder_node: str,
     target_nodes: list[str],
     recipe: dict[str, object],
+    recipe_path: Path,
     source_context: Path,
 ) -> tuple[dict[str, Any], str]:
     raw = _safe_read(path, maximum=MAXIMUM_EVIDENCE_BYTES, private=True)
     try:
         document = json.loads(raw)
-        source = json.loads((MODEL_ROOT / "model-smoke-source.json").read_text())
-        artifact_document = json.loads(
-            (MODEL_ROOT / "model-smoke-artifacts.json").read_text()
+        source = json.loads(
+            recipe_path.with_name(f"{recipe_path.stem}-source.json").read_text()
         )
-        topology = json.loads((MODEL_ROOT / "model-smoke-multinode.json").read_text())
+        artifact_document = json.loads(
+            recipe_path.with_name(f"{recipe_path.stem}-artifacts.json").read_text()
+        )
+        topology = json.loads(
+            recipe_path.with_name(f"{recipe_path.stem}-multinode.json").read_text()
+        )
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
         raise SliceError("model qualification is invalid") from error
     if (
@@ -605,6 +610,7 @@ class Runner:
                 builder_node=args.builder_node,
                 target_nodes=targets,
                 recipe=self.recipe,
+                recipe_path=self.recipe_path,
                 source_context=self.source_context,
             )
         expected_inputs = {

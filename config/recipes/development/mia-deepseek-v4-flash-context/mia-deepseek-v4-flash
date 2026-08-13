@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ ${VONK_WORLD_SIZE:-} != 2 ]] ||
+   [[ ${VONK_RANK:-} != 0 && ${VONK_RANK:-} != 1 ]] ||
+   [[ ${VONK_LISTEN_HOST:-} != 0.0.0.0 ]] ||
+   [[ ${VONK_LISTEN_PORT:-} != 8888 ]] ||
+   [[ ! ${VONK_LOCAL_ADDR:-} =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+   [[ ! ${VONK_MASTER_ADDR:-} =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+   [[ ! ${VONK_MASTER_PORT:-} =~ ^[0-9]+$ ]]; then
+  echo "invalid Vonk two-Spark runtime contract" >&2
+  exit 2
+fi
+
+model=$(
+  /opt/vonk/resolve-model.py "${VONK_RUNTIME_SPEC:?}" "${VONK_MODEL_ROOT:?}"
+)
+if [[ -z ${model} ]]; then
+  echo "the signed runtime contract does not select the pinned model" >&2
+  exit 1
+fi
+
+mapfile -t fabric_interfaces < <(
+  ip -o -4 address show | awk -v address="${VONK_LOCAL_ADDR}" '
+    {
+      value=$4
+      sub(/\/.*/, "", value)
+      if (value == address) print $2
+    }'
+)
+if [[ ${#fabric_interfaces[@]} != 1 ]]; then
+  echo "controller-selected fabric address is not uniquely assigned" >&2
+  exit 1
+fi
+read -r fabric_hca fabric_gid < <(
+  /opt/vonk/resolve-roce.py "${fabric_interfaces[0]}" "${VONK_LOCAL_ADDR}"
+)
+if [[ -z ${fabric_hca:-} || -z ${fabric_gid:-} ]]; then
+  echo "RoCEv2 fabric discovery failed" >&2
+  exit 1
+fi
+
+state=${VONK_STATE_ROOT:?}
+install -d -m 0700 "${state}/cache" "${state}/tmp"
+export HOME="${state}"
+export HF_HOME="${state}/cache"
+export HF_HUB_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
+export HF_HUB_DISABLE_TELEMETRY=1
+export VLLM_CACHE_ROOT="${state}/cache/vllm"
+export TMPDIR="${state}/tmp"
+export VLLM_HOST_IP="${VONK_LOCAL_ADDR}"
+export NCCL_NET=IB
+export NCCL_IB_DISABLE=0
+export NCCL_IB_HCA="${fabric_hca}"
+export NCCL_IB_GID_INDEX="${fabric_gid}"
+export NCCL_SOCKET_IFNAME="${fabric_interfaces[0]}"
+export TP_SOCKET_IFNAME="${fabric_interfaces[0]}"
+export GLOO_SOCKET_IFNAME="${fabric_interfaces[0]}"
+export NCCL_IB_ADDR_FAMILY=AF_INET
+export NCCL_IB_ROCE_VERSION_NUM=2
+export NCCL_CROSS_NIC=1
+export NCCL_CUMEM_ENABLE=0
+export NCCL_IGNORE_CPU_AFFINITY=1
+export NCCL_NVLS_ENABLE=0
+export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
+export VLLM_SPARSE_INDEXER_MAX_LOGITS_MB=256
+export VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=0
+export VLLM_PREFIX_CACHE_RETENTION_INTERVAL=4096
+export DSPARK_SUPPRESS_STOPS_IN_REASONING=1
+export VLLM_USE_FLASHINFER_SAMPLER=1
+export VLLM_USE_BREAKABLE_CUDAGRAPH=0
+export VLLM_USE_B12X_MOE=1
+export VLLM_B12X_W4A16_FORCE_BLOCKS_PER_SM=0
+export VLLM_B12X_W4A16_FORCE_BLOCKS_MAX_M=16
+export TORCH_CUDA_ARCH_LIST=12.1a
+export FLASHINFER_CUDA_ARCH_LIST=12.1a
+export CUTE_DSL_ARCH=sm_121a
+export FLASHINFER_DISABLE_VERSION_CHECK=1
+export FLASHINFER_WORKSPACE_BASE="${state}/cache/flashinfer"
+export TILELANG_CLEANUP_TEMP_FILES=1
+export DG_JIT_USE_NVRTC=0
+export DG_JIT_NVCC_COMPILER=/usr/local/cuda/bin/nvcc
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
+headless=()
+if [[ ${VONK_RANK} == 1 ]]; then
+  headless=(--headless)
+fi
+
+exec /usr/local/bin/vllm serve "${model}" \
+  --served-model-name deepseek-v4-flash-dspark \
+  --host "${VONK_LISTEN_HOST}" \
+  --port "${VONK_LISTEN_PORT}" \
+  --trust-remote-code \
+  --tensor-parallel-size 2 \
+  --pipeline-parallel-size 1 \
+  --kv-cache-dtype nvfp4_ds_mla \
+  --block-size 256 \
+  --max-model-len 1048576 \
+  --max-num-seqs 6 \
+  --max-num-batched-tokens 8192 \
+  --long-prefill-token-threshold 1024 \
+  --max-cudagraph-capture-size 36 \
+  --gpu-memory-utilization 0.835 \
+  --enable-prefix-caching \
+  --enable-prompt-tokens-details \
+  --async-scheduling \
+  --enable-chunked-prefill \
+  --speculative-config '{"method":"dspark","num_speculative_tokens":5,"draft_sample_method":"probabilistic"}' \
+  --tokenizer-mode deepseek_v4 \
+  --distributed-executor-backend mp \
+  --moe-backend flashinfer_b12x \
+  --tool-call-parser deepseek_v4 \
+  --enable-auto-tool-choice \
+  --reasoning-parser deepseek_v4 \
+  --reasoning-config '{"reasoning_parser":"deepseek_v4","reasoning_start_str":"<think>","reasoning_end_str":"</think>"}' \
+  --default-chat-template-kwargs '{"thinking":true,"reasoning_effort":"max"}' \
+  --generation-config vllm \
+  --enable-flashinfer-autotune \
+  --nnodes 2 \
+  --node-rank "${VONK_RANK}" \
+  --master-addr "${VONK_MASTER_ADDR}" \
+  --master-port "${VONK_MASTER_PORT}" \
+  "${headless[@]}"

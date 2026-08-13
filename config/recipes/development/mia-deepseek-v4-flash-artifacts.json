@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "license_ids": [
+    "deepseek-model",
+    "mia-apache-2.0"
+  ],
+  "artifacts": [
+    {
+      "id": "model",
+      "kind": "huggingface.snapshot",
+      "repository": "deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+      "bytes": 166898660330
+    }
+  ]
+}
+

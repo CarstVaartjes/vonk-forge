@@ -42,6 +42,18 @@ def test_vendored_multinode_profile_supports_three_nodes() -> None:
     assert sum(role["count"] for role in profile["roles"]) == 3
 
 
+def test_host_network_is_reserved_for_connected_multinode_profiles() -> None:
+    multinode = fixture("recipe-v1-multinode.json")
+    multinode["runtime"]["security"]["host_network"] = True
+
+    validate_recipe(multinode)
+
+    single = fixture("recipe-v1-minimal.json")
+    single["runtime"]["security"]["host_network"] = True
+    with pytest.raises(RecipeContractError, match="connected multi-node"):
+        validate_recipe(single)
+
+
 def test_canonical_recipe_matches_global_bytes() -> None:
     assert canonical_recipe({"z": 1, "a": [True, None]}) == (b'{"a":[true,null],"z":1}')
 
@@ -72,7 +84,7 @@ def test_recipe_validation_rejects_unsafe_values(path, value, message) -> None:
 
 def test_global_contract_lock_matches_vendored_bytes() -> None:
     lock = contract_lock()
-    assert lock["source_commit"] == "13ad51e9b7997bafb9a87bb78fa636df40724125"
+    assert lock["source_commit"] == "5d09fd032b30de86154bd17ada3678ae55a7a0aa"
     for relative_path, metadata in lock["files"].items():
         payload = (ROOT / relative_path).read_bytes()
         assert __import__("hashlib").sha256(payload).hexdigest() == metadata["sha256"]

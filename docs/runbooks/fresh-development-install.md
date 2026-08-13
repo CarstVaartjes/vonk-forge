@@ -159,17 +159,23 @@ On every Ubuntu 24.04 ARM64 node:
    DER SHA-256 fingerprint, unique node ID, and (for multi-node use) the
    node's direct-fabric address and measured 200000 Mb/s bandwidth in
    `/etc/vonk-forge-agent/agent.toml`.
-7. Create the root-owned six-key `docker-firewall.conf`, then enable the signed
+7. Create the root-owned `docker-firewall.conf`, including every accepted
+   bridge-published and host-network endpoint port, then enable the signed
    `vonk-forge-docker-firewall.service` before the package-helper socket. It
    installs persistent Docker-aware `DOCKER-USER` policy for every accepted
-   original published host port and the peer-only rendezvous flow. UFW `INPUT`
-   policy does not protect Docker-published ports; use the exact
-   original-destination/source contract from the workload runbook and run the
-   packaged check after Docker restart and host reboot.
+   original published host port, host-network endpoint, and peer-only fabric
+   flow. UFW `INPUT` policy does not protect Docker-published ports, while
+   host-network workloads require an explicit `INPUT` policy; use the exact
+   contract from the workload runbook and run the packaged check after Docker
+   restart and host reboot.
 
 Use the exact commands and minimal configuration in
 [Install the Vonk Forge agent](../operations/install-vonk-agent.md). Do not add
 the agent account to Docker, sudo, or an NVIDIA administration group.
+
+After the generic synthetic and DS4 acceptance slices pass, use the dedicated
+[MIA DeepSeek V4 Flash runbook](mia-deepseek-v4-flash.md) for the current
+source-first two-Spark tensor-parallel workload.
 
 ## 6. Pair and start one node at a time
 

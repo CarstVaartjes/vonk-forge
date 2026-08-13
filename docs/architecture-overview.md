@@ -130,8 +130,12 @@ instead, the controller signs an expiring grant bound to one canonical runtime
 request, and a root helper compiles only the allow-listed Docker operation.
 The helper verifies the imported image, Linux/ARM64 platform, numeric non-root
 user, runtime-interface label, resource limits, mounts, ports, and optional
-`--gpus all` request. It rejects host networking, arbitrary devices, raw
-InfiniBand, privileged containers, additional capabilities, and socket mounts.
+`--gpus all` request. Bridge mode remains the default. A connected multi-node
+recipe may select one compiled direct-fabric shape with host networking, host
+IPC, `/dev/infiniband`, and fixed memlock/stack limits; the helper requires the
+complete shape plus the host-firewall preflight. It rejects every partial or
+additional host privilege, arbitrary devices, privileged containers,
+additional capabilities, and socket mounts.
 
 Public build networking is fail-closed until a hostname-aware egress
 proxy/firewall is installed. `slirp4netns` is not an allowlist, so the agent

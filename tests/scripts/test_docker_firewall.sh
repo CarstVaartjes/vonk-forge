@@ -19,6 +19,7 @@ printf '%s\n' \
     'VONK_NODE_FABRIC_IP=192.168.100.10' \
     'VONK_PEER_FABRIC_IP=192.168.100.11' \
     'VONK_ENDPOINT_HOST_PORTS=8000,8101' \
+    'VONK_HOST_ENDPOINT_PORTS=8888' \
     'VONK_RENDEZVOUS_PORT=29500' > "$config"
 
 unshare --net -- /bin/sh -seu -- "$helper" "$config" <<'EOF'
@@ -39,11 +40,25 @@ fi
 /usr/sbin/ip link set vonk-fabric up
 $helper --config "$config" apply
 $helper --config "$config" check
+$helper --config "$config" check-host-port 8888
 $helper --config "$config" apply
 $helper --config "$config" check
 test "$($iptables -S DOCKER-USER | sed -n '/^-A DOCKER-USER /{p;q;}')" = \
     '-A DOCKER-USER -j VONK-FORGE'
 test "$($iptables -S VONK-FORGE | awk '$1 == "-A" { count++ } END { print count+0 }')" = 12
+test "$($iptables -S INPUT | sed -n '/^-A INPUT /{p;q;}')" = \
+    '-A INPUT -j VONK-FORGE-HOST'
+test "$($iptables -S VONK-FORGE-HOST | awk '$1 == "-A" { count++ } END { print count+0 }')" = 9
+$iptables -C VONK-FORGE-HOST -i lo -p tcp --dport 8888 -j RETURN
+$iptables -C VONK-FORGE-HOST -i vonk-mgmt -p tcp -s 192.168.1.231 \
+    --dport 8888 -j RETURN
+$iptables -C VONK-FORGE-HOST -p tcp --dport 8888 -j DROP
+$iptables -C VONK-FORGE-HOST -i vonk-fabric -s 192.168.100.11 \
+    -d 192.168.100.10 -p tcp -j RETURN
+$iptables -C VONK-FORGE-HOST -i vonk-fabric -s 192.168.100.11 \
+    -d 192.168.100.10 -p udp -j RETURN
+$iptables -C VONK-FORGE-HOST -d 192.168.100.10 -p tcp -j DROP
+$iptables -C VONK-FORGE-HOST -d 192.168.100.10 -p udp -j DROP
 $iptables -C VONK-FORGE -i vonk-mgmt -p tcp -s 192.168.1.231 \
     -m conntrack --ctorigdst 192.168.1.211 --ctorigdstport 8000 -j RETURN
 $iptables -C VONK-FORGE -i vonk-fabric -p tcp -s 192.168.100.11 \

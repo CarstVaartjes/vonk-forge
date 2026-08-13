@@ -406,6 +406,77 @@ fn container_arguments_are_typed_and_hardened() {
 }
 
 #[test]
+fn direct_fabric_host_mode_has_one_compiled_privilege_shape() {
+    let runner = FakeRunner {
+        calls: RefCell::new(vec![]),
+        outputs: RefCell::new(VecDeque::new()),
+    };
+    let directory = tempdir().unwrap();
+    let mut workload = spec();
+    workload.security.host_network = true;
+    let placement = Placement {
+        endpoint_address: Some("192.168.1.211".parse::<IpAddr>().unwrap()),
+        rank: 0,
+        role: "entrypoint".to_owned(),
+        world_size: 2,
+        local_address: Some("192.168.100.10".parse::<IpAddr>().unwrap()),
+        master_address: Some("192.168.100.10".parse::<IpAddr>().unwrap()),
+        master_port: Some(29500),
+        port: 8000,
+        reserved_memory_bytes: 120_000_000_000,
+    };
+
+    workload.validate().unwrap();
+    let arguments = OciRuntime {
+        runner: &runner,
+        data_root: directory.path(),
+        huggingface_curl_config: None,
+    }
+    .start_arguments(
+        &workload,
+        "cb555393-764b-4eb6-8f15-b416d289428f",
+        "45ea6921-50c9-4971-be2a-4cd04ce05069",
+        &placement,
+    )
+    .unwrap();
+
+    for pair in [
+        ["--network", "host"],
+        ["--ipc", "host"],
+        ["--device", "/dev/infiniband:/dev/infiniband"],
+        ["--ulimit", "memlock=-1:-1"],
+        ["--ulimit", "stack=67108864:67108864"],
+    ] {
+        assert!(
+            arguments.windows(2).any(|values| values == pair),
+            "{pair:?}"
+        );
+    }
+    assert!(!arguments.iter().any(|value| value == "--publish"));
+
+    let mut single = placement;
+    single.rank = 0;
+    single.world_size = 1;
+    single.local_address = None;
+    single.master_address = None;
+    single.master_port = None;
+    assert!(
+        OciRuntime {
+            runner: &runner,
+            data_root: directory.path(),
+            huggingface_curl_config: None,
+        }
+        .start_arguments(
+            &workload,
+            "cb555393-764b-4eb6-8f15-b416d289428f",
+            "45ea6921-50c9-4971-be2a-4cd04ce05069",
+            &single,
+        )
+        .is_err()
+    );
+}
+
+#[test]
 fn coordinator_publishes_rendezvous_only_on_declared_master_fabric_address() {
     let runner = FakeRunner {
         calls: RefCell::new(vec![]),

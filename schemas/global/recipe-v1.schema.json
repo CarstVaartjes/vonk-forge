@@ -272,7 +272,7 @@
           "properties": {
             "devices": {"type": "array", "maxItems": 8, "uniqueItems": true, "items": {"enum": ["nvidia.com/gpu=all"]}},
             "capabilities": {"type": "array", "maxItems": 0},
-            "host_network": {"const": false},
+            "host_network": {"type": "boolean"},
             "privileged": {"const": false},
             "user": {"type": "string", "pattern": "^(?!0(?::0)?$)[1-9][0-9]*(?::[1-9][0-9]*)?$"},
             "mounts": {

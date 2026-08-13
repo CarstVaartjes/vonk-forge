@@ -43,9 +43,12 @@ separately named `vonkctl-legacy` launcher; they are not supported by routine
 
 Its checked adapter Compose files can contain host networking and host IPC;
 host networking and host IPC are legacy runtime exceptions for the historical
-NCCL/RoCE implementation. They are not accepted recipe policy. The supported
-outbound-agent path rejects host networking, host IPC, raw InfiniBand, Docker
-socket access, and added capabilities.
+NCCL/RoCE implementation. They are not authority for accepted recipe policy.
+The supported outbound-agent path normally rejects host networking, host IPC,
+raw InfiniBand, Docker socket access, and added capabilities. Its sole
+direct-fabric exception is a connected multi-node recipe compiled to the exact
+host-network/IPC/InfiniBand shape and guarded by the packaged host firewall;
+arbitrary variants remain rejected.
 
 ## Archived local-controller behavior
 
