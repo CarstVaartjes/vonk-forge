@@ -7,6 +7,8 @@
 .env
 .env.*
 !.env.example
+tailscale-oauth-client-id
+tailscale-oauth-client-secret
 *.key
 *.pem
 model-cache/

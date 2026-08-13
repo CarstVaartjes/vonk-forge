@@ -37,6 +37,8 @@ _CADDY_UID = 10000
 _CADDY_GID = 10000
 _LITELLM_UID = 10002
 _LITELLM_GID = 10001
+_TAILSCALE_UID = 0
+_TAILSCALE_GID = 0
 _GIT_UID = 65534
 _GIT_GID = 65534
 _MAX_SECRET_BYTES = 64 * 1024
@@ -67,6 +69,10 @@ _PROJECTION_FILES = {
         }
     ),
     "LiteLLM": frozenset({"litellm-master-key", "litellm-upstream-key"}),
+    "auth": frozenset({"database-url", "admin-password-verifier"}),
+    "Tailscale": frozenset(
+        {"tailscale-oauth-client-id", "tailscale-oauth-client-secret"}
+    ),
 }
 _TARGET_SHA256 = "0" * 64
 _BUILD_DIGEST = "sha256:" + "1" * 64
@@ -959,8 +965,10 @@ def stage_runtime_secrets(
     worker_root: Path,
     caddy_root: Path,
     litellm_root: Path,
+    auth_root: Path,
+    tailscale_root: Path,
 ) -> None:
-    """Stage five disjoint, service-owned runtime-secret projections."""
+    """Stage seven disjoint, service-owned runtime-secret projections."""
     source = Path(source)
     roots = (
         (Path(api_root), "API", _API_UID, _API_GID),
@@ -968,6 +976,13 @@ def stage_runtime_secrets(
         (Path(worker_root), "worker", _API_UID, _API_GID),
         (Path(caddy_root), "Caddy", _CADDY_UID, _CADDY_GID),
         (Path(litellm_root), "LiteLLM", _LITELLM_UID, _LITELLM_GID),
+        (Path(auth_root), "auth", _API_UID, _API_GID),
+        (
+            Path(tailscale_root),
+            "Tailscale",
+            _TAILSCALE_UID,
+            _TAILSCALE_GID,
+        ),
     )
     _directory(source, label="development secret source")
     if not _are_distinct_projection_roots(
@@ -992,6 +1007,11 @@ def stage_runtime_secrets(
     litellm_upstream_key = _read_source_secret(source, "litellm-upstream-key")
     management_cidrs = _read_source_secret(source, "management-cidrs")
     token_signing_key = _read_source_secret(source, "token-signing-key")
+    admin_password_verifier = _read_source_secret(source, "admin-password-verifier")
+    tailscale_oauth_client_id = _read_source_secret(source, "tailscale-oauth-client-id")
+    tailscale_oauth_client_secret = _read_source_secret(
+        source, "tailscale-oauth-client-secret"
+    )
 
     opened: list[tuple[int, bool] | None] = []
     try:
@@ -1056,7 +1076,7 @@ def stage_runtime_secrets(
                 )
             )
 
-        api, migrate, worker, caddy, litellm = descriptors
+        api, migrate, worker, caddy, litellm, auth, tailscale = descriptors
         admin_present = "admin-grant-private-key" in os.listdir(api)
         worker_present = "worker-api-token" in os.listdir(worker)
         admin_key = _admin_credential(api)
@@ -1173,6 +1193,28 @@ def stage_runtime_secrets(
                     content,
                     uid=_LITELLM_UID,
                     gid=_LITELLM_GID,
+                )
+            for name, content in (
+                ("database-url", database_url),
+                ("admin-password-verifier", admin_password_verifier),
+            ):
+                _write_projection_secret(
+                    auth,
+                    name,
+                    content,
+                    uid=_API_UID,
+                    gid=_API_GID,
+                )
+            for name, content in (
+                ("tailscale-oauth-client-id", tailscale_oauth_client_id),
+                ("tailscale-oauth-client-secret", tailscale_oauth_client_secret),
+            ):
+                _write_projection_secret(
+                    tailscale,
+                    name,
+                    content,
+                    uid=_TAILSCALE_UID,
+                    gid=_TAILSCALE_GID,
                 )
         finally:
             sealing_error: DevInitError | None = None
@@ -1363,7 +1405,9 @@ def main() -> int:
             Path(_required_environment("VONK_REPOSITORY_PATH")),
             _required_environment("VONK_DEV_REPOSITORY_URL"),
         )
-    runtime_paths: tuple[Path, Path, Path, Path, Path, Path, Path] | None = None
+    runtime_paths: (
+        tuple[Path, Path, Path, Path, Path, Path, Path, Path, Path] | None
+    ) = None
     if phase in {"all", "runtime"}:
         runtime_paths = (
             Path(_required_environment("VONK_DEV_SECRET_SOURCE_ROOT")),
@@ -1372,6 +1416,8 @@ def main() -> int:
             Path(_required_environment("VONK_DEV_WORKER_SECRET_ROOT")),
             Path(_required_environment("VONK_DEV_CADDY_SECRET_ROOT")),
             Path(_required_environment("VONK_DEV_LITELLM_SECRET_ROOT")),
+            Path(_required_environment("VONK_DEV_AUTH_SECRET_ROOT")),
+            Path(_required_environment("VONK_DEV_TAILSCALE_SECRET_ROOT")),
             Path(_required_environment("VONK_DEV_RUNTIME_CONFIG_ROOT")),
         )
     generation = _development_generation_identity()
@@ -1394,6 +1440,8 @@ def main() -> int:
         worker_secret_root,
         caddy_secret_root,
         litellm_secret_root,
+        auth_secret_root,
+        tailscale_secret_root,
         runtime_config_root,
     ) = runtime_paths
     stage_runtime_secrets(
@@ -1403,6 +1451,8 @@ def main() -> int:
         worker_secret_root,
         caddy_secret_root,
         litellm_secret_root,
+        auth_secret_root,
+        tailscale_secret_root,
     )
     stage_development_assets("vonk_control.resources.dev", runtime_config_root)
     identity_root = Path(

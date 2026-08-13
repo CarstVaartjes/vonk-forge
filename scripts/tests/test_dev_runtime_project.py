@@ -25,9 +25,12 @@ REGISTRY_HOSTNAME = "registry.example.test"
 MANAGEMENT_CIDRS = "192.0.2.0/24,2001:db8::/64"
 DIRECT_FABRIC_CIDRS = "198.51.100.0/24,2001:db8:1::/64"
 NAS_ADDRESS = "192.0.2.10"
+OAUTH_CLIENT_ID = b"synthetic-tailscale-client-id\n"
+OAUTH_CLIENT_SECRET = b"synthetic-tailscale-client-secret\n"
 
 EXPECTED_PROJECT_FILES = {
     "docker-compose.yml",
+    "secrets/admin-password-verifier",
     "secrets/agent-ca-certificate",
     "secrets/agent-ca-key",
     "secrets/agent-proxy-auth",
@@ -42,6 +45,8 @@ EXPECTED_PROJECT_FILES = {
     "secrets/management-cidrs",
     "secrets/postgres-password",
     "secrets/token-signing-key",
+    "secrets/tailscale-oauth-client-id",
+    "secrets/tailscale-oauth-client-secret",
 }
 
 REQUIRED_SECRET_NAMES = {
@@ -52,6 +57,14 @@ REQUIRED_SECRET_NAMES = {
 
 
 def _run_secret_generator(secrets_dir: Path) -> subprocess.CompletedProcess[str]:
+    oauth_root = secrets_dir.parent / "oauth-inputs"
+    oauth_root.mkdir(mode=0o700, exist_ok=True)
+    client_id = oauth_root / "client-id"
+    client_secret = oauth_root / "client-secret"
+    client_id.write_bytes(OAUTH_CLIENT_ID)
+    client_secret.write_bytes(OAUTH_CLIENT_SECRET)
+    client_id.chmod(0o600)
+    client_secret.chmod(0o600)
     return subprocess.run(
         (
             sys.executable,
@@ -66,6 +79,10 @@ def _run_secret_generator(secrets_dir: Path) -> subprocess.CompletedProcess[str]
             AGENT_HOSTNAME,
             "--registry-hostname",
             REGISTRY_HOSTNAME,
+            "--tailscale-oauth-client-id-file",
+            str(client_id),
+            "--tailscale-oauth-client-secret-file",
+            str(client_secret),
         ),
         check=False,
         capture_output=True,
@@ -152,6 +169,8 @@ def test_publishes_exact_two_item_project_without_secret_output(tmp_path: Path) 
         "secrets",
     ]
     assert _project_listing(destination) == EXPECTED_PROJECT_FILES
+    assert not (destination / "secrets" / "admin-password").exists()
+    assert not (destination / "secrets" / "controller-ca-key").exists()
     assert not (destination / "secrets" / "git-signing-key.pub").exists()
     assert not (
         destination / "secrets" / "host-runtime-grant-public-key"

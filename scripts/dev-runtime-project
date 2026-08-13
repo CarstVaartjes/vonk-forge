@@ -42,6 +42,7 @@ _LOCAL_STAGING_FILESYSTEMS = frozenset(
 _HOST_LABEL = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?")
 _PUBLISHED_SECRET_NAMES = frozenset(
     {
+        "admin-password-verifier",
         "agent-ca-certificate",
         "agent-ca-key",
         "agent-proxy-auth",
@@ -55,6 +56,8 @@ _PUBLISHED_SECRET_NAMES = frozenset(
         "litellm-upstream-key",
         "management-cidrs",
         "postgres-password",
+        "tailscale-oauth-client-id",
+        "tailscale-oauth-client-secret",
         "token-signing-key",
     }
 )

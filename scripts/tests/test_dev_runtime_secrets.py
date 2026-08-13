@@ -3,11 +3,13 @@ from __future__ import annotations
 import base64
 import datetime as dt
 import importlib.util
+import json
 import os
 import re
 import stat
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from types import ModuleType
 
@@ -20,6 +22,10 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 )
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "control" / "src"))
+
+from vonk_control.passwords import PasswordVerification, verify_password
+
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "dev-runtime-secrets.py"
 
@@ -29,6 +35,7 @@ REGISTRY_HOSTNAME = "registry.example.test"
 MANAGEMENT_CIDRS = "192.0.2.0/24,2001:db8::/64"
 
 DEPLOYMENT_SECRET_NAMES = {
+    "admin-password-verifier",
     "agent-ca-certificate",
     "agent-ca-key",
     "agent-proxy-auth",
@@ -43,35 +50,73 @@ DEPLOYMENT_SECRET_NAMES = {
     "management-cidrs",
     "postgres-password",
     "token-signing-key",
+    "tailscale-oauth-client-id",
+    "tailscale-oauth-client-secret",
 }
 LOCAL_SOURCE_SECRET_NAMES = DEPLOYMENT_SECRET_NAMES | {
+    "admin-password",
     "controller-ca-key",
     "git-signing-key.pub",
     "host-runtime-grant-public-key",
 }
 
+OAUTH_CLIENT_ID = b"synthetic-tailscale-client-id\n"
+OAUTH_CLIENT_SECRET = b"synthetic-tailscale-client-secret\n"
+BROWSER_ACCESS_SECRET_NAMES = {
+    "admin-password",
+    "admin-password-verifier",
+    "tailscale-oauth-client-id",
+    "tailscale-oauth-client-secret",
+}
+ROTATION_JOURNAL = ".admin-password-rotation"
 
-def _run_generator(secrets_dir: Path, *extra: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        (
-            sys.executable,
-            str(SCRIPT),
-            "--secrets-dir",
-            str(secrets_dir),
-            "--management-cidrs",
-            MANAGEMENT_CIDRS,
-            "--enroll-hostname",
-            ENROLL_HOSTNAME,
-            "--agent-hostname",
-            AGENT_HOSTNAME,
-            "--registry-hostname",
-            REGISTRY_HOSTNAME,
-            *extra,
-        ),
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+
+def _write_oauth_inputs(root: Path) -> tuple[Path, Path]:
+    root.mkdir(mode=0o700)
+    client_id = root / "client-id"
+    client_secret = root / "client-secret"
+    client_id.write_bytes(OAUTH_CLIENT_ID)
+    client_secret.write_bytes(OAUTH_CLIENT_SECRET)
+    client_id.chmod(0o600)
+    client_secret.chmod(0o600)
+    return client_id, client_secret
+
+
+def _run_generator(
+    secrets_dir: Path,
+    *extra: str,
+    oauth_files: tuple[Path, Path] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    with tempfile.TemporaryDirectory(prefix="vonk-oauth-test-") as temporary:
+        temporary_root = Path(temporary)
+        temporary_root.chmod(0o700)
+        client_id, client_secret = oauth_files or _write_oauth_inputs(
+            temporary_root / "inputs"
+        )
+        return subprocess.run(
+            (
+                sys.executable,
+                str(SCRIPT),
+                "--secrets-dir",
+                str(secrets_dir),
+                "--management-cidrs",
+                MANAGEMENT_CIDRS,
+                "--enroll-hostname",
+                ENROLL_HOSTNAME,
+                "--agent-hostname",
+                AGENT_HOSTNAME,
+                "--registry-hostname",
+                REGISTRY_HOSTNAME,
+                "--tailscale-oauth-client-id-file",
+                str(client_id),
+                "--tailscale-oauth-client-secret-file",
+                str(client_secret),
+                *extra,
+            ),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
 
 
 def _load_module() -> ModuleType:
@@ -131,6 +176,44 @@ def _assert_no_sensitive_output(
                 pytest.fail(f"secret value from {name} leaked to command output")
 
 
+def _secret_state(
+    secrets_dir: Path, names: set[str] | frozenset[str]
+) -> dict[str, tuple[bytes, int, int]]:
+    return {
+        name: (
+            (secrets_dir / name).read_bytes(),
+            (secrets_dir / name).stat().st_dev,
+            (secrets_dir / name).stat().st_ino,
+        )
+        for name in names
+    }
+
+
+def _prior_browser_access_generation(secrets_dir: Path) -> set[str]:
+    created = _run_generator(secrets_dir)
+    assert created.returncode == 0, created.stderr
+    for name in BROWSER_ACCESS_SECRET_NAMES:
+        (secrets_dir / name).unlink()
+    names = {path.name for path in secrets_dir.iterdir()}
+    assert names == LOCAL_SOURCE_SECRET_NAMES - BROWSER_ACCESS_SECRET_NAMES
+    return names
+
+
+def _prepare_arguments(
+    oauth_files: tuple[Path, Path], **extra: object
+) -> dict[str, object]:
+    client_id, client_secret = oauth_files
+    return {
+        "management_cidrs": MANAGEMENT_CIDRS,
+        "enroll_hostname": ENROLL_HOSTNAME,
+        "agent_hostname": AGENT_HOSTNAME,
+        "registry_hostname": REGISTRY_HOSTNAME,
+        "tailscale_oauth_client_id_file": client_id,
+        "tailscale_oauth_client_secret_file": client_secret,
+        **extra,
+    }
+
+
 def test_certificate_window_supports_the_ubuntu_cryptography_api() -> None:
     module = _load_module()
     before = dt.datetime(2026, 1, 1, tzinfo=dt.UTC).replace(tzinfo=None)
@@ -152,9 +235,10 @@ def test_declares_local_source_and_deployment_secret_boundaries() -> None:
     assert module.LOCAL_SOURCE_SECRET_NAMES == LOCAL_SOURCE_SECRET_NAMES
     assert module.DEPLOYMENT_SECRET_NAMES == DEPLOYMENT_SECRET_NAMES
     assert module.RUNTIME_SECRET_NAMES == LOCAL_SOURCE_SECRET_NAMES
-    assert len(module.LOCAL_SOURCE_SECRET_NAMES) == 17
-    assert len(module.DEPLOYMENT_SECRET_NAMES) == 14
+    assert len(module.LOCAL_SOURCE_SECRET_NAMES) == 21
+    assert len(module.DEPLOYMENT_SECRET_NAMES) == 17
     assert module.LOCAL_SOURCE_SECRET_NAMES - module.DEPLOYMENT_SECRET_NAMES == {
+        "admin-password",
         "controller-ca-key",
         "git-signing-key.pub",
         "host-runtime-grant-public-key",
@@ -167,8 +251,9 @@ def test_generates_idempotent_local_runtime_secret_store_without_leaking_values(
     protected_parent = tmp_path / "protected"
     protected_parent.mkdir(mode=0o700)
     secrets_dir = protected_parent / "runtime"
+    oauth_files = _write_oauth_inputs(tmp_path / "oauth-inputs")
 
-    first = _run_generator(secrets_dir)
+    first = _run_generator(secrets_dir, oauth_files=oauth_files)
 
     assert first.returncode == 0, first.stderr
     output = dict(line.split("=", 1) for line in first.stdout.splitlines()[1:])
@@ -203,9 +288,7 @@ def test_generates_idempotent_local_runtime_secret_store_without_leaking_values(
         controller_ca.public_key().public_bytes_raw()
         == controller_key.public_key().public_bytes_raw()
     )
-    host_runtime_key = _private_key(
-        secrets_dir / "host-runtime-grant-private-key"
-    )
+    host_runtime_key = _private_key(secrets_dir / "host-runtime-grant-private-key")
     assert isinstance(host_runtime_key, Ed25519PrivateKey)
     assert (
         bytes.fromhex(
@@ -254,6 +337,21 @@ def test_generates_idempotent_local_runtime_secret_store_without_leaking_values(
     assert (secrets_dir / "management-cidrs").read_text(encoding="ascii") == (
         "192.0.2.0/24\n2001:db8::/64\n"
     )
+    admin_password = (
+        (secrets_dir / "admin-password").read_text(encoding="ascii").strip()
+    )
+    admin_verifier = (
+        (secrets_dir / "admin-password-verifier").read_text(encoding="ascii").strip()
+    )
+    assert re.fullmatch(r"[A-Za-z0-9_-]{43}", admin_password)
+    assert admin_verifier.startswith("$argon2id$v=19$m=65536,t=3,p=1$")
+    assert verify_password(admin_verifier, admin_password) == PasswordVerification(
+        True, False
+    )
+    assert (secrets_dir / "tailscale-oauth-client-id").read_bytes() == OAUTH_CLIENT_ID
+    assert (
+        secrets_dir / "tailscale-oauth-client-secret"
+    ).read_bytes() == OAUTH_CLIENT_SECRET
 
     before = {
         name: (
@@ -262,7 +360,7 @@ def test_generates_idempotent_local_runtime_secret_store_without_leaking_values(
         )
         for name in LOCAL_SOURCE_SECRET_NAMES
     }
-    second = _run_generator(secrets_dir)
+    second = _run_generator(secrets_dir, oauth_files=oauth_files)
 
     assert second.returncode == 0, second.stderr
     assert second.stdout == first.stdout
@@ -281,6 +379,8 @@ def test_generates_idempotent_local_runtime_secret_store_without_leaking_values(
         {
             "agent-ca-key",
             "agent-proxy-auth",
+            "admin-password",
+            "admin-password-verifier",
             "controller-ca-key",
             "controller-server-key",
             "database-url",
@@ -289,8 +389,35 @@ def test_generates_idempotent_local_runtime_secret_store_without_leaking_values(
             "litellm-master-key",
             "litellm-upstream-key",
             "postgres-password",
+            "tailscale-oauth-client-id",
+            "tailscale-oauth-client-secret",
         },
     )
+
+
+@pytest.mark.parametrize("fault", ["mode", "symlink", "hardlink"])
+def test_rejects_unsafe_oauth_input_before_creating_the_secret_bundle(
+    tmp_path: Path, fault: str
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    client_id, client_secret = _write_oauth_inputs(tmp_path / "oauth-inputs")
+    if fault == "mode":
+        client_secret.chmod(0o640)
+    elif fault == "symlink":
+        client_secret.unlink()
+        client_secret.symlink_to(client_id)
+    else:
+        os.link(client_secret, tmp_path / "oauth-secret-copy")
+
+    result = _run_generator(secrets_dir, oauth_files=(client_id, client_secret))
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert not secrets_dir.exists()
+    assert OAUTH_CLIENT_ID.decode().strip() not in result.stderr
+    assert OAUTH_CLIENT_SECRET.decode().strip() not in result.stderr
 
 
 def test_rejects_symlink_secret_directory_without_touching_target(
@@ -332,9 +459,7 @@ def test_generates_into_an_existing_empty_private_directory(tmp_path: Path) -> N
     result = _run_generator(secrets_dir)
 
     assert result.returncode == 0, result.stderr
-    assert {path.name for path in secrets_dir.iterdir()} == (
-        LOCAL_SOURCE_SECRET_NAMES
-    )
+    assert {path.name for path in secrets_dir.iterdir()} == (LOCAL_SOURCE_SECRET_NAMES)
 
 
 def test_explicit_upgrade_adds_only_host_runtime_authority_to_legacy_store(
@@ -360,9 +485,7 @@ def test_explicit_upgrade_adds_only_host_runtime_authority_to_legacy_store(
     }
 
     refused = _run_generator(secrets_dir)
-    upgraded = _run_generator(
-        secrets_dir, "--upgrade-host-runtime-authority"
-    )
+    upgraded = _run_generator(secrets_dir, "--upgrade-host-runtime-authority")
 
     assert refused.returncode == 1
     assert refused.stdout == ""
@@ -376,11 +499,14 @@ def test_explicit_upgrade_adds_only_host_runtime_authority_to_legacy_store(
     } == before
     private = _private_key(secrets_dir / "host-runtime-grant-private-key")
     assert isinstance(private, Ed25519PrivateKey)
-    assert bytes.fromhex(
-        (secrets_dir / "host-runtime-grant-public-key")
-        .read_text(encoding="ascii")
-        .strip()
-    ) == private.public_key().public_bytes_raw()
+    assert (
+        bytes.fromhex(
+            (secrets_dir / "host-runtime-grant-public-key")
+            .read_text(encoding="ascii")
+            .strip()
+        )
+        == private.public_key().public_bytes_raw()
+    )
     _assert_no_sensitive_output(
         refused.stdout + refused.stderr + upgraded.stdout + upgraded.stderr,
         secrets_dir,
@@ -399,9 +525,7 @@ def test_explicit_upgrade_recovers_public_key_after_private_key_publication(
     retained_private = (secrets_dir / "host-runtime-grant-private-key").read_bytes()
     (secrets_dir / "host-runtime-grant-public-key").unlink()
 
-    upgraded = _run_generator(
-        secrets_dir, "--upgrade-host-runtime-authority"
-    )
+    upgraded = _run_generator(secrets_dir, "--upgrade-host-runtime-authority")
 
     assert upgraded.returncode == 0, upgraded.stderr
     assert (
@@ -409,11 +533,14 @@ def test_explicit_upgrade_recovers_public_key_after_private_key_publication(
     ).read_bytes() == retained_private
     private = _private_key(secrets_dir / "host-runtime-grant-private-key")
     assert isinstance(private, Ed25519PrivateKey)
-    assert bytes.fromhex(
-        (secrets_dir / "host-runtime-grant-public-key")
-        .read_text(encoding="ascii")
-        .strip()
-    ) == private.public_key().public_bytes_raw()
+    assert (
+        bytes.fromhex(
+            (secrets_dir / "host-runtime-grant-public-key")
+            .read_text(encoding="ascii")
+            .strip()
+        )
+        == private.public_key().public_bytes_raw()
+    )
 
 
 def test_explicit_upgrade_refuses_public_only_or_unknown_legacy_state(
@@ -427,9 +554,7 @@ def test_explicit_upgrade_refuses_public_only_or_unknown_legacy_state(
     (secrets_dir / "host-runtime-grant-private-key").unlink()
     retained_public = (secrets_dir / "host-runtime-grant-public-key").read_bytes()
 
-    refused = _run_generator(
-        secrets_dir, "--upgrade-host-runtime-authority"
-    )
+    refused = _run_generator(secrets_dir, "--upgrade-host-runtime-authority")
 
     assert refused.returncode == 1
     assert refused.stdout == ""
@@ -440,18 +565,268 @@ def test_explicit_upgrade_refuses_public_only_or_unknown_legacy_state(
 
     (secrets_dir / "unknown").write_bytes(b"unknown\n")
     (secrets_dir / "unknown").chmod(0o600)
-    unknown = _run_generator(
-        secrets_dir, "--upgrade-host-runtime-authority"
-    )
+    unknown = _run_generator(secrets_dir, "--upgrade-host-runtime-authority")
     assert unknown.returncode == 1
     assert unknown.stdout == ""
     assert "unknown entries" in unknown.stderr
+
+
+def test_upgrade_browser_access_is_add_only_for_the_exact_prior_generation(
+    tmp_path: Path,
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    prior_names = _prior_browser_access_generation(secrets_dir)
+    before = _secret_state(secrets_dir, prior_names)
+    oauth_files = _write_oauth_inputs(tmp_path / "upgrade-oauth-inputs")
+
+    refused = _run_generator(secrets_dir, oauth_files=oauth_files)
+    upgraded = _run_generator(
+        secrets_dir, "--upgrade-browser-access", oauth_files=oauth_files
+    )
+
+    assert refused.returncode == 1
+    assert refused.stdout == ""
+    assert upgraded.returncode == 0, upgraded.stderr
+    assert {path.name for path in secrets_dir.iterdir()} == LOCAL_SOURCE_SECRET_NAMES
+    assert _secret_state(secrets_dir, prior_names) == before
+    assert (secrets_dir / "tailscale-oauth-client-id").read_bytes() == OAUTH_CLIENT_ID
+    assert (
+        secrets_dir / "tailscale-oauth-client-secret"
+    ).read_bytes() == OAUTH_CLIENT_SECRET
+    _assert_no_sensitive_output(
+        refused.stdout + refused.stderr + upgraded.stdout + upgraded.stderr,
+        secrets_dir,
+        BROWSER_ACCESS_SECRET_NAMES,
+    )
+
+
+@pytest.mark.parametrize("state", ["partial", "unknown", "complete"])
+def test_upgrade_browser_access_refuses_every_non_prior_generation(
+    tmp_path: Path, state: str
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    prior_names = _prior_browser_access_generation(secrets_dir)
+    if state == "partial":
+        partial = secrets_dir / "admin-password"
+        partial.write_bytes(b"synthetic-partial-admin-password\n")
+        partial.chmod(0o600)
+    elif state == "unknown":
+        unknown = secrets_dir / "unknown"
+        unknown.write_bytes(b"synthetic-unknown-entry\n")
+        unknown.chmod(0o600)
+    else:
+        for name in BROWSER_ACCESS_SECRET_NAMES:
+            content = b"synthetic-complete-placeholder\n"
+            path = secrets_dir / name
+            path.write_bytes(content)
+            path.chmod(0o600)
+    before_names = {path.name for path in secrets_dir.iterdir()}
+    before = _secret_state(secrets_dir, before_names)
+
+    result = _run_generator(secrets_dir, "--upgrade-browser-access")
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert {path.name for path in secrets_dir.iterdir()} == before_names
+    assert _secret_state(secrets_dir, before_names) == before
+    assert prior_names <= before_names
+
+
+def test_upgrade_browser_access_removes_only_files_created_by_a_failed_attempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    prior_names = _prior_browser_access_generation(secrets_dir)
+    before = _secret_state(secrets_dir, prior_names)
+    oauth_files = _write_oauth_inputs(tmp_path / "upgrade-oauth-inputs")
+    runtime = _load_module()
+    real_write = runtime._write_file
+    writes = 0
+
+    def fail_third_write(directory: int, name: str, content: bytes) -> None:
+        nonlocal writes
+        writes += 1
+        if writes == 3:
+            raise runtime.RuntimeSecretError("synthetic upgrade interruption")
+        real_write(directory, name, content)
+
+    monkeypatch.setattr(runtime, "_write_file", fail_third_write)
+
+    with pytest.raises(runtime.RuntimeSecretError, match="synthetic upgrade"):
+        runtime.prepare_runtime_secrets(
+            secrets_dir,
+            **_prepare_arguments(oauth_files, upgrade_browser_access=True),
+        )
+
+    assert {path.name for path in secrets_dir.iterdir()} == prior_names
+    assert _secret_state(secrets_dir, prior_names) == before
+
+
+def test_rotate_admin_password_changes_only_the_credential_pair_when_explicit(
+    tmp_path: Path,
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    created = _run_generator(secrets_dir)
+    assert created.returncode == 0, created.stderr
+    before = _secret_state(secrets_dir, LOCAL_SOURCE_SECRET_NAMES)
+    old_password = before["admin-password"][0].decode("ascii").strip()
+    old_verifier = before["admin-password-verifier"][0].decode("ascii").strip()
+
+    unchanged = _run_generator(secrets_dir)
+    assert unchanged.returncode == 0, unchanged.stderr
+    assert _secret_state(secrets_dir, LOCAL_SOURCE_SECRET_NAMES) == before
+
+    rotated = _run_generator(secrets_dir, "--rotate-admin-password")
+
+    assert rotated.returncode == 0, rotated.stderr
+    assert {path.name for path in secrets_dir.iterdir()} == LOCAL_SOURCE_SECRET_NAMES
+    after = _secret_state(secrets_dir, LOCAL_SOURCE_SECRET_NAMES)
+    assert {name for name in after if after[name] != before[name]} == {
+        "admin-password",
+        "admin-password-verifier",
+    }
+    new_password = after["admin-password"][0].decode("ascii").strip()
+    new_verifier = after["admin-password-verifier"][0].decode("ascii").strip()
+    assert new_password != old_password
+    assert new_verifier != old_verifier
+    assert verify_password(new_verifier, new_password).valid
+    assert not verify_password(new_verifier, old_password).valid
+    _assert_no_sensitive_output(
+        unchanged.stdout + unchanged.stderr + rotated.stdout + rotated.stderr,
+        secrets_dir,
+        BROWSER_ACCESS_SECRET_NAMES,
+    )
+    assert old_password not in rotated.stdout + rotated.stderr
+    assert old_verifier not in rotated.stdout + rotated.stderr
+
+
+@pytest.mark.parametrize(
+    ("interrupt_after", "replace_count"),
+    [("journal", 0), ("password", 1), ("verifier", 2)],
+)
+def test_rotate_admin_password_recovers_every_interruption_point(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    interrupt_after: str,
+    replace_count: int,
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    created = _run_generator(secrets_dir)
+    assert created.returncode == 0, created.stderr
+    oauth_files = _write_oauth_inputs(tmp_path / "rotation-oauth-inputs")
+    old_password = (secrets_dir / "admin-password").read_text(encoding="ascii").strip()
+    old_verifier = (
+        (secrets_dir / "admin-password-verifier").read_text(encoding="ascii").strip()
+    )
+    runtime = _load_module()
+    real_replace = runtime.os.replace
+    replacements = 0
+
+    class SyntheticInterruption(BaseException):
+        pass
+
+    def interrupting_replace(*args: object, **kwargs: object) -> None:
+        nonlocal replacements
+        if replace_count == 0 and replacements == 0:
+            raise SyntheticInterruption()
+        real_replace(*args, **kwargs)
+        replacements += 1
+        if replacements == replace_count:
+            raise SyntheticInterruption()
+
+    monkeypatch.setattr(runtime.os, "replace", interrupting_replace)
+    with pytest.raises(SyntheticInterruption):
+        runtime.prepare_runtime_secrets(
+            secrets_dir,
+            **_prepare_arguments(oauth_files, rotate_admin_password=True),
+        )
+
+    journal_path = secrets_dir / ROTATION_JOURNAL
+    _assert_regular_private_file(journal_path)
+    journal_raw = journal_path.read_bytes()
+    journal = json.loads(journal_raw)
+    assert set(journal) == {
+        "old_password_sha256",
+        "old_verifier_sha256",
+        "new_password_sha256",
+        "new_verifier_sha256",
+    }
+    assert all(re.fullmatch(r"[0-9a-f]{64}", value) for value in journal.values())
+    assert old_password.encode() not in journal_raw
+    assert old_verifier.encode() not in journal_raw
+
+    monkeypatch.setattr(runtime.os, "replace", real_replace)
+    recovered = _run_generator(secrets_dir, oauth_files=oauth_files)
+
+    assert recovered.returncode == 0, recovered.stderr
+    assert {path.name for path in secrets_dir.iterdir()} == LOCAL_SOURCE_SECRET_NAMES
+    new_password = (secrets_dir / "admin-password").read_text(encoding="ascii").strip()
+    new_verifier = (
+        (secrets_dir / "admin-password-verifier").read_text(encoding="ascii").strip()
+    )
+    assert verify_password(new_verifier, new_password).valid
+    assert not verify_password(new_verifier, old_password).valid
+    assert old_password not in recovered.stdout + recovered.stderr
+    assert old_verifier not in recovered.stdout + recovered.stderr
+    assert new_password not in recovered.stdout + recovered.stderr
+    assert new_verifier not in recovered.stdout + recovered.stderr
+
+
+def test_rotate_admin_password_reports_filesystem_failure_as_recoverable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    created = _run_generator(secrets_dir)
+    assert created.returncode == 0, created.stderr
+    oauth_files = _write_oauth_inputs(tmp_path / "rotation-oauth-inputs")
+    runtime = _load_module()
+    real_replace = runtime.os.replace
+    replacements = 0
+
+    def failing_replace(*args: object, **kwargs: object) -> None:
+        nonlocal replacements
+        real_replace(*args, **kwargs)
+        replacements += 1
+        if replacements == 1:
+            raise OSError("synthetic rotation filesystem failure")
+
+    monkeypatch.setattr(runtime.os, "replace", failing_replace)
+    with pytest.raises(
+        runtime.RuntimeSecretError,
+        match="rotation was interrupted; rerun to recover",
+    ):
+        runtime.prepare_runtime_secrets(
+            secrets_dir,
+            **_prepare_arguments(oauth_files, rotate_admin_password=True),
+        )
+
+    assert (secrets_dir / ROTATION_JOURNAL).is_file()
+    monkeypatch.setattr(runtime.os, "replace", real_replace)
+    runtime.prepare_runtime_secrets(
+        secrets_dir,
+        **_prepare_arguments(oauth_files),
+    )
+    assert {path.name for path in secrets_dir.iterdir()} == LOCAL_SOURCE_SECRET_NAMES
 
 
 def test_default_store_is_the_gitignored_local_development_directory(
     tmp_path: Path,
 ) -> None:
     development = tmp_path / ".dev"
+    client_id, client_secret = _write_oauth_inputs(tmp_path / "oauth-inputs")
 
     result = subprocess.run(
         (
@@ -465,6 +840,10 @@ def test_default_store_is_the_gitignored_local_development_directory(
             AGENT_HOSTNAME,
             "--registry-hostname",
             REGISTRY_HOSTNAME,
+            "--tailscale-oauth-client-id-file",
+            str(client_id),
+            "--tailscale-oauth-client-secret-file",
+            str(client_secret),
         ),
         cwd=tmp_path,
         check=False,
@@ -475,9 +854,7 @@ def test_default_store_is_the_gitignored_local_development_directory(
     destination = development / "vonk-forge-secrets"
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines()[0] == str(destination)
-    assert {path.name for path in destination.iterdir()} == (
-        LOCAL_SOURCE_SECRET_NAMES
-    )
+    assert {path.name for path in destination.iterdir()} == (LOCAL_SOURCE_SECRET_NAMES)
 
 
 def test_rejects_group_writable_secret_parent(tmp_path: Path) -> None:
@@ -668,6 +1045,7 @@ def test_rejects_windows_or_smb_filesystem_for_generation(
     secrets = _load_module()
     destination = tmp_path / "runtime"
     destination.mkdir(mode=0o700)
+    client_id, client_secret = _write_oauth_inputs(tmp_path / "oauth-inputs")
     monkeypatch.setattr(secrets, "_filesystem_type", lambda _path: "cifs")
 
     with pytest.raises(secrets.RuntimeSecretError):
@@ -677,6 +1055,8 @@ def test_rejects_windows_or_smb_filesystem_for_generation(
             enroll_hostname=ENROLL_HOSTNAME,
             agent_hostname=AGENT_HOSTNAME,
             registry_hostname=REGISTRY_HOSTNAME,
+            tailscale_oauth_client_id_file=client_id,
+            tailscale_oauth_client_secret_file=client_secret,
         )
 
     result = _run_generator(Path("C:\\\\vonk-forge\\\\secrets"))

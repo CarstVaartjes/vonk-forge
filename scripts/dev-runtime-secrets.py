@@ -6,13 +6,17 @@ from __future__ import annotations
 import argparse
 import base64
 import datetime as dt
+import hashlib
 import ipaddress
+import json
 import os
 import re
 import secrets
 import stat
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "control" / "src"))
 
 from cryptography import x509
 from cryptography.exceptions import InvalidSignature
@@ -22,6 +26,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PublicKey,
 )
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+from vonk_control.passwords import hash_password, verify_password
 
 _DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 _READ_FLAGS = os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC
@@ -33,6 +38,7 @@ _HOST_LABEL = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?")
 
 DEPLOYMENT_SECRET_NAMES = frozenset(
     {
+        "admin-password-verifier",
         "agent-ca-certificate",
         "agent-ca-key",
         "agent-proxy-auth",
@@ -46,11 +52,14 @@ DEPLOYMENT_SECRET_NAMES = frozenset(
         "litellm-upstream-key",
         "management-cidrs",
         "postgres-password",
+        "tailscale-oauth-client-id",
+        "tailscale-oauth-client-secret",
         "token-signing-key",
     }
 )
 LOCAL_SOURCE_SECRET_NAMES = DEPLOYMENT_SECRET_NAMES | frozenset(
     {
+        "admin-password",
         "controller-ca-key",
         "git-signing-key.pub",
         "host-runtime-grant-public-key",
@@ -59,12 +68,35 @@ LOCAL_SOURCE_SECRET_NAMES = DEPLOYMENT_SECRET_NAMES | frozenset(
 # Compatibility for the project publisher, which validates the complete local
 # source before publishing its fixed deployment subset.
 RUNTIME_SECRET_NAMES = LOCAL_SOURCE_SECRET_NAMES
+_BROWSER_ACCESS_SECRET_NAMES = frozenset(
+    {
+        "admin-password",
+        "admin-password-verifier",
+        "tailscale-oauth-client-id",
+        "tailscale-oauth-client-secret",
+    }
+)
+_PRE_BROWSER_ACCESS_SECRET_NAMES = RUNTIME_SECRET_NAMES - _BROWSER_ACCESS_SECRET_NAMES
 _HOST_RUNTIME_PRIVATE = "host-runtime-grant-private-key"
 _HOST_RUNTIME_PUBLIC = "host-runtime-grant-public-key"
 _LEGACY_RUNTIME_SECRET_NAMES = RUNTIME_SECRET_NAMES - {
     _HOST_RUNTIME_PRIVATE,
     _HOST_RUNTIME_PUBLIC,
 }
+_ROTATION_JOURNAL = ".admin-password-rotation"
+_ROTATION_PASSWORD = ".admin-password.rotate"
+_ROTATION_VERIFIER = ".admin-password-verifier.rotate"
+_ROTATION_ENTRIES = frozenset(
+    {_ROTATION_JOURNAL, _ROTATION_PASSWORD, _ROTATION_VERIFIER}
+)
+_ROTATION_DIGEST_KEYS = frozenset(
+    {
+        "old_password_sha256",
+        "old_verifier_sha256",
+        "new_password_sha256",
+        "new_verifier_sha256",
+    }
+)
 
 
 class RuntimeSecretError(RuntimeError):
@@ -278,6 +310,25 @@ def _write_file(directory: int, name: str, content: bytes) -> None:
             os.close(descriptor)
 
 
+def _read_external_secret(path: Path) -> bytes:
+    parent = _open_private_parent(path)
+    try:
+        return _read_file(parent, path.name)
+    finally:
+        os.close(parent)
+
+
+def _unlink_if_present(directory: int, name: str) -> None:
+    try:
+        os.unlink(name, dir_fd=directory)
+    except FileNotFoundError:
+        pass
+
+
+def _sha256(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()
+
+
 def _ca_certificate(common_name: str, key: Ed25519PrivateKey) -> x509.Certificate:
     now = dt.datetime.now(dt.UTC)
     subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
@@ -317,6 +368,8 @@ def _secret_bundle(
     enroll_hostname: str,
     agent_hostname: str,
     registry_hostname: str,
+    tailscale_oauth_client_id: bytes,
+    tailscale_oauth_client_secret: bytes,
 ) -> dict[str, bytes]:
     agent_key = Ed25519PrivateKey.generate()
     controller_key = Ed25519PrivateKey.generate()
@@ -370,6 +423,7 @@ def _secret_bundle(
         .sign(controller_key, algorithm=None)
     )
     password = secrets.token_hex(32)
+    admin_password, admin_password_verifier = _admin_credential_pair()
     private_pem = lambda key: key.private_bytes(
         serialization.Encoding.PEM,
         serialization.PrivateFormat.PKCS8,
@@ -392,6 +446,8 @@ def _secret_bundle(
     )
     token = lambda: (secrets.token_urlsafe(32) + "\n").encode("ascii")
     return {
+        "admin-password": admin_password,
+        "admin-password-verifier": admin_password_verifier,
         "agent-ca-certificate": agent_ca.public_bytes(serialization.Encoding.PEM),
         "agent-ca-key": private_pem(agent_key),
         "agent-proxy-auth": token(),
@@ -416,8 +472,16 @@ def _secret_bundle(
         "litellm-upstream-key": token(),
         "management-cidrs": ("\n".join(management_cidrs) + "\n").encode("ascii"),
         "postgres-password": (password + "\n").encode("ascii"),
+        "tailscale-oauth-client-id": tailscale_oauth_client_id,
+        "tailscale-oauth-client-secret": tailscale_oauth_client_secret,
         "token-signing-key": token(),
     }
+
+
+def _admin_credential_pair() -> tuple[bytes, bytes]:
+    password = secrets.token_urlsafe(32)
+    verifier = hash_password(password)
+    return (password + "\n").encode("ascii"), (verifier + "\n").encode("ascii")
 
 
 def _validate_bundle(
@@ -598,6 +662,39 @@ def _validate_bundle(
         "ascii"
     ):
         raise RuntimeSecretError("development management CIDRs do not match")
+    try:
+        admin_password = bundle["admin-password"].decode("ascii")
+        admin_verifier = bundle["admin-password-verifier"].decode("ascii")
+        password_value = admin_password.removesuffix("\n")
+        verifier_value = admin_verifier.removesuffix("\n")
+        verifier_parts = verifier_value.split("$")
+        salt = base64.b64decode(verifier_parts[4] + "=" * (-len(verifier_parts[4]) % 4))
+        password_hash = base64.b64decode(
+            verifier_parts[5] + "=" * (-len(verifier_parts[5]) % 4)
+        )
+    except (IndexError, UnicodeDecodeError, ValueError) as error:
+        raise RuntimeSecretError(
+            "development administrator credential is invalid"
+        ) from error
+    verification = verify_password(verifier_value, password_value)
+    if (
+        admin_password != password_value + "\n"
+        or re.fullmatch(r"[A-Za-z0-9_-]{43}", password_value) is None
+        or admin_verifier != verifier_value + "\n"
+        or verifier_parts[:4]
+        != [
+            "",
+            "argon2id",
+            "v=19",
+            "m=65536,t=3,p=1",
+        ]
+        or len(verifier_parts) != 6
+        or len(salt) != 16
+        or len(password_hash) != 32
+        or not verification.valid
+        or verification.needs_rehash
+    ):
+        raise RuntimeSecretError("development administrator credential is invalid")
     for name in (
         "agent-proxy-auth",
         "litellm-master-key",
@@ -664,17 +761,13 @@ def _host_runtime_authority_pair(
         )
     else:
         try:
-            key = serialization.load_pem_private_key(
-                retained_private, password=None
-            )
+            key = serialization.load_pem_private_key(retained_private, password=None)
         except (TypeError, ValueError) as error:
             raise RuntimeSecretError(
                 "development host runtime authority is invalid"
             ) from error
         if not isinstance(key, Ed25519PrivateKey):
-            raise RuntimeSecretError(
-                "development host runtime authority is invalid"
-            )
+            raise RuntimeSecretError("development host runtime authority is invalid")
         private = retained_private
     public = (key.public_key().public_bytes_raw().hex() + "\n").encode("ascii")
     return private, public
@@ -706,9 +799,7 @@ def _upgrade_host_runtime_authority(
         os.fsync(directory)
     _write_file(directory, _HOST_RUNTIME_PUBLIC, public)
     os.fsync(directory)
-    installed = {
-        name: _read_file(directory, name) for name in RUNTIME_SECRET_NAMES
-    }
+    installed = {name: _read_file(directory, name) for name in RUNTIME_SECRET_NAMES}
     _validate_bundle(
         installed,
         management_cidrs=management_cidrs,
@@ -718,6 +809,263 @@ def _upgrade_host_runtime_authority(
     )
 
 
+def _upgrade_browser_access(
+    directory: int,
+    prior_bundle: dict[str, bytes],
+    *,
+    tailscale_oauth_client_id: bytes,
+    tailscale_oauth_client_secret: bytes,
+    management_cidrs: tuple[str, ...],
+    enroll_hostname: str,
+    agent_hostname: str,
+    registry_hostname: str,
+) -> None:
+    password, verifier = _admin_credential_pair()
+    additions = {
+        "admin-password": password,
+        "admin-password-verifier": verifier,
+        "tailscale-oauth-client-id": tailscale_oauth_client_id,
+        "tailscale-oauth-client-secret": tailscale_oauth_client_secret,
+    }
+    candidate = dict(prior_bundle)
+    candidate.update(additions)
+    _validate_bundle(
+        candidate,
+        management_cidrs=management_cidrs,
+        enroll_hostname=enroll_hostname,
+        agent_hostname=agent_hostname,
+        registry_hostname=registry_hostname,
+    )
+    attempted: list[str] = []
+    try:
+        for name, content in sorted(additions.items()):
+            attempted.append(name)
+            _write_file(directory, name, content)
+        os.fsync(directory)
+        installed = {name: _read_file(directory, name) for name in RUNTIME_SECRET_NAMES}
+        _validate_bundle(
+            installed,
+            management_cidrs=management_cidrs,
+            enroll_hostname=enroll_hostname,
+            agent_hostname=agent_hostname,
+            registry_hostname=registry_hostname,
+        )
+    except BaseException:
+        for name in attempted:
+            _unlink_if_present(directory, name)
+        os.fsync(directory)
+        raise
+
+
+def _rotation_journal(
+    old_password: bytes,
+    old_verifier: bytes,
+    new_password: bytes,
+    new_verifier: bytes,
+) -> bytes:
+    return (
+        json.dumps(
+            {
+                "old_password_sha256": _sha256(old_password),
+                "old_verifier_sha256": _sha256(old_verifier),
+                "new_password_sha256": _sha256(new_password),
+                "new_verifier_sha256": _sha256(new_verifier),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n"
+    ).encode("ascii")
+
+
+def _parse_rotation_journal(content: bytes) -> dict[str, str]:
+    try:
+        document = json.loads(content.decode("ascii"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise RuntimeSecretError(
+            "development administrator rotation journal is invalid"
+        ) from error
+    if (
+        not isinstance(document, dict)
+        or set(document) != _ROTATION_DIGEST_KEYS
+        or any(
+            not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None
+            for value in document.values()
+        )
+    ):
+        raise RuntimeSecretError(
+            "development administrator rotation journal is invalid"
+        )
+    return document
+
+
+def _rotation_value(directory: int, name: str) -> bytes | None:
+    try:
+        os.stat(name, dir_fd=directory, follow_symlinks=False)
+    except FileNotFoundError:
+        return None
+    return _read_file(directory, name)
+
+
+def _finish_admin_rotation(directory: int, journal: dict[str, str]) -> None:
+    password = _read_file(directory, "admin-password")
+    verifier = _read_file(directory, "admin-password-verifier")
+    password_temporary = _rotation_value(directory, _ROTATION_PASSWORD)
+    verifier_temporary = _rotation_value(directory, _ROTATION_VERIFIER)
+    password_digest = _sha256(password)
+    verifier_digest = _sha256(verifier)
+    temporary_password_digest = (
+        None if password_temporary is None else _sha256(password_temporary)
+    )
+    temporary_verifier_digest = (
+        None if verifier_temporary is None else _sha256(verifier_temporary)
+    )
+    old_pair = (
+        password_digest == journal["old_password_sha256"]
+        and verifier_digest == journal["old_verifier_sha256"]
+    )
+    new_pair = (
+        password_digest == journal["new_password_sha256"]
+        and verifier_digest == journal["new_verifier_sha256"]
+    )
+    if old_pair:
+        valid_password_temporary = temporary_password_digest in {
+            None,
+            journal["new_password_sha256"],
+        }
+        valid_verifier_temporary = temporary_verifier_digest in {
+            None,
+            journal["new_verifier_sha256"],
+        }
+        if not valid_password_temporary or not valid_verifier_temporary:
+            raise RuntimeSecretError(
+                "development administrator rotation state is invalid"
+            )
+        if password_temporary is not None and verifier_temporary is not None:
+            os.replace(
+                _ROTATION_PASSWORD,
+                "admin-password",
+                src_dir_fd=directory,
+                dst_dir_fd=directory,
+            )
+            os.replace(
+                _ROTATION_VERIFIER,
+                "admin-password-verifier",
+                src_dir_fd=directory,
+                dst_dir_fd=directory,
+            )
+        else:
+            _unlink_if_present(directory, _ROTATION_PASSWORD)
+            _unlink_if_present(directory, _ROTATION_VERIFIER)
+    elif (
+        password_digest == journal["new_password_sha256"]
+        and verifier_digest == journal["old_verifier_sha256"]
+        and password_temporary is None
+        and temporary_verifier_digest == journal["new_verifier_sha256"]
+    ):
+        os.replace(
+            _ROTATION_VERIFIER,
+            "admin-password-verifier",
+            src_dir_fd=directory,
+            dst_dir_fd=directory,
+        )
+    elif new_pair and password_temporary is None and verifier_temporary is None:
+        pass
+    else:
+        raise RuntimeSecretError("development administrator rotation state is invalid")
+    os.fsync(directory)
+    _unlink_if_present(directory, _ROTATION_JOURNAL)
+    os.fsync(directory)
+
+
+def _recover_admin_rotation(directory: int) -> None:
+    names = set(os.listdir(directory))
+    if _ROTATION_JOURNAL not in names:
+        if names & _ROTATION_ENTRIES:
+            raise RuntimeSecretError(
+                "development administrator rotation state is invalid"
+            )
+        return
+    if not names <= RUNTIME_SECRET_NAMES | _ROTATION_ENTRIES:
+        raise RuntimeSecretError(
+            "development secrets directory contains unknown entries"
+        )
+    journal = _parse_rotation_journal(_read_file(directory, _ROTATION_JOURNAL))
+    _finish_admin_rotation(directory, journal)
+
+
+def _rotate_admin_password(
+    directory: int,
+    bundle: dict[str, bytes],
+    *,
+    management_cidrs: tuple[str, ...],
+    enroll_hostname: str,
+    agent_hostname: str,
+    registry_hostname: str,
+) -> None:
+    new_password, new_verifier = _admin_credential_pair()
+    candidate = dict(bundle)
+    candidate["admin-password"] = new_password
+    candidate["admin-password-verifier"] = new_verifier
+    _validate_bundle(
+        candidate,
+        management_cidrs=management_cidrs,
+        enroll_hostname=enroll_hostname,
+        agent_hostname=agent_hostname,
+        registry_hostname=registry_hostname,
+    )
+    journal_created = False
+    try:
+        _write_file(directory, _ROTATION_PASSWORD, new_password)
+        _write_file(directory, _ROTATION_VERIFIER, new_verifier)
+        os.fsync(directory)
+        _write_file(
+            directory,
+            _ROTATION_JOURNAL,
+            _rotation_journal(
+                bundle["admin-password"],
+                bundle["admin-password-verifier"],
+                new_password,
+                new_verifier,
+            ),
+        )
+        os.fsync(directory)
+        journal_created = True
+        os.replace(
+            _ROTATION_PASSWORD,
+            "admin-password",
+            src_dir_fd=directory,
+            dst_dir_fd=directory,
+        )
+        os.replace(
+            _ROTATION_VERIFIER,
+            "admin-password-verifier",
+            src_dir_fd=directory,
+            dst_dir_fd=directory,
+        )
+        os.fsync(directory)
+        installed = {name: _read_file(directory, name) for name in RUNTIME_SECRET_NAMES}
+        _validate_bundle(
+            installed,
+            management_cidrs=management_cidrs,
+            enroll_hostname=enroll_hostname,
+            agent_hostname=agent_hostname,
+            registry_hostname=registry_hostname,
+        )
+        _unlink_if_present(directory, _ROTATION_JOURNAL)
+        os.fsync(directory)
+    except BaseException as error:
+        if not journal_created:
+            _unlink_if_present(directory, _ROTATION_PASSWORD)
+            _unlink_if_present(directory, _ROTATION_VERIFIER)
+            os.fsync(directory)
+        if isinstance(error, OSError) and journal_created:
+            raise RuntimeSecretError(
+                "development administrator rotation was interrupted; rerun to recover"
+            ) from error
+        raise
+
+
 def prepare_runtime_secrets(
     secrets_dir: Path,
     *,
@@ -725,12 +1073,31 @@ def prepare_runtime_secrets(
     enroll_hostname: str,
     agent_hostname: str,
     registry_hostname: str,
+    tailscale_oauth_client_id_file: Path,
+    tailscale_oauth_client_secret_file: Path,
     upgrade_host_runtime_authority: bool = False,
+    upgrade_browser_access: bool = False,
+    rotate_admin_password: bool = False,
 ) -> Path:
+    if (
+        sum(
+            (
+                upgrade_host_runtime_authority,
+                upgrade_browser_access,
+                rotate_admin_password,
+            )
+        )
+        > 1
+    ):
+        raise RuntimeSecretError("development secret operation is ambiguous")
     enroll = _validate_hostname(enroll_hostname)
     agent = _validate_hostname(agent_hostname)
     registry = _validate_hostname(registry_hostname)
     cidrs = _validate_cidrs(management_cidrs)
+    tailscale_oauth_client_id = _read_external_secret(tailscale_oauth_client_id_file)
+    tailscale_oauth_client_secret = _read_external_secret(
+        tailscale_oauth_client_secret_file
+    )
     parent = _open_private_parent(secrets_dir)
     existing_descriptor = -1
     try:
@@ -741,18 +1108,41 @@ def prepare_runtime_secrets(
         existing = _open_existing_directory(parent, secrets_dir.name)
         if existing is not None:
             existing_descriptor, existing_metadata = existing
+            _recover_admin_rotation(existing_descriptor)
             names = set(os.listdir(existing_descriptor))
             if names:
+                if upgrade_browser_access:
+                    if names != _PRE_BROWSER_ACCESS_SECRET_NAMES:
+                        for name in sorted(names):
+                            if name not in RUNTIME_SECRET_NAMES:
+                                raise RuntimeSecretError(
+                                    "development secrets directory contains unknown entries"
+                                )
+                            _read_file(existing_descriptor, name)
+                        raise RuntimeSecretError(
+                            "browser access upgrade requires the exact prior generation"
+                        )
+                    prior_bundle = {
+                        name: _read_file(existing_descriptor, name) for name in names
+                    }
+                    _upgrade_browser_access(
+                        existing_descriptor,
+                        prior_bundle,
+                        tailscale_oauth_client_id=tailscale_oauth_client_id,
+                        tailscale_oauth_client_secret=tailscale_oauth_client_secret,
+                        management_cidrs=cidrs,
+                        enroll_hostname=enroll,
+                        agent_hostname=agent,
+                        registry_hostname=registry,
+                    )
+                    return secrets_dir
                 recoverable_upgrade = frozenset(names) in {
                     frozenset(_LEGACY_RUNTIME_SECRET_NAMES),
-                    frozenset(
-                        _LEGACY_RUNTIME_SECRET_NAMES | {_HOST_RUNTIME_PRIVATE}
-                    ),
+                    frozenset(_LEGACY_RUNTIME_SECRET_NAMES | {_HOST_RUNTIME_PRIVATE}),
                 }
                 if upgrade_host_runtime_authority and recoverable_upgrade:
                     bundle = {
-                        name: _read_file(existing_descriptor, name)
-                        for name in names
+                        name: _read_file(existing_descriptor, name) for name in names
                     }
                     _upgrade_host_runtime_authority(
                         existing_descriptor,
@@ -780,9 +1170,22 @@ def prepare_runtime_secrets(
                     agent_hostname=agent,
                     registry_hostname=registry,
                 )
+                if rotate_admin_password:
+                    _rotate_admin_password(
+                        existing_descriptor,
+                        bundle,
+                        management_cidrs=cidrs,
+                        enroll_hostname=enroll,
+                        agent_hostname=agent,
+                        registry_hostname=registry,
+                    )
                 return secrets_dir
         else:
             existing_metadata = None
+        if upgrade_browser_access or rotate_admin_password:
+            raise RuntimeSecretError(
+                "development secret operation requires an existing generation"
+            )
         staging_name = f".{secrets_dir.name}.staging-{secrets.token_hex(16)}"
         staging_descriptor = -1
         try:
@@ -793,6 +1196,8 @@ def prepare_runtime_secrets(
                 enroll_hostname=enroll,
                 agent_hostname=agent,
                 registry_hostname=registry,
+                tailscale_oauth_client_id=tailscale_oauth_client_id,
+                tailscale_oauth_client_secret=tailscale_oauth_client_secret,
             )
             _validate_bundle(
                 bundle,
@@ -884,13 +1289,28 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--enroll-hostname", required=True)
     parser.add_argument("--agent-hostname", required=True)
     parser.add_argument("--registry-hostname", required=True)
+    parser.add_argument("--tailscale-oauth-client-id-file", type=Path, required=True)
     parser.add_argument(
+        "--tailscale-oauth-client-secret-file", type=Path, required=True
+    )
+    operations = parser.add_mutually_exclusive_group()
+    operations.add_argument(
         "--upgrade-host-runtime-authority",
         action="store_true",
         help=(
             "add only the host runtime signing key pair to a validated "
             "legacy development secret generation"
         ),
+    )
+    operations.add_argument(
+        "--upgrade-browser-access",
+        action="store_true",
+        help="add browser access secrets to the exact prior generation",
+    )
+    operations.add_argument(
+        "--rotate-admin-password",
+        action="store_true",
+        help="rotate only the administrator password and verifier",
     )
     return parser.parse_args()
 
@@ -910,9 +1330,13 @@ def main() -> int:
             enroll_hostname=arguments.enroll_hostname,
             agent_hostname=arguments.agent_hostname,
             registry_hostname=arguments.registry_hostname,
-            upgrade_host_runtime_authority=(
-                arguments.upgrade_host_runtime_authority
+            tailscale_oauth_client_id_file=(arguments.tailscale_oauth_client_id_file),
+            tailscale_oauth_client_secret_file=(
+                arguments.tailscale_oauth_client_secret_file
             ),
+            upgrade_host_runtime_authority=(arguments.upgrade_host_runtime_authority),
+            upgrade_browser_access=arguments.upgrade_browser_access,
+            rotate_admin_password=arguments.rotate_admin_password,
         )
         print(destination)
         for line in _public_summary(destination):
