@@ -83,6 +83,13 @@ the build container. These settings are one boundary: do not remove the force
 mask, make the private ancestor traversable by other host users, or ignore
 permission errors during storage accounting.
 
+The package also enables a lingering `vonk-agent` user manager. Podman uses
+that account's read-only user D-Bus endpoint and the systemd cgroup manager;
+the service keeps `ProtectControlGroups=yes`. `AF_NETLINK` permits `runc` to
+create the isolated namespace but does not grant build egress: accepted source
+builds still require `--network=none`. Treat a missing user bus, `Linger=no`,
+or a Podman cgroup fallback as a failed node preflight.
+
 ## PKI and NAS project
 
 Follow [Development NAS installation](development-nas-installation.md) from a
@@ -321,6 +328,9 @@ then install the Rust package:
 sudo apt update
 sudo apt install vonk-forge-agent
 apt-cache policy vonk-forge-agent
+agent_uid="$(id -u vonk-agent)"
+test "$(loginctl show-user vonk-agent -p Linger --value)" = yes
+test -S "/run/user/${agent_uid}/bus"
 ```
 
 Do not enable both `dev` and `stable`. Complete the NVIDIA Docker/CDI preflight

@@ -165,6 +165,7 @@ fn build_exports_a_docker_load_archive_from_the_rootless_builder() {
     let build = &calls[0];
     assert_eq!(build.0, Program::Podman);
     for required in [
+        "--cgroup-manager=systemd",
         "--no-cache",
         "--cap-drop=all",
         "--security-opt=no-new-privileges",
@@ -193,6 +194,12 @@ fn build_exports_a_docker_load_archive_from_the_rootless_builder() {
             || value.starts_with("--pids-limit=")
     }));
     for (_, arguments) in calls.iter() {
+        assert!(
+            arguments
+                .iter()
+                .any(|value| value == "--cgroup-manager=systemd"),
+            "every isolated Podman call must use the rootless user systemd manager"
+        );
         for option in [
             "overlay.ignore_chown_errors=true",
             "overlay.mount_program=/usr/bin/fuse-overlayfs",

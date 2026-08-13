@@ -79,8 +79,10 @@ completion.
 The maintainer script creates the unprivileged account, allocates the first
 non-overlapping standard subordinate UID and GID ranges permitted by
 `/etc/login.defs`, initializes rootless container storage and signed A/B slots,
-and leaves network state disabled. It performs no download, pairing, or service
-start. The service has no ambient capabilities; its capability bounding set is
+enables the account's lingering user manager, and leaves the network agent
+disabled. It performs no download, pairing, or network-service start. Package
+removal disables lingering again. The service has no ambient capabilities;
+its capability bounding set is
 the tested minimum needed for the distribution's setuid
 `newuidmap`/`newgidmap` helpers to create the delegated namespace:
 `CAP_DAC_OVERRIDE`, `CAP_SETUID`, `CAP_SETGID`, and `CAP_SYS_ADMIN`. Existing
@@ -169,12 +171,16 @@ validated policy and fails closed when the file, Docker chain, or managed rules
 are unavailable.
 
 ```bash
+agent_uid="$(id -u vonk-agent)"
+test "$(loginctl show-user vonk-agent -p Linger --value)" = yes
+test -S "/run/user/${agent_uid}/bus"
 sudo -u vonk-agent env \
   HOME=/var/lib/vonk-forge-agent \
   XDG_DATA_HOME=/var/lib/vonk-forge-agent \
-  XDG_RUNTIME_DIR=/run/vonk-forge-agent \
+  XDG_RUNTIME_DIR="/run/user/${agent_uid}" \
+  DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${agent_uid}/bus" \
   CONTAINERS_STORAGE_CONF=/etc/vonk-forge-agent/containers-storage.conf \
-  podman info
+  podman --cgroup-manager=systemd info
 sudo awk -F: '$1 == "vonk-agent" { total += $3 } END { exit !(total >= 65536) }' \
   /etc/subuid
 sudo awk -F: '$1 == "vonk-agent" { total += $3 } END { exit !(total >= 65536) }' \
@@ -195,6 +201,10 @@ client and NVIDIA CDI `nvidia.com/gpu=all` checks pass.
 Install/start admission remains controller-side: disk is checked before image
 and weight installation, RAM/VRAM and current workloads before start, and all
 participants/fabric links before a multi-node start.
+
+`podman info` must report the systemd cgroup manager without a fallback
+warning. The user manager is build authority only: it does not run the Vonk
+network agent, expose a socket, or gain Docker/sudo membership.
 
 ## Boundary checks
 

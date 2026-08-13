@@ -261,6 +261,7 @@ fn build_network(
 
 fn podman_storage_arguments(storage: &Path, runroot: &Path) -> Vec<String> {
     vec![
+        "--cgroup-manager=systemd".to_owned(),
         "--root".to_owned(),
         storage.display().to_string(),
         "--runroot".to_owned(),

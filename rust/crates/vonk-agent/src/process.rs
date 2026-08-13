@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     fs::{self, File},
     io::{Read, Seek, SeekFrom},
     path::Path,
@@ -158,22 +159,14 @@ fn run_process(
 ) -> Result<ProcessOutput, ProcessError> {
     let mut stdout = tempfile()?;
     let mut stderr = tempfile()?;
+    let environment = subprocess_environment(program, rustix::process::geteuid().as_raw());
     let mut child = Command::new(program.path())
         .args(arguments)
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout.try_clone()?))
         .stderr(Stdio::from(stderr.try_clone()?))
         .env_clear()
-        .env("LANG", "C.UTF-8")
-        .env("LC_ALL", "C.UTF-8")
-        .env("PATH", "/usr/bin:/bin")
-        .env("HOME", "/var/lib/vonk-forge-agent")
-        .env("XDG_DATA_HOME", "/var/lib/vonk-forge-agent")
-        .env("XDG_RUNTIME_DIR", "/run/vonk-forge-agent")
-        .env(
-            "CONTAINERS_STORAGE_CONF",
-            "/etc/vonk-forge-agent/containers-storage.conf",
-        )
+        .envs(environment)
         .spawn()?;
     let started = Instant::now();
     let status = loop {
@@ -217,6 +210,31 @@ fn run_process(
         stdout: bounded_read(&mut stdout, output_limit)?,
         stderr: bounded_read(&mut stderr, output_limit)?,
     })
+}
+
+fn subprocess_environment(program: Program, effective_uid: u32) -> BTreeMap<&'static str, String> {
+    let mut environment = BTreeMap::from([
+        ("LANG", "C.UTF-8".to_owned()),
+        ("LC_ALL", "C.UTF-8".to_owned()),
+        ("PATH", "/usr/bin:/bin".to_owned()),
+        ("HOME", "/var/lib/vonk-forge-agent".to_owned()),
+        ("XDG_DATA_HOME", "/var/lib/vonk-forge-agent".to_owned()),
+        (
+            "CONTAINERS_STORAGE_CONF",
+            "/etc/vonk-forge-agent/containers-storage.conf".to_owned(),
+        ),
+    ]);
+    if program == Program::Podman {
+        let runtime = format!("/run/user/{effective_uid}");
+        environment.insert("XDG_RUNTIME_DIR", runtime.clone());
+        environment.insert(
+            "DBUS_SESSION_BUS_ADDRESS",
+            format!("unix:path={runtime}/bus"),
+        );
+    } else {
+        environment.insert("XDG_RUNTIME_DIR", "/run/vonk-forge-agent".to_owned());
+    }
+    environment
 }
 
 fn directory_bytes(path: &Path) -> Result<u64, std::io::Error> {
@@ -286,10 +304,29 @@ fn output_bytes(output: &ProcessOutput) -> u64 {
 mod tests {
     use super::{
         ProcessError, ProcessRunner, Program, SystemProcessRunner, directory_bytes,
-        present_during_scan,
+        present_during_scan, subprocess_environment,
     };
     use std::{fs, io::Write, net::TcpListener, os::unix::fs::symlink, thread, time::Duration};
     use tempfile::tempdir;
+
+    #[test]
+    fn podman_uses_the_effective_users_systemd_bus() {
+        let environment = subprocess_environment(Program::Podman, 128);
+
+        assert_eq!(environment["XDG_RUNTIME_DIR"], "/run/user/128");
+        assert_eq!(
+            environment["DBUS_SESSION_BUS_ADDRESS"],
+            "unix:path=/run/user/128/bus"
+        );
+    }
+
+    #[test]
+    fn non_podman_tools_keep_the_private_agent_runtime() {
+        let environment = subprocess_environment(Program::Curl, 128);
+
+        assert_eq!(environment["XDG_RUNTIME_DIR"], "/run/vonk-forge-agent");
+        assert!(!environment.contains_key("DBUS_SESSION_BUS_ADDRESS"));
+    }
 
     #[test]
     fn storage_scan_ignores_paths_removed_by_the_running_process() {

@@ -276,7 +276,12 @@ def _verify_payload(payload: Path, control: Path) -> None:
         or "DeviceAllow=/dev/fuse rw" not in units["vonk-forge-agent.service"]
         or "DeviceAllow=char-231:* rw" not in units["vonk-forge-agent.service"]
         or "BindPaths=-/dev/fuse" not in units["vonk-forge-agent.service"]
+        or "BindReadOnlyPaths=/run/user"
+        not in units["vonk-forge-agent.service"]
         or "InaccessiblePaths=-/run/docker.sock"
+        not in units["vonk-forge-agent.service"]
+        or "ProtectHome=tmpfs" not in units["vonk-forge-agent.service"]
+        or "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK"
         not in units["vonk-forge-agent.service"]
         or "/dev/infiniband" in units["vonk-forge-agent.service"]
         or "Delegate=yes" not in units["vonk-forge-agent.service"]
