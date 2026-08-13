@@ -420,6 +420,20 @@ class RotationFaults:
             return None
         if path.name.startswith(ROTATION_PREFIX):
             entries = set(self._real["listdir"](descriptor))
+            password = (self.secrets_dir / ROTATION_PASSWORD).read_bytes()
+            verifier = (self.secrets_dir / ROTATION_VERIFIER).read_bytes()
+            if (
+                entries == {ROTATION_JOURNAL, ROTATION_VERIFIER}
+                and password != self.old_password
+                and verifier == self.old_verifier
+            ):
+                return "transaction-fsync-password-move"
+            if (
+                entries == {ROTATION_JOURNAL}
+                and password != self.old_password
+                and verifier != self.old_verifier
+            ):
+                return "transaction-fsync-verifier-move"
             if entries == {ROTATION_JOURNAL}:
                 return "transaction-fsync-manifest"
             if entries == {ROTATION_JOURNAL, ROTATION_PASSWORD}:
@@ -1438,9 +1452,18 @@ def test_upgrade_and_rotation_invocations_serialize_on_one_kernel_lock(
     )
     first.start()
     assert first_inside.wait(5)
+    management_cidrs = secrets_dir / "management-cidrs"
+    original_lock_inode = management_cidrs.stat().st_ino
+    replacement = secrets_dir / ".synthetic-management-cidrs-replacement"
+    replacement.write_bytes(management_cidrs.read_bytes())
+    replacement.chmod(0o600)
+    replacement.replace(management_cidrs)
+    assert management_cidrs.stat().st_ino != original_lock_inode
     second.start()
 
     assert observation.get(timeout=5) == "lock-attempt"
+    with pytest.raises(queue.Empty):
+        observation.get(timeout=0.5)
     assert mutations == 1
     release_first.set()
     first.join(5)
@@ -1450,6 +1473,110 @@ def test_upgrade_and_rotation_invocations_serialize_on_one_kernel_lock(
     assert not second.is_alive()
     assert results == [None, None]
     assert {path.name for path in secrets_dir.iterdir()} == LOCAL_SOURCE_SECRET_NAMES
+
+
+def test_rotation_fsyncs_both_directories_after_each_payload_move(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    oauth_files = _write_oauth_inputs(tmp_path / "oauth-inputs")
+    created = _run_generator(secrets_dir, oauth_files=oauth_files)
+    assert created.returncode == 0, created.stderr
+    runtime = _load_module()
+    real_replace = runtime.os.replace
+    real_fsync = runtime.os.fsync
+    real_readlink = runtime.os.readlink
+    events: list[str] = []
+
+    def replace(*args: object, **kwargs: object) -> None:
+        real_replace(*args, **kwargs)
+        destination = str(args[1])
+        if destination in {ROTATION_PASSWORD, ROTATION_VERIFIER}:
+            events.append(f"move-{destination}")
+
+    def fsync(descriptor: int) -> None:
+        path = Path(real_readlink(f"/proc/self/fd/{descriptor}"))
+        if path == secrets_dir:
+            events.append("fsync-root")
+        elif path.parent == secrets_dir and path.name.startswith(ROTATION_PREFIX):
+            events.append("fsync-transaction")
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(runtime.os, "replace", replace)
+    monkeypatch.setattr(runtime.os, "fsync", fsync)
+
+    runtime.prepare_runtime_secrets(
+        secrets_dir,
+        **_prepare_arguments(oauth_files, rotate_admin_password=True),
+    )
+
+    password_move = events.index(f"move-{ROTATION_PASSWORD}")
+    verifier_move = events.index(f"move-{ROTATION_VERIFIER}")
+    assert events[password_move : password_move + 3] == [
+        f"move-{ROTATION_PASSWORD}",
+        "fsync-root",
+        "fsync-transaction",
+    ]
+    assert events[verifier_move : verifier_move + 3] == [
+        f"move-{ROTATION_VERIFIER}",
+        "fsync-root",
+        "fsync-transaction",
+    ]
+
+
+@pytest.mark.parametrize("persisted_move", ["password", "verifier"])
+def test_rotation_replays_payload_when_destination_persists_before_source_removal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    persisted_move: str,
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    oauth_files = _write_oauth_inputs(tmp_path / "oauth-inputs")
+    created = _run_generator(secrets_dir, oauth_files=oauth_files)
+    assert created.returncode == 0, created.stderr
+    old_password = (secrets_dir / ROTATION_PASSWORD).read_bytes()
+    old_verifier = (secrets_dir / ROTATION_VERIFIER).read_bytes()
+    runtime = _load_module()
+    faults = RotationFaults(
+        runtime,
+        secrets_dir,
+        old_password=old_password,
+        old_verifier=old_verifier,
+    )
+    faults.install(monkeypatch, "transaction-fsync-verifier")
+    with pytest.raises(SyntheticRotationCrash):
+        runtime.prepare_runtime_secrets(
+            secrets_dir,
+            **_prepare_arguments(oauth_files, rotate_admin_password=True),
+        )
+    faults.restore(monkeypatch)
+    transaction = _rotation_transaction(secrets_dir)
+    new_password = (transaction / ROTATION_PASSWORD).read_bytes()
+    new_verifier = (transaction / ROTATION_VERIFIER).read_bytes()
+
+    def persist_destination(name: str, content: bytes) -> None:
+        temporary = secrets_dir / f".synthetic-persisted-{name}"
+        temporary.write_bytes(content)
+        temporary.chmod(0o600)
+        temporary.replace(secrets_dir / name)
+
+    persist_destination(ROTATION_PASSWORD, new_password)
+    if persisted_move == "verifier":
+        (transaction / ROTATION_PASSWORD).unlink()
+        persist_destination(ROTATION_VERIFIER, new_verifier)
+
+    runtime.prepare_runtime_secrets(
+        secrets_dir,
+        **_prepare_arguments(oauth_files),
+    )
+
+    assert (secrets_dir / ROTATION_PASSWORD).read_bytes() == new_password
+    assert (secrets_dir / ROTATION_VERIFIER).read_bytes() == new_verifier
+    assert not transaction.exists()
 
 
 def test_rotate_admin_password_changes_only_the_credential_pair_when_explicit(
@@ -1511,8 +1638,10 @@ def test_rotate_admin_password_changes_only_the_credential_pair_when_explicit(
         "verifier-fsync",
         "transaction-fsync-verifier",
         "password-rename",
+        "transaction-fsync-password-move",
         "root-fsync-password",
         "verifier-rename",
+        "transaction-fsync-verifier-move",
         "root-fsync-verifier",
         "journal-unlink",
         "transaction-fsync-cleanup",
@@ -1599,8 +1728,10 @@ def test_rotate_admin_password_recovers_every_persisted_crash_boundary(
         "verifier-fsync",
         "transaction-fsync-verifier",
         "password-rename",
+        "transaction-fsync-password-move",
         "root-fsync-password",
         "verifier-rename",
+        "transaction-fsync-verifier-move",
         "root-fsync-verifier",
         "journal-unlink",
         "transaction-fsync-cleanup",
@@ -1653,8 +1784,10 @@ def test_rotate_admin_password_recovers_every_filesystem_error_boundary(
     "event",
     [
         "password-rename",
+        "transaction-fsync-password-move",
         "root-fsync-password",
         "verifier-rename",
+        "transaction-fsync-verifier-move",
         "root-fsync-verifier",
         "journal-unlink",
         "transaction-fsync-cleanup",

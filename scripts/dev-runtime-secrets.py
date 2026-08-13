@@ -535,50 +535,29 @@ def _create_owned_directory(directory: int, name: str) -> tuple[int, _OwnedEntry
         ) from error
 
 
-def _acquire_mutation_lock(directory: int) -> int:
-    descriptor = -1
+def _acquire_mutation_lock(directory: int) -> None:
     try:
-        listed = os.stat("management-cidrs", dir_fd=directory, follow_symlinks=False)
-        descriptor = os.open("management-cidrs", _READ_FLAGS, dir_fd=directory)
-        before = os.fstat(descriptor)
+        before = os.fstat(directory)
         if (
-            not _same_inode(listed, before)
-            or not stat.S_ISREG(before.st_mode)
+            not stat.S_ISDIR(before.st_mode)
             or before.st_uid != os.geteuid()
-            or before.st_nlink != 1
-            or stat.S_IMODE(before.st_mode) != _PRIVATE_MODE
-            or not 0 < before.st_size <= _MAX_SECRET_BYTES
+            or before.st_nlink < 2
+            or stat.S_IMODE(before.st_mode) != 0o700
         ):
             raise RuntimeSecretError("development mutation lock is unsafe")
-        identity = (
-            before.st_dev,
-            before.st_ino,
-            before.st_size,
-            before.st_nlink,
-            before.st_mtime_ns,
-            before.st_ctime_ns,
-        )
-        fcntl.flock(descriptor, fcntl.LOCK_EX)
-        named = os.stat("management-cidrs", dir_fd=directory, follow_symlinks=False)
-        after = os.fstat(descriptor)
-        updated = (
-            after.st_dev,
-            after.st_ino,
-            after.st_size,
-            after.st_nlink,
-            after.st_mtime_ns,
-            after.st_ctime_ns,
-        )
-        if not _same_inode(named, after) or identity != updated:
+        fcntl.flock(directory, fcntl.LOCK_EX)
+        after = os.fstat(directory)
+        if (
+            not _same_inode(before, after)
+            or not stat.S_ISDIR(after.st_mode)
+            or after.st_uid != os.geteuid()
+            or after.st_nlink < 2
+            or stat.S_IMODE(after.st_mode) != 0o700
+        ):
             raise RuntimeSecretError("development mutation lock changed")
-        return descriptor
     except RuntimeSecretError:
-        if descriptor >= 0:
-            os.close(descriptor)
         raise
     except OSError as error:
-        if descriptor >= 0:
-            os.close(descriptor)
         raise RuntimeSecretError(
             "development mutation lock cannot be acquired safely"
         ) from error
@@ -1293,6 +1272,8 @@ def _replace_owned_rotation_file(
         src_dir_fd=source,
         dst_dir_fd=destination,
     )
+    os.fsync(destination)
+    os.fsync(source)
 
 
 def _remove_rotation_transaction(
@@ -1420,34 +1401,58 @@ def _resume_admin_rotation(directory: int, name: str) -> None:
                 directory,
                 "admin-password",
             )
-            os.fsync(directory)
             _replace_owned_rotation_file(
                 transaction,
                 temporary_verifier[1],
                 directory,
                 "admin-password-verifier",
             )
-            os.fsync(directory)
         elif forward_mixed_pair:
             if (
-                temporary_password is not None
+                temporary_password_digest
+                not in {None, journal["new_password_sha256"]}
                 or temporary_verifier_digest != journal["new_verifier_sha256"]
             ):
                 raise RuntimeSecretError(
                     "development administrator rotation state is invalid"
                 )
-            os.fsync(directory)
+            if temporary_password is not None:
+                _replace_owned_rotation_file(
+                    transaction,
+                    temporary_password[1],
+                    directory,
+                    "admin-password",
+                )
             _replace_owned_rotation_file(
                 transaction,
                 temporary_verifier[1],
                 directory,
                 "admin-password-verifier",
             )
-            os.fsync(directory)
         elif new_pair:
-            if temporary_password is not None or temporary_verifier is not None:
+            if temporary_password_digest not in {
+                None,
+                journal["new_password_sha256"],
+            } or temporary_verifier_digest not in {
+                None,
+                journal["new_verifier_sha256"],
+            }:
                 raise RuntimeSecretError(
                     "development administrator rotation state is invalid"
+                )
+            if temporary_password is not None:
+                _replace_owned_rotation_file(
+                    transaction,
+                    temporary_password[1],
+                    directory,
+                    "admin-password",
+                )
+            if temporary_verifier is not None:
+                _replace_owned_rotation_file(
+                    transaction,
+                    temporary_verifier[1],
+                    directory,
+                    "admin-password-verifier",
                 )
         else:
             raise RuntimeSecretError(
@@ -1639,7 +1644,6 @@ def prepare_runtime_secrets(
     )
     parent = _open_private_parent(secrets_dir)
     existing_descriptor = -1
-    mutation_lock = -1
     try:
         if _filesystem_type(secrets_dir) in _UNSAFE_GENERATION_FILESYSTEMS:
             raise RuntimeSecretError(
@@ -1649,7 +1653,7 @@ def prepare_runtime_secrets(
         if existing is not None:
             existing_descriptor, existing_metadata = existing
             if os.listdir(existing_descriptor):
-                mutation_lock = _acquire_mutation_lock(existing_descriptor)
+                _acquire_mutation_lock(existing_descriptor)
             _recover_admin_rotation(existing_descriptor)
             names = set(os.listdir(existing_descriptor))
             if names:
@@ -1778,8 +1782,6 @@ def prepare_runtime_secrets(
                 _remove_staging(parent, staging_name, staging_descriptor)
         return secrets_dir
     finally:
-        if mutation_lock >= 0:
-            os.close(mutation_lock)
         if existing_descriptor >= 0:
             os.close(existing_descriptor)
         os.close(parent)

@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from .auth import Actor
 from .models import LoginSession, User
 from .passwords import verify_password
+from .user_authority import serialize_user_authority
 
 _ADMIN_SUBJECT = "admin"
 _ADMIN_ROLE = "administrator"
@@ -296,6 +297,7 @@ class BrowserAuthService:
     def bootstrap_admin(self, verifier: str) -> BootstrapResult:
         self._verifier(verifier)
         with self._sessions.begin() as db:
+            serialize_user_authority(db)
             users = db.scalars(
                 select(User).where(
                     or_(User.subject == _ADMIN_SUBJECT, User.role == _ADMIN_ROLE)
@@ -324,6 +326,7 @@ class BrowserAuthService:
         self._verifier(verifier)
         now = self._now()
         with self._sessions.begin() as db:
+            serialize_user_authority(db)
             users = db.scalars(
                 select(User)
                 .where(or_(User.subject == _ADMIN_SUBJECT, User.role == _ADMIN_ROLE))
