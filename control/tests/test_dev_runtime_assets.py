@@ -21,6 +21,7 @@ EXPECTED_RESOURCES = {
     "litellm-bootstrap.json": 0o444,
     "litellm-entrypoint.sh": 0o555,
     "litellm-supervisor.py": 0o555,
+    "tailscale-configure.sh": 0o555,
 }
 MAXIMUM_RESOURCE_BYTES = 128 * 1024
 
@@ -255,6 +256,7 @@ def test_stage_development_assets_assigns_exact_service_owners_when_root(
         "litellm-bootstrap": (10002, 10001),
         "litellm-entrypoint": (10002, 10001),
         "litellm-supervisor": (10002, 10001),
+        "tailscale-configure": (0, 0),
     }
 
 
@@ -452,6 +454,70 @@ def test_caddy_entrypoint_stages_runtime_files_as_uid_10000(
     )
     assert invalid.returncode == 64
     assert "browser hostname must be vonk-forge.<tailnet-name>.ts.net" in invalid.stderr
+
+    hostname_root = tmp_path / "tailnet-runtime"
+    hostname_root.mkdir(mode=0o755)
+    hostname_file = hostname_root / "control-hostname"
+    hostname_file.write_text(
+        "vonk-forge.discovered-tailnet.ts.net\n",
+        encoding="utf-8",
+    )
+    hostname_file.chmod(0o444)
+    file_command = list(command)
+    hostname_environment_index = file_command.index(
+        "VONK_CONTROL_HOSTNAME=vonk-forge.tailnet.test.ts.net"
+    )
+    del file_command[hostname_environment_index - 1 : hostname_environment_index + 1]
+    entrypoint_index = file_command.index("--entrypoint")
+    file_command[entrypoint_index:entrypoint_index] = [
+        "--mount",
+        f"type=bind,src={hostname_root},dst=/run/vonk-tailnet,readonly",
+        "--env",
+        "VONK_CONTROL_HOSTNAME_FILE=/run/vonk-tailnet/control-hostname",
+    ]
+    discovered = subprocess.run(
+        file_command,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=False,
+        timeout=30,
+        text=True,
+    )
+    assert discovered.returncode == 0, discovered.stderr
+
+    hostname_file.unlink()
+    pending = subprocess.run(
+        file_command,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=False,
+        timeout=30,
+        text=True,
+    )
+    assert pending.returncode == 0, pending.stderr
+
+    hostname_file.write_text("control.test.example\n", encoding="utf-8")
+    hostname_file.chmod(0o444)
+    rejected_file = subprocess.run(
+        file_command,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=False,
+        timeout=30,
+        text=True,
+    )
+    assert rejected_file.returncode == 64
+    assert "control.test.example" not in rejected_file.stdout + rejected_file.stderr
+
+
+def test_caddy_entrypoint_restarts_when_discovered_hostname_changes_or_disappears() -> None:
+    package = importlib.resources.files(RESOURCE_PACKAGE)
+    source = package.joinpath("caddy-entrypoint.sh").read_text(encoding="utf-8")
+
+    assert 'active_control_hostname=${VONK_CONTROL_HOSTNAME:-}' in source
+    assert 'observed_control_hostname=$(cat "$VONK_CONTROL_HOSTNAME_FILE")' in source
+    assert '[ "$observed_control_hostname" != "$active_control_hostname" ]' in source
+    assert 'exec /bin/sh "$0"' in source
 
 
 def test_litellm_supervisor_materializes_file_secrets_without_environment(

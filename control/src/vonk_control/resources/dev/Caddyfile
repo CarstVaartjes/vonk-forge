@@ -46,6 +46,7 @@ http://127.0.0.1:2019 {
 	import edge_headers
 }
 
+# BEGIN PRIVATE BROWSER EDGE
 (browser_proxy_headers) {
 	# Tailscale owns the browser's HTTPS boundary. Never forward caller-supplied
 	# proxy or agent identity metadata to either application upstream.
@@ -102,6 +103,7 @@ http://127.0.0.1:2019 {
 	}
 	respond 421
 }
+# END PRIVATE BROWSER EDGE
 
 https://{$VONK_AGENT_ENROLL_HOSTNAME}:{$VONK_BACKEND_PORT} {
 	import edge_guards

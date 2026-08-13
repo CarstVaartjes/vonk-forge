@@ -1,7 +1,31 @@
 #!/bin/sh
 set -eu
 
-: "${VONK_CONTROL_HOSTNAME:?set VONK_CONTROL_HOSTNAME}"
+browser_hostname_pending=0
+if [ -n "${VONK_CONTROL_HOSTNAME_FILE:-}" ]; then
+  if [ -n "${VONK_CONTROL_HOSTNAME:-}" ]; then
+    printf 'Vonk Forge Caddy browser hostname authority is ambiguous\n' >&2
+    exit 64
+  fi
+  if [ ! -e "$VONK_CONTROL_HOSTNAME_FILE" ] \
+    && [ ! -L "$VONK_CONTROL_HOSTNAME_FILE" ]; then
+    browser_hostname_pending=1
+  elif [ -L "$VONK_CONTROL_HOSTNAME_FILE" ] \
+    || [ ! -f "$VONK_CONTROL_HOSTNAME_FILE" ] \
+    || [ ! -r "$VONK_CONTROL_HOSTNAME_FILE" ] \
+    || [ ! -s "$VONK_CONTROL_HOSTNAME_FILE" ] \
+    || [ "$(wc -l < "$VONK_CONTROL_HOSTNAME_FILE")" -ne 1 ] \
+    || [ "$(wc -c < "$VONK_CONTROL_HOSTNAME_FILE")" -gt 254 ]; then
+    printf 'Vonk Forge Caddy browser hostname file is invalid\n' >&2
+    exit 64
+  elif ! VONK_CONTROL_HOSTNAME=$(cat "$VONK_CONTROL_HOSTNAME_FILE"); then
+    printf 'Vonk Forge Caddy browser hostname file is unavailable\n' >&2
+    exit 1
+  fi
+fi
+if [ "$browser_hostname_pending" -eq 0 ]; then
+  : "${VONK_CONTROL_HOSTNAME:?set VONK_CONTROL_HOSTNAME or VONK_CONTROL_HOSTNAME_FILE}"
+fi
 : "${VONK_AGENT_ENROLL_HOSTNAME:?set VONK_AGENT_ENROLL_HOSTNAME}"
 : "${VONK_AGENT_HOSTNAME:?set VONK_AGENT_HOSTNAME}"
 : "${VONK_BACKEND_PORT:?set VONK_BACKEND_PORT}"
@@ -48,25 +72,30 @@ normalize_hostname() {
   printf '%s' "$normalized"
 }
 
-control_hostname=$(normalize_hostname "$VONK_CONTROL_HOSTNAME")
-case "$control_hostname" in
-  vonk-forge.*.ts.net) ;;
-  *)
-    printf 'Vonk Forge browser hostname must be vonk-forge.<tailnet-name>.ts.net\n' >&2
-    exit 64
-    ;;
-esac
 enrollment_hostname=$(normalize_hostname "$VONK_AGENT_ENROLL_HOSTNAME")
 agent_hostname=$(normalize_hostname "$VONK_AGENT_HOSTNAME")
-if [ "$control_hostname" = "$enrollment_hostname" ] \
-  || [ "$control_hostname" = "$agent_hostname" ] \
-  || [ "$enrollment_hostname" = "$agent_hostname" ]; then
+if [ "$enrollment_hostname" = "$agent_hostname" ]; then
   printf 'Vonk Forge Caddy SNI hostnames must be distinct\n' >&2
   exit 64
 fi
-export VONK_CONTROL_HOSTNAME=$control_hostname
 export VONK_AGENT_ENROLL_HOSTNAME=$enrollment_hostname
 export VONK_AGENT_HOSTNAME=$agent_hostname
+if [ "$browser_hostname_pending" -eq 0 ]; then
+  control_hostname=$(normalize_hostname "$VONK_CONTROL_HOSTNAME")
+  case "$control_hostname" in
+    vonk-forge.*.ts.net) ;;
+    *)
+      printf 'Vonk Forge browser hostname must be vonk-forge.<tailnet-name>.ts.net\n' >&2
+      exit 64
+      ;;
+  esac
+  if [ "$control_hostname" = "$enrollment_hostname" ] \
+    || [ "$control_hostname" = "$agent_hostname" ]; then
+    printf 'Vonk Forge Caddy SNI hostnames must be distinct\n' >&2
+    exit 64
+  fi
+  export VONK_CONTROL_HOSTNAME=$control_hostname
+fi
 
 for required_file in \
   /run/secrets/controller-server-certificate \
@@ -179,7 +208,63 @@ chmod 0500 "$runtime_temporary"
 mv -f "$runtime_temporary" "$runtime_caddy"
 trap - EXIT HUP INT TERM
 
-if [ "$#" -eq 0 ]; then
-  set -- "$runtime_caddy" run --config /run/vonk-runtime/Caddyfile --adapter caddyfile
+if [ "$#" -gt 0 ]; then
+  exec "$@"
 fi
-exec "$@"
+
+if [ "$browser_hostname_pending" -eq 0 ] \
+  && [ -z "${VONK_CONTROL_HOSTNAME_FILE:-}" ]; then
+  exec "$runtime_caddy" run --config /run/vonk-runtime/Caddyfile --adapter caddyfile
+fi
+
+source_caddyfile=/run/vonk-runtime/Caddyfile
+selected_caddyfile=$source_caddyfile
+if [ "$browser_hostname_pending" -eq 1 ]; then
+  agent_caddyfile=$runtime_root/Caddyfile.agent-only
+  if [ ! -f "$source_caddyfile" ] \
+    || [ "$(grep -Fxc '# BEGIN PRIVATE BROWSER EDGE' "$source_caddyfile")" -ne 1 ] \
+    || [ "$(grep -Fxc '# END PRIVATE BROWSER EDGE' "$source_caddyfile")" -ne 1 ]; then
+    printf 'Vonk Forge Caddy staged configuration is invalid\n' >&2
+    exit 1
+  fi
+  agent_temporary=$(mktemp "$runtime_root/.Caddyfile.agent-only.XXXXXX")
+  trap 'rm -f "$agent_temporary"' EXIT HUP INT TERM
+  if ! awk '
+    $0 == "# BEGIN PRIVATE BROWSER EDGE" { hidden = 1; next }
+    $0 == "# END PRIVATE BROWSER EDGE" { hidden = 0; found = 1; next }
+    !hidden { print }
+    END { if (hidden || !found) exit 1 }
+  ' "$source_caddyfile" >"$agent_temporary"; then
+    printf 'Vonk Forge Caddy staged configuration is invalid\n' >&2
+    exit 1
+  fi
+  chmod 0400 "$agent_temporary"
+  mv -f "$agent_temporary" "$agent_caddyfile"
+  trap - EXIT HUP INT TERM
+  selected_caddyfile=$agent_caddyfile
+fi
+
+active_control_hostname=${VONK_CONTROL_HOSTNAME:-}
+"$runtime_caddy" run --config "$selected_caddyfile" --adapter caddyfile &
+caddy_pid=$!
+terminate_caddy() {
+  kill -TERM "$caddy_pid" 2>/dev/null || true
+  wait "$caddy_pid" 2>/dev/null || true
+}
+trap 'terminate_caddy; exit 0' TERM INT
+trap 'terminate_caddy; exit 1' HUP
+
+while kill -0 "$caddy_pid" 2>/dev/null; do
+  observed_control_hostname=
+  if [ -f "$VONK_CONTROL_HOSTNAME_FILE" ] \
+    && [ ! -L "$VONK_CONTROL_HOSTNAME_FILE" ]; then
+    observed_control_hostname=$(cat "$VONK_CONTROL_HOSTNAME_FILE")
+  fi
+  if [ "$observed_control_hostname" != "$active_control_hostname" ]; then
+    terminate_caddy
+    trap - TERM INT HUP
+    exec /bin/sh "$0"
+  fi
+  sleep 2
+done
+wait "$caddy_pid"

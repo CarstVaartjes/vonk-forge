@@ -348,6 +348,7 @@ services:
     volumes:
       - dev-runtime-config:/run/vonk-runtime:ro
       - dev-caddy-secrets:/run/secrets:ro
+      - dev-tailscale-runtime:/run/vonk-tailnet:ro
     tmpfs:
       - /config:rw,noexec,nosuid,nodev,mode=0700,uid=10000,gid=10000
       - /data:rw,noexec,nosuid,nodev,mode=0700,uid=10000,gid=10000
@@ -358,7 +359,8 @@ services:
       VONK_AGENT_ENROLL_HOSTNAME: enroll.vonk-forge.lan
       VONK_AGENT_HOSTNAME: agents.vonk-forge.lan
       VONK_BACKEND_PORT: "8443"
-    networks: [application, ingress]
+      VONK_CONTROL_HOSTNAME_FILE: /run/vonk-tailnet/control-hostname
+    networks: [application, ingress, tailnet-web-edge]
     depends_on:
       control-api: {condition: service_healthy}
       dev-init: {condition: service_completed_successfully}
@@ -368,10 +370,79 @@ services:
       timeout: 5s
       retries: 12
 
+  tailscale-gateway:
+    image: tailscale/tailscale:v1.98.8@sha256:d54b2e6a9c09f0e5ec52e82b9ad4af3d446b54a7c08075e92f11c39dd410105f
+    pull_policy: always
+    hostname: vonk-forge-dev-gateway
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      TS_AUTH_ONCE: "true"
+      TS_CLIENT_ID: file:/run/secrets/tailscale-oauth-client-id
+      TS_CLIENT_SECRET: file:/run/secrets/tailscale-oauth-client-secret
+      TS_EXTRA_ARGS: --advertise-tags=tag:vonk-gateway
+      TS_HOSTNAME: vonk-forge-dev-gateway
+      TS_SOCKET: /var/run/tailscale/tailscaled.sock
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "true"
+    secrets:
+      - tailscale-oauth-client-id
+      - tailscale-oauth-client-secret
+    volumes:
+      - dev-tailscale-state:/var/lib/tailscale
+      - dev-tailscale-socket:/var/run/tailscale
+    tmpfs: [/tmp:size=64m,mode=1777]
+    networks: [ingress, tailnet-web-edge]
+    healthcheck:
+      test: [CMD, tailscale, --socket=/var/run/tailscale/tailscaled.sock, status, --json]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  tailscale-configurator:
+    image: tailscale/tailscale:v1.98.8@sha256:d54b2e6a9c09f0e5ec52e82b9ad4af3d446b54a7c08075e92f11c39dd410105f
+    pull_policy: always
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    network_mode: service:tailscale-gateway
+    entrypoint: [/bin/sh, /run/vonk-runtime/tailscale-configure.sh]
+    volumes:
+      - dev-tailscale-socket:/var/run/tailscale
+      - dev-runtime-config:/run/vonk-runtime:ro
+      - dev-tailscale-runtime:/run/vonk-tailnet
+    tmpfs: [/tmp:size=16m,mode=1777]
+    depends_on:
+      caddy: {condition: service_healthy}
+      tailscale-gateway: {condition: service_healthy}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          test -s /run/vonk-tailnet/control-hostname &&
+          tailscale --socket=/var/run/tailscale/tailscaled.sock status --json |
+          grep -Fq 'service-host' &&
+          tailscale --socket=/var/run/tailscale/tailscaled.sock serve status --json |
+          tr -d '[:space:]' |
+          grep -Fq '"svc:vonk-forge":{"TCP":{"443":{"HTTPS":true}}' &&
+          ! tailscale --socket=/var/run/tailscale/tailscaled.sock serve status --json |
+          tr -d '[:space:]' |
+          grep -Fq '"443":{"HTTP":true}' &&
+          tailscale --socket=/var/run/tailscale/tailscaled.sock serve get-config --all |
+          tr -d '[:space:]' |
+          grep -Fqx '{"services":{"svc:vonk-forge":{"endpoints":{"tcp:443":"http://caddy:8080"}}},"version":"0.0.1"}'
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
 networks:
   application: {internal: true}
   data: {internal: true}
   ingress: {}
+  tailnet-web-edge: {internal: true}
 
 secrets:
   postgres-password:
@@ -402,6 +473,10 @@ secrets:
     file: ./secrets/management-cidrs
   token-signing-key:
     file: ./secrets/token-signing-key
+  tailscale-oauth-client-id:
+    file: ./secrets/tailscale-oauth-client-id
+  tailscale-oauth-client-secret:
+    file: ./secrets/tailscale-oauth-client-secret
 
 volumes:
   dev-postgres-data: {}
@@ -416,4 +491,7 @@ volumes:
   dev-litellm-secrets: {}
   dev-migrate-secrets: {}
   dev-runtime-config: {}
+  dev-tailscale-runtime: {}
+  dev-tailscale-socket: {}
+  dev-tailscale-state: {}
   dev-worker-secrets: {}

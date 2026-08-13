@@ -154,6 +154,7 @@ def test_image_template_hardens_caddy_as_the_only_lan_listener() -> None:
         "VONK_AGENT_ENROLL_HOSTNAME": "enroll.vonk-forge.lan",
         "VONK_AGENT_HOSTNAME": "agents.vonk-forge.lan",
         "VONK_BACKEND_PORT": "8443",
+        "VONK_CONTROL_HOSTNAME_FILE": "/run/vonk-tailnet/control-hostname",
     }
     assert caddy["ports"] == [
         {
@@ -163,7 +164,11 @@ def test_image_template_hardens_caddy_as_the_only_lan_listener() -> None:
             "target": 8443,
         }
     ]
-    assert set(caddy["networks"]) == {"application", "ingress"}
+    assert set(caddy["networks"]) == {
+        "application",
+        "ingress",
+        "tailnet-web-edge",
+    }
     assert caddy["healthcheck"] == {
         "test": [
             "CMD",
@@ -193,6 +198,7 @@ def test_image_template_hardens_caddy_as_the_only_lan_listener() -> None:
     assert set(volumes) == {
         "/run/vonk-runtime",
         "/run/secrets",
+        "/run/vonk-tailnet",
     }
     assert volumes["/run/secrets"] == {
         "type": "volume",
@@ -205,6 +211,13 @@ def test_image_template_hardens_caddy_as_the_only_lan_listener() -> None:
         "type": "volume",
         "source": "dev-runtime-config",
         "target": "/run/vonk-runtime",
+        "read_only": True,
+        "volume": {},
+    }
+    assert volumes["/run/vonk-tailnet"] == {
+        "type": "volume",
+        "source": "dev-tailscale-runtime",
+        "target": "/run/vonk-tailnet",
         "read_only": True,
         "volume": {},
     }
@@ -387,7 +400,11 @@ def test_image_template_enables_only_the_explicit_builtin_agent_authority() -> N
         "required": True,
     }
     assert set(api["networks"]) == {"application", "data", "ingress"}
-    assert set(services["caddy"]["networks"]) == {"application", "ingress"}
+    assert set(services["caddy"]["networks"]) == {
+        "application",
+        "ingress",
+        "tailnet-web-edge",
+    }
     assert services["control-worker"]["networks"] == {
         "application": None,
         "data": None,
