@@ -184,6 +184,8 @@ On every Ubuntu 24.04 ARM64 node:
    [APT `dev` channel setup](../operations/agent-package-release.md#install-the-dev-channel).
 2. Run the installation guide's NVIDIA Docker/CDI preflight, then
    `sudo apt update && sudo apt install vonk-forge-agent`.
+   Require `Linger=yes`, the `vonk-agent` user bus, and rootless Podman with the
+   systemd cgroup manager exactly as shown in that guide before pairing.
 3. Copy only `controller-ca` and `host-runtime-grant-public-key` from the
    private local source bundle to the node. Never copy either corresponding
    private key.

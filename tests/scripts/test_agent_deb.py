@@ -14,6 +14,7 @@ BUILD = ROOT / "scripts/build-agent-deb"
 VERIFY = ROOT / "scripts/verify-agent-deb"
 PREINST = ROOT / "packaging/debian/preinst"
 POSTINST = ROOT / "packaging/debian/postinst"
+PRERM = ROOT / "packaging/debian/prerm"
 DOCKER_FIREWALL = ROOT / "packaging/bin/vonk-forge-docker-firewall"
 
 
@@ -180,6 +181,14 @@ def test_postinst_rejects_exhausted_subid_space(tmp_path: Path) -> None:
     assert result.stdout == ""
 
 
+def test_package_manages_the_rootless_podman_user_manager() -> None:
+    postinst = POSTINST.read_text()
+    prerm = PRERM.read_text()
+
+    assert "/usr/bin/loginctl enable-linger vonk-agent" in postinst
+    assert "/usr/bin/loginctl disable-linger vonk-agent" in prerm
+
+
 def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> None:
     binaries = tmp_path / "binaries"
     binaries.mkdir()
@@ -251,6 +260,12 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
     unit = (payload / "lib/systemd/system/vonk-forge-agent.service").read_text()
     assert "Environment=HOME=/var/lib/vonk-forge-agent" in unit
     assert "Environment=XDG_RUNTIME_DIR=/run/vonk-forge-agent" in unit
+    assert "ProtectControlGroups=yes" in unit
+    assert "ProtectHome=tmpfs" in unit
+    assert "BindReadOnlyPaths=/run/user" in unit
+    assert (
+        "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK" in unit
+    )
     assert "RestrictNamespaces=user mnt pid ipc uts cgroup net" in unit
     assert "ProtectProc=default" in unit
     assert "ProcSubset=all" in unit

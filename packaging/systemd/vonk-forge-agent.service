@@ -43,9 +43,12 @@ DeviceAllow=char-231:* rw
 # builds cannot declare devices; accepted workloads use the signed Docker
 # helper boundary. Raw InfiniBand devices are intentionally not exposed.
 BindPaths=-/dev/fuse -/dev/nvidiactl -/dev/nvidia-uvm -/dev/nvidia-uvm-tools -/dev/nvidia-modeset -/dev/nvidia0
+BindReadOnlyPaths=/run/user
 InaccessiblePaths=-/run/docker.sock
 ProtectSystem=strict
-ProtectHome=yes
+# ProtectHome=tmpfs keeps home directories hidden while allowing the dedicated
+# account's rootless systemd bus to be restored from /run/user read-only.
+ProtectHome=tmpfs
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectKernelLogs=yes
@@ -63,7 +66,7 @@ RestrictNamespaces=user mnt pid ipc uts cgroup net
 Delegate=yes
 RemoveIPC=yes
 SystemCallArchitectures=native
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 ReadOnlyPaths=/var/lib/vonk-forge/slots /var/lib/vonk-forge/supervisor /etc/vonk-forge-agent /usr/lib/vonk-forge
 ReadWritePaths=/var/lib/vonk-forge-agent /run/vonk-forge-agent
 

@@ -113,6 +113,13 @@ startup.
 
 Recipe builds continue to use operation-private rootless Podman storage with
 no Docker socket, GPU, host mount, privileged mode, or private-network access.
+Podman uses the dedicated account's lingering user systemd manager for cgroup
+v2 delegation. The agent service retains `ProtectControlGroups=yes`; it sees
+`/run/user` read-only, and Unix ownership keeps every other user's runtime
+private. Podman alone receives the effective UID's runtime path and user D-Bus
+address. The build command explicitly selects the systemd cgroup manager.
+`AF_NETLINK` is available only because `runc` requires it to create the
+isolated network namespace; the source build still runs with `--network=none`.
 The resulting OCI image is exported through Podman's `docker-archive`
 transport and uploaded by archive digest. The target node downloads the exact
 Docker-loadable archive, verifies size and SHA-256 before requesting authority,
@@ -132,6 +139,11 @@ rootless build sandbox. The root helper receives the Docker CLI/socket paths
 and network/device visibility required by its compiled runtime operations, but
 keeps a closed executable allowlist, no shell, bounded execution, signed
 one-shot grants, and managed read/write paths.
+
+The Debian maintainer lifecycle enables lingering for `vonk-agent` without
+starting the network agent and disables lingering on package removal. This
+makes the rootless cgroup authority available after boot and before any source
+build without adding the account to sudo or Docker.
 
 The documented operator preflight and runtime capability advertisement fail
 closed if Docker, the NVIDIA Container Toolkit, or the configured GPU runtime

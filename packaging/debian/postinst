@@ -12,6 +12,7 @@ if ! getent passwd vonk-agent >/dev/null; then
     adduser --system --ingroup vonk-agent --home /var/lib/vonk-forge-agent \
         --no-create-home --shell /usr/sbin/nologin vonk-agent
 fi
+/usr/bin/loginctl enable-linger vonk-agent >/dev/null
 
 # Podman needs a standard subordinate range to map both OCI image ownership
 # and the required numeric non-root runtime identity. Allocate the first free
