@@ -1998,6 +1998,108 @@ def test_rotate_tailscale_oauth_recovers_a_crash_by_restoring_the_old_pair(
     } == before
 
 
+@pytest.mark.parametrize(
+    "boundary",
+    [
+        "destination-fsync",
+        "commit-marker-fsync",
+        "backup-cleanup",
+        "journal-cleanup",
+    ],
+)
+def test_rotate_tailscale_oauth_exact_retry_recovers_every_commit_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, boundary: str
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    created = _run_generator(secrets_dir)
+    assert created.returncode == 0, created.stderr
+    replacement = _write_oauth_values(
+        tmp_path / "replacement-oauth-inputs",
+        ROTATED_OAUTH_CLIENT_ID,
+        ROTATED_OAUTH_CLIENT_SECRET,
+    )
+    runtime = _load_module()
+    real_fsync = runtime.os.fsync
+    real_unlink = runtime.os.unlink
+    triggered = False
+
+    def descriptor_path(descriptor: int) -> Path:
+        return Path(os.readlink(f"/proc/self/fd/{descriptor}"))
+
+    def crash_at_fsync(descriptor: int) -> None:
+        nonlocal triggered
+        real_fsync(descriptor)
+        if triggered:
+            return
+        path = descriptor_path(descriptor)
+        transactions = [
+            candidate
+            for candidate in secrets_dir.iterdir()
+            if candidate.name.startswith(OAUTH_ROTATION_PREFIX)
+        ]
+        if not transactions:
+            return
+        entries = {candidate.name for candidate in transactions[0].iterdir()}
+        pair_is_new = (
+            (secrets_dir / "tailscale-oauth-client-id").read_bytes()
+            == ROTATED_OAUTH_CLIENT_ID
+            and (secrets_dir / "tailscale-oauth-client-secret").read_bytes()
+            == ROTATED_OAUTH_CLIENT_SECRET
+        )
+        if (
+            boundary == "destination-fsync"
+            and path == secrets_dir
+            and pair_is_new
+            and "committed" not in entries
+        ) or (
+            boundary == "commit-marker-fsync"
+            and path == transactions[0]
+            and "committed" in entries
+        ):
+            triggered = True
+            raise SyntheticRotationCrash(boundary)
+
+    def crash_during_cleanup(
+        path: str, *args: object, **kwargs: object
+    ) -> None:
+        nonlocal triggered
+        real_unlink(path, *args, **kwargs)
+        if (
+            boundary == "backup-cleanup" and path == "old-client-id"
+        ) or (
+            boundary == "journal-cleanup" and path == ROTATION_JOURNAL
+        ):
+            triggered = True
+            raise SyntheticRotationCrash(boundary)
+
+    monkeypatch.setattr(runtime.os, "fsync", crash_at_fsync)
+    monkeypatch.setattr(runtime.os, "unlink", crash_during_cleanup)
+    with pytest.raises(SyntheticRotationCrash):
+        runtime.prepare_runtime_secrets(
+            secrets_dir,
+            **_prepare_arguments(replacement, rotate_tailscale_oauth=True),
+        )
+    assert triggered
+
+    monkeypatch.setattr(runtime.os, "fsync", real_fsync)
+    monkeypatch.setattr(runtime.os, "unlink", real_unlink)
+    recovered = runtime.prepare_runtime_secrets(
+        secrets_dir,
+        **_prepare_arguments(replacement, rotate_tailscale_oauth=True),
+    )
+
+    assert recovered == secrets_dir
+    assert (secrets_dir / "tailscale-oauth-client-id").read_bytes() == (
+        ROTATED_OAUTH_CLIENT_ID
+    )
+    assert (secrets_dir / "tailscale-oauth-client-secret").read_bytes() == (
+        ROTATED_OAUTH_CLIENT_SECRET
+    )
+    assert {path.name for path in secrets_dir.iterdir()} == LOCAL_SOURCE_SECRET_NAMES
+
+
 @pytest.mark.parametrize("state", ["prejournal", "postjournal"])
 def test_rotate_tailscale_oauth_recovery_rejects_foreign_transaction_state(
     tmp_path: Path, state: str

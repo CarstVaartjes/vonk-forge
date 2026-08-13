@@ -9,6 +9,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from types import ModuleType
 
@@ -209,6 +210,150 @@ def test_publishes_exact_two_item_project_without_secret_output(tmp_path: Path) 
         )
         if marker and marker in (result.stdout + result.stderr):
             pytest.fail(f"secret value from {name} leaked to project command output")
+
+
+def test_publication_waits_for_oauth_rotation_and_never_snapshots_a_mixed_pair(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    secrets_dir = _prepare_source_secrets(tmp_path)
+    destination = tmp_path / "nas-project"
+    replacement_root = tmp_path / "replacement-oauth-inputs"
+    replacement_root.mkdir(mode=0o700)
+    replacement_id = replacement_root / "client-id"
+    replacement_secret = replacement_root / "client-secret"
+    replacement_id.write_bytes(b"rotated-tailscale-client-id\n")
+    replacement_secret.write_bytes(b"rotated-tailscale-client-secret\n")
+    replacement_id.chmod(0o600)
+    replacement_secret.chmod(0o600)
+
+    runtime = importlib.util.module_from_spec(
+        importlib.util.spec_from_file_location(
+            "vonk_dev_runtime_secrets_rotation_test", SECRETS_SCRIPT
+        )
+    )
+    assert runtime.__spec__ is not None
+    assert runtime.__spec__.loader is not None
+    runtime.__spec__.loader.exec_module(runtime)
+    project = _load_project_module()
+    first_oauth_install = threading.Event()
+    finish_rotation = threading.Event()
+    source_read_started = threading.Event()
+    rotation_errors: list[BaseException] = []
+    publication_errors: list[BaseException] = []
+    real_replace = runtime.os.replace
+    real_read_regular_at = project._read_regular_at
+    source_identity = (secrets_dir.stat().st_dev, secrets_dir.stat().st_ino)
+
+    def pause_after_first_oauth_install(*args: object, **kwargs: object) -> None:
+        real_replace(*args, **kwargs)
+        if args[:2] == (
+            "new-client-id",
+            "tailscale-oauth-client-id",
+        ):
+            first_oauth_install.set()
+            assert finish_rotation.wait(timeout=5)
+
+    def observe_source_read(
+        directory: int, name: str, **kwargs: object
+    ) -> bytes:
+        metadata = os.fstat(directory)
+        if (metadata.st_dev, metadata.st_ino) == source_identity:
+            source_read_started.set()
+        return real_read_regular_at(directory, name, **kwargs)
+
+    monkeypatch.setattr(runtime.os, "replace", pause_after_first_oauth_install)
+    monkeypatch.setattr(project, "_read_regular_at", observe_source_read)
+
+    def rotate() -> None:
+        try:
+            runtime.prepare_runtime_secrets(
+                secrets_dir,
+                management_cidrs=MANAGEMENT_CIDRS,
+                enroll_hostname=ENROLL_HOSTNAME,
+                agent_hostname=AGENT_HOSTNAME,
+                registry_hostname=REGISTRY_HOSTNAME,
+                tailscale_oauth_client_id_file=replacement_id,
+                tailscale_oauth_client_secret_file=replacement_secret,
+                rotate_tailscale_oauth=True,
+            )
+        except (runtime.RuntimeSecretError, OSError, AssertionError) as error:
+            rotation_errors.append(error)
+
+    def publish() -> None:
+        try:
+            project.publish_project(
+                source_compose=SOURCE_COMPOSE,
+                secrets_dir=secrets_dir,
+                destination=destination,
+                nas_address=NAS_ADDRESS,
+                management_cidrs=MANAGEMENT_CIDRS,
+                direct_fabric_cidrs=DIRECT_FABRIC_CIDRS,
+                enroll_hostname=ENROLL_HOSTNAME,
+                agent_hostname=AGENT_HOSTNAME,
+                registry_hostname=REGISTRY_HOSTNAME,
+            )
+        except (project.ProjectPublicationError, OSError, AssertionError) as error:
+            publication_errors.append(error)
+
+    rotation_thread = threading.Thread(target=rotate)
+    publication_thread = threading.Thread(target=publish)
+    rotation_thread.start()
+    assert first_oauth_install.wait(timeout=5)
+    publication_thread.start()
+    try:
+        assert not source_read_started.wait(timeout=0.5)
+    finally:
+        finish_rotation.set()
+        rotation_thread.join(timeout=5)
+        publication_thread.join(timeout=5)
+
+    assert not rotation_thread.is_alive()
+    assert not publication_thread.is_alive()
+    assert rotation_errors == []
+    assert publication_errors == []
+    assert source_read_started.is_set()
+    published_id = (
+        destination / "secrets" / "tailscale-oauth-client-id"
+    ).read_bytes()
+    published_secret = (
+        destination / "secrets" / "tailscale-oauth-client-secret"
+    ).read_bytes()
+    assert (published_id, published_secret) in {
+        (OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET),
+        (replacement_id.read_bytes(), replacement_secret.read_bytes()),
+    }
+
+
+def test_failed_source_validation_releases_the_shared_generation_lock(
+    tmp_path: Path,
+) -> None:
+    secrets_dir = _prepare_source_secrets(tmp_path)
+    (secrets_dir / "management-cidrs").write_text(
+        "198.51.100.0/24\n", encoding="ascii"
+    )
+    project = _load_project_module()
+
+    with pytest.raises(
+        project.ProjectPublicationError,
+        match="source secret bundle does not match project inputs",
+    ):
+        project.publish_project(
+            source_compose=SOURCE_COMPOSE,
+            secrets_dir=secrets_dir,
+            destination=tmp_path / "nas-project",
+            nas_address=NAS_ADDRESS,
+            management_cidrs=MANAGEMENT_CIDRS,
+            direct_fabric_cidrs=DIRECT_FABRIC_CIDRS,
+            enroll_hostname=ENROLL_HOSTNAME,
+            agent_hostname=AGENT_HOSTNAME,
+            registry_hostname=REGISTRY_HOSTNAME,
+        )
+
+    descriptor = os.open(secrets_dir, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    finally:
+        os.close(descriptor)
 
 
 def project_lock_name(destination: Path) -> str:
