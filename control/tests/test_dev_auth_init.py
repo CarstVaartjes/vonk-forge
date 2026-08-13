@@ -156,6 +156,60 @@ def test_dev_auth_init_rotate_replaces_verifier_and_revokes_sessions(
     assert new_verifier not in output.out + output.err
 
 
+@pytest.mark.parametrize("conflict", ["second-administrator", "admin-wrong-role"])
+def test_dev_auth_init_rotate_rejects_non_unique_authority_without_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    conflict: str,
+) -> None:
+    module = _module()
+    database_url, sessions = _database(tmp_path)
+    old_verifier = hash_password(OLD_PASSWORD)
+    new_verifier = hash_password(NEW_PASSWORD)
+    root = _auth_root(tmp_path, database_url, new_verifier)
+    with sessions.begin() as db:
+        admin = User(
+            subject="admin",
+            role="operator" if conflict == "admin-wrong-role" else "administrator",
+            password_verifier=old_verifier,
+            disabled_at=None,
+        )
+        db.add(admin)
+        db.flush()
+        db.add(
+            LoginSession(
+                user_id=admin.id,
+                digest=sha256(b"synthetic-conflicting-authority-session").hexdigest(),
+                expires_at=NOW + timedelta(hours=1),
+            )
+        )
+        if conflict == "second-administrator":
+            db.add(
+                User(
+                    subject="synthetic-other-administrator",
+                    role="administrator",
+                    password_verifier=hash_password("synthetic other password"),
+                    disabled_at=None,
+                )
+            )
+
+    assert _run(module, monkeypatch, root=root, mode="rotate") == 1
+
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == "development authentication initialization failed\n"
+    assert NEW_PASSWORD not in output.err
+    assert new_verifier not in output.err
+    with sessions() as db:
+        persisted_admin = db.scalar(select(User).where(User.subject == "admin"))
+        login = db.scalar(select(LoginSession))
+    assert persisted_admin is not None
+    assert login is not None
+    assert persisted_admin.password_verifier == old_verifier
+    assert login.revoked_at is None
+
+
 @pytest.mark.parametrize("mode", ["", "BOOTSTRAP", "unknown"])
 def test_dev_auth_init_accepts_only_the_exact_mode_enum(
     tmp_path: Path,

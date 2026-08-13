@@ -10,12 +10,11 @@ from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 
 import pytest
+import vonk_control.browser_auth as browser_auth_module
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
-
-import vonk_control.browser_auth as browser_auth_module
 from vonk_control.auth import Actor
 from vonk_control.browser_auth import (
     BootstrapResult,
@@ -26,7 +25,6 @@ from vonk_control.browser_auth import (
 )
 from vonk_control.models import Base, LoginSession, User
 from vonk_control.passwords import hash_password
-
 
 ADMIN_PASSWORD = "correct horse battery staple"
 NOW = datetime(2026, 8, 13, 9, 30, tzinfo=UTC)
@@ -86,9 +84,7 @@ def add_admin(
         role="administrator",
         disabled_at=disabled_at,
         password_verifier=(
-            hash_password(ADMIN_PASSWORD)
-            if verifier is DEFAULT_VERIFIER
-            else verifier
+            hash_password(ADMIN_PASSWORD) if verifier is DEFAULT_VERIFIER else verifier
         ),
     )
     with sessions.begin() as db:
@@ -216,7 +212,9 @@ def test_login_cleanup_removes_only_a_bounded_batch_of_expired_sessions(
     assert len(expired) == 1
 
 
-def test_rotate_admin_revokes_every_active_session(sessions: sessionmaker[Session]) -> None:
+def test_rotate_admin_revokes_every_active_session(
+    sessions: sessionmaker[Session],
+) -> None:
     """Changing an administrator verifier must invalidate every prior session."""
     add_admin(sessions)
     clock = Clock()
@@ -231,9 +229,9 @@ def test_rotate_admin_revokes_every_active_session(sessions: sessionmaker[Sessio
     first = service.login("admin", ADMIN_PASSWORD)
     second = service.login("admin", ADMIN_PASSWORD)
 
-    assert service.rotate_admin(hash_password("new administrator password")) == BootstrapResult(
-        "rotated"
-    )
+    assert service.rotate_admin(
+        hash_password("new administrator password")
+    ) == BootstrapResult("rotated")
     with sessions() as db:
         rows = db.scalars(select(LoginSession)).all()
     assert len(rows) == 2
@@ -245,7 +243,55 @@ def test_rotate_admin_revokes_every_active_session(sessions: sessionmaker[Sessio
         service.resolve(second.token)
 
 
-def test_bootstrap_admin_is_exact_and_idempotent(sessions: sessionmaker[Session]) -> None:
+@pytest.mark.parametrize("conflict", ["second-administrator", "admin-wrong-role"])
+def test_rotate_admin_rejects_non_unique_authority_without_mutation(
+    sessions: sessionmaker[Session], conflict: str
+) -> None:
+    """Rotation must use the exact same admin/administrator authority as bootstrap."""
+    old_verifier = hash_password(ADMIN_PASSWORD)
+    new_verifier = hash_password("synthetic replacement administrator password")
+    with sessions.begin() as db:
+        admin = User(
+            subject="admin",
+            role="operator" if conflict == "admin-wrong-role" else "administrator",
+            disabled_at=None,
+            password_verifier=old_verifier,
+        )
+        db.add(admin)
+        db.flush()
+        db.add(
+            LoginSession(
+                user_id=admin.id,
+                digest=sha256(b"synthetic-authority-conflict-session").hexdigest(),
+                expires_at=NOW + timedelta(hours=1),
+            )
+        )
+        if conflict == "second-administrator":
+            db.add(
+                User(
+                    subject="synthetic-other-administrator",
+                    role="administrator",
+                    disabled_at=None,
+                    password_verifier=hash_password("synthetic other password"),
+                )
+            )
+    service = browser_auth(sessions, Clock(), opaque(33), opaque(34))
+
+    with pytest.raises(BrowserAuthenticationError):
+        service.rotate_admin(new_verifier)
+
+    with sessions() as db:
+        persisted_admin = db.scalar(select(User).where(User.subject == "admin"))
+        login = db.scalar(select(LoginSession))
+    assert persisted_admin is not None
+    assert login is not None
+    assert persisted_admin.password_verifier == old_verifier
+    assert login.revoked_at is None
+
+
+def test_bootstrap_admin_is_exact_and_idempotent(
+    sessions: sessionmaker[Session],
+) -> None:
     """Changing the bootstrap identity or verifier must not silently replace authority."""
     service = browser_auth(sessions, Clock(), opaque(21), opaque(22))
     verifier = hash_password(ADMIN_PASSWORD)
@@ -287,7 +333,9 @@ def test_throttle_rejects_the_sixth_failed_attempt_for_one_subject(
     """Allowing a sixth failure in five minutes must stop before password work."""
     add_admin(sessions)
     monotonic = MonotonicClock()
-    limiter = LoginRateLimiter(token_signing_key=b"test-token-signing-key", clock=monotonic)
+    limiter = LoginRateLimiter(
+        token_signing_key=b"test-token-signing-key", clock=monotonic
+    )
     service = BrowserAuthService(
         sessions,
         token_signing_key=b"test-token-signing-key",
@@ -311,7 +359,9 @@ def test_throttle_rejects_a_new_subject_after_twenty_global_failures(
     """Dropping the global failure window must not permit the twenty-first attempt."""
     add_admin(sessions)
     monotonic = MonotonicClock()
-    limiter = LoginRateLimiter(token_signing_key=b"test-token-signing-key", clock=monotonic)
+    limiter = LoginRateLimiter(
+        token_signing_key=b"test-token-signing-key", clock=monotonic
+    )
     service = BrowserAuthService(
         sessions,
         token_signing_key=b"test-token-signing-key",
@@ -354,7 +404,9 @@ def test_throttle_success_clears_only_its_subject_failure_state() -> None:
 def test_throttle_evicts_expired_subject_state_before_admission() -> None:
     """Retaining expired subject entries would eventually exhaust the bounded map."""
     monotonic = MonotonicClock()
-    limiter = LoginRateLimiter(token_signing_key=b"test-token-signing-key", clock=monotonic)
+    limiter = LoginRateLimiter(
+        token_signing_key=b"test-token-signing-key", clock=monotonic
+    )
     attempt = limiter.reserve("expired-subject")
     assert attempt is not None
     limiter.fail(attempt)
@@ -527,7 +579,10 @@ def test_postgres_rotation_revokes_a_login_serialized_with_its_user_lock(
     def observe_rotation_select(
         _connection, _cursor, statement, _parameters, _context, _executemany
     ) -> None:
-        if threading.current_thread().name == "browser-auth-rotation" and "FROM users" in statement:
+        if (
+            threading.current_thread().name == "browser-auth-rotation"
+            and "FROM users" in statement
+        ):
             rotation_select_started.set()
 
     def login() -> None:
@@ -538,7 +593,9 @@ def test_postgres_rotation_revokes_a_login_serialized_with_its_user_lock(
 
     def rotate() -> None:
         try:
-            rotation_results.append(service.rotate_admin(hash_password("rotated password")))
+            rotation_results.append(
+                service.rotate_admin(hash_password("rotated password"))
+            )
         except BaseException as error:  # noqa: BLE001 - thread reports test failure
             rotation_results.append(error)
 
@@ -588,7 +645,9 @@ def _concurrently_reserve(
         if attempt is not None:
             limiter.fail(attempt)
 
-    threads = [threading.Thread(target=reserve, args=(subject,)) for subject in subjects]
+    threads = [
+        threading.Thread(target=reserve, args=(subject,)) for subject in subjects
+    ]
     for thread in threads:
         thread.start()
     start.wait(timeout=5)

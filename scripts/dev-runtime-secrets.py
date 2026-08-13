@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import base64
 import datetime as dt
+import fcntl
 import hashlib
 import ipaddress
 import json
@@ -83,11 +84,21 @@ _LEGACY_RUNTIME_SECRET_NAMES = RUNTIME_SECRET_NAMES - {
     _HOST_RUNTIME_PRIVATE,
     _HOST_RUNTIME_PUBLIC,
 }
-_ROTATION_JOURNAL = ".admin-password-rotation"
-_ROTATION_PASSWORD = ".admin-password.rotate"
-_ROTATION_VERIFIER = ".admin-password-verifier.rotate"
-_ROTATION_ENTRIES = frozenset(
-    {_ROTATION_JOURNAL, _ROTATION_PASSWORD, _ROTATION_VERIFIER}
+_ROTATION_PREFIX = ".admin-password-rotation-"
+_ROTATION_NAME = re.compile(r"\.admin-password-rotation-[0-9a-f]{32}\Z")
+_ROTATION_PASSWORD = "admin-password"
+_ROTATION_VERIFIER = "admin-password-verifier"
+_ROTATION_JOURNAL = "journal"
+_ROTATION_MANIFEST_TEMPORARY = ".journal.tmp"
+_LEGACY_ROTATION_JOURNAL = ".admin-password-rotation"
+_LEGACY_ROTATION_PASSWORD = ".admin-password.rotate"
+_LEGACY_ROTATION_VERIFIER = ".admin-password-verifier.rotate"
+_LEGACY_ROTATION_ENTRIES = frozenset(
+    {
+        _LEGACY_ROTATION_JOURNAL,
+        _LEGACY_ROTATION_PASSWORD,
+        _LEGACY_ROTATION_VERIFIER,
+    }
 )
 _ROTATION_DIGEST_KEYS = frozenset(
     {
@@ -101,6 +112,18 @@ _ROTATION_DIGEST_KEYS = frozenset(
 
 class RuntimeSecretError(RuntimeError):
     """The requested development secret operation is unsafe or invalid."""
+
+
+class _OwnedEntry:
+    __slots__ = ("descriptor", "device", "inode", "name")
+
+    def __init__(
+        self, name: str, device: int, inode: int, descriptor: int = -1
+    ) -> None:
+        self.name = name
+        self.device = device
+        self.inode = inode
+        self.descriptor = descriptor
 
 
 def _same_inode(left: os.stat_result, right: os.stat_result) -> bool:
@@ -310,6 +333,257 @@ def _write_file(directory: int, name: str, content: bytes) -> None:
             os.close(descriptor)
 
 
+def _owned_entry(
+    name: str, metadata: os.stat_result, descriptor: int = -1
+) -> _OwnedEntry:
+    return _OwnedEntry(name, metadata.st_dev, metadata.st_ino, descriptor)
+
+
+def _same_owned_entry(entry: _OwnedEntry, metadata: os.stat_result) -> bool:
+    return (entry.device, entry.inode) == (metadata.st_dev, metadata.st_ino)
+
+
+def _unlink_owned_entry(directory: int, entry: _OwnedEntry) -> bool:
+    if entry.descriptor < 0:
+        return False
+    try:
+        current = os.stat(entry.name, dir_fd=directory, follow_symlinks=False)
+    except FileNotFoundError:
+        return False
+    opened = os.fstat(entry.descriptor)
+    if (
+        not _same_inode(current, opened)
+        or not stat.S_ISREG(current.st_mode)
+        or not stat.S_ISREG(opened.st_mode)
+        or current.st_uid != os.geteuid()
+        or opened.st_uid != os.geteuid()
+        or current.st_nlink != 1
+        or opened.st_nlink != 1
+    ):
+        return False
+    os.unlink(entry.name, dir_fd=directory)
+    return True
+
+
+def _close_owned_entry(entry: _OwnedEntry) -> None:
+    if entry.descriptor >= 0:
+        os.close(entry.descriptor)
+        entry.descriptor = -1
+
+
+def _rmdir_owned_entry(directory: int, entry: _OwnedEntry) -> bool:
+    if entry.descriptor < 0:
+        return False
+    try:
+        current = os.stat(entry.name, dir_fd=directory, follow_symlinks=False)
+    except FileNotFoundError:
+        return False
+    opened = os.fstat(entry.descriptor)
+    if (
+        not _same_inode(current, opened)
+        or not stat.S_ISDIR(current.st_mode)
+        or not stat.S_ISDIR(opened.st_mode)
+        or current.st_uid != os.geteuid()
+        or opened.st_uid != os.geteuid()
+        or current.st_nlink != 2
+        or opened.st_nlink != 2
+        or stat.S_IMODE(current.st_mode) != 0o700
+        or stat.S_IMODE(opened.st_mode) != 0o700
+    ):
+        return False
+    os.rmdir(entry.name, dir_fd=directory)
+    return True
+
+
+def _create_owned_file(directory: int, name: str, content: bytes) -> _OwnedEntry:
+    descriptor = -1
+    owned: _OwnedEntry | None = None
+    succeeded = False
+    try:
+        descriptor = os.open(name, _WRITE_FLAGS, _PRIVATE_MODE, dir_fd=directory)
+        opened = os.fstat(descriptor)
+        owned = _owned_entry(name, opened, descriptor)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or opened.st_uid != os.geteuid()
+            or opened.st_nlink != 1
+        ):
+            raise RuntimeSecretError(f"development secret {name} cannot be created")
+        view = memoryview(content)
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:
+                raise OSError("short write")
+            view = view[written:]
+        os.fchmod(descriptor, _PRIVATE_MODE)
+        os.fsync(descriptor)
+        final = os.fstat(descriptor)
+        if (
+            not _same_owned_entry(owned, final)
+            or final.st_size != len(content)
+            or stat.S_IMODE(final.st_mode) != _PRIVATE_MODE
+        ):
+            raise RuntimeSecretError(f"development secret {name} cannot be created")
+        succeeded = True
+        return owned
+    except Exception as error:
+        if owned is not None:
+            _unlink_owned_entry(directory, owned)
+        if isinstance(error, RuntimeSecretError):
+            raise
+        raise RuntimeSecretError(
+            f"development secret {name} cannot be created"
+        ) from error
+    finally:
+        if descriptor >= 0 and not succeeded:
+            if owned is not None:
+                _close_owned_entry(owned)
+            else:
+                os.close(descriptor)
+
+
+def _read_rotation_file(directory: int, name: str) -> tuple[bytes, _OwnedEntry]:
+    descriptor = -1
+    succeeded = False
+    try:
+        listed = os.stat(name, dir_fd=directory, follow_symlinks=False)
+        descriptor = os.open(name, _READ_FLAGS, dir_fd=directory)
+        before = os.fstat(descriptor)
+        if (
+            not _same_inode(listed, before)
+            or not stat.S_ISREG(before.st_mode)
+            or before.st_uid != os.geteuid()
+            or before.st_nlink != 1
+            or stat.S_IMODE(before.st_mode) != _PRIVATE_MODE
+            or not 0 <= before.st_size <= _MAX_SECRET_BYTES
+        ):
+            raise RuntimeSecretError(
+                "development administrator rotation state is invalid"
+            )
+        content = bytearray()
+        while len(content) <= _MAX_SECRET_BYTES:
+            chunk = os.read(descriptor, min(4096, _MAX_SECRET_BYTES + 1 - len(content)))
+            if not chunk:
+                break
+            content.extend(chunk)
+        after = os.fstat(descriptor)
+        identity = (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_nlink,
+            before.st_mtime_ns,
+            before.st_ctime_ns,
+        )
+        updated = (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_nlink,
+            after.st_mtime_ns,
+            after.st_ctime_ns,
+        )
+        if len(content) != before.st_size or identity != updated:
+            raise RuntimeSecretError(
+                "development administrator rotation state is invalid"
+            )
+        succeeded = True
+        return bytes(content), _owned_entry(name, before, descriptor)
+    except RuntimeSecretError:
+        raise
+    except OSError as error:
+        raise RuntimeSecretError(
+            "development administrator rotation state is invalid"
+        ) from error
+    finally:
+        if descriptor >= 0 and not succeeded:
+            os.close(descriptor)
+
+
+def _create_owned_directory(directory: int, name: str) -> tuple[int, _OwnedEntry]:
+    descriptor = -1
+    owned: _OwnedEntry | None = None
+    try:
+        os.mkdir(name, 0o700, dir_fd=directory)
+        listed = os.stat(name, dir_fd=directory, follow_symlinks=False)
+        descriptor = os.open(name, _DIRECTORY_FLAGS, dir_fd=directory)
+        opened = os.fstat(descriptor)
+        owned = _owned_entry(name, opened, descriptor)
+        if (
+            not _same_inode(listed, opened)
+            or not stat.S_ISDIR(opened.st_mode)
+            or opened.st_uid != os.geteuid()
+            or opened.st_nlink != 2
+            or stat.S_IMODE(opened.st_mode) != 0o700
+        ):
+            raise RuntimeSecretError(
+                "development administrator rotation cannot be created"
+            )
+        return descriptor, owned
+    except Exception as error:
+        if owned is not None:
+            _rmdir_owned_entry(directory, owned)
+            _close_owned_entry(owned)
+            descriptor = -1
+        elif descriptor >= 0:
+            os.close(descriptor)
+            descriptor = -1
+        if isinstance(error, RuntimeSecretError):
+            raise
+        raise RuntimeSecretError(
+            "development administrator rotation cannot be created"
+        ) from error
+
+
+def _acquire_mutation_lock(directory: int) -> int:
+    descriptor = -1
+    try:
+        listed = os.stat("management-cidrs", dir_fd=directory, follow_symlinks=False)
+        descriptor = os.open("management-cidrs", _READ_FLAGS, dir_fd=directory)
+        before = os.fstat(descriptor)
+        if (
+            not _same_inode(listed, before)
+            or not stat.S_ISREG(before.st_mode)
+            or before.st_uid != os.geteuid()
+            or before.st_nlink != 1
+            or stat.S_IMODE(before.st_mode) != _PRIVATE_MODE
+            or not 0 < before.st_size <= _MAX_SECRET_BYTES
+        ):
+            raise RuntimeSecretError("development mutation lock is unsafe")
+        identity = (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_nlink,
+            before.st_mtime_ns,
+            before.st_ctime_ns,
+        )
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        named = os.stat("management-cidrs", dir_fd=directory, follow_symlinks=False)
+        after = os.fstat(descriptor)
+        updated = (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_nlink,
+            after.st_mtime_ns,
+            after.st_ctime_ns,
+        )
+        if not _same_inode(named, after) or identity != updated:
+            raise RuntimeSecretError("development mutation lock changed")
+        return descriptor
+    except RuntimeSecretError:
+        if descriptor >= 0:
+            os.close(descriptor)
+        raise
+    except OSError as error:
+        if descriptor >= 0:
+            os.close(descriptor)
+        raise RuntimeSecretError(
+            "development mutation lock cannot be acquired safely"
+        ) from error
+
+
 def _read_external_secret(path: Path) -> bytes:
     parent = _open_private_parent(path)
     try:
@@ -482,6 +756,42 @@ def _admin_credential_pair() -> tuple[bytes, bytes]:
     password = secrets.token_urlsafe(32)
     verifier = hash_password(password)
     return (password + "\n").encode("ascii"), (verifier + "\n").encode("ascii")
+
+
+def _validate_admin_credential(password: bytes, verifier: bytes) -> None:
+    try:
+        admin_password = password.decode("ascii")
+        admin_verifier = verifier.decode("ascii")
+        password_value = admin_password.removesuffix("\n")
+        verifier_value = admin_verifier.removesuffix("\n")
+        verifier_parts = verifier_value.split("$")
+        salt = base64.b64decode(verifier_parts[4] + "=" * (-len(verifier_parts[4]) % 4))
+        password_hash = base64.b64decode(
+            verifier_parts[5] + "=" * (-len(verifier_parts[5]) % 4)
+        )
+    except (IndexError, UnicodeDecodeError, ValueError) as error:
+        raise RuntimeSecretError(
+            "development administrator credential is invalid"
+        ) from error
+    verification = verify_password(verifier_value, password_value)
+    if (
+        admin_password != password_value + "\n"
+        or re.fullmatch(r"[A-Za-z0-9_-]{43}", password_value) is None
+        or admin_verifier != verifier_value + "\n"
+        or verifier_parts[:4]
+        != [
+            "",
+            "argon2id",
+            "v=19",
+            "m=65536,t=3,p=1",
+        ]
+        or len(verifier_parts) != 6
+        or len(salt) != 16
+        or len(password_hash) != 32
+        or not verification.valid
+        or verification.needs_rehash
+    ):
+        raise RuntimeSecretError("development administrator credential is invalid")
 
 
 def _validate_bundle(
@@ -662,39 +972,9 @@ def _validate_bundle(
         "ascii"
     ):
         raise RuntimeSecretError("development management CIDRs do not match")
-    try:
-        admin_password = bundle["admin-password"].decode("ascii")
-        admin_verifier = bundle["admin-password-verifier"].decode("ascii")
-        password_value = admin_password.removesuffix("\n")
-        verifier_value = admin_verifier.removesuffix("\n")
-        verifier_parts = verifier_value.split("$")
-        salt = base64.b64decode(verifier_parts[4] + "=" * (-len(verifier_parts[4]) % 4))
-        password_hash = base64.b64decode(
-            verifier_parts[5] + "=" * (-len(verifier_parts[5]) % 4)
-        )
-    except (IndexError, UnicodeDecodeError, ValueError) as error:
-        raise RuntimeSecretError(
-            "development administrator credential is invalid"
-        ) from error
-    verification = verify_password(verifier_value, password_value)
-    if (
-        admin_password != password_value + "\n"
-        or re.fullmatch(r"[A-Za-z0-9_-]{43}", password_value) is None
-        or admin_verifier != verifier_value + "\n"
-        or verifier_parts[:4]
-        != [
-            "",
-            "argon2id",
-            "v=19",
-            "m=65536,t=3,p=1",
-        ]
-        or len(verifier_parts) != 6
-        or len(salt) != 16
-        or len(password_hash) != 32
-        or not verification.valid
-        or verification.needs_rehash
-    ):
-        raise RuntimeSecretError("development administrator credential is invalid")
+    _validate_admin_credential(
+        bundle["admin-password"], bundle["admin-password-verifier"]
+    )
     for name in (
         "agent-proxy-auth",
         "litellm-master-key",
@@ -836,11 +1116,10 @@ def _upgrade_browser_access(
         agent_hostname=agent_hostname,
         registry_hostname=registry_hostname,
     )
-    attempted: list[str] = []
+    created: list[_OwnedEntry] = []
     try:
         for name, content in sorted(additions.items()):
-            attempted.append(name)
-            _write_file(directory, name, content)
+            created.append(_create_owned_file(directory, name, content))
         os.fsync(directory)
         installed = {name: _read_file(directory, name) for name in RUNTIME_SECRET_NAMES}
         _validate_bundle(
@@ -851,10 +1130,13 @@ def _upgrade_browser_access(
             registry_hostname=registry_hostname,
         )
     except BaseException:
-        for name in attempted:
-            _unlink_if_present(directory, name)
+        for entry in created:
+            _unlink_owned_entry(directory, entry)
         os.fsync(directory)
         raise
+    finally:
+        for entry in created:
+            _close_owned_entry(entry)
 
 
 def _rotation_journal(
@@ -899,7 +1181,7 @@ def _parse_rotation_journal(content: bytes) -> dict[str, str]:
     return document
 
 
-def _rotation_value(directory: int, name: str) -> bytes | None:
+def _legacy_rotation_value(directory: int, name: str) -> bytes | None:
     try:
         os.stat(name, dir_fd=directory, follow_symlinks=False)
     except FileNotFoundError:
@@ -907,11 +1189,11 @@ def _rotation_value(directory: int, name: str) -> bytes | None:
     return _read_file(directory, name)
 
 
-def _finish_admin_rotation(directory: int, journal: dict[str, str]) -> None:
+def _finish_legacy_admin_rotation(directory: int, journal: dict[str, str]) -> None:
     password = _read_file(directory, "admin-password")
     verifier = _read_file(directory, "admin-password-verifier")
-    password_temporary = _rotation_value(directory, _ROTATION_PASSWORD)
-    verifier_temporary = _rotation_value(directory, _ROTATION_VERIFIER)
+    password_temporary = _legacy_rotation_value(directory, _LEGACY_ROTATION_PASSWORD)
+    verifier_temporary = _legacy_rotation_value(directory, _LEGACY_ROTATION_VERIFIER)
     password_digest = _sha256(password)
     verifier_digest = _sha256(verifier)
     temporary_password_digest = (
@@ -943,28 +1225,30 @@ def _finish_admin_rotation(directory: int, journal: dict[str, str]) -> None:
             )
         if password_temporary is not None and verifier_temporary is not None:
             os.replace(
-                _ROTATION_PASSWORD,
+                _LEGACY_ROTATION_PASSWORD,
                 "admin-password",
                 src_dir_fd=directory,
                 dst_dir_fd=directory,
             )
+            os.fsync(directory)
             os.replace(
-                _ROTATION_VERIFIER,
+                _LEGACY_ROTATION_VERIFIER,
                 "admin-password-verifier",
                 src_dir_fd=directory,
                 dst_dir_fd=directory,
             )
         else:
-            _unlink_if_present(directory, _ROTATION_PASSWORD)
-            _unlink_if_present(directory, _ROTATION_VERIFIER)
+            _unlink_if_present(directory, _LEGACY_ROTATION_PASSWORD)
+            _unlink_if_present(directory, _LEGACY_ROTATION_VERIFIER)
     elif (
         password_digest == journal["new_password_sha256"]
         and verifier_digest == journal["old_verifier_sha256"]
         and password_temporary is None
         and temporary_verifier_digest == journal["new_verifier_sha256"]
     ):
+        os.fsync(directory)
         os.replace(
-            _ROTATION_VERIFIER,
+            _LEGACY_ROTATION_VERIFIER,
             "admin-password-verifier",
             src_dir_fd=directory,
             dst_dir_fd=directory,
@@ -974,24 +1258,253 @@ def _finish_admin_rotation(directory: int, journal: dict[str, str]) -> None:
     else:
         raise RuntimeSecretError("development administrator rotation state is invalid")
     os.fsync(directory)
-    _unlink_if_present(directory, _ROTATION_JOURNAL)
+    _unlink_if_present(directory, _LEGACY_ROTATION_JOURNAL)
     os.fsync(directory)
+
+
+def _replace_owned_rotation_file(
+    source: int,
+    entry: _OwnedEntry,
+    destination: int,
+    destination_name: str,
+) -> None:
+    if entry.descriptor < 0:
+        raise RuntimeSecretError("development administrator rotation state is invalid")
+    try:
+        current = os.stat(entry.name, dir_fd=source, follow_symlinks=False)
+        opened = os.fstat(entry.descriptor)
+    except OSError as error:
+        raise RuntimeSecretError(
+            "development administrator rotation state is invalid"
+        ) from error
+    if (
+        not _same_inode(current, opened)
+        or not stat.S_ISREG(current.st_mode)
+        or not stat.S_ISREG(opened.st_mode)
+        or current.st_uid != os.geteuid()
+        or opened.st_uid != os.geteuid()
+        or current.st_nlink != 1
+        or opened.st_nlink != 1
+    ):
+        raise RuntimeSecretError("development administrator rotation state is invalid")
+    os.replace(
+        entry.name,
+        destination_name,
+        src_dir_fd=source,
+        dst_dir_fd=destination,
+    )
+
+
+def _remove_rotation_transaction(
+    directory: int,
+    transaction: int,
+    transaction_entry: _OwnedEntry,
+    entries: dict[str, tuple[bytes, _OwnedEntry]],
+) -> None:
+    for _content, entry in entries.values():
+        _unlink_owned_entry(transaction, entry)
+    if os.listdir(transaction):
+        raise RuntimeSecretError("development administrator rotation state is invalid")
+    os.fsync(transaction)
+    if not _rmdir_owned_entry(directory, transaction_entry):
+        raise RuntimeSecretError("development administrator rotation state is invalid")
+    os.fsync(directory)
+
+
+def _open_rotation_transaction(
+    directory: int, name: str
+) -> tuple[int, _OwnedEntry, dict[str, tuple[bytes, _OwnedEntry]]]:
+    opened = _open_existing_directory(directory, name)
+    if opened is None:
+        raise RuntimeSecretError("development administrator rotation state is invalid")
+    transaction, metadata = opened
+    entries: dict[str, tuple[bytes, _OwnedEntry]] = {}
+    try:
+        if metadata.st_nlink != 2:
+            raise RuntimeSecretError(
+                "development administrator rotation state is invalid"
+            )
+        names = set(os.listdir(transaction))
+        if _ROTATION_JOURNAL not in names:
+            if not names <= {_ROTATION_MANIFEST_TEMPORARY}:
+                raise RuntimeSecretError(
+                    "development administrator rotation state is invalid"
+                )
+        elif not names <= {
+            _ROTATION_JOURNAL,
+            _ROTATION_PASSWORD,
+            _ROTATION_VERIFIER,
+        }:
+            raise RuntimeSecretError(
+                "development administrator rotation state is invalid"
+            )
+        for child in sorted(names):
+            entries[child] = _read_rotation_file(transaction, child)
+        return transaction, _owned_entry(name, metadata, transaction), entries
+    except BaseException:
+        for _content, entry in entries.values():
+            _close_owned_entry(entry)
+        os.close(transaction)
+        raise
+
+
+def _resume_admin_rotation(directory: int, name: str) -> None:
+    transaction = -1
+    transaction_entry: _OwnedEntry | None = None
+    entries: dict[str, tuple[bytes, _OwnedEntry]] = {}
+    try:
+        transaction, transaction_entry, entries = _open_rotation_transaction(
+            directory, name
+        )
+        password = _read_file(directory, "admin-password")
+        verifier = _read_file(directory, "admin-password-verifier")
+        journal_content = entries.get(_ROTATION_JOURNAL, (None, None))[0]
+        if journal_content is None:
+            _validate_admin_credential(password, verifier)
+            _remove_rotation_transaction(
+                directory, transaction, transaction_entry, entries
+            )
+            return
+        journal = _parse_rotation_journal(journal_content)
+
+        password_digest = _sha256(password)
+        verifier_digest = _sha256(verifier)
+        temporary_password = entries.get(_ROTATION_PASSWORD)
+        temporary_verifier = entries.get(_ROTATION_VERIFIER)
+        temporary_password_digest = (
+            None if temporary_password is None else _sha256(temporary_password[0])
+        )
+        temporary_verifier_digest = (
+            None if temporary_verifier is None else _sha256(temporary_verifier[0])
+        )
+        old_pair = (
+            password_digest == journal["old_password_sha256"]
+            and verifier_digest == journal["old_verifier_sha256"]
+        )
+        forward_mixed_pair = (
+            password_digest == journal["new_password_sha256"]
+            and verifier_digest == journal["old_verifier_sha256"]
+        )
+        new_pair = (
+            password_digest == journal["new_password_sha256"]
+            and verifier_digest == journal["new_verifier_sha256"]
+        )
+
+        if old_pair:
+            password_recognized = temporary_password_digest in {
+                None,
+                _sha256(b""),
+                journal["new_password_sha256"],
+            }
+            verifier_recognized = temporary_verifier_digest in {
+                None,
+                _sha256(b""),
+                journal["new_verifier_sha256"],
+            }
+            if not password_recognized or not verifier_recognized:
+                raise RuntimeSecretError(
+                    "development administrator rotation state is invalid"
+                )
+            complete_payloads = (
+                temporary_password_digest == journal["new_password_sha256"]
+                and temporary_verifier_digest == journal["new_verifier_sha256"]
+            )
+            if not complete_payloads:
+                _remove_rotation_transaction(
+                    directory, transaction, transaction_entry, entries
+                )
+                return
+            _replace_owned_rotation_file(
+                transaction,
+                temporary_password[1],
+                directory,
+                "admin-password",
+            )
+            os.fsync(directory)
+            _replace_owned_rotation_file(
+                transaction,
+                temporary_verifier[1],
+                directory,
+                "admin-password-verifier",
+            )
+            os.fsync(directory)
+        elif forward_mixed_pair:
+            if (
+                temporary_password is not None
+                or temporary_verifier_digest != journal["new_verifier_sha256"]
+            ):
+                raise RuntimeSecretError(
+                    "development administrator rotation state is invalid"
+                )
+            os.fsync(directory)
+            _replace_owned_rotation_file(
+                transaction,
+                temporary_verifier[1],
+                directory,
+                "admin-password-verifier",
+            )
+            os.fsync(directory)
+        elif new_pair:
+            if temporary_password is not None or temporary_verifier is not None:
+                raise RuntimeSecretError(
+                    "development administrator rotation state is invalid"
+                )
+        else:
+            raise RuntimeSecretError(
+                "development administrator rotation state is invalid"
+            )
+
+        installed_password = _read_file(directory, "admin-password")
+        installed_verifier = _read_file(directory, "admin-password-verifier")
+        if (
+            _sha256(installed_password) != journal["new_password_sha256"]
+            or _sha256(installed_verifier) != journal["new_verifier_sha256"]
+        ):
+            raise RuntimeSecretError(
+                "development administrator rotation state is invalid"
+            )
+        _validate_admin_credential(installed_password, installed_verifier)
+        _remove_rotation_transaction(directory, transaction, transaction_entry, entries)
+    finally:
+        for _content, entry in entries.values():
+            _close_owned_entry(entry)
+        if transaction_entry is not None:
+            _close_owned_entry(transaction_entry)
+            transaction = -1
+        elif transaction >= 0:
+            os.close(transaction)
 
 
 def _recover_admin_rotation(directory: int) -> None:
     names = set(os.listdir(directory))
-    if _ROTATION_JOURNAL not in names:
-        if names & _ROTATION_ENTRIES:
+    extras = names - RUNTIME_SECRET_NAMES
+    if not extras:
+        return
+    if extras <= _LEGACY_ROTATION_ENTRIES:
+        if _LEGACY_ROTATION_JOURNAL not in extras:
             raise RuntimeSecretError(
                 "development administrator rotation state is invalid"
             )
+        journal = _parse_rotation_journal(
+            _read_file(directory, _LEGACY_ROTATION_JOURNAL)
+        )
+        _finish_legacy_admin_rotation(directory, journal)
         return
-    if not names <= RUNTIME_SECRET_NAMES | _ROTATION_ENTRIES:
+    if len(extras) != 1:
+        raise RuntimeSecretError("development administrator rotation state is invalid")
+    name = next(iter(extras))
+    if _ROTATION_NAME.fullmatch(name) is None:
         raise RuntimeSecretError(
             "development secrets directory contains unknown entries"
         )
-    journal = _parse_rotation_journal(_read_file(directory, _ROTATION_JOURNAL))
-    _finish_admin_rotation(directory, journal)
+    try:
+        _resume_admin_rotation(directory, name)
+    except RuntimeSecretError:
+        raise
+    except OSError as error:
+        raise RuntimeSecretError(
+            "development administrator rotation recovery was interrupted"
+        ) from error
 
 
 def _rotate_admin_password(
@@ -1014,36 +1527,50 @@ def _rotate_admin_password(
         agent_hostname=agent_hostname,
         registry_hostname=registry_hostname,
     )
-    journal_created = False
+    transaction = -1
+    transaction_entry: _OwnedEntry | None = None
+    entries: dict[str, tuple[bytes, _OwnedEntry]] = {}
+    journal_durable = False
+    transaction_name = _ROTATION_PREFIX + secrets.token_hex(16)
     try:
-        _write_file(directory, _ROTATION_PASSWORD, new_password)
-        _write_file(directory, _ROTATION_VERIFIER, new_verifier)
+        transaction, transaction_entry = _create_owned_directory(
+            directory, transaction_name
+        )
         os.fsync(directory)
-        _write_file(
-            directory,
+        journal_content = _rotation_journal(
+            bundle["admin-password"],
+            bundle["admin-password-verifier"],
+            new_password,
+            new_verifier,
+        )
+        journal_entry = _create_owned_file(
+            transaction,
+            _ROTATION_MANIFEST_TEMPORARY,
+            journal_content,
+        )
+        entries[_ROTATION_MANIFEST_TEMPORARY] = (journal_content, journal_entry)
+        os.replace(
+            _ROTATION_MANIFEST_TEMPORARY,
             _ROTATION_JOURNAL,
-            _rotation_journal(
-                bundle["admin-password"],
-                bundle["admin-password-verifier"],
-                new_password,
-                new_verifier,
-            ),
+            src_dir_fd=transaction,
+            dst_dir_fd=transaction,
         )
-        os.fsync(directory)
-        journal_created = True
-        os.replace(
-            _ROTATION_PASSWORD,
-            "admin-password",
-            src_dir_fd=directory,
-            dst_dir_fd=directory,
+        entries.pop(_ROTATION_MANIFEST_TEMPORARY)
+        journal_entry.name = _ROTATION_JOURNAL
+        entries[_ROTATION_JOURNAL] = (journal_content, journal_entry)
+        os.fsync(transaction)
+        journal_durable = True
+        password_entry = _create_owned_file(
+            transaction, _ROTATION_PASSWORD, new_password
         )
-        os.replace(
-            _ROTATION_VERIFIER,
-            "admin-password-verifier",
-            src_dir_fd=directory,
-            dst_dir_fd=directory,
+        entries[_ROTATION_PASSWORD] = (new_password, password_entry)
+        os.fsync(transaction)
+        verifier_entry = _create_owned_file(
+            transaction, _ROTATION_VERIFIER, new_verifier
         )
-        os.fsync(directory)
+        entries[_ROTATION_VERIFIER] = (new_verifier, verifier_entry)
+        os.fsync(transaction)
+        _resume_admin_rotation(directory, transaction_name)
         installed = {name: _read_file(directory, name) for name in RUNTIME_SECRET_NAMES}
         _validate_bundle(
             installed,
@@ -1052,18 +1579,30 @@ def _rotate_admin_password(
             agent_hostname=agent_hostname,
             registry_hostname=registry_hostname,
         )
-        _unlink_if_present(directory, _ROTATION_JOURNAL)
-        os.fsync(directory)
-    except BaseException as error:
-        if not journal_created:
-            _unlink_if_present(directory, _ROTATION_PASSWORD)
-            _unlink_if_present(directory, _ROTATION_VERIFIER)
-            os.fsync(directory)
-        if isinstance(error, OSError) and journal_created:
-            raise RuntimeSecretError(
-                "development administrator rotation was interrupted; rerun to recover"
-            ) from error
-        raise
+    except Exception as error:
+        if not journal_durable and transaction >= 0 and transaction_entry is not None:
+            try:
+                _remove_rotation_transaction(
+                    directory,
+                    transaction,
+                    transaction_entry,
+                    entries,
+                )
+            except (OSError, RuntimeSecretError):
+                pass
+        if isinstance(error, RuntimeSecretError) and not journal_durable:
+            raise
+        raise RuntimeSecretError(
+            "development administrator rotation was interrupted; rerun to recover"
+        ) from error
+    finally:
+        for _content, entry in entries.values():
+            _close_owned_entry(entry)
+        if transaction_entry is not None:
+            _close_owned_entry(transaction_entry)
+            transaction = -1
+        elif transaction >= 0:
+            os.close(transaction)
 
 
 def prepare_runtime_secrets(
@@ -1100,6 +1639,7 @@ def prepare_runtime_secrets(
     )
     parent = _open_private_parent(secrets_dir)
     existing_descriptor = -1
+    mutation_lock = -1
     try:
         if _filesystem_type(secrets_dir) in _UNSAFE_GENERATION_FILESYSTEMS:
             raise RuntimeSecretError(
@@ -1108,6 +1648,8 @@ def prepare_runtime_secrets(
         existing = _open_existing_directory(parent, secrets_dir.name)
         if existing is not None:
             existing_descriptor, existing_metadata = existing
+            if os.listdir(existing_descriptor):
+                mutation_lock = _acquire_mutation_lock(existing_descriptor)
             _recover_admin_rotation(existing_descriptor)
             names = set(os.listdir(existing_descriptor))
             if names:
@@ -1236,6 +1778,8 @@ def prepare_runtime_secrets(
                 _remove_staging(parent, staging_name, staging_descriptor)
         return secrets_dir
     finally:
+        if mutation_lock >= 0:
+            os.close(mutation_lock)
         if existing_descriptor >= 0:
             os.close(existing_descriptor)
         os.close(parent)

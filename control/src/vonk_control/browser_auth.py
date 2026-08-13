@@ -22,7 +22,6 @@ from .auth import Actor
 from .models import LoginSession, User
 from .passwords import verify_password
 
-
 _ADMIN_SUBJECT = "admin"
 _ADMIN_ROLE = "administrator"
 _SESSION_LIFETIME = timedelta(hours=12)
@@ -129,8 +128,14 @@ class LoginRateLimiter:
             attempts = self._subjects.get(identifier)
             if (
                 len(self._global) >= self._maximum_global_failures
-                or (attempts is not None and len(attempts) >= self._maximum_subject_failures)
-                or (attempts is None and len(self._subjects) >= self._maximum_tracked_subjects)
+                or (
+                    attempts is not None
+                    and len(attempts) >= self._maximum_subject_failures
+                )
+                or (
+                    attempts is None
+                    and len(self._subjects) >= self._maximum_tracked_subjects
+                )
             ):
                 return None
             if attempts is None:
@@ -194,6 +199,7 @@ class LoginRateLimiter:
             attempts.remove(state)
             if not attempts:
                 del self._subjects[state.identifier]
+
 
 class BrowserAuthService:
     """Own browser-session lifecycle operations backed by SQLAlchemy rows."""
@@ -318,12 +324,15 @@ class BrowserAuthService:
         self._verifier(verifier)
         now = self._now()
         with self._sessions.begin() as db:
-            user = db.scalar(
+            users = db.scalars(
                 select(User)
-                .where(User.subject == _ADMIN_SUBJECT)
+                .where(or_(User.subject == _ADMIN_SUBJECT, User.role == _ADMIN_ROLE))
                 .with_for_update()
-            )
-            if user is None or user.role != _ADMIN_ROLE:
+            ).all()
+            if len(users) != 1:
+                raise BrowserAuthenticationError()
+            user = users[0]
+            if user.subject != _ADMIN_SUBJECT or user.role != _ADMIN_ROLE:
                 raise BrowserAuthenticationError()
             if user.password_verifier == verifier:
                 return BootstrapResult("unchanged")
@@ -382,8 +391,14 @@ class BrowserAuthService:
 
     def _now(self) -> datetime:
         now = self._clock()
-        if not isinstance(now, datetime) or now.tzinfo is None or now.utcoffset() is None:
-            raise ValueError("browser authentication clock must return an aware datetime")
+        if (
+            not isinstance(now, datetime)
+            or now.tzinfo is None
+            or now.utcoffset() is None
+        ):
+            raise ValueError(
+                "browser authentication clock must return an aware datetime"
+            )
         return now.astimezone(UTC)
 
     @staticmethod

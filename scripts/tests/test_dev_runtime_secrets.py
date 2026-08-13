@@ -2,16 +2,19 @@ from __future__ import annotations
 
 import base64
 import datetime as dt
+import fcntl
 import importlib.util
 import json
 import os
+import queue
 import re
 import stat
 import subprocess
 import sys
 import tempfile
+import threading
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 from cryptography import x509
@@ -68,7 +71,17 @@ BROWSER_ACCESS_SECRET_NAMES = {
     "tailscale-oauth-client-id",
     "tailscale-oauth-client-secret",
 }
-ROTATION_JOURNAL = ".admin-password-rotation"
+ROTATION_PREFIX = ".admin-password-rotation-"
+ROTATION_PASSWORD = "admin-password"
+ROTATION_VERIFIER = "admin-password-verifier"
+ROTATION_JOURNAL = "journal"
+ROTATION_MANIFEST_TEMPORARY = ".journal.tmp"
+
+
+def _rotation_child(transaction: Path, kind: str) -> Path:
+    child = transaction / kind
+    assert child.exists()
+    return child
 
 
 def _write_oauth_inputs(root: Path) -> tuple[Path, Path]:
@@ -189,6 +202,10 @@ def _secret_state(
     }
 
 
+def _descriptor_count() -> int:
+    return len(os.listdir("/proc/self/fd"))
+
+
 def _prior_browser_access_generation(secrets_dir: Path) -> set[str]:
     created = _run_generator(secrets_dir)
     assert created.returncode == 0, created.stderr
@@ -212,6 +229,243 @@ def _prepare_arguments(
         "tailscale_oauth_client_secret_file": client_secret,
         **extra,
     }
+
+
+class SyntheticRotationCrash(BaseException):
+    pass
+
+
+class RotationFaults:
+    def __init__(
+        self,
+        runtime: ModuleType,
+        secrets_dir: Path,
+        *,
+        old_password: bytes,
+        old_verifier: bytes,
+    ) -> None:
+        self.runtime = runtime
+        self.secrets_dir = secrets_dir
+        self.old_password = old_password
+        self.old_verifier = old_verifier
+        self.event = ""
+        self.error = False
+        self.triggered = False
+        self._real = {
+            name: getattr(runtime.os, name)
+            for name in (
+                "close",
+                "fsync",
+                "listdir",
+                "mkdir",
+                "open",
+                "readlink",
+                "replace",
+                "rmdir",
+                "unlink",
+                "write",
+            )
+        }
+
+    def install(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        event: str,
+        *,
+        error: bool = False,
+    ) -> None:
+        self.event = event
+        self.error = error
+        self.triggered = False
+
+        def mkdir(
+            path: str,
+            mode: int = 0o777,
+            *,
+            dir_fd: int | None = None,
+        ) -> None:
+            self._real["mkdir"](path, mode, dir_fd=dir_fd)
+            if str(path).startswith(ROTATION_PREFIX):
+                self._trigger("transaction-create")
+
+        def open_file(
+            path: str,
+            flags: int,
+            mode: int = 0o777,
+            *,
+            dir_fd: int | None = None,
+        ) -> int:
+            descriptor = self._real["open"](path, flags, mode, dir_fd=dir_fd)
+            kind = self._file_kind(descriptor)
+            if flags & os.O_EXCL and kind is not None:
+                try:
+                    self._trigger(f"{kind}-create")
+                except BaseException:
+                    self._real["close"](descriptor)
+                    raise
+            return descriptor
+
+        def write(descriptor: int, content: bytes | memoryview) -> int:
+            kind = self._file_kind(descriptor)
+            if self.event == "manifest-partial-write" and kind == "manifest":
+                written = self._real["write"](descriptor, bytes(content)[:7])
+                self.triggered = True
+                raise OSError("synthetic partial manifest write")
+            written = self._real["write"](descriptor, content)
+            if kind is not None:
+                self._trigger(f"{kind}-write")
+            return written
+
+        def fsync(descriptor: int) -> None:
+            event_name = self._fsync_event(descriptor)
+            if event_name == self.event and self.error:
+                self._trigger(event_name)
+            self._real["fsync"](descriptor)
+            if event_name is not None:
+                self._trigger(event_name)
+
+        def replace(*args: object, **kwargs: object) -> None:
+            self._real["replace"](*args, **kwargs)
+            destination = str(args[1])
+            if destination == ROTATION_JOURNAL:
+                self._trigger("manifest-rename")
+            elif destination == ROTATION_PASSWORD:
+                self._trigger("password-rename")
+            elif destination == ROTATION_VERIFIER:
+                self._trigger("verifier-rename")
+
+        def unlink(path: str, *args: object, **kwargs: object) -> None:
+            self._real["unlink"](path, *args, **kwargs)
+            if str(path) in {ROTATION_JOURNAL, ".admin-password-rotation"}:
+                self._trigger("journal-unlink")
+
+        def rmdir(path: str, *args: object, **kwargs: object) -> None:
+            self._real["rmdir"](path, *args, **kwargs)
+            if str(path).startswith(ROTATION_PREFIX):
+                self._trigger("transaction-remove")
+
+        monkeypatch.setattr(self.runtime.os, "mkdir", mkdir)
+        monkeypatch.setattr(self.runtime.os, "open", open_file)
+        monkeypatch.setattr(self.runtime.os, "write", write)
+        monkeypatch.setattr(self.runtime.os, "fsync", fsync)
+        monkeypatch.setattr(self.runtime.os, "replace", replace)
+        monkeypatch.setattr(self.runtime.os, "unlink", unlink)
+        monkeypatch.setattr(self.runtime.os, "rmdir", rmdir)
+
+    def restore(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for name, function in self._real.items():
+            monkeypatch.setattr(self.runtime.os, name, function)
+
+    def _trigger(self, event: str | None) -> None:
+        if self.triggered or event != self.event:
+            return
+        self.triggered = True
+        if self.error:
+            raise OSError(f"synthetic rotation failure at {event}")
+        raise SyntheticRotationCrash(event)
+
+    def _descriptor_path(self, descriptor: int) -> Path:
+        return Path(self._real["readlink"](f"/proc/self/fd/{descriptor}"))
+
+    def _file_kind(self, descriptor: int) -> str | None:
+        path = self._descriptor_path(descriptor)
+        legacy = {
+            ".admin-password.rotate": "password",
+            ".admin-password-verifier.rotate": "verifier",
+            ".admin-password-rotation": "journal",
+        }
+        if path.name in legacy:
+            return legacy[path.name]
+        if not path.parent.name.startswith(ROTATION_PREFIX):
+            return None
+        if path.name == ROTATION_VERIFIER:
+            return "verifier"
+        if path.name == ROTATION_PASSWORD:
+            return "password"
+        if path.name == ROTATION_MANIFEST_TEMPORARY:
+            return "manifest"
+        return None
+
+    def _fsync_event(self, descriptor: int) -> str | None:
+        path = self._descriptor_path(descriptor)
+        kind = self._file_kind(descriptor)
+        if kind is not None:
+            return f"{kind}-fsync"
+        if path == self.secrets_dir:
+            transactions = [
+                name
+                for name in self._real["listdir"](self.secrets_dir)
+                if name.startswith(ROTATION_PREFIX)
+            ]
+            password = (self.secrets_dir / ROTATION_PASSWORD).read_bytes()
+            verifier = (self.secrets_dir / ROTATION_VERIFIER).read_bytes()
+            if transactions and password == self.old_password:
+                transaction = self.secrets_dir / transactions[0]
+                if not self._real["listdir"](transaction):
+                    return "root-fsync-transaction"
+            if (
+                transactions
+                and password != self.old_password
+                and verifier == self.old_verifier
+            ):
+                return "root-fsync-password"
+            if (
+                transactions
+                and password != self.old_password
+                and verifier != self.old_verifier
+            ):
+                return "root-fsync-verifier"
+            if not transactions and password != self.old_password:
+                return "root-fsync-remove"
+            return None
+        if path.name.startswith(ROTATION_PREFIX):
+            entries = set(self._real["listdir"](descriptor))
+            if entries == {ROTATION_JOURNAL}:
+                return "transaction-fsync-manifest"
+            if entries == {ROTATION_JOURNAL, ROTATION_PASSWORD}:
+                return "transaction-fsync-password"
+            if entries == {
+                ROTATION_JOURNAL,
+                ROTATION_PASSWORD,
+                ROTATION_VERIFIER,
+            }:
+                return "transaction-fsync-verifier"
+            if not entries:
+                return "transaction-fsync-cleanup"
+        return None
+
+
+def _rotation_transaction(secrets_dir: Path) -> Path:
+    transactions = [
+        path for path in secrets_dir.iterdir() if path.name.startswith(ROTATION_PREFIX)
+    ]
+    assert len(transactions) == 1
+    transaction = transactions[0]
+    metadata = transaction.lstat()
+    assert stat.S_ISDIR(metadata.st_mode)
+    assert metadata.st_uid == os.geteuid()
+    assert stat.S_IMODE(metadata.st_mode) == 0o700
+    return transaction
+
+
+def _assert_recovered_admin_pair(
+    secrets_dir: Path,
+    *,
+    old_password: bytes,
+    old_verifier: bytes,
+) -> None:
+    assert {path.name for path in secrets_dir.iterdir()} == LOCAL_SOURCE_SECRET_NAMES
+    password = (secrets_dir / ROTATION_PASSWORD).read_bytes()
+    verifier = (secrets_dir / ROTATION_VERIFIER).read_bytes()
+    password_value = password.decode("ascii").strip()
+    verifier_value = verifier.decode("ascii").strip()
+    assert verify_password(verifier_value, password_value).valid
+    if password == old_password:
+        assert verifier == old_verifier
+    else:
+        assert not verify_password(
+            verifier_value, old_password.decode("ascii").strip()
+        ).valid
 
 
 def test_certificate_window_supports_the_ubuntu_cryptography_api() -> None:
@@ -646,17 +900,17 @@ def test_upgrade_browser_access_removes_only_files_created_by_a_failed_attempt(
     before = _secret_state(secrets_dir, prior_names)
     oauth_files = _write_oauth_inputs(tmp_path / "upgrade-oauth-inputs")
     runtime = _load_module()
-    real_write = runtime._write_file
+    real_write = runtime._create_owned_file
     writes = 0
 
-    def fail_third_write(directory: int, name: str, content: bytes) -> None:
+    def fail_third_write(directory: int, name: str, content: bytes) -> object:
         nonlocal writes
         writes += 1
         if writes == 3:
             raise runtime.RuntimeSecretError("synthetic upgrade interruption")
-        real_write(directory, name, content)
+        return real_write(directory, name, content)
 
-    monkeypatch.setattr(runtime, "_write_file", fail_third_write)
+    monkeypatch.setattr(runtime, "_create_owned_file", fail_third_write)
 
     with pytest.raises(runtime.RuntimeSecretError, match="synthetic upgrade"):
         runtime.prepare_runtime_secrets(
@@ -666,6 +920,536 @@ def test_upgrade_browser_access_removes_only_files_created_by_a_failed_attempt(
 
     assert {path.name for path in secrets_dir.iterdir()} == prior_names
     assert _secret_state(secrets_dir, prior_names) == before
+
+
+def test_upgrade_browser_access_preserves_an_exclusive_create_collision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    prior_names = _prior_browser_access_generation(secrets_dir)
+    before = _secret_state(secrets_dir, prior_names)
+    oauth_files = _write_oauth_inputs(tmp_path / "upgrade-oauth-inputs")
+    runtime = _load_module()
+    before_descriptors = _descriptor_count()
+    real_open = runtime.os.open
+    foreign = b"synthetic-exclusive-create-collision\n"
+    collision: tuple[int, int] | None = None
+
+    def collide_open(
+        path: str,
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        nonlocal collision
+        if (
+            collision is None
+            and path == "admin-password"
+            and flags & os.O_EXCL
+            and dir_fd is not None
+        ):
+            descriptor = real_open(
+                path,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                0o600,
+                dir_fd=dir_fd,
+            )
+            runtime.os.write(descriptor, foreign)
+            runtime.os.fchmod(descriptor, 0o600)
+            runtime.os.fsync(descriptor)
+            metadata = runtime.os.fstat(descriptor)
+            collision = (metadata.st_dev, metadata.st_ino)
+            runtime.os.close(descriptor)
+        return real_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(runtime.os, "open", collide_open)
+
+    with pytest.raises(runtime.RuntimeSecretError):
+        runtime.prepare_runtime_secrets(
+            secrets_dir,
+            **_prepare_arguments(oauth_files, upgrade_browser_access=True),
+        )
+
+    assert collision is not None
+    collision_path = secrets_dir / "admin-password"
+    metadata = collision_path.stat()
+    assert (metadata.st_dev, metadata.st_ino) == collision
+    assert collision_path.read_bytes() == foreign
+    assert _secret_state(secrets_dir, prior_names) == before
+    assert _descriptor_count() == before_descriptors
+
+
+def test_upgrade_browser_access_preserves_a_concurrent_replacement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    prior_names = _prior_browser_access_generation(secrets_dir)
+    before = _secret_state(secrets_dir, prior_names)
+    oauth_files = _write_oauth_inputs(tmp_path / "upgrade-oauth-inputs")
+    runtime = _load_module()
+    before_descriptors = _descriptor_count()
+    real_open = runtime.os.open
+    foreign = b"synthetic-concurrent-replacement\n"
+    replacement: tuple[int, int] | None = None
+
+    def replace_before_second_create(
+        path: str,
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        nonlocal replacement
+        if (
+            replacement is None
+            and path == "admin-password-verifier"
+            and flags & os.O_EXCL
+            and dir_fd is not None
+        ):
+            runtime.os.unlink("admin-password", dir_fd=dir_fd)
+            descriptor = real_open(
+                "admin-password",
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                0o600,
+                dir_fd=dir_fd,
+            )
+            runtime.os.write(descriptor, foreign)
+            runtime.os.fchmod(descriptor, 0o600)
+            runtime.os.fsync(descriptor)
+            metadata = runtime.os.fstat(descriptor)
+            replacement = (metadata.st_dev, metadata.st_ino)
+            runtime.os.close(descriptor)
+            raise OSError("synthetic concurrent replacement")
+        return real_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(runtime.os, "open", replace_before_second_create)
+
+    with pytest.raises(runtime.RuntimeSecretError):
+        runtime.prepare_runtime_secrets(
+            secrets_dir,
+            **_prepare_arguments(oauth_files, upgrade_browser_access=True),
+        )
+
+    assert replacement is not None
+    replacement_path = secrets_dir / "admin-password"
+    metadata = replacement_path.stat()
+    assert (metadata.st_dev, metadata.st_ino) == replacement
+    assert replacement_path.read_bytes() == foreign
+    assert _secret_state(secrets_dir, prior_names) == before
+    assert _descriptor_count() == before_descriptors
+
+
+@pytest.mark.parametrize("operation", ["upgrade", "rotation"])
+def test_mutation_closes_retained_ownership_descriptors_after_success(
+    tmp_path: Path, operation: str
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    oauth_files = _write_oauth_inputs(tmp_path / "oauth-inputs")
+    if operation == "upgrade":
+        _prior_browser_access_generation(secrets_dir)
+        flags = {"upgrade_browser_access": True}
+    else:
+        created = _run_generator(secrets_dir, oauth_files=oauth_files)
+        assert created.returncode == 0, created.stderr
+        flags = {"rotate_admin_password": True}
+    runtime = _load_module()
+    before_descriptors = _descriptor_count()
+
+    runtime.prepare_runtime_secrets(
+        secrets_dir,
+        **_prepare_arguments(oauth_files, **flags),
+    )
+
+    assert _descriptor_count() == before_descriptors
+
+
+@pytest.mark.parametrize("operation", ["upgrade", "rotation"])
+def test_mutation_closes_retained_ownership_descriptors_after_exception(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    oauth_files = _write_oauth_inputs(tmp_path / "oauth-inputs")
+    if operation == "upgrade":
+        _prior_browser_access_generation(secrets_dir)
+        failure_name = "admin-password-verifier"
+        flags = {"upgrade_browser_access": True}
+    else:
+        created = _run_generator(secrets_dir, oauth_files=oauth_files)
+        assert created.returncode == 0, created.stderr
+        failure_name = ROTATION_PASSWORD
+        flags = {"rotate_admin_password": True}
+    runtime = _load_module()
+    real_create = runtime._create_owned_file
+    before_descriptors = _descriptor_count()
+
+    def fail_after_an_owned_entry(directory: int, name: str, content: bytes) -> object:
+        if name == failure_name:
+            raise runtime.RuntimeSecretError("synthetic retained descriptor failure")
+        return real_create(directory, name, content)
+
+    monkeypatch.setattr(runtime, "_create_owned_file", fail_after_an_owned_entry)
+
+    with pytest.raises(runtime.RuntimeSecretError):
+        runtime.prepare_runtime_secrets(
+            secrets_dir,
+            **_prepare_arguments(oauth_files, **flags),
+        )
+
+    assert _descriptor_count() == before_descriptors
+    if operation == "rotation":
+        monkeypatch.setattr(runtime, "_create_owned_file", real_create)
+        runtime.prepare_runtime_secrets(
+            secrets_dir,
+            **_prepare_arguments(oauth_files),
+        )
+        assert _descriptor_count() == before_descriptors
+
+
+def test_rotation_retains_transaction_descriptor_through_recovery_handoff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    oauth_files = _write_oauth_inputs(tmp_path / "oauth-inputs")
+    created = _run_generator(secrets_dir, oauth_files=oauth_files)
+    assert created.returncode == 0, created.stderr
+    runtime = _load_module()
+    real_resume = runtime._resume_admin_rotation
+    before_descriptors = _descriptor_count()
+    retained_at_handoff: list[bool] = []
+
+    def observe_handoff(directory: int, name: str) -> None:
+        transaction = runtime.os.stat(name, dir_fd=directory, follow_symlinks=False)
+        retained = False
+        for descriptor_path in Path("/proc/self/fd").iterdir():
+            try:
+                opened = runtime.os.fstat(int(descriptor_path.name))
+            except (OSError, ValueError):
+                continue
+            if (opened.st_dev, opened.st_ino) == (
+                transaction.st_dev,
+                transaction.st_ino,
+            ):
+                retained = True
+                break
+        retained_at_handoff.append(retained)
+        real_resume(directory, name)
+
+    monkeypatch.setattr(runtime, "_resume_admin_rotation", observe_handoff)
+
+    runtime.prepare_runtime_secrets(
+        secrets_dir,
+        **_prepare_arguments(oauth_files, rotate_admin_password=True),
+    )
+
+    assert retained_at_handoff == [True]
+    assert _descriptor_count() == before_descriptors
+
+
+def test_rotation_preserves_and_rejects_an_exclusive_transaction_collision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    oauth_files = _write_oauth_inputs(tmp_path / "oauth-inputs")
+    created = _run_generator(secrets_dir, oauth_files=oauth_files)
+    assert created.returncode == 0, created.stderr
+    before = _secret_state(secrets_dir, LOCAL_SOURCE_SECRET_NAMES)
+    runtime = _load_module()
+    token = "a" * 32
+    transaction_name = ROTATION_PREFIX + token
+    transaction_path = secrets_dir / transaction_name
+    foreign = b"synthetic-foreign-transaction-entry\n"
+    real_mkdir = runtime.os.mkdir
+    real_open = runtime.os.open
+    collision: tuple[int, int] | None = None
+
+    def collide_mkdir(
+        path: str,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> None:
+        nonlocal collision
+        if path == transaction_name and collision is None and dir_fd is not None:
+            real_mkdir(path, 0o700, dir_fd=dir_fd)
+            metadata = runtime.os.stat(path, dir_fd=dir_fd, follow_symlinks=False)
+            collision = (metadata.st_dev, metadata.st_ino)
+            transaction = real_open(
+                path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dir_fd
+            )
+            descriptor = real_open(
+                "foreign",
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                0o600,
+                dir_fd=transaction,
+            )
+            runtime.os.write(descriptor, foreign)
+            runtime.os.fchmod(descriptor, 0o600)
+            runtime.os.fsync(descriptor)
+            runtime.os.close(descriptor)
+            runtime.os.close(transaction)
+        real_mkdir(path, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(runtime.secrets, "token_hex", lambda _size: token)
+    monkeypatch.setattr(runtime.os, "mkdir", collide_mkdir)
+
+    with pytest.raises(runtime.RuntimeSecretError):
+        runtime.prepare_runtime_secrets(
+            secrets_dir,
+            **_prepare_arguments(oauth_files, rotate_admin_password=True),
+        )
+
+    assert collision is not None
+    metadata = transaction_path.stat()
+    assert (metadata.st_dev, metadata.st_ino) == collision
+    assert (transaction_path / "foreign").read_bytes() == foreign
+    assert _secret_state(secrets_dir, LOCAL_SOURCE_SECRET_NAMES) == before
+
+    monkeypatch.setattr(runtime.os, "mkdir", real_mkdir)
+    with pytest.raises(runtime.RuntimeSecretError):
+        runtime.prepare_runtime_secrets(
+            secrets_dir,
+            **_prepare_arguments(oauth_files),
+        )
+    assert (transaction_path / "foreign").read_bytes() == foreign
+
+
+def test_rotation_preserves_and_rejects_a_concurrent_child_collision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    oauth_files = _write_oauth_inputs(tmp_path / "oauth-inputs")
+    created = _run_generator(secrets_dir, oauth_files=oauth_files)
+    assert created.returncode == 0, created.stderr
+    before = _secret_state(secrets_dir, LOCAL_SOURCE_SECRET_NAMES)
+    runtime = _load_module()
+    real_open = runtime.os.open
+    foreign = b"synthetic-foreign-rotation-child\n"
+    collision: tuple[int, int] | None = None
+
+    def collide_child_open(
+        path: str,
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        nonlocal collision
+        parent = ""
+        if dir_fd is not None:
+            parent = Path(runtime.os.readlink(f"/proc/self/fd/{dir_fd}")).name
+        if (
+            collision is None
+            and parent.startswith(ROTATION_PREFIX)
+            and path.startswith(ROTATION_PASSWORD)
+            and flags & os.O_EXCL
+            and dir_fd is not None
+        ):
+            descriptor = real_open(
+                path,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                0o600,
+                dir_fd=dir_fd,
+            )
+            runtime.os.write(descriptor, foreign)
+            runtime.os.fchmod(descriptor, 0o600)
+            runtime.os.fsync(descriptor)
+            metadata = runtime.os.fstat(descriptor)
+            collision = (metadata.st_dev, metadata.st_ino)
+            runtime.os.close(descriptor)
+        return real_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(runtime.os, "open", collide_child_open)
+
+    with pytest.raises(runtime.RuntimeSecretError):
+        runtime.prepare_runtime_secrets(
+            secrets_dir,
+            **_prepare_arguments(oauth_files, rotate_admin_password=True),
+        )
+
+    transaction_path = _rotation_transaction(secrets_dir)
+    child = next(
+        path
+        for path in transaction_path.iterdir()
+        if path.name.startswith(ROTATION_PASSWORD)
+    )
+    assert collision is not None
+    metadata = child.stat()
+    assert (metadata.st_dev, metadata.st_ino) == collision
+    assert child.read_bytes() == foreign
+    assert _secret_state(secrets_dir, LOCAL_SOURCE_SECRET_NAMES) == before
+
+    monkeypatch.setattr(runtime.os, "open", real_open)
+    with pytest.raises(runtime.RuntimeSecretError):
+        runtime.prepare_runtime_secrets(
+            secrets_dir,
+            **_prepare_arguments(oauth_files),
+        )
+    assert child.read_bytes() == foreign
+
+
+@pytest.mark.parametrize("manifest", [None, b"", b'{"old_password_sha256"'])
+def test_rotation_recovers_only_exact_safe_pre_manifest_debris(
+    tmp_path: Path, manifest: bytes | None
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    oauth_files = _write_oauth_inputs(tmp_path / "oauth-inputs")
+    created = _run_generator(secrets_dir, oauth_files=oauth_files)
+    assert created.returncode == 0, created.stderr
+    before = _secret_state(secrets_dir, LOCAL_SOURCE_SECRET_NAMES)
+    transaction = secrets_dir / (ROTATION_PREFIX + "b" * 32)
+    transaction.mkdir(mode=0o700)
+    if manifest is not None:
+        temporary = transaction / ROTATION_MANIFEST_TEMPORARY
+        temporary.write_bytes(manifest)
+        temporary.chmod(0o600)
+
+    recovered = _run_generator(secrets_dir, oauth_files=oauth_files)
+
+    assert recovered.returncode == 0, recovered.stderr
+    assert _secret_state(secrets_dir, LOCAL_SOURCE_SECRET_NAMES) == before
+    assert not transaction.exists()
+
+
+@pytest.mark.parametrize(
+    "foreign_state",
+    ["transaction-mode", "manifest-mode", "manifest-hardlink", "foreign-entry"],
+)
+def test_rotation_recovery_rejects_foreign_pre_manifest_state(
+    tmp_path: Path, foreign_state: str
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    oauth_files = _write_oauth_inputs(tmp_path / "oauth-inputs")
+    created = _run_generator(secrets_dir, oauth_files=oauth_files)
+    assert created.returncode == 0, created.stderr
+    before = _secret_state(secrets_dir, LOCAL_SOURCE_SECRET_NAMES)
+    transaction = secrets_dir / (ROTATION_PREFIX + "c" * 32)
+    transaction.mkdir(mode=0o700)
+    temporary = transaction / ROTATION_MANIFEST_TEMPORARY
+    if foreign_state == "transaction-mode":
+        transaction.chmod(0o750)
+    elif foreign_state == "manifest-mode":
+        temporary.write_bytes(b"synthetic-partial-manifest")
+        temporary.chmod(0o640)
+    elif foreign_state == "manifest-hardlink":
+        temporary.write_bytes(b"synthetic-partial-manifest")
+        temporary.chmod(0o600)
+        os.link(temporary, transaction / "second-link")
+    else:
+        foreign = transaction / "foreign"
+        foreign.write_bytes(b"synthetic-foreign-state")
+        foreign.chmod(0o600)
+
+    refused = _run_generator(secrets_dir, oauth_files=oauth_files)
+
+    assert refused.returncode == 1
+    assert refused.stdout == ""
+    assert transaction.exists()
+    assert _secret_state(secrets_dir, LOCAL_SOURCE_SECRET_NAMES) == before
+
+    transaction.chmod(0o700)
+    for child in transaction.iterdir():
+        child.unlink()
+    transaction.rmdir()
+
+
+def test_upgrade_and_rotation_invocations_serialize_on_one_kernel_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    oauth_files = _write_oauth_inputs(tmp_path / "oauth-inputs")
+    created = _run_generator(secrets_dir, oauth_files=oauth_files)
+    assert created.returncode == 0, created.stderr
+    runtime = _load_module()
+    real_rotate = runtime._rotate_admin_password
+    real_flock = fcntl.flock
+    first_inside = threading.Event()
+    release_first = threading.Event()
+    observation: queue.Queue[str] = queue.Queue()
+    guard = threading.Lock()
+    lock_attempts = 0
+    mutations = 0
+    results: list[Exception | None] = []
+
+    def observed_flock(descriptor: int, operation: int) -> None:
+        nonlocal lock_attempts
+        with guard:
+            lock_attempts += 1
+            attempt = lock_attempts
+        if attempt == 2:
+            observation.put("lock-attempt")
+        real_flock(descriptor, operation)
+
+    def held_rotation(*args: object, **kwargs: object) -> None:
+        nonlocal mutations
+        with guard:
+            mutations += 1
+            invocation = mutations
+        if invocation == 1:
+            first_inside.set()
+            assert release_first.wait(5)
+        else:
+            observation.put("mutator-entered")
+        real_rotate(*args, **kwargs)
+
+    def invoke(**flags: bool) -> None:
+        try:
+            runtime.prepare_runtime_secrets(
+                secrets_dir,
+                **_prepare_arguments(oauth_files, **flags),
+            )
+        except Exception as error:  # noqa: BLE001 - return thread failures to pytest.
+            results.append(error)
+        else:
+            results.append(None)
+
+    monkeypatch.setattr(
+        runtime,
+        "fcntl",
+        SimpleNamespace(flock=observed_flock, LOCK_EX=fcntl.LOCK_EX),
+        raising=False,
+    )
+    monkeypatch.setattr(runtime, "_rotate_admin_password", held_rotation)
+    first = threading.Thread(
+        target=invoke, kwargs={"rotate_admin_password": True}, daemon=True
+    )
+    second = threading.Thread(
+        target=invoke, kwargs={"rotate_admin_password": True}, daemon=True
+    )
+    first.start()
+    assert first_inside.wait(5)
+    second.start()
+
+    assert observation.get(timeout=5) == "lock-attempt"
+    assert mutations == 1
+    release_first.set()
+    first.join(5)
+    second.join(5)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert results == [None, None]
+    assert {path.name for path in secrets_dir.iterdir()} == LOCAL_SOURCE_SECRET_NAMES
 
 
 def test_rotate_admin_password_changes_only_the_credential_pair_when_explicit(
@@ -709,14 +1493,37 @@ def test_rotate_admin_password_changes_only_the_credential_pair_when_explicit(
 
 
 @pytest.mark.parametrize(
-    ("interrupt_after", "replace_count"),
-    [("journal", 0), ("password", 1), ("verifier", 2)],
+    "event",
+    [
+        "transaction-create",
+        "root-fsync-transaction",
+        "manifest-create",
+        "manifest-write",
+        "manifest-fsync",
+        "manifest-rename",
+        "transaction-fsync-manifest",
+        "password-create",
+        "password-write",
+        "password-fsync",
+        "transaction-fsync-password",
+        "verifier-create",
+        "verifier-write",
+        "verifier-fsync",
+        "transaction-fsync-verifier",
+        "password-rename",
+        "root-fsync-password",
+        "verifier-rename",
+        "root-fsync-verifier",
+        "journal-unlink",
+        "transaction-fsync-cleanup",
+        "transaction-remove",
+        "root-fsync-remove",
+    ],
 )
-def test_rotate_admin_password_recovers_every_interruption_point(
+def test_rotate_admin_password_recovers_every_persisted_crash_boundary(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    interrupt_after: str,
-    replace_count: int,
+    event: str,
 ) -> None:
     protected_parent = tmp_path / "protected"
     protected_parent.mkdir(mode=0o700)
@@ -724,102 +1531,189 @@ def test_rotate_admin_password_recovers_every_interruption_point(
     created = _run_generator(secrets_dir)
     assert created.returncode == 0, created.stderr
     oauth_files = _write_oauth_inputs(tmp_path / "rotation-oauth-inputs")
-    old_password = (secrets_dir / "admin-password").read_text(encoding="ascii").strip()
-    old_verifier = (
-        (secrets_dir / "admin-password-verifier").read_text(encoding="ascii").strip()
-    )
+    old_password = (secrets_dir / ROTATION_PASSWORD).read_bytes()
+    old_verifier = (secrets_dir / ROTATION_VERIFIER).read_bytes()
     runtime = _load_module()
-    real_replace = runtime.os.replace
-    replacements = 0
+    faults = RotationFaults(
+        runtime,
+        secrets_dir,
+        old_password=old_password,
+        old_verifier=old_verifier,
+    )
+    faults.install(monkeypatch, event)
 
-    class SyntheticInterruption(BaseException):
-        pass
-
-    def interrupting_replace(*args: object, **kwargs: object) -> None:
-        nonlocal replacements
-        if replace_count == 0 and replacements == 0:
-            raise SyntheticInterruption()
-        real_replace(*args, **kwargs)
-        replacements += 1
-        if replacements == replace_count:
-            raise SyntheticInterruption()
-
-    monkeypatch.setattr(runtime.os, "replace", interrupting_replace)
-    with pytest.raises(SyntheticInterruption):
+    with pytest.raises(SyntheticRotationCrash):
         runtime.prepare_runtime_secrets(
             secrets_dir,
             **_prepare_arguments(oauth_files, rotate_admin_password=True),
         )
+    assert faults.triggered
 
-    journal_path = secrets_dir / ROTATION_JOURNAL
-    _assert_regular_private_file(journal_path)
-    journal_raw = journal_path.read_bytes()
-    journal = json.loads(journal_raw)
-    assert set(journal) == {
-        "old_password_sha256",
-        "old_verifier_sha256",
-        "new_password_sha256",
-        "new_verifier_sha256",
-    }
-    assert all(re.fullmatch(r"[0-9a-f]{64}", value) for value in journal.values())
-    assert old_password.encode() not in journal_raw
-    assert old_verifier.encode() not in journal_raw
+    if event == "transaction-fsync-manifest":
+        transaction = _rotation_transaction(secrets_dir)
+        journal_path = _rotation_child(transaction, ROTATION_JOURNAL)
+        _assert_regular_private_file(journal_path)
+        journal_raw = journal_path.read_bytes()
+        journal = json.loads(journal_raw)
+        assert set(journal) == {
+            "old_password_sha256",
+            "old_verifier_sha256",
+            "new_password_sha256",
+            "new_verifier_sha256",
+        }
+        assert all(re.fullmatch(r"[0-9a-f]{64}", value) for value in journal.values())
+        assert old_password.strip() not in journal_raw
+        assert old_verifier.strip() not in journal_raw
+        assert len(list(transaction.iterdir())) == 1
 
-    monkeypatch.setattr(runtime.os, "replace", real_replace)
-    recovered = _run_generator(secrets_dir, oauth_files=oauth_files)
-
-    assert recovered.returncode == 0, recovered.stderr
-    assert {path.name for path in secrets_dir.iterdir()} == LOCAL_SOURCE_SECRET_NAMES
-    new_password = (secrets_dir / "admin-password").read_text(encoding="ascii").strip()
-    new_verifier = (
-        (secrets_dir / "admin-password-verifier").read_text(encoding="ascii").strip()
-    )
-    assert verify_password(new_verifier, new_password).valid
-    assert not verify_password(new_verifier, old_password).valid
-    assert old_password not in recovered.stdout + recovered.stderr
-    assert old_verifier not in recovered.stdout + recovered.stderr
-    assert new_password not in recovered.stdout + recovered.stderr
-    assert new_verifier not in recovered.stdout + recovered.stderr
-
-
-def test_rotate_admin_password_reports_filesystem_failure_as_recoverable(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    protected_parent = tmp_path / "protected"
-    protected_parent.mkdir(mode=0o700)
-    secrets_dir = protected_parent / "runtime"
-    created = _run_generator(secrets_dir)
-    assert created.returncode == 0, created.stderr
-    oauth_files = _write_oauth_inputs(tmp_path / "rotation-oauth-inputs")
-    runtime = _load_module()
-    real_replace = runtime.os.replace
-    replacements = 0
-
-    def failing_replace(*args: object, **kwargs: object) -> None:
-        nonlocal replacements
-        real_replace(*args, **kwargs)
-        replacements += 1
-        if replacements == 1:
-            raise OSError("synthetic rotation filesystem failure")
-
-    monkeypatch.setattr(runtime.os, "replace", failing_replace)
-    with pytest.raises(
-        runtime.RuntimeSecretError,
-        match="rotation was interrupted; rerun to recover",
-    ):
-        runtime.prepare_runtime_secrets(
-            secrets_dir,
-            **_prepare_arguments(oauth_files, rotate_admin_password=True),
-        )
-
-    assert (secrets_dir / ROTATION_JOURNAL).is_file()
-    monkeypatch.setattr(runtime.os, "replace", real_replace)
+    faults.restore(monkeypatch)
     runtime.prepare_runtime_secrets(
         secrets_dir,
         **_prepare_arguments(oauth_files),
     )
-    assert {path.name for path in secrets_dir.iterdir()} == LOCAL_SOURCE_SECRET_NAMES
+
+    _assert_recovered_admin_pair(
+        secrets_dir,
+        old_password=old_password,
+        old_verifier=old_verifier,
+    )
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        "transaction-create",
+        "root-fsync-transaction",
+        "manifest-create",
+        "manifest-partial-write",
+        "manifest-write",
+        "manifest-fsync",
+        "manifest-rename",
+        "transaction-fsync-manifest",
+        "password-create",
+        "password-write",
+        "password-fsync",
+        "transaction-fsync-password",
+        "verifier-create",
+        "verifier-write",
+        "verifier-fsync",
+        "transaction-fsync-verifier",
+        "password-rename",
+        "root-fsync-password",
+        "verifier-rename",
+        "root-fsync-verifier",
+        "journal-unlink",
+        "transaction-fsync-cleanup",
+        "transaction-remove",
+        "root-fsync-remove",
+    ],
+)
+def test_rotate_admin_password_recovers_every_filesystem_error_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    event: str,
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    created = _run_generator(secrets_dir)
+    assert created.returncode == 0, created.stderr
+    oauth_files = _write_oauth_inputs(tmp_path / "rotation-oauth-inputs")
+    old_password = (secrets_dir / ROTATION_PASSWORD).read_bytes()
+    old_verifier = (secrets_dir / ROTATION_VERIFIER).read_bytes()
+    runtime = _load_module()
+    faults = RotationFaults(
+        runtime,
+        secrets_dir,
+        old_password=old_password,
+        old_verifier=old_verifier,
+    )
+    faults.install(monkeypatch, event, error=True)
+
+    with pytest.raises(runtime.RuntimeSecretError):
+        runtime.prepare_runtime_secrets(
+            secrets_dir,
+            **_prepare_arguments(oauth_files, rotate_admin_password=True),
+        )
+    assert faults.triggered
+
+    faults.restore(monkeypatch)
+    runtime.prepare_runtime_secrets(
+        secrets_dir,
+        **_prepare_arguments(oauth_files),
+    )
+    _assert_recovered_admin_pair(
+        secrets_dir,
+        old_password=old_password,
+        old_verifier=old_verifier,
+    )
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        "password-rename",
+        "root-fsync-password",
+        "verifier-rename",
+        "root-fsync-verifier",
+        "journal-unlink",
+        "transaction-fsync-cleanup",
+        "transaction-remove",
+        "root-fsync-remove",
+    ],
+)
+def test_admin_rotation_recovery_is_itself_resumable_after_filesystem_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    event: str,
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    created = _run_generator(secrets_dir)
+    assert created.returncode == 0, created.stderr
+    oauth_files = _write_oauth_inputs(tmp_path / "rotation-oauth-inputs")
+    old_password = (secrets_dir / ROTATION_PASSWORD).read_bytes()
+    old_verifier = (secrets_dir / ROTATION_VERIFIER).read_bytes()
+    runtime = _load_module()
+    faults = RotationFaults(
+        runtime,
+        secrets_dir,
+        old_password=old_password,
+        old_verifier=old_verifier,
+    )
+    faults.install(monkeypatch, "transaction-fsync-verifier")
+    with pytest.raises(SyntheticRotationCrash):
+        runtime.prepare_runtime_secrets(
+            secrets_dir,
+            **_prepare_arguments(oauth_files, rotate_admin_password=True),
+        )
+    faults.restore(monkeypatch)
+
+    recovery_faults = RotationFaults(
+        runtime,
+        secrets_dir,
+        old_password=old_password,
+        old_verifier=old_verifier,
+    )
+    recovery_faults.install(monkeypatch, event, error=True)
+    with pytest.raises(runtime.RuntimeSecretError):
+        runtime.prepare_runtime_secrets(
+            secrets_dir,
+            **_prepare_arguments(oauth_files),
+        )
+    assert recovery_faults.triggered
+
+    recovery_faults.restore(monkeypatch)
+    runtime.prepare_runtime_secrets(
+        secrets_dir,
+        **_prepare_arguments(oauth_files),
+    )
+    _assert_recovered_admin_pair(
+        secrets_dir,
+        old_password=old_password,
+        old_verifier=old_verifier,
+    )
 
 
 def test_default_store_is_the_gitignored_local_development_directory(
