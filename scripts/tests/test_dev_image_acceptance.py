@@ -934,6 +934,14 @@ def test_acceptance_exercises_pinned_rollback_and_deletes_only_the_verified_repo
     assert text.count('docker volume rm -- "$repository_volume"') == 1
     assert 'assert_volume_exists "$postgres_volume"' in text
     assert 'assert_volume_exists "$state_volume"' in text
+    retention_block = text[
+        text.index("for retained_volume in") : text.index(
+            "# With only the verified repository volume reset"
+        )
+    ]
+    assert "dev-tailscale-runtime" in retention_block
+    assert "dev-tailscale-socket" not in retention_block
+    assert "dev-tailscale-state" not in retention_block
 
 
 def test_acceptance_diagnostics_are_bounded_and_avoid_raw_secret_output() -> None:

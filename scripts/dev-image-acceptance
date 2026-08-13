@@ -732,7 +732,7 @@ for retained_volume in \
   dev-route-publications dev-supervisor-state dev-api-secrets \
   dev-auth-secrets dev-caddy-secrets dev-litellm-secrets dev-migrate-secrets \
   dev-runtime-config dev-tailscale-secrets dev-tailscale-runtime \
-  dev-tailscale-socket dev-tailscale-state dev-worker-secrets; do
+  dev-worker-secrets; do
   assert_project_volume_exists "$retained_volume"
 done
 
