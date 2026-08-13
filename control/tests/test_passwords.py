@@ -1,3 +1,5 @@
+from base64 import b64decode
+
 import pytest
 from vonk_control.passwords import (
     PasswordPolicyError,
@@ -10,6 +12,9 @@ from vonk_control.passwords import (
 def test_hash_password_emits_the_exact_argon2id_policy() -> None:
     verifier = hash_password("A" * 43)
     assert verifier.startswith("$argon2id$v=19$m=65536,t=3,p=1$")
+    _, _, _, _, encoded_salt, encoded_hash = verifier.split("$")
+    assert len(b64decode(encoded_salt + "=" * (-len(encoded_salt) % 4))) == 16
+    assert len(b64decode(encoded_hash + "=" * (-len(encoded_hash) % 4))) == 32
     assert verify_password(verifier, "A" * 43) == PasswordVerification(True, False)
 
 
