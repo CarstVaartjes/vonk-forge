@@ -549,6 +549,9 @@ def test_security_and_recovery_docs_split_network_and_application_authority() ->
     ):
         assert required in recovery
     assert "--rotate-tailscale-oauth" in recovery
+    assert "--tailscale-oauth-rotation-id" in recovery
+    assert "hash-only sidecar receipt" in recovery
+    assert "trusted offline operator boundary" in threat
 
 
 def test_development_updates_do_not_replace_the_production_trust_boundary() -> None:

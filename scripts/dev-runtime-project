@@ -256,6 +256,10 @@ def _open_locked_source_directory(path: Path) -> int:
         raise ProjectPublicationError(
             "source secrets directory cannot be locked safely"
         ) from error
+    except BaseException:
+        if descriptor >= 0:
+            os.close(descriptor)
+        raise
     finally:
         os.close(parent)
 

@@ -149,6 +149,8 @@ def test_existing_install_browser_upgrade_and_normal_journey_are_complete() -> N
         "Logout",
         "`--rotate-admin-password`",
         "`--rotate-tailscale-oauth`",
+        "`--tailscale-oauth-rotation-id <uuid>`",
+        "hash-only receipt",
         "revokes every existing browser session",
         "Tailscale state",
     ):

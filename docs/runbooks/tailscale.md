@@ -150,7 +150,8 @@ If state cannot be restored, recreate the project with the OAuth files. Verify
 exactly one current tagged node advertises all three Services and revoke the
 orphan. For compromise, revoke OAuth, the node, and its tag/Service approvals;
 for development, capture both replacement values and run the documented
-`--rotate-tailscale-oauth` transaction before republishing and choosing
+`--rotate-tailscale-oauth` transaction with one stable non-secret UUIDv4
+`--tailscale-oauth-rotation-id` before republishing and choosing
 **Pull** then **Redeploy** with every named volume preserved. Production uses
 its selected-generation secret and host-updater boundary. Never add a
 temporary LAN human endpoint.

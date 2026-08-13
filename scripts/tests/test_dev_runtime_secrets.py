@@ -79,6 +79,8 @@ ROTATION_VERIFIER = "admin-password-verifier"
 ROTATION_JOURNAL = "journal"
 ROTATION_MANIFEST_TEMPORARY = ".journal.tmp"
 OAUTH_ROTATION_PREFIX = ".tailscale-oauth-rotation-"
+OAUTH_ROTATION_ID = "2fdb4cf7-f240-4a6f-b52f-06fdb4058d50"
+OTHER_OAUTH_ROTATION_ID = "70d4d13a-5575-43d8-ae60-bf42499901c4"
 
 
 def _rotation_child(transaction: Path, kind: str) -> Path:
@@ -112,6 +114,14 @@ def _run_generator(
     *extra: str,
     oauth_files: tuple[Path, Path] | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    expanded_extra = list(extra)
+    if (
+        "--rotate-tailscale-oauth" in expanded_extra
+        and "--tailscale-oauth-rotation-id" not in expanded_extra
+    ):
+        expanded_extra.extend(
+            ("--tailscale-oauth-rotation-id", OAUTH_ROTATION_ID)
+        )
     with tempfile.TemporaryDirectory(prefix="vonk-oauth-test-") as temporary:
         temporary_root = Path(temporary)
         temporary_root.chmod(0o700)
@@ -136,7 +146,7 @@ def _run_generator(
                 str(client_id),
                 "--tailscale-oauth-client-secret-file",
                 str(client_secret),
-                *extra,
+                *expanded_extra,
             ),
             check=False,
             capture_output=True,
@@ -281,7 +291,7 @@ def _prepare_arguments(
     oauth_files: tuple[Path, Path], **extra: object
 ) -> dict[str, object]:
     client_id, client_secret = oauth_files
-    return {
+    arguments = {
         "management_cidrs": MANAGEMENT_CIDRS,
         "enroll_hostname": ENROLL_HOSTNAME,
         "agent_hostname": AGENT_HOSTNAME,
@@ -290,6 +300,11 @@ def _prepare_arguments(
         "tailscale_oauth_client_secret_file": client_secret,
         **extra,
     }
+    if arguments.get("rotate_tailscale_oauth") and not arguments.get(
+        "tailscale_oauth_rotation_id"
+    ):
+        arguments["tailscale_oauth_rotation_id"] = OAUTH_ROTATION_ID
+    return arguments
 
 
 class SyntheticRotationCrash(BaseException):
@@ -1724,6 +1739,29 @@ def test_rotate_tailscale_oauth_changes_only_the_oauth_pair_when_explicit(
     assert ROTATED_OAUTH_CLIENT_SECRET.decode().strip() not in (
         rotated.stdout + rotated.stderr
     )
+    receipt = protected_parent / ".runtime.tailscale-oauth-rotation-receipt"
+    _assert_regular_private_file(receipt)
+    receipt_document = json.loads(receipt.read_text(encoding="ascii"))
+    assert receipt_document["rotation_id"] == OAUTH_ROTATION_ID
+    assert ROTATED_OAUTH_CLIENT_ID.strip() not in receipt.read_bytes()
+    assert ROTATED_OAUTH_CLIENT_SECRET.strip() not in receipt.read_bytes()
+
+    exact_retry = _run_generator(
+        secrets_dir,
+        "--rotate-tailscale-oauth",
+        oauth_files=replacement,
+    )
+    assert exact_retry.returncode == 0, exact_retry.stderr
+
+    different_operation = _run_generator(
+        secrets_dir,
+        "--rotate-tailscale-oauth",
+        "--tailscale-oauth-rotation-id",
+        OTHER_OAUTH_ROTATION_ID,
+        oauth_files=replacement,
+    )
+    assert different_operation.returncode == 1
+    assert "both be new" in different_operation.stderr
 
 
 def test_rotate_tailscale_oauth_rejects_aliased_inputs_without_mutation(
@@ -2005,6 +2043,7 @@ def test_rotate_tailscale_oauth_recovers_a_crash_by_restoring_the_old_pair(
         "commit-marker-fsync",
         "backup-cleanup",
         "journal-cleanup",
+        "committed-cleanup",
     ],
 )
 def test_rotate_tailscale_oauth_exact_retry_recovers_every_commit_boundary(
@@ -2070,6 +2109,8 @@ def test_rotate_tailscale_oauth_exact_retry_recovers_every_commit_boundary(
             boundary == "backup-cleanup" and path == "old-client-id"
         ) or (
             boundary == "journal-cleanup" and path == ROTATION_JOURNAL
+        ) or (
+            boundary == "committed-cleanup" and path == "committed"
         ):
             triggered = True
             raise SyntheticRotationCrash(boundary)
@@ -2100,6 +2141,85 @@ def test_rotate_tailscale_oauth_exact_retry_recovers_every_commit_boundary(
     assert {path.name for path in secrets_dir.iterdir()} == LOCAL_SOURCE_SECRET_NAMES
 
 
+@pytest.mark.parametrize("cleanup_name", [ROTATION_JOURNAL, "committed"])
+def test_rotate_tailscale_oauth_post_commit_cleanup_error_returns_success(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    cleanup_name: str,
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    created = _run_generator(secrets_dir)
+    assert created.returncode == 0, created.stderr
+    replacement = _write_oauth_values(
+        tmp_path / "replacement-oauth-inputs",
+        ROTATED_OAUTH_CLIENT_ID,
+        ROTATED_OAUTH_CLIENT_SECRET,
+    )
+    runtime = _load_module()
+    real_unlink = runtime.os.unlink
+    triggered = False
+
+    def fail_once_after_journal_cleanup(
+        path: str, *args: object, **kwargs: object
+    ) -> None:
+        nonlocal triggered
+        real_unlink(path, *args, **kwargs)
+        if not triggered and path == cleanup_name:
+            triggered = True
+            raise OSError("synthetic post-commit cleanup failure")
+
+    monkeypatch.setattr(runtime.os, "unlink", fail_once_after_journal_cleanup)
+    result = runtime.prepare_runtime_secrets(
+        secrets_dir,
+        **_prepare_arguments(replacement, rotate_tailscale_oauth=True),
+    )
+
+    assert triggered
+    assert result == secrets_dir
+    assert {path.name for path in secrets_dir.iterdir()} == LOCAL_SOURCE_SECRET_NAMES
+    assert (secrets_dir / "tailscale-oauth-client-id").read_bytes() == (
+        ROTATED_OAUTH_CLIENT_ID
+    )
+
+
+def test_forged_committed_state_cannot_authorize_a_different_rotation_id(
+    tmp_path: Path,
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    created = _run_generator(secrets_dir)
+    assert created.returncode == 0, created.stderr
+    runtime = _load_module()
+    transaction = secrets_dir / (OAUTH_ROTATION_PREFIX + "d" * 32)
+    transaction.mkdir(mode=0o700)
+    committed = transaction / "committed"
+    committed.write_bytes(
+        runtime._oauth_rotation_journal(
+            OAUTH_CLIENT_ID,
+            OAUTH_CLIENT_SECRET,
+            OAUTH_CLIENT_ID,
+            OAUTH_CLIENT_SECRET,
+            OAUTH_ROTATION_ID,
+        )
+    )
+    committed.chmod(0o600)
+
+    refused = _run_generator(
+        secrets_dir,
+        "--rotate-tailscale-oauth",
+        "--tailscale-oauth-rotation-id",
+        OTHER_OAUTH_ROTATION_ID,
+    )
+
+    assert refused.returncode == 1
+    assert "both be new" in refused.stderr
+    assert OAUTH_CLIENT_ID.decode().strip() not in refused.stderr
+    assert OAUTH_CLIENT_SECRET.decode().strip() not in refused.stderr
+
+
 @pytest.mark.parametrize("state", ["prejournal", "postjournal"])
 def test_rotate_tailscale_oauth_recovery_rejects_foreign_transaction_state(
     tmp_path: Path, state: str
@@ -2121,6 +2241,7 @@ def test_rotate_tailscale_oauth_recovery_rejects_foreign_transaction_state(
                 OAUTH_CLIENT_SECRET,
                 ROTATED_OAUTH_CLIENT_ID,
                 ROTATED_OAUTH_CLIENT_SECRET,
+                OAUTH_ROTATION_ID,
             )
         )
         journal.chmod(0o600)

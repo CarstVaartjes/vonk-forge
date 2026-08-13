@@ -624,11 +624,18 @@ as a substitute for restoring PostgreSQL or generated-secret state.
   client with the same narrow scope. Capture both replacement values in new
   private mode-`0600` input files, then rerun the exact complete generator
   command from this runbook with those two inputs and
-  `--rotate-tailscale-oauth`. The locked transaction validates the existing
+  `--rotate-tailscale-oauth`. Generate one non-secret UUIDv4 rotation ID,
+  record it with the replacement OAuth item, and pass it as
+  `--tailscale-oauth-rotation-id <uuid>` on the first attempt and every retry.
+  The generator keeps a mode-`0600` hash-only receipt beside the 21-file
+  generation; include that receipt and the rotation ID in the encrypted source
+  backup. The locked transaction validates the existing
   generation, changes exactly `tailscale-oauth-client-id` and
   `tailscale-oauth-client-secret`, preserves every other file byte-for-byte
   with its mode and ownership, and rolls back an interrupted install before a
-  retry. Back up the completed 21-file generation, republish it with
+  retry. A retry with the same UUID is idempotent even after final transaction
+  cleanup; a different UUID cannot authorize an unchanged pair. Back up the
+  completed 21-file generation and its receipt, republish it with
   `scripts/dev-runtime-project`, then choose **Pull** then **Redeploy** while
   preserving every named volume. Rotate the
   administrator password and revoke browser sessions separately if application

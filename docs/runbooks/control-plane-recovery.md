@@ -45,10 +45,13 @@ loss, administrator password loss, and break-glass loopback.
   one replacement client with only `auth_keys` write and
   `tag:vonk-gateway`, capture both replacement values in private mode-`0600`
   files, and run the development generator's atomic
-  `--rotate-tailscale-oauth` operation against the complete validated local
+  `--rotate-tailscale-oauth` operation with one recorded non-secret UUIDv4
+  `--tailscale-oauth-rotation-id` against the complete validated local
   generation. Republish with `scripts/dev-runtime-project`, choose **Pull**
   then **Redeploy**, and preserve every named volume. The transaction changes
-  only the two OAuth files and rolls back an interrupted install. Then follow
+  only the two OAuth files and rolls back an interrupted install. Reuse the
+  exact UUID for every retry and include the hash-only sidecar receipt in the
+  encrypted source backup. Then follow
   the authoritative
   [browser-access recovery instructions](development-nas-installation.md#rotation-and-recovery).
   Do not rotate an application credential unless that authority was also

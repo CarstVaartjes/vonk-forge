@@ -28,6 +28,7 @@ DIRECT_FABRIC_CIDRS = "198.51.100.0/24,2001:db8:1::/64"
 NAS_ADDRESS = "192.0.2.10"
 OAUTH_CLIENT_ID = b"synthetic-tailscale-client-id\n"
 OAUTH_CLIENT_SECRET = b"synthetic-tailscale-client-secret\n"
+OAUTH_ROTATION_ID = "2fdb4cf7-f240-4a6f-b52f-06fdb4058d50"
 
 EXPECTED_PROJECT_FILES = {
     "docker-compose.yml",
@@ -238,10 +239,12 @@ def test_publication_waits_for_oauth_rotation_and_never_snapshots_a_mixed_pair(
     first_oauth_install = threading.Event()
     finish_rotation = threading.Event()
     source_read_started = threading.Event()
+    shared_lock_attempted = threading.Event()
     rotation_errors: list[BaseException] = []
     publication_errors: list[BaseException] = []
     real_replace = runtime.os.replace
     real_read_regular_at = project._read_regular_at
+    real_flock = project.fcntl.flock
     source_identity = (secrets_dir.stat().st_dev, secrets_dir.stat().st_ino)
 
     def pause_after_first_oauth_install(*args: object, **kwargs: object) -> None:
@@ -261,8 +264,14 @@ def test_publication_waits_for_oauth_rotation_and_never_snapshots_a_mixed_pair(
             source_read_started.set()
         return real_read_regular_at(directory, name, **kwargs)
 
+    def observe_flock(descriptor: int, operation: int) -> None:
+        if operation == fcntl.LOCK_SH:
+            shared_lock_attempted.set()
+        real_flock(descriptor, operation)
+
     monkeypatch.setattr(runtime.os, "replace", pause_after_first_oauth_install)
     monkeypatch.setattr(project, "_read_regular_at", observe_source_read)
+    monkeypatch.setattr(project.fcntl, "flock", observe_flock)
 
     def rotate() -> None:
         try:
@@ -275,6 +284,7 @@ def test_publication_waits_for_oauth_rotation_and_never_snapshots_a_mixed_pair(
                 tailscale_oauth_client_id_file=replacement_id,
                 tailscale_oauth_client_secret_file=replacement_secret,
                 rotate_tailscale_oauth=True,
+                tailscale_oauth_rotation_id=OAUTH_ROTATION_ID,
             )
         except (runtime.RuntimeSecretError, OSError, AssertionError) as error:
             rotation_errors.append(error)
@@ -301,6 +311,7 @@ def test_publication_waits_for_oauth_rotation_and_never_snapshots_a_mixed_pair(
     assert first_oauth_install.wait(timeout=5)
     publication_thread.start()
     try:
+        assert shared_lock_attempted.wait(timeout=5)
         assert not source_read_started.wait(timeout=0.5)
     finally:
         finish_rotation.set()
@@ -352,6 +363,32 @@ def test_failed_source_validation_releases_the_shared_generation_lock(
     descriptor = os.open(secrets_dir, os.O_RDONLY | os.O_DIRECTORY)
     try:
         fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    finally:
+        os.close(descriptor)
+
+
+def test_source_lock_descriptor_is_closed_when_locking_is_interrupted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    secrets_dir = _prepare_source_secrets(tmp_path)
+    project = _load_project_module()
+    real_flock = project.fcntl.flock
+
+    class SyntheticInterrupt(BaseException):
+        pass
+
+    def interrupt_after_lock(descriptor: int, operation: int) -> None:
+        real_flock(descriptor, operation)
+        if operation == fcntl.LOCK_SH:
+            raise SyntheticInterrupt
+
+    monkeypatch.setattr(project.fcntl, "flock", interrupt_after_lock)
+    with pytest.raises(SyntheticInterrupt):
+        project._open_locked_source_directory(secrets_dir)
+
+    descriptor = os.open(secrets_dir, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        real_flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
     finally:
         os.close(descriptor)
 

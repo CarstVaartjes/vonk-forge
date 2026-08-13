@@ -66,6 +66,14 @@ backups, pinned image/SBOM verification, and protected code-host credentials.
 Hardware acceptance is never inferred from simulation and requires explicitly
 approved targets.
 
+The owner of the private mode-`0700` development source generation is a trusted
+offline operator boundary. Its OAuth rotation journals and hash-only receipt
+provide crash consistency and exact UUID-bound retry evidence; they are not a
+defense against that same filesystem owner. An attacker able to fabricate owned
+transaction state can already replace every plaintext source credential, so
+suspected owner compromise requires revoking the OAuth client and rebuilding a
+complete generation from independently trusted encrypted backup.
+
 Hermes intentionally has terminal and Internet tooling. Prompt injection or a
 malicious repository can therefore alter its persisted state, disclose a
 credential available inside its own container, or act through that credential.
