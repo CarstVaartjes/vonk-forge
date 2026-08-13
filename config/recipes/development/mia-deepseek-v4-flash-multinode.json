@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "architecture": "aarch64",
+  "os_id": "ubuntu",
+  "os_version": "24.04",
+  "gpu": "NVIDIA GB10",
+  "compute_capability": "12.1",
+  "cuda_code": "sm_121",
+  "minimum_memory_available_bytes": 124000000000,
+  "minimum_disk_available_bytes": 471236274132,
+  "minimum_fabric_bandwidth_mbps": 200000,
+  "single_nodes": 0,
+  "multinode_nodes": 2
+}

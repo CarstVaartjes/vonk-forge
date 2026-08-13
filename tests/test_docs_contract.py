@@ -13,6 +13,7 @@ COMPOSE_README = ROOT / "deploy/compose/README.md"
 ARCHITECTURE = ROOT / "docs/architecture-overview.md"
 SUPPLY_CHAIN = ROOT / "docs/runbooks/supply-chain.md"
 DEV_WORKLOADS = ROOT / "docs/runbooks/development-agent-workloads.md"
+MIA_TWO_SPARK = ROOT / "docs/runbooks/mia-deepseek-v4-flash.md"
 DEV_WORKLOAD_ACCEPTANCE = ROOT / "docs/audits/development-agent-workload-acceptance.md"
 DEV_WORKLOADS_DESIGN = (
     ROOT
@@ -170,6 +171,9 @@ def test_spark_workload_firewall_is_docker_aware_and_fresh_install_blocking() ->
     assert "recipe_endpoint_port=8000" not in workloads
     assert "original published host port" in workloads
     assert "unlisted Docker-published TCP port" in workloads
+    assert "`VONK-FORGE-HOST`" in workloads
+    assert "`VONK_HOST_ENDPOINT_PORTS=8888`" in workloads
+    assert "`check-host-port`" in workloads
 
 
 def test_fresh_spark_install_does_not_claim_nvidia_platform_ownership() -> None:
@@ -379,6 +383,25 @@ def test_model_commands_bind_private_qualification_and_runtime_evidence() -> Non
     assert "build and distribution evidence" in normalized
     assert "per-node runtime artifact evidence" in normalized
     assert "retained by the acceptance runner" in normalized
+
+
+def test_latest_mia_runbook_is_exact_reproducible_and_secret_free() -> None:
+    text = MIA_TWO_SPARK.read_text()
+    normalized = _normalized_text(MIA_TWO_SPARK)
+
+    for value in (
+        "3c9576c52ab71d89e22fe4621e0d32300a59039a",
+        "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
+        "166898660330",
+        "VONK_HOST_ENDPOINT_PORTS=8888",
+        "check-host-port 8888",
+        "--recipe config/recipes/development/mia-deepseek-v4-flash.json",
+        "--phase model-multinode",
+        "--stop-after inference-ok",
+    ):
+        assert value in text
+    assert "No Hugging Face token" in normalized
+    assert "rank 1 runs headless" in normalized.lower()
 
 
 def test_secret_docs_separate_local_backup_from_exact_nas_projection() -> None:

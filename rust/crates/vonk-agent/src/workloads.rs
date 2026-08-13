@@ -144,8 +144,7 @@ impl WorkloadSpec {
         {
             return Err(WorkloadError::Invalid("endpoint"));
         }
-        if self.security.host_network
-            || self.security.privileged
+        if self.security.privileged
             || !self.security.capabilities.is_empty()
             || !canonical_runtime_mounts(&self.security.mounts)
             || self

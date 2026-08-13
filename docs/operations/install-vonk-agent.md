@@ -162,7 +162,7 @@ one-use grant and repeat this same grant/pair/approve/pair flow.
 
 Before enabling the privileged helper, install
 `/etc/vonk-forge-agent/docker-firewall.conf` and enable
-`vonk-forge-docker-firewall.service` with the exact six-key procedure in
+`vonk-forge-docker-firewall.service` with the exact site-policy procedure in
 [Development agent workloads](../runbooks/development-agent-workloads.md#etchosts-and-firewall).
 This ordering is mandatory: the helper has a systemd requirement on the
 validated policy and fails closed when the file, Docker chain, or managed rules

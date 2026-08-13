@@ -227,12 +227,23 @@ recipes. The current development recipe publishes host port `8000`. If a later
 accepted recipe declares another host port, add it before installation and
 reload the service before permitting that recipe to start.
 
+Connected multi-node recipes may instead use the narrowly accepted host-network
+shape required by the native Spark runtime. Put their API ports in
+`VONK_HOST_ENDPOINT_PORTS`; the current MIA DeepSeek V4 Flash recipe uses
+`VONK_HOST_ENDPOINT_PORTS=8888`. The service places `VONK-FORGE-HOST` first in
+`INPUT`, permits those
+ports only from loopback and the NAS management address, and drops every other
+source. It also permits TCP and UDP to the selected fabric address only from
+the declared peer on the selected fabric interface, which covers the native
+runtime's dynamic peer transport without opening the management interface.
+
 ```ini
 VONK_NAS_MANAGEMENT_IP=<NAS_MANAGEMENT_IP>
 VONK_NODE_MANAGEMENT_IP=<THIS_NODE_MANAGEMENT_IP>
 VONK_NODE_FABRIC_IP=<THIS_NODE_SELECTED_FABRIC_IP>
 VONK_PEER_FABRIC_IP=<PEER_SELECTED_FABRIC_IP>
 VONK_ENDPOINT_HOST_PORTS=8000
+VONK_HOST_ENDPOINT_PORTS=8888
 VONK_RENDEZVOUS_PORT=29500
 ```
 
@@ -248,9 +259,10 @@ sudo /usr/lib/vonk-forge/vonk-forge-docker-firewall \
   --config /etc/vonk-forge-agent/docker-firewall.conf check
 sudo iptables -w -S DOCKER-USER
 sudo iptables -w -S VONK-FORGE
+sudo iptables -w -S VONK-FORGE-HOST
 ```
 
-The parser accepts only those six keys, canonical IPv4 addresses and ports,
+The parser accepts only those seven keys, canonical IPv4 addresses and ports,
 and a root-owned non-writable regular file. It also requires the node's
 management and fabric addresses to be assigned exactly once on two different
 local interfaces; allow rules are bound to those derived ingress interfaces.
@@ -263,6 +275,11 @@ blocking offline package installation or pairing. A recipe port omitted from
 `VONK_ENDPOINT_HOST_PORTS` remains covered by the node-address default drop: the
 run becomes unreachable and fails acceptance, but the unlisted Docker-published
 TCP port is never exposed.
+
+Immediately before a host-network workload starts, the privileged helper runs
+the packaged `check-host-port` action for the exact `VONK_LISTEN_PORT`. Missing
+authorization or firewall drift fails the start before Docker is invoked. Set
+`VONK_HOST_ENDPOINT_PORTS=` when no accepted host-network recipe is installed.
 
 Prove lifecycle coupling once during fresh-node acceptance, with no Vonk or
 other irreplaceable Docker workload active:
@@ -587,6 +604,12 @@ missing container. An absent or exited container must fail the operation and be
 cleaned up rather than waiting on continued lease renewals.
 
 ## Restart persistence
+
+The latest official MIA tensor-parallel workload uses the same operation
+states with a different immutable recipe and Hugging Face snapshot. Follow the
+dedicated [MIA DeepSeek V4 Flash two-Spark runbook](mia-deepseek-v4-flash.md)
+for its exact qualification, host-network firewall, build, run, recovery, and
+cleanup commands.
 
 For the single-node checkpoint, restart the target agent supervisor, then use
 the NAS UI durability action **Stop project**, wait until the project is

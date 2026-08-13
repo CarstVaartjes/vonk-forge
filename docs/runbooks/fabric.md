@@ -18,10 +18,11 @@ Cluster Assistant, review its proposed changes, and retain its generated
 validation report. The historical Netplan and SSH commands have been removed
 from the operational path so they cannot be mistaken for fresh-install
 instructions. Regardless of how addresses are configured, Vonk's
-current container workload contract uses TCP over one declared direct-fabric
-address per node. The host-level RDMA/NCCL measurements in this runbook prove
-the physical platform, but Vonk does not pass raw InfiniBand devices into
-workload containers and does not claim GPUDirect RDMA.
+current container workload contract uses one declared direct-fabric address
+per node. Bridge-mode workloads use address-bound TCP publication. The narrow
+connected-multinode host mode passes `/dev/infiniband` and permits peer-only
+TCP/UDP on that selected interface/address for native NCCL/RoCE; it does not
+grant arbitrary devices or claim GPUDirect RDMA.
 
 `inventory/reports/fabric.json` is committed as explicitly-labelled
 preconfiguration/staging evidence. Do not populate `inventory/cluster.toml` or

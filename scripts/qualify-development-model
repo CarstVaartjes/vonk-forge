@@ -18,6 +18,9 @@ SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 NODE = re.compile(r"spk_[0-9a-f]{32}\Z")
 IMAGE = re.compile(r"ghcr\.io/[a-z0-9._/-]+@sha256:[0-9a-f]{64}\Z")
+HUGGING_FACE_REPOSITORY = re.compile(
+    r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}/[A-Za-z0-9][A-Za-z0-9._-]{0,95}\Z"
+)
 MAXIMUM_DOCUMENT_BYTES = 2 * 1024 * 1024
 
 
@@ -77,15 +80,26 @@ def _artifacts(document: dict[str, Any]) -> list[dict[str, Any]]:
         if not isinstance(identifier, str) or identifier in identifiers:
             raise Refusal("artifact.identity")
         identifiers.add(identifier)
-        if item.get("kind") != "http.file" or not isinstance(repository, str):
+        kind = item.get("kind")
+        if not isinstance(repository, str):
             raise Refusal("artifact.source")
-        if (
-            not isinstance(revision, str)
-            or not revision.startswith("sha256:")
-            or not _lower_sha(revision.removeprefix("sha256:"))
-        ):
-            raise Refusal("artifact.revision")
-        if re.search(r"/resolve/[0-9a-f]{40}/", repository) is None:
+        if kind == "http.file":
+            if (
+                not isinstance(revision, str)
+                or not revision.startswith("sha256:")
+                or not _lower_sha(revision.removeprefix("sha256:"))
+            ):
+                raise Refusal("artifact.revision")
+            if re.search(r"/resolve/[0-9a-f]{40}/", repository) is None:
+                raise Refusal("artifact.source")
+        elif kind == "huggingface.snapshot":
+            if (
+                HUGGING_FACE_REPOSITORY.fullmatch(repository) is None
+                or not isinstance(revision, str)
+                or COMMIT.fullmatch(revision) is None
+            ):
+                raise Refusal("artifact.revision")
+        else:
             raise Refusal("artifact.source")
         if _int(item.get("bytes"), "artifact.bytes") == 0:
             raise Refusal("artifact.bytes")
@@ -96,7 +110,15 @@ def _artifacts(document: dict[str, Any]) -> list[dict[str, Any]]:
 def _validate_source(source: dict[str, Any]) -> str:
     if COMMIT.fullmatch(str(source.get("commit", ""))) is None:
         raise Refusal("source.commit")
-    if not _lower_sha(source.get("archive_sha256")):
+    repository = source.get("repository")
+    if (
+        not isinstance(repository, str)
+        or not repository.startswith("https://github.com/")
+        or repository.count("/") < 4
+    ):
+        raise Refusal("source.repository")
+    archive = source.get("archive_sha256")
+    if archive is not None and not _lower_sha(archive):
         raise Refusal("source.archive")
     image = source.get("runtime_image")
     if not isinstance(image, str) or IMAGE.fullmatch(image) is None:
@@ -133,12 +155,18 @@ def _observed_artifacts(
         raise Refusal("artifact.identity")
     for artifact in expected:
         observed = by_id.get(artifact["id"])
-        if not isinstance(observed, dict) or observed != {
+        expected_observation = {
             "id": artifact["id"],
             "revision": artifact["revision"],
-            "sha256": artifact["revision"].removeprefix("sha256:"),
             "bytes": artifact["bytes"],
-        }:
+        }
+        if artifact["kind"] == "http.file":
+            expected_observation["sha256"] = artifact["revision"].removeprefix(
+                "sha256:"
+            )
+        elif artifact["kind"] == "huggingface.snapshot":
+            expected_observation["repository"] = artifact["repository"]
+        if not isinstance(observed, dict) or observed != expected_observation:
             raise Refusal("artifact.identity")
 
 
@@ -266,7 +294,7 @@ def qualify(
     ]
     if not common_fabric or len(fabric_addresses) != len(set(fabric_addresses)):
         raise Refusal("node.fabric_identity")
-    if topology.get("single_nodes") != 1 or required_nodes != 2:
+    if topology.get("single_nodes") not in (0, 1) or required_nodes != 2:
         raise Refusal("topology.nodes")
     return {
         "schema_version": 1,

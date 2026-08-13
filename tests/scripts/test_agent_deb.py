@@ -96,6 +96,7 @@ VONK_NODE_MANAGEMENT_IP=192.168.1.211
 VONK_NODE_FABRIC_IP=192.168.100.10
 VONK_PEER_FABRIC_IP=192.168.100.11
 VONK_ENDPOINT_HOST_PORTS=8000,8101
+VONK_HOST_ENDPOINT_PORTS=8888
 VONK_RENDEZVOUS_PORT=29500"""
     if replacement is not None:
         old, new = replacement
@@ -314,6 +315,29 @@ def test_docker_firewall_rejects_missing_site_configuration(tmp_path: Path) -> N
 
     assert result.returncode != 0
     assert "site configuration" in result.stderr
+
+
+def test_docker_firewall_requires_explicit_host_endpoint_authority(
+    tmp_path: Path,
+) -> None:
+    config = _firewall_config(tmp_path)
+
+    accepted = subprocess.run(
+        [DOCKER_FIREWALL, "--config", config, "check-host-port", "8888"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    rejected = subprocess.run(
+        [DOCKER_FIREWALL, "--config", config, "check-host-port", "9999"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert accepted.returncode != 64
+    assert rejected.returncode != 0
+    assert "not authorized" in rejected.stderr
 
 
 @pytest.mark.parametrize(

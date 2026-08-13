@@ -2,6 +2,7 @@
 set -eu
 
 chain=VONK-FORGE
+host_chain=VONK-FORGE-HOST
 marker=vonk-forge-managed-v1
 iptables_bin=${VONK_FIREWALL_IPTABLES:-/usr/sbin/iptables}
 ip_bin=${VONK_FIREWALL_IP:-/usr/sbin/ip}
@@ -12,15 +13,21 @@ fail() {
 }
 
 usage() {
-    echo "usage: vonk-forge-docker-firewall --config PATH apply|check" >&2
+    echo "usage: vonk-forge-docker-firewall --config PATH apply|check|check-host-port [PORT]" >&2
     exit 64
 }
 
 [ "${1:-}" = --config ] || usage
 config=${2:-}
 action=${3:-}
-[ "$#" -eq 3 ] || usage
-case "$action" in apply|check) ;; *) usage ;; esac
+requested_host_port=
+case "$action" in
+    apply|check) [ "$#" -eq 3 ] || usage ;;
+    check-host-port)
+        [ "$#" -eq 4 ] || usage
+        requested_host_port=$4 ;;
+    *) usage ;;
+esac
 
 [ -e "$config" ] || fail "site configuration is missing: $config"
 [ ! -L "$config" ] || fail "site configuration must not be a symlink"
@@ -36,12 +43,14 @@ node_management_ip=
 node_fabric_ip=
 peer_fabric_ip=
 endpoint_ports=
+host_endpoint_ports=
 rendezvous_port=
 seen_nas=0
 seen_management=0
 seen_fabric=0
 seen_peer=0
 seen_endpoints=0
+seen_host_endpoints=0
 seen_rendezvous=0
 
 while IFS= read -r line || [ -n "$line" ]; do
@@ -62,6 +71,9 @@ while IFS= read -r line || [ -n "$line" ]; do
         VONK_ENDPOINT_HOST_PORTS=*)
             [ "$seen_endpoints" -eq 0 ] || fail "duplicate VONK_ENDPOINT_HOST_PORTS"
             endpoint_ports=${line#*=}; seen_endpoints=1 ;;
+        VONK_HOST_ENDPOINT_PORTS=*)
+            [ "$seen_host_endpoints" -eq 0 ] || fail "duplicate VONK_HOST_ENDPOINT_PORTS"
+            host_endpoint_ports=${line#*=}; seen_host_endpoints=1 ;;
         VONK_RENDEZVOUS_PORT=*)
             [ "$seen_rendezvous" -eq 0 ] || fail "duplicate VONK_RENDEZVOUS_PORT"
             rendezvous_port=${line#*=}; seen_rendezvous=1 ;;
@@ -115,6 +127,35 @@ for port in "$@"; do
     if [ -z "$canonical_ports" ]; then canonical_ports=$port; else canonical_ports=$canonical_ports,$port; fi
 done
 [ "$canonical_ports" = "$endpoint_ports" ] || fail "endpoint host ports are not canonical"
+
+canonical_host_ports=
+if [ -n "$host_endpoint_ports" ]; then
+    old_ifs=$IFS
+    IFS=,
+    # shellcheck disable=SC2086 # Deliberate field split under comma-only IFS.
+    set -- $host_endpoint_ports
+    IFS=$old_ifs
+    for port in "$@"; do
+        valid_port "$port" || fail "host endpoint port is invalid"
+        [ "$port" != "$rendezvous_port" ] || fail "host endpoint and rendezvous ports must differ"
+        case ",$canonical_host_ports," in *,$port,*) fail "host endpoint ports must be unique" ;; esac
+        if [ -z "$canonical_host_ports" ]; then
+            canonical_host_ports=$port
+        else
+            canonical_host_ports=$canonical_host_ports,$port
+        fi
+    done
+fi
+[ "$canonical_host_ports" = "$host_endpoint_ports" ] \
+    || fail "host endpoint ports are not canonical"
+
+if [ "$action" = check-host-port ]; then
+    valid_port "$requested_host_port" || fail "requested host endpoint port is invalid"
+    case ",$host_endpoint_ports," in
+        *,$requested_host_port,*) ;;
+        *) fail "host endpoint port is not authorized" ;;
+    esac
+fi
 
 [ "$(id -u)" -eq 0 ] || fail "must run as root"
 [ -x "$iptables_bin" ] || fail "iptables is unavailable"
@@ -187,8 +228,51 @@ verify_rules() {
     [ "$actual" -eq "$expected" ] || fail "managed firewall chain contains unexpected rules"
 }
 
-if [ "$action" = check ]; then
+verify_host_rules() {
+    ipt -n -L INPUT >/dev/null 2>&1 || fail "host INPUT chain is unavailable"
+    ipt -n -L "$host_chain" >/dev/null 2>&1 \
+        || fail "managed host firewall chain is unavailable"
+    first_jump=$(ipt -S INPUT | sed -n '/^-A INPUT /{p;q;}')
+    [ "$first_jump" = "-A INPUT -j $host_chain" ] \
+        || fail "managed host firewall jump is not first"
+    require_host_rule -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
+    host_count=0
+    if [ -n "$host_endpoint_ports" ]; then
+        old_ifs=$IFS
+        IFS=,
+        # shellcheck disable=SC2086 # Deliberate field split under comma-only IFS.
+        set -- $host_endpoint_ports
+        IFS=$old_ifs
+        for port in "$@"; do
+            require_host_rule -i lo -p tcp --dport "$port" -j RETURN
+            require_host_rule -i "$management_interface" -p tcp \
+                -s "$nas_management_ip" --dport "$port" -j RETURN
+            require_host_rule -p tcp --dport "$port" -j DROP
+            host_count=$((host_count + 1))
+        done
+    fi
+    require_host_rule -i "$fabric_interface" -s "$peer_fabric_ip" \
+        -d "$node_fabric_ip" -p tcp -j RETURN
+    require_host_rule -i "$fabric_interface" -s "$peer_fabric_ip" \
+        -d "$node_fabric_ip" -p udp -j RETURN
+    require_host_rule -d "$node_fabric_ip" -p tcp -j DROP
+    require_host_rule -d "$node_fabric_ip" -p udp -j DROP
+    require_host_rule -m comment --comment "$marker" -j RETURN
+    expected=$((6 + 3 * host_count))
+    actual=$(ipt -S "$host_chain" | awk -v chain="$host_chain" \
+        '$1 == "-A" && $2 == chain { count++ } END { print count+0 }')
+    [ "$actual" -eq "$expected" ] \
+        || fail "managed host firewall chain contains unexpected rules"
+}
+
+require_host_rule() {
+    ipt -C "$host_chain" "$@" >/dev/null 2>&1 \
+        || fail "managed host firewall rule is missing"
+}
+
+if [ "$action" = check ] || [ "$action" = check-host-port ]; then
     verify_rules
+    verify_host_rules
     exit 0
 fi
 
@@ -223,4 +307,37 @@ ipt -A "$chain" -p tcp -m conntrack --ctorigdst "$node_fabric_ip" \
 ipt -A "$chain" -p tcp -m conntrack --ctorigdst "$node_management_ip" -j DROP
 ipt -A "$chain" -p tcp -m conntrack --ctorigdst "$node_fabric_ip" -j DROP
 ipt -A "$chain" -m comment --comment "$marker" -j RETURN
+
+ipt -n -L INPUT >/dev/null 2>&1 || fail "host INPUT chain is unavailable"
+if ipt -n -L "$host_chain" >/dev/null 2>&1; then
+    ipt -C "$host_chain" -m comment --comment "$marker" -j RETURN >/dev/null 2>&1 \
+        || fail "refusing foreign $host_chain chain"
+else
+    ipt -N "$host_chain"
+fi
+ipt -F "$host_chain"
+while ipt -D INPUT -j "$host_chain" >/dev/null 2>&1; do :; done
+ipt -I INPUT 1 -j "$host_chain"
+ipt -A "$host_chain" -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
+if [ -n "$host_endpoint_ports" ]; then
+    old_ifs=$IFS
+    IFS=,
+    # shellcheck disable=SC2086 # Deliberate field split under comma-only IFS.
+    set -- $host_endpoint_ports
+    IFS=$old_ifs
+    for port in "$@"; do
+        ipt -A "$host_chain" -i lo -p tcp --dport "$port" -j RETURN
+        ipt -A "$host_chain" -i "$management_interface" -p tcp \
+            -s "$nas_management_ip" --dport "$port" -j RETURN
+        ipt -A "$host_chain" -p tcp --dport "$port" -j DROP
+    done
+fi
+ipt -A "$host_chain" -i "$fabric_interface" -s "$peer_fabric_ip" \
+    -d "$node_fabric_ip" -p tcp -j RETURN
+ipt -A "$host_chain" -i "$fabric_interface" -s "$peer_fabric_ip" \
+    -d "$node_fabric_ip" -p udp -j RETURN
+ipt -A "$host_chain" -d "$node_fabric_ip" -p tcp -j DROP
+ipt -A "$host_chain" -d "$node_fabric_ip" -p udp -j DROP
+ipt -A "$host_chain" -m comment --comment "$marker" -j RETURN
 verify_rules
+verify_host_rules

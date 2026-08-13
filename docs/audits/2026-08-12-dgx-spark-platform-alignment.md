@@ -20,8 +20,11 @@ the Docker group and cannot read `/run/docker.sock`. The root helper accepts
 only canonical, expiring requests bound to node, job, operation, attempt,
 fence, action, and SHA-256. It compiles fixed Docker arguments, verifies the
 imported Linux/ARM64 image and numeric non-root user, and rejects privileged
-mode, host networking, arbitrary mounts/devices, raw InfiniBand, added
-capabilities, socket mounts, and unbounded resources.
+mode, arbitrary mounts/devices, added capabilities, socket mounts, and
+unbounded resources. The later direct-fabric extension accepts host networking,
+host IPC, and `/dev/infiniband` only as one complete connected-multinode shape
+with a successful host-firewall preflight; partial or additional privilege is
+still rejected.
 Accepted containers keep a read-only root and receive only a bounded writable
 `/tmp` tmpfs for standard lock/temporary files. Readiness also revalidates the
 exact managed Docker container every ten seconds, so a process that exits
@@ -173,7 +176,7 @@ undocumented NVIDIA factory state untouched; a future Docker-API aggregator or
 Swarm deployment must resolve it with NVIDIA/Docker support before enrollment.
 
 The remaining host boundary is now packaged rather than pasted: a root-owned
-six-key site file drives `vonk-forge-docker-firewall.service`, which is bound to
+site file drives `vonk-forge-docker-firewall.service`, which is bound to
 Docker's lifecycle and required by the privileged runtime helper. It validates
 the complete IPv4 `DOCKER-USER` chain, protects the recipe's original published
 host ports (not merely its container-internal port), and rejects drift or a
@@ -185,6 +188,12 @@ equivalent signed IPv6 policy exists. Its namespace acceptance passed on Spark
 on Spark 1 and Spark 2, the packaged verifier passed against each live
 `DOCKER-USER` policy, and ordered supervisor/NAS restarts preserved the same
 two-rank workload and route.
+
+The 2026-08-13 direct-fabric extension adds the separately managed
+`VONK-FORGE-HOST` `INPUT` chain. Host-network recipe endpoints require an
+explicit `VONK_HOST_ENDPOINT_PORTS` entry and a successful helper preflight;
+only the NAS management source can reach them, while peer transport is limited
+to the declared peer and selected fabric interface/address.
 
 The accepted inventory vocabulary now reports
 `fabric.connected.mbps.200000`, separating observed link connectivity from the
