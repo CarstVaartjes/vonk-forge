@@ -2,6 +2,7 @@ import {render, screen, waitFor} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {App} from "./app";
 import {AuthProvider, AuthenticationRequired} from "./auth";
+import {ApiClient} from "./api/client";
 import type {ControlApi} from "./api/types";
 
 const session = {
@@ -33,6 +34,7 @@ function controlApi(overrides: Partial<TestApi> = {}): TestApi {
 
 afterEach(() => {
   history.replaceState(null, "", "/");
+  vi.unstubAllGlobals();
 });
 
 it("keeps the control shell hidden until an unauthenticated startup check reaches the login page", async () => {
@@ -64,6 +66,32 @@ it("shows only the administrator sign-in form after a 401 session check", async 
   expect(screen.getByLabelText("Administrator account")).toHaveValue("admin");
   expect(screen.getByLabelText("Administrator account")).toHaveAttribute("autocomplete", "username");
   expect(screen.getByLabelText("Password")).toHaveAttribute("autocomplete", "current-password");
+});
+
+it("renders the bounded throttle guidance for an ApiClient login 429", async () => {
+  // Break caught: ApiClient loses the HTTP status from a real throttle
+  // response, so the login page shows generic guidance instead of the
+  // bounded retry message.
+  const paths: string[] = [];
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = input instanceof Request ? input : new Request(new URL(String(input), location.origin), init);
+    const path = new URL(request.url).pathname;
+    paths.push(path);
+    if (path === "/api/v1/auth/session") {
+      return new Response(JSON.stringify({detail: "authentication failed"}), {status: 401});
+    }
+    return new Response(JSON.stringify({detail: "authentication temporarily unavailable"}), {status: 429});
+  });
+  const api = new ApiClient();
+  const user = userEvent.setup();
+
+  render(<AuthProvider api={api}><App api={api}/></AuthProvider>);
+  await screen.findByRole("heading", {name: "Sign in"});
+  await user.type(screen.getByLabelText("Password"), "synthetic-test-password");
+  await user.click(screen.getByRole("button", {name: "Sign in"}));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("Sign in is temporarily unavailable. Please try again.");
+  expect(paths).toEqual(["/api/v1/auth/session", "/api/v1/auth/login"]);
 });
 
 it("opens Fleet with the authenticated administrator identity after a successful login", async () => {

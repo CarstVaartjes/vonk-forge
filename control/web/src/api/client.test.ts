@@ -67,6 +67,20 @@ it("throws and emits one centralized authentication signal for an API 401", asyn
   expect(signals).toBe(1);
 });
 
+it("emits one authentication-required callback for a generated revoke 401", async () => {
+  // Break caught: generated response middleware and revoke's local response
+  // handling each notify the shell for the same expired-session response.
+  vi.stubGlobal("fetch", async () => new Response(JSON.stringify({detail: "authentication failed"}), {
+    headers: {"Content-Type": "application/json"}, status: 401,
+  }));
+  const api = new ApiClient();
+  let signals = 0;
+  api.onAuthenticationRequired(() => { signals += 1; });
+
+  await expect(api.revokeAgentNode("spk_0123456789abcdef0123456789abcdef")).rejects.toBeInstanceOf(AuthenticationRequired);
+  expect(signals).toBe(1);
+});
+
 it("adds the session CSRF token to generated enrollment mutations", async () => {
   document.cookie = "vonk_csrf=csrf-value; path=/";
   let captured: Request | undefined;

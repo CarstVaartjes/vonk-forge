@@ -56,8 +56,14 @@ function csrfToken(): string | undefined {
   return cookie?.slice(cookie.indexOf("=") + 1);
 }
 
+export class ApiError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
 function resultData<T>(result: {data?: T; error?: unknown; response: Response}): T {
-  if (result.response.status === 401) throw new AuthenticationRequired();
   if (result.data === undefined) {
     const detail = typeof result.error === "object" && result.error !== null && "detail" in result.error
       ? String(result.error.detail).slice(0, 256)
@@ -167,7 +173,7 @@ export class ApiClient implements ControlApi {
         return new Request(request, {headers});
       },
       onResponse: ({response}) => {
-        if (response.status === 401) this.authenticationRequired?.();
+        this.requireAuthentication(response);
       },
     });
   }
@@ -201,9 +207,9 @@ export class ApiClient implements ControlApi {
         const body = problem as {code?: unknown; detail?: unknown};
         const code = typeof body.code === "string" ? body.code.slice(0, 128) : `HTTP ${response.status}`;
         const detail = typeof body.detail === "string" ? body.detail.slice(0, 256) : "request failed";
-        throw new Error(`${code}: ${detail}`);
+        throw new ApiError(response.status, `${code}: ${detail}`);
       }
-      throw new Error(`Control API returned ${response.status}`);
+      throw new ApiError(response.status, `Control API returned ${response.status}`);
     }
     return response.json() as Promise<T>;
   }
@@ -222,7 +228,7 @@ export class ApiClient implements ControlApi {
     if (csrf) headers.set("X-CSRF-Token", csrf);
     const response = await fetch("/api/v1/auth/logout", {method: "POST", headers, credentials: "same-origin"});
     this.requireAuthentication(response);
-    if (response.status !== 204) throw new Error(`Control API returned ${response.status}`);
+    if (response.status !== 204) throw new ApiError(response.status, `Control API returned ${response.status}`);
   }
 
   async catalogRecipes(cursor?: string): Promise<CatalogRecipeList> {
@@ -350,7 +356,6 @@ export class ApiClient implements ControlApi {
     const {response} = await this.generated.POST("/api/v1/agents/nodes/{node_id}/revoke", {
       params: {path: {node_id: nodeId}},
     });
-    this.requireAuthentication(response);
     if (!response.ok) throw new Error(`Control API returned ${response.status}`);
   }
 
