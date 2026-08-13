@@ -114,10 +114,12 @@ startup.
 Recipe builds continue to use operation-private rootless Podman storage with
 no Docker socket, GPU, host mount, privileged mode, or private-network access.
 Podman uses the dedicated account's lingering user systemd manager for cgroup
-v2 delegation. The agent service retains `ProtectControlGroups=yes`; it sees
-`/run/user` read-only, and Unix ownership keeps every other user's runtime
-private. Podman alone receives the effective UID's runtime path and user D-Bus
-address. The build command explicitly selects the systemd cgroup manager.
+v2 delegation. The agent service retains `ProtectControlGroups=yes`; persistent
+homes remain inaccessible, while its own mode-`0700` `/run/user/<uid>` runtime
+stays writable because Podman maintains `libpod` state there. Unix ownership
+keeps every other user's runtime private. Podman alone receives the effective
+UID's runtime path and user D-Bus address. The build command explicitly selects
+the systemd cgroup manager.
 `AF_NETLINK` is available only because `runc` requires it to create the
 isolated network namespace; the source build still runs with `--network=none`.
 The resulting OCI image is exported through Podman's `docker-archive`

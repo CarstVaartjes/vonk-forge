@@ -43,12 +43,12 @@ DeviceAllow=char-231:* rw
 # builds cannot declare devices; accepted workloads use the signed Docker
 # helper boundary. Raw InfiniBand devices are intentionally not exposed.
 BindPaths=-/dev/fuse -/dev/nvidiactl -/dev/nvidia-uvm -/dev/nvidia-uvm-tools -/dev/nvidia-modeset -/dev/nvidia0
-BindReadOnlyPaths=/run/user
-InaccessiblePaths=-/run/docker.sock
+InaccessiblePaths=/home /root -/run/docker.sock
 ProtectSystem=strict
-# ProtectHome=tmpfs keeps home directories hidden while allowing the dedicated
-# account's rootless systemd bus to be restored from /run/user read-only.
-ProtectHome=tmpfs
+# Rootless Podman must update its own mode-0700 /run/user/<uid> runtime while
+# Unix ownership prevents this service account from traversing another user's
+# runtime. Hide persistent homes explicitly and leave only that runtime usable.
+ProtectHome=no
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectKernelLogs=yes

@@ -2126,6 +2126,9 @@ def test_rust_supervisor_is_stable_outside_slots_and_units_keep_agent_unprivileg
     )
     assert "AmbientCapabilities=" in rust_agent
     assert "ProtectProc=default" in rust_agent
+    assert "ProtectHome=no" in rust_agent
+    assert "InaccessiblePaths=/home /root -/run/docker.sock" in rust_agent
+    assert "BindReadOnlyPaths=/run/user" not in rust_agent
     assert "RestrictSUIDSGID=yes" not in rust_agent
     assert (
         "ExecStart=/usr/lib/vonk-forge/vonk-agent-supervisor run-agent"

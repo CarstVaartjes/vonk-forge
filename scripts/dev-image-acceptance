@@ -539,7 +539,7 @@ import sys
 expected_uid, expected_gid = (int(part) for part in sys.argv[1].split(":"))
 expected_names = sorted(sys.argv[2].split(","))
 root = os.stat("/projected", follow_symlinks=False)
-if not stat.S_ISDIR(root.st_mode) or stat.S_IMODE(root.st_mode) != 0o700:
+if not stat.S_ISDIR(root.st_mode) or stat.S_IMODE(root.st_mode) != 0o550:
     raise SystemExit("projected secret root metadata mismatch")
 if (root.st_uid, root.st_gid) != (expected_uid, expected_gid):
     raise SystemExit("projected secret root owner mismatch")
