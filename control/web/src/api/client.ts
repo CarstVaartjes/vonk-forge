@@ -1,6 +1,8 @@
 import createClient from "openapi-fetch";
+import {AuthenticationRequired} from "../auth";
 import type {paths} from "./generated";
 import type {
+  AuthSession,
   AgentsResponse,
   AuditSummary,
   ControlApi,
@@ -55,6 +57,7 @@ function csrfToken(): string | undefined {
 }
 
 function resultData<T>(result: {data?: T; error?: unknown; response: Response}): T {
+  if (result.response.status === 401) throw new AuthenticationRequired();
   if (result.data === undefined) {
     const detail = typeof result.error === "object" && result.error !== null && "detail" in result.error
       ? String(result.error.detail).slice(0, 256)
@@ -146,6 +149,7 @@ function packageCandidate(value: PackageCandidateDocument): PackageCandidate {
 }
 
 export class ApiClient implements ControlApi {
+  private authenticationRequired?: () => void;
   private readonly generated = createClient<paths>({
     baseUrl: location.origin,
     credentials: "same-origin",
@@ -162,7 +166,23 @@ export class ApiClient implements ControlApi {
         headers.set("X-CSRF-Token", csrf);
         return new Request(request, {headers});
       },
+      onResponse: ({response}) => {
+        if (response.status === 401) this.authenticationRequired?.();
+      },
     });
+  }
+
+  onAuthenticationRequired(listener: () => void): () => void {
+    this.authenticationRequired = listener;
+    return () => {
+      if (this.authenticationRequired === listener) this.authenticationRequired = undefined;
+    };
+  }
+
+  private requireAuthentication(response: Response): void {
+    if (response.status !== 401) return;
+    this.authenticationRequired?.();
+    throw new AuthenticationRequired();
   }
 
   async request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -173,6 +193,7 @@ export class ApiClient implements ControlApi {
     const csrf = csrfToken();
     if (csrf && init.method && !["GET", "HEAD"].includes(init.method)) headers.set("X-CSRF-Token", csrf);
     const response = await fetch(path, {...init, headers, credentials: "same-origin"});
+    this.requireAuthentication(response);
     if (!response.ok) {
       let problem: unknown;
       try { problem = await response.json(); } catch { problem = null; }
@@ -185,6 +206,23 @@ export class ApiClient implements ControlApi {
       throw new Error(`Control API returned ${response.status}`);
     }
     return response.json() as Promise<T>;
+  }
+
+  session(): Promise<AuthSession> {
+    return this.request("/api/v1/auth/session");
+  }
+
+  login(subject: "admin", password: string): Promise<AuthSession> {
+    return this.request("/api/v1/auth/login", {method: "POST", body: JSON.stringify({subject, password})});
+  }
+
+  async logout(): Promise<void> {
+    const headers = new Headers({Accept: "application/json"});
+    const csrf = csrfToken();
+    if (csrf) headers.set("X-CSRF-Token", csrf);
+    const response = await fetch("/api/v1/auth/logout", {method: "POST", headers, credentials: "same-origin"});
+    this.requireAuthentication(response);
+    if (response.status !== 204) throw new Error(`Control API returned ${response.status}`);
   }
 
   async catalogRecipes(cursor?: string): Promise<CatalogRecipeList> {
@@ -235,6 +273,7 @@ export class ApiClient implements ControlApi {
     const response = await fetch(`/api/v1/catalog/source-bundles/${sha256}`, {
       method: "PUT", body: archive as BodyInit, headers, credentials: "same-origin",
     });
+    this.requireAuthentication(response);
     if (!response.ok) throw new Error(`Source upload returned ${response.status}: ${(await response.text()).slice(0, 256)}`);
     return response.json() as Promise<SourceBundleReceipt>;
   }
@@ -311,6 +350,7 @@ export class ApiClient implements ControlApi {
     const {response} = await this.generated.POST("/api/v1/agents/nodes/{node_id}/revoke", {
       params: {path: {node_id: nodeId}},
     });
+    this.requireAuthentication(response);
     if (!response.ok) throw new Error(`Control API returned ${response.status}`);
   }
 

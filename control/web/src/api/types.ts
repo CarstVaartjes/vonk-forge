@@ -1,6 +1,7 @@
 import type {components} from "./generated";
 
 export type NodeSummary = components["schemas"]["NodeStatus"];
+export type AuthSession = components["schemas"]["AuthSession"];
 export type FleetResponse = components["schemas"]["FleetStatusResponse"];
 export type AgentSummary = components["schemas"]["AgentSummary"];
 export type AgentsResponse = components["schemas"]["AgentsResponse"];

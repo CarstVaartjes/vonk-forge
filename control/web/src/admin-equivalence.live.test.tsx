@@ -2,8 +2,9 @@ import {readFileSync, writeFileSync} from "node:fs";
 import {render, screen, within} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {ApiClient} from "./api/client";
+import {App} from "./app";
+import {AuthProvider} from "./auth";
 import type {ReconciliationPlan} from "./api/types";
-import {ProfilesPage} from "./pages/profiles";
 
 const origin = process.env.VONK_LIVE_ORIGIN;
 const browserToken = process.env.VONK_LIVE_BROWSER_TOKEN;
@@ -47,8 +48,11 @@ const enabled = Boolean(origin && browserToken && browserCsrf && stateFile && ex
   };
 
   try {
-    render(<ProfilesPage api={new ApiClient()}/>);
+    const api = new ApiClient();
+    render(<AuthProvider api={api}><App api={api}/></AuthProvider>);
     const user = userEvent.setup();
+    expect(await screen.findByText("admin")).toBeVisible();
+    await user.click(screen.getByRole("link", {name: "Profiles"}));
     const profile = screen.getByLabelText("Profile ID to reconcile");
     await user.type(profile, "production-agents");
     await user.click(screen.getByRole("button", {name: "Preview exact plan"}));
