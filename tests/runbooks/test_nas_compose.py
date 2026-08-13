@@ -153,6 +153,26 @@ def test_control_recovery_uses_only_the_journaled_host_boundary() -> None:
     assert "docker compose" not in text
 
 
+def test_tailscale_runbook_documents_the_exact_private_browser_service() -> None:
+    text = TAILSCALE_RUNBOOK.read_text()
+    normalized = " ".join(text.split())
+
+    for required in (
+        "Trust credentials",
+        "`auth_keys` write scope",
+        "`tag:vonk-gateway`",
+        "`svc:vonk-forge`",
+        "HTTPS 443 -> http://caddy:8080",
+        "HTTPS-only",
+        "Funnel",
+        "application administrator login",
+        "stable Service URL",
+    ):
+        assert required in normalized
+    assert "PASTE_TAILSCALE" not in text
+    assert "No Windows hosts-file entry" in normalized
+
+
 def test_hermes_secret_mode_matches_the_authoritative_nas_guide() -> None:
     runbook = HERMES_RUNBOOK.read_text()
     guide = COMPOSE_README.read_text()

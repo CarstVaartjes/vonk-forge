@@ -85,8 +85,12 @@ uv run pytest
 
 For a first installation, follow the concise
 [fresh development installation](docs/runbooks/fresh-development-install.md).
-It covers the NAS, signed agent package, pairing, and first synthetic workload
-in one order. For a NAS, create one NAS-local project containing only
+It covers the NAS, private browser login, signed agent package, pairing, and
+first synthetic workload in one order. Normal administration opens the stable
+private Tailscale HTTPS `svc:vonk-forge` Service in a browser without an SSH or
+PowerShell tunnel. The exact URL and login steps are in
+[Open the stable browser URL](docs/runbooks/development-nas-installation.md#open-the-stable-browser-url).
+For a NAS, create one NAS-local project containing only
 `docker-compose.yml` and `secrets/`. Download and retain
 `docker-compose.dev.yml` locally; the project publisher installs it as
 `docker-compose.yml`, which remains unchanged during normal development.
@@ -97,7 +101,7 @@ reproduction or guarded recovery. Signed releases separately publish the full
 `docker-compose.production.yml`. The NAS pulls public images and never
 receives source, Dockerfiles, build contexts, or image archives. Follow the
 [development NAS installation guide](docs/runbooks/development-nas-installation.md)
-for the complete 13-file deployed runtime bundle and generic Compose-project
+for the complete 17-file deployed runtime bundle and generic Compose-project
 import.
 
 Repository contributors with the two `dev-local` images already built can run

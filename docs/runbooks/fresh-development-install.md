@@ -10,6 +10,11 @@ The finished NAS directory contains only `docker-compose.yml` and `secrets/`.
 GPU nodes receive only the public controller CA and their own locally generated
 identity. No GitHub, GHCR, R2, database, signing, or model credential is copied
 to a GPU node or baked into an image.
+The normal operator endpoint is the stable private Tailscale HTTPS Service URL
+for `svc:vonk-forge`; normal browser access does not require an SSH tunnel,
+PowerShell forwarding process, bearer token, Windows hosts-file entry, or LAN
+browser port.
+There is no Windows hosts-file entry for the Tailscale Service.
 
 Plan local NVMe capacity for images and model artifacts separately. The
 qualified DS4 wrapper image is about 2.59 GB. Its immutable base and drafter
@@ -37,6 +42,7 @@ Direct-fabric networks: <DIRECT_FABRIC_CIDRS_OR_NONE>
 Enrollment name:        <ENROLLMENT_HOSTNAME>
 Agent controller name:  <CONTROLLER_HOSTNAME>
 Reserved registry name: <REGISTRY_HOSTNAME>
+Tailnet administrator:   <TAILNET_ADMIN_IDENTITY>
 ```
 
 Each GPU node also needs a unique identity generated with:
@@ -71,6 +77,13 @@ restarting containers alone does not fetch a moved `:dev` tag.
 
 ## 3. Generate and publish the NAS project
 
+First complete the exact numbered Tailscale console and safe OAuth-file steps
+in [Prepare private Tailscale browser access](development-nas-installation.md#prepare-private-tailscale-browser-access).
+Grant only `auth_keys` write to `tag:vonk-gateway`, merge the exact
+`svc:vonk-forge:443` grant and auto-approval, and leave Funnel disabled. Save
+the ID and secret only in the two mode `0600` local input files; never put
+their values in command arguments or output.
+
 Generate secrets on a private Linux filesystem, not directly on SMB:
 
 ```bash
@@ -81,7 +94,9 @@ scripts/dev-runtime-secrets.py \
   --management-cidrs '<NODE_MANAGEMENT_CIDR>' \
   --enroll-hostname '<ENROLLMENT_HOSTNAME>' \
   --agent-hostname '<CONTROLLER_HOSTNAME>' \
-  --registry-hostname '<REGISTRY_HOSTNAME>'
+  --registry-hostname '<REGISTRY_HOSTNAME>' \
+  --tailscale-oauth-client-id-file '<LOCAL_OAUTH_INPUT_DIRECTORY>/client-id' \
+  --tailscale-oauth-client-secret-file '<LOCAL_OAUTH_INPUT_DIRECTORY>/client-secret'
 scripts/dev-runtime-project \
   --source-compose '<DOWNLOAD_DIRECTORY>/docker-compose.dev.yml' \
   --secrets-dir '<LOCAL_STAGING_DIRECTORY>/secrets' \
@@ -94,10 +109,15 @@ scripts/dev-runtime-project \
   --registry-hostname '<REGISTRY_HOSTNAME>'
 ```
 
-Back up all 17 local source files as one encrypted generation. The publisher
-copies exactly 14 files to the NAS and deliberately excludes the controller CA
-private key, public Git-signing key, and public host-runtime grant key. Do not display secret contents while
-checking the result. The publisher takes a nonblocking Linux file lock on the
+Back up exactly 21 local source files as one encrypted generation. Create a
+1Password Password item named **Vonk Forge NAS Development Administrator**,
+set its username to exact `admin`, and store the local `admin-password` there
+without placing it in a command argument or terminal output. The publisher
+copies exactly 17 files to the NAS. The four local-only files are
+`admin-password`, `controller-ca-key`, `git-signing-key.pub`, and
+`host-runtime-grant-public-key`; the plaintext administrator password is never
+published to the NAS. Do not display secret contents while checking the
+result. The publisher takes a nonblocking Linux file lock on the
 mounted share and rejects a concurrent invocation; it fails closed if locking
 is unavailable. If an SMB write, mount, or workstation is interrupted, do not
 edit the destination or delete the hidden `.vonk-forge-publish` recovery
@@ -109,19 +129,26 @@ publishers across workstations and is safe to retain. A successful run removes
 both hidden transaction states from the project and leaves exactly
 `docker-compose.yml` plus `secrets/`.
 
-An existing installation with the original valid 15-file local source can be
-upgraded without rotating its CA, database password, or other authority: repeat
-the generator command once with `--upgrade-host-runtime-authority`, then back
-up the resulting 17-file generation and republish it. The add-only migration
-refuses every other incomplete or unknown state.
+An existing installation with a valid pre-browser 17-file local source can be
+upgraded without rotating its CA, database password, or other authority:
+repeat the generator command once with `--upgrade-browser-access`, then back up
+the resulting 21-file generation and republish it. This add-only migration
+preserves every existing secret byte and refuses every other incomplete,
+unknown, symlinked, or inconsistent state. An older valid 15-file source first
+needs the separate `--upgrade-host-runtime-authority` transition.
 
 ## 4. Configure names and start the NAS stack
 
-Add this line to `/etc/hosts` on the NAS and every GPU node:
+Add this line to `/etc/hosts` on the NAS and every GPU node for the enrollment,
+agent, and registry names:
 
 ```text
 <NAS_MANAGEMENT_IP> <ENROLLMENT_HOSTNAME> <CONTROLLER_HOSTNAME> <REGISTRY_HOSTNAME>
 ```
+
+The operator must never add the Tailscale browser name to `/etc/hosts` or the
+Windows hosts file.
+Tailscale supplies its DNS name and trusted HTTPS certificate.
 
 Allow the GPU-node management CIDR to reach NAS TCP 8443 and reject other
 sources. In the NAS Docker/Compose UI:
@@ -134,10 +161,15 @@ sources. In the NAS Docker/Compose UI:
 One-shot cohort, initializer, and migration containers should exit with status
 zero. They are completed prerequisites, not failed services. See
 [Development NAS installation](development-nas-installation.md) if startup
-does not reach healthy state. Configure the guide's
-[restricted operator loopback forwarding](development-nas-installation.md#restrict-operator-loopback-forwarding)
-before the acceptance tunnel in step 7; do not expose ports 8080 or 4000 on the
-LAN.
+does not reach healthy state. Do not expose ports 8080 or 4000 on the LAN.
+
+Open the `tailscale-configurator` logs, copy only the reported stable private
+Tailscale HTTPS Service URL (`https://vonk-forge.<TAILNET_NAME>.ts.net/`), and
+open it in a Tailscale-connected browser. Log in as exact subject `admin` with
+the password from **Vonk Forge NAS Development Administrator**. Confirm the
+Development marker, then use this authenticated browser for the pairing steps
+below. Tailnet membership is only the reachability gate; it does not replace
+the application login.
 
 ## 5. Install and configure each GPU node
 
@@ -198,8 +230,11 @@ migration `complete`, and fresh inventory. Repeat for each additional node.
 
 ## 7. Prove the installation
 
-Create a private admin token, forward the NAS loopback API and inference ports,
-and run the deterministic synthetic lifecycle:
+The commands below are deterministic acceptance, not normal browser access.
+Create a private admin token, configure the guide's
+[restricted acceptance and break-glass loopback forwarding](development-nas-installation.md#restrict-acceptance-and-break-glass-loopback-forwarding),
+forward the NAS loopback API and inference ports, and run the synthetic
+lifecycle:
 
 ```bash
 install -d -m 0700 .state/development-acceptance
@@ -232,10 +267,18 @@ For real single-node and multi-node model qualification, restart persistence,
 and rank failure/recovery, continue with
 [Development agent workload acceptance](development-agent-workloads.md).
 
+Finish the supported installation in the browser: open the stable private
+Tailscale HTTPS Service URL, log in as exact subject `admin`, and confirm the
+authenticated Fleet page shows both Sparks with their certificate-bound
+identities and fresh inventory. Use **Logout** and confirm the login page
+returns. Closing every terminal must not affect browser availability.
+
 ## Normal updates
 
 - NAS development stack: in the existing Docker UI project choose **Pull**,
   then **Redeploy**. Keep the Compose file, secrets, and named volumes.
+  Reopen the same stable Service URL, log in, verify both Sparks, and use
+  **Logout** when finished. A restart without Pull is not an update.
 - GPU nodes: after the accepted APT `dev` publication is complete, follow
   [Update and switch channels](../operations/agent-package-release.md#update-and-switch-channels).
   Apt stages the signed inactive slot; activate and prove one canary node,

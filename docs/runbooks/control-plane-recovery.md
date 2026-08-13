@@ -31,6 +31,38 @@ window, confirm the exact predecessor platform target remains authorized by
 current TUF metadata and that its content-addressed OCI objects remain
 available.
 
+## Development browser-access recovery
+
+Development's mutable-image Pull then Redeploy path is deliberately separate
+from the production recovery boundary below. Production remains digest-pinned
+and host-updater mediated; never use development aliases or a NAS project UI to
+select a production generation.
+Use the following independent responses for OAuth compromise, Tailscale state
+loss, administrator password loss, and break-glass loopback.
+
+- **OAuth compromise:** revoke the client under Tailscale **Trust
+  credentials**, revoke the affected gateway node and Service approval, create
+  one replacement client with only `auth_keys` write and
+  `tag:vonk-gateway`, then follow the authoritative
+  [browser-access recovery instructions](development-nas-installation.md#rotation-and-recovery).
+  Do not rotate an application credential unless that authority was also
+  exposed.
+- **Tailscale state loss:** preserve or restore the development
+  `dev-tailscale-state` volume when possible. Otherwise allow the scoped OAuth
+  client to create one replacement tagged gateway, verify only that gateway
+  advertises `svc:vonk-forge`, revoke any orphan, and confirm the HTTPS-only
+  Serve map. PostgreSQL and application sessions are separate authorities.
+- **Administrator password loss:** recover the complete encrypted local secret
+  generation, use its authorized password-rotation operation, update the
+  **Vonk Forge NAS Development Administrator** 1Password item, republish, and
+  redeploy with every named volume preserved. Rotation revokes existing
+  browser sessions; there is no unauthenticated reset route or default
+  password.
+- **Break-glass loopback:** if private browser ingress is unavailable, use the
+  bounded loopback-forwarding procedure only for diagnosis or recovery. Do not
+  publish a LAN listener or enable Tailscale Funnel, and remove the temporary
+  forwarding session when recovery is complete.
+
 ## Automatic upgrade backup
 
 Every applied platform upgrade creates its backup after exact revalidation and

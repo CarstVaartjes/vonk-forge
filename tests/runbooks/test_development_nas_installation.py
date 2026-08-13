@@ -85,7 +85,65 @@ def test_operator_access_keeps_both_application_ports_on_nas_loopback() -> None:
         "sudo systemctl reload ssh",
     ):
         assert required in text
-    assert "restricted operator loopback forwarding" in FRESH_INSTALL.read_text()
+    normalized = _normalized_text(RUNBOOK)
+    assert "bounded acceptance and break-glass recovery only" in normalized
+    assert "not the normal browser path" in normalized
+
+
+def test_development_nas_runbook_documents_private_browser_prerequisites() -> None:
+    text = _normalized_text(RUNBOOK)
+
+    for required in (
+        "Tailscale admin console",
+        "Trust credentials",
+        "`auth_keys` write",
+        "`tag:vonk-gateway`",
+        "`svc:vonk-forge`",
+        "HTTPS-only Serve",
+        "Tailscale Funnel remains disabled",
+        "no human-facing LAN port",
+        "`--tailscale-oauth-client-id-file`",
+        "`--tailscale-oauth-client-secret-file`",
+        "mode `0600`",
+    ):
+        assert required in text
+
+
+def test_development_nas_runbook_documents_exact_browser_secret_boundary() -> None:
+    text = _normalized_text(RUNBOOK)
+
+    assert "exactly 21 local source files" in text
+    assert "exactly 17 files" in text
+    for local_only in (
+        "`admin-password`",
+        "`controller-ca-key`",
+        "`git-signing-key.pub`",
+        "`host-runtime-grant-public-key`",
+    ):
+        assert local_only in text
+    assert "Vonk Forge NAS Development Administrator" in text
+    assert "1Password" in text
+    assert "encrypted backup" in text
+    assert "plaintext administrator password is never published to the NAS" in text
+
+
+def test_existing_install_browser_upgrade_and_normal_journey_are_complete() -> None:
+    text = _normalized_text(RUNBOOK)
+
+    for required in (
+        "`--upgrade-browser-access`",
+        "preserves every existing secret byte",
+        "**Pull** then **Redeploy**",
+        "Keep every named volume",
+        "stable Tailscale Service URL",
+        "`https://vonk-forge.",
+        "Log in as exact subject `admin`",
+        "Logout",
+        "`--rotate-admin-password`",
+        "revokes every existing browser session",
+        "Tailscale state",
+    ):
+        assert required in text
 
 
 def test_normal_install_and_update_path_is_ui_only_before_guarded_recovery() -> None:

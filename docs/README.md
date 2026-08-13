@@ -4,6 +4,9 @@ Vonk Forge runs a Docker-capable control host (normally a NAS) and one or more
 Vonk Forge GPU node agents. Caddy is the only published ingress; Tailscale is the
 default remote-access boundary; GPU node agents make outbound mTLS connections;
 LiteLLM publishes only routes acknowledged by the control plane.
+Normal administration uses the stable private Tailscale HTTPS
+`svc:vonk-forge` Service in a browser without an SSH or PowerShell tunnel. See
+[Open the stable browser URL](runbooks/development-nas-installation.md#open-the-stable-browser-url).
 
 ## Authority boundary
 
