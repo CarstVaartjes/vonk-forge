@@ -216,6 +216,49 @@ def _prior_browser_access_generation(secrets_dir: Path) -> set[str]:
     return names
 
 
+def test_existing_directory_descriptor_closes_when_post_open_fstat_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    (protected_parent / "runtime").mkdir(mode=0o700)
+    runtime = _load_module()
+    parent = os.open(protected_parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    real_open = runtime.os.open
+    real_fstat = runtime.os.fstat
+    opened_descriptor: int | None = None
+
+    def record_open(
+        path: str,
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        nonlocal opened_descriptor
+        descriptor = real_open(path, flags, mode, dir_fd=dir_fd)
+        if path == "runtime" and dir_fd == parent:
+            opened_descriptor = descriptor
+        return descriptor
+
+    def fail_after_open(descriptor: int) -> os.stat_result:
+        if descriptor == opened_descriptor:
+            raise OSError("synthetic post-open fstat failure")
+        return real_fstat(descriptor)
+
+    monkeypatch.setattr(runtime.os, "open", record_open)
+    monkeypatch.setattr(runtime.os, "fstat", fail_after_open)
+    try:
+        with pytest.raises(OSError, match="synthetic post-open fstat failure"):
+            runtime._open_existing_directory(parent, "runtime")
+    finally:
+        runtime.os.close(parent)
+
+    assert opened_descriptor is not None
+    with pytest.raises(OSError, match="Bad file descriptor"):
+        real_fstat(opened_descriptor)
+
+
 def _prepare_arguments(
     oauth_files: tuple[Path, Path], **extra: object
 ) -> dict[str, object]:

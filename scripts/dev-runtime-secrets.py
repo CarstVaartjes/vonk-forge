@@ -982,7 +982,11 @@ def _open_existing_directory(
         raise RuntimeSecretError(
             "development secrets directory cannot be opened safely"
         ) from error
-    opened = os.fstat(descriptor)
+    try:
+        opened = os.fstat(descriptor)
+    except BaseException:
+        os.close(descriptor)
+        raise
     if (
         not _same_inode(listed, opened)
         or not stat.S_ISDIR(opened.st_mode)
@@ -1409,8 +1413,7 @@ def _resume_admin_rotation(directory: int, name: str) -> None:
             )
         elif forward_mixed_pair:
             if (
-                temporary_password_digest
-                not in {None, journal["new_password_sha256"]}
+                temporary_password_digest not in {None, journal["new_password_sha256"]}
                 or temporary_verifier_digest != journal["new_verifier_sha256"]
             ):
                 raise RuntimeSecretError(
