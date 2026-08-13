@@ -415,12 +415,20 @@ active_compose_file=$compose_file
 
 secrets_dir="$acceptance_root/secrets"
 mkdir -m 0700 "$secrets_dir"
-python3 "$repository_root/scripts/dev-runtime-secrets.py" \
+oauth_inputs="$acceptance_root/oauth-inputs"
+mkdir -m 0700 "$oauth_inputs"
+printf '%s\n' 'synthetic-tailscale-client-id' > "$oauth_inputs/client-id"
+printf '%s\n' 'synthetic-tailscale-client-secret' > "$oauth_inputs/client-secret"
+chmod 0600 "$oauth_inputs/client-id" "$oauth_inputs/client-secret"
+PYTHONPATH="$repository_root/control/src${PYTHONPATH:+:$PYTHONPATH}" \
+  python3 "$repository_root/scripts/dev-runtime-secrets.py" \
   --secrets-dir "$secrets_dir" \
   --management-cidrs '127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16' \
   --enroll-hostname enroll.vonk-forge.lan \
   --agent-hostname agents.vonk-forge.lan \
   --registry-hostname registry.vonk-forge.lan \
+  --tailscale-oauth-client-id-file "$oauth_inputs/client-id" \
+  --tailscale-oauth-client-secret-file "$oauth_inputs/client-secret" \
   >/dev/null
 postgres_password=$(sed -n '1p' "$secrets_dir/postgres-password")
 
@@ -498,6 +506,40 @@ for mount in json.load(sys.stdin):
     'test -r /run/secrets/git-signing-key && test -r /run/secrets/admin-grant-private-key && test -r /run/secrets/token-signing-key && test -r /run/secrets/worker-api-token'
   compose exec -T control-worker sh -ec \
     'test -r /run/secrets/worker-api-token && test ! -e /run/secrets/git-signing-key && test ! -e /run/secrets/admin-grant-private-key && test ! -e /run/secrets/token-signing-key'
+  assert_projected_secret_metadata \
+    "dev-auth-secrets" "10001:10001" \
+    "database-url,admin-password-verifier"
+  assert_projected_secret_metadata \
+    "dev-tailscale-secrets" "0:0" \
+    "tailscale-oauth-client-id,tailscale-oauth-client-secret"
+}
+
+assert_projected_secret_metadata() {
+  local logical_name=$1 expected_owner=$2 expected_names=$3 volume
+  volume="${project_name}_${logical_name}"
+  assert_project_volume_exists "$logical_name"
+  docker run --rm --network=none --user 0:0 \
+    --volume "$volume:/projected:ro" "$api_image" python -c '
+import os
+import stat
+import sys
+
+expected_uid, expected_gid = (int(part) for part in sys.argv[1].split(":"))
+expected_names = sorted(sys.argv[2].split(","))
+root = os.stat("/projected", follow_symlinks=False)
+if not stat.S_ISDIR(root.st_mode) or stat.S_IMODE(root.st_mode) != 0o700:
+    raise SystemExit("projected secret root metadata mismatch")
+if (root.st_uid, root.st_gid) != (expected_uid, expected_gid):
+    raise SystemExit("projected secret root owner mismatch")
+if sorted(os.listdir("/projected")) != expected_names:
+    raise SystemExit("projected secret names mismatch")
+for name in expected_names:
+    metadata = os.stat(f"/projected/{name}", follow_symlinks=False)
+    if not stat.S_ISREG(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) != 0o400:
+        raise SystemExit("projected secret entry metadata mismatch")
+    if (metadata.st_uid, metadata.st_gid) != (expected_uid, expected_gid):
+        raise SystemExit("projected secret entry owner mismatch")
+' "$expected_owner" "$expected_names"
 }
 
 repository_commit() {
@@ -576,7 +618,7 @@ assert_project_volume_exists() {
 pull_first_party_aliases() {
   compose pull --policy always \
     dev-cohort-reset dev-api-cohort dev-worker-cohort dev-cohort-verify \
-    dev-repository-init dev-init migrate control-api control-worker
+    dev-repository-init dev-init migrate dev-auth-init control-api control-worker
 }
 
 # A deliberately mixed API-current/worker-previous pair uses two distinct
@@ -599,11 +641,12 @@ move_mutable_alias "$api_image_a_ref" "$api_mutable_alias"
 move_mutable_alias "$worker_image_a_ref" "$worker_mutable_alias"
 pull_first_party_aliases
 compose_started=1
-compose up --wait --pull never
+compose up --wait --pull never caddy control-worker litellm
 assert_cohort_gate_succeeded
 assert_exited_successfully dev-repository-init
 assert_exited_successfully dev-init
 assert_exited_successfully migrate
+assert_exited_successfully dev-auth-init
 assert_running postgres
 assert_running control-worker
 assert_running control-api
@@ -623,11 +666,12 @@ move_mutable_alias "$worker_image_b_ref" "$worker_mutable_alias"
 pull_first_party_aliases
 [[ $(sha256sum "$compose_file" "$override_file") == "$compose_graph" ]] \
   || die "mutable Compose graph changed during cohort promotion"
-compose up --wait --pull never --force-recreate
+compose up --wait --pull never --force-recreate caddy control-worker litellm
 assert_cohort_gate_succeeded
 assert_exited_successfully dev-repository-init
 assert_exited_successfully dev-init
 assert_exited_successfully migrate
+assert_exited_successfully dev-auth-init
 assert_running postgres
 assert_running control-worker
 assert_running control-api
@@ -651,13 +695,14 @@ active_compose_file=$pinned_file
 compose stop control-api control-worker >/dev/null
 compose rm --force --stop \
   dev-cohort-reset dev-api-cohort dev-worker-cohort dev-cohort-verify \
-  dev-repository-init dev-init migrate control-api control-worker >/dev/null
-if compose up --wait --pull never --force-recreate; then
+  dev-repository-init dev-init migrate dev-auth-init control-api control-worker >/dev/null
+if compose up --wait --pull never --force-recreate caddy control-worker litellm; then
   die "pinned cohort A unexpectedly accepted cohort B's repository baseline"
 fi
 assert_exited_with_failure dev-repository-init
 assert_service_never_started dev-init
 assert_service_never_started migrate
+assert_service_never_started dev-auth-init
 rollback_logs=$(compose logs --no-color dev-repository-init 2>&1 || true)
 [[ "$rollback_logs" == *"development repository accepted baseline is divergent"* ]] \
   || die "pinned cohort A did not report the non-fast-forward repository baseline"
@@ -673,18 +718,21 @@ assert_volume_exists "$state_volume"
 for retained_volume in \
   dev-postgres-data dev-image-cohort dev-control-identity dev-control-state \
   dev-route-publications dev-supervisor-state dev-api-secrets \
-  dev-migrate-secrets dev-worker-secrets; do
+  dev-auth-secrets dev-caddy-secrets dev-litellm-secrets dev-migrate-secrets \
+  dev-runtime-config dev-tailscale-secrets dev-tailscale-runtime \
+  dev-tailscale-socket dev-tailscale-state dev-worker-secrets; do
   assert_project_volume_exists "$retained_volume"
 done
 
 # With only the verified repository volume reset, immutable pinned A can start
 # while PostgreSQL and every other randomized project state volume persists.
 compose_started=1
-compose up --wait --pull never --force-recreate
+compose up --wait --pull never --force-recreate caddy control-worker litellm
 assert_cohort_gate_succeeded
 assert_exited_successfully dev-repository-init
 assert_exited_successfully dev-init
 assert_exited_successfully migrate
+assert_exited_successfully dev-auth-init
 assert_running postgres
 assert_running control-worker
 assert_running control-api

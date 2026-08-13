@@ -20,6 +20,7 @@ API_DEV_IMAGE = "ghcr.io/carstvaartjes/vonk-forge-api:dev"
 WORKER_DEV_IMAGE = "ghcr.io/carstvaartjes/vonk-forge-worker:dev"
 PINNED_BASELINE = f'x-pinned-expected-commit: "{COMMIT}"'
 EXPECTED_SECRET_NAMES = {
+    "admin-password-verifier",
     "agent-ca-certificate",
     "agent-ca-key",
     "agent-proxy-auth",
@@ -34,6 +35,8 @@ EXPECTED_SECRET_NAMES = {
     "management-cidrs",
     "postgres-password",
     "token-signing-key",
+    "tailscale-oauth-client-id",
+    "tailscale-oauth-client-secret",
 }
 PORT_INTERPOLATIONS = {
     "VONK_AGENT_PORT": "${VONK_AGENT_PORT:-8443}",
@@ -89,7 +92,12 @@ def test_pinned_render_uses_one_verified_cohort_identity_for_every_service(
     assert PINNED_BASELINE in text
     assert "__VONK_EXPECTED_COMMIT__" not in text
     assert "VONK_DEV_EXPECTED_COMMIT" not in text
-    for service in ("dev-init", "migrate", "control-api", "control-worker"):
+    for service in (
+        "dev-init",
+        "migrate",
+        "control-api",
+        "control-worker",
+    ):
         environment = _compose_service(output, service)["environment"]
         assert environment["VONK_DEV_SELECTED_COHORT_FILE"] == "/cohort/selected.json"
     assert "__VONK_" not in text
@@ -451,9 +459,15 @@ def test_rendered_compose_is_image_only_and_has_exact_runtime_boundaries(
     assert all("build" not in service for service in services.values())
     assert services["dev-init"]["image"] == API_IMAGE
     assert services["migrate"]["image"] == API_IMAGE
+    assert services["dev-auth-init"]["image"] == API_IMAGE
     assert services["control-api"]["image"] == API_IMAGE
     assert services["control-worker"]["image"] == WORKER_IMAGE
-    for service in ("dev-init", "migrate", "control-api", "control-worker"):
+    for service in (
+        "dev-init",
+        "migrate",
+        "control-api",
+        "control-worker",
+    ):
         environment = services[service]["environment"]
         assert environment["VONK_DEV_SELECTED_COHORT_FILE"] == "/cohort/selected.json"
         assert "VONK_DEV_EXPECTED_COMMIT" not in environment
@@ -498,6 +512,65 @@ def test_rendered_compose_is_image_only_and_has_exact_runtime_boundaries(
     assert migrate_secrets["source"] != volumes["control-api"]["/run/secrets"]["source"]
     assert migrate_secrets["source"] != volumes["control-worker"]["/run/secrets"]["source"]
     assert volumes["control-worker"]["/run/secrets"]["source"].endswith("dev-worker-secrets")
+    assert volumes["dev-auth-init"]["/auth-secrets"] == {
+        "type": "volume",
+        "source": "dev-auth-secrets",
+        "target": "/auth-secrets",
+        "read_only": True,
+        "volume": {},
+    }
+    assert volumes["tailscale-gateway"]["/run/secrets"] == {
+        "type": "volume",
+        "source": "dev-tailscale-secrets",
+        "target": "/run/secrets",
+        "read_only": True,
+        "volume": {},
+    }
+    assert services["dev-auth-init"].get("secrets", []) == []
+    assert services["tailscale-gateway"].get("secrets", []) == []
+    assert set(services["dev-auth-init"]["networks"]) == {"data"}
+    assert services["control-api"]["depends_on"]["dev-auth-init"]["condition"] == (
+        "service_completed_successfully"
+    )
+
+
+def test_mutable_and_pinned_outputs_share_secret_projection_topology_without_values(
+    tmp_path: Path,
+) -> None:
+    _, pinned_output = _rendered_pinned(tmp_path)
+    mutable_root = tmp_path / "mutable"
+    mutable_root.mkdir()
+    _, mutable_output = _rendered_dev(mutable_root)
+
+    def topology(output: Path) -> dict[str, object]:
+        rendered = json.loads(
+            subprocess.run(
+                ("docker", "compose", "-f", str(output), "config", "--format", "json"),
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout
+        )
+        services = rendered["services"]
+        return {
+            "dev-init-volumes": services["dev-init"]["volumes"],
+            "dev-auth-init": {
+                key: value
+                for key, value in services["dev-auth-init"].items()
+                if key not in {"image", "pull_policy"}
+            },
+            "tailscale-gateway-volumes": services["tailscale-gateway"]["volumes"],
+            "tailscale-gateway-environment": services["tailscale-gateway"]["environment"],
+            "api-dependencies": services["control-api"]["depends_on"],
+            "volumes": set(rendered["volumes"]),
+        }
+
+    assert topology(pinned_output) == topology(mutable_output)
+    for output in (pinned_output, mutable_output):
+        text = output.read_text(encoding="utf-8")
+        assert "synthetic-tailscale-client-id" not in text
+        assert "synthetic-tailscale-client-secret" not in text
+        assert "synthetic-admin-password" not in text
 
 
 def test_mutable_compose_uses_exact_refs_and_always_pulls_every_first_party_service(
@@ -519,6 +592,7 @@ def test_mutable_compose_uses_exact_refs_and_always_pulls_every_first_party_serv
         "dev-cohort-verify",
         "dev-init",
         "migrate",
+        "dev-auth-init",
         "control-api",
     }
     worker_services = {"dev-worker-cohort", "control-worker"}

@@ -70,13 +70,17 @@ def test_development_gateway_is_pinned_userspace_and_least_privilege() -> None:
         "TS_USERSPACE": "true",
     }
     assert set(gateway["networks"]) == {"ingress", "tailnet-web-edge"}
-    assert {secret["target"] for secret in gateway["secrets"]} == {
-        "/run/secrets/tailscale-oauth-client-id",
-        "/run/secrets/tailscale-oauth-client-secret",
-    }
+    assert not gateway.get("secrets")
     volumes = _volumes_by_target(gateway)
     assert volumes["/var/lib/tailscale"]["source"] == "dev-tailscale-state"
     assert volumes["/var/run/tailscale"]["source"] == "dev-tailscale-socket"
+    assert volumes["/run/secrets"] == {
+        "type": "volume",
+        "source": "dev-tailscale-secrets",
+        "target": "/run/secrets",
+        "read_only": True,
+        "volume": {},
+    }
     assert all(
         volume["target"] != "/var/run/docker.sock" for volume in volumes.values()
     )

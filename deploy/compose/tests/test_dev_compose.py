@@ -25,6 +25,8 @@ LITELLM_IMAGE = (
     "ghcr.io/berriai/litellm:v1.81.14-stable@sha256:"
     "a3ce130137752e6b085de521b773eacbb641c8b6322c6f538453e860e7b9cf43"
 )
+OAUTH_CLIENT_ID = "synthetic-tailscale-client-id\n"
+OAUTH_CLIENT_SECRET = "synthetic-tailscale-client-secret\n"
 
 
 def _rendered(tmp_path: Path) -> dict[str, object]:
@@ -125,6 +127,45 @@ def test_dev_compose_initializes_identity_before_api_and_worker(tmp_path: Path) 
     )
 
 
+def test_image_template_bootstraps_auth_after_migration_before_api() -> None:
+    rendered = _rendered_image_template()
+    services = rendered["services"]
+    auth = services["dev-auth-init"]
+
+    assert auth["image"] == services["control-api"]["image"]
+    assert auth["pull_policy"] == "always"
+    assert auth["user"] == "10001:10001"
+    assert auth["read_only"] is True
+    assert auth["cap_drop"] == ["ALL"]
+    assert auth["security_opt"] == ["no-new-privileges:true"]
+    assert auth["command"] == ["python", "-m", "vonk_control.dev_auth_init"]
+    assert auth["environment"] == {"VONK_DEV_AUTH_MODE": "bootstrap"}
+    assert set(auth["networks"]) == {"data"}
+    assert auth.get("ports", []) == []
+    assert auth.get("secrets", []) == []
+    assert auth["restart"] == "no"
+
+    volumes = _volumes_by_target(auth)
+    assert set(volumes) == {"/auth-secrets"}
+    assert volumes["/auth-secrets"]["source"].endswith("dev-auth-secrets")
+    assert volumes["/auth-secrets"]["read_only"] is True
+    assert auth["depends_on"] == {
+        "dev-init": {
+            "condition": "service_completed_successfully",
+            "required": True,
+        },
+        "migrate": {
+            "condition": "service_completed_successfully",
+            "required": True,
+        },
+        "postgres": {"condition": "service_healthy", "required": True},
+    }
+    assert services["control-api"]["depends_on"]["dev-auth-init"] == {
+        "condition": "service_completed_successfully",
+        "required": True,
+    }
+
+
 def _volumes_by_target(service: dict[str, object]) -> dict[str, dict[str, object]]:
     return {volume["target"]: volume for volume in service.get("volumes", [])}
 
@@ -154,7 +195,7 @@ def test_image_template_hardens_caddy_as_the_only_lan_listener() -> None:
         "VONK_AGENT_ENROLL_HOSTNAME": "enroll.vonk-forge.lan",
         "VONK_AGENT_HOSTNAME": "agents.vonk-forge.lan",
         "VONK_BACKEND_PORT": "8443",
-        "VONK_CONTROL_HOSTNAME_FILE": "/run/vonk-tailnet/control-hostname",
+        "VONK_CONTROL_HOSTNAME_FILE": "/run/vonk-tailnet/control-hostname.ready",
     }
     assert caddy["ports"] == [
         {
@@ -660,6 +701,10 @@ def _script_repository(tmp_path: Path) -> tuple[Path, Path]:
         RUNTIME_SECRETS_HELPER,
         local_script.parent / RUNTIME_SECRETS_HELPER.name,
     )
+    package = repository / "control/src/vonk_control"
+    package.mkdir(parents=True)
+    shutil.copy2(ROOT / "control/src/vonk_control/__init__.py", package / "__init__.py")
+    shutil.copy2(ROOT / "control/src/vonk_control/passwords.py", package / "passwords.py")
     local_compose = repository / "deploy/compose/compose.dev.images.yaml"
     local_compose.parent.mkdir(parents=True)
     shutil.copy2(IMAGE_TEMPLATE, local_compose)
@@ -729,6 +774,7 @@ def _existing_secrets(
     tmp_path: Path, *, management_cidrs: str = "127.0.0.1/32"
 ) -> Path:
     secrets = tmp_path / "secrets"
+    oauth_client_id, oauth_client_secret = _oauth_inputs(tmp_path)
     subprocess.run(
         (
             "python3",
@@ -743,12 +789,38 @@ def _existing_secrets(
             "agents.vonk-forge.lan",
             "--registry-hostname",
             "registry.vonk-forge.lan",
+            "--tailscale-oauth-client-id-file",
+            str(oauth_client_id),
+            "--tailscale-oauth-client-secret-file",
+            str(oauth_client_secret),
         ),
         check=True,
         capture_output=True,
         text=True,
     )
     return secrets
+
+
+def _oauth_inputs(root: Path) -> tuple[Path, Path]:
+    oauth_inputs = root / "oauth-inputs"
+    oauth_inputs.mkdir(mode=0o700, exist_ok=True)
+    oauth_client_id = oauth_inputs / "client-id"
+    oauth_client_secret = oauth_inputs / "client-secret"
+    if not oauth_client_id.exists():
+        oauth_client_id.write_text(OAUTH_CLIENT_ID, encoding="ascii")
+        oauth_client_id.chmod(0o600)
+    if not oauth_client_secret.exists():
+        oauth_client_secret.write_text(OAUTH_CLIENT_SECRET, encoding="ascii")
+        oauth_client_secret.chmod(0o600)
+    return oauth_client_id, oauth_client_secret
+
+
+def _oauth_environment(root: Path) -> dict[str, str]:
+    oauth_client_id, oauth_client_secret = _oauth_inputs(root)
+    return {
+        "VONK_DEV_TAILSCALE_OAUTH_CLIENT_ID_FILE": str(oauth_client_id),
+        "VONK_DEV_TAILSCALE_OAUTH_CLIENT_SECRET_FILE": str(oauth_client_secret),
+    }
 
 
 def _run_dev_compose(
@@ -763,6 +835,7 @@ def _run_dev_compose(
     management_cidrs: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     environment = os.environ | {
+        **_oauth_environment(secrets.parent),
         "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
         "VONK_DEV_SECRETS_DIR": str(secrets),
         "VONK_DEV_ORIGIN_DIR": str(capture / "ignored-origin.git"),
@@ -894,6 +967,7 @@ def test_dev_compose_script_rejects_unsafe_project_names(
     capture = tmp_path / "capture"
     capture.mkdir()
     environment = os.environ | {
+        **_oauth_environment(tmp_path),
         "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
         "VONK_DEV_SECRETS_DIR": str(secrets),
         "VONK_DEV_PROJECT_NAME": project_name,
@@ -1031,6 +1105,7 @@ def test_dev_compose_script_rejects_a_symlinked_development_directory(
     sentinel.write_text("preserve\n", encoding="utf-8")
     development_root.symlink_to(external, target_is_directory=True)
     environment = os.environ | {
+        **_oauth_environment(tmp_path),
         "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
         "VONK_DEV_SECRETS_DIR": str(secrets),
         "VONK_TEST_CAPTURE_DIR": str(capture),
@@ -1102,6 +1177,7 @@ def test_dev_compose_rejects_development_directory_symlink_swapped_in_before_saf
     )
     fake_python.chmod(0o755)
     environment = os.environ | {
+        **_oauth_environment(tmp_path),
         "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
         "VONK_TEST_CAPTURE_DIR": str(capture),
         "VONK_TEST_REPOSITORY_ROOT": str(repository),
@@ -1151,6 +1227,7 @@ def test_dev_compose_rejects_managed_secret_file_symlinks(
     capture = tmp_path / "capture"
     capture.mkdir()
     environment = os.environ | {
+        **_oauth_environment(tmp_path),
         "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
         "VONK_TEST_CAPTURE_DIR": str(capture),
     }
@@ -1190,6 +1267,7 @@ def test_dev_compose_uses_the_python_runtime_generator_without_ssh_keygen(
     capture = tmp_path / "capture"
     capture.mkdir()
     environment = os.environ | {
+        **_oauth_environment(tmp_path),
         "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
         "VONK_TEST_CAPTURE_DIR": str(capture),
     }
@@ -1207,7 +1285,9 @@ def test_dev_compose_uses_the_python_runtime_generator_without_ssh_keygen(
     assert (capture / "environment").exists()
     assert (secrets / "git-signing-key").is_file()
     assert (secrets / "git-signing-key.pub").is_file()
-    assert len(tuple(secrets.iterdir())) == 17
+    assert len(tuple(secrets.iterdir())) == 21
+    assert OAUTH_CLIENT_ID not in result.stdout + result.stderr
+    assert OAUTH_CLIENT_SECRET not in result.stdout + result.stderr
 
 
 def test_dev_compose_rejects_an_existing_private_key_without_its_public_mate(
@@ -1225,6 +1305,7 @@ def test_dev_compose_rejects_an_existing_private_key_without_its_public_mate(
     capture = tmp_path / "capture"
     capture.mkdir()
     environment = os.environ | {
+        **_oauth_environment(tmp_path),
         "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
         "VONK_TEST_CAPTURE_DIR": str(capture),
     }

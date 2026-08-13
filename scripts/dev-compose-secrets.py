@@ -416,6 +416,10 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--repository-root", type=Path, required=True)
     parser.add_argument("--external-secrets-dir", type=Path)
     parser.add_argument("--management-cidrs", default="127.0.0.1/32")
+    parser.add_argument("--tailscale-oauth-client-id-file", type=Path, required=True)
+    parser.add_argument(
+        "--tailscale-oauth-client-secret-file", type=Path, required=True
+    )
     return parser.parse_args()
 
 
@@ -448,6 +452,12 @@ def main() -> int:
                 enroll_hostname="enroll.vonk-forge.lan",
                 agent_hostname="agents.vonk-forge.lan",
                 registry_hostname="registry.vonk-forge.lan",
+                tailscale_oauth_client_id_file=(
+                    arguments.tailscale_oauth_client_id_file
+                ),
+                tailscale_oauth_client_secret_file=(
+                    arguments.tailscale_oauth_client_secret_file
+                ),
             )
         except module.RuntimeSecretError as error:
             raise SecretPreparationError(str(error)) from error

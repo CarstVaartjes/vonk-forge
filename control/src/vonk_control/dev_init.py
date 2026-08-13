@@ -77,7 +77,7 @@ _PROJECTION_FILES = {
 _TARGET_SHA256 = "0" * 64
 _BUILD_DIGEST = "sha256:" + "1" * 64
 _VERSION = "0.1.0"
-_DATABASE_REVISION = "0020_recipe_catalog_bridge"
+_DATABASE_REVISION = "0021_browser_authentication"
 _GIT_HOME = "/nonexistent/vonk-control"
 
 

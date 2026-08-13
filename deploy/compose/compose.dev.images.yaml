@@ -119,6 +119,7 @@ services:
     command: [python, -m, vonk_control.dev_init]
     environment:
       VONK_CONTROL_IDENTITY_ROOT: /control-identity
+      VONK_DEV_AUTH_SECRET_ROOT: /auth-secrets
       VONK_DEV_API_SECRET_ROOT: /api-secrets
       VONK_DEV_CADDY_SECRET_ROOT: /caddy-secrets
       VONK_DEV_LITELLM_SECRET_ROOT: /litellm-secrets
@@ -126,17 +127,20 @@ services:
       VONK_DEV_INIT_PHASE: runtime
       VONK_DEV_RUNTIME_CONFIG_ROOT: /runtime-config
       VONK_DEV_SECRET_SOURCE_ROOT: /host-secrets
+      VONK_DEV_TAILSCALE_SECRET_ROOT: /tailscale-secrets
       VONK_DEV_WORKER_SECRET_ROOT: /worker-secrets
       VONK_DEV_SELECTED_COHORT_FILE: /cohort/selected.json
       VONK_ROUTE_ROOT: /routes
       VONK_STATE_PATH: /state
       VONK_SUPERVISOR_ROOT: /supervisor
     volumes:
+      - dev-auth-secrets:/auth-secrets
       - dev-api-secrets:/api-secrets
       - dev-caddy-secrets:/caddy-secrets
       - dev-litellm-secrets:/litellm-secrets
       - dev-migrate-secrets:/migrate-secrets
       - dev-runtime-config:/runtime-config
+      - dev-tailscale-secrets:/tailscale-secrets
       - dev-worker-secrets:/worker-secrets
       - dev-control-identity:/control-identity
       - dev-control-state:/state
@@ -144,6 +148,8 @@ services:
       - dev-supervisor-state:/supervisor
       - dev-image-cohort:/cohort:ro
     secrets:
+      - source: admin-password-verifier
+        target: /host-secrets/admin-password-verifier
       - source: agent-ca-certificate
         target: /host-secrets/agent-ca-certificate
       - source: agent-ca-key
@@ -168,6 +174,10 @@ services:
         target: /host-secrets/litellm-upstream-key
       - source: management-cidrs
         target: /host-secrets/management-cidrs
+      - source: tailscale-oauth-client-id
+        target: /host-secrets/tailscale-oauth-client-id
+      - source: tailscale-oauth-client-secret
+        target: /host-secrets/tailscale-oauth-client-secret
       - source: token-signing-key
         target: /host-secrets/token-signing-key
     depends_on:
@@ -229,6 +239,26 @@ services:
       dev-init: {condition: service_completed_successfully}
       dev-cohort-verify: {condition: service_completed_successfully}
     networks: [data]
+    restart: "no"
+
+  dev-auth-init:
+    image: *api-image
+    pull_policy: always
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    command: [python, -m, vonk_control.dev_auth_init]
+    environment:
+      VONK_DEV_AUTH_MODE: bootstrap
+    volumes:
+      - dev-auth-secrets:/auth-secrets:ro
+    tmpfs: [/tmp]
+    networks: [data]
+    depends_on:
+      postgres: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+      dev-init: {condition: service_completed_successfully}
     restart: "no"
 
   control-worker:
@@ -299,6 +329,7 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
       migrate: {condition: service_completed_successfully}
+      dev-auth-init: {condition: service_completed_successfully}
       dev-init: {condition: service_completed_successfully}
       control-worker: {condition: service_started}
     healthcheck:
@@ -387,10 +418,8 @@ services:
       TS_SOCKET: /var/run/tailscale/tailscaled.sock
       TS_STATE_DIR: /var/lib/tailscale
       TS_USERSPACE: "true"
-    secrets:
-      - tailscale-oauth-client-id
-      - tailscale-oauth-client-secret
     volumes:
+      - dev-tailscale-secrets:/run/secrets:ro
       - dev-tailscale-state:/var/lib/tailscale
       - dev-tailscale-socket:/var/run/tailscale
     tmpfs: [/tmp:size=64m,mode=1777]
@@ -431,6 +460,8 @@ networks:
   tailnet-web-edge: {internal: true}
 
 secrets:
+  admin-password-verifier:
+    file: ./secrets/admin-password-verifier
   postgres-password:
     file: ./secrets/postgres-password
   database-url:
@@ -465,6 +496,7 @@ secrets:
     file: ./secrets/tailscale-oauth-client-secret
 
 volumes:
+  dev-auth-secrets: {}
   dev-postgres-data: {}
   dev-image-cohort: {}
   dev-control-identity: {}
@@ -477,6 +509,7 @@ volumes:
   dev-litellm-secrets: {}
   dev-migrate-secrets: {}
   dev-runtime-config: {}
+  dev-tailscale-secrets: {}
   dev-tailscale-runtime: {}
   dev-tailscale-socket: {}
   dev-tailscale-state: {}

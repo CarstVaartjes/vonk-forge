@@ -67,6 +67,12 @@ def _fixture_repository(tmp_path: Path) -> Path:
         ROOT / "scripts/dev-runtime-secrets.py",
         repository / "scripts/dev-runtime-secrets.py",
     )
+    (repository / "control/src/vonk_control").mkdir(parents=True)
+    for module in ("__init__.py", "passwords.py"):
+        shutil.copy2(
+            ROOT / "control/src/vonk_control" / module,
+            repository / "control/src/vonk_control" / module,
+        )
     shutil.copy2(TEMPLATE, repository / "deploy/compose/compose.dev.images.yaml")
     subprocess.run(("git", "init", "-q", "-b", "main", str(repository)), check=True)
     subprocess.run(
@@ -249,7 +255,7 @@ def _successful_lifecycle_tools(tmp_path: Path) -> tuple[Path, Path]:
         "  exit 0\n"
         "fi\n"
         'if [[ "$1" == run && " $* " == *\' --network=none \'* ]]; then\n'
-        "  if [[ \" $* \" == *database_revision* ]]; then printf '%s\\n' 0020_recipe_catalog_bridge; exit 0; fi\n"
+        "  if [[ \" $* \" == *database_revision* ]]; then printf '%s\\n' 0021_browser_authentication; exit 0; fi\n"
         '  printf \'{"image_role":"%s","source_commit":"%s","source_repository":"%s"}\\n\' "${@: -3:1}" "${@: -2:1}" "${@: -1}"\n'
         "  exit 0\n"
         "fi\n"
@@ -278,6 +284,7 @@ def _successful_lifecycle_tools(tmp_path: Path) -> tuple[Path, Path]:
         "    dev-repository-init-id) if [[ \"$cohort\" == rollback-failed ]]; then printf '%s\\n' 'exited 1'; else printf '%s\\n' 'exited 0'; fi ;;\n"
         "    dev-init-id) if [[ \"$cohort\" == rollback-failed ]]; then printf '%s\\n' 'created 0'; else printf '%s\\n' 'exited 0'; fi ;;\n"
         "    migrate-id) if [[ \"$cohort\" == rollback-failed ]]; then printf '%s\\n' 'created 0'; else printf '%s\\n' 'exited 0'; fi ;;\n"
+        "    dev-auth-init-id) if [[ \"$cohort\" == rollback-failed ]]; then printf '%s\\n' 'created 0'; else printf '%s\\n' 'exited 0'; fi ;;\n"
         "    dev-*-id) printf '%s\\n' 'exited 0' ;;\n"
         "    *) printf '%s\\n' 'running 0' ;;\n"
         "  esac\n"
@@ -814,6 +821,7 @@ def test_successful_lifecycle_exercises_mutable_redeploy_and_runtime_boundaries(
     assert any(
         "test -r /run/secrets/token-signing-key" in line for line in normalized_commands
     )
+    assert sum("projected secret" in line for line in normalized_commands) == 6
     assert sum("{{json .Mounts}}" in line for line in normalized_commands) == 9
     assert (
         sum(
@@ -925,6 +933,27 @@ def test_acceptance_diagnostics_are_bounded_and_avoid_raw_secret_output() -> Non
     assert "logs --tail 100 --no-color" in text
     assert "head -c 32768" in text
     assert "[redacted]" in text
+
+
+def test_acceptance_generates_synthetic_oauth_inputs_and_checks_only_projection_metadata() -> None:
+    text = SCRIPT.read_text(encoding="utf-8")
+
+    assert 'oauth_inputs="$acceptance_root/oauth-inputs"' in text
+    assert '--tailscale-oauth-client-id-file "$oauth_inputs/client-id"' in text
+    assert '--tailscale-oauth-client-secret-file "$oauth_inputs/client-secret"' in text
+    assert "assert_projected_secret_metadata" in text
+    assert '"dev-auth-secrets" "10001:10001" \\' in text
+    assert '"database-url,admin-password-verifier"' in text
+    assert '"dev-tailscale-secrets" "0:0" \\' in text
+    assert '"tailscale-oauth-client-id,tailscale-oauth-client-secret"' in text
+    metadata_function = text[
+        text.index("assert_projected_secret_metadata()") : text.index(
+            "repository_commit()"
+        )
+    ]
+    assert "read_text" not in metadata_function
+    assert "read_bytes" not in metadata_function
+    assert "open(" not in metadata_function
 
 
 def test_acceptance_pins_the_temporary_registry_image_for_all_runner_architectures() -> (

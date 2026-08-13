@@ -68,18 +68,25 @@ def _dockerfile() -> str:
     return DOCKERFILE.read_text(encoding="utf-8")
 
 
-def test_focused_publication_gate_covers_cohort_and_startup_settings() -> None:
+def test_focused_publication_gate_covers_auth_web_caddy_and_tailscale() -> None:
     step = _step(_workflow(), "Run focused source and Compose contracts")
 
     for contract in (
+        "deploy/compose/tests/test_dev_compose.py",
         "deploy/compose/tests/test_dev_compose_secrets.py",
+        "deploy/compose/tests/test_dev_tailscale.py",
         "scripts/tests/test_dev_runtime_secrets.py",
         "scripts/tests/test_dev_runtime_project.py",
         "scripts/tests/test_dev_admin_token.py",
         "control/tests/test_dev_cohort.py",
+        "control/tests/test_dev_auth_init.py",
+        "control/tests/test_browser_authentication_migration.py",
         "control/tests/test_settings.py",
     ):
         assert contract in step
+    assert "npm ci --prefix control/web" in step
+    assert "npm test --prefix control/web -- --run src/auth.test.tsx" in step
+    assert "npm run build --prefix control/web" in step
 
 
 def _docker_stage(text: str, name: str) -> str:
@@ -590,7 +597,7 @@ def test_workflow_builds_scans_and_accepts_oci_archives_before_login() -> None:
     assert "deploy/compose/compose.dev.images.yaml" in preload
     assert "mapfile -t runtime_images" in preload
     assert "@sha256:[0-9a-f]{64}$" in preload
-    assert 'test "${#runtime_images[@]}" = 3' in preload
+    assert 'test "${#runtime_images[@]}" = 4' in preload
     assert 'for runtime_image in "${runtime_images[@]}"; do' in preload
     assert 'docker pull "$runtime_image"' in preload
     assert 'scripts/render-dev-compose \\' in render
