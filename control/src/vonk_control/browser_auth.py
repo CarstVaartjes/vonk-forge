@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from hmac import new as hmac_new
+from itertools import count
 from threading import Lock
 from typing import Literal
 
@@ -66,6 +67,22 @@ class BootstrapResult:
     status: Literal["created", "unchanged", "rotated"]
 
 
+@dataclass(frozen=True)
+class LoginAttempt:
+    """An opaque admission reservation finalized exactly once by the caller."""
+
+    _owner: object = field(repr=False, compare=False)
+    _id: int = field(repr=False)
+
+
+@dataclass
+class _AttemptState:
+    identifier: str
+    id: int
+    attempted_at: float
+    failed: bool = False
+
+
 class LoginRateLimiter:
     """A bounded, process-local failure limiter with opaque subject identifiers."""
 
@@ -74,52 +91,90 @@ class LoginRateLimiter:
         *,
         token_signing_key: bytes,
         clock: Callable[[], float] = time.monotonic,
+        maximum_tracked_subjects: int = _MAX_TRACKED_SUBJECTS,
+        maximum_subject_failures: int = _MAX_SUBJECT_FAILURES,
+        maximum_global_failures: int = _MAX_GLOBAL_FAILURES,
+        window_seconds: float = _LOGIN_WINDOW_SECONDS,
     ) -> None:
         if not isinstance(token_signing_key, bytes) or not token_signing_key:
             raise ValueError("token signing key is invalid")
+        if (
+            not isinstance(maximum_tracked_subjects, int)
+            or not isinstance(maximum_subject_failures, int)
+            or not isinstance(maximum_global_failures, int)
+            or maximum_tracked_subjects < 1
+            or maximum_subject_failures < 1
+            or maximum_global_failures < 1
+            or window_seconds <= 0
+        ):
+            raise ValueError("login rate limit is invalid")
         self._token_signing_key = token_signing_key
         self._clock = clock
-        self._subjects: dict[str, deque[float]] = {}
-        self._global: deque[float] = deque()
+        self._maximum_tracked_subjects = maximum_tracked_subjects
+        self._maximum_subject_failures = maximum_subject_failures
+        self._maximum_global_failures = maximum_global_failures
+        self._window_seconds = window_seconds
+        self._subjects: dict[str, deque[_AttemptState]] = {}
+        self._global: deque[_AttemptState] = deque()
+        self._attempts: dict[int, _AttemptState] = {}
+        self._owner = object()
+        self._ids = count()
         self._lock = Lock()
 
-    def admit(self, subject: str) -> bool:
+    def reserve(self, subject: str) -> LoginAttempt | None:
         identifier = self._identifier(subject)
         now = self._clock()
         with self._lock:
             self._evict(now)
-            failures = self._subjects.get(identifier)
-            if len(self._global) >= _MAX_GLOBAL_FAILURES:
-                return False
-            if failures is not None and len(failures) >= _MAX_SUBJECT_FAILURES:
-                return False
-            return failures is not None or len(self._subjects) < _MAX_TRACKED_SUBJECTS
+            attempts = self._subjects.get(identifier)
+            if (
+                len(self._global) >= self._maximum_global_failures
+                or (attempts is not None and len(attempts) >= self._maximum_subject_failures)
+                or (attempts is None and len(self._subjects) >= self._maximum_tracked_subjects)
+            ):
+                return None
+            if attempts is None:
+                attempts = deque()
+                self._subjects[identifier] = attempts
+            attempt_id = next(self._ids)
+            state = _AttemptState(identifier, attempt_id, now)
+            attempts.append(state)
+            self._global.append(state)
+            self._attempts[attempt_id] = state
+            return LoginAttempt(self._owner, attempt_id)
 
-    def record_failure(self, subject: str) -> bool:
-        identifier = self._identifier(subject)
+    def fail(self, attempt: LoginAttempt) -> None:
+        if not isinstance(attempt, LoginAttempt) or attempt._owner is not self._owner:
+            raise ValueError("login attempt is invalid")
         now = self._clock()
         with self._lock:
             self._evict(now)
-            if len(self._global) >= _MAX_GLOBAL_FAILURES:
-                return False
-            failures = self._subjects.get(identifier)
-            if failures is None:
-                if len(self._subjects) >= _MAX_TRACKED_SUBJECTS:
-                    return False
-                failures = deque()
-                self._subjects[identifier] = failures
-            if len(failures) >= _MAX_SUBJECT_FAILURES:
-                return False
-            failures.append(now)
-            self._global.append(now)
-            return True
+            state = self._attempts.pop(attempt._id, None)
+            if state is not None:
+                state.failed = True
 
-    def record_success(self, subject: str) -> None:
-        identifier = self._identifier(subject)
+    def succeed(self, attempt: LoginAttempt) -> None:
+        if not isinstance(attempt, LoginAttempt) or attempt._owner is not self._owner:
+            raise ValueError("login attempt is invalid")
         now = self._clock()
         with self._lock:
             self._evict(now)
-            self._subjects.pop(identifier, None)
+            state = self._attempts.pop(attempt._id, None)
+            if state is None:
+                return
+            self._global.remove(state)
+            attempts = self._subjects.get(state.identifier)
+            if attempts is None:
+                return
+            retained = deque(
+                candidate
+                for candidate in attempts
+                if candidate is not state and not candidate.failed
+            )
+            if retained:
+                self._subjects[state.identifier] = retained
+            else:
+                del self._subjects[state.identifier]
 
     def _identifier(self, subject: str) -> str:
         if not isinstance(subject, str):
@@ -129,17 +184,16 @@ class LoginRateLimiter:
         ).hexdigest()
 
     def _evict(self, now: float) -> None:
-        cutoff = now - _LOGIN_WINDOW_SECONDS
-        while self._global and self._global[0] <= cutoff:
-            self._global.popleft()
-        expired = [
-            identifier
-            for identifier, failures in self._subjects.items()
-            if _discard_expired(failures, cutoff)
-        ]
-        for identifier in expired:
-            del self._subjects[identifier]
-
+        cutoff = now - self._window_seconds
+        while self._global and self._global[0].attempted_at <= cutoff:
+            state = self._global.popleft()
+            self._attempts.pop(state.id, None)
+            attempts = self._subjects.get(state.identifier)
+            if attempts is None:
+                continue
+            attempts.remove(state)
+            if not attempts:
+                del self._subjects[state.identifier]
 
 class BrowserAuthService:
     """Own browser-session lifecycle operations backed by SQLAlchemy rows."""
@@ -164,47 +218,53 @@ class BrowserAuthService:
         )
 
     def login(self, subject: str, password: str) -> IssuedBrowserSession:
-        if not self._rate_limiter.admit(subject):
+        attempt = self._rate_limiter.reserve(subject)
+        if attempt is None:
             raise BrowserAuthenticationThrottledError()
         now = self._now()
         issued: IssuedBrowserSession | None = None
         authenticated = False
-        with self._sessions.begin() as db:
-            self._cleanup_expired(db, now)
-            user = db.scalar(select(User).where(User.subject == subject))
-            authenticated = not (
-                subject != _ADMIN_SUBJECT
-                or user is None
-                or user.role != _ADMIN_ROLE
-                or user.disabled_at is not None
-                or user.password_verifier is None
-                or not verify_password(user.password_verifier, password).valid
-            )
-            if authenticated:
-                token = self._opaque_token()
-                csrf = self._opaque_token()
-                expires_at = now + _SESSION_LIFETIME
-                row = LoginSession(
-                    user_id=user.id,
-                    digest=_digest(token),
-                    expires_at=expires_at,
+        try:
+            with self._sessions.begin() as db:
+                self._cleanup_expired(db, now)
+                user = db.scalar(
+                    select(User).where(User.subject == subject).with_for_update()
                 )
-                db.add(row)
-                db.flush()
-                issued = IssuedBrowserSession(
-                    identity=BrowserIdentity(
-                        actor=Actor(user.subject, user.role),
+                authenticated = not (
+                    subject != _ADMIN_SUBJECT
+                    or user is None
+                    or user.role != _ADMIN_ROLE
+                    or user.disabled_at is not None
+                    or user.password_verifier is None
+                    or not verify_password(user.password_verifier, password).valid
+                )
+                if authenticated:
+                    token = self._opaque_token()
+                    csrf = self._opaque_token()
+                    expires_at = now + _SESSION_LIFETIME
+                    row = LoginSession(
+                        user_id=user.id,
+                        digest=_digest(token),
                         expires_at=expires_at,
-                        session_id=row.id,
-                    ),
-                    token=token,
-                    csrf=csrf,
-                )
+                    )
+                    db.add(row)
+                    db.flush()
+                    issued = IssuedBrowserSession(
+                        identity=BrowserIdentity(
+                            actor=Actor(user.subject, user.role),
+                            expires_at=expires_at,
+                            session_id=row.id,
+                        ),
+                        token=token,
+                        csrf=csrf,
+                    )
+        except BaseException:
+            self._rate_limiter.fail(attempt)
+            raise
         if not authenticated:
-            if not self._rate_limiter.record_failure(subject):
-                raise BrowserAuthenticationThrottledError()
+            self._rate_limiter.fail(attempt)
             raise BrowserAuthenticationError()
-        self._rate_limiter.record_success(subject)
+        self._rate_limiter.succeed(attempt)
         if issued is None:
             raise RuntimeError("authenticated login did not issue a session")
         return issued
@@ -293,6 +353,8 @@ class BrowserAuthService:
             row.revoked_at is not None
             or _database_utc(row.expires_at) <= now
             or user.disabled_at is not None
+            or user.subject != _ADMIN_SUBJECT
+            or user.role != _ADMIN_ROLE
         ):
             raise BrowserAuthenticationError()
         return row, user
@@ -342,9 +404,3 @@ def _database_utc(value: datetime) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
-
-
-def _discard_expired(failures: deque[float], cutoff: float) -> bool:
-    while failures and failures[0] <= cutoff:
-        failures.popleft()
-    return not failures

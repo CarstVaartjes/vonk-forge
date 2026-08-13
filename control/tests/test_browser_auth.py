@@ -1,14 +1,21 @@
 from __future__ import annotations
 
 import base64
+import shutil
+import subprocess
+import threading
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, event, select
+from sqlalchemy.engine import Engine
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
+import vonk_control.browser_auth as browser_auth_module
 from vonk_control.auth import Actor
 from vonk_control.browser_auth import (
     BootstrapResult,
@@ -326,29 +333,37 @@ def test_throttle_success_clears_only_its_subject_failure_state() -> None:
     limiter = LoginRateLimiter(
         token_signing_key=b"test-token-signing-key", clock=MonotonicClock()
     )
-    for _ in range(5):
-        assert limiter.admit("admin")
-        assert limiter.record_failure("admin")
-        assert limiter.admit("other-subject")
-        assert limiter.record_failure("other-subject")
+    for _ in range(4):
+        admin = limiter.reserve("admin")
+        other = limiter.reserve("other-subject")
+        assert admin is not None and other is not None
+        limiter.fail(admin)
+        limiter.fail(other)
+    other = limiter.reserve("other-subject")
+    assert other is not None
+    limiter.fail(other)
+    successful = limiter.reserve("admin")
+    assert successful is not None
 
-    limiter.record_success("admin")
+    limiter.succeed(successful)
 
-    assert limiter.admit("admin")
-    assert not limiter.admit("other-subject")
+    assert limiter.reserve("admin") is not None
+    assert limiter.reserve("other-subject") is None
 
 
 def test_throttle_evicts_expired_subject_state_before_admission() -> None:
     """Retaining expired subject entries would eventually exhaust the bounded map."""
     monotonic = MonotonicClock()
     limiter = LoginRateLimiter(token_signing_key=b"test-token-signing-key", clock=monotonic)
-    assert limiter.record_failure("expired-subject")
+    attempt = limiter.reserve("expired-subject")
+    assert attempt is not None
+    limiter.fail(attempt)
     assert len(limiter._subjects) == 1
 
     monotonic.value = 300.0
 
-    assert limiter.admit("new-subject")
-    assert len(limiter._subjects) == 0
+    assert limiter.reserve("new-subject") is not None
+    assert len(limiter._subjects) == 1
 
 
 def test_throttle_never_retains_a_submitted_subject_in_plaintext() -> None:
@@ -358,8 +373,228 @@ def test_throttle_never_retains_a_submitted_subject_in_plaintext() -> None:
         token_signing_key=b"test-token-signing-key", clock=MonotonicClock()
     )
 
-    assert limiter.record_failure(subject)
+    attempt = limiter.reserve(subject)
+    assert attempt is not None
+    limiter.fail(attempt)
 
     assert subject not in limiter._subjects
     assert subject not in repr(limiter)
 
+
+def test_login_issues_independent_session_and_csrf_tokens(
+    sessions: sessionmaker[Session],
+) -> None:
+    """Reusing one raw value for session and CSRF tokens must not be possible."""
+    add_admin(sessions)
+    service = browser_auth(sessions, Clock(), opaque(27), opaque(28))
+
+    issued = service.login("admin", ADMIN_PASSWORD)
+
+    assert issued.token == opaque(27)
+    assert issued.csrf == opaque(28)
+    assert issued.token != issued.csrf
+
+
+@pytest.mark.parametrize(("field", "value"), (("role", "viewer"), ("subject", "other")))
+def test_resolution_rejects_session_when_exact_browser_authority_changes(
+    sessions: sessionmaker[Session], field: str, value: str
+) -> None:
+    """Returning a changed subject or role would retain browser authority."""
+    add_admin(sessions)
+    service = browser_auth(sessions, Clock(), opaque(29), opaque(30))
+    issued = service.login("admin", ADMIN_PASSWORD)
+    with sessions.begin() as db:
+        user = db.scalar(select(User).where(User.subject == "admin"))
+        assert user is not None
+        setattr(user, field, value)
+
+    with pytest.raises(BrowserAuthenticationError):
+        service.resolve(issued.token)
+
+
+def test_limiter_reservations_bound_inflight_attempts_for_one_subject() -> None:
+    """Splitting admission from failure recording would admit a sixth in-flight attempt."""
+    limiter = LoginRateLimiter(
+        token_signing_key=b"test-token-signing-key", clock=MonotonicClock()
+    )
+
+    attempts = _concurrently_reserve(limiter, ("admin",) * 6)
+
+    assert sum(attempt is not None for attempt in attempts) == 5
+
+
+def test_limiter_reservations_bound_inflight_attempts_globally() -> None:
+    """Splitting admission from failure recording would admit 21 global attempts."""
+    limiter = LoginRateLimiter(
+        token_signing_key=b"test-token-signing-key", clock=MonotonicClock()
+    )
+
+    attempts = _concurrently_reserve(
+        limiter, tuple(f"concurrent-{index}" for index in range(21))
+    )
+
+    assert sum(attempt is not None for attempt in attempts) == 20
+
+
+def test_limiter_rejects_the_1025th_tracked_subject() -> None:
+    """Growing past 1,024 keyed subjects would permit unbounded retention."""
+    limiter = LoginRateLimiter(
+        token_signing_key=b"test-token-signing-key",
+        clock=MonotonicClock(),
+        maximum_global_failures=1_025,
+    )
+
+    attempts = [limiter.reserve(f"subject-{index}") for index in range(1_024)]
+
+    assert all(attempt is not None for attempt in attempts)
+    assert limiter.reserve("subject-over-limit") is None
+    assert len(limiter._subjects) == 1_024
+    for attempt in attempts:
+        assert attempt is not None
+        limiter.succeed(attempt)
+
+
+@pytest.fixture(scope="module")
+def postgres_engine() -> Engine:
+    if shutil.which("docker") is None:
+        pytest.skip("Docker is required for PostgreSQL browser-auth locking tests")
+    try:
+        container = subprocess.check_output(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "-d",
+                "-e",
+                "POSTGRES_PASSWORD=postgres",
+                "-p",
+                "127.0.0.1::5432",
+                "postgres:16",
+            ],
+            text=True,
+        ).strip()
+    except subprocess.CalledProcessError as error:
+        pytest.skip(f"disposable PostgreSQL is unavailable: {error}")
+    try:
+        port = subprocess.check_output(
+            [
+                "docker",
+                "inspect",
+                "-f",
+                '{{(index (index .NetworkSettings.Ports "5432/tcp") 0).HostPort}}',
+                container,
+            ],
+            text=True,
+        ).strip()
+        engine = create_engine(
+            f"postgresql+psycopg://postgres:postgres@127.0.0.1:{port}/postgres"
+        )
+        for _ in range(100):
+            try:
+                with engine.connect():
+                    break
+            except (OSError, SQLAlchemyError):
+                time.sleep(0.1)
+        else:
+            pytest.skip("disposable PostgreSQL did not become ready")
+        yield engine
+        engine.dispose()
+    finally:
+        subprocess.run(["docker", "stop", container], check=False, capture_output=True)
+
+
+def test_postgres_rotation_revokes_a_login_serialized_with_its_user_lock(
+    postgres_engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An old-password login concurrent with rotation must leave no active session."""
+    Base.metadata.drop_all(postgres_engine)
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
+    add_admin(sessions)
+    service = browser_auth(sessions, Clock(), opaque(31), opaque(32))
+    verification_started = threading.Event()
+    release_verification = threading.Event()
+    rotation_select_started = threading.Event()
+    login_results: list[object] = []
+    rotation_results: list[object] = []
+    verify = browser_auth_module.verify_password
+
+    def paused_verify(verifier: str, password: str):
+        verification_started.set()
+        assert release_verification.wait(timeout=5)
+        return verify(verifier, password)
+
+    def observe_rotation_select(
+        _connection, _cursor, statement, _parameters, _context, _executemany
+    ) -> None:
+        if threading.current_thread().name == "browser-auth-rotation" and "FROM users" in statement:
+            rotation_select_started.set()
+
+    def login() -> None:
+        try:
+            login_results.append(service.login("admin", ADMIN_PASSWORD))
+        except BaseException as error:  # noqa: BLE001 - thread reports test failure
+            login_results.append(error)
+
+    def rotate() -> None:
+        try:
+            rotation_results.append(service.rotate_admin(hash_password("rotated password")))
+        except BaseException as error:  # noqa: BLE001 - thread reports test failure
+            rotation_results.append(error)
+
+    monkeypatch.setattr(browser_auth_module, "verify_password", paused_verify)
+    event.listen(postgres_engine, "before_cursor_execute", observe_rotation_select)
+    try:
+        login_thread = threading.Thread(target=login, name="browser-auth-login")
+        rotation_thread = threading.Thread(target=rotate, name="browser-auth-rotation")
+        login_thread.start()
+        assert verification_started.wait(timeout=5)
+        rotation_thread.start()
+        assert rotation_select_started.wait(timeout=5)
+        release_verification.set()
+        login_thread.join(timeout=5)
+        rotation_thread.join(timeout=5)
+    finally:
+        release_verification.set()
+        event.remove(postgres_engine, "before_cursor_execute", observe_rotation_select)
+
+    assert not login_thread.is_alive()
+    assert not rotation_thread.is_alive()
+    assert len(login_results) == 1
+    assert isinstance(login_results[0], browser_auth_module.IssuedBrowserSession)
+    assert rotation_results == [BootstrapResult("rotated")]
+    with sessions() as db:
+        rows = db.scalars(select(LoginSession)).all()
+    assert len(rows) == 1
+    assert rows[0].revoked_at is not None
+
+
+def _concurrently_reserve(
+    limiter: LoginRateLimiter, subjects: tuple[str, ...]
+) -> list[object]:
+    start = threading.Barrier(len(subjects) + 1)
+    reserved = threading.Barrier(len(subjects) + 1)
+    release = threading.Event()
+    attempts: list[object] = []
+    attempts_lock = threading.Lock()
+
+    def reserve(subject: str) -> None:
+        start.wait(timeout=5)
+        attempt = limiter.reserve(subject)
+        with attempts_lock:
+            attempts.append(attempt)
+        reserved.wait(timeout=5)
+        assert release.wait(timeout=5)
+        if attempt is not None:
+            limiter.fail(attempt)
+
+    threads = [threading.Thread(target=reserve, args=(subject,)) for subject in subjects]
+    for thread in threads:
+        thread.start()
+    start.wait(timeout=5)
+    reserved.wait(timeout=5)
+    release.set()
+    for thread in threads:
+        thread.join(timeout=5)
+    assert all(not thread.is_alive() for thread in threads)
+    return attempts
