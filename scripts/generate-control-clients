@@ -14,11 +14,14 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 
+from sqlalchemy.orm import sessionmaker
 from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import TokenCodec
+from vonk_control.browser_auth import BrowserAuthService
 from vonk_control.operation_api import admin_openapi_schema
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -38,19 +41,39 @@ class _SchemaJobs:
         del limit
         return []
 
-    def list_page(self, *, limit: int = 100, cursor: str | None = None, status: str | None = None, target: str | None = None) -> tuple[list[object], str | None, int]:
+    def list_page(
+        self,
+        *,
+        limit: int = 100,
+        cursor: str | None = None,
+        status: str | None = None,
+        target: str | None = None,
+    ) -> tuple[list[object], str | None, int]:
         del limit, cursor, status, target
         return [], None, 0
 
 
-def _write_openapi() -> None:
+def _schema(*, include_browser_auth: bool) -> dict[str, object]:
+    signing_key = b"schema-only-signing-key-32-bytes!"
     app = create_app(
         jobs=_SchemaJobs(),
-        tokens=TokenCodec(b"schema-only-signing-key-32-bytes!"),
+        tokens=TokenCodec(signing_key),
         audits=MemoryAuditStore(),
         fleet=lambda: {"commit": "0" * 40, "nodes": []},
+        browser_auth=(
+            BrowserAuthService(
+                sessionmaker(),
+                token_signing_key=signing_key,
+                clock=lambda: datetime.now(UTC),
+            )
+            if include_browser_auth
+            else None
+        ),
     )
-    document = admin_openapi_schema(app)
+    return admin_openapi_schema(app)
+
+
+def _write_openapi(document: dict[str, object]) -> None:
     OPENAPI.write_text(
         json.dumps(document, sort_keys=True, indent=2) + "\n",
         encoding="utf-8",
@@ -86,7 +109,10 @@ def _normalize_generated_text(path: Path) -> None:
 
 
 def main() -> None:
-    _write_openapi()
+    # The cluster-profile client remains a signed-bearer client. Generate it
+    # from the unchanged administrative surface before adding browser-only
+    # session operations to the shared web contract.
+    _write_openapi(_schema(include_browser_auth=False))
     _run(
         [
             "openapi-python-client",
@@ -103,13 +129,11 @@ def main() -> None:
         ]
     )
     _normalize_generated_text(PYTHON_OUTPUT)
+    _write_openapi(_schema(include_browser_auth=True))
     TYPESCRIPT_OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     _run(
         [
-            str(
-                ROOT
-                / "tools/openapi-client/node_modules/.bin/openapi-typescript"
-            ),
+            str(ROOT / "tools/openapi-client/node_modules/.bin/openapi-typescript"),
             str(OPENAPI),
             "--output",
             str(TYPESCRIPT_OUTPUT),

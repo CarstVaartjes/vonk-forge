@@ -4,13 +4,20 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
 import uvicorn
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 from vonk_control.api import AdminServices, create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
+from vonk_control.browser_auth import BrowserAuthService
+from vonk_control.models import Base, User
+from vonk_control.passwords import hash_password
 
 COMMIT = "a" * 40
 PLAN_DIGEST = "d" * 64
@@ -96,6 +103,29 @@ def main() -> None:
     ready_file = Path(sys.argv[3])
     codec = TokenCodec(b"k" * 32)
     token = codec.issue(Actor("operator", "operator"), ttl_seconds=3600, now=0)
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    browser_password = "live-equivalence-browser-password"
+    with sessions.begin() as db:
+        db.add(
+            User(
+                subject="admin",
+                role="administrator",
+                disabled_at=None,
+                password_verifier=hash_password(browser_password),
+            )
+        )
+    browser_auth = BrowserAuthService(
+        sessions,
+        token_signing_key=b"k" * 32,
+        clock=lambda: datetime.now(UTC),
+    )
+    browser_session = browser_auth.login("admin", browser_password)
 
     def fleet() -> dict[str, object]:
         available = json.loads(state_file.read_text())["available"]
@@ -132,8 +162,17 @@ def main() -> None:
             changes=None,
             reconciler=Reconciler(),
         ),
+        browser_auth=browser_auth,
     )
-    ready_file.write_text(json.dumps({"token": token}))
+    ready_file.write_text(
+        json.dumps(
+            {
+                "browser_csrf": browser_session.csrf,
+                "browser_token": browser_session.token,
+                "token": token,
+            }
+        )
+    )
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="error")
 
 
