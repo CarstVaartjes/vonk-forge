@@ -181,6 +181,11 @@ def test_tailscale_runbook_documents_the_exact_private_browser_service() -> None
     assert setup.index("MagicDNS") < setup.index(
         "`svc:vonk-forge`"
     ) < setup.index("Merge the reviewed sections")
+    verification = normalized.split("## Verification", 1)[1].split(
+        "## Drain, revocation, and recovery", 1
+    )[0]
+    assert "Development must report exactly one Service" in verification
+    assert "Production must report exactly three Services" in verification
 
 
 def test_hermes_secret_mode_matches_the_authoritative_nas_guide() -> None:

@@ -75,17 +75,26 @@ def test_focused_publication_gate_covers_auth_web_caddy_and_tailscale() -> None:
         "deploy/compose/tests/test_dev_compose.py",
         "deploy/compose/tests/test_dev_compose_secrets.py",
         "deploy/compose/tests/test_dev_tailscale.py",
+        "deploy/compose/tests/test_agent_ingress.py",
         "scripts/tests/test_dev_runtime_secrets.py",
         "scripts/tests/test_dev_runtime_project.py",
         "scripts/tests/test_dev_admin_token.py",
         "control/tests/test_dev_cohort.py",
         "control/tests/test_dev_auth_init.py",
         "control/tests/test_browser_authentication_migration.py",
+        "control/tests/test_passwords.py",
+        "control/tests/test_browser_auth.py",
+        "control/tests/test_auth_api.py",
+        "control/tests/test_api.py",
+        "control/tests/test_dev_runtime_assets.py",
         "control/tests/test_settings.py",
     ):
         assert contract in step
     assert "npm ci --prefix control/web" in step
-    assert "npm test --prefix control/web -- --run src/auth.test.tsx" in step
+    assert (
+        "npm test --prefix control/web -- --run src/auth.test.tsx "
+        "src/pages/login.test.tsx src/api/client.test.ts" in step
+    )
     assert "npm run build --prefix control/web" in step
 
 

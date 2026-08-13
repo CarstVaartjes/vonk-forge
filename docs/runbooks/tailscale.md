@@ -129,10 +129,12 @@ sudo vonk-control-offline maintenance logs \
   --service tailscale-configurator --since-minutes 30
 ```
 
-Status must report `HTTPS: true` on all three Services and never `HTTP: true`.
-The export must contain exactly the three upstreams above. Test dashboard and
-API reachability as an authorized GitHub-backed user, then confirm a user
-outside `group:hermes-users` is denied. Even an authorized user must supply the
+Development must report exactly one Service: `svc:vonk-forge` with `HTTPS:
+true`, never `HTTP: true`, and only the `http://caddy:8080` upstream. Production
+must report exactly three Services, each with `HTTPS: true`, never `HTTP: true`,
+and exactly the three upstreams above. In production, test dashboard and API
+reachability as an authorized GitHub-backed user, then confirm a user outside
+`group:hermes-users` is denied. Even an authorized user must supply the
 separate Hermes key to invoke the API. Confirm an ordinary LAN client cannot
 reach either Hermes endpoint.
 
@@ -147,9 +149,10 @@ encrypted generation as the control database and Hermes state. Restore state
 before startup when possible.
 
 If state cannot be restored, recreate the project with the OAuth files. Verify
-exactly one current tagged node advertises all three Services and revoke the
-orphan. For compromise, revoke OAuth, the node, and its tag/Service approvals;
-for development, capture both replacement values and run the documented
+exactly one current tagged node advertises the one development Service or all
+three production Services, as appropriate, and revoke the orphan. For
+compromise, revoke OAuth, the node, and its tag/Service approvals; for
+development, capture both replacement values and run the documented
 `--rotate-tailscale-oauth` transaction with one stable non-secret UUIDv4
 `--tailscale-oauth-rotation-id` before republishing and choosing
 **Pull** then **Redeploy** with every named volume preserved. Production uses

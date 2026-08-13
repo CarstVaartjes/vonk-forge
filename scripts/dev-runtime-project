@@ -875,6 +875,16 @@ def publish_project(
     runtime = _runtime_module()
     source_directory = _open_locked_source_directory(secrets_dir)
     try:
+        try:
+            source_names = set(os.listdir(source_directory))
+        except OSError as error:
+            raise ProjectPublicationError(
+                "source secret bundle cannot be listed safely"
+            ) from error
+        if source_names != runtime.RUNTIME_SECRET_NAMES:
+            raise ProjectPublicationError(
+                "source secret bundle contains unexpected entries"
+            )
         source_bundle = {
             name: _read_regular_at(source_directory, name, maximum=64 * 1024)
             for name in runtime.RUNTIME_SECRET_NAMES

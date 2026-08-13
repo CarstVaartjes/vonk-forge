@@ -213,6 +213,38 @@ def test_publishes_exact_two_item_project_without_secret_output(tmp_path: Path) 
             pytest.fail(f"secret value from {name} leaked to project command output")
 
 
+@pytest.mark.parametrize(
+    ("entry_name", "directory"),
+    (
+        ("unexpected-secret", False),
+        (".browser-access-upgrade-" + "a" * 32, True),
+        (".admin-password-rotation-" + "b" * 32, True),
+        (".tailscale-oauth-rotation-" + "c" * 32, True),
+        (".admin-password-rotation", False),
+        (".admin-password.rotate", False),
+        (".admin-password-verifier.rotate", False),
+    ),
+)
+def test_rejects_unknown_and_incomplete_transaction_source_entries(
+    tmp_path: Path, entry_name: str, directory: bool
+) -> None:
+    secrets_dir = _prepare_source_secrets(tmp_path)
+    entry = secrets_dir / entry_name
+    if directory:
+        entry.mkdir(mode=0o700)
+    else:
+        entry.write_bytes(b"synthetic transaction residue\n")
+        entry.chmod(0o600)
+    destination = tmp_path / "nas-project"
+
+    result = _run_project(destination, secrets_dir)
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert not destination.exists()
+    assert entry_name not in result.stderr
+
+
 def test_publication_waits_for_oauth_rotation_and_never_snapshots_a_mixed_pair(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
