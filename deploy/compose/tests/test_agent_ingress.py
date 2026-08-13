@@ -178,6 +178,8 @@ def _adapted_development_caddy() -> dict:
             "-e",
             "VONK_AGENT_HOSTNAME=agents.test.example",
             "-e",
+            "VONK_CONTROL_HOSTNAME=vonk-forge.tailnet.test.ts.net",
+            "-e",
             "VONK_BACKEND_PORT=8443",
             "-e",
             "VONK_MANAGEMENT_CIDRS=10.0.0.0/24",
@@ -360,6 +362,100 @@ def test_development_caddy_health_listener_is_exact_and_loopback_only() -> None:
     assert ":2019" not in listeners
     assert "0.0.0.0:2019" not in listeners
     assert "[::]:2019" not in listeners
+
+
+def test_development_browser_edge_accepts_only_the_canonical_tailscale_service_host() -> None:
+    adapted = _adapted_development_caddy()
+    browser = _server_on_port(adapted, 8080)
+
+    assert browser["listen"] == [":8080"]
+    routes: list[dict] = []
+
+    def collect_routes(value: object) -> None:
+        if isinstance(value, dict):
+            if "handle" in value:
+                routes.append(value)
+            for child in value.values():
+                collect_routes(child)
+        elif isinstance(value, list):
+            for child in value:
+                collect_routes(child)
+
+    collect_routes(browser["routes"])
+    trusted = next(
+        route
+        for route in routes
+        if route.get("match")
+        == [{"host": ["vonk-forge.tailnet.test.ts.net"]}]
+    )
+    trusted_routes = trusted["handle"][0]["routes"]
+    trusted_serialized = json.dumps(trusted_routes, sort_keys=True)
+
+    assert '"max_size": 1000000' in trusted_serialized
+    for header in (
+        "Strict-Transport-Security",
+        "X-Content-Type-Options",
+        "X-Frame-Options",
+        "Referrer-Policy",
+    ):
+        assert header in trusted_serialized
+    for path, status in (
+        ("/agent/v1/*", 404),
+        ("/internal/*", 404),
+    ):
+        route = next(
+            candidate
+            for candidate in routes
+            if candidate.get("match") == [{"path": [path]}]
+        )
+        assert f'"status_code": {status}' in json.dumps(route, sort_keys=True)
+    repository_authority = next(
+        route
+        for route in routes
+        if route.get("match")
+        == [
+            {
+                "method": ["POST", "PUT", "PATCH", "DELETE"],
+                "path": [
+                    "/litellm/model",
+                    "/litellm/model/*",
+                    "/litellm/model_group",
+                    "/litellm/model_group/*",
+                    "/litellm/config",
+                    "/litellm/config/*",
+                ],
+            }
+        ]
+    )
+    assert '"status_code": 403' in json.dumps(repository_authority, sort_keys=True)
+    assert "litellm:4000" in trusted_serialized
+    assert "control-api:8000" in trusted_serialized
+
+    sanitizers: list[dict] = []
+
+    def collect_sanitizers(value: object) -> None:
+        if isinstance(value, dict):
+            if value.get("handler") == "headers":
+                sanitizers.append(value)
+            for child in value.values():
+                collect_sanitizers(child)
+        elif isinstance(value, list):
+            for child in value:
+                collect_sanitizers(child)
+
+    collect_sanitizers(trusted_routes)
+    assert {
+        header
+        for handler in sanitizers
+        for header in handler.get("request", {}).get("delete", [])
+    } >= {"Forwarded", "X-Forwarded-*", "X-Vonk-Agent-*"}
+
+    rejected = next(
+        route
+        for route in routes
+        if "match" not in route and '"status_code": 421' in json.dumps(route)
+    )
+    assert '"status_code": 421' in json.dumps(rejected)
 
 
 def test_mtls_image_upload_has_a_dedicated_bound_without_widening_other_edges() -> None:

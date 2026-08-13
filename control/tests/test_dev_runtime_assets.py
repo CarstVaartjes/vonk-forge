@@ -374,39 +374,42 @@ def test_caddy_entrypoint_stages_runtime_files_as_uid_10000(
         target.write_bytes(content)
         target.chmod(0o444)
 
-    result = subprocess.run(
+    command = (
+        "docker",
+        "run",
+        "--rm",
+        "--user",
+        "10000:10000",
+        "--tmpfs",
+        "/tmp:rw,mode=1777",
+        "--tmpfs",
+        "/run/vonk-caddy:rw,exec,mode=0700,uid=10000,gid=10000",
+        "--mount",
+        f"type=bind,src={entrypoint},dst=/entrypoint.sh,readonly",
+        "--mount",
+        f"type=bind,src={secrets_root},dst=/run/secrets,readonly",
+        "--env",
+        "VONK_CONTROL_HOSTNAME=vonk-forge.tailnet.test.ts.net",
+        "--env",
+        "VONK_AGENT_ENROLL_HOSTNAME=enroll.test",
+        "--env",
+        "VONK_AGENT_HOSTNAME=agent.test",
+        "--env",
+        "VONK_BACKEND_PORT=8443",
+        "--entrypoint",
+        "/bin/sh",
+        "caddy:2.10.2@sha256:c3d7ee5d2b11f9dc54f947f68a734c84e9c9666c92c88a7f30b9cba5da182adb",
+        "-c",
         (
-            "docker",
-            "run",
-            "--rm",
-            "--user",
-            "10000:10000",
-            "--tmpfs",
-            "/tmp:rw,mode=1777",
-            "--tmpfs",
-            "/run/vonk-caddy:rw,exec,mode=0700,uid=10000,gid=10000",
-            "--mount",
-            f"type=bind,src={entrypoint},dst=/entrypoint.sh,readonly",
-            "--mount",
-            f"type=bind,src={secrets_root},dst=/run/secrets,readonly",
-            "--env",
-            "VONK_AGENT_ENROLL_HOSTNAME=enroll.test",
-            "--env",
-            "VONK_AGENT_HOSTNAME=agent.test",
-            "--env",
-            "VONK_BACKEND_PORT=8443",
-            "--entrypoint",
-            "/bin/sh",
-            "caddy:2.10.2@sha256:c3d7ee5d2b11f9dc54f947f68a734c84e9c9666c92c88a7f30b9cba5da182adb",
-            "-c",
-            (
-                "exec /bin/sh /entrypoint.sh /bin/sh -c '"
-                'test "$(stat -c %a /tmp/vonk-agent-proxy-auth.caddy)" = 400 '
-                '&& test "$(wc -l < /tmp/vonk-agent-proxy-auth.caddy)" = 1 '
-                '&& test "$(stat -c %a /run/vonk-caddy/caddy)" = 500 '
-                "&& /run/vonk-caddy/caddy version >/dev/null'"
-            ),
+            "exec /bin/sh /entrypoint.sh /bin/sh -c '"
+            'test "$(stat -c %a /tmp/vonk-agent-proxy-auth.caddy)" = 400 '
+            '&& test "$(wc -l < /tmp/vonk-agent-proxy-auth.caddy)" = 1 '
+            '&& test "$(stat -c %a /run/vonk-caddy/caddy)" = 500 '
+            "&& /run/vonk-caddy/caddy version >/dev/null'"
         ),
+    )
+    result = subprocess.run(
+        command,
         stdin=subprocess.DEVNULL,
         capture_output=True,
         check=False,
@@ -416,6 +419,21 @@ def test_caddy_entrypoint_stages_runtime_files_as_uid_10000(
 
     assert result.returncode == 0, result.stderr
     assert "A" * 32 not in result.stdout + result.stderr
+
+    invalid_command = list(command)
+    invalid_command[invalid_command.index(
+        "VONK_CONTROL_HOSTNAME=vonk-forge.tailnet.test.ts.net"
+    )] = "VONK_CONTROL_HOSTNAME=control.test.example"
+    invalid = subprocess.run(
+        invalid_command,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=False,
+        timeout=30,
+        text=True,
+    )
+    assert invalid.returncode == 64
+    assert "browser hostname must be vonk-forge.<tailnet-name>.ts.net" in invalid.stderr
 
 
 def test_litellm_supervisor_materializes_file_secrets_without_environment(

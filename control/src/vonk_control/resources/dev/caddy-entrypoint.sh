@@ -1,6 +1,7 @@
 #!/bin/sh
 set -eu
 
+: "${VONK_CONTROL_HOSTNAME:=vonk-forge.invalid.ts.net}"
 : "${VONK_AGENT_ENROLL_HOSTNAME:?set VONK_AGENT_ENROLL_HOSTNAME}"
 : "${VONK_AGENT_HOSTNAME:?set VONK_AGENT_HOSTNAME}"
 : "${VONK_BACKEND_PORT:?set VONK_BACKEND_PORT}"
@@ -47,12 +48,23 @@ normalize_hostname() {
   printf '%s' "$normalized"
 }
 
+control_hostname=$(normalize_hostname "$VONK_CONTROL_HOSTNAME")
+case "$control_hostname" in
+  vonk-forge.*.ts.net) ;;
+  *)
+    printf 'Vonk Forge browser hostname must be vonk-forge.<tailnet-name>.ts.net\n' >&2
+    exit 64
+    ;;
+esac
 enrollment_hostname=$(normalize_hostname "$VONK_AGENT_ENROLL_HOSTNAME")
 agent_hostname=$(normalize_hostname "$VONK_AGENT_HOSTNAME")
-if [ "$enrollment_hostname" = "$agent_hostname" ]; then
+if [ "$control_hostname" = "$enrollment_hostname" ] \
+  || [ "$control_hostname" = "$agent_hostname" ] \
+  || [ "$enrollment_hostname" = "$agent_hostname" ]; then
   printf 'Vonk Forge Caddy SNI hostnames must be distinct\n' >&2
   exit 64
 fi
+export VONK_CONTROL_HOSTNAME=$control_hostname
 export VONK_AGENT_ENROLL_HOSTNAME=$enrollment_hostname
 export VONK_AGENT_HOSTNAME=$agent_hostname
 

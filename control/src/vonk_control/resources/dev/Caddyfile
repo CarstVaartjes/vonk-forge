@@ -46,6 +46,63 @@ http://127.0.0.1:2019 {
 	import edge_headers
 }
 
+(browser_proxy_headers) {
+	# Tailscale owns the browser's HTTPS boundary. Never forward caller-supplied
+	# proxy or agent identity metadata to either application upstream.
+	request_header -Forwarded
+	request_header -X-Forwarded-*
+	request_header -X-Vonk-Agent-*
+}
+
+(browser_control_proxy) {
+	import browser_proxy_headers
+	reverse_proxy control-api:8000
+}
+
+# Tailscale Services terminates HTTPS before this private Docker listener. The
+# service MagicDNS name is exactly vonk-forge.<tailnet-name>.ts.net; every
+# other Host fails before it can reach the browser API or UI.
+:8080 {
+	@canonical_browser_host host {$VONK_CONTROL_HOSTNAME}
+	handle @canonical_browser_host {
+		import edge_guards
+		handle /healthz {
+			respond 200
+		}
+		@agent_path path /agent/v1/*
+		handle @agent_path {
+			respond 404
+		}
+		@internal_path path /internal/*
+		handle @internal_path {
+			respond 404
+		}
+		handle /v1/* {
+			import browser_proxy_headers
+			reverse_proxy litellm:4000
+		}
+		@litellm_repository_authority {
+			method POST PUT PATCH DELETE
+			path /litellm/model /litellm/model/* /litellm/model_group /litellm/model_group/* /litellm/config /litellm/config/*
+		}
+		handle @litellm_repository_authority {
+			respond 403
+		}
+		handle_path /litellm/* {
+			import browser_proxy_headers
+			reverse_proxy litellm:4000
+		}
+		handle /grafana/* {
+			import browser_proxy_headers
+			reverse_proxy grafana:3000
+		}
+		handle {
+			import browser_control_proxy
+		}
+	}
+	respond 421
+}
+
 https://{$VONK_AGENT_ENROLL_HOSTNAME}:{$VONK_BACKEND_PORT} {
 	import edge_guards
 	tls /run/secrets/controller-server-certificate /run/secrets/controller-server-key
