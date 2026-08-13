@@ -1755,14 +1755,21 @@ def _parse_oauth_receipt(content: bytes) -> list[dict[str, str]]:
     for raw in document["operations"]:
         if not isinstance(raw, dict) or set(raw) != {
             "rotation_id",
+            "old_client_id_sha256",
+            "old_client_secret_sha256",
             "new_client_id_sha256",
             "new_client_secret_sha256",
         }:
             raise RuntimeSecretError(message)
         operation = {key: value for key, value in raw.items() if isinstance(value, str)}
-        if len(operation) != 3 or any(
+        if len(operation) != 5 or any(
             re.fullmatch(r"[0-9a-f]{64}", operation[key]) is None
-            for key in ("new_client_id_sha256", "new_client_secret_sha256")
+            for key in (
+                "old_client_id_sha256",
+                "old_client_secret_sha256",
+                "new_client_id_sha256",
+                "new_client_secret_sha256",
+            )
         ):
             raise RuntimeSecretError(message)
         try:
@@ -1807,6 +1814,8 @@ def _write_oauth_receipt(
         key: journal[key]
         for key in (
             "rotation_id",
+            "old_client_id_sha256",
+            "old_client_secret_sha256",
             "new_client_id_sha256",
             "new_client_secret_sha256",
         )
@@ -2162,12 +2171,16 @@ def _rotate_tailscale_oauth(
         return
     if receipt_operation is not None:
         raise RuntimeSecretError("Tailscale OAuth rotation ID was already used")
-    if any(
-        item["new_client_id_sha256"] == requested_identity["new_client_id_sha256"]
-        and item["new_client_secret_sha256"]
-        == requested_identity["new_client_secret_sha256"]
+    requested_pair = (
+        requested_identity["new_client_id_sha256"],
+        requested_identity["new_client_secret_sha256"],
+    )
+    previously_valid_pairs = {
+        (item[f"{state}_client_id_sha256"], item[f"{state}_client_secret_sha256"])
         for item in receipt or []
-    ):
+        for state in ("old", "new")
+    }
+    if requested_pair in previously_valid_pairs:
         raise RuntimeSecretError(
             "replacement Tailscale OAuth credentials were previously used"
         )

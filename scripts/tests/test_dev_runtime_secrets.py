@@ -2277,6 +2277,22 @@ def test_stale_rotation_id_and_previously_used_pair_cannot_roll_back_credentials
     assert "credentials were previously used" in reused_pair.stderr
     assert _secret_state(secrets_dir, LOCAL_SOURCE_SECRET_NAMES) == current
 
+    original = _write_oauth_values(
+        tmp_path / "original-oauth-inputs",
+        OAUTH_CLIENT_ID,
+        OAUTH_CLIENT_SECRET,
+    )
+    restore_original = _run_generator(
+        secrets_dir,
+        "--rotate-tailscale-oauth",
+        "--tailscale-oauth-rotation-id",
+        "b9e6d29a-2d1e-4b64-83de-c78f5638b8dc",
+        oauth_files=original,
+    )
+    assert restore_original.returncode == 1
+    assert "credentials were previously used" in restore_original.stderr
+    assert _secret_state(secrets_dir, LOCAL_SOURCE_SECRET_NAMES) == current
+
 
 def test_long_generation_name_uses_a_bounded_receipt_filename(tmp_path: Path) -> None:
     protected_parent = tmp_path / "protected"
