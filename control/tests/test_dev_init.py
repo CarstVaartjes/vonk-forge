@@ -1660,7 +1660,7 @@ def test_stage_runtime_secrets_rejects_wrong_pristine_root_metadata(
     ("symlink", "fifo", "socket", "hardlink", "directory", "unknown"),
 )
 def test_stage_runtime_secrets_rejects_unsafe_entries_without_mutation(
-    tmp_path: Path, unsafe_kind: str
+    tmp_path: Path, request: pytest.FixtureRequest, unsafe_kind: str
 ) -> None:
     source = _secret_source(tmp_path / "source")
     roots = [
@@ -1677,6 +1677,7 @@ def test_stage_runtime_secrets_rejects_unsafe_entries_without_mutation(
     ]
     stage_runtime_secrets(source, *roots)
     api = roots[0]
+    request.addfinalizer(lambda: api.chmod(0o700) if api.exists() else None)
     canonical = api / "admin-grant-private-key"
     original = canonical.read_bytes()
     api.chmod(0o700)
@@ -1771,7 +1772,9 @@ def test_stage_runtime_secrets_preflights_existing_roots_before_creating_missing
 
 
 def test_stage_runtime_secrets_rejects_wrong_root_owner_without_mutation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
 ) -> None:
     source = _secret_source(tmp_path / "source")
     roots = [
@@ -1787,6 +1790,7 @@ def test_stage_runtime_secrets_rejects_wrong_root_owner_without_mutation(
         )
     ]
     stage_runtime_secrets(source, *roots)
+    request.addfinalizer(lambda: roots[0].chmod(0o700) if roots[0].exists() else None)
     canonical = roots[0] / "admin-grant-private-key"
     original = canonical.read_bytes()
     real_fstat = dev_init.os.fstat
@@ -1813,7 +1817,10 @@ def test_stage_runtime_secrets_rejects_wrong_root_owner_without_mutation(
 
 @pytest.mark.parametrize("metadata_fault", ("owner", "mode"))
 def test_stage_runtime_secrets_rejects_wrong_entry_metadata_without_mutation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, metadata_fault: str
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+    metadata_fault: str,
 ) -> None:
     source = _secret_source(tmp_path / "source")
     roots = [
@@ -1830,6 +1837,7 @@ def test_stage_runtime_secrets_rejects_wrong_entry_metadata_without_mutation(
     ]
     stage_runtime_secrets(source, *roots)
     api = roots[0]
+    request.addfinalizer(lambda: api.chmod(0o700) if api.exists() else None)
     target = api / "database-url"
     canonical = api / "admin-grant-private-key"
     original = canonical.read_bytes()
