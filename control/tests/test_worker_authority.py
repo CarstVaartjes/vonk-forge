@@ -770,4 +770,6 @@ def test_external_caddy_listener_denies_internal_worker_routes_before_fallback()
     )[0]
 
     assert "path /internal/*" in tailnet
-    assert tailnet.index("path /internal/*") < tailnet.index("import control_proxy")
+    assert tailnet.index("path /internal/*") < tailnet.index(
+        "import browser_control_proxy"
+    )

@@ -6,9 +6,12 @@ import importlib.resources
 import importlib.util
 import json
 import os
+import selectors
 import shutil
 import stat
 import subprocess
+import time
+import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -21,6 +24,7 @@ EXPECTED_RESOURCES = {
     "litellm-bootstrap.json": 0o444,
     "litellm-entrypoint.sh": 0o555,
     "litellm-supervisor.py": 0o555,
+    "tailscale-configure.sh": 0o555,
 }
 MAXIMUM_RESOURCE_BYTES = 128 * 1024
 
@@ -255,6 +259,7 @@ def test_stage_development_assets_assigns_exact_service_owners_when_root(
         "litellm-bootstrap": (10002, 10001),
         "litellm-entrypoint": (10002, 10001),
         "litellm-supervisor": (10002, 10001),
+        "tailscale-configure": (0, 0),
     }
 
 
@@ -374,39 +379,42 @@ def test_caddy_entrypoint_stages_runtime_files_as_uid_10000(
         target.write_bytes(content)
         target.chmod(0o444)
 
-    result = subprocess.run(
+    command = (
+        "docker",
+        "run",
+        "--rm",
+        "--user",
+        "10000:10000",
+        "--tmpfs",
+        "/tmp:rw,mode=1777",
+        "--tmpfs",
+        "/run/vonk-caddy:rw,exec,mode=0700,uid=10000,gid=10000",
+        "--mount",
+        f"type=bind,src={entrypoint},dst=/entrypoint.sh,readonly",
+        "--mount",
+        f"type=bind,src={secrets_root},dst=/run/secrets,readonly",
+        "--env",
+        "VONK_CONTROL_HOSTNAME=vonk-forge.tailnet.test.ts.net",
+        "--env",
+        "VONK_AGENT_ENROLL_HOSTNAME=enroll.test",
+        "--env",
+        "VONK_AGENT_HOSTNAME=agent.test",
+        "--env",
+        "VONK_BACKEND_PORT=8443",
+        "--entrypoint",
+        "/bin/sh",
+        "caddy:2.10.2@sha256:c3d7ee5d2b11f9dc54f947f68a734c84e9c9666c92c88a7f30b9cba5da182adb",
+        "-c",
         (
-            "docker",
-            "run",
-            "--rm",
-            "--user",
-            "10000:10000",
-            "--tmpfs",
-            "/tmp:rw,mode=1777",
-            "--tmpfs",
-            "/run/vonk-caddy:rw,exec,mode=0700,uid=10000,gid=10000",
-            "--mount",
-            f"type=bind,src={entrypoint},dst=/entrypoint.sh,readonly",
-            "--mount",
-            f"type=bind,src={secrets_root},dst=/run/secrets,readonly",
-            "--env",
-            "VONK_AGENT_ENROLL_HOSTNAME=enroll.test",
-            "--env",
-            "VONK_AGENT_HOSTNAME=agent.test",
-            "--env",
-            "VONK_BACKEND_PORT=8443",
-            "--entrypoint",
-            "/bin/sh",
-            "caddy:2.10.2@sha256:c3d7ee5d2b11f9dc54f947f68a734c84e9c9666c92c88a7f30b9cba5da182adb",
-            "-c",
-            (
-                "exec /bin/sh /entrypoint.sh /bin/sh -c '"
-                'test "$(stat -c %a /tmp/vonk-agent-proxy-auth.caddy)" = 400 '
-                '&& test "$(wc -l < /tmp/vonk-agent-proxy-auth.caddy)" = 1 '
-                '&& test "$(stat -c %a /run/vonk-caddy/caddy)" = 500 '
-                "&& /run/vonk-caddy/caddy version >/dev/null'"
-            ),
+            "exec /bin/sh /entrypoint.sh /bin/sh -c '"
+            'test "$(stat -c %a /tmp/vonk-agent-proxy-auth.caddy)" = 400 '
+            '&& test "$(wc -l < /tmp/vonk-agent-proxy-auth.caddy)" = 1 '
+            '&& test "$(stat -c %a /run/vonk-caddy/caddy)" = 500 '
+            "&& /run/vonk-caddy/caddy version >/dev/null'"
         ),
+    )
+    result = subprocess.run(
+        command,
         stdin=subprocess.DEVNULL,
         capture_output=True,
         check=False,
@@ -416,6 +424,319 @@ def test_caddy_entrypoint_stages_runtime_files_as_uid_10000(
 
     assert result.returncode == 0, result.stderr
     assert "A" * 32 not in result.stdout + result.stderr
+
+    absent_command = list(command)
+    absent_index = absent_command.index("--env")
+    while absent_command[absent_index + 1] != (
+        "VONK_CONTROL_HOSTNAME=vonk-forge.tailnet.test.ts.net"
+    ):
+        absent_index = absent_command.index("--env", absent_index + 1)
+    del absent_command[absent_index:absent_index + 2]
+    absent = subprocess.run(
+        absent_command,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=False,
+        timeout=30,
+        text=True,
+    )
+    assert absent.returncode != 0
+    assert "VONK_CONTROL_HOSTNAME" in absent.stderr
+
+    invalid_command = list(command)
+    invalid_command[invalid_command.index(
+        "VONK_CONTROL_HOSTNAME=vonk-forge.tailnet.test.ts.net"
+    )] = "VONK_CONTROL_HOSTNAME=control.test.example"
+    invalid = subprocess.run(
+        invalid_command,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=False,
+        timeout=30,
+        text=True,
+    )
+    assert invalid.returncode == 64
+    assert "browser hostname must be vonk-forge.<tailnet-name>.ts.net" in invalid.stderr
+
+    hostname_root = tmp_path / "tailnet-runtime"
+    hostname_root.mkdir(mode=0o755)
+    hostname_file = hostname_root / "control-hostname.ready"
+    hostname_file.write_text(
+        "11111111-1111-4111-8111-111111111111 "
+        "vonk-forge.discovered-tailnet.ts.net\n",
+        encoding="utf-8",
+    )
+    hostname_file.chmod(0o444)
+    file_command = list(command)
+    hostname_environment_index = file_command.index(
+        "VONK_CONTROL_HOSTNAME=vonk-forge.tailnet.test.ts.net"
+    )
+    del file_command[hostname_environment_index - 1 : hostname_environment_index + 1]
+    entrypoint_index = file_command.index("--entrypoint")
+    file_command[entrypoint_index:entrypoint_index] = [
+        "--mount",
+        f"type=bind,src={hostname_root},dst=/run/vonk-tailnet,readonly",
+        "--env",
+        "VONK_CONTROL_HOSTNAME_FILE=/run/vonk-tailnet/control-hostname.ready",
+        "--env",
+        "VONK_CONTROL_HOSTNAME_GENERATION=11111111-1111-4111-8111-111111111111",
+    ]
+    discovered = subprocess.run(
+        file_command,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=False,
+        timeout=30,
+        text=True,
+    )
+    assert discovered.returncode == 0, discovered.stderr
+
+    hostname_file.unlink()
+    pending = subprocess.run(
+        file_command,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=False,
+        timeout=30,
+        text=True,
+    )
+    assert pending.returncode == 0, pending.stderr
+
+    hostname_file.write_text(
+        "11111111-1111-4111-8111-111111111111 control.test.example\n",
+        encoding="utf-8",
+    )
+    hostname_file.chmod(0o444)
+    rejected_file = subprocess.run(
+        file_command,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=False,
+        timeout=30,
+        text=True,
+    )
+    assert rejected_file.returncode == 64
+    assert "control.test.example" not in rejected_file.stdout + rejected_file.stderr
+
+
+def _atomic_text(path: Path, content: str) -> None:
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}")
+    temporary.write_text(content, encoding="utf-8")
+    temporary.chmod(0o444)
+    os.replace(temporary, path)
+
+
+def _next_handoff_mode(
+    process: subprocess.Popen[str], selector: selectors.BaseSelector, *, timeout: float
+) -> str:
+    deadline = time.monotonic() + timeout
+    observed: list[str] = []
+    while time.monotonic() < deadline:
+        events = selector.select(deadline - time.monotonic())
+        if not events:
+            break
+        assert process.stdout is not None
+        line = process.stdout.readline().strip()
+        if not line and process.poll() is not None:
+            break
+        observed.append(line)
+        if line == "agent-only" or line.startswith("browser:"):
+            return line
+    remainder = ""
+    if process.poll() is not None and process.stdout is not None:
+        remainder = process.stdout.read()
+    raise AssertionError(
+        f"Caddy handoff process did not report its mode; "
+        f"returncode={process.poll()}, observed={observed!r}, output={remainder!r}"
+    )
+
+
+def test_caddy_entrypoint_requires_fresh_generation_and_reacts_to_real_file_events(
+    tmp_path: Path,
+) -> None:
+    if shutil.which("docker") is None:
+        pytest.skip("Docker is required for the Caddy hostname handoff test")
+    package = importlib.resources.files(RESOURCE_PACKAGE)
+    package_root = Path(os.fspath(package))
+    secrets_root = tmp_path / "secrets"
+    secrets_root.mkdir(mode=0o755)
+    for name, content in {
+        "controller-server-certificate": b"certificate\n",
+        "controller-server-key": b"private-key\n",
+        "agent-ca-certificate": b"agent-ca\n",
+        "agent-proxy-auth": b"A" * 43 + b"\n",
+        "management-cidrs": b"192.0.2.0/24\n",
+    }.items():
+        target = secrets_root / name
+        target.write_bytes(content)
+        target.chmod(0o444)
+    tailnet_root = tmp_path / "tailnet"
+    tailnet_root.mkdir(mode=0o755)
+    authority = tailnet_root / "control-hostname.ready"
+    _atomic_text(
+        authority,
+        "vonk-forge.yesterdays-tailnet.ts.net\n",
+    )
+    fake_caddy = tmp_path / "caddy"
+    fake_caddy.write_text(
+        "#!/bin/sh\n"
+        "config=\n"
+        "while [ \"$#\" -gt 0 ]; do\n"
+        "  if [ \"$1\" = --config ]; then config=$2; shift 2; else shift; fi\n"
+        "done\n"
+        "if grep -Fq ':8080 {' \"$config\"; then\n"
+        "  printf 'browser:%s\\n' \"$VONK_CONTROL_HOSTNAME\"\n"
+        "else\n"
+        "  printf 'agent-only\\n'\n"
+        "fi\n"
+        "trap 'exit 0' TERM INT\n"
+        "while :; do sleep 1; done\n",
+        encoding="utf-8",
+    )
+    fake_caddy.chmod(0o755)
+    container_name = f"vonk-caddy-handoff-{uuid.uuid4().hex[:12]}"
+    command = [
+        "docker",
+        "run",
+        "--rm",
+        "--name",
+        container_name,
+        "--user",
+        "10000:10000",
+        "--tmpfs",
+        "/tmp:rw,mode=1777",
+        "--tmpfs",
+        "/run/vonk-caddy:rw,exec,mode=0700,uid=10000,gid=10000",
+        "--mount",
+        f"type=bind,src={package_root},dst=/run/vonk-runtime,readonly",
+        "--mount",
+        f"type=bind,src={secrets_root},dst=/run/secrets,readonly",
+        "--mount",
+        f"type=bind,src={tailnet_root},dst=/run/vonk-tailnet,readonly",
+        "--mount",
+        f"type=bind,src={fake_caddy},dst=/usr/bin/caddy,readonly",
+        "--env",
+        "VONK_CONTROL_HOSTNAME_FILE=/run/vonk-tailnet/control-hostname.ready",
+        "--env",
+        "VONK_AGENT_ENROLL_HOSTNAME=enroll.test",
+        "--env",
+        "VONK_AGENT_HOSTNAME=agent.test",
+        "--env",
+        "VONK_BACKEND_PORT=8443",
+        "--env",
+        "VONK_CADDY_HANDOFF_TEST_MODE=1",
+        "--env",
+        "VONK_CONTROL_HOSTNAME_POLL_INTERVAL=1",
+        "--entrypoint",
+        "/bin/sh",
+        "caddy:2.10.2@sha256:c3d7ee5d2b11f9dc54f947f68a734c84e9c9666c92c88a7f30b9cba5da182adb",
+        "/run/vonk-runtime/caddy-entrypoint.sh",
+    ]
+    process = subprocess.Popen(
+        command,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    selector = selectors.DefaultSelector()
+    assert process.stdout is not None
+    selector.register(process.stdout, selectors.EVENT_READ)
+    try:
+        assert _next_handoff_mode(process, selector, timeout=10) == "agent-only"
+        assert not selector.select(1.5), "persisted authority must not enable browser mode"
+
+        _atomic_text(
+            authority,
+            "22222222-2222-4222-8222-222222222222 "
+            "vonk-forge.current-tailnet.ts.net\n",
+        )
+        assert _next_handoff_mode(process, selector, timeout=10) == (
+            "browser:vonk-forge.current-tailnet.ts.net"
+        )
+
+        _atomic_text(
+            authority,
+            "22222222-2222-4222-8222-222222222222 "
+            "vonk-forge.replaced-tailnet.ts.net\n",
+        )
+        assert _next_handoff_mode(process, selector, timeout=10) == (
+            "browser:vonk-forge.replaced-tailnet.ts.net"
+        )
+
+        authority.unlink()
+        assert _next_handoff_mode(process, selector, timeout=10) == "agent-only"
+    finally:
+        selector.close()
+        subprocess.run(
+            ["docker", "rm", "-f", container_name],
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=10,
+        )
+        process.wait(timeout=10)
+
+
+def test_caddy_health_requires_browser_authority_and_probes_the_browser_route(
+    tmp_path: Path,
+) -> None:
+    entrypoint = Path(
+        os.fspath(
+            importlib.resources.files(RESOURCE_PACKAGE).joinpath(
+                "caddy-entrypoint.sh"
+            )
+        )
+    )
+    authority = tmp_path / "control-hostname.ready"
+    authority.write_text(
+        "11111111-1111-4111-8111-111111111111 "
+        "vonk-forge.test-tailnet.ts.net\n",
+        encoding="ascii",
+    )
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    calls = tmp_path / "wget.calls"
+    wget = fake_bin / "wget"
+    wget.write_text(
+        "#!/bin/sh\n"
+        "printf '%s\\n' \"$*\" >>\"$WGET_CALLS\"\n",
+        encoding="ascii",
+    )
+    wget.chmod(0o755)
+    environment = os.environ | {
+        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        "VONK_AGENT_ENROLL_HOSTNAME": "enroll.test",
+        "VONK_AGENT_HOSTNAME": "agents.test",
+        "VONK_BACKEND_PORT": "8443",
+        "VONK_CONTROL_HOSTNAME_FILE": str(authority),
+        "WGET_CALLS": str(calls),
+    }
+
+    healthy = subprocess.run(
+        ["/bin/sh", entrypoint, "health"],
+        env=environment,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert healthy.returncode == 0, healthy.stderr
+    assert calls.read_text(encoding="ascii").splitlines() == [
+        "-q --spider -T 3 http://127.0.0.1:2019/healthz",
+        "-q --spider -T 3 --header=Host: vonk-forge.test-tailnet.ts.net "
+        + "http://127.0.0.1:8080/healthz",
+    ]
+
+    authority.unlink()
+    pending = subprocess.run(
+        ["/bin/sh", entrypoint, "health"],
+        env=environment,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    assert pending.returncode != 0
 
 
 def test_litellm_supervisor_materializes_file_secrets_without_environment(

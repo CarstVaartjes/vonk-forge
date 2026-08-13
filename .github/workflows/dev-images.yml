@@ -62,6 +62,8 @@ jobs:
           uv run --python 3.12 --frozen --with pytest==9.1.1 pytest -q \
             deploy/compose/tests/test_dev_compose.py \
             deploy/compose/tests/test_dev_compose_secrets.py \
+            deploy/compose/tests/test_dev_tailscale.py \
+            deploy/compose/tests/test_agent_ingress.py \
             scripts/tests/test_render_dev_compose.py \
             scripts/tests/test_dev_runtime_secrets.py \
             scripts/tests/test_dev_runtime_project.py \
@@ -69,9 +71,19 @@ jobs:
             scripts/tests/test_verify_dev_image_secrets.py \
             scripts/tests/test_dev_image_acceptance.py \
             scripts/tests/test_dev_image_workflow.py
+          npm ci --prefix control/web
+          npm test --prefix control/web -- --run src/auth.test.tsx src/pages/login.test.tsx src/api/client.test.ts
+          npm run build --prefix control/web
           uv run --project control --frozen pytest -q \
             control/tests/test_dev_cohort.py \
+            control/tests/test_dev_auth_init.py \
             control/tests/test_dev_init.py \
+            control/tests/test_browser_authentication_migration.py \
+            control/tests/test_passwords.py \
+            control/tests/test_browser_auth.py \
+            control/tests/test_auth_api.py \
+            control/tests/test_api.py \
+            control/tests/test_dev_runtime_assets.py \
             control/tests/test_generation_readiness.py \
             control/tests/test_settings.py
           scripts/verify-public-image-inputs
@@ -140,7 +152,7 @@ jobs:
               deploy/compose/compose.dev.images.yaml \
               | sort -u
           )
-          test "${#runtime_images[@]}" = 3
+          test "${#runtime_images[@]}" = 4
           for runtime_image in "${runtime_images[@]}"; do
             [[ "$runtime_image" =~ ^[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}$ ]]
             docker pull "$runtime_image"

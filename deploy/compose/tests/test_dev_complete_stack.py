@@ -26,12 +26,15 @@ WORKER_IMAGE = "vonk-forge-worker:dev-local"
 ENROLL_HOST = "enroll.vonk-forge.lan"
 AGENT_HOST = "agents.vonk-forge.lan"
 NODE_ID = "spk_" + "7" * 32
+BROWSER_HOST = "vonk-forge.synthetic-ci.ts.net"
+BROWSER_GENERATION = "11111111-1111-4111-8111-111111111111"
 
 
 def _run(
     arguments: list[str],
     *,
     environment: dict[str, str] | None = None,
+    input_text: str | None = None,
     check: bool = True,
     timeout: int = 180,
 ) -> subprocess.CompletedProcess[str]:
@@ -41,6 +44,7 @@ def _run(
         env=environment,
         check=False,
         capture_output=True,
+        input=input_text,
         text=True,
         timeout=timeout,
     )
@@ -55,11 +59,174 @@ def _run(
 
 
 def _require_local_images() -> None:
-    if _run(["docker", "info"], check=False, timeout=15).returncode != 0:
-        pytest.skip("a reachable Docker daemon is required")
+    assert _run(["docker", "info"], check=False, timeout=15).returncode == 0, (
+        "a reachable Docker daemon is required"
+    )
     for image in (API_IMAGE, WORKER_IMAGE):
-        if _run(["docker", "image", "inspect", image], check=False).returncode != 0:
-            pytest.skip(f"the prebuilt {image} acceptance image is required")
+        assert _run(
+            ["docker", "image", "inspect", image], check=False
+        ).returncode == 0, f"the prebuilt {image} acceptance image is required"
+
+
+def _browser_response(
+    project: str, *, hostname: str, path: str
+) -> tuple[int, str]:
+    code = (
+        "import http.client, sys; "
+        "connection = http.client.HTTPConnection('caddy', 8080, timeout=5); "
+        "connection.request('GET', sys.argv[2], headers={'Host': sys.argv[1]}); "
+        "response = connection.getresponse(); "
+        "print(response.status); "
+        "print(response.read().decode('utf-8'))"
+    )
+    result = _run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--network",
+            f"{project}_ingress",
+            "--entrypoint",
+            "python",
+            API_IMAGE,
+            "-c",
+            code,
+            hostname,
+            path,
+        ],
+        timeout=20,
+    )
+    status, body = result.stdout.split("\n", 1)
+    return int(status), body
+
+
+def _browser_auth_flow(project: str, *, hostname: str, password: str) -> dict[str, object]:
+    code = r'''
+import http.client
+import http.cookies
+import json
+import sys
+
+hostname = sys.argv[1]
+password = sys.stdin.read()
+
+def request(method, path, *, body=None, headers=None):
+    connection = http.client.HTTPConnection("caddy", 8080, timeout=10)
+    request_headers = {"Host": hostname, **(headers or {})}
+    payload = None if body is None else json.dumps(body)
+    connection.request(method, path, body=payload, headers=request_headers)
+    response = connection.getresponse()
+    content = response.read().decode("utf-8")
+    result = (response.status, response.getheaders(), content)
+    connection.close()
+    return result
+
+login_status, login_headers, login_body = request(
+    "POST",
+    "/api/v1/auth/login",
+    body={"subject": "admin", "password": password},
+    headers={"Content-Type": "application/json", "Origin": f"https://{hostname}"},
+)
+set_cookie = [value for name, value in login_headers if name.lower() == "set-cookie"]
+cookies = http.cookies.SimpleCookie()
+for value in set_cookie:
+    cookies.load(value)
+cookie_header = "; ".join(f"{name}={morsel.value}" for name, morsel in cookies.items())
+csrf = cookies["vonk_csrf"].value
+session_status, _, session_body = request(
+    "GET", "/api/v1/auth/session", headers={"Cookie": cookie_header}
+)
+fleet_status, _, fleet_body = request(
+    "GET", "/api/v1/fleet", headers={"Cookie": cookie_header}
+)
+logout_status, logout_headers, logout_body = request(
+    "POST",
+    "/api/v1/auth/logout",
+    headers={
+        "Cookie": cookie_header,
+        "Origin": f"https://{hostname}",
+        "X-CSRF-Token": csrf,
+    },
+)
+revoked_status, _, revoked_body = request(
+    "GET", "/api/v1/auth/session", headers={"Cookie": cookie_header}
+)
+print(json.dumps({
+    "login_status": login_status,
+    "login_body": json.loads(login_body),
+    "set_cookie": set_cookie,
+    "session_status": session_status,
+    "session_body": json.loads(session_body),
+    "fleet_status": fleet_status,
+    "fleet_body": json.loads(fleet_body),
+    "logout_status": logout_status,
+    "logout_body": logout_body,
+    "logout_set_cookie": [
+        value for name, value in logout_headers if name.lower() == "set-cookie"
+    ],
+    "revoked_status": revoked_status,
+    "revoked_body": json.loads(revoked_body),
+}, sort_keys=True))
+'''
+    result = _run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--interactive",
+            "--network",
+            f"{project}_ingress",
+            "--entrypoint",
+            "python",
+            API_IMAGE,
+            "-c",
+            code,
+            hostname,
+        ],
+        input_text=password,
+        timeout=30,
+    )
+    document = json.loads(result.stdout)
+    assert isinstance(document, dict)
+    return document
+
+
+def _seed_synthetic_browser_authority(project: str) -> None:
+    volume = f"{project}_dev-tailscale-runtime"
+    _run(
+        [
+            "docker",
+            "volume",
+            "create",
+            "--label",
+            f"com.docker.compose.project={project}",
+            "--label",
+            "com.docker.compose.volume=dev-tailscale-runtime",
+            volume,
+        ]
+    )
+    _run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--user",
+            "0:0",
+            "--volume",
+            f"{volume}:/runtime",
+            "--entrypoint",
+            "/bin/sh",
+            API_IMAGE,
+            "-ec",
+            (
+                "umask 022; "
+                f"printf '%s\\n' '{BROWSER_HOST}' > /runtime/control-hostname; "
+                f"printf '%s\\n' '{BROWSER_GENERATION} {BROWSER_HOST}' "
+                "> /runtime/control-hostname.ready; "
+                "chmod 0444 /runtime/control-hostname /runtime/control-hostname.ready"
+            ),
+        ]
+    )
 
 
 def test_failed_subprocess_reports_bounded_stdout_and_stderr() -> None:
@@ -76,6 +243,27 @@ def test_failed_subprocess_reports_bounded_stdout_and_stderr() -> None:
     assert "exit code 7" in message
     assert "diagnostic-stderr" in message
     assert len(message) < 34_000
+
+
+def test_browser_auth_password_is_streamed_outside_container_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_run(
+        arguments: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        captured["arguments"] = arguments
+        captured.update(kwargs)
+        return subprocess.CompletedProcess(arguments, 0, stdout="{}\n", stderr="")
+
+    monkeypatch.setitem(globals(), "_run", fake_run)
+    password = "synthetic-admin-password-canary"
+
+    _browser_auth_flow("vonk-stack-test", hostname=BROWSER_HOST, password=password)
+
+    assert password not in captured["arguments"]
+    assert captured["input_text"] == password
 
 
 def _unused_ports() -> tuple[int, int]:
@@ -352,6 +540,16 @@ def test_complete_development_stack_enforces_tls_identity_and_acks_routes(
     project = f"vonk-stack-{uuid.uuid4().hex[:12]}"
     api_port, agent_port = _unused_ports()
     secrets = tmp_path / "secrets"
+    oauth_inputs = tmp_path / "oauth-inputs"
+    oauth_inputs.mkdir(mode=0o700)
+    oauth_client_id = oauth_inputs / "client-id"
+    oauth_client_secret = oauth_inputs / "client-secret"
+    oauth_client_id.write_text("synthetic-tailscale-client-id\n", encoding="ascii")
+    oauth_client_secret.write_text(
+        "synthetic-tailscale-client-secret\n", encoding="ascii"
+    )
+    oauth_client_id.chmod(0o600)
+    oauth_client_secret.chmod(0o600)
     environment = {
         **os.environ,
         "VONK_AGENT_PORT": str(agent_port),
@@ -361,12 +559,71 @@ def test_complete_development_stack_enforces_tls_identity_and_acks_routes(
         ),
         "VONK_DEV_PROJECT_NAME": project,
         "VONK_DEV_SECRETS_DIR": str(secrets),
+        "VONK_DEV_SYNTHETIC_CONTROL_HOSTNAME_GENERATION": BROWSER_GENERATION,
+        "VONK_DEV_TAILSCALE_OAUTH_CLIENT_ID_FILE": str(oauth_client_id),
+        "VONK_DEV_TAILSCALE_OAUTH_CLIENT_SECRET_FILE": str(oauth_client_secret),
     }
     api_container = f"{project}-control-api-1"
     litellm_container = f"{project}-litellm-1"
 
     try:
-        _run([str(COMPOSE), "up", "-d"], environment=environment, timeout=240)
+        _seed_synthetic_browser_authority(project)
+        _run(
+            [str(COMPOSE), "up", "-d", "caddy", "control-worker", "litellm"],
+            environment=environment,
+            timeout=240,
+        )
+        for excluded in ("tailscale-gateway", "tailscale-configurator"):
+            assert _run(
+                ["docker", "container", "inspect", f"{project}-{excluded}-1"],
+                check=False,
+            ).returncode != 0
+        browser_hostname = BROWSER_HOST
+        root_status, root_html = _browser_response(
+            project, hostname=browser_hostname, path="/"
+        )
+        assert root_status == 200
+        assert "<title>Vonk Forge Control</title>" in root_html
+        session_status, _session_body = _browser_response(
+            project, hostname=browser_hostname, path="/api/v1/auth/session"
+        )
+        assert session_status == 401
+        agent_status, _agent_body = _browser_response(
+            project, hostname=browser_hostname, path="/agent/v1/claim"
+        )
+        assert agent_status == 404
+        rejected_status, _rejected_body = _browser_response(
+            project, hostname="noncanonical.invalid", path="/"
+        )
+        assert rejected_status == 421
+
+        browser = _browser_auth_flow(
+            project,
+            hostname=browser_hostname,
+            password=(secrets / "admin-password").read_text(encoding="ascii").strip(),
+        )
+        assert browser["login_status"] == 200
+        assert browser["login_body"]["subject"] == "admin"
+        assert browser["login_body"]["role"] == "administrator"
+        login_cookies = browser["set_cookie"]
+        assert isinstance(login_cookies, list) and len(login_cookies) == 2
+        assert login_cookies[0].startswith("vonk_session=")
+        assert "HttpOnly" in login_cookies[0]
+        assert login_cookies[1].startswith("vonk_csrf=")
+        assert "HttpOnly" not in login_cookies[1]
+        assert all("SameSite=strict" in cookie for cookie in login_cookies)
+        assert all("Secure" in cookie for cookie in login_cookies)
+        assert browser["session_status"] == 200
+        assert browser["session_body"]["subject"] == "admin"
+        assert browser["fleet_status"] == 200
+        assert isinstance(browser["fleet_body"]["nodes"], list)
+        assert browser["logout_status"] == 204
+        assert browser["logout_body"] == ""
+        cleared = browser["logout_set_cookie"]
+        assert isinstance(cleared, list) and len(cleared) == 2
+        assert all("Max-Age=0" in cookie for cookie in cleared)
+        assert browser["revoked_status"] == 401
+
         certificate, key = _write_client_identity(secrets, tmp_path)
         controller_ca = secrets / "controller-ca"
 

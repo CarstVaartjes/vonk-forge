@@ -417,6 +417,7 @@ class User(Base):
     subject: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     role: Mapped[str] = mapped_column(String(32), nullable=False)
     disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    password_verifier: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
 
 class LoginSession(Base):

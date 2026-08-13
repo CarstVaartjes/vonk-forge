@@ -11,13 +11,20 @@ Git/TUF remains authoritative for platform source, fleet policy, and the
 existing workload-release projection. The global catalog is a publisher and
 distribution service, not a runtime dependency.
 
+For browser administration, tailnet reachability and Vonk Forge authentication
+are independent gates. Tailscale OAuth and persisted gateway state establish a
+private network path; the administrator verifier establishes application
+identity; opaque session digests authorize subsequent browser requests. None
+of these authorities substitutes for another or belongs in the worker, Caddy,
+an image, Git, or a GPU node.
+
 ## Trust boundaries
 
 | Boundary | Assets and attacker | Prevention | Detection and recovery | Executable evidence |
 |---|---|---|---|---|
-| Tailnet human ingress | Sessions, inference keys; unauthorized tailnet or LAN client | Tagged userspace Tailscale gateway, separately granted exact named Services, no human LAN listener, private gateway-to-Caddy network, Caddy body/header and API auth controls | Tailnet policy tests and bounded API logs; revoke user, gateway node, tag, or Service and withdraw routes | `deploy/compose/tests/test_tailscale.py`, `test_networking.py`, `control/tests/test_api.py` |
+| Tailnet human ingress | Sessions, inference keys; unauthorized tailnet or LAN client | OAuth limited to `auth_keys` write for `tag:vonk-gateway`, separately granted exact named Services, HTTPS-only Serve, no Funnel or human LAN listener, private gateway-to-Caddy network, Caddy body/header and independent application-auth controls | Tailnet policy tests and bounded API logs; revoke OAuth client, user, gateway node, tag, or Service and withdraw routes | `deploy/compose/tests/test_tailscale.py`, `test_networking.py`, `control/tests/test_api.py` |
 | Restricted GPU node LAN ingress | Enrollment grant, agent identity, registry artifacts; hostile LAN client | One NAS-IP-bound backend port, firewall management-CIDR restriction, route-minimal SNI split, mTLS for agent/registry, no human routes | Caddy/control audit, certificate revocation, enrollment expiry, firewall review | `deploy/compose/tests/test_agent_ingress.py`, `control/tests/security/test_agent_identity.py` |
-| Admin browser | Proposal intent; malicious site or compromised browser | Same-origin API only, SameSite/HttpOnly session, double-submit CSRF, typed forms, explicit diff confirmation | Audit request/actor/base/targets; revoke session | web unit/Playwright tests, authorization matrix |
+| Admin browser | Administrator password, verifier, opaque session, proposal intent; malicious site or compromised browser | Plaintext password stays in 1Password/encrypted operator storage, API receives only the administrator verifier, PostgreSQL stores only opaque session digests, and the same-origin API uses Secure SameSite/HttpOnly session cookies, double-submit CSRF, typed forms, and explicit diff confirmation | Audit request/actor/base/targets; rotate password and verifier, revoke all sessions, and investigate the independent tailnet boundary | web unit/Playwright tests, authorization matrix |
 | CLI token | Administrator capability; local unprivileged user | HTTPS origin validation, regular non-symlink token file, bounded JSON, no token in argv/output | API audit and token rotation | `tests/cluster_profiles/test_control_client.py` |
 | Git/code host | Desired state; malicious contributor or remote | Full immutable commit IDs, protected-branch reachability, exact required checks, signed commits, one-way PR-only release policy | Proposal/commit digests and CI; revert through reviewed PR | repository/proposal/git-policy/reconcile tests |
 | Repository content | API parsers and planner; malicious committed files | Repository is mounted only by the API; allowlisted roots, object reads, no hooks/protocols, blob/size checks, canonical typed serializers, local-only endpoints, and immutable adapter executable paths | Validation results and rejected proposal audit | `control/tests/security/test_untrusted_repository.py`, `test_boundaries.py` |
@@ -58,6 +65,14 @@ prevention. Recovery depends on independent console access, off-host encrypted
 backups, pinned image/SBOM verification, and protected code-host credentials.
 Hardware acceptance is never inferred from simulation and requires explicitly
 approved targets.
+
+The owner of the private mode-`0700` development source generation is a trusted
+offline operator boundary. Its OAuth rotation journals and hash-only receipt
+provide crash consistency and exact UUID-bound retry evidence; they are not a
+defense against that same filesystem owner. An attacker able to fabricate owned
+transaction state can already replace every plaintext source credential, so
+suspected owner compromise requires revoking the OAuth client and rebuilding a
+complete generation from independently trusted encrypted backup.
 
 Hermes intentionally has terminal and Internet tooling. Prompt injection or a
 malicious repository can therefore alter its persisted state, disclose a

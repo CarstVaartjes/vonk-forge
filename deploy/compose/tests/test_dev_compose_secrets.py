@@ -62,21 +62,25 @@ def test_image_template_stages_exact_disjoint_runtime_secret_volumes() -> None:
     }
 
     expected_environment = {
+        "VONK_DEV_AUTH_SECRET_ROOT": "/auth-secrets",
         "VONK_DEV_API_SECRET_ROOT": "/api-secrets",
         "VONK_DEV_CADDY_SECRET_ROOT": "/caddy-secrets",
         "VONK_DEV_LITELLM_SECRET_ROOT": "/litellm-secrets",
         "VONK_DEV_MIGRATE_SECRET_ROOT": "/migrate-secrets",
         "VONK_DEV_RUNTIME_CONFIG_ROOT": "/runtime-config",
+        "VONK_DEV_TAILSCALE_SECRET_ROOT": "/tailscale-secrets",
         "VONK_DEV_WORKER_SECRET_ROOT": "/worker-secrets",
     }
     assert expected_environment.items() <= initializer["environment"].items()
     init_volumes = _volumes_by_target(initializer)
     expected_roots = {
+        "/auth-secrets": "dev-auth-secrets",
         "/api-secrets": "dev-api-secrets",
         "/caddy-secrets": "dev-caddy-secrets",
         "/litellm-secrets": "dev-litellm-secrets",
         "/migrate-secrets": "dev-migrate-secrets",
         "/runtime-config": "dev-runtime-config",
+        "/tailscale-secrets": "dev-tailscale-secrets",
         "/worker-secrets": "dev-worker-secrets",
     }
     assert {
@@ -97,6 +101,7 @@ def test_image_template_stages_exact_disjoint_runtime_secret_volumes() -> None:
     assert source_secrets == {
         (name, f"/host-secrets/{name}")
         for name in (
+            "admin-password-verifier",
             "agent-ca-certificate",
             "agent-ca-key",
             "agent-proxy-auth",
@@ -109,6 +114,8 @@ def test_image_template_stages_exact_disjoint_runtime_secret_volumes() -> None:
             "litellm-master-key",
             "litellm-upstream-key",
             "management-cidrs",
+            "tailscale-oauth-client-id",
+            "tailscale-oauth-client-secret",
             "token-signing-key",
         )
     }
@@ -128,16 +135,24 @@ def test_image_template_keeps_private_authority_with_its_exact_service() -> None
             secret_consumers.setdefault(secret["source"], set()).add(service_name)
 
     assert volume_consumers["dev-api-secrets"] == {"control-api", "dev-init"}
+    assert volume_consumers["dev-auth-secrets"] == {"dev-auth-init", "dev-init"}
     assert volume_consumers["dev-worker-secrets"] == {"control-worker", "dev-init"}
     assert volume_consumers["dev-migrate-secrets"] == {"dev-init", "migrate"}
     assert volume_consumers["dev-caddy-secrets"] == {"caddy", "dev-init"}
     assert volume_consumers["dev-litellm-secrets"] == {"dev-init", "litellm"}
+    assert volume_consumers["dev-tailscale-secrets"] == {
+        "dev-init",
+        "tailscale-gateway",
+    }
     assert secret_consumers["agent-ca-key"] == {"dev-init"}
     assert secret_consumers["controller-server-key"] == {"dev-init"}
     assert secret_consumers["litellm-master-key"] == {"dev-init"}
     assert secret_consumers["litellm-upstream-key"] == {"dev-init"}
     assert secret_consumers["management-cidrs"] == {"dev-init"}
     assert secret_consumers["token-signing-key"] == {"dev-init"}
+    assert secret_consumers["admin-password-verifier"] == {"dev-init"}
+    assert secret_consumers["tailscale-oauth-client-id"] == {"dev-init"}
+    assert secret_consumers["tailscale-oauth-client-secret"] == {"dev-init"}
     assert services["control-api"]["environment"]["VONK_TOKEN_SIGNING_KEY_FILE"] == (
         "/run/secrets/token-signing-key"
     )
@@ -149,6 +164,44 @@ def test_image_template_keeps_private_authority_with_its_exact_service() -> None
         assert "LITELLM_DATABASE_URL" not in environment
         assert "VONK_AGENT_CA_KEY" not in environment
         assert "VONK_CONTROLLER_SERVER_KEY" not in environment
+
+
+def test_image_template_never_projects_plaintext_admin_password() -> None:
+    rendered = _rendered_image_template()
+
+    assert "admin-password" not in rendered.get("secrets", {})
+    for service in rendered["services"].values():
+        assert all(
+            secret["source"] != "admin-password"
+            for secret in service.get("secrets", [])
+        )
+        assert all(
+            volume["source"] != "admin-password"
+            for volume in service.get("volumes", [])
+        )
+
+
+def test_image_template_preserves_existing_state_and_identity_volumes() -> None:
+    volumes = set(_rendered_image_template()["volumes"])
+
+    assert volumes >= {
+        "dev-api-secrets",
+        "dev-caddy-secrets",
+        "dev-control-identity",
+        "dev-control-state",
+        "dev-image-cohort",
+        "dev-litellm-secrets",
+        "dev-migrate-secrets",
+        "dev-postgres-data",
+        "dev-repository",
+        "dev-route-publications",
+        "dev-runtime-config",
+        "dev-supervisor-state",
+        "dev-tailscale-runtime",
+        "dev-tailscale-socket",
+        "dev-tailscale-state",
+        "dev-worker-secrets",
+    }
 
 
 def test_image_template_hands_acknowledgement_volume_to_litellm_only() -> None:

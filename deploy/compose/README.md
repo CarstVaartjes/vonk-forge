@@ -35,6 +35,7 @@ vonk-forge/
 └── secrets/
     ├── postgres-password
     ├── database-url
+    ├── admin-password-verifier
     ├── git-signing-key
     ├── agent-ca-certificate
     ├── agent-ca-key
@@ -45,6 +46,8 @@ vonk-forge/
     ├── litellm-master-key
     ├── litellm-upstream-key
     ├── management-cidrs
+    ├── tailscale-oauth-client-id
+    ├── tailscale-oauth-client-secret
     └── token-signing-key
 ```
 
@@ -64,9 +67,12 @@ scripts/dev-compose down
 ```
 
 The wrapper creates `.dev/vonk-forge-secrets/` locally and never commits it.
-The API is bound to loopback on port `8080`; use an explicit SSH or Tailscale
-forward when accessing a NAS from another machine. Set `VONK_DEV_PORT` before
-starting if the port is already in use. This stack is for development only:
+The API remains bound to loopback on port `8080` for deterministic acceptance
+and break-glass recovery. Normal NAS administration uses the stable private
+Tailscale HTTPS `svc:vonk-forge` Service in a browser without an SSH or
+PowerShell tunnel; follow
+[Open the stable browser URL](../../docs/runbooks/development-nas-installation.md#open-the-stable-browser-url).
+Set `VONK_DEV_PORT` before starting if the port is already in use. This stack is for development only:
 its synthetic platform identity and database are not valid production release
 evidence, and `scripts/dev-compose down -v` removes its development volumes.
 

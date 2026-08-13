@@ -15,6 +15,8 @@ _CADDY_UID = 10000
 _CADDY_GID = 10000
 _LITELLM_UID = 10002
 _LITELLM_GID = 10001
+_TAILSCALE_UID = 0
+_TAILSCALE_GID = 0
 
 
 class DevelopmentAssetError(RuntimeError):
@@ -35,6 +37,12 @@ _ASSETS = {
     "litellm-bootstrap.json": _Asset(0o444, _LITELLM_UID, _LITELLM_GID, 128 * 1024),
     "litellm-entrypoint.sh": _Asset(0o555, _LITELLM_UID, _LITELLM_GID, 128 * 1024),
     "litellm-supervisor.py": _Asset(0o555, _LITELLM_UID, _LITELLM_GID, 128 * 1024),
+    "tailscale-configure.sh": _Asset(
+        0o555,
+        _TAILSCALE_UID,
+        _TAILSCALE_GID,
+        128 * 1024,
+    ),
 }
 
 

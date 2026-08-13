@@ -21,6 +21,9 @@ if [[ ! "$project_name" =~ ^[a-z0-9][a-z0-9_-]{0,62}$ ]]; then
   exit 2
 fi
 
+oauth_client_id_file=${VONK_DEV_TAILSCALE_OAUTH_CLIENT_ID_FILE:?set private Tailscale OAuth client ID file path}
+oauth_client_secret_file=${VONK_DEV_TAILSCALE_OAUTH_CLIENT_SECRET_FILE:?set private Tailscale OAuth client secret file path}
+
 if [[ "$#" -eq 0 ]]; then
   set -- up -d --wait --pull never
 elif [[ "$1" == up ]]; then
@@ -35,14 +38,20 @@ elif [[ "$1" == up ]]; then
 fi
 
 if [[ -n ${VONK_DEV_SECRETS_DIR:-} ]]; then
-  secrets_dir=$(python3 "$secrets_helper" \
+  secrets_dir=$(PYTHONPATH="$repository_root/control/src${PYTHONPATH:+:$PYTHONPATH}" \
+    python3 "$secrets_helper" \
     --repository-root "$repository_root" \
     --management-cidrs "$management_cidrs" \
+    --tailscale-oauth-client-id-file "$oauth_client_id_file" \
+    --tailscale-oauth-client-secret-file "$oauth_client_secret_file" \
     --external-secrets-dir "$VONK_DEV_SECRETS_DIR")
 else
-  secrets_dir=$(python3 "$secrets_helper" \
+  secrets_dir=$(PYTHONPATH="$repository_root/control/src${PYTHONPATH:+:$PYTHONPATH}" \
+    python3 "$secrets_helper" \
     --repository-root "$repository_root" \
-    --management-cidrs "$management_cidrs")
+    --management-cidrs "$management_cidrs" \
+    --tailscale-oauth-client-id-file "$oauth_client_id_file" \
+    --tailscale-oauth-client-secret-file "$oauth_client_secret_file")
 fi
 
 expected_commit=$(git -C "$repository_root" rev-parse --verify 'HEAD^{commit}')
@@ -96,6 +105,19 @@ services:
         target: /source-origin
         read_only: true
 EOF
+
+if [[ -n ${VONK_DEV_SYNTHETIC_CONTROL_HOSTNAME_GENERATION:-} ]]; then
+  synthetic_control_hostname_generation=$VONK_DEV_SYNTHETIC_CONTROL_HOSTNAME_GENERATION
+  if [[ ! "$synthetic_control_hostname_generation" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]; then
+    printf '%s\n' 'synthetic development control hostname generation is invalid' >&2
+    exit 2
+  fi
+  cat >> "$overlay" <<EOF
+  caddy:
+    environment:
+      VONK_CONTROL_HOSTNAME_GENERATION: $synthetic_control_hostname_generation
+EOF
+fi
 
 docker compose \
   --project-name "$project_name" \

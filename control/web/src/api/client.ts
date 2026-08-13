@@ -1,6 +1,8 @@
 import createClient from "openapi-fetch";
+import {AuthenticationRequired} from "../auth";
 import type {paths} from "./generated";
 import type {
+  AuthSession,
   AgentsResponse,
   AuditSummary,
   ControlApi,
@@ -52,6 +54,13 @@ function csrfToken(): string | undefined {
     .map(value => value.trim())
     .find(value => value.startsWith("vonk_csrf="));
   return cookie?.slice(cookie.indexOf("=") + 1);
+}
+
+export class ApiError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message);
+    this.name = "ApiError";
+  }
 }
 
 function resultData<T>(result: {data?: T; error?: unknown; response: Response}): T {
@@ -146,6 +155,7 @@ function packageCandidate(value: PackageCandidateDocument): PackageCandidate {
 }
 
 export class ApiClient implements ControlApi {
+  private authenticationRequired?: () => void;
   private readonly generated = createClient<paths>({
     baseUrl: location.origin,
     credentials: "same-origin",
@@ -162,7 +172,23 @@ export class ApiClient implements ControlApi {
         headers.set("X-CSRF-Token", csrf);
         return new Request(request, {headers});
       },
+      onResponse: ({response}) => {
+        this.requireAuthentication(response);
+      },
     });
+  }
+
+  onAuthenticationRequired(listener: () => void): () => void {
+    this.authenticationRequired = listener;
+    return () => {
+      if (this.authenticationRequired === listener) this.authenticationRequired = undefined;
+    };
+  }
+
+  private requireAuthentication(response: Response): void {
+    if (response.status !== 401) return;
+    this.authenticationRequired?.();
+    throw new AuthenticationRequired();
   }
 
   async request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -173,6 +199,7 @@ export class ApiClient implements ControlApi {
     const csrf = csrfToken();
     if (csrf && init.method && !["GET", "HEAD"].includes(init.method)) headers.set("X-CSRF-Token", csrf);
     const response = await fetch(path, {...init, headers, credentials: "same-origin"});
+    this.requireAuthentication(response);
     if (!response.ok) {
       let problem: unknown;
       try { problem = await response.json(); } catch { problem = null; }
@@ -180,11 +207,28 @@ export class ApiClient implements ControlApi {
         const body = problem as {code?: unknown; detail?: unknown};
         const code = typeof body.code === "string" ? body.code.slice(0, 128) : `HTTP ${response.status}`;
         const detail = typeof body.detail === "string" ? body.detail.slice(0, 256) : "request failed";
-        throw new Error(`${code}: ${detail}`);
+        throw new ApiError(response.status, `${code}: ${detail}`);
       }
-      throw new Error(`Control API returned ${response.status}`);
+      throw new ApiError(response.status, `Control API returned ${response.status}`);
     }
     return response.json() as Promise<T>;
+  }
+
+  session(): Promise<AuthSession> {
+    return this.request("/api/v1/auth/session");
+  }
+
+  login(subject: "admin", password: string): Promise<AuthSession> {
+    return this.request("/api/v1/auth/login", {method: "POST", body: JSON.stringify({subject, password})});
+  }
+
+  async logout(): Promise<void> {
+    const headers = new Headers({Accept: "application/json"});
+    const csrf = csrfToken();
+    if (csrf) headers.set("X-CSRF-Token", csrf);
+    const response = await fetch("/api/v1/auth/logout", {method: "POST", headers, credentials: "same-origin"});
+    this.requireAuthentication(response);
+    if (response.status !== 204) throw new ApiError(response.status, `Control API returned ${response.status}`);
   }
 
   async catalogRecipes(cursor?: string): Promise<CatalogRecipeList> {
@@ -235,6 +279,7 @@ export class ApiClient implements ControlApi {
     const response = await fetch(`/api/v1/catalog/source-bundles/${sha256}`, {
       method: "PUT", body: archive as BodyInit, headers, credentials: "same-origin",
     });
+    this.requireAuthentication(response);
     if (!response.ok) throw new Error(`Source upload returned ${response.status}: ${(await response.text()).slice(0, 256)}`);
     return response.json() as Promise<SourceBundleReceipt>;
   }

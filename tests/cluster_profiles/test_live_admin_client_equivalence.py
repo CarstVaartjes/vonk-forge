@@ -68,7 +68,8 @@ def test_generated_cli_and_rendered_browser_share_live_plan_and_apply_contract(
             time.sleep(0.05)
         else:
             raise AssertionError("disposable control API did not start")
-        token = json.loads(ready_file.read_text())["token"]
+        ready = json.loads(ready_file.read_text())
+        token = ready["token"]
         token_file = tmp_path / "token"
         token_file.write_text(token + "\n")
         token_file.chmod(0o600)
@@ -83,8 +84,9 @@ def test_generated_cli_and_rendered_browser_share_live_plan_and_apply_contract(
         result_file = tmp_path / "browser-result.json"
         environment = {
             **os.environ,
+            "VONK_LIVE_BROWSER_CSRF": ready["browser_csrf"],
+            "VONK_LIVE_BROWSER_TOKEN": ready["browser_token"],
             "VONK_LIVE_ORIGIN": origin,
-            "VONK_LIVE_TOKEN": token,
             "VONK_LIVE_STATE_FILE": str(state_file),
             "VONK_LIVE_EXPECTED_FILE": str(expected_file),
             "VONK_LIVE_RESULT_FILE": str(result_file),

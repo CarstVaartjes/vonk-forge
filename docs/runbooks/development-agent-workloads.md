@@ -18,6 +18,7 @@ defaults baked into Compose or a recipe.
 | `<DOWNLOAD_DIRECTORY>` | Private local directory containing the accepted Compose workflow artifact. |
 | `<LOCAL_STAGING_DIRECTORY>` | Private mode `0700` local directory used to generate secrets. |
 | `<LOCAL_SECRETS_DIR>` | `<LOCAL_STAGING_DIRECTORY>/secrets`. |
+| `<LOCAL_OAUTH_INPUT_DIRECTORY>` | Private mode `0700` local directory containing the separately captured Tailscale OAuth client ID and secret files. |
 | `<MOUNTED_NAS_PARENT>` | Mounted SMB parent that contains the NAS project directory. |
 | `<NAS_SSH_TARGET>` | Operator SSH target for loopback forwarding only. |
 | `<NAS_MANAGEMENT_IP>` | NAS address on the GPU-node management LAN. |
@@ -96,7 +97,9 @@ scripts/dev-runtime-secrets.py \
   --management-cidrs '<NODE_MANAGEMENT_CIDR>' \
   --enroll-hostname '<ENROLLMENT_HOSTNAME>' \
   --agent-hostname '<CONTROLLER_HOSTNAME>' \
-  --registry-hostname '<REGISTRY_HOSTNAME>'
+  --registry-hostname '<REGISTRY_HOSTNAME>' \
+  --tailscale-oauth-client-id-file '<LOCAL_OAUTH_INPUT_DIRECTORY>/client-id' \
+  --tailscale-oauth-client-secret-file '<LOCAL_OAUTH_INPUT_DIRECTORY>/client-secret'
 scripts/dev-runtime-project \
   --source-compose '<DOWNLOAD_DIRECTORY>/docker-compose.dev.yml' \
   --secrets-dir '<LOCAL_SECRETS_DIR>' \
@@ -109,35 +112,41 @@ scripts/dev-runtime-project \
   --registry-hostname '<REGISTRY_HOSTNAME>'
 ```
 
-The generator creates 17 local source files: 14 deployment secret/config files
-plus `controller-ca-key`, `git-signing-key.pub`, and
-`host-runtime-grant-public-key`. The protected `controller-ca-key` and
-`host-runtime-grant-private-key` are required to preserve their respective
-authorities, so include all 17 local
-source files in one encrypted 1Password generation or equivalent backup before
-first deployment. `controller-ca-key` must not be copied to the NAS.
+The generator creates exactly 21 local source files: exactly 17 deployment
+files plus four local-only files: `admin-password`, `controller-ca-key`,
+`git-signing-key.pub`, and `host-runtime-grant-public-key`. The protected local
+source preserves the administrator, controller, Git-signing, and host-runtime
+authorities, so include all 21 files in one encrypted 1Password generation or
+equivalent backup before first deployment. None of the four local-only files
+is copied to the NAS; in particular, the plaintext `admin-password` stays only
+in the local generation, its encrypted backup, and the named 1Password item.
 For two-node acceptance, pass the canonical NVIDIA Sync direct networks and
 configure each agent with one address from those networks plus its measured
 bandwidth. The publisher rejects any direct network that overlaps management.
-For the one supported upgrade from the original 15-file source generation,
-rerun the same command once with `--upgrade-host-runtime-authority`. The helper
+For the one supported host-authority upgrade from the original 15-file source
+generation, rerun the same command once with
+`--upgrade-host-runtime-authority`. The helper
 accepts only an otherwise complete and valid legacy generation, performs an
 add-only migration by adding the two
 host-runtime authority files, leaves every existing file byte-for-byte
 unchanged, and can recover if power is lost after publishing the private half.
-Back up the resulting 17-file generation before deployment. It rejects a
-public-only key, unknown file, inconsistent generation, or ordinary incomplete
-directory; do not work around that refusal by replacing the CA or server
-certificate.
+That produces the valid pre-browser 17-file source generation. Rerun the full
+command with both OAuth input files and `--upgrade-browser-access`; this
+add-only browser migration preserves all 17 existing bytes and adds the four
+browser files. Back up the resulting 21-file generation before deployment. It
+rejects a public-only key, unknown file, inconsistent generation, or ordinary
+incomplete directory; do not work around that refusal by replacing the CA or
+server certificate.
 
 `dev-runtime-project` validates the complete local generation and projects
-exactly 14 deployment files into the NAS `secrets/` directory; it excludes
-`controller-ca-key`, `git-signing-key.pub`, and
+exactly 17 deployment files into the NAS `secrets/` directory; it excludes
+`admin-password`, `controller-ca-key`, `git-signing-key.pub`, and
 `host-runtime-grant-public-key`. The NAS project must contain only
-`docker-compose.yml` and `secrets/`. Pull/redeploy it in the Docker UI and keep
-every named volume. Successful one-shot cohort, initialization, and migration
-containers are expected to exit; PostgreSQL, API, worker, Caddy, and LiteLLM
-must then be healthy. Never print secret values while diagnosing them.
+`docker-compose.yml` and `secrets/`. Choose **Pull** then **Redeploy** in the
+Docker UI and keep every named volume. Successful one-shot cohort,
+initialization, and migration containers are expected to exit; PostgreSQL,
+API, worker, Caddy, and LiteLLM must then be healthy. Never print secret values
+while diagnosing them.
 
 A development pull/redeploy replaces the single `control-api` replica. During
 that bounded interval, in-flight agent requests may produce Caddy `EOF`,
@@ -658,11 +667,11 @@ matching full-state restore.
 Rotate the PostgreSQL password and database URL only as one coordinated pair.
 Rotate Git signing authority with historical public-key retention. Rotate
 agent/controller PKI, host-runtime signing authority, LiteLLM/proxy tokens, and
-token-signing authority as one planned new 17-file local
+token-signing authority as one planned new 21-file local
 source generation: back it up, distribute replacement public trust first,
 schedule re-enrollment/client key change, install the replacement helper public
 key on every node before switching the private signer, project the exact
-14-file NAS bundle,
+17-file NAS bundle,
 and pull/redeploy. Never overwrite one CA private key or one server certificate
 in isolation and hope the other projections recover.
 
@@ -687,7 +696,9 @@ scripts/dev-runtime-secrets.py \
   --management-cidrs '<NODE_MANAGEMENT_CIDR>' \
   --enroll-hostname '<ENROLLMENT_HOSTNAME>' \
   --agent-hostname '<CONTROLLER_HOSTNAME>' \
-  --registry-hostname '<REGISTRY_HOSTNAME>'
+  --registry-hostname '<REGISTRY_HOSTNAME>' \
+  --tailscale-oauth-client-id-file '<LOCAL_OAUTH_INPUT_DIRECTORY>/client-id' \
+  --tailscale-oauth-client-secret-file '<LOCAL_OAUTH_INPUT_DIRECTORY>/client-secret'
 scripts/dev-runtime-project \
   --source-compose '<DOWNLOAD_DIRECTORY>/docker-compose.dev.yml' \
   --secrets-dir "$ACCEPTANCE_ROOT/secrets" \

@@ -42,6 +42,7 @@ _LOCAL_STAGING_FILESYSTEMS = frozenset(
 _HOST_LABEL = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?")
 _PUBLISHED_SECRET_NAMES = frozenset(
     {
+        "admin-password-verifier",
         "agent-ca-certificate",
         "agent-ca-key",
         "agent-proxy-auth",
@@ -55,6 +56,8 @@ _PUBLISHED_SECRET_NAMES = frozenset(
         "litellm-upstream-key",
         "management-cidrs",
         "postgres-password",
+        "tailscale-oauth-client-id",
+        "tailscale-oauth-client-secret",
         "token-signing-key",
     }
 )
@@ -213,8 +216,9 @@ def _read_regular(
         os.close(parent)
 
 
-def _validate_source_directory(path: Path) -> None:
+def _open_locked_source_directory(path: Path) -> int:
     parent = _open_parent_without_symlinks(path)
+    descriptor = -1
     try:
         listed = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
         descriptor = os.open(path.name, _DIRECTORY_FLAGS, dir_fd=parent)
@@ -230,9 +234,41 @@ def _validate_source_directory(path: Path) -> None:
             or stat.S_IMODE(opened.st_mode) != 0o700
         ):
             raise ProjectPublicationError("source secrets directory is unsafe")
+        fcntl.flock(descriptor, fcntl.LOCK_SH)
+        locked = os.fstat(descriptor)
+        current = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
+        if (
+            (locked.st_dev, locked.st_ino) != (opened.st_dev, opened.st_ino)
+            or (current.st_dev, current.st_ino) != (opened.st_dev, opened.st_ino)
+            or not stat.S_ISDIR(locked.st_mode)
+            or locked.st_uid != os.geteuid()
+            or stat.S_IMODE(locked.st_mode) != 0o700
+        ):
+            raise ProjectPublicationError("source secrets directory changed")
+        return descriptor
+    except ProjectPublicationError:
+        if descriptor >= 0:
+            os.close(descriptor)
+        raise
+    except OSError as error:
+        if descriptor >= 0:
+            os.close(descriptor)
+        raise ProjectPublicationError(
+            "source secrets directory cannot be locked safely"
+        ) from error
+    except BaseException:
+        if descriptor >= 0:
+            os.close(descriptor)
+        raise
+    finally:
+        os.close(parent)
+
+
+def _release_source_directory(descriptor: int) -> None:
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
     finally:
         os.close(descriptor)
-        os.close(parent)
 
 
 def _render_compose(
@@ -836,24 +872,37 @@ def publish_project(
     fabric_cidrs = _validate_direct_fabric_cidrs(
         direct_fabric_cidrs, management_cidrs=cidrs
     )
-    _validate_source_directory(secrets_dir)
     runtime = _runtime_module()
-    source_bundle = {
-        name: _read_regular(secrets_dir / name, private=True, maximum=64 * 1024)
-        for name in runtime.RUNTIME_SECRET_NAMES
-    }
+    source_directory = _open_locked_source_directory(secrets_dir)
     try:
-        runtime._validate_bundle(
-            source_bundle,
-            management_cidrs=cidrs,
-            enroll_hostname=enroll,
-            agent_hostname=agent,
-            registry_hostname=registry,
-        )
-    except runtime.RuntimeSecretError as error:
-        raise ProjectPublicationError(
-            "source secret bundle does not match project inputs"
-        ) from error
+        try:
+            source_names = set(os.listdir(source_directory))
+        except OSError as error:
+            raise ProjectPublicationError(
+                "source secret bundle cannot be listed safely"
+            ) from error
+        if source_names != runtime.RUNTIME_SECRET_NAMES:
+            raise ProjectPublicationError(
+                "source secret bundle contains unexpected entries"
+            )
+        source_bundle = {
+            name: _read_regular_at(source_directory, name, maximum=64 * 1024)
+            for name in runtime.RUNTIME_SECRET_NAMES
+        }
+        try:
+            runtime._validate_bundle(
+                source_bundle,
+                management_cidrs=cidrs,
+                enroll_hostname=enroll,
+                agent_hostname=agent,
+                registry_hostname=registry,
+            )
+        except runtime.RuntimeSecretError as error:
+            raise ProjectPublicationError(
+                "source secret bundle does not match project inputs"
+            ) from error
+    finally:
+        _release_source_directory(source_directory)
     compose_source = _read_regular(source_compose, private=False)
     compose = _render_compose(
         compose_source,

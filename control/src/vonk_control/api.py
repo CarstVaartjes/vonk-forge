@@ -58,6 +58,7 @@ from .auth import (
     TokenCodec,
     TrustedProxyAgentIdentityMiddleware,
 )
+from .browser_auth import BrowserAuthenticationError, BrowserAuthService
 from .catalog_api import install_catalog_routes
 from .catalog_service import CatalogService
 from .cluster_mappings import ClusterMappingService
@@ -105,6 +106,37 @@ _RECIPE_IMAGE_UPLOAD = re.compile(
     r"[89ab][0-9a-f]{3}-[0-9a-f]{12}/image\Z"
 )
 _MAX_IDENTITY_PROJECTION_BYTES = 64 * 1024
+_LOGIN_PATH = "/api/v1/auth/login"
+
+
+class _DuplicateJsonKey(ValueError):
+    pass
+
+
+class _RequestBodyTooLarge(ValueError):
+    pass
+
+
+def _reject_duplicate_json_keys(
+    pairs: list[tuple[str, object]],
+) -> dict[str, object]:
+    document: dict[str, object] = {}
+    for key, value in pairs:
+        if key in document:
+            raise _DuplicateJsonKey
+        document[key] = value
+    return document
+
+
+async def _bounded_request_body(request: Request, maximum: int) -> bytes:
+    body = bytearray()
+    async for chunk in request.stream():
+        if len(body) + len(chunk) > maximum:
+            raise _RequestBodyTooLarge
+        body.extend(chunk)
+    bounded = bytes(body)
+    request._body = bounded
+    return bounded
 
 
 class GenerationReadinessError(RuntimeError):
@@ -949,6 +981,7 @@ def create_app(
     global_catalog: Any | None = None,
     workload_run: WorkloadRunWorkflow | None = None,
     recipe_operations: RecipeOperationService | None = None,
+    browser_auth: BrowserAuthService | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="Vonk Forge Control", version="1.0", docs_url=None, redoc_url=None
@@ -972,6 +1005,12 @@ def create_app(
     async def canonical_agent_validation_error(
         request: Request, error: RequestValidationError
     ) -> Response:
+        if request.url.path == _LOGIN_PATH:
+            return Response(
+                content=canonical_message({"detail": "login request is invalid"}),
+                status_code=422,
+                media_type="application/json",
+            )
         if request.url.path.startswith("/api/v1/catalog/"):
             return Response(
                 content=canonical_message(
@@ -1029,19 +1068,36 @@ def create_app(
             request.method == "PUT"
             and _RECIPE_IMAGE_UPLOAD.fullmatch(request.url.path) is not None
         )
-        maximum = (
-            MAX_RECIPE_IMAGE_BYTES if recipe_image_upload else 1_048_576
-        )
-        if (
-            length
-            and int(length) > maximum
-            and request.url.path != "/agent/v1/enroll"
-        ):
+        maximum = MAX_RECIPE_IMAGE_BYTES if recipe_image_upload else 1_048_576
+        if length and int(length) > maximum and request.url.path != "/agent/v1/enroll":
             response = Response(status_code=413)
         else:
-            response = await call_next(request)
+            body_too_large = False
+            invalid_login_document = False
+            if request.method == "POST" and request.url.path == _LOGIN_PATH:
+                try:
+                    json.loads(
+                        await _bounded_request_body(request, maximum),
+                        object_pairs_hook=_reject_duplicate_json_keys,
+                    )
+                except _RequestBodyTooLarge:
+                    body_too_large = True
+                except (UnicodeDecodeError, json.JSONDecodeError, _DuplicateJsonKey):
+                    invalid_login_document = True
+            if body_too_large:
+                response = Response(status_code=413)
+            elif invalid_login_document:
+                response = Response(
+                    content=canonical_message({"detail": "login request is invalid"}),
+                    status_code=422,
+                    media_type="application/json",
+                )
+            else:
+                response = await call_next(request)
         response.headers["x-request-id"] = request_id
         response.headers["x-content-type-options"] = "nosniff"
+        if request.url.path.startswith("/api/v1/auth/"):
+            response.headers["cache-control"] = "no-store"
         if metrics is not None:
             metrics.observe_api(
                 request.method, response.status_code, time.monotonic() - started
@@ -1053,17 +1109,27 @@ def create_app(
         cookie_auth = False
         if authorization.startswith("Bearer "):
             encoded = authorization.removeprefix("Bearer ")
+            if not encoded:
+                raise HTTPException(status_code=401, detail="authentication required")
+            try:
+                authenticated = tokens.verify(encoded, now=now())
+            except AuthError:
+                raise HTTPException(
+                    status_code=401, detail="authentication failed"
+                ) from None
         else:
             encoded = request.cookies.get("vonk_session", "")
             cookie_auth = bool(encoded)
-        if not encoded:
-            raise HTTPException(status_code=401, detail="authentication required")
-        try:
-            authenticated = tokens.verify(encoded, now=now())
-        except AuthError:
-            raise HTTPException(
-                status_code=401, detail="authentication failed"
-            ) from None
+            if not encoded:
+                raise HTTPException(status_code=401, detail="authentication required")
+            if browser_auth is None:
+                raise HTTPException(status_code=401, detail="authentication failed")
+            try:
+                authenticated = browser_auth.resolve(encoded).actor
+            except BrowserAuthenticationError:
+                raise HTTPException(
+                    status_code=401, detail="authentication failed"
+                ) from None
         if cookie_auth and request.method not in {"GET", "HEAD", "OPTIONS"}:
             cookie = request.cookies.get("vonk_csrf")
             header = request.headers.get("x-csrf-token")
@@ -1092,6 +1158,11 @@ def create_app(
             update_grants=updates,
         )
     authenticated_actor = Depends(actor)
+
+    if browser_auth is not None:
+        from .auth_api import install_auth_routes
+
+        install_auth_routes(app, browser_auth, audits, authenticated_actor)
 
     install_package_routes(
         app,
@@ -2193,6 +2264,11 @@ def production_app() -> FastAPI:
             sessions,
             clock=clock,
             bundles=SourceBundleStore(settings.state_path / "source-bundles"),
+        ),
+        browser_auth=BrowserAuthService(
+            sessions,
+            token_signing_key=settings.token_signing_key,
+            clock=clock,
         ),
         recipe_operations=recipe_operations,
     )

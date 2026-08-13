@@ -200,6 +200,34 @@
         "title": "ApplyRequest",
         "type": "object"
       },
+      "AuthSession": {
+        "additionalProperties": false,
+        "properties": {
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "role": {
+            "const": "administrator",
+            "title": "Role",
+            "type": "string"
+          },
+          "subject": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "subject",
+          "role",
+          "expires_at"
+        ],
+        "title": "AuthSession",
+        "type": "object"
+      },
       "BoundedErrorResponse": {
         "additionalProperties": false,
         "properties": {
@@ -1554,6 +1582,43 @@
           "total"
         ],
         "title": "JobsResponse",
+        "type": "object"
+      },
+      "LoginRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "password": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Password",
+            "type": "string"
+          },
+          "subject": {
+            "const": "admin",
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "subject",
+          "password"
+        ],
+        "title": "LoginRequest",
+        "type": "object"
+      },
+      "LoginRequestInvalid": {
+        "additionalProperties": false,
+        "properties": {
+          "detail": {
+            "const": "login request is invalid",
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "LoginRequestInvalid",
         "type": "object"
       },
       "MappingNodePlanResponse": {
@@ -5380,6 +5445,11 @@
       "BearerAuth": {
         "scheme": "bearer",
         "type": "http"
+      },
+      "BrowserSession": {
+        "in": "cookie",
+        "name": "vonk_session",
+        "type": "apiKey"
       }
     }
   },
@@ -5984,6 +6054,84 @@
           }
         ],
         "summary": "Audit View"
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "operationId": "loginBrowser",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSession"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginRequestInvalid"
+                }
+              }
+            },
+            "description": "Invalid login request"
+          }
+        },
+        "security": [],
+        "summary": "Login"
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "operationId": "logoutBrowser",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "BrowserSession": []
+          }
+        ],
+        "summary": "Logout"
+      }
+    },
+    "/api/v1/auth/session": {
+      "get": {
+        "operationId": "getBrowserSession",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSession"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "BrowserSession": []
+          }
+        ],
+        "summary": "Session"
       }
     },
     "/api/v1/catalog/imports/global": {

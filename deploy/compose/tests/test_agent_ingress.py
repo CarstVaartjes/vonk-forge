@@ -155,6 +155,58 @@ def _request_body_routes(value: object) -> list[dict]:
     return routes
 
 
+def _routes_with_handlers(value: object) -> list[dict]:
+    routes: list[dict] = []
+
+    def visit(item: object) -> None:
+        if isinstance(item, dict):
+            if isinstance(item.get("handle"), list):
+                routes.append(item)
+            for child in item.values():
+                visit(child)
+        elif isinstance(item, list):
+            for child in item:
+                visit(child)
+
+    visit(value)
+    return routes
+
+
+def _assert_browser_sanitizer_precedes_each_upstream(value: object) -> None:
+    expected_deletes = ["Forwarded", "X-Forwarded-*", "X-Vonk-Agent-*"]
+    expected_upstreams = {
+        "litellm:4000": 2,
+        "grafana:3000": 1,
+        "control-api:8000": 1,
+    }
+
+    for upstream, expected_count in expected_upstreams.items():
+        sequences: list[list[dict]] = []
+        for route in _routes_with_handlers(value):
+            handlers = route["handle"]
+            if any(
+                handler.get("handler") == "reverse_proxy"
+                and handler.get("upstreams") == [{"dial": upstream}]
+                for handler in handlers
+            ):
+                sequences.append(handlers)
+        assert len(sequences) == expected_count, (upstream, sequences)
+        for handlers in sequences:
+            proxy_index = next(
+                index
+                for index, handler in enumerate(handlers)
+                if handler.get("handler") == "reverse_proxy"
+                and handler.get("upstreams") == [{"dial": upstream}]
+            )
+            deleted_headers = [
+                header
+                for handler in handlers[:proxy_index]
+                if handler.get("handler") == "headers"
+                for header in handler.get("request", {}).get("delete", [])
+            ]
+            assert deleted_headers == expected_deletes
+
+
 def _adapted_development_caddy() -> dict:
     result = subprocess.run(
         [
@@ -177,6 +229,8 @@ def _adapted_development_caddy() -> dict:
             "VONK_AGENT_ENROLL_HOSTNAME=enroll.test.example",
             "-e",
             "VONK_AGENT_HOSTNAME=agents.test.example",
+            "-e",
+            "VONK_CONTROL_HOSTNAME=vonk-forge.tailnet.test.ts.net",
             "-e",
             "VONK_BACKEND_PORT=8443",
             "-e",
@@ -308,7 +362,11 @@ def test_development_image_compose_enables_complete_builtin_agent_settings(
     assert api["environment"]["VONK_MANAGEMENT_CIDRS_FILE"] == (
         "/run/secrets/management-cidrs"
     )
-    assert set(caddy["networks"]) == {"application", "ingress"}
+    assert set(caddy["networks"]) == {
+        "application",
+        "ingress",
+        "tailnet-web-edge",
+    }
     assert set(api["networks"]) == {"application", "data", "ingress"}
     assert caddy["depends_on"]["control-api"] == {
         "condition": "service_healthy",
@@ -360,6 +418,128 @@ def test_development_caddy_health_listener_is_exact_and_loopback_only() -> None:
     assert ":2019" not in listeners
     assert "0.0.0.0:2019" not in listeners
     assert "[::]:2019" not in listeners
+
+
+def test_development_browser_edge_accepts_only_the_canonical_tailscale_service_host() -> None:
+    adapted = _adapted_development_caddy()
+    browser = _server_on_port(adapted, 8080)
+
+    assert browser["listen"] == [":8080"]
+    routes = _routes_with_handlers(browser["routes"])
+    trusted = next(
+        route
+        for route in routes
+        if route.get("match")
+        == [{"host": ["vonk-forge.tailnet.test.ts.net"]}]
+    )
+    trusted_routes = trusted["handle"][0]["routes"]
+    trusted_serialized = json.dumps(trusted_routes, sort_keys=True)
+
+    assert '"max_size": 1000000' in trusted_serialized
+    for header in (
+        "Strict-Transport-Security",
+        "X-Content-Type-Options",
+        "X-Frame-Options",
+        "Referrer-Policy",
+    ):
+        assert header in trusted_serialized
+    for path, status in (
+        ("/agent/v1/*", 404),
+        ("/internal/*", 404),
+    ):
+        route = next(
+            candidate
+            for candidate in routes
+            if candidate.get("match") == [{"path": [path]}]
+        )
+        assert f'"status_code": {status}' in json.dumps(route, sort_keys=True)
+    repository_authority = next(
+        route
+        for route in routes
+        if route.get("match")
+        == [
+            {
+                "method": ["POST", "PUT", "PATCH", "DELETE"],
+                "path": [
+                    "/litellm/model",
+                    "/litellm/model/*",
+                    "/litellm/model_group",
+                    "/litellm/model_group/*",
+                    "/litellm/config",
+                    "/litellm/config/*",
+                ],
+            }
+        ]
+    )
+    assert '"status_code": 403' in json.dumps(repository_authority, sort_keys=True)
+    assert "litellm:4000" in trusted_serialized
+    assert "control-api:8000" in trusted_serialized
+
+    _assert_browser_sanitizer_precedes_each_upstream(trusted_routes)
+
+    rejected = next(
+        route
+        for route in routes
+        if "match" not in route and '"status_code": 421' in json.dumps(route)
+    )
+    assert '"status_code": 421' in json.dumps(rejected)
+
+
+def test_production_browser_edge_accepts_only_control_hostname_and_fails_closed() -> None:
+    environment = _environment()
+    source = (ROOT / "deploy/compose/Caddyfile").read_text(encoding="utf-8")
+    assert "@canonical_browser_host host {$VONK_CONTROL_HOSTNAME}" in source
+    assert "respond 421" in source
+
+    adapted = _adapted_caddy(environment)
+    browser = _server_on_port(adapted, 8080)
+    routes = _routes_with_handlers(browser["routes"])
+    trusted = next(
+        route
+        for route in routes
+        if route.get("match") == [{"host": [environment["VONK_CONTROL_HOSTNAME"]]}]
+    )
+    trusted_routes = trusted["handle"][0]["routes"]
+    trusted_serialized = json.dumps(trusted_routes, sort_keys=True)
+
+    assert "control-api:8000" in trusted_serialized
+    assert "litellm:4000" in trusted_serialized
+    assert "grafana:3000" in trusted_serialized
+    trusted_adapter_routes = _routes_with_handlers(trusted_routes)
+    for path in ("/agent/v1/*", "/internal/*"):
+        denied = next(
+            route
+            for route in trusted_adapter_routes
+            if route.get("match") == [{"path": [path]}]
+        )
+        assert '"status_code": 404' in json.dumps(denied, sort_keys=True)
+    repository_authority = next(
+        route
+        for route in trusted_adapter_routes
+        if route.get("match")
+        == [
+            {
+                "method": ["POST", "PUT", "PATCH", "DELETE"],
+                "path": [
+                    "/litellm/model",
+                    "/litellm/model/*",
+                    "/litellm/model_group",
+                    "/litellm/model_group/*",
+                    "/litellm/config",
+                    "/litellm/config/*",
+                ],
+            }
+        ]
+    )
+    assert '"status_code": 403' in json.dumps(repository_authority, sort_keys=True)
+    _assert_browser_sanitizer_precedes_each_upstream(trusted_routes)
+
+    rejected = next(
+        route
+        for route in routes
+        if "match" not in route and '"status_code": 421' in json.dumps(route)
+    )
+    assert '"status_code": 421' in json.dumps(rejected)
 
 
 def test_mtls_image_upload_has_a_dedicated_bound_without_widening_other_edges() -> None:
@@ -425,7 +605,12 @@ def test_caddy_adapts_three_sni_boundaries_for_admin_enrollment_and_mtls_agents(
             if route.get("match") == [{"host": [host]}]
         )
 
-    control_routes = tailnet_server["routes"]
+    control_site = next(
+        route
+        for route in _routes_with_handlers(tailnet_server["routes"])
+        if route.get("match") == [{"host": [caddy_environment["VONK_CONTROL_HOSTNAME"]]}]
+    )
+    control_routes = control_site["handle"][0]["routes"]
     denied = next(
         index for index, route in enumerate(control_routes)
         if route.get("match") == [{"path": ["/agent/v1/*"]}]
@@ -565,7 +750,12 @@ def test_caddy_activation_route_is_exposed_only_on_verified_mtls_agent_sni() -> 
     )
     assert not fnmatchcase(activation_path, enrollment_proxy["match"][0]["path"][0])
 
-    control_routes = tailnet_server["routes"]
+    control_site = next(
+        route
+        for route in _routes_with_handlers(tailnet_server["routes"])
+        if route.get("match") == [{"host": [caddy_environment["VONK_CONTROL_HOSTNAME"]]}]
+    )
+    control_routes = control_site["handle"][0]["routes"]
     control_denial = next(
         route
         for route in control_routes

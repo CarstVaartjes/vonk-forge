@@ -47,42 +47,62 @@
 	}
 }
 
+(browser_proxy_headers) {
+	# The trusted Host selects the browser boundary; no browser-controlled
+	# forwarding or agent identity headers may reach any browser upstream.
+	request_header -Forwarded
+	request_header -X-Forwarded-*
+	request_header -X-Vonk-Agent-*
+}
+
+(browser_control_proxy) {
+	import browser_proxy_headers
+	reverse_proxy control-api:8000
+}
+
 # Browser and operator traffic arrives only from the Tailscale gateway over the
 # private tailnet-web-edge network. Tailscale terminates HTTPS before this HTTP
 # listener; Docker does not publish port 8080.
 :8080 {
-	import edge_guards
-	handle /healthz {
-		respond 200
-	}
+	@canonical_browser_host host {$VONK_CONTROL_HOSTNAME}
+	handle @canonical_browser_host {
+		import edge_guards
+		handle /healthz {
+			respond 200
+		}
 
-	@agent_path path /agent/v1/*
-	handle @agent_path {
-		respond 404
+		@agent_path path /agent/v1/*
+		handle @agent_path {
+			respond 404
+		}
+		@internal_path path /internal/*
+		handle @internal_path {
+			respond 404
+		}
+		handle /v1/* {
+			import browser_proxy_headers
+			reverse_proxy litellm:4000
+		}
+		@litellm_repository_authority {
+			method POST PUT PATCH DELETE
+			path /litellm/model /litellm/model/* /litellm/model_group /litellm/model_group/* /litellm/config /litellm/config/*
+		}
+		handle @litellm_repository_authority {
+			respond 403
+		}
+		handle_path /litellm/* {
+			import browser_proxy_headers
+			reverse_proxy litellm:4000
+		}
+		handle /grafana/* {
+			import browser_proxy_headers
+			reverse_proxy grafana:3000
+		}
+		handle {
+			import browser_control_proxy
+		}
 	}
-	@internal_path path /internal/*
-	handle @internal_path {
-		respond 404
-	}
-	handle /v1/* {
-		reverse_proxy litellm:4000
-	}
-	@litellm_repository_authority {
-		method POST PUT PATCH DELETE
-		path /litellm/model /litellm/model/* /litellm/model_group /litellm/model_group/* /litellm/config /litellm/config/*
-	}
-	handle @litellm_repository_authority {
-		respond 403
-	}
-	handle_path /litellm/* {
-		reverse_proxy litellm:4000
-	}
-	handle /grafana/* {
-		reverse_proxy grafana:3000
-	}
-	handle {
-		import control_proxy
-	}
+	respond 421
 }
 
 # Bootstrap is server-authenticated but intentionally does not request a client

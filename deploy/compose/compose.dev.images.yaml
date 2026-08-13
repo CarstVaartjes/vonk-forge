@@ -119,6 +119,7 @@ services:
     command: [python, -m, vonk_control.dev_init]
     environment:
       VONK_CONTROL_IDENTITY_ROOT: /control-identity
+      VONK_DEV_AUTH_SECRET_ROOT: /auth-secrets
       VONK_DEV_API_SECRET_ROOT: /api-secrets
       VONK_DEV_CADDY_SECRET_ROOT: /caddy-secrets
       VONK_DEV_LITELLM_SECRET_ROOT: /litellm-secrets
@@ -126,17 +127,20 @@ services:
       VONK_DEV_INIT_PHASE: runtime
       VONK_DEV_RUNTIME_CONFIG_ROOT: /runtime-config
       VONK_DEV_SECRET_SOURCE_ROOT: /host-secrets
+      VONK_DEV_TAILSCALE_SECRET_ROOT: /tailscale-secrets
       VONK_DEV_WORKER_SECRET_ROOT: /worker-secrets
       VONK_DEV_SELECTED_COHORT_FILE: /cohort/selected.json
       VONK_ROUTE_ROOT: /routes
       VONK_STATE_PATH: /state
       VONK_SUPERVISOR_ROOT: /supervisor
     volumes:
+      - dev-auth-secrets:/auth-secrets
       - dev-api-secrets:/api-secrets
       - dev-caddy-secrets:/caddy-secrets
       - dev-litellm-secrets:/litellm-secrets
       - dev-migrate-secrets:/migrate-secrets
       - dev-runtime-config:/runtime-config
+      - dev-tailscale-secrets:/tailscale-secrets
       - dev-worker-secrets:/worker-secrets
       - dev-control-identity:/control-identity
       - dev-control-state:/state
@@ -144,6 +148,8 @@ services:
       - dev-supervisor-state:/supervisor
       - dev-image-cohort:/cohort:ro
     secrets:
+      - source: admin-password-verifier
+        target: /host-secrets/admin-password-verifier
       - source: agent-ca-certificate
         target: /host-secrets/agent-ca-certificate
       - source: agent-ca-key
@@ -168,6 +174,10 @@ services:
         target: /host-secrets/litellm-upstream-key
       - source: management-cidrs
         target: /host-secrets/management-cidrs
+      - source: tailscale-oauth-client-id
+        target: /host-secrets/tailscale-oauth-client-id
+      - source: tailscale-oauth-client-secret
+        target: /host-secrets/tailscale-oauth-client-secret
       - source: token-signing-key
         target: /host-secrets/token-signing-key
     depends_on:
@@ -229,6 +239,26 @@ services:
       dev-init: {condition: service_completed_successfully}
       dev-cohort-verify: {condition: service_completed_successfully}
     networks: [data]
+    restart: "no"
+
+  dev-auth-init:
+    image: *api-image
+    pull_policy: always
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    command: [python, -m, vonk_control.dev_auth_init]
+    environment:
+      VONK_DEV_AUTH_MODE: reconcile
+    volumes:
+      - dev-auth-secrets:/auth-secrets:ro
+    tmpfs: [/tmp]
+    networks: [data]
+    depends_on:
+      postgres: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+      dev-init: {condition: service_completed_successfully}
     restart: "no"
 
   control-worker:
@@ -299,6 +329,7 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
       migrate: {condition: service_completed_successfully}
+      dev-auth-init: {condition: service_completed_successfully}
       dev-init: {condition: service_completed_successfully}
       control-worker: {condition: service_started}
     healthcheck:
@@ -348,6 +379,7 @@ services:
     volumes:
       - dev-runtime-config:/run/vonk-runtime:ro
       - dev-caddy-secrets:/run/secrets:ro
+      - dev-tailscale-runtime:/run/vonk-tailnet:ro
     tmpfs:
       - /config:rw,noexec,nosuid,nodev,mode=0700,uid=10000,gid=10000
       - /data:rw,noexec,nosuid,nodev,mode=0700,uid=10000,gid=10000
@@ -358,12 +390,65 @@ services:
       VONK_AGENT_ENROLL_HOSTNAME: enroll.vonk-forge.lan
       VONK_AGENT_HOSTNAME: agents.vonk-forge.lan
       VONK_BACKEND_PORT: "8443"
-    networks: [application, ingress]
+      VONK_CONTROL_HOSTNAME_FILE: /run/vonk-tailnet/control-hostname.ready
+    networks: [application, ingress, tailnet-web-edge]
     depends_on:
       control-api: {condition: service_healthy}
       dev-init: {condition: service_completed_successfully}
     healthcheck:
-      test: [CMD, wget, -q, --spider, -T, "3", http://127.0.0.1:2019/healthz]
+      test: [CMD, /bin/sh, /run/vonk-runtime/caddy-entrypoint.sh, health]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  tailscale-gateway:
+    image: tailscale/tailscale:v1.98.8@sha256:d54b2e6a9c09f0e5ec52e82b9ad4af3d446b54a7c08075e92f11c39dd410105f
+    pull_policy: always
+    hostname: vonk-forge-dev-gateway
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      TS_AUTH_ONCE: "true"
+      TS_CLIENT_ID: file:/run/secrets/tailscale-oauth-client-id
+      TS_CLIENT_SECRET: file:/run/secrets/tailscale-oauth-client-secret
+      TS_EXTRA_ARGS: --advertise-tags=tag:vonk-gateway
+      TS_HOSTNAME: vonk-forge-dev-gateway
+      TS_SOCKET: /var/run/tailscale/tailscaled.sock
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "true"
+    volumes:
+      - dev-tailscale-secrets:/run/secrets:ro
+      - dev-tailscale-state:/var/lib/tailscale
+      - dev-tailscale-socket:/var/run/tailscale
+    tmpfs: [/tmp:size=64m,mode=1777]
+    networks: [tailscale-egress, tailnet-web-edge]
+    healthcheck:
+      test: [CMD, tailscale, --socket=/var/run/tailscale/tailscaled.sock, status, --json]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  tailscale-configurator:
+    image: tailscale/tailscale:v1.98.8@sha256:d54b2e6a9c09f0e5ec52e82b9ad4af3d446b54a7c08075e92f11c39dd410105f
+    pull_policy: always
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    network_mode: service:tailscale-gateway
+    entrypoint: [/bin/sh, /run/vonk-runtime/tailscale-configure.sh]
+    volumes:
+      - dev-tailscale-socket:/var/run/tailscale
+      - dev-runtime-config:/run/vonk-runtime:ro
+      - dev-tailscale-runtime:/run/vonk-tailnet
+    tmpfs: [/tmp:size=16m,mode=1777]
+    depends_on:
+      caddy: {condition: service_started}
+      tailscale-gateway: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, /bin/sh, /run/vonk-runtime/tailscale-configure.sh, health]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -372,8 +457,12 @@ networks:
   application: {internal: true}
   data: {internal: true}
   ingress: {}
+  tailscale-egress: {}
+  tailnet-web-edge: {internal: true}
 
 secrets:
+  admin-password-verifier:
+    file: ./secrets/admin-password-verifier
   postgres-password:
     file: ./secrets/postgres-password
   database-url:
@@ -402,8 +491,13 @@ secrets:
     file: ./secrets/management-cidrs
   token-signing-key:
     file: ./secrets/token-signing-key
+  tailscale-oauth-client-id:
+    file: ./secrets/tailscale-oauth-client-id
+  tailscale-oauth-client-secret:
+    file: ./secrets/tailscale-oauth-client-secret
 
 volumes:
+  dev-auth-secrets: {}
   dev-postgres-data: {}
   dev-image-cohort: {}
   dev-control-identity: {}
@@ -416,4 +510,8 @@ volumes:
   dev-litellm-secrets: {}
   dev-migrate-secrets: {}
   dev-runtime-config: {}
+  dev-tailscale-secrets: {}
+  dev-tailscale-runtime: {}
+  dev-tailscale-socket: {}
+  dev-tailscale-state: {}
   dev-worker-secrets: {}

@@ -20,6 +20,8 @@ def test_default_tailscale_image_matches_the_audited_lock() -> None:
 
     assert lock["images"]["tailscale"] == TAILSCALE_IMAGE
     assert source.count(TAILSCALE_IMAGE) == 2
+
+
 EXPECTED_MAP = {
     "version": "0.0.1",
     "services": {
@@ -32,6 +34,14 @@ EXPECTED_MAP = {
         },
     },
 }
+
+
+def test_production_gateway_retains_exactly_three_service_endpoints() -> None:
+    script = (COMPOSE / "tailscale/configure.sh").read_text(encoding="utf-8")
+
+    assert json.dumps(EXPECTED_MAP, sort_keys=True, separators=(",", ":")) in script
+    assert script.count("--service=svc:") == 3
+    assert script.count("serve advertise svc:") == 3
 
 
 def _environment() -> dict[str, str]:

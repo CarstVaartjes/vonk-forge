@@ -2423,10 +2423,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 from .db import build_engine, session_factory
                 from .models import User
                 from .settings import Settings
+                from .user_authority import serialize_user_authority
 
                 settings = Settings.from_env_and_secrets()
                 sessions = session_factory(build_engine(settings.database_url))
                 with sessions.begin() as session:
+                    serialize_user_authority(session)
                     session.add(User(subject=args.subject, role="administrator"))
                 return 0
             raise BackupError(f"unsupported offline command: {args.command}")

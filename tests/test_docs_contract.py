@@ -26,6 +26,9 @@ FRESH_DEVELOPMENT_INSTALL = ROOT / "docs/runbooks/fresh-development-install.md"
 PLATFORM_UPDATE = ROOT / "docs/runbooks/platform-update.md"
 RUNTIME_RELEASE = ROOT / "docs/runbooks/runtime-release.md"
 VONKCTL = ROOT / "docs/runbooks/vonkctl.md"
+DOCS_INDEX = ROOT / "docs/README.md"
+CONTROL_RECOVERY = ROOT / "docs/runbooks/control-plane-recovery.md"
+THREAT_MODEL = ROOT / "docs/security/threat-model.md"
 
 GENERIC_ONBOARDING_DOCS = (
     README,
@@ -408,14 +411,18 @@ def test_secret_docs_separate_local_backup_from_exact_nas_projection() -> None:
     runbook = _normalized_text(DEV_WORKLOADS)
     design = _normalized_text(DEV_WORKLOADS_DESIGN)
 
-    for text in (runbook, design):
-        assert "17 local source files" in text
-        assert "14 deployment secret/config files" in text
-        assert "15-file" in text
-        assert "add-only" in text
-        assert "exactly 14 deployment files" in text
-        assert "`controller-ca-key`" in text
-        assert "must not be copied to the NAS" in text
+    assert "exactly 21 local source files" in runbook
+    assert "exactly 17 deployment files" in runbook
+    assert "four local-only files" in runbook
+    assert "15-file" in runbook
+    assert "add-only" in runbook
+
+    # This dated design records the accepted boundary at that historical slice.
+    assert "17 local source files" in design
+    assert "14 deployment secret/config files" in design
+    assert "exactly 14 deployment files" in design
+    assert "`controller-ca-key`" in design
+    assert "must not be copied to the NAS" in design
 
 
 def test_design_records_intentionally_database_free_litellm_runtime() -> None:
@@ -457,6 +464,127 @@ def test_complete_runbook_documents_exact_cleanup_and_recovery_boundaries() -> N
     assert "PASSWORD_REQUIRED" in text
 
 
+def test_complete_runbook_uses_current_browser_secret_generation_contract() -> None:
+    text = DEV_WORKLOADS.read_text()
+    normalized = _normalized_text(DEV_WORKLOADS)
+
+    assert "--tailscale-oauth-client-id-file" in text
+    assert "--tailscale-oauth-client-secret-file" in text
+    assert "exactly 21 local source files" in normalized
+    assert "exactly 17 deployment files" in normalized
+    for local_only in (
+        "`admin-password`",
+        "`controller-ca-key`",
+        "`git-signing-key.pub`",
+        "`host-runtime-grant-public-key`",
+    ):
+        assert local_only in text
+    assert "--upgrade-browser-access" in text
+    assert "Pull** then **Redeploy" in text
+
+
 def test_related_guides_link_to_the_complete_development_acceptance_path() -> None:
     for path in (DEV_NAS, NODE_ONBOARDING, MODEL_SWITCHING, MODEL_CAPACITY):
         assert "development-agent-workloads.md" in path.read_text()
+
+
+def test_operator_entry_points_make_private_browser_login_the_normal_path() -> None:
+    for path in (README, DOCS_INDEX, COMPOSE_README):
+        text = _normalized_text(path)
+        assert "stable private Tailscale HTTPS" in text
+        assert "svc:vonk-forge" in text
+        assert "browser" in text
+        assert "without an SSH or PowerShell tunnel" in text
+        assert "development-nas-installation.md#open-the-stable-browser-url" in text
+
+
+def test_fresh_install_finishes_with_direct_login_and_both_nodes_visible() -> None:
+    text = FRESH_DEVELOPMENT_INSTALL.read_text()
+    normalized = _normalized_text(FRESH_DEVELOPMENT_INSTALL)
+
+    assert "stable private Tailscale HTTPS Service URL" in normalized
+    assert "no Windows hosts-file entry" in normalized
+    assert "Log in as exact subject `admin`" in normalized
+    assert "both Sparks" in normalized
+    assert "Logout" in normalized
+    assert "normal browser access does not require an SSH tunnel" in normalized
+
+    proof_parts = re.split(
+        r"^## (?:\d+\. )?Prove the installation$",
+        text,
+        maxsplit=1,
+        flags=re.MULTILINE,
+    )
+    assert len(proof_parts) == 2
+    proof = proof_parts[1]
+    assert "deterministic acceptance" in " ".join(proof.split())
+    assert "ssh -N" in proof
+
+
+def test_hosts_entries_are_only_for_agent_side_management_names() -> None:
+    fresh = _normalized_text(FRESH_DEVELOPMENT_INSTALL)
+
+    assert "/etc/hosts" in fresh
+    assert "NAS and every GPU node" in fresh
+    assert "enrollment, agent, and registry names" in fresh
+    assert "never add the Tailscale browser name" in fresh
+
+
+def test_security_and_recovery_docs_split_network_and_application_authority() -> None:
+    threat = _normalized_text(THREAT_MODEL)
+    recovery = _normalized_text(CONTROL_RECOVERY)
+
+    for required in (
+        "tailnet reachability and Vonk Forge authentication are independent gates",
+        "administrator verifier",
+        "opaque session digests",
+        "Tailscale OAuth",
+    ):
+        assert required in threat
+    for required in (
+        "OAuth compromise",
+        "Tailscale state loss",
+        "administrator password loss",
+        "break-glass loopback",
+    ):
+        assert required in recovery
+    assert "--rotate-tailscale-oauth" in recovery
+    assert "--tailscale-oauth-rotation-id" in recovery
+    assert "hash-only sidecar receipt history" in recovery
+    assert "Stale UUIDs" in recovery
+    assert "trusted offline operator boundary" in threat
+
+
+def test_development_updates_do_not_replace_the_production_trust_boundary() -> None:
+    combined = " ".join(
+        _normalized_text(path)
+        for path in (README, COMPOSE_README, DEV_NAS, CONTROL_RECOVERY)
+    )
+
+    assert "Pull then Redeploy" in combined
+    assert "mutable `:dev`" in combined
+    assert "production" in combined
+    assert "digest-pinned" in combined
+    assert "host updater" in combined or "host-updater" in combined
+
+
+def test_quick_start_does_not_present_a_tunnel_as_normal_browser_access() -> None:
+    quick_start = _section(README, "Quick start")
+    fresh_before_acceptance = re.split(
+        r"^## (?:\d+\. )?Prove the installation$",
+        FRESH_DEVELOPMENT_INSTALL.read_text(),
+        maxsplit=1,
+        flags=re.MULTILINE,
+    )[0]
+
+    forbidden = (
+        "use an SSH tunnel to access the UI",
+        "open an SSH tunnel for the UI",
+        "keep this tunnel open to use the UI",
+        "SSH forwarding is the normal operator path",
+    )
+    for text in (quick_start, fresh_before_acceptance):
+        assert "ssh -N" not in text
+        assert "-L 18080:127.0.0.1:8080" not in text
+        for claim in forbidden:
+            assert claim not in text

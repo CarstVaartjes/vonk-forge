@@ -2,15 +2,17 @@ import {readFileSync, writeFileSync} from "node:fs";
 import {render, screen, within} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {ApiClient} from "./api/client";
+import {App} from "./app";
+import {AuthProvider} from "./auth";
 import type {ReconciliationPlan} from "./api/types";
-import {ProfilesPage} from "./pages/profiles";
 
 const origin = process.env.VONK_LIVE_ORIGIN;
-const token = process.env.VONK_LIVE_TOKEN;
+const browserToken = process.env.VONK_LIVE_BROWSER_TOKEN;
+const browserCsrf = process.env.VONK_LIVE_BROWSER_CSRF;
 const stateFile = process.env.VONK_LIVE_STATE_FILE;
 const expectedFile = process.env.VONK_LIVE_EXPECTED_FILE;
 const resultFile = process.env.VONK_LIVE_RESULT_FILE;
-const enabled = Boolean(origin && token && stateFile && expectedFile && resultFile);
+const enabled = Boolean(origin && browserToken && browserCsrf && stateFile && expectedFile && resultFile);
 
 (enabled ? it : it.skip)("crosses generated CLI and rendered browser clients against one live API", async () => {
   const expected = JSON.parse(readFileSync(expectedFile!, "utf8")) as ReconciliationPlan;
@@ -19,15 +21,15 @@ const enabled = Boolean(origin && token && stateFile && expectedFile && resultFi
   let browserPlan: ReconciliationPlan | undefined;
   let raceNextApply = false;
   let staleStatus = 0;
-  document.cookie = `vonk_session=${token}; path=/`;
-  document.cookie = "vonk_csrf=live-csrf; path=/";
+  document.cookie = `vonk_session=${browserToken}; path=/`;
+  document.cookie = `vonk_csrf=${browserCsrf}; path=/`;
 
   globalThis.fetch = async (input: string | URL | Request, init?: RequestInit) => {
     const request = input instanceof Request
       ? new Request(input, init)
       : new Request(new URL(String(input), origin), init);
     const headers = new Headers(request.headers);
-    headers.set("Cookie", `vonk_session=${token}; vonk_csrf=live-csrf`);
+    headers.set("Cookie", `vonk_session=${browserToken}; vonk_csrf=${browserCsrf}`);
     const authenticated = new Request(request, {headers});
     const url = new URL(authenticated.url);
     if (authenticated.method === "POST" && url.pathname === "/api/v1/reconciliations") {
@@ -46,8 +48,11 @@ const enabled = Boolean(origin && token && stateFile && expectedFile && resultFi
   };
 
   try {
-    render(<ProfilesPage api={new ApiClient()}/>);
+    const api = new ApiClient();
+    render(<AuthProvider api={api}><App api={api}/></AuthProvider>);
     const user = userEvent.setup();
+    expect(await screen.findByText("admin")).toBeVisible();
+    await user.click(screen.getByRole("link", {name: "Profiles"}));
     const profile = screen.getByLabelText("Profile ID to reconcile");
     await user.type(profile, "production-agents");
     await user.click(screen.getByRole("button", {name: "Preview exact plan"}));

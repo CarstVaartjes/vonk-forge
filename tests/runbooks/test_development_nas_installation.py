@@ -85,7 +85,77 @@ def test_operator_access_keeps_both_application_ports_on_nas_loopback() -> None:
         "sudo systemctl reload ssh",
     ):
         assert required in text
-    assert "restricted operator loopback forwarding" in FRESH_INSTALL.read_text()
+    normalized = _normalized_text(RUNBOOK)
+    assert "bounded acceptance and break-glass recovery only" in normalized
+    assert "not the normal browser path" in normalized
+
+
+def test_development_nas_runbook_documents_private_browser_prerequisites() -> None:
+    text = _normalized_text(RUNBOOK)
+
+    for required in (
+        "Tailscale admin console",
+        "MagicDNS",
+        "HTTPS certificates",
+        "Trust credentials",
+        "`auth_keys` write",
+        "`tag:vonk-gateway`",
+        "`svc:vonk-forge`",
+        "`tcp:443`",
+        "HTTPS-only Serve",
+        "Tailscale Funnel remains disabled",
+        "no human-facing LAN port",
+        "`--tailscale-oauth-client-id-file`",
+        "`--tailscale-oauth-client-secret-file`",
+        "mode `0600`",
+    ):
+        assert required in text
+
+    prerequisites = text.index("MagicDNS")
+    service = text.index("`svc:vonk-forge`")
+    grants = text.index("Merge the `tag:vonk-gateway`")
+    assert prerequisites < service < grants
+
+
+def test_development_nas_runbook_documents_exact_browser_secret_boundary() -> None:
+    text = _normalized_text(RUNBOOK)
+
+    assert "exactly 21 local source files" in text
+    assert "exactly 17 files" in text
+    for local_only in (
+        "`admin-password`",
+        "`controller-ca-key`",
+        "`git-signing-key.pub`",
+        "`host-runtime-grant-public-key`",
+    ):
+        assert local_only in text
+    assert "Vonk Forge NAS Development Administrator" in text
+    assert "1Password" in text
+    assert "encrypted backup" in text
+    assert "plaintext administrator password is never published to the NAS" in text
+
+
+def test_existing_install_browser_upgrade_and_normal_journey_are_complete() -> None:
+    text = _normalized_text(RUNBOOK)
+
+    for required in (
+        "`--upgrade-browser-access`",
+        "preserves every existing secret byte",
+        "**Pull** then **Redeploy**",
+        "Keep every named volume",
+        "stable Tailscale Service URL",
+        "`https://vonk-forge.",
+        "Log in as exact subject `admin`",
+        "Logout",
+        "`--rotate-admin-password`",
+        "`--rotate-tailscale-oauth`",
+        "`--tailscale-oauth-rotation-id <uuid>`",
+        "hash-only receipt history",
+        "previously used credential pair",
+        "revokes every existing browser session",
+        "Tailscale state",
+    ):
+        assert required in text
 
 
 def test_normal_install_and_update_path_is_ui_only_before_guarded_recovery() -> None:
@@ -180,6 +250,9 @@ def test_operator_entry_points_link_to_development_nas_runbook() -> None:
 
 def test_fresh_install_is_the_concise_operator_entry_point() -> None:
     text = _normalized_text(FRESH_INSTALL)
+    setup = text.split("## 3. Generate and publish the NAS project", 1)[1].split(
+        "## 4. Configure names and start the NAS stack", 1
+    )[0]
 
     for required in (
         "docker-compose.yml",
@@ -190,10 +263,17 @@ def test_fresh_install_is_the_concise_operator_entry_point() -> None:
         "/var/lib/vonk-forge/supervisor/current/vonk-agent pair ... --token-stdin",
         "scripts/run-development-slices",
         "--phase synthetic",
+        "MagicDNS",
+        "HTTPS certificates",
+        "`svc:vonk-forge`",
+        "`tcp:443`",
     ):
         assert required in text
     assert "No GitHub, GHCR, R2, database, signing, or model credential" in text
     assert "Do not install a registry token on the NAS" in text
+    assert setup.index("MagicDNS") < setup.index("`svc:vonk-forge`") < setup.index(
+        "Service grant and auto-approval"
+    )
 
 
 def test_readme_and_documentation_index_lead_to_fresh_install() -> None:

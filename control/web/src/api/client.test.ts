@@ -1,3 +1,4 @@
+import {AuthenticationRequired} from "../auth";
 import {ApiClient} from "./client";
 
 afterEach(() => {
@@ -22,6 +23,62 @@ it("uses the generated fleet operation with same-origin credentials", async () =
   expect(fleet).toEqual({commit: "a".repeat(40), nodes: []});
   expect(new URL(captured!.url).pathname).toBe("/api/v1/fleet");
   expect(captured!.credentials).toBe("same-origin");
+});
+
+it("uses exact browser-auth documents and the CSRF cookie for server logout", async () => {
+  // Break caught: browser login drifts from the closed API document, or logout
+  // omits the double-submit CSRF value while claiming to revoke the session.
+  document.cookie = "vonk_csrf=synthetic-csrf-value; path=/";
+  const requests: Request[] = [];
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = input instanceof Request ? input : new Request(new URL(String(input), location.origin), init);
+    requests.push(request);
+    const path = new URL(request.url).pathname;
+    if (path === "/api/v1/auth/logout") return new Response(null, {status: 204});
+    return new Response(JSON.stringify({subject: "admin", role: "administrator", expires_at: "2026-08-13T21:30:00Z"}), {headers: {"Content-Type": "application/json"}, status: 200});
+  });
+  const api = new ApiClient();
+
+  expect(await api.session()).toEqual({subject: "admin", role: "administrator", expires_at: "2026-08-13T21:30:00Z"});
+  await api.login("admin", "synthetic-test-password");
+  await api.logout();
+
+  expect(requests.map(request => [request.method, new URL(request.url).pathname])).toEqual([
+    ["GET", "/api/v1/auth/session"],
+    ["POST", "/api/v1/auth/login"],
+    ["POST", "/api/v1/auth/logout"],
+  ]);
+  expect(await requests[1].clone().json()).toEqual({subject: "admin", password: "synthetic-test-password"});
+  expect(requests[2].headers.get("X-CSRF-Token")).toBe("synthetic-csrf-value");
+  expect(requests.every(request => request.credentials === "same-origin")).toBe(true);
+});
+
+it("throws and emits one centralized authentication signal for an API 401", async () => {
+  // Break caught: an expired browser session becomes a page-local error rather
+  // than a single, in-memory signal that can remove the full control shell.
+  vi.stubGlobal("fetch", async () => new Response(JSON.stringify({detail: "authentication failed"}), {
+    headers: {"Content-Type": "application/json"}, status: 401,
+  }));
+  const api = new ApiClient();
+  let signals = 0;
+  api.onAuthenticationRequired(() => { signals += 1; });
+
+  await expect(api.fleet()).rejects.toBeInstanceOf(AuthenticationRequired);
+  expect(signals).toBe(1);
+});
+
+it("emits one authentication-required callback for a generated revoke 401", async () => {
+  // Break caught: generated response middleware and revoke's local response
+  // handling each notify the shell for the same expired-session response.
+  vi.stubGlobal("fetch", async () => new Response(JSON.stringify({detail: "authentication failed"}), {
+    headers: {"Content-Type": "application/json"}, status: 401,
+  }));
+  const api = new ApiClient();
+  let signals = 0;
+  api.onAuthenticationRequired(() => { signals += 1; });
+
+  await expect(api.revokeAgentNode("spk_0123456789abcdef0123456789abcdef")).rejects.toBeInstanceOf(AuthenticationRequired);
+  expect(signals).toBe(1);
 });
 
 it("adds the session CSRF token to generated enrollment mutations", async () => {

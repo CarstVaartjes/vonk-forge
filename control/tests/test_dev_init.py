@@ -67,6 +67,8 @@ def _set_main_environment(
         "worker": tmp_path / "worker",
         "caddy": tmp_path / "caddy",
         "litellm": tmp_path / "litellm",
+        "auth": tmp_path / "auth",
+        "tailscale": tmp_path / "tailscale",
         "runtime_config": tmp_path / "runtime-config",
         "identity": tmp_path / "identity",
         "state": tmp_path / "state",
@@ -82,6 +84,8 @@ def _set_main_environment(
         ("VONK_DEV_WORKER_SECRET_ROOT", str(paths["worker"])),
         ("VONK_DEV_CADDY_SECRET_ROOT", str(paths["caddy"])),
         ("VONK_DEV_LITELLM_SECRET_ROOT", str(paths["litellm"])),
+        ("VONK_DEV_AUTH_SECRET_ROOT", str(paths["auth"])),
+        ("VONK_DEV_TAILSCALE_SECRET_ROOT", str(paths["tailscale"])),
         ("VONK_DEV_RUNTIME_CONFIG_ROOT", str(paths["runtime_config"])),
         ("VONK_CONTROL_IDENTITY_ROOT", str(paths["identity"])),
         ("VONK_STATE_PATH", str(paths["state"])),
@@ -784,6 +788,9 @@ def _secret_source(root: Path) -> Path:
         "litellm-upstream-key": b"litellm-upstream-key-sentinel\n",
         "management-cidrs": b"192.0.2.0/24\n2001:db8::/64\n",
         "token-signing-key": b"token-signing-key-sentinel-00000000\n",
+        "admin-password-verifier": b"synthetic-admin-verifier-sentinel\n",
+        "tailscale-oauth-client-id": b"synthetic-tailscale-client-id\n",
+        "tailscale-oauth-client-secret": b"synthetic-tailscale-client-secret\n",
     }
     for name, content in contents.items():
         (root / name).write_bytes(content)
@@ -837,7 +844,15 @@ def test_stage_runtime_secrets_projects_exact_disjoint_service_authority(
     (source / "git-signing-key").write_bytes(b"git-signing-private-sentinel\n")
     roots = {
         name: tmp_path / name
-        for name in ("api", "migrate", "worker", "caddy", "litellm")
+        for name in (
+            "api",
+            "migrate",
+            "worker",
+            "caddy",
+            "litellm",
+            "auth",
+            "tailscale",
+        )
     }
 
     stage_runtime_secrets(
@@ -847,6 +862,8 @@ def test_stage_runtime_secrets_projects_exact_disjoint_service_authority(
         roots["worker"],
         roots["caddy"],
         roots["litellm"],
+        roots["auth"],
+        roots["tailscale"],
     )
 
     assert {path.name for path in roots["api"].iterdir()} == {
@@ -878,6 +895,14 @@ def test_stage_runtime_secrets_projects_exact_disjoint_service_authority(
         "litellm-master-key",
         "litellm-upstream-key",
     }
+    assert {path.name for path in roots["auth"].iterdir()} == {
+        "admin-password-verifier",
+        "database-url",
+    }
+    assert {path.name for path in roots["tailscale"].iterdir()} == {
+        "tailscale-oauth-client-id",
+        "tailscale-oauth-client-secret",
+    }
     assert (roots["api"] / "worker-api-token").read_bytes() == (
         roots["worker"] / "worker-api-token"
     ).read_bytes()
@@ -900,6 +925,10 @@ def test_stage_runtime_secrets_projects_exact_disjoint_service_authority(
     assert b"controller-server-private-key-sentinel\n" not in visible["api"]
     assert b"litellm-master-key-sentinel\n" not in visible["api"]
     assert b"litellm-upstream-key-sentinel\n" not in visible["worker"]
+    assert b"synthetic-admin-verifier-sentinel\n" not in visible["api"]
+    assert b"synthetic-admin-verifier-sentinel\n" not in visible["tailscale"]
+    assert b"synthetic-tailscale-client-secret\n" not in visible["auth"]
+    assert b"synthetic-tailscale-client-secret\n" not in visible["api"]
 
 
 def test_stage_runtime_secrets_assigns_exact_service_owners_when_root(
@@ -908,7 +937,15 @@ def test_stage_runtime_secrets_assigns_exact_service_owners_when_root(
     source = _secret_source(tmp_path / "source")
     roots = {
         name: tmp_path / name
-        for name in ("api", "migrate", "worker", "caddy", "litellm")
+        for name in (
+            "api",
+            "migrate",
+            "worker",
+            "caddy",
+            "litellm",
+            "auth",
+            "tailscale",
+        )
     }
     expected_names = {
         "admin-grant-private-key",
@@ -925,6 +962,9 @@ def test_stage_runtime_secrets_assigns_exact_service_owners_when_root(
         "management-cidrs",
         "token-signing-key",
         "worker-api-token",
+        "admin-password-verifier",
+        "tailscale-oauth-client-id",
+        "tailscale-oauth-client-secret",
     }
     owners: dict[tuple[str, str], tuple[int, int]] = {}
 
@@ -949,12 +989,15 @@ def test_stage_runtime_secrets_assigns_exact_service_owners_when_root(
         roots["worker"],
         roots["caddy"],
         roots["litellm"],
+        roots["auth"],
+        roots["tailscale"],
     )
 
     assert set(owners.values()) == {
         (10000, 10000),
         (10001, 10001),
         (10002, 10001),
+        (0, 0),
     }
     assert all(
         owner == (10000, 10000)
@@ -969,7 +1012,12 @@ def test_stage_runtime_secrets_assigns_exact_service_owners_when_root(
     assert all(
         owner == (10001, 10001)
         for (root, _name), owner in owners.items()
-        if root in {"api", "migrate", "worker"}
+        if root in {"api", "migrate", "worker", "auth"}
+    )
+    assert all(
+        owner == (0, 0)
+        for (root, _name), owner in owners.items()
+        if root == "tailscale"
     )
 
 
@@ -982,6 +1030,8 @@ def test_stage_runtime_secrets_creates_disjoint_service_projections(
     worker_root = tmp_path / "worker"
     caddy_root = tmp_path / "caddy"
     litellm_root = tmp_path / "litellm"
+    auth_root = tmp_path / "auth"
+    tailscale_root = tmp_path / "tailscale"
 
     stage_runtime_secrets(
         source,
@@ -990,6 +1040,8 @@ def test_stage_runtime_secrets_creates_disjoint_service_projections(
         worker_root,
         caddy_root,
         litellm_root,
+        auth_root,
+        tailscale_root,
     )
 
     assert {path.name for path in api_root.iterdir()} == {
@@ -1036,6 +1088,14 @@ def test_stage_runtime_secrets_creates_disjoint_service_projections(
     assert not (migrate_root / "worker-api-token").exists()
     assert not (worker_root / "git-signing-key").exists()
     assert not (worker_root / "admin-grant-private-key").exists()
+    assert {path.name for path in auth_root.iterdir()} == {
+        "admin-password-verifier",
+        "database-url",
+    }
+    assert {path.name for path in tailscale_root.iterdir()} == {
+        "tailscale-oauth-client-id",
+        "tailscale-oauth-client-secret",
+    }
 
 
 def test_stage_runtime_secrets_rejects_symlink_inputs_and_projection_roots(
@@ -1054,6 +1114,8 @@ def test_stage_runtime_secrets_rejects_symlink_inputs_and_projection_roots(
             tmp_path / "worker",
             tmp_path / "caddy",
             tmp_path / "litellm",
+            tmp_path / "auth",
+            tmp_path / "tailscale",
         )
 
     source = _secret_source(tmp_path / "safe-source")
@@ -1069,6 +1131,8 @@ def test_stage_runtime_secrets_rejects_symlink_inputs_and_projection_roots(
             tmp_path / "worker",
             tmp_path / "caddy",
             tmp_path / "litellm",
+            tmp_path / "auth",
+            tmp_path / "tailscale",
         )
 
 
@@ -1099,6 +1163,8 @@ def test_stage_runtime_secrets_rejects_parent_symlink_aliases_before_mutation(
                 worker_root,
                 tmp_path / "caddy",
                 tmp_path / "litellm",
+                tmp_path / "auth",
+                tmp_path / "tailscale",
             )
 
     after = shared.stat()
@@ -1122,6 +1188,8 @@ def test_stage_runtime_secrets_requires_absolute_projection_paths(
             tmp_path / "worker",
             tmp_path / "caddy",
             tmp_path / "litellm",
+            tmp_path / "auth",
+            tmp_path / "tailscale",
         )
 
     assert not (tmp_path / "api").exists()
@@ -1151,6 +1219,8 @@ def test_stage_runtime_secrets_rejects_symlinked_parent_components(
                 worker_root,
                 tmp_path / "caddy",
                 tmp_path / "litellm",
+                tmp_path / "auth",
+                tmp_path / "tailscale",
             )
 
     assert not any(actual_parent.iterdir())
@@ -1165,6 +1235,8 @@ def test_stage_runtime_secrets_preserves_generated_credentials_and_refreshes_inp
     worker_root = tmp_path / "worker"
     caddy_root = tmp_path / "caddy"
     litellm_root = tmp_path / "litellm"
+    auth_root = tmp_path / "auth"
+    tailscale_root = tmp_path / "tailscale"
     stage_runtime_secrets(
         source,
         api_root,
@@ -1172,6 +1244,8 @@ def test_stage_runtime_secrets_preserves_generated_credentials_and_refreshes_inp
         worker_root,
         caddy_root,
         litellm_root,
+        auth_root,
+        tailscale_root,
     )
     admin_key = (api_root / "admin-grant-private-key").read_bytes()
     worker_token = (worker_root / "worker-api-token").read_bytes()
@@ -1191,6 +1265,8 @@ def test_stage_runtime_secrets_preserves_generated_credentials_and_refreshes_inp
         worker_root,
         caddy_root,
         litellm_root,
+        auth_root,
+        tailscale_root,
     )
 
     assert (api_root / "admin-grant-private-key").read_bytes() == admin_key
@@ -1240,7 +1316,16 @@ def test_stage_runtime_secrets_does_not_clear_canonical_credentials(
 ) -> None:
     source = _secret_source(tmp_path / "source")
     roots = [
-        tmp_path / name for name in ("api", "migrate", "worker", "caddy", "litellm")
+        tmp_path / name
+        for name in (
+            "api",
+            "migrate",
+            "worker",
+            "caddy",
+            "litellm",
+            "auth",
+            "tailscale",
+        )
     ]
     stage_runtime_secrets(source, *roots)
     admin = (roots[0] / "admin-grant-private-key").read_bytes()
@@ -1268,7 +1353,16 @@ def test_stage_runtime_secrets_never_stages_the_worker_canonical_on_rerun(
 ) -> None:
     source = _secret_source(tmp_path / "source")
     roots = [
-        tmp_path / name for name in ("api", "migrate", "worker", "caddy", "litellm")
+        tmp_path / name
+        for name in (
+            "api",
+            "migrate",
+            "worker",
+            "caddy",
+            "litellm",
+            "auth",
+            "tailscale",
+        )
     ]
     stage_runtime_secrets(source, *roots)
     worker_token = roots[2] / "worker-api-token"
@@ -1342,7 +1436,16 @@ def test_stage_runtime_secrets_faults_preserve_canonical_credentials_and_token_c
 ) -> None:
     source = _secret_source(tmp_path / "source")
     roots = [
-        tmp_path / name for name in ("api", "migrate", "worker", "caddy", "litellm")
+        tmp_path / name
+        for name in (
+            "api",
+            "migrate",
+            "worker",
+            "caddy",
+            "litellm",
+            "auth",
+            "tailscale",
+        )
     ]
     stage_runtime_secrets(source, *roots)
     admin = (roots[0] / "admin-grant-private-key").read_bytes()
@@ -1395,7 +1498,16 @@ def test_stage_runtime_secrets_initializes_pristine_docker_volume_roots(
 ) -> None:
     source = _secret_source(tmp_path / "source")
     roots = [
-        tmp_path / name for name in ("api", "migrate", "worker", "caddy", "litellm")
+        tmp_path / name
+        for name in (
+            "api",
+            "migrate",
+            "worker",
+            "caddy",
+            "litellm",
+            "auth",
+            "tailscale",
+        )
     ]
     for root in roots:
         root.mkdir(mode=0o755)
@@ -1412,6 +1524,8 @@ def test_stage_runtime_secrets_initializes_pristine_docker_volume_roots(
         roots[2]: (10001, 10001),
         roots[3]: (10000, 10000),
         roots[4]: (10002, 10001),
+        roots[5]: (10001, 10001),
+        roots[6]: (0, 0),
     }
     root_chowns = {
         path: (uid, gid) for path, uid, gid in ownership if path in expected_owners
@@ -1429,7 +1543,16 @@ def test_stage_runtime_secrets_rejects_mixed_pristine_and_unsafe_roots_without_m
 ) -> None:
     source = _secret_source(tmp_path / "source")
     roots = [
-        tmp_path / name for name in ("api", "migrate", "worker", "caddy", "litellm")
+        tmp_path / name
+        for name in (
+            "api",
+            "migrate",
+            "worker",
+            "caddy",
+            "litellm",
+            "auth",
+            "tailscale",
+        )
     ]
     for root in (roots[0], roots[1], roots[3], roots[4]):
         root.mkdir(mode=0o755)
@@ -1463,7 +1586,16 @@ def test_stage_runtime_secrets_rejects_nonempty_docker_volume_roots_without_muta
 ) -> None:
     source = _secret_source(tmp_path / "source")
     roots = [
-        tmp_path / item for item in ("api", "migrate", "worker", "caddy", "litellm")
+        tmp_path / item
+        for item in (
+            "api",
+            "migrate",
+            "worker",
+            "caddy",
+            "litellm",
+            "auth",
+            "tailscale",
+        )
     ]
     for root in roots:
         root.mkdir(mode=0o755)
@@ -1495,7 +1627,16 @@ def test_stage_runtime_secrets_rejects_wrong_pristine_root_metadata(
 ) -> None:
     source = _secret_source(tmp_path / "source")
     roots = [
-        tmp_path / name for name in ("api", "migrate", "worker", "caddy", "litellm")
+        tmp_path / name
+        for name in (
+            "api",
+            "migrate",
+            "worker",
+            "caddy",
+            "litellm",
+            "auth",
+            "tailscale",
+        )
     ]
     for root in roots:
         root.mkdir(mode=0o755)
@@ -1519,14 +1660,24 @@ def test_stage_runtime_secrets_rejects_wrong_pristine_root_metadata(
     ("symlink", "fifo", "socket", "hardlink", "directory", "unknown"),
 )
 def test_stage_runtime_secrets_rejects_unsafe_entries_without_mutation(
-    tmp_path: Path, unsafe_kind: str
+    tmp_path: Path, request: pytest.FixtureRequest, unsafe_kind: str
 ) -> None:
     source = _secret_source(tmp_path / "source")
     roots = [
-        tmp_path / name for name in ("api", "migrate", "worker", "caddy", "litellm")
+        tmp_path / name
+        for name in (
+            "api",
+            "migrate",
+            "worker",
+            "caddy",
+            "litellm",
+            "auth",
+            "tailscale",
+        )
     ]
     stage_runtime_secrets(source, *roots)
     api = roots[0]
+    request.addfinalizer(lambda: api.chmod(0o700) if api.exists() else None)
     canonical = api / "admin-grant-private-key"
     original = canonical.read_bytes()
     api.chmod(0o700)
@@ -1571,7 +1722,16 @@ def test_stage_runtime_secrets_rejects_wrong_root_mode_without_mutation(
 ) -> None:
     source = _secret_source(tmp_path / "source")
     roots = [
-        tmp_path / name for name in ("api", "migrate", "worker", "caddy", "litellm")
+        tmp_path / name
+        for name in (
+            "api",
+            "migrate",
+            "worker",
+            "caddy",
+            "litellm",
+            "auth",
+            "tailscale",
+        )
     ]
     stage_runtime_secrets(source, *roots)
     canonical = roots[0] / "admin-grant-private-key"
@@ -1590,7 +1750,16 @@ def test_stage_runtime_secrets_preflights_existing_roots_before_creating_missing
 ) -> None:
     source = _secret_source(tmp_path / "source")
     roots = [
-        tmp_path / name for name in ("api", "migrate", "worker", "caddy", "litellm")
+        tmp_path / name
+        for name in (
+            "api",
+            "migrate",
+            "worker",
+            "caddy",
+            "litellm",
+            "auth",
+            "tailscale",
+        )
     ]
     roots[1].mkdir(mode=0o700)
 
@@ -1603,13 +1772,25 @@ def test_stage_runtime_secrets_preflights_existing_roots_before_creating_missing
 
 
 def test_stage_runtime_secrets_rejects_wrong_root_owner_without_mutation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
 ) -> None:
     source = _secret_source(tmp_path / "source")
     roots = [
-        tmp_path / name for name in ("api", "migrate", "worker", "caddy", "litellm")
+        tmp_path / name
+        for name in (
+            "api",
+            "migrate",
+            "worker",
+            "caddy",
+            "litellm",
+            "auth",
+            "tailscale",
+        )
     ]
     stage_runtime_secrets(source, *roots)
+    request.addfinalizer(lambda: roots[0].chmod(0o700) if roots[0].exists() else None)
     canonical = roots[0] / "admin-grant-private-key"
     original = canonical.read_bytes()
     real_fstat = dev_init.os.fstat
@@ -1636,14 +1817,27 @@ def test_stage_runtime_secrets_rejects_wrong_root_owner_without_mutation(
 
 @pytest.mark.parametrize("metadata_fault", ("owner", "mode"))
 def test_stage_runtime_secrets_rejects_wrong_entry_metadata_without_mutation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, metadata_fault: str
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+    metadata_fault: str,
 ) -> None:
     source = _secret_source(tmp_path / "source")
     roots = [
-        tmp_path / name for name in ("api", "migrate", "worker", "caddy", "litellm")
+        tmp_path / name
+        for name in (
+            "api",
+            "migrate",
+            "worker",
+            "caddy",
+            "litellm",
+            "auth",
+            "tailscale",
+        )
     ]
     stage_runtime_secrets(source, *roots)
     api = roots[0]
+    request.addfinalizer(lambda: api.chmod(0o700) if api.exists() else None)
     target = api / "database-url"
     canonical = api / "admin-grant-private-key"
     original = canonical.read_bytes()
@@ -1700,6 +1894,8 @@ def test_stage_runtime_secrets_rejects_malformed_generated_credentials(
     worker_root = tmp_path / "worker"
     caddy_root = tmp_path / "caddy"
     litellm_root = tmp_path / "litellm"
+    auth_root = tmp_path / "auth"
+    tailscale_root = tmp_path / "tailscale"
     stage_runtime_secrets(
         source,
         api_root,
@@ -1707,6 +1903,8 @@ def test_stage_runtime_secrets_rejects_malformed_generated_credentials(
         worker_root,
         caddy_root,
         litellm_root,
+        auth_root,
+        tailscale_root,
     )
     root = api_root if projection == "api" else worker_root
     root.chmod(0o700)
@@ -1724,6 +1922,8 @@ def test_stage_runtime_secrets_rejects_malformed_generated_credentials(
             worker_root,
             caddy_root,
             litellm_root,
+            auth_root,
+            tailscale_root,
         )
 
     assert target.read_bytes() == malformed
@@ -1745,6 +1945,8 @@ def test_stage_runtime_secrets_rejects_symlinked_generated_credentials(
     worker_root = tmp_path / "worker"
     caddy_root = tmp_path / "caddy"
     litellm_root = tmp_path / "litellm"
+    auth_root = tmp_path / "auth"
+    tailscale_root = tmp_path / "tailscale"
     stage_runtime_secrets(
         source,
         api_root,
@@ -1752,6 +1954,8 @@ def test_stage_runtime_secrets_rejects_symlinked_generated_credentials(
         worker_root,
         caddy_root,
         litellm_root,
+        auth_root,
+        tailscale_root,
     )
     root = api_root if projection == "api" else worker_root
     root.chmod(0o700)
@@ -1770,6 +1974,8 @@ def test_stage_runtime_secrets_rejects_symlinked_generated_credentials(
             worker_root,
             caddy_root,
             litellm_root,
+            auth_root,
+            tailscale_root,
         )
 
     assert target.is_symlink()
@@ -1787,6 +1993,8 @@ def test_main_initializes_repository_synthetic_state_and_runtime_secrets(
     worker_root = tmp_path / "worker"
     caddy_root = tmp_path / "caddy"
     litellm_root = tmp_path / "litellm"
+    auth_root = tmp_path / "auth"
+    tailscale_root = tmp_path / "tailscale"
     runtime_config_root = tmp_path / "runtime-config"
     identity = tmp_path / "identity"
     state = tmp_path / "state"
@@ -1801,6 +2009,8 @@ def test_main_initializes_repository_synthetic_state_and_runtime_secrets(
     monkeypatch.setenv("VONK_DEV_WORKER_SECRET_ROOT", str(worker_root))
     monkeypatch.setenv("VONK_DEV_CADDY_SECRET_ROOT", str(caddy_root))
     monkeypatch.setenv("VONK_DEV_LITELLM_SECRET_ROOT", str(litellm_root))
+    monkeypatch.setenv("VONK_DEV_AUTH_SECRET_ROOT", str(auth_root))
+    monkeypatch.setenv("VONK_DEV_TAILSCALE_SECRET_ROOT", str(tailscale_root))
     monkeypatch.setenv("VONK_DEV_RUNTIME_CONFIG_ROOT", str(runtime_config_root))
     monkeypatch.setenv("VONK_DEV_API_IMAGE", API_IMAGE)
     monkeypatch.setenv("VONK_DEV_WORKER_IMAGE", WORKER_IMAGE)
@@ -1822,6 +2032,8 @@ def test_main_initializes_repository_synthetic_state_and_runtime_secrets(
     assert (worker_root / "worker-api-token").is_file()
     assert (caddy_root / "controller-server-key").is_file()
     assert (litellm_root / "litellm-master-key").is_file()
+    assert (auth_root / "admin-password-verifier").is_file()
+    assert (tailscale_root / "tailscale-oauth-client-secret").is_file()
     assert (runtime_config_root / "Caddyfile").is_file()
     assert all(path.is_dir() for path in (state, routes, supervisor))
 
@@ -2058,6 +2270,8 @@ def test_main_preflights_all_required_environment_before_cloning(
     monkeypatch.setenv("VONK_DEV_WORKER_SECRET_ROOT", str(tmp_path / "worker"))
     monkeypatch.setenv("VONK_DEV_CADDY_SECRET_ROOT", str(tmp_path / "caddy"))
     monkeypatch.setenv("VONK_DEV_LITELLM_SECRET_ROOT", str(tmp_path / "litellm"))
+    monkeypatch.setenv("VONK_DEV_AUTH_SECRET_ROOT", str(tmp_path / "auth"))
+    monkeypatch.setenv("VONK_DEV_TAILSCALE_SECRET_ROOT", str(tmp_path / "tailscale"))
     monkeypatch.setenv(
         "VONK_DEV_RUNTIME_CONFIG_ROOT",
         str(tmp_path / "runtime-config"),
@@ -2084,6 +2298,8 @@ def test_main_rejects_an_unpinned_process_image_before_cloning(
     monkeypatch.setenv("VONK_DEV_WORKER_SECRET_ROOT", str(tmp_path / "worker"))
     monkeypatch.setenv("VONK_DEV_CADDY_SECRET_ROOT", str(tmp_path / "caddy"))
     monkeypatch.setenv("VONK_DEV_LITELLM_SECRET_ROOT", str(tmp_path / "litellm"))
+    monkeypatch.setenv("VONK_DEV_AUTH_SECRET_ROOT", str(tmp_path / "auth"))
+    monkeypatch.setenv("VONK_DEV_TAILSCALE_SECRET_ROOT", str(tmp_path / "tailscale"))
     monkeypatch.setenv(
         "VONK_DEV_RUNTIME_CONFIG_ROOT",
         str(tmp_path / "runtime-config"),
