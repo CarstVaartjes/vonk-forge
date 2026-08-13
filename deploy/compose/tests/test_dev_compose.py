@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import os
 import shutil
@@ -27,6 +28,27 @@ LITELLM_IMAGE = (
 )
 OAUTH_CLIENT_ID = "synthetic-tailscale-client-id\n"
 OAUTH_CLIENT_SECRET = "synthetic-tailscale-client-secret\n"
+
+
+def _alembic_heads() -> set[str]:
+    revisions: set[str] = set()
+    down_revisions: set[str] = set()
+    for migration in (ROOT / "control/migrations/versions").glob("*.py"):
+        assignments = {
+            node.targets[0].id: ast.literal_eval(node.value)
+            for node in ast.parse(migration.read_text(encoding="utf-8")).body
+            if isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id in {"revision", "down_revision"}
+        }
+        revisions.add(assignments["revision"])
+        down_revision = assignments["down_revision"]
+        if isinstance(down_revision, str):
+            down_revisions.add(down_revision)
+        elif down_revision is not None:
+            down_revisions.update(down_revision)
+    return revisions - down_revisions
 
 
 def _rendered(tmp_path: Path) -> dict[str, object]:
@@ -103,6 +125,16 @@ def test_dev_compose_builds_local_control_services_without_release_images(
             "target": 8000,
         }
     ]
+
+
+def test_source_compose_advertises_the_actual_alembic_head(tmp_path: Path) -> None:
+    services = _rendered(tmp_path)["services"]
+    advertised_revisions = {
+        services[name]["environment"]["VONK_DATABASE_REVISION"]
+        for name in ("control-api", "control-worker")
+    }
+
+    assert advertised_revisions == _alembic_heads()
 
 
 def test_local_source_compose_remains_distinct_from_published_image_template() -> None:
