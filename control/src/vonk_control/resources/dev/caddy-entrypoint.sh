@@ -1,26 +1,52 @@
 #!/bin/sh
 set -eu
 
+valid_generation() {
+  printf '%s\n' "$1" | grep -Eq '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+}
+
+read_hostname_authority() {
+  [ ! -L "$VONK_CONTROL_HOSTNAME_FILE" ] \
+    && [ -f "$VONK_CONTROL_HOSTNAME_FILE" ] \
+    && [ -r "$VONK_CONTROL_HOSTNAME_FILE" ] \
+    && [ -s "$VONK_CONTROL_HOSTNAME_FILE" ] \
+    && [ "$(wc -l < "$VONK_CONTROL_HOSTNAME_FILE")" -eq 1 ] \
+    && [ "$(wc -c < "$VONK_CONTROL_HOSTNAME_FILE")" -le 300 ] \
+    && cat "$VONK_CONTROL_HOSTNAME_FILE"
+}
+
+parse_hostname_authority() {
+  raw_hostname_authority=$1
+  saved_authority_ifs=$IFS
+  IFS=' '
+  set -- $raw_hostname_authority
+  IFS=$saved_authority_ifs
+  [ "$#" -eq 2 ] && valid_generation "$1" || return 1
+  parsed_hostname_generation=$1
+  parsed_control_hostname=$2
+}
+
 browser_hostname_pending=0
 if [ -n "${VONK_CONTROL_HOSTNAME_FILE:-}" ]; then
   if [ -n "${VONK_CONTROL_HOSTNAME:-}" ]; then
     printf 'Vonk Forge Caddy browser hostname authority is ambiguous\n' >&2
     exit 64
   fi
-  if [ ! -e "$VONK_CONTROL_HOSTNAME_FILE" ] \
-    && [ ! -L "$VONK_CONTROL_HOSTNAME_FILE" ]; then
-    browser_hostname_pending=1
-  elif [ -L "$VONK_CONTROL_HOSTNAME_FILE" ] \
-    || [ ! -f "$VONK_CONTROL_HOSTNAME_FILE" ] \
-    || [ ! -r "$VONK_CONTROL_HOSTNAME_FILE" ] \
-    || [ ! -s "$VONK_CONTROL_HOSTNAME_FILE" ] \
-    || [ "$(wc -l < "$VONK_CONTROL_HOSTNAME_FILE")" -ne 1 ] \
-    || [ "$(wc -c < "$VONK_CONTROL_HOSTNAME_FILE")" -gt 254 ]; then
-    printf 'Vonk Forge Caddy browser hostname file is invalid\n' >&2
-    exit 64
-  elif ! VONK_CONTROL_HOSTNAME=$(cat "$VONK_CONTROL_HOSTNAME_FILE"); then
-    printf 'Vonk Forge Caddy browser hostname file is unavailable\n' >&2
-    exit 1
+  # A persisted record is never startup authority. Only a record observed after
+  # this Caddy process staged agent-only supplies a fresh configurator generation.
+  browser_hostname_pending=1
+  if [ -n "${VONK_CONTROL_HOSTNAME_GENERATION:-}" ]; then
+    if ! valid_generation "$VONK_CONTROL_HOSTNAME_GENERATION"; then
+      printf 'Vonk Forge Caddy browser hostname generation is invalid\n' >&2
+      exit 64
+    fi
+    if hostname_authority=$(read_hostname_authority); then
+      if parse_hostname_authority "$hostname_authority" \
+        && [ "$parsed_hostname_generation" = "$VONK_CONTROL_HOSTNAME_GENERATION" ]; then
+        VONK_CONTROL_HOSTNAME=$parsed_control_hostname
+        browser_hostname_pending=0
+      fi
+    fi
   fi
 fi
 if [ "$browser_hostname_pending" -eq 0 ]; then
@@ -29,6 +55,25 @@ fi
 : "${VONK_AGENT_ENROLL_HOSTNAME:?set VONK_AGENT_ENROLL_HOSTNAME}"
 : "${VONK_AGENT_HOSTNAME:?set VONK_AGENT_HOSTNAME}"
 : "${VONK_BACKEND_PORT:?set VONK_BACKEND_PORT}"
+
+control_hostname_poll_interval=2
+if [ "${VONK_CADDY_HANDOFF_TEST_MODE:-0}" = "1" ]; then
+  control_hostname_poll_interval=${VONK_CONTROL_HOSTNAME_POLL_INTERVAL:-1}
+  case "$control_hostname_poll_interval" in
+    "" | *[!0-9]*)
+      printf 'Vonk Forge Caddy test poll interval is invalid\n' >&2
+      exit 64
+      ;;
+  esac
+  if [ "$control_hostname_poll_interval" -lt 1 ] \
+    || [ "$control_hostname_poll_interval" -gt 5 ]; then
+    printf 'Vonk Forge Caddy test poll interval is invalid\n' >&2
+    exit 64
+  fi
+elif [ -n "${VONK_CONTROL_HOSTNAME_POLL_INTERVAL:-}" ]; then
+  printf 'Vonk Forge Caddy test poll interval requires test mode\n' >&2
+  exit 64
+fi
 
 case "$VONK_BACKEND_PORT" in
   "" | *[!0-9]*)
@@ -244,7 +289,21 @@ if [ "$browser_hostname_pending" -eq 1 ]; then
   selected_caddyfile=$agent_caddyfile
 fi
 
-active_control_hostname=${VONK_CONTROL_HOSTNAME:-}
+hostname_authority_snapshot() {
+  if authority=$(read_hostname_authority); then
+    printf '%s:%s' "$(stat -c '%d:%i' "$VONK_CONTROL_HOSTNAME_FILE")" "$authority"
+  else
+    printf 'unavailable'
+  fi
+}
+
+active_hostname_authority=
+staged_hostname_snapshot=
+if [ "$browser_hostname_pending" -eq 1 ]; then
+  staged_hostname_snapshot=$(hostname_authority_snapshot)
+elif [ -n "${VONK_CONTROL_HOSTNAME_FILE:-}" ]; then
+  active_hostname_authority=$(read_hostname_authority)
+fi
 "$runtime_caddy" run --config "$selected_caddyfile" --adapter caddyfile &
 caddy_pid=$!
 terminate_caddy() {
@@ -255,16 +314,37 @@ trap 'terminate_caddy; exit 0' TERM INT
 trap 'terminate_caddy; exit 1' HUP
 
 while kill -0 "$caddy_pid" 2>/dev/null; do
-  observed_control_hostname=
-  if [ -f "$VONK_CONTROL_HOSTNAME_FILE" ] \
-    && [ ! -L "$VONK_CONTROL_HOSTNAME_FILE" ]; then
-    observed_control_hostname=$(cat "$VONK_CONTROL_HOSTNAME_FILE")
+  if [ "$browser_hostname_pending" -eq 1 ]; then
+    observed_hostname_snapshot=$(hostname_authority_snapshot)
+    if [ "$observed_hostname_snapshot" != "$staged_hostname_snapshot" ]; then
+      staged_hostname_snapshot=$observed_hostname_snapshot
+      if observed_hostname_authority=$(read_hostname_authority); then
+        if parse_hostname_authority "$observed_hostname_authority"; then
+          terminate_caddy
+          trap - TERM INT HUP
+          unset VONK_CONTROL_HOSTNAME
+          export VONK_CONTROL_HOSTNAME_GENERATION=$parsed_hostname_generation
+          exec /bin/sh "$0"
+        fi
+      fi
+    fi
+  else
+    observed_hostname_authority=
+    if authority=$(read_hostname_authority); then
+      observed_hostname_authority=$authority
+    fi
+    if [ "$observed_hostname_authority" != "$active_hostname_authority" ]; then
+      terminate_caddy
+      trap - TERM INT HUP
+      unset VONK_CONTROL_HOSTNAME
+      if parse_hostname_authority "$observed_hostname_authority"; then
+        export VONK_CONTROL_HOSTNAME_GENERATION=$parsed_hostname_generation
+      else
+        unset VONK_CONTROL_HOSTNAME_GENERATION
+      fi
+      exec /bin/sh "$0"
+    fi
   fi
-  if [ "$observed_control_hostname" != "$active_control_hostname" ]; then
-    terminate_caddy
-    trap - TERM INT HUP
-    exec /bin/sh "$0"
-  fi
-  sleep 2
+  sleep "$control_hostname_poll_interval"
 done
 wait "$caddy_pid"

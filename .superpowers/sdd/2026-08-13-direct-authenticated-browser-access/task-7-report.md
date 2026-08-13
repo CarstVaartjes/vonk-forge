@@ -201,3 +201,57 @@ The remaining concern is exclusively the 16 Task 8 secret-caller wiring
 failures above. The recurring 67 pytest cleanup warnings are the existing
 sealed runtime-secret fixture warnings recorded by prior tasks; no Task 7 test
 was skipped or masked.
+
+## Fix round 1/5: fresh continuous hostname authority
+
+The hostname handoff now separates the stable non-secret operational output
+`control-hostname` from generation-scoped Caddy authority
+`control-hostname.ready`, whose exact record is `<configurator UUID>
+vonk-forge.<live MagicDNSSuffix>`. Caddy always starts agent-only and snapshots
+persisted authority; only a subsequent atomic publication from the current
+configurator generation enables the browser edge. Replacement carries fresh
+authority directly into a validated re-exec, while removal or malformed input
+returns Caddy to agent-only. This preserves the acyclic dependency graph:
+gateway -> configurator live validation -> atomic outputs -> Caddy watcher;
+the configurator still depends on independently healthy gateway and staged
+Caddy, and Caddy never depends on the configurator.
+
+Strict executable RED evidence:
+
+```text
+uv run --project control --frozen pytest control/tests/test_dev_runtime_assets.py::test_caddy_entrypoint_requires_fresh_generation_and_reacts_to_real_file_events -q
+1 failed, 67 warnings in 0.43s
+Failure: persisted vonk-forge.yesterdays-tailnet.ts.net enabled browser mode instead of agent-only.
+
+uv run --python 3.12 --frozen --with pytest==9.1.1 pytest deploy/compose/tests/test_dev_tailscale.py::test_continuous_reconciler_republishes_live_suffix_and_health_rejects_stale -q
+1 failed, 67 warnings in 8.08s
+Failure: no generation-scoped control-hostname.ready record was published.
+```
+
+Focused GREEN evidence:
+
+```text
+deploy/compose/tests/test_dev_tailscale.py + deploy/compose/tests/test_tailscale.py: 15 passed
+control/tests/test_dev_runtime_assets.py: 18 passed
+deploy/compose/tests/test_agent_ingress.py: 15 passed
+Total: 48 passed, 0 failed
+```
+
+The continuous fake CLI changes `MagicDNSSuffix`, observes only complete old or
+new atomic records, proves Caddy reacts to real replacement/removal events, and
+proves health fails while live status and published authority disagree. Health
+now validates the current generation, exact live suffix, operational hostname,
+ready record, exact HTTPS Service map, `service-host`, and canonical Caddy
+health. Production reconciliation remains 60 seconds; one-second controls are
+accepted only with explicit test mode. The transient watcher failure during
+GREEN was traced to derived `VONK_CONTROL_HOSTNAME` surviving re-exec and
+colliding with file authority; clearing that derived value before revalidation
+resolved it.
+
+The final development map remains exactly `svc:vonk-forge` HTTPS 443 ->
+`http://caddy:8080`. No secret, OAuth scope, host port, Funnel, TUN device,
+capability, Docker socket, or public exposure was added. Production gateway,
+policy, and three-Service map remain byte-unchanged. Shell syntax, Compose
+rendering, `git diff --check`, production-preservation diff, and the 21-source /
+17-deployment secret boundary check all exited 0. The only outstanding failures
+remain the 16 unmodified Task 8 caller-wiring cases already recorded above.

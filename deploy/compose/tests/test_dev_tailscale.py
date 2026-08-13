@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import socket
 import subprocess
+import time
 from pathlib import Path
 
 
@@ -121,13 +123,12 @@ def test_development_configurator_has_only_bounded_runtime_authority() -> None:
 
 def test_configurator_health_requires_active_https_capability_and_exact_map() -> None:
     configurator = _rendered()["services"]["tailscale-configurator"]
-    health_command = " ".join(configurator["healthcheck"]["test"])
-
-    assert "serve status --json" in health_command
-    assert "status --json" in health_command
-    assert '"HTTPS":true' in health_command
-    assert "service-host" in health_command
-    assert "serve get-config --all" in health_command
+    assert configurator["healthcheck"]["test"] == [
+        "CMD",
+        "/bin/sh",
+        "/run/vonk-runtime/tailscale-configure.sh",
+        "health",
+    ]
 
 
 def test_hostname_handoff_orders_caddy_without_a_startup_cycle() -> None:
@@ -137,7 +138,7 @@ def test_hostname_handoff_orders_caddy_without_a_startup_cycle() -> None:
     configurator = services["tailscale-configurator"]
 
     assert caddy["environment"]["VONK_CONTROL_HOSTNAME_FILE"] == (
-        "/run/vonk-tailnet/control-hostname"
+        "/run/vonk-tailnet/control-hostname.ready"
     )
     assert "VONK_CONTROL_HOSTNAME" not in caddy["environment"]
     assert set(caddy["networks"]) == {
@@ -284,6 +285,148 @@ def test_reconciler_rejects_invalid_tailnet_suffix_without_stale_publication(
     assert result.returncode != 0
     assert not target.exists()
     assert "malicious.invalid" not in result.stdout + result.stderr
+
+
+def _wait_for_text(path: Path, expected: str, *, timeout: float = 8) -> list[str]:
+    deadline = time.monotonic() + timeout
+    observed: list[str] = []
+    while time.monotonic() < deadline:
+        try:
+            content = path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            content = ""
+        if content:
+            observed.append(content)
+        if content == expected:
+            return observed
+        time.sleep(0.02)
+    raise AssertionError(f"{path.name} did not become {expected!r}; observed {observed!r}")
+
+
+def test_continuous_reconciler_republishes_live_suffix_and_health_rejects_stale(
+    tmp_path: Path,
+) -> None:
+    socket_path = tmp_path / "tailscaled.sock"
+    daemon_socket = socket.socket(socket.AF_UNIX)
+    daemon_socket.bind(str(socket_path))
+    output = tmp_path / "tailnet-runtime"
+    output.mkdir()
+    hostname = output / "control-hostname"
+    authority = output / "control-hostname.ready"
+    suffix = tmp_path / "suffix"
+    suffix.write_text("first-team.ts.net\n", encoding="utf-8")
+    generation_file = tmp_path / "current-generation"
+    expected = json.dumps(EXPECTED_MAP, sort_keys=True, separators=(",", ":"))
+    fake_tailscale = tmp_path / "tailscale"
+    fake_tailscale.write_text(
+        "#!/bin/sh\n"
+        "case \"$*\" in\n"
+        f"  *\"serve get-config --all\"*) printf '%s\\n' '{expected}' ;;\n"
+        "  *\"serve status --json\"*) printf '%s\\n' "
+        "'{\"Services\":{\"svc:vonk-forge\":{\"TCP\":{\"443\":{\"HTTPS\":true}}}}}' ;;\n"
+        f"  *\"status --json\"*) value=$(cat {suffix}); printf "
+        "'{\"CurrentTailnet\":{\"MagicDNSSuffix\":\"%s\"},"
+        "\"Self\":{\"CapMap\":{\"service-host\":[]}}}\\n' \"$value\" ;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    fake_tailscale.chmod(0o755)
+    fake_wget = tmp_path / "wget"
+    fake_wget.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    fake_wget.chmod(0o755)
+    environment = os.environ | {
+        "PATH": f"{tmp_path}:{os.environ['PATH']}",
+        "TS_SOCKET_PATH": str(socket_path),
+        "TS_HOSTNAME_OUTPUT": str(hostname),
+        "TS_CONFIGURE_TEST_MODE": "1",
+        "TS_RECONCILE_INTERVAL": "1",
+        "TS_GENERATION_FILE": str(generation_file),
+        "TS_TEST_GENERATION": "11111111-1111-4111-8111-111111111111",
+    }
+    process = subprocess.Popen(
+        ["/bin/sh", CONFIGURE],
+        env=environment,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        _wait_for_text(hostname, "vonk-forge.first-team.ts.net\n")
+        ready_observed = _wait_for_text(
+            authority,
+            "11111111-1111-4111-8111-111111111111 "
+            "vonk-forge.first-team.ts.net\n",
+        )
+        assert set(ready_observed) == {
+            "11111111-1111-4111-8111-111111111111 "
+            "vonk-forge.first-team.ts.net\n"
+        }
+
+        healthy = subprocess.run(
+            ["/bin/sh", CONFIGURE, "health"],
+            env=environment,
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=5,
+        )
+        assert healthy.returncode == 0, healthy.stderr
+
+        os.kill(process.pid, signal.SIGSTOP)
+        suffix.write_text("second-team.ts.net\n", encoding="utf-8")
+        stale = subprocess.run(
+            ["/bin/sh", CONFIGURE, "health"],
+            env=environment,
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=5,
+        )
+        assert stale.returncode != 0
+        os.kill(process.pid, signal.SIGCONT)
+
+        hostname_observed = _wait_for_text(
+            hostname,
+            "vonk-forge.second-team.ts.net\n",
+        )
+        ready_observed = _wait_for_text(
+            authority,
+            "11111111-1111-4111-8111-111111111111 "
+            "vonk-forge.second-team.ts.net\n",
+        )
+        assert set(hostname_observed) <= {
+            "vonk-forge.first-team.ts.net\n",
+            "vonk-forge.second-team.ts.net\n",
+        }
+        assert set(ready_observed) <= {
+            "11111111-1111-4111-8111-111111111111 "
+            "vonk-forge.first-team.ts.net\n",
+            "11111111-1111-4111-8111-111111111111 "
+            "vonk-forge.second-team.ts.net\n",
+        }
+
+        healthy_again = subprocess.run(
+            ["/bin/sh", CONFIGURE, "health"],
+            env=environment,
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=5,
+        )
+        assert healthy_again.returncode == 0, healthy_again.stderr
+    finally:
+        try:
+            os.kill(process.pid, signal.SIGCONT)
+        except ProcessLookupError:
+            pass
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+        daemon_socket.close()
 
 
 def test_development_reconciler_source_has_no_public_or_secret_output_path() -> None:

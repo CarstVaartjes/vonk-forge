@@ -359,7 +359,7 @@ services:
       VONK_AGENT_ENROLL_HOSTNAME: enroll.vonk-forge.lan
       VONK_AGENT_HOSTNAME: agents.vonk-forge.lan
       VONK_BACKEND_PORT: "8443"
-      VONK_CONTROL_HOSTNAME_FILE: /run/vonk-tailnet/control-hostname
+      VONK_CONTROL_HOSTNAME_FILE: /run/vonk-tailnet/control-hostname.ready
     networks: [application, ingress, tailnet-web-edge]
     depends_on:
       control-api: {condition: service_healthy}
@@ -419,21 +419,7 @@ services:
       caddy: {condition: service_healthy}
       tailscale-gateway: {condition: service_healthy}
     healthcheck:
-      test:
-        - CMD-SHELL
-        - >-
-          test -s /run/vonk-tailnet/control-hostname &&
-          tailscale --socket=/var/run/tailscale/tailscaled.sock status --json |
-          grep -Fq 'service-host' &&
-          tailscale --socket=/var/run/tailscale/tailscaled.sock serve status --json |
-          tr -d '[:space:]' |
-          grep -Fq '"svc:vonk-forge":{"TCP":{"443":{"HTTPS":true}}' &&
-          ! tailscale --socket=/var/run/tailscale/tailscaled.sock serve status --json |
-          tr -d '[:space:]' |
-          grep -Fq '"443":{"HTTP":true}' &&
-          tailscale --socket=/var/run/tailscale/tailscaled.sock serve get-config --all |
-          tr -d '[:space:]' |
-          grep -Fqx '{"services":{"svc:vonk-forge":{"endpoints":{"tcp:443":"http://caddy:8080"}}},"version":"0.0.1"}'
+      test: [CMD, /bin/sh, /run/vonk-runtime/tailscale-configure.sh, health]
       interval: 10s
       timeout: 5s
       retries: 12
