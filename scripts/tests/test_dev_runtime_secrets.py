@@ -81,6 +81,9 @@ ROTATION_MANIFEST_TEMPORARY = ".journal.tmp"
 OAUTH_ROTATION_PREFIX = ".tailscale-oauth-rotation-"
 OAUTH_ROTATION_ID = "2fdb4cf7-f240-4a6f-b52f-06fdb4058d50"
 OTHER_OAUTH_ROTATION_ID = "70d4d13a-5575-43d8-ae60-bf42499901c4"
+THIRD_OAUTH_ROTATION_ID = "b2569b53-f109-49c7-a197-d37f93e84dd4"
+SECOND_ROTATED_OAUTH_CLIENT_ID = b"second-rotated-tailscale-client-id\n"
+SECOND_ROTATED_OAUTH_CLIENT_SECRET = b"second-rotated-tailscale-client-secret\n"
 
 
 def _rotation_child(transaction: Path, kind: str) -> Path:
@@ -1739,10 +1742,11 @@ def test_rotate_tailscale_oauth_changes_only_the_oauth_pair_when_explicit(
     assert ROTATED_OAUTH_CLIENT_SECRET.decode().strip() not in (
         rotated.stdout + rotated.stderr
     )
-    receipt = protected_parent / ".runtime.tailscale-oauth-rotation-receipt"
+    receipt = next(protected_parent.glob(".vonk-*.tailscale-oauth-rotation-receipt"))
     _assert_regular_private_file(receipt)
     receipt_document = json.loads(receipt.read_text(encoding="ascii"))
-    assert receipt_document["rotation_id"] == OAUTH_ROTATION_ID
+    assert receipt_document["schema_version"] == 1
+    assert receipt_document["operations"][0]["rotation_id"] == OAUTH_ROTATION_ID
     assert ROTATED_OAUTH_CLIENT_ID.strip() not in receipt.read_bytes()
     assert ROTATED_OAUTH_CLIENT_SECRET.strip() not in receipt.read_bytes()
 
@@ -1761,7 +1765,7 @@ def test_rotate_tailscale_oauth_changes_only_the_oauth_pair_when_explicit(
         oauth_files=replacement,
     )
     assert different_operation.returncode == 1
-    assert "both be new" in different_operation.stderr
+    assert "credentials were previously used" in different_operation.stderr
 
 
 def test_rotate_tailscale_oauth_rejects_aliased_inputs_without_mutation(
@@ -2215,9 +2219,121 @@ def test_forged_committed_state_cannot_authorize_a_different_rotation_id(
     )
 
     assert refused.returncode == 1
-    assert "both be new" in refused.stderr
+    assert "credentials were previously used" in refused.stderr
     assert OAUTH_CLIENT_ID.decode().strip() not in refused.stderr
     assert OAUTH_CLIENT_SECRET.decode().strip() not in refused.stderr
+
+
+def test_stale_rotation_id_and_previously_used_pair_cannot_roll_back_credentials(
+    tmp_path: Path,
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    created = _run_generator(secrets_dir)
+    assert created.returncode == 0, created.stderr
+    first = _write_oauth_values(
+        tmp_path / "first-oauth-inputs",
+        ROTATED_OAUTH_CLIENT_ID,
+        ROTATED_OAUTH_CLIENT_SECRET,
+    )
+    second = _write_oauth_values(
+        tmp_path / "second-oauth-inputs",
+        SECOND_ROTATED_OAUTH_CLIENT_ID,
+        SECOND_ROTATED_OAUTH_CLIENT_SECRET,
+    )
+    first_rotation = _run_generator(
+        secrets_dir,
+        "--rotate-tailscale-oauth",
+        oauth_files=first,
+    )
+    assert first_rotation.returncode == 0, first_rotation.stderr
+    second_rotation = _run_generator(
+        secrets_dir,
+        "--rotate-tailscale-oauth",
+        "--tailscale-oauth-rotation-id",
+        OTHER_OAUTH_ROTATION_ID,
+        oauth_files=second,
+    )
+    assert second_rotation.returncode == 0, second_rotation.stderr
+    current = _secret_state(secrets_dir, LOCAL_SOURCE_SECRET_NAMES)
+
+    stale_retry = _run_generator(
+        secrets_dir,
+        "--rotate-tailscale-oauth",
+        oauth_files=first,
+    )
+    reused_pair = _run_generator(
+        secrets_dir,
+        "--rotate-tailscale-oauth",
+        "--tailscale-oauth-rotation-id",
+        THIRD_OAUTH_ROTATION_ID,
+        oauth_files=first,
+    )
+
+    assert stale_retry.returncode == 1
+    assert "rotation ID was already used" in stale_retry.stderr
+    assert reused_pair.returncode == 1
+    assert "credentials were previously used" in reused_pair.stderr
+    assert _secret_state(secrets_dir, LOCAL_SOURCE_SECRET_NAMES) == current
+
+
+def test_long_generation_name_uses_a_bounded_receipt_filename(tmp_path: Path) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / ("r" * 195)
+    created = _run_generator(secrets_dir)
+    assert created.returncode == 0, created.stderr
+    replacement = _write_oauth_values(
+        tmp_path / "replacement-oauth-inputs",
+        ROTATED_OAUTH_CLIENT_ID,
+        ROTATED_OAUTH_CLIENT_SECRET,
+    )
+
+    rotated = _run_generator(
+        secrets_dir,
+        "--rotate-tailscale-oauth",
+        oauth_files=replacement,
+    )
+
+    assert rotated.returncode == 0, rotated.stderr
+    receipts = list(
+        protected_parent.glob(".vonk-*.tailscale-oauth-rotation-receipt")
+    )
+    assert len(receipts) == 1
+    assert len(os.fsencode(receipts[0].name)) <= 255
+    assert {path.name for path in secrets_dir.iterdir()} == LOCAL_SOURCE_SECRET_NAMES
+
+
+def test_owned_receipt_temporary_is_removed_under_the_generation_lock(
+    tmp_path: Path,
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    created = _run_generator(secrets_dir)
+    assert created.returncode == 0, created.stderr
+    replacement = _write_oauth_values(
+        tmp_path / "replacement-oauth-inputs",
+        ROTATED_OAUTH_CLIENT_ID,
+        ROTATED_OAUTH_CLIENT_SECRET,
+    )
+    rotated = _run_generator(
+        secrets_dir,
+        "--rotate-tailscale-oauth",
+        oauth_files=replacement,
+    )
+    assert rotated.returncode == 0, rotated.stderr
+    receipt = next(protected_parent.glob(".vonk-*.tailscale-oauth-rotation-receipt"))
+    temporary = receipt.with_name(f"{receipt.name}.tmp")
+    temporary.write_bytes(receipt.read_bytes())
+    temporary.chmod(0o600)
+
+    recovered = _run_generator(secrets_dir, oauth_files=replacement)
+
+    assert recovered.returncode == 0, recovered.stderr
+    assert not temporary.exists()
+    assert receipt.exists()
 
 
 @pytest.mark.parametrize("state", ["prejournal", "postjournal"])

@@ -150,7 +150,8 @@ def test_existing_install_browser_upgrade_and_normal_journey_are_complete() -> N
         "`--rotate-admin-password`",
         "`--rotate-tailscale-oauth`",
         "`--tailscale-oauth-rotation-id <uuid>`",
-        "hash-only receipt",
+        "hash-only receipt history",
+        "previously used credential pair",
         "revokes every existing browser session",
         "Tailscale state",
     ):

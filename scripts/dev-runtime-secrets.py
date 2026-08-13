@@ -121,6 +121,8 @@ _OAUTH_ROTATION_JOURNAL = "journal"
 _OAUTH_ROTATION_JOURNAL_TEMPORARY = ".journal.tmp"
 _OAUTH_ROTATION_COMMITTED = "committed"
 _OAUTH_ROTATION_RECEIPT_SUFFIX = ".tailscale-oauth-rotation-receipt"
+_OAUTH_ROTATION_RECEIPT_SCHEMA = 1
+_OAUTH_ROTATION_RECEIPT_LIMIT = 256
 _OAUTH_ROTATION_DIGEST_KEYS = frozenset(
     {
         "old_client_id_sha256",
@@ -1730,10 +1732,53 @@ def _validate_oauth_rotation_id(value: str | None) -> str:
 
 
 def _oauth_receipt_name(secrets_name: str) -> str:
-    return f".{secrets_name}{_OAUTH_ROTATION_RECEIPT_SUFFIX}"
+    identity = hashlib.sha256(os.fsencode(secrets_name)).hexdigest()[:32]
+    return f".vonk-{identity}{_OAUTH_ROTATION_RECEIPT_SUFFIX}"
 
 
-def _read_oauth_receipt(directory: int, name: str) -> dict[str, str] | None:
+def _parse_oauth_receipt(content: bytes) -> list[dict[str, str]]:
+    message = "development Tailscale OAuth rotation receipt is invalid"
+    try:
+        document = json.loads(content.decode("ascii"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise RuntimeSecretError(message) from error
+    if (
+        not isinstance(document, dict)
+        or set(document) != {"schema_version", "operations"}
+        or document["schema_version"] != _OAUTH_ROTATION_RECEIPT_SCHEMA
+        or not isinstance(document["operations"], list)
+        or not 1 <= len(document["operations"]) <= _OAUTH_ROTATION_RECEIPT_LIMIT
+    ):
+        raise RuntimeSecretError(message)
+    operations: list[dict[str, str]] = []
+    seen_ids: set[str] = set()
+    for raw in document["operations"]:
+        if not isinstance(raw, dict) or set(raw) != {
+            "rotation_id",
+            "new_client_id_sha256",
+            "new_client_secret_sha256",
+        }:
+            raise RuntimeSecretError(message)
+        operation = {key: value for key, value in raw.items() if isinstance(value, str)}
+        if len(operation) != 3 or any(
+            re.fullmatch(r"[0-9a-f]{64}", operation[key]) is None
+            for key in ("new_client_id_sha256", "new_client_secret_sha256")
+        ):
+            raise RuntimeSecretError(message)
+        try:
+            rotation_id = _validate_oauth_rotation_id(operation["rotation_id"])
+        except RuntimeSecretError as error:
+            raise RuntimeSecretError(message) from error
+        if rotation_id in seen_ids:
+            raise RuntimeSecretError(message)
+        seen_ids.add(rotation_id)
+        operations.append(operation)
+    return operations
+
+
+def _read_oauth_receipt(
+    directory: int, name: str
+) -> list[dict[str, str]] | None:
     try:
         os.stat(name, dir_fd=directory, follow_symlinks=False)
     except FileNotFoundError:
@@ -1748,20 +1793,55 @@ def _read_oauth_receipt(directory: int, name: str) -> dict[str, str] | None:
         error_message="development Tailscale OAuth rotation receipt is unsafe",
     )
     try:
-        return _parse_oauth_rotation_journal(content)
+        return _parse_oauth_receipt(content)
     finally:
         _close_owned_entry(entry)
 
 
 def _write_oauth_receipt(
     directory: int, name: str, journal_content: bytes
-) -> dict[str, str]:
+) -> list[dict[str, str]]:
     journal = _parse_oauth_rotation_journal(journal_content)
-    _read_oauth_receipt(directory, name)
-    temporary_name = f"{name}.tmp-{secrets.token_hex(16)}"
+    operations = _read_oauth_receipt(directory, name) or []
+    operation = {
+        key: journal[key]
+        for key in (
+            "rotation_id",
+            "new_client_id_sha256",
+            "new_client_secret_sha256",
+        )
+    }
+    prior = next(
+        (
+            item
+            for item in operations
+            if item["rotation_id"] == operation["rotation_id"]
+        ),
+        None,
+    )
+    if prior is not None and prior != operation:
+        raise RuntimeSecretError("Tailscale OAuth rotation ID was already used")
+    if prior is None:
+        if len(operations) >= _OAUTH_ROTATION_RECEIPT_LIMIT:
+            raise RuntimeSecretError(
+                "Tailscale OAuth rotation receipt history is full"
+            )
+        operations = [*operations, operation]
+    receipt_content = (
+        json.dumps(
+            {
+                "schema_version": _OAUTH_ROTATION_RECEIPT_SCHEMA,
+                "operations": operations,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n"
+    ).encode("ascii")
+    temporary_name = f"{name}.tmp"
     entry: _OwnedEntry | None = None
     try:
-        entry = _create_owned_file(directory, temporary_name, journal_content)
+        entry = _create_owned_file(directory, temporary_name, receipt_content)
         os.replace(
             temporary_name,
             name,
@@ -1771,16 +1851,44 @@ def _write_oauth_receipt(
         entry.name = name
         os.fsync(directory)
         verified = _read_oauth_receipt(directory, name)
-        if verified != journal:
+        if verified != operations:
             raise RuntimeSecretError(
                 "development Tailscale OAuth rotation receipt is invalid"
             )
-        return journal
+        return operations
     finally:
         if entry is not None:
             if entry.name == temporary_name:
                 _unlink_owned_entry(directory, entry)
             _close_owned_entry(entry)
+
+
+def _remove_oauth_receipt_temporary(directory: int, receipt_name: str) -> None:
+    temporary_name = f"{receipt_name}.tmp"
+    try:
+        os.stat(temporary_name, dir_fd=directory, follow_symlinks=False)
+    except FileNotFoundError:
+        return
+    except OSError as error:
+        raise RuntimeSecretError(
+            "development Tailscale OAuth rotation receipt temporary is unsafe"
+        ) from error
+    content, entry = _read_rotation_file(
+        directory,
+        temporary_name,
+        error_message=(
+            "development Tailscale OAuth rotation receipt temporary is unsafe"
+        ),
+    )
+    try:
+        _parse_oauth_receipt(content)
+        if not _unlink_owned_entry(directory, entry):
+            raise RuntimeSecretError(
+                "development Tailscale OAuth rotation receipt temporary is unsafe"
+            )
+        os.fsync(directory)
+    finally:
+        _close_owned_entry(entry)
 
 
 def _open_oauth_rotation_transaction(
@@ -2016,7 +2124,7 @@ def _rotate_tailscale_oauth(
     receipt_name: str,
     rotation_id: str,
     recovered_commit: dict[str, str] | None = None,
-    receipt: dict[str, str] | None = None,
+    receipt: list[dict[str, str]] | None = None,
 ) -> None:
     old_client_id = bundle[_OAUTH_CLIENT_ID]
     old_client_secret = bundle[_OAUTH_CLIENT_SECRET]
@@ -2033,16 +2141,38 @@ def _rotate_tailscale_oauth(
         and recovered_commit is not None
         and all(recovered_commit[key] == value for key, value in requested_identity.items())
     )
+    receipt_operation = next(
+        (
+            item
+            for item in receipt or []
+            if item["rotation_id"] == rotation_id
+        ),
+        None,
+    )
     receipt_exact_commit = (
         unchanged_id
         and unchanged_secret
-        and receipt is not None
-        and all(receipt[key] == value for key, value in requested_identity.items())
+        and receipt_operation is not None
+        and all(
+            receipt_operation[key] == value
+            for key, value in requested_identity.items()
+        )
     )
     if recovered_exact_commit or receipt_exact_commit:
         return
-    if receipt is not None and receipt["rotation_id"] == rotation_id:
+    if receipt_operation is not None:
         raise RuntimeSecretError("Tailscale OAuth rotation ID was already used")
+    if any(
+        item["new_client_id_sha256"] == requested_identity["new_client_id_sha256"]
+        and item["new_client_secret_sha256"]
+        == requested_identity["new_client_secret_sha256"]
+        for item in receipt or []
+    ):
+        raise RuntimeSecretError(
+            "replacement Tailscale OAuth credentials were previously used"
+        )
+    if len(receipt or []) >= _OAUTH_ROTATION_RECEIPT_LIMIT:
+        raise RuntimeSecretError("Tailscale OAuth rotation receipt history is full")
     if unchanged_id or unchanged_secret:
         raise RuntimeSecretError(
             "replacement Tailscale OAuth credentials must both be new"
@@ -2149,11 +2279,25 @@ def _rotate_tailscale_oauth(
                 recovered = _resume_oauth_rotation(
                     directory, parent, receipt_name, transaction_name
                 )
-                proof = recovered or _read_oauth_receipt(parent, receipt_name)
-                if proof is not None and all(
-                    proof[key] == value
-                    for key, value in requested_identity.items()
-                ):
+                receipt_history = _read_oauth_receipt(parent, receipt_name) or []
+                receipt_proof = next(
+                    (
+                        item
+                        for item in receipt_history
+                        if all(
+                            item[key] == value
+                            for key, value in requested_identity.items()
+                        )
+                    ),
+                    None,
+                )
+                if (
+                    recovered is not None
+                    and all(
+                        recovered[key] == value
+                        for key, value in requested_identity.items()
+                    )
+                ) or receipt_proof is not None:
                     return
             except (OSError, RuntimeSecretError):
                 pass
@@ -2232,6 +2376,7 @@ def prepare_runtime_secrets(
             existing_descriptor, existing_metadata = existing
             if os.listdir(existing_descriptor):
                 _acquire_mutation_lock(existing_descriptor)
+            _remove_oauth_receipt_temporary(parent, oauth_receipt_name)
             oauth_recovery = _recover_rotations(
                 existing_descriptor, parent, oauth_receipt_name
             )

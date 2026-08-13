@@ -50,8 +50,9 @@ loss, administrator password loss, and break-glass loopback.
   generation. Republish with `scripts/dev-runtime-project`, choose **Pull**
   then **Redeploy**, and preserve every named volume. The transaction changes
   only the two OAuth files and rolls back an interrupted install. Reuse the
-  exact UUID for every retry and include the hash-only sidecar receipt in the
-  encrypted source backup. Then follow
+  exact UUID for every retry and include the fixed-length hash-only sidecar
+  receipt history in the encrypted source backup. Stale UUIDs and previously
+  used pairs fail closed. Then follow
   the authoritative
   [browser-access recovery instructions](development-nas-installation.md#rotation-and-recovery).
   Do not rotate an application credential unless that authority was also

@@ -627,9 +627,11 @@ as a substitute for restoring PostgreSQL or generated-secret state.
   `--rotate-tailscale-oauth`. Generate one non-secret UUIDv4 rotation ID,
   record it with the replacement OAuth item, and pass it as
   `--tailscale-oauth-rotation-id <uuid>` on the first attempt and every retry.
-  The generator keeps a mode-`0600` hash-only receipt beside the 21-file
-  generation; include that receipt and the rotation ID in the encrypted source
-  backup. The locked transaction validates the existing
+  The generator keeps a mode-`0600`, fixed-length, hash-only receipt history
+  beside the 21-file generation; include that receipt and the rotation ID in
+  the encrypted source backup. The history rejects a stale operation ID or any
+  previously used credential pair, so an old retry cannot roll back a newer
+  rotation. The locked transaction validates the existing
   generation, changes exactly `tailscale-oauth-client-id` and
   `tailscale-oauth-client-secret`, preserves every other file byte-for-byte
   with its mode and ownership, and rolls back an interrupted install before a
