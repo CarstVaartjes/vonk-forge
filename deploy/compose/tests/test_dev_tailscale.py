@@ -8,7 +8,6 @@ import subprocess
 import time
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[3]
 COMPOSE = ROOT / "deploy/compose"
 IMAGE_TEMPLATE = COMPOSE / "compose.dev.images.yaml"
@@ -363,8 +362,10 @@ def test_continuous_reconciler_republishes_live_suffix_and_health_rejects_stale(
             "vonk-forge.first-team.ts.net\n",
         )
         assert set(ready_observed) == {
-            "11111111-1111-4111-8111-111111111111 "
-            "vonk-forge.first-team.ts.net\n"
+            (
+                "11111111-1111-4111-8111-111111111111 "
+                "vonk-forge.first-team.ts.net\n"
+            )
         }
 
         healthy = subprocess.run(
@@ -404,10 +405,14 @@ def test_continuous_reconciler_republishes_live_suffix_and_health_rejects_stale(
             "vonk-forge.second-team.ts.net\n",
         }
         assert set(ready_observed) <= {
-            "11111111-1111-4111-8111-111111111111 "
-            "vonk-forge.first-team.ts.net\n",
-            "11111111-1111-4111-8111-111111111111 "
-            "vonk-forge.second-team.ts.net\n",
+            (
+                "11111111-1111-4111-8111-111111111111 "
+                "vonk-forge.first-team.ts.net\n"
+            ),
+            (
+                "11111111-1111-4111-8111-111111111111 "
+                "vonk-forge.second-team.ts.net\n"
+            ),
         }
 
         healthy_again = subprocess.run(

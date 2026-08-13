@@ -5,6 +5,7 @@ from deploy.compose.tests.test_agent_ingress import (
     _adapted_caddy,
     _environment,
     _rendered,
+    _routes_with_handlers,
     _server_on_port,
 )
 
@@ -48,7 +49,7 @@ def test_native_litellm_admin_has_a_writable_root_path_and_preserves_auth_health
 
 def test_caddy_routes_native_ui_before_spa_and_blocks_dynamic_model_authority() -> None:
     adapted = _adapted_caddy(_environment())
-    routes = _server_on_port(adapted, 8080)["routes"]
+    routes = _routes_with_handlers(_server_on_port(adapted, 8080)["routes"])
 
     inference = next(
         (index, route)
