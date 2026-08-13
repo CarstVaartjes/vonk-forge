@@ -175,20 +175,25 @@ administrator login still controls application access.
 1. Open **Tailscale admin console → DNS** and enable **MagicDNS**. Enable
    **HTTPS certificates** for the tailnet before configuring Serve; accept the
    certificate-domain acknowledgement shown by Tailscale.
-2. Open **Services**, define exact Service `svc:vonk-forge`, and add endpoint
-   `tcp:443`. Do this before grants or auto-approval so policy references a
-   defined Service.
-3. Open **Settings → Trust credentials → OAuth clients**, then create one OAuth
-   client for this gateway.
-4. Grant only `auth_keys` write scope (**Auth Keys — Write**) and restrict the
-   client to its only tag, `tag:vonk-gateway`. Do not grant Devices, DNS,
-   Policy, Key Value, or any other scope.
-5. Merge the `tag:vonk-gateway`, `svc:vonk-forge`, grant, auto-approver, and
+2. Open **Services → Advertise → Define a Service**, name it exact
+   `vonk-forge` (the resulting identifier is `svc:vonk-forge`), and add exact
+   endpoint `tcp:443`. Do this before grants or auto-approval so policy
+   references a defined Service.
+3. Open **Trust credentials → Credential → OAuth**, then create one OAuth
+   client for this gateway. This is a machine OAuth client using client
+   credentials, not an OAuth app acting for a human user.
+4. Grant only `auth_keys` write scope (shown as **Auth Keys — Write** or
+   **Keys → Auth Keys — Write**) and restrict the client to its only tag,
+   `tag:vonk-gateway`. Do not grant Devices, DNS, Policy, Key Value, or any
+   other scope. Tailscale requires a tag for an OAuth client with this scope.
+5. Open **Access controls** and merge the `tag:vonk-gateway`,
+   `svc:vonk-forge`, grant, service auto-approver, and
    test entries from
    [`deploy/compose/tailscale/grants.example.hujson`](../../deploy/compose/tailscale/grants.example.hujson)
-   into the existing tailnet policy. Limit `svc:vonk-forge:443` to the exact
-   administrator identity or administrator group. Never use `svc:*`, an
-   allow-all grant, or a Funnel rule.
+   into the existing tailnet policy. Keep the grant at exact `tcp:443`, and
+   limit `svc:vonk-forge:443` to the exact administrator identity or
+   administrator group. Save the policy only after its built-in tests pass.
+   Never use `svc:*`, an allow-all grant, or a Funnel rule.
 6. Save the newly shown client ID and secret immediately into two private
    local input files. Tailscale shows the secret only at creation time. This
    silent-input example keeps values out of command arguments and output:

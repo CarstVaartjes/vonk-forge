@@ -15,16 +15,18 @@ authentication are independent gates: an authorized tailnet user must still
 complete the application administrator login at `svc:vonk-forge`.
 
 Before creating credentials or policy, enable **MagicDNS** and **HTTPS
-certificates** under the Tailscale admin console's DNS settings. Then define
-these exact Services and endpoints in the Services page:
+certificates** under the Tailscale admin console's DNS settings. Then use
+**Services → Advertise → Define a Service** to define these exact Services and
+endpoints:
 
 - `svc:vonk-forge`, endpoint `tcp:443`;
 - `svc:hermes-dashboard`, endpoint `tcp:443`; and
 - `svc:hermes-api`, endpoint `tcp:443`.
 
-The gateway never receives a GitHub token. After the Services exist, create a
-separate OAuth client under Trust credentials with only `auth_keys` write scope
-and `tag:vonk-gateway` as its only tag.
+The gateway never receives a GitHub token. After the Services exist, use
+**Trust credentials → Credential → OAuth** to create a separate machine OAuth
+client with only `auth_keys` write scope and `tag:vonk-gateway` as its only
+tag. Do not create a human OAuth app.
 
 Merge the reviewed sections of `deploy/compose/tailscale/grants.example.hujson`
 into tailnet policy after replacing the GitHub-login placeholder. Administrators
@@ -37,8 +39,8 @@ human-facing LAN port is a fallback.
 
 ## Secrets and unattended startup
 
-The OAuth client is created under **Tailscale admin console → Settings → Trust
-credentials → OAuth clients** with only `auth_keys` write scope and only
+The OAuth client is created under **Tailscale admin console → Trust credentials
+→ Credential → OAuth** with only `auth_keys` write scope and only
 `tag:vonk-gateway`. Capture its values once into separate mode `0600` files
 without putting either value in a command argument or terminal output.
 

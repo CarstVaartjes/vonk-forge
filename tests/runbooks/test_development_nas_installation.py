@@ -97,7 +97,9 @@ def test_development_nas_runbook_documents_private_browser_prerequisites() -> No
         "Tailscale admin console",
         "MagicDNS",
         "HTTPS certificates",
+        "Services → Advertise → Define a Service",
         "Trust credentials",
+        "Credential → OAuth",
         "`auth_keys` write",
         "`tag:vonk-gateway`",
         "`svc:vonk-forge`",
@@ -113,7 +115,7 @@ def test_development_nas_runbook_documents_private_browser_prerequisites() -> No
 
     prerequisites = text.index("MagicDNS")
     service = text.index("`svc:vonk-forge`")
-    grants = text.index("Merge the `tag:vonk-gateway`")
+    grants = text.index("Open **Access controls** and merge the `tag:vonk-gateway`")
     assert prerequisites < service < grants
 
 
@@ -265,6 +267,8 @@ def test_fresh_install_is_the_concise_operator_entry_point() -> None:
         "--phase synthetic",
         "MagicDNS",
         "HTTPS certificates",
+        "Services → Advertise → Define a Service",
+        "Trust credentials → Credential → OAuth",
         "`svc:vonk-forge`",
         "`tcp:443`",
     ):
@@ -272,7 +276,7 @@ def test_fresh_install_is_the_concise_operator_entry_point() -> None:
     assert "No GitHub, GHCR, R2, database, signing, or model credential" in text
     assert "Do not install a registry token on the NAS" in text
     assert setup.index("MagicDNS") < setup.index("`svc:vonk-forge`") < setup.index(
-        "Service grant and auto-approval"
+        "Service grant, service auto-approval"
     )
 
 

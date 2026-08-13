@@ -163,6 +163,8 @@ def test_tailscale_runbook_documents_the_exact_private_browser_service() -> None
 
     for required in (
         "Trust credentials",
+        "Services → Advertise → Define a Service",
+        "Credential → OAuth",
         "MagicDNS",
         "HTTPS certificates",
         "`auth_keys` write scope",
