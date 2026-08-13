@@ -261,8 +261,9 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
     assert "Environment=HOME=/var/lib/vonk-forge-agent" in unit
     assert "Environment=XDG_RUNTIME_DIR=/run/vonk-forge-agent" in unit
     assert "ProtectControlGroups=yes" in unit
-    assert "ProtectHome=tmpfs" in unit
-    assert "BindReadOnlyPaths=/run/user" in unit
+    assert "ProtectHome=no" in unit
+    assert "InaccessiblePaths=/home /root -/run/docker.sock" in unit
+    assert "BindReadOnlyPaths=/run/user" not in unit
     assert (
         "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK" in unit
     )

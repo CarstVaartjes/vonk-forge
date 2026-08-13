@@ -960,6 +960,8 @@ def test_acceptance_generates_synthetic_oauth_inputs_and_checks_only_projection_
             "repository_commit()"
         )
     ]
+    assert "stat.S_IMODE(root.st_mode) != 0o550" in metadata_function
+    assert "stat.S_IMODE(root.st_mode) != 0o700" not in metadata_function
     assert "read_text" not in metadata_function
     assert "read_bytes" not in metadata_function
     assert "open(" not in metadata_function
