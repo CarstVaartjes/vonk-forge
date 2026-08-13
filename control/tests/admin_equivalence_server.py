@@ -11,7 +11,6 @@ from types import SimpleNamespace
 import uvicorn
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 from vonk_control.api import AdminServices, create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
@@ -103,10 +102,10 @@ def main() -> None:
     ready_file = Path(sys.argv[3])
     codec = TokenCodec(b"k" * 32)
     token = codec.issue(Actor("operator", "operator"), ttl_seconds=3600, now=0)
+    database = ready_file.parent / "control.db"
     engine = create_engine(
-        "sqlite+pysqlite:///:memory:",
+        f"sqlite+pysqlite:///{database}",
         connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
     )
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
