@@ -68,7 +68,7 @@ def test_development_gateway_is_pinned_userspace_and_least_privilege() -> None:
         "TS_STATE_DIR": "/var/lib/tailscale",
         "TS_USERSPACE": "true",
     }
-    assert set(gateway["networks"]) == {"ingress", "tailnet-web-edge"}
+    assert set(gateway["networks"]) == {"tailscale-egress", "tailnet-web-edge"}
     assert not gateway.get("secrets")
     volumes = _volumes_by_target(gateway)
     assert volumes["/var/lib/tailscale"]["source"] == "dev-tailscale-state"
@@ -114,7 +114,7 @@ def test_development_configurator_has_only_bounded_runtime_authority() -> None:
     assert volumes["/run/vonk-tailnet"]["source"] == "dev-tailscale-runtime"
     assert configurator["depends_on"] == {
         "caddy": {
-            "condition": "service_healthy",
+            "condition": "service_started",
             "required": True,
         },
         "tailscale-gateway": {
@@ -159,7 +159,7 @@ def test_hostname_handoff_orders_caddy_without_a_startup_cycle() -> None:
     }
     assert "tailscale-configurator" not in caddy["depends_on"]
     assert configurator["depends_on"]["caddy"] == {
-        "condition": "service_healthy",
+        "condition": "service_started",
         "required": True,
     }
     assert not services["tailscale-gateway"].get("depends_on")
@@ -288,6 +288,112 @@ def test_reconciler_rejects_invalid_tailnet_suffix_without_stale_publication(
     assert result.returncode != 0
     assert not target.exists()
     assert "malicious.invalid" not in result.stdout + result.stderr
+
+
+def test_overlapping_reconcilers_parse_only_their_own_tailscale_snapshots(
+    tmp_path: Path,
+) -> None:
+    socket_path = tmp_path / "tailscaled.sock"
+    daemon_socket = socket.socket(socket.AF_UNIX)
+    daemon_socket.bind(str(socket_path))
+    expected = json.dumps(EXPECTED_MAP, sort_keys=True, separators=(",", ":"))
+    fake_root = tmp_path / "fake-state"
+    fake_root.mkdir()
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    fake_tailscale = fake_bin / "tailscale"
+    fake_tailscale.write_text(
+        "#!/bin/sh\n"
+        "set -eu\n"
+        "role=${TS_FAKE_ROLE:?}\n"
+        "root=${TS_FAKE_ROOT:?}\n"
+        "case \"$*\" in\n"
+        f"  *\"serve get-config --all\"*) printf '%s\\n' '{expected}' ;;\n"
+        "  *\"serve status --json\"*) printf '%s\\n' "
+        "'{\"Services\":{\"svc:vonk-forge\":{\"TCP\":{\"443\":{\"HTTPS\":true}}}}}' ;;\n"
+        "  *\"status --json\"*)\n"
+        "    count_file=$root/$role.count\n"
+        "    count=0\n"
+        "    if [ -f \"$count_file\" ]; then count=$(cat \"$count_file\"); fi\n"
+        "    count=$((count + 1))\n"
+        "    printf '%s\\n' \"$count\" >\"$count_file\"\n"
+        "    printf '{\"CurrentTailnet\":{\"MagicDNSSuffix\":\"%s-team.ts.net\"},' \"$role\"\n"
+        "    printf '\"Self\":{\"CapMap\":{\"service-host\":[]}}}\\n'\n"
+        "    if [ \"$role\" = first ] && [ \"$count\" -eq 2 ]; then\n"
+        "      : >\"$root/first-snapshot-written\"\n"
+        "      while [ ! -f \"$root/second-snapshot-written\" ]; do sleep 0.01; done\n"
+        "    elif [ \"$role\" = second ] && [ \"$count\" -eq 2 ]; then\n"
+        "      : >\"$root/second-snapshot-written\"\n"
+        "    fi ;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    fake_tailscale.chmod(0o755)
+
+    def invocation(role: str, generation: str) -> tuple[dict[str, str], Path]:
+        output = tmp_path / f"{role}-runtime"
+        output.mkdir()
+        hostname = output / "control-hostname"
+        environment = os.environ | {
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+            "TS_CONFIGURE_ONCE": "1",
+            "TS_CONFIGURE_TEST_MODE": "1",
+            "TS_FAKE_ROLE": role,
+            "TS_FAKE_ROOT": str(fake_root),
+            "TS_GENERATION_FILE": str(tmp_path / f"{role}-generation"),
+            "TS_HOSTNAME_OUTPUT": str(hostname),
+            "TS_SOCKET_PATH": str(socket_path),
+            "TS_TEST_GENERATION": generation,
+        }
+        return environment, hostname
+
+    first_environment, first_hostname = invocation(
+        "first", "11111111-1111-4111-8111-111111111111"
+    )
+    second_environment, second_hostname = invocation(
+        "second", "22222222-2222-4222-8222-222222222222"
+    )
+    first = subprocess.Popen(
+        ["/bin/sh", CONFIGURE],
+        env=first_environment,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        deadline = time.monotonic() + 5
+        while (
+            not (fake_root / "first-snapshot-written").exists()
+            and time.monotonic() < deadline
+        ):
+            time.sleep(0.01)
+        assert (fake_root / "first-snapshot-written").exists()
+
+        second = subprocess.run(
+            ["/bin/sh", CONFIGURE],
+            env=second_environment,
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=5,
+        )
+        first_stdout, first_stderr = first.communicate(timeout=5)
+
+        assert first.returncode == 0, first_stderr
+        assert second.returncode == 0, second.stderr
+        assert first_hostname.read_text(encoding="utf-8") == (
+            "vonk-forge.first-team.ts.net\n"
+        )
+        assert second_hostname.read_text(encoding="utf-8") == (
+            "vonk-forge.second-team.ts.net\n"
+        )
+        assert "vonk-forge.first-team.ts.net" in first_stdout
+    finally:
+        if first.poll() is None:
+            first.kill()
+            first.wait(timeout=5)
+        daemon_socket.close()
 
 
 def _wait_for_text(path: Path, expected: str, *, timeout: float = 8) -> list[str]:

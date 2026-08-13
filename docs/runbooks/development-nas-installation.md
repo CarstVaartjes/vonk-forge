@@ -265,7 +265,11 @@ every existing secret byte and key relationship and creates only
 before publication. If the source is the older valid 15-file generation, first
 run the separately documented `--upgrade-host-runtime-authority` transition,
 then run `--upgrade-browser-access`. Neither switch repairs partial, unknown,
-symlinked, or inconsistent state.
+symlinked, or inconsistent state created outside its own transaction. If power
+or the workstation process is lost during the browser upgrade, leave the hidden
+`.browser-access-upgrade-*` transaction untouched and rerun the identical
+command with the same OAuth inputs. The generator verifies the digest journal
+and safely finishes or rolls back its own interrupted add-only transaction.
 
 Publish the accepted Compose and that exact bundle to the mounted NAS share:
 

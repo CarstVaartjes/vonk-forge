@@ -250,7 +250,7 @@ services:
     security_opt: [no-new-privileges:true]
     command: [python, -m, vonk_control.dev_auth_init]
     environment:
-      VONK_DEV_AUTH_MODE: bootstrap
+      VONK_DEV_AUTH_MODE: reconcile
     volumes:
       - dev-auth-secrets:/auth-secrets:ro
     tmpfs: [/tmp]
@@ -396,7 +396,7 @@ services:
       control-api: {condition: service_healthy}
       dev-init: {condition: service_completed_successfully}
     healthcheck:
-      test: [CMD, wget, -q, --spider, -T, "3", http://127.0.0.1:2019/healthz]
+      test: [CMD, /bin/sh, /run/vonk-runtime/caddy-entrypoint.sh, health]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -423,7 +423,7 @@ services:
       - dev-tailscale-state:/var/lib/tailscale
       - dev-tailscale-socket:/var/run/tailscale
     tmpfs: [/tmp:size=64m,mode=1777]
-    networks: [ingress, tailnet-web-edge]
+    networks: [tailscale-egress, tailnet-web-edge]
     healthcheck:
       test: [CMD, tailscale, --socket=/var/run/tailscale/tailscaled.sock, status, --json]
       interval: 10s
@@ -445,7 +445,7 @@ services:
       - dev-tailscale-runtime:/run/vonk-tailnet
     tmpfs: [/tmp:size=16m,mode=1777]
     depends_on:
-      caddy: {condition: service_healthy}
+      caddy: {condition: service_started}
       tailscale-gateway: {condition: service_healthy}
     healthcheck:
       test: [CMD, /bin/sh, /run/vonk-runtime/tailscale-configure.sh, health]
@@ -457,6 +457,7 @@ networks:
   application: {internal: true}
   data: {internal: true}
   ingress: {}
+  tailscale-egress: {}
   tailnet-web-edge: {internal: true}
 
 secrets:

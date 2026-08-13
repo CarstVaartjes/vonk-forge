@@ -164,7 +164,7 @@ def _inputs(root_path: Path) -> tuple[str, str]:
 
 def _run() -> str:
     mode = os.environ.get("VONK_DEV_AUTH_MODE")
-    if mode not in {"bootstrap", "rotate"}:
+    if mode not in {"bootstrap", "reconcile", "rotate"}:
         raise DevAuthInitError("development authentication mode is invalid")
     root = Path(os.environ.get("VONK_DEV_AUTH_SECRET_ROOT", "/auth-secrets"))
     database_url, verifier = _inputs(root)
@@ -177,7 +177,12 @@ def _run() -> str:
         )
         if mode == "bootstrap":
             return service.bootstrap_admin(verifier).status
-        return service.rotate_admin(verifier).status
+        if mode == "rotate":
+            return service.rotate_admin(verifier).status
+        try:
+            return service.rotate_admin(verifier).status
+        except BrowserAuthenticationError:
+            return service.bootstrap_admin(verifier).status
     finally:
         engine.dispose()
 

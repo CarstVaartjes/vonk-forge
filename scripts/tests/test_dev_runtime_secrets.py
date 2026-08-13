@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
@@ -79,11 +80,220 @@ ROTATION_VERIFIER = "admin-password-verifier"
 ROTATION_JOURNAL = "journal"
 ROTATION_MANIFEST_TEMPORARY = ".journal.tmp"
 OAUTH_ROTATION_PREFIX = ".tailscale-oauth-rotation-"
+BROWSER_UPGRADE_PREFIX = ".browser-access-upgrade-"
 OAUTH_ROTATION_ID = "2fdb4cf7-f240-4a6f-b52f-06fdb4058d50"
 OTHER_OAUTH_ROTATION_ID = "70d4d13a-5575-43d8-ae60-bf42499901c4"
 THIRD_OAUTH_ROTATION_ID = "b2569b53-f109-49c7-a197-d37f93e84dd4"
 SECOND_ROTATED_OAUTH_CLIENT_ID = b"second-rotated-tailscale-client-id\n"
 SECOND_ROTATED_OAUTH_CLIENT_SECRET = b"second-rotated-tailscale-client-secret\n"
+BROWSER_UPGRADE_CRASH_BOUNDARIES = (
+    "transaction-create",
+    "root-fsync-transaction",
+    "journal-write",
+    "journal-fsync",
+    "journal-rename",
+    "transaction-fsync-journal",
+    "admin-password-write",
+    "admin-password-fsync",
+    "admin-password-verifier-write",
+    "admin-password-verifier-fsync",
+    "tailscale-oauth-client-id-write",
+    "tailscale-oauth-client-id-fsync",
+    "tailscale-oauth-client-secret-write",
+    "tailscale-oauth-client-secret-fsync",
+    "transaction-fsync-payloads",
+    "admin-password-link",
+    "admin-password-root-fsync",
+    "admin-password-unlink",
+    "admin-password-transaction-fsync",
+    "admin-password-verifier-link",
+    "admin-password-verifier-root-fsync",
+    "admin-password-verifier-unlink",
+    "admin-password-verifier-transaction-fsync",
+    "tailscale-oauth-client-id-link",
+    "tailscale-oauth-client-id-root-fsync",
+    "tailscale-oauth-client-id-unlink",
+    "tailscale-oauth-client-id-transaction-fsync",
+    "tailscale-oauth-client-secret-link",
+    "tailscale-oauth-client-secret-root-fsync",
+    "tailscale-oauth-client-secret-unlink",
+    "tailscale-oauth-client-secret-transaction-fsync",
+    "journal-unlink",
+    "transaction-fsync-cleanup",
+    "transaction-remove",
+    "root-fsync-cleanup",
+)
+
+BROWSER_UPGRADE_CRASH_HARNESS = r"""
+import importlib.util
+import os
+import signal
+import sys
+from pathlib import Path
+
+script = Path(sys.argv[1])
+secrets_dir = Path(sys.argv[2])
+client_id = Path(sys.argv[3])
+client_secret = Path(sys.argv[4])
+boundary = sys.argv[5]
+marker = Path(sys.argv[6])
+specification = importlib.util.spec_from_file_location("crashing_runtime", script)
+runtime = importlib.util.module_from_spec(specification)
+specification.loader.exec_module(runtime)
+real = {
+    name: getattr(runtime.os, name)
+    for name in (
+        "fsync",
+        "link",
+        "mkdir",
+        "readlink",
+        "replace",
+        "rmdir",
+        "unlink",
+        "write",
+    )
+}
+transaction_name = None
+pending_root_fsync = None
+pending_transaction_fsync = None
+
+
+def descriptor_path(descriptor):
+    return Path(real["readlink"](f"/proc/self/fd/{descriptor}"))
+
+
+def stop_at(event):
+    if event != boundary:
+        return
+    marker.write_text(event, encoding="ascii")
+    signal.raise_signal(signal.SIGSTOP)
+
+
+def mkdir(path, mode=0o777, *, dir_fd=None):
+    global transaction_name, pending_root_fsync
+    real["mkdir"](path, mode, dir_fd=dir_fd)
+    if str(path).startswith(".browser-access-upgrade-"):
+        transaction_name = str(path)
+        pending_root_fsync = "root-fsync-transaction"
+        stop_at("transaction-create")
+
+
+def write(descriptor, content):
+    written = real["write"](descriptor, content)
+    path = descriptor_path(descriptor)
+    if transaction_name is not None and path.parent.name == transaction_name:
+        kind = "journal" if path.name == ".journal.tmp" else path.name
+        stop_at(f"{kind}-write")
+    return written
+
+
+def fsync(descriptor):
+    global pending_root_fsync, pending_transaction_fsync
+    path = descriptor_path(descriptor)
+    real["fsync"](descriptor)
+    if transaction_name is None:
+        return
+    if path.parent.name == transaction_name:
+        kind = "journal" if path.name == ".journal.tmp" else path.name
+        stop_at(f"{kind}-fsync")
+        return
+    if path == secrets_dir and pending_root_fsync is not None:
+        event = pending_root_fsync
+        pending_root_fsync = None
+        stop_at(event)
+        return
+    if path.name != transaction_name:
+        return
+    if pending_transaction_fsync is not None:
+        event = pending_transaction_fsync
+        pending_transaction_fsync = None
+        stop_at(event)
+        return
+    names = set(os.listdir(path))
+    if names == {
+        "journal",
+        "admin-password",
+        "admin-password-verifier",
+        "tailscale-oauth-client-id",
+        "tailscale-oauth-client-secret",
+    }:
+        stop_at("transaction-fsync-payloads")
+
+
+def replace(source, destination, *, src_dir_fd=None, dst_dir_fd=None):
+    global pending_transaction_fsync
+    real["replace"](
+        source,
+        destination,
+        src_dir_fd=src_dir_fd,
+        dst_dir_fd=dst_dir_fd,
+    )
+    if source == ".journal.tmp" and destination == "journal":
+        pending_transaction_fsync = "transaction-fsync-journal"
+        stop_at("journal-rename")
+
+
+def link(source, destination, *, src_dir_fd=None, dst_dir_fd=None, **kwargs):
+    global pending_root_fsync
+    real["link"](
+        source,
+        destination,
+        src_dir_fd=src_dir_fd,
+        dst_dir_fd=dst_dir_fd,
+        **kwargs,
+    )
+    pending_root_fsync = f"{source}-root-fsync"
+    stop_at(f"{source}-link")
+
+
+def unlink(path, *args, **kwargs):
+    global pending_transaction_fsync
+    directory = kwargs.get("dir_fd")
+    real["unlink"](path, *args, **kwargs)
+    if transaction_name is None or directory is None:
+        return
+    parent = descriptor_path(directory)
+    if parent.name != transaction_name:
+        return
+    if path == "journal":
+        pending_transaction_fsync = "transaction-fsync-cleanup"
+        stop_at("journal-unlink")
+    elif path in {
+        "admin-password",
+        "admin-password-verifier",
+        "tailscale-oauth-client-id",
+        "tailscale-oauth-client-secret",
+    }:
+        pending_transaction_fsync = f"{path}-transaction-fsync"
+        stop_at(f"{path}-unlink")
+
+
+def rmdir(path, *args, **kwargs):
+    global pending_root_fsync
+    real["rmdir"](path, *args, **kwargs)
+    if str(path).startswith(".browser-access-upgrade-"):
+        pending_root_fsync = "root-fsync-cleanup"
+        stop_at("transaction-remove")
+
+
+runtime.os.mkdir = mkdir
+runtime.os.write = write
+runtime.os.fsync = fsync
+runtime.os.replace = replace
+runtime.os.link = link
+runtime.os.unlink = unlink
+runtime.os.rmdir = rmdir
+runtime.prepare_runtime_secrets(
+    secrets_dir,
+    management_cidrs="192.0.2.0/24,2001:db8::/64",
+    enroll_hostname="enroll.example.test",
+    agent_hostname="agents.example.test",
+    registry_hostname="registry.example.test",
+    tailscale_oauth_client_id_file=client_id,
+    tailscale_oauth_client_secret_file=client_secret,
+    upgrade_browser_access=True,
+)
+"""
 
 
 def _rotation_child(transaction: Path, kind: str) -> Path:
@@ -155,6 +365,54 @@ def _run_generator(
             capture_output=True,
             text=True,
         )
+
+
+def _kill_browser_upgrade_at_boundary(
+    secrets_dir: Path,
+    oauth_files: tuple[Path, Path],
+    boundary: str,
+    marker: Path,
+) -> subprocess.CompletedProcess[str]:
+    process = subprocess.Popen(
+        (
+            sys.executable,
+            "-c",
+            BROWSER_UPGRADE_CRASH_HARNESS,
+            str(SCRIPT),
+            str(secrets_dir),
+            str(oauth_files[0]),
+            str(oauth_files[1]),
+            boundary,
+            str(marker),
+        ),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    deadline = time.monotonic() + 15
+    try:
+        while not marker.exists() and process.poll() is None:
+            if time.monotonic() >= deadline:
+                pytest.fail(f"browser upgrade did not reach {boundary}")
+            time.sleep(0.01)
+        if not marker.exists():
+            stdout, stderr = process.communicate()
+            pytest.fail(
+                f"browser upgrade exited before {boundary}: "
+                f"returncode={process.returncode}, stdout={stdout!r}, stderr={stderr!r}"
+            )
+        process.kill()
+        stdout, stderr = process.communicate(timeout=5)
+        return subprocess.CompletedProcess(
+            process.args,
+            process.returncode,
+            stdout,
+            stderr,
+        )
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
 
 
 def _load_module() -> ModuleType:
@@ -767,6 +1025,94 @@ def test_rejects_unsafe_oauth_input_before_creating_the_secret_bundle(
     assert OAUTH_CLIENT_SECRET.decode().strip() not in result.stderr
 
 
+@pytest.mark.parametrize(
+    "malformed",
+    [
+        b"\n",
+        b"first-line\nsecond-line\n",
+        b"client-id\r\n",
+        b"client\x00id",
+        b"client\x1fid",
+        b"client\x7fid",
+        b"x" * 4097,
+    ],
+    ids=(
+        "empty-line",
+        "multiple-lines",
+        "carriage-return",
+        "nul",
+        "c0-control",
+        "delete-control",
+        "over-limit",
+    ),
+)
+def test_rejects_malformed_oauth_values_before_creating_the_secret_bundle(
+    tmp_path: Path, malformed: bytes
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    oauth_files = _write_oauth_values(
+        tmp_path / "oauth-inputs",
+        malformed,
+        OAUTH_CLIENT_SECRET,
+    )
+
+    result = _run_generator(secrets_dir, oauth_files=oauth_files)
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert not secrets_dir.exists()
+    assert OAUTH_CLIENT_SECRET.decode().strip() not in result.stderr
+
+
+def test_rejects_equal_oauth_values_with_different_trailing_newlines(
+    tmp_path: Path,
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    oauth_files = _write_oauth_values(
+        tmp_path / "oauth-inputs",
+        b"synthetic-equal-value\n",
+        b"synthetic-equal-value",
+    )
+
+    result = _run_generator(secrets_dir, oauth_files=oauth_files)
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert not secrets_dir.exists()
+    assert "synthetic-equal-value" not in result.stderr
+
+
+def test_rejects_malformed_oauth_rotation_without_partial_mutation(
+    tmp_path: Path,
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    created = _run_generator(secrets_dir)
+    assert created.returncode == 0, created.stderr
+    before = _secret_state(secrets_dir, LOCAL_SOURCE_SECRET_NAMES)
+    malformed = _write_oauth_values(
+        tmp_path / "malformed-oauth-inputs",
+        ROTATED_OAUTH_CLIENT_ID,
+        b"secret\nwith-second-line\n",
+    )
+
+    result = _run_generator(
+        secrets_dir,
+        "--rotate-tailscale-oauth",
+        oauth_files=malformed,
+    )
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert _secret_state(secrets_dir, LOCAL_SOURCE_SECRET_NAMES) == before
+    assert b"secret\nwith-second-line" not in result.stderr.encode()
+
+
 def test_rejects_symlink_secret_directory_without_touching_target(
     tmp_path: Path,
 ) -> None:
@@ -949,6 +1295,77 @@ def test_upgrade_browser_access_is_add_only_for_the_exact_prior_generation(
     )
 
 
+@pytest.mark.parametrize("boundary", BROWSER_UPGRADE_CRASH_BOUNDARIES)
+def test_upgrade_browser_access_recovers_after_sigkill_at_every_durable_boundary(
+    tmp_path: Path, boundary: str
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    prior_names = _prior_browser_access_generation(secrets_dir)
+    before = _secret_state(secrets_dir, prior_names)
+    oauth_files = _write_oauth_inputs(tmp_path / "upgrade-oauth-inputs")
+    marker = tmp_path / "crash-boundary"
+
+    crashed = _kill_browser_upgrade_at_boundary(
+        secrets_dir,
+        oauth_files,
+        boundary,
+        marker,
+    )
+
+    assert crashed.returncode == -9
+    retry = _run_generator(
+        secrets_dir,
+        "--upgrade-browser-access",
+        oauth_files=oauth_files,
+    )
+    assert retry.returncode == 0, retry.stderr
+    assert retry.stderr == ""
+    assert {path.name for path in secrets_dir.iterdir()} == LOCAL_SOURCE_SECRET_NAMES
+    assert _secret_state(secrets_dir, prior_names) == before
+    assert (secrets_dir / "tailscale-oauth-client-id").read_bytes() == (
+        OAUTH_CLIENT_ID
+    )
+    assert (secrets_dir / "tailscale-oauth-client-secret").read_bytes() == (
+        OAUTH_CLIENT_SECRET
+    )
+    _assert_no_sensitive_output(
+        crashed.stdout + crashed.stderr + retry.stdout + retry.stderr,
+        secrets_dir,
+        BROWSER_ACCESS_SECRET_NAMES,
+    )
+
+
+def test_upgrade_browser_access_recovers_rollback_after_journal_loss(
+    tmp_path: Path,
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    prior_names = _prior_browser_access_generation(secrets_dir)
+    before = _secret_state(secrets_dir, prior_names)
+    transaction = secrets_dir / (
+        BROWSER_UPGRADE_PREFIX + "0123456789abcdef0123456789abcdef"
+    )
+    transaction.mkdir(mode=0o700)
+    residual = transaction / "admin-password"
+    residual.write_bytes(b"rollback-payload-with-lost-journal\n")
+    residual.chmod(0o600)
+    oauth_files = _write_oauth_inputs(tmp_path / "upgrade-oauth-inputs")
+
+    retry = _run_generator(
+        secrets_dir,
+        "--upgrade-browser-access",
+        oauth_files=oauth_files,
+    )
+
+    assert retry.returncode == 0, retry.stderr
+    assert not transaction.exists()
+    assert {path.name for path in secrets_dir.iterdir()} == LOCAL_SOURCE_SECRET_NAMES
+    assert _secret_state(secrets_dir, prior_names) == before
+
+
 @pytest.mark.parametrize("state", ["partial", "unknown", "complete"])
 def test_upgrade_browser_access_refuses_every_non_prior_generation(
     tmp_path: Path, state: str
@@ -1027,28 +1444,29 @@ def test_upgrade_browser_access_preserves_an_exclusive_create_collision(
     runtime = _load_module()
     before_descriptors = _descriptor_count()
     real_open = runtime.os.open
+    real_link = runtime.os.link
     foreign = b"synthetic-exclusive-create-collision\n"
     collision: tuple[int, int] | None = None
 
-    def collide_open(
-        path: str,
-        flags: int,
-        mode: int = 0o777,
+    def collide_link(
+        source: str,
+        destination: str,
         *,
-        dir_fd: int | None = None,
-    ) -> int:
+        src_dir_fd: int | None = None,
+        dst_dir_fd: int | None = None,
+        follow_symlinks: bool = True,
+    ) -> None:
         nonlocal collision
         if (
             collision is None
-            and path == "admin-password"
-            and flags & os.O_EXCL
-            and dir_fd is not None
+            and destination == "admin-password"
+            and dst_dir_fd is not None
         ):
             descriptor = real_open(
-                path,
+                destination,
                 os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                 0o600,
-                dir_fd=dir_fd,
+                dir_fd=dst_dir_fd,
             )
             runtime.os.write(descriptor, foreign)
             runtime.os.fchmod(descriptor, 0o600)
@@ -1056,9 +1474,15 @@ def test_upgrade_browser_access_preserves_an_exclusive_create_collision(
             metadata = runtime.os.fstat(descriptor)
             collision = (metadata.st_dev, metadata.st_ino)
             runtime.os.close(descriptor)
-        return real_open(path, flags, mode, dir_fd=dir_fd)
+        real_link(
+            source,
+            destination,
+            src_dir_fd=src_dir_fd,
+            dst_dir_fd=dst_dir_fd,
+            follow_symlinks=follow_symlinks,
+        )
 
-    monkeypatch.setattr(runtime.os, "open", collide_open)
+    monkeypatch.setattr(runtime.os, "link", collide_link)
 
     with pytest.raises(runtime.RuntimeSecretError):
         runtime.prepare_runtime_secrets(
@@ -1087,29 +1511,30 @@ def test_upgrade_browser_access_preserves_a_concurrent_replacement(
     runtime = _load_module()
     before_descriptors = _descriptor_count()
     real_open = runtime.os.open
+    real_link = runtime.os.link
     foreign = b"synthetic-concurrent-replacement\n"
     replacement: tuple[int, int] | None = None
 
-    def replace_before_second_create(
-        path: str,
-        flags: int,
-        mode: int = 0o777,
+    def replace_before_second_link(
+        source: str,
+        destination: str,
         *,
-        dir_fd: int | None = None,
-    ) -> int:
+        src_dir_fd: int | None = None,
+        dst_dir_fd: int | None = None,
+        follow_symlinks: bool = True,
+    ) -> None:
         nonlocal replacement
         if (
             replacement is None
-            and path == "admin-password-verifier"
-            and flags & os.O_EXCL
-            and dir_fd is not None
+            and destination == "admin-password-verifier"
+            and dst_dir_fd is not None
         ):
-            runtime.os.unlink("admin-password", dir_fd=dir_fd)
+            runtime.os.unlink("admin-password", dir_fd=dst_dir_fd)
             descriptor = real_open(
                 "admin-password",
                 os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                 0o600,
-                dir_fd=dir_fd,
+                dir_fd=dst_dir_fd,
             )
             runtime.os.write(descriptor, foreign)
             runtime.os.fchmod(descriptor, 0o600)
@@ -1118,9 +1543,15 @@ def test_upgrade_browser_access_preserves_a_concurrent_replacement(
             replacement = (metadata.st_dev, metadata.st_ino)
             runtime.os.close(descriptor)
             raise OSError("synthetic concurrent replacement")
-        return real_open(path, flags, mode, dir_fd=dir_fd)
+        real_link(
+            source,
+            destination,
+            src_dir_fd=src_dir_fd,
+            dst_dir_fd=dst_dir_fd,
+            follow_symlinks=follow_symlinks,
+        )
 
-    monkeypatch.setattr(runtime.os, "open", replace_before_second_create)
+    monkeypatch.setattr(runtime.os, "link", replace_before_second_link)
 
     with pytest.raises(runtime.RuntimeSecretError):
         runtime.prepare_runtime_secrets(

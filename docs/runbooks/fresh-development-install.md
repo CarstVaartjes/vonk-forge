@@ -137,8 +137,10 @@ upgraded without rotating its CA, database password, or other authority:
 repeat the generator command once with `--upgrade-browser-access`, then back up
 the resulting 21-file generation and republish it. This add-only migration
 preserves every existing secret byte and refuses every other incomplete,
-unknown, symlinked, or inconsistent state. An older valid 15-file source first
-needs the separate `--upgrade-host-runtime-authority` transition.
+unknown, symlinked, or inconsistent state. Its own interrupted hidden
+`.browser-access-upgrade-*` transaction is recoverable: do not edit it; rerun
+the identical command with the same OAuth inputs. An older valid 15-file source
+first needs the separate `--upgrade-host-runtime-authority` transition.
 
 ## 4. Configure names and start the NAS stack
 

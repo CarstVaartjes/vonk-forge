@@ -34,6 +34,7 @@ _DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 _READ_FLAGS = os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC
 _WRITE_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
 _MAX_SECRET_BYTES = 64 * 1024
+_MAX_OAUTH_VALUE_BYTES = 4 * 1024
 _PRIVATE_MODE = 0o600
 _UNSAFE_GENERATION_FILESYSTEMS = frozenset({"9p", "cifs", "drvfs", "smb3"})
 _HOST_LABEL = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?")
@@ -79,6 +80,10 @@ _BROWSER_ACCESS_SECRET_NAMES = frozenset(
     }
 )
 _PRE_BROWSER_ACCESS_SECRET_NAMES = RUNTIME_SECRET_NAMES - _BROWSER_ACCESS_SECRET_NAMES
+_BROWSER_UPGRADE_PREFIX = ".browser-access-upgrade-"
+_BROWSER_UPGRADE_NAME = re.compile(r"\.browser-access-upgrade-[0-9a-f]{32}\Z")
+_BROWSER_UPGRADE_JOURNAL = "journal"
+_BROWSER_UPGRADE_JOURNAL_TEMPORARY = ".journal.tmp"
 _HOST_RUNTIME_PRIVATE = "host-runtime-grant-private-key"
 _HOST_RUNTIME_PUBLIC = "host-runtime-grant-public-key"
 _LEGACY_RUNTIME_SECRET_NAMES = RUNTIME_SECRET_NAMES - {
@@ -367,7 +372,12 @@ def _same_owned_entry(entry: _OwnedEntry, metadata: os.stat_result) -> bool:
     return (entry.device, entry.inode) == (metadata.st_dev, metadata.st_ino)
 
 
-def _unlink_owned_entry(directory: int, entry: _OwnedEntry) -> bool:
+def _unlink_owned_entry(
+    directory: int,
+    entry: _OwnedEntry,
+    *,
+    allowed_link_counts: frozenset[int] = frozenset({1}),
+) -> bool:
     if entry.descriptor < 0:
         return False
     try:
@@ -381,8 +391,8 @@ def _unlink_owned_entry(directory: int, entry: _OwnedEntry) -> bool:
         or not stat.S_ISREG(opened.st_mode)
         or current.st_uid != os.geteuid()
         or opened.st_uid != os.geteuid()
-        or current.st_nlink != 1
-        or opened.st_nlink != 1
+        or current.st_nlink not in allowed_link_counts
+        or opened.st_nlink not in allowed_link_counts
     ):
         return False
     os.unlink(entry.name, dir_fd=directory)
@@ -471,6 +481,7 @@ def _read_rotation_file(
     name: str,
     *,
     error_message: str = "development administrator rotation state is invalid",
+    allowed_link_counts: frozenset[int] = frozenset({1}),
 ) -> tuple[bytes, _OwnedEntry]:
     descriptor = -1
     succeeded = False
@@ -482,7 +493,7 @@ def _read_rotation_file(
             not _same_inode(listed, before)
             or not stat.S_ISREG(before.st_mode)
             or before.st_uid != os.geteuid()
-            or before.st_nlink != 1
+            or before.st_nlink not in allowed_link_counts
             or stat.S_IMODE(before.st_mode) != _PRIVATE_MODE
             or not 0 <= before.st_size <= _MAX_SECRET_BYTES
         ):
@@ -588,7 +599,7 @@ def _acquire_mutation_lock(directory: int) -> None:
 
 
 def _read_external_secret_pair(first: Path, second: Path) -> tuple[bytes, bytes]:
-    message = "Tailscale OAuth input files are unsafe, empty, or aliased"
+    message = "Tailscale OAuth input files are unsafe, invalid, or aliased"
     first_parent = _open_private_parent(first)
     second_parent = -1
     first_entry: _OwnedEntry | None = None
@@ -601,12 +612,18 @@ def _read_external_secret_pair(first: Path, second: Path) -> tuple[bytes, bytes]
         second_content, second_entry = _read_rotation_file(
             second_parent, second.name, error_message=message
         )
+        first_value = first_content.removesuffix(b"\n")
+        second_value = second_content.removesuffix(b"\n")
         if (
-            not first_content
-            or not second_content
+            not first_value
+            or not second_value
+            or len(first_value) > _MAX_OAUTH_VALUE_BYTES
+            or len(second_value) > _MAX_OAUTH_VALUE_BYTES
+            or any(byte < 0x20 or byte == 0x7F for byte in first_value)
+            or any(byte < 0x20 or byte == 0x7F for byte in second_value)
             or (first_entry.device, first_entry.inode)
             == (second_entry.device, second_entry.inode)
-            or first_content == second_content
+            or first_value == second_value
         ):
             raise RuntimeSecretError(message)
         return first_content, second_content
@@ -1121,6 +1138,236 @@ def _upgrade_host_runtime_authority(
     )
 
 
+def _browser_upgrade_journal(additions: dict[str, bytes]) -> bytes:
+    return (
+        json.dumps(
+            {name: _sha256(content) for name, content in additions.items()},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n"
+    ).encode("ascii")
+
+
+def _parse_browser_upgrade_journal(content: bytes) -> dict[str, str]:
+    message = "development browser access upgrade state is invalid"
+    try:
+        document = json.loads(content.decode("ascii"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise RuntimeSecretError(message) from error
+    if (
+        not isinstance(document, dict)
+        or set(document) != _BROWSER_ACCESS_SECRET_NAMES
+        or any(
+            not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None
+            for value in document.values()
+        )
+    ):
+        raise RuntimeSecretError(message)
+    return document
+
+
+def _open_browser_upgrade_transaction(
+    directory: int, name: str
+) -> tuple[int, _OwnedEntry, dict[str, tuple[bytes, _OwnedEntry]]]:
+    message = "development browser access upgrade state is invalid"
+    opened = _open_existing_directory(directory, name)
+    if opened is None:
+        raise RuntimeSecretError(message)
+    transaction, metadata = opened
+    entries: dict[str, tuple[bytes, _OwnedEntry]] = {}
+    allowed = _BROWSER_ACCESS_SECRET_NAMES | {
+        _BROWSER_UPGRADE_JOURNAL,
+        _BROWSER_UPGRADE_JOURNAL_TEMPORARY,
+    }
+    try:
+        if metadata.st_nlink != 2:
+            raise RuntimeSecretError(message)
+        names = set(os.listdir(transaction))
+        if _BROWSER_UPGRADE_JOURNAL not in names:
+            if not names <= (
+                _BROWSER_ACCESS_SECRET_NAMES
+                | {_BROWSER_UPGRADE_JOURNAL_TEMPORARY}
+            ):
+                raise RuntimeSecretError(message)
+        elif (
+            _BROWSER_UPGRADE_JOURNAL_TEMPORARY in names
+            or not names <= allowed - {_BROWSER_UPGRADE_JOURNAL_TEMPORARY}
+        ):
+            raise RuntimeSecretError(message)
+        for child in sorted(names):
+            entries[child] = _read_rotation_file(
+                transaction,
+                child,
+                error_message=message,
+                allowed_link_counts=frozenset({1, 2}),
+            )
+        return transaction, _owned_entry(name, metadata, transaction), entries
+    except BaseException:
+        for _content, entry in entries.values():
+            _close_owned_entry(entry)
+        os.close(transaction)
+        raise
+
+
+def _browser_destination_is_owned(
+    directory: int, name: str, entry: _OwnedEntry
+) -> bool:
+    try:
+        current = os.stat(name, dir_fd=directory, follow_symlinks=False)
+    except FileNotFoundError:
+        return False
+    opened = os.fstat(entry.descriptor)
+    return (
+        _same_inode(current, opened)
+        and stat.S_ISREG(current.st_mode)
+        and stat.S_ISREG(opened.st_mode)
+        and current.st_uid == os.geteuid()
+        and opened.st_uid == os.geteuid()
+        and current.st_nlink in {1, 2}
+        and opened.st_nlink in {1, 2}
+        and stat.S_IMODE(current.st_mode) == _PRIVATE_MODE
+        and stat.S_IMODE(opened.st_mode) == _PRIVATE_MODE
+    )
+
+
+def _rollback_browser_upgrade(
+    directory: int,
+    transaction: int,
+    transaction_entry: _OwnedEntry,
+    entries: dict[str, tuple[bytes, _OwnedEntry]],
+) -> None:
+    changed = False
+    for name in sorted(_BROWSER_ACCESS_SECRET_NAMES):
+        staged = entries.get(name)
+        if staged is not None and _browser_destination_is_owned(
+            directory, name, staged[1]
+        ):
+            os.unlink(name, dir_fd=directory)
+            changed = True
+    if changed:
+        os.fsync(directory)
+    _remove_rotation_transaction(
+        directory, transaction, transaction_entry, entries
+    )
+
+
+def _resume_browser_upgrade(directory: int, name: str) -> bool:
+    message = "development browser access upgrade state is invalid"
+    transaction = -1
+    transaction_entry: _OwnedEntry | None = None
+    entries: dict[str, tuple[bytes, _OwnedEntry]] = {}
+    try:
+        transaction, transaction_entry, entries = (
+            _open_browser_upgrade_transaction(directory, name)
+        )
+        live_names = set(os.listdir(directory)) & _BROWSER_ACCESS_SECRET_NAMES
+        journal_content = entries.get(_BROWSER_UPGRADE_JOURNAL, (None, None))[0]
+        if journal_content is None:
+            staged_names = set(entries) & _BROWSER_ACCESS_SECRET_NAMES
+            if not live_names:
+                completed = False
+            elif (
+                live_names == _BROWSER_ACCESS_SECRET_NAMES
+                and not staged_names
+                and _BROWSER_UPGRADE_JOURNAL_TEMPORARY not in entries
+            ):
+                completed = True
+            else:
+                raise RuntimeSecretError(message)
+            _remove_rotation_transaction(
+                directory, transaction, transaction_entry, entries
+            )
+            return completed
+
+        journal = _parse_browser_upgrade_journal(journal_content)
+        staged_names = set(entries) & _BROWSER_ACCESS_SECRET_NAMES
+        if any(
+            _sha256(entries[child][0]) != journal[child]
+            for child in staged_names
+        ):
+            raise RuntimeSecretError(message)
+        if not live_names and staged_names != _BROWSER_ACCESS_SECRET_NAMES:
+            _remove_rotation_transaction(
+                directory, transaction, transaction_entry, entries
+            )
+            return False
+        if live_names | staged_names != _BROWSER_ACCESS_SECRET_NAMES:
+            raise RuntimeSecretError(message)
+
+        for child in sorted(_BROWSER_ACCESS_SECRET_NAMES):
+            staged = entries.get(child)
+            if staged is None:
+                if _sha256(_read_file(directory, child)) != journal[child]:
+                    raise RuntimeSecretError(message)
+                continue
+            try:
+                os.stat(child, dir_fd=directory, follow_symlinks=False)
+            except FileNotFoundError:
+                os.link(
+                    child,
+                    child,
+                    src_dir_fd=transaction,
+                    dst_dir_fd=directory,
+                    follow_symlinks=False,
+                )
+            else:
+                if not _browser_destination_is_owned(directory, child, staged[1]):
+                    raise RuntimeSecretError(message)
+            os.fsync(directory)
+            if not _unlink_owned_entry(
+                transaction,
+                staged[1],
+                allowed_link_counts=frozenset({1, 2}),
+            ):
+                raise RuntimeSecretError(message)
+            os.fsync(transaction)
+
+        installed = {
+            child: _read_file(directory, child)
+            for child in _BROWSER_ACCESS_SECRET_NAMES
+        }
+        if any(_sha256(installed[child]) != journal[child] for child in installed):
+            raise RuntimeSecretError(message)
+        _validate_admin_credential(
+            installed["admin-password"],
+            installed["admin-password-verifier"],
+        )
+        _remove_rotation_transaction(
+            directory, transaction, transaction_entry, entries
+        )
+        return True
+    finally:
+        for _content, entry in entries.values():
+            _close_owned_entry(entry)
+        if transaction_entry is not None:
+            _close_owned_entry(transaction_entry)
+            transaction = -1
+        elif transaction >= 0:
+            os.close(transaction)
+
+
+def _recover_browser_upgrade(directory: int) -> bool:
+    extras = set(os.listdir(directory)) - RUNTIME_SECRET_NAMES
+    transactions = [
+        name for name in extras if _BROWSER_UPGRADE_NAME.fullmatch(name) is not None
+    ]
+    if not transactions:
+        return False
+    if len(extras) != 1 or len(transactions) != 1:
+        raise RuntimeSecretError(
+            "development browser access upgrade state is invalid"
+        )
+    try:
+        return _resume_browser_upgrade(directory, transactions[0])
+    except RuntimeSecretError:
+        raise
+    except OSError as error:
+        raise RuntimeSecretError(
+            "development browser access upgrade recovery was interrupted"
+        ) from error
+
+
 def _upgrade_browser_access(
     directory: int,
     prior_bundle: dict[str, bytes],
@@ -1148,27 +1395,62 @@ def _upgrade_browser_access(
         agent_hostname=agent_hostname,
         registry_hostname=registry_hostname,
     )
-    created: list[_OwnedEntry] = []
+    transaction = -1
+    transaction_entry: _OwnedEntry | None = None
+    entries: dict[str, tuple[bytes, _OwnedEntry]] = {}
+    transaction_name = _BROWSER_UPGRADE_PREFIX + secrets.token_hex(16)
     try:
-        for name, content in sorted(additions.items()):
-            created.append(_create_owned_file(directory, name, content))
-        os.fsync(directory)
-        installed = {name: _read_file(directory, name) for name in RUNTIME_SECRET_NAMES}
-        _validate_bundle(
-            installed,
-            management_cidrs=management_cidrs,
-            enroll_hostname=enroll_hostname,
-            agent_hostname=agent_hostname,
-            registry_hostname=registry_hostname,
+        transaction, transaction_entry = _create_owned_directory(
+            directory,
+            transaction_name,
+            error_message="development browser access upgrade cannot be created",
         )
-    except BaseException:
-        for entry in created:
-            _unlink_owned_entry(directory, entry)
         os.fsync(directory)
+        journal_content = _browser_upgrade_journal(additions)
+        journal_entry = _create_owned_file(
+            transaction,
+            _BROWSER_UPGRADE_JOURNAL_TEMPORARY,
+            journal_content,
+        )
+        entries[_BROWSER_UPGRADE_JOURNAL_TEMPORARY] = (
+            journal_content,
+            journal_entry,
+        )
+        os.replace(
+            _BROWSER_UPGRADE_JOURNAL_TEMPORARY,
+            _BROWSER_UPGRADE_JOURNAL,
+            src_dir_fd=transaction,
+            dst_dir_fd=transaction,
+        )
+        entries.pop(_BROWSER_UPGRADE_JOURNAL_TEMPORARY)
+        journal_entry.name = _BROWSER_UPGRADE_JOURNAL
+        entries[_BROWSER_UPGRADE_JOURNAL] = (journal_content, journal_entry)
+        os.fsync(transaction)
+        for child, content in sorted(additions.items()):
+            entries[child] = (content, _create_owned_file(transaction, child, content))
+        os.fsync(transaction)
+        _resume_browser_upgrade(directory, transaction_name)
+    except BaseException as error:
+        if transaction >= 0 and transaction_entry is not None:
+            try:
+                _rollback_browser_upgrade(
+                    directory, transaction, transaction_entry, entries
+                )
+            except (OSError, RuntimeSecretError):
+                pass
+        if isinstance(error, OSError):
+            raise RuntimeSecretError(
+                "development browser access upgrade cannot be installed"
+            ) from error
         raise
     finally:
-        for entry in created:
+        for _content, entry in entries.values():
             _close_owned_entry(entry)
+        if transaction_entry is not None:
+            _close_owned_entry(transaction_entry)
+            transaction = -1
+        elif transaction >= 0:
+            os.close(transaction)
 
 
 def _rotation_journal(
@@ -2390,12 +2672,35 @@ def prepare_runtime_secrets(
             if os.listdir(existing_descriptor):
                 _acquire_mutation_lock(existing_descriptor)
             _remove_oauth_receipt_temporary(parent, oauth_receipt_name)
+            _recover_browser_upgrade(existing_descriptor)
             oauth_recovery = _recover_rotations(
                 existing_descriptor, parent, oauth_receipt_name
             )
             names = set(os.listdir(existing_descriptor))
             if names:
                 if upgrade_browser_access:
+                    if names == RUNTIME_SECRET_NAMES:
+                        completed = {
+                            name: _read_file(existing_descriptor, name)
+                            for name in names
+                        }
+                        _validate_bundle(
+                            completed,
+                            management_cidrs=cidrs,
+                            enroll_hostname=enroll,
+                            agent_hostname=agent,
+                            registry_hostname=registry,
+                        )
+                        if (
+                            completed[_OAUTH_CLIENT_ID]
+                            == tailscale_oauth_client_id
+                            and completed[_OAUTH_CLIENT_SECRET]
+                            == tailscale_oauth_client_secret
+                        ):
+                            return secrets_dir
+                        raise RuntimeSecretError(
+                            "browser access upgrade requires the exact prior generation"
+                        )
                     if names != _PRE_BROWSER_ACCESS_SECRET_NAMES:
                         for name in sorted(names):
                             if name not in RUNTIME_SECRET_NAMES:

@@ -26,6 +26,16 @@ parse_hostname_authority() {
   parsed_control_hostname=$2
 }
 
+health_mode=0
+if [ "${1:-}" = "health" ]; then
+  [ "$#" -eq 1 ] || exit 1
+  : "${VONK_CONTROL_HOSTNAME_FILE:?set VONK_CONTROL_HOSTNAME_FILE}"
+  hostname_authority=$(read_hostname_authority) || exit 1
+  parse_hostname_authority "$hostname_authority" || exit 1
+  export VONK_CONTROL_HOSTNAME_GENERATION=$parsed_hostname_generation
+  health_mode=1
+fi
+
 browser_hostname_pending=0
 if [ -n "${VONK_CONTROL_HOSTNAME_FILE:-}" ]; then
   if [ -n "${VONK_CONTROL_HOSTNAME:-}" ]; then
@@ -140,6 +150,14 @@ if [ "$browser_hostname_pending" -eq 0 ]; then
     exit 64
   fi
   export VONK_CONTROL_HOSTNAME=$control_hostname
+fi
+
+if [ "$health_mode" -eq 1 ]; then
+  wget -q --spider -T 3 http://127.0.0.1:2019/healthz \
+    && wget -q --spider -T 3 \
+      --header="Host: ${control_hostname}" \
+      http://127.0.0.1:8080/healthz
+  exit $?
 fi
 
 for required_file in \

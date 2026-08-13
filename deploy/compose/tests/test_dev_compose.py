@@ -159,7 +159,7 @@ def test_dev_compose_initializes_identity_before_api_and_worker(tmp_path: Path) 
     )
 
 
-def test_image_template_bootstraps_auth_after_migration_before_api() -> None:
+def test_image_template_reconciles_auth_after_migration_before_api() -> None:
     rendered = _rendered_image_template()
     services = rendered["services"]
     auth = services["dev-auth-init"]
@@ -171,7 +171,7 @@ def test_image_template_bootstraps_auth_after_migration_before_api() -> None:
     assert auth["cap_drop"] == ["ALL"]
     assert auth["security_opt"] == ["no-new-privileges:true"]
     assert auth["command"] == ["python", "-m", "vonk_control.dev_auth_init"]
-    assert auth["environment"] == {"VONK_DEV_AUTH_MODE": "bootstrap"}
+    assert auth["environment"] == {"VONK_DEV_AUTH_MODE": "reconcile"}
     assert set(auth["networks"]) == {"data"}
     assert auth.get("ports", []) == []
     assert auth.get("secrets", []) == []
@@ -181,6 +181,11 @@ def test_image_template_bootstraps_auth_after_migration_before_api() -> None:
     assert set(volumes) == {"/auth-secrets"}
     assert volumes["/auth-secrets"]["source"].endswith("dev-auth-secrets")
     assert volumes["/auth-secrets"]["read_only"] is True
+    postgres_volumes = _volumes_by_target(services["postgres"])
+    assert set(postgres_volumes) == {"/var/lib/postgresql"}
+    assert postgres_volumes["/var/lib/postgresql"]["source"].endswith(
+        "dev-postgres-data"
+    )
     assert auth["depends_on"] == {
         "dev-init": {
             "condition": "service_completed_successfully",
@@ -245,12 +250,9 @@ def test_image_template_hardens_caddy_as_the_only_lan_listener() -> None:
     assert caddy["healthcheck"] == {
         "test": [
             "CMD",
-            "wget",
-            "-q",
-            "--spider",
-            "-T",
-            "3",
-            "http://127.0.0.1:2019/healthz",
+            "/bin/sh",
+            "/run/vonk-runtime/caddy-entrypoint.sh",
+            "health",
         ],
         "interval": "10s",
         "timeout": "5s",

@@ -678,6 +678,67 @@ def test_caddy_entrypoint_requires_fresh_generation_and_reacts_to_real_file_even
         process.wait(timeout=10)
 
 
+def test_caddy_health_requires_browser_authority_and_probes_the_browser_route(
+    tmp_path: Path,
+) -> None:
+    entrypoint = Path(
+        os.fspath(
+            importlib.resources.files(RESOURCE_PACKAGE).joinpath(
+                "caddy-entrypoint.sh"
+            )
+        )
+    )
+    authority = tmp_path / "control-hostname.ready"
+    authority.write_text(
+        "11111111-1111-4111-8111-111111111111 "
+        "vonk-forge.test-tailnet.ts.net\n",
+        encoding="ascii",
+    )
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    calls = tmp_path / "wget.calls"
+    wget = fake_bin / "wget"
+    wget.write_text(
+        "#!/bin/sh\n"
+        "printf '%s\\n' \"$*\" >>\"$WGET_CALLS\"\n",
+        encoding="ascii",
+    )
+    wget.chmod(0o755)
+    environment = os.environ | {
+        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        "VONK_AGENT_ENROLL_HOSTNAME": "enroll.test",
+        "VONK_AGENT_HOSTNAME": "agents.test",
+        "VONK_BACKEND_PORT": "8443",
+        "VONK_CONTROL_HOSTNAME_FILE": str(authority),
+        "WGET_CALLS": str(calls),
+    }
+
+    healthy = subprocess.run(
+        ["/bin/sh", entrypoint, "health"],
+        env=environment,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert healthy.returncode == 0, healthy.stderr
+    assert calls.read_text(encoding="ascii").splitlines() == [
+        "-q --spider -T 3 http://127.0.0.1:2019/healthz",
+        "-q --spider -T 3 --header=Host: vonk-forge.test-tailnet.ts.net "
+        + "http://127.0.0.1:8080/healthz",
+    ]
+
+    authority.unlink()
+    pending = subprocess.run(
+        ["/bin/sh", entrypoint, "health"],
+        env=environment,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    assert pending.returncode != 0
+
+
 def test_litellm_supervisor_materializes_file_secrets_without_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

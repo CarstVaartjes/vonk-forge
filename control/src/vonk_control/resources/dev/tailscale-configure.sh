@@ -8,6 +8,23 @@ generation_file=${TS_GENERATION_FILE:-/tmp/vonk-tailnet-generation}
 reconcile_interval=60
 remaining=120
 expected_service_map='{"services":{"svc:vonk-forge":{"endpoints":{"tcp:443":"http://caddy:8080"}}},"version":"0.0.1"}'
+snapshot_directory=$(mktemp -d /tmp/vonk-tailnet-snapshots.XXXXXX)
+serve_status_snapshot=${snapshot_directory}/serve-status.json
+serve_config_snapshot=${snapshot_directory}/serve-config.json
+serve_status_compact=${snapshot_directory}/serve-status.compact
+serve_config_compact=${snapshot_directory}/serve-config.compact
+tailscale_status_snapshot=${snapshot_directory}/status.json
+
+cleanup_snapshots() {
+    rm -f \
+        "${serve_status_snapshot}" \
+        "${serve_config_snapshot}" \
+        "${serve_status_compact}" \
+        "${serve_config_compact}" \
+        "${tailscale_status_snapshot}"
+    rmdir "${snapshot_directory}" 2>/dev/null || true
+}
+trap cleanup_snapshots EXIT
 
 if [ "${TS_CONFIGURE_TEST_MODE:-0}" = "1" ]; then
     reconcile_interval=${TS_RECONCILE_INTERVAL:-1}
@@ -43,16 +60,16 @@ valid_generation() {
 }
 
 serve_is_exact() {
-    ts serve status --json >/tmp/tailscale-serve-status.json
-    ts serve get-config --all >/tmp/tailscale-serve-config.json
-    tr -d '[:space:]' </tmp/tailscale-serve-status.json >/tmp/tailscale-serve-status.compact
-    tr -d '[:space:]' </tmp/tailscale-serve-config.json >/tmp/tailscale-serve-config.compact
+    ts serve status --json >"${serve_status_snapshot}"
+    ts serve get-config --all >"${serve_config_snapshot}"
+    tr -d '[:space:]' <"${serve_status_snapshot}" >"${serve_status_compact}"
+    tr -d '[:space:]' <"${serve_config_snapshot}" >"${serve_config_compact}"
 
     grep -Fq '"svc:vonk-forge":{"TCP":{"443":{"HTTPS":true}}' \
-        /tmp/tailscale-serve-status.compact \
-        && ! grep -Fq '"443":{"HTTP":true}' /tmp/tailscale-serve-status.compact \
-        && ! grep -Fq '"TCPForward"' /tmp/tailscale-serve-status.compact \
-        && [ "$(cat /tmp/tailscale-serve-config.compact)" = "${expected_service_map}" ]
+        "${serve_status_compact}" \
+        && ! grep -Fq '"443":{"HTTP":true}' "${serve_status_compact}" \
+        && ! grep -Fq '"TCPForward"' "${serve_status_compact}" \
+        && [ "$(cat "${serve_config_compact}")" = "${expected_service_map}" ]
 }
 
 configure_service() {
@@ -62,12 +79,12 @@ configure_service() {
 }
 
 verify_capability_and_suffix() {
-    ts status --json >/tmp/tailscale-status.json
-    if ! grep -Fq 'service-host' /tmp/tailscale-status.json; then
+    ts status --json >"${tailscale_status_snapshot}"
+    if ! grep -Fq 'service-host' "${tailscale_status_snapshot}"; then
         printf 'ERROR: the gateway lacks the required Service hosting capability.\n' >&2
         return 1
     fi
-    suffix=$(sed -n 's/.*"MagicDNSSuffix"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' /tmp/tailscale-status.json | head -n 1 | tr '[:upper:]' '[:lower:]')
+    suffix=$(sed -n 's/.*"MagicDNSSuffix"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "${tailscale_status_snapshot}" | head -n 1 | tr '[:upper:]' '[:lower:]')
     case "${suffix}" in
         "" | .* | *..* | *. | *[!a-z0-9.-]* | *-.* | *.-*)
             printf 'ERROR: Tailscale returned an invalid browser hostname suffix.\n' >&2
@@ -174,7 +191,7 @@ atomic_output "${generation_file}" "${generation}"
 trap 'fail_closed_outputs; exit 1' HUP INT TERM
 
 while [ "${remaining}" -gt 0 ]; do
-    if [ -S "${socket}" ] && ts status --json >/tmp/tailscale-status.json 2>/dev/null; then
+    if [ -S "${socket}" ] && ts status --json >"${tailscale_status_snapshot}" 2>/dev/null; then
         break
     fi
     sleep 2

@@ -10,12 +10,14 @@ from types import ModuleType
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_control.browser_auth import BrowserAuthenticationError, BrowserAuthService
 from vonk_control.models import Base, LoginSession, User
 from vonk_control.passwords import hash_password, verify_password
 
 OLD_PASSWORD = "synthetic-old-administrator-password"
 NEW_PASSWORD = "synthetic-new-administrator-password"
 NOW = datetime(2026, 8, 13, 12, 0, tzinfo=UTC)
+OLD_SESSION_TOKEN = "s" * 43
 
 
 def _module() -> ModuleType:
@@ -53,22 +55,24 @@ def _run(
     return int(module.main())
 
 
-def test_dev_auth_init_bootstrap_creates_admin_and_is_idempotent(
+@pytest.mark.parametrize("mode", ["bootstrap", "reconcile"])
+def test_dev_auth_init_creates_admin_and_is_idempotent(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    mode: str,
 ) -> None:
     module = _module()
     database_url, sessions = _database(tmp_path)
     verifier = hash_password(NEW_PASSWORD)
     root = _auth_root(tmp_path, database_url, verifier)
 
-    assert _run(module, monkeypatch, root=root, mode="bootstrap") == 0
+    assert _run(module, monkeypatch, root=root, mode=mode) == 0
     first = capsys.readouterr()
     assert first.out == "created\n"
     assert first.err == ""
 
-    assert _run(module, monkeypatch, root=root, mode="bootstrap") == 0
+    assert _run(module, monkeypatch, root=root, mode=mode) == 0
     second = capsys.readouterr()
     assert second.out == "unchanged\n"
     assert second.err == ""
@@ -111,10 +115,12 @@ def test_dev_auth_init_rejects_an_administrator_role_conflict_without_disclosure
     assert verifier not in output.err
 
 
-def test_dev_auth_init_rotate_replaces_verifier_and_revokes_sessions(
+@pytest.mark.parametrize("mode", ["rotate", "reconcile"])
+def test_dev_auth_init_replaces_changed_verifier_and_revokes_sessions(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    mode: str,
 ) -> None:
     module = _module()
     database_url, sessions = _database(tmp_path)
@@ -133,12 +139,20 @@ def test_dev_auth_init_rotate_replaces_verifier_and_revokes_sessions(
         db.add(
             LoginSession(
                 user_id=user.id,
-                digest=sha256(b"synthetic-session-token").hexdigest(),
+                digest=sha256(OLD_SESSION_TOKEN.encode("ascii")).hexdigest(),
                 expires_at=NOW + timedelta(hours=1),
             )
         )
+        db.add(
+            User(
+                subject="synthetic-operator",
+                role="operator",
+                password_verifier=None,
+                disabled_at=None,
+            )
+        )
 
-    assert _run(module, monkeypatch, root=root, mode="rotate") == 0
+    assert _run(module, monkeypatch, root=root, mode=mode) == 0
 
     output = capsys.readouterr()
     assert output.out == "rotated\n"
@@ -146,22 +160,40 @@ def test_dev_auth_init_rotate_replaces_verifier_and_revokes_sessions(
     with sessions() as db:
         user = db.scalar(select(User).where(User.subject == "admin"))
         login = db.scalar(select(LoginSession))
+        operator = db.scalar(
+            select(User).where(User.subject == "synthetic-operator")
+        )
     assert user is not None
     assert login is not None
+    assert operator is not None
+    assert operator.role == "operator"
     assert user.password_verifier == new_verifier
     assert login.revoked_at is not None
     assert verify_password(new_verifier, NEW_PASSWORD).valid
     assert not verify_password(new_verifier, OLD_PASSWORD).valid
+    service = BrowserAuthService(
+        sessions,
+        token_signing_key=b"synthetic-browser-auth-signing-key",
+        clock=lambda: NOW,
+        token_source=lambda: "n" * 43,
+    )
+    with pytest.raises(BrowserAuthenticationError):
+        service.resolve(OLD_SESSION_TOKEN)
+    with pytest.raises(BrowserAuthenticationError):
+        service.login("admin", OLD_PASSWORD)
+    assert service.login("admin", NEW_PASSWORD).identity.actor.subject == "admin"
     assert NEW_PASSWORD not in output.out + output.err
     assert new_verifier not in output.out + output.err
 
 
+@pytest.mark.parametrize("mode", ["rotate", "reconcile"])
 @pytest.mark.parametrize("conflict", ["second-administrator", "admin-wrong-role"])
-def test_dev_auth_init_rotate_rejects_non_unique_authority_without_mutation(
+def test_dev_auth_init_rejects_non_unique_authority_without_mutation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     conflict: str,
+    mode: str,
 ) -> None:
     module = _module()
     database_url, sessions = _database(tmp_path)
@@ -194,7 +226,7 @@ def test_dev_auth_init_rotate_rejects_non_unique_authority_without_mutation(
                 )
             )
 
-    assert _run(module, monkeypatch, root=root, mode="rotate") == 1
+    assert _run(module, monkeypatch, root=root, mode=mode) == 1
 
     output = capsys.readouterr()
     assert output.out == ""
