@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 from datetime import UTC, datetime
 
@@ -77,6 +78,64 @@ def _login(client: TestClient, password: str = ADMIN_PASSWORD):
         headers={"origin": ORIGIN},
         json={"subject": "admin", "password": password},
     )
+
+
+def _chunked_asgi_login(
+    app: object,
+    *,
+    extra_headers: tuple[tuple[bytes, bytes], ...],
+) -> tuple[int, int]:
+    async def request() -> tuple[int, int]:
+        chunks = [
+            b'{"subject":"admin","password":"' + b"x" * (600 * 1024),
+            b"x" * (500 * 1024),
+            b'"}',
+        ]
+        reads = 0
+        sent: list[dict[str, object]] = []
+
+        async def receive() -> dict[str, object]:
+            nonlocal reads
+            if reads >= len(chunks):
+                return {"type": "http.disconnect"}
+            body = chunks[reads]
+            reads += 1
+            return {
+                "type": "http.request",
+                "body": body,
+                "more_body": reads < len(chunks),
+            }
+
+        async def send(message: dict[str, object]) -> None:
+            sent.append(message)
+
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0", "spec_version": "2.3"},
+            "http_version": "1.1",
+            "method": "POST",
+            "scheme": "https",
+            "path": "/api/v1/auth/login",
+            "raw_path": b"/api/v1/auth/login",
+            "query_string": b"",
+            "headers": (
+                (b"content-type", b"application/json"),
+                (b"host", b"forge.example.test"),
+                (b"origin", b"https://forge.example.test"),
+                *extra_headers,
+            ),
+            "client": ("testclient", 1234),
+            "server": ("forge.example.test", 443),
+            "root_path": "",
+            "state": {},
+        }
+        await asyncio.wait_for(app(scope, receive, send), timeout=1)  # type: ignore[operator]
+        start = next(
+            message for message in sent if message["type"] == "http.response.start"
+        )
+        return int(start["status"]), reads
+
+    return asyncio.run(request())
 
 
 def test_login_returns_only_a_session_summary_and_exact_secure_cookies() -> None:
@@ -169,6 +228,26 @@ def test_login_rejects_duplicate_or_malformed_json_without_echoing_it(
     assert response.status_code == 422
     assert response.json() == {"detail": "login request is invalid"}
     assert "secret" not in response.text
+    assert audits.list() == []
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        ((b"transfer-encoding", b"chunked"),),
+        ((b"content-length", b"64"),),
+    ],
+)
+def test_login_stops_reading_asgi_chunks_at_the_actual_request_limit(
+    headers: tuple[tuple[bytes, bytes], ...],
+) -> None:
+    """Missing or false length metadata must not let login buffer an oversized body."""
+    client, audits, _verifier = _client()
+
+    status, reads = _chunked_asgi_login(client.app, extra_headers=headers)
+
+    assert status == 413
+    assert reads == 2
     assert audits.list() == []
 
 

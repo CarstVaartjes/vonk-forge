@@ -113,6 +113,10 @@ class _DuplicateJsonKey(ValueError):
     pass
 
 
+class _RequestBodyTooLarge(ValueError):
+    pass
+
+
 def _reject_duplicate_json_keys(
     pairs: list[tuple[str, object]],
 ) -> dict[str, object]:
@@ -122,6 +126,17 @@ def _reject_duplicate_json_keys(
             raise _DuplicateJsonKey
         document[key] = value
     return document
+
+
+async def _bounded_request_body(request: Request, maximum: int) -> bytes:
+    body = bytearray()
+    async for chunk in request.stream():
+        if len(body) + len(chunk) > maximum:
+            raise _RequestBodyTooLarge
+        body.extend(chunk)
+    bounded = bytes(body)
+    request._body = bounded
+    return bounded
 
 
 class GenerationReadinessError(RuntimeError):
@@ -1057,16 +1072,21 @@ def create_app(
         if length and int(length) > maximum and request.url.path != "/agent/v1/enroll":
             response = Response(status_code=413)
         else:
+            body_too_large = False
             invalid_login_document = False
             if request.method == "POST" and request.url.path == _LOGIN_PATH:
                 try:
                     json.loads(
-                        await request.body(),
+                        await _bounded_request_body(request, maximum),
                         object_pairs_hook=_reject_duplicate_json_keys,
                     )
+                except _RequestBodyTooLarge:
+                    body_too_large = True
                 except (UnicodeDecodeError, json.JSONDecodeError, _DuplicateJsonKey):
                     invalid_login_document = True
-            if invalid_login_document:
+            if body_too_large:
+                response = Response(status_code=413)
+            elif invalid_login_document:
                 response = Response(
                     content=canonical_message({"detail": "login request is invalid"}),
                     status_code=422,

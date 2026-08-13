@@ -1918,6 +1918,14 @@ export interface components {
              */
             subject: "admin";
         };
+        /** LoginRequestInvalid */
+        LoginRequestInvalid: {
+            /**
+             * Detail
+             * @constant
+             */
+            detail: "login request is invalid";
+        };
         /** MappingNodePlanResponse */
         MappingNodePlanResponse: {
             /** Endpoint Owner */
@@ -3598,13 +3606,13 @@ export interface operations {
                     "application/json": components["schemas"]["AuthSession"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Invalid login request */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["LoginRequestInvalid"];
                 };
             };
         };

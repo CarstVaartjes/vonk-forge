@@ -1606,6 +1606,21 @@
         "title": "LoginRequest",
         "type": "object"
       },
+      "LoginRequestInvalid": {
+        "additionalProperties": false,
+        "properties": {
+          "detail": {
+            "const": "login request is invalid",
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "LoginRequestInvalid",
+        "type": "object"
+      },
       "MappingNodePlanResponse": {
         "additionalProperties": false,
         "properties": {
@@ -5430,6 +5445,11 @@
       "BearerAuth": {
         "scheme": "bearer",
         "type": "http"
+      },
+      "BrowserSession": {
+        "in": "cookie",
+        "name": "vonk_session",
+        "type": "apiKey"
       }
     }
   },
@@ -6064,18 +6084,14 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/LoginRequestInvalid"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Invalid login request"
           }
         },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
+        "security": [],
         "summary": "Login"
       }
     },
@@ -6089,7 +6105,7 @@
         },
         "security": [
           {
-            "BearerAuth": []
+            "BrowserSession": []
           }
         ],
         "summary": "Logout"
@@ -6112,7 +6128,7 @@
         },
         "security": [
           {
-            "BearerAuth": []
+            "BrowserSession": []
           }
         ],
         "summary": "Session"

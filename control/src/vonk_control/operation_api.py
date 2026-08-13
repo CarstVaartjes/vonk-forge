@@ -832,6 +832,14 @@ def admin_openapi_schema(app: Any) -> dict[str, object]:
 
     source = deepcopy(app.openapi())
     paths: dict[str, object] = {}
+    browser_auth_paths = {
+        "/api/v1/auth/login",
+        "/api/v1/auth/logout",
+        "/api/v1/auth/session",
+    }
+    includes_browser_auth = any(
+        path in source.get("paths", {}) for path in browser_auth_paths
+    )
     for path, path_item in source.get("paths", {}).items():
         if path in {"/api/v1/healthz", "/api/v1/readyz"}:
             continue
@@ -847,13 +855,24 @@ def admin_openapi_schema(app: Any) -> dict[str, object]:
                 raise RuntimeError(
                     f"admin operation ID is not explicit for {method.upper()} {path}"
                 ) from error
-            operation["security"] = [{"BearerAuth": []}]
+            if path == "/api/v1/auth/login":
+                operation["security"] = []
+            elif path in browser_auth_paths:
+                operation["security"] = [{"BrowserSession": []}]
+            else:
+                operation["security"] = [{"BearerAuth": []}]
         paths[path] = selected
     source["paths"] = paths
     components = source.setdefault("components", {})
     components["securitySchemes"] = {
         "BearerAuth": {"scheme": "bearer", "type": "http"}
     }
+    if includes_browser_auth:
+        components["securitySchemes"]["BrowserSession"] = {
+            "in": "cookie",
+            "name": "vonk_session",
+            "type": "apiKey",
+        }
 
     referenced: set[str] = set()
 

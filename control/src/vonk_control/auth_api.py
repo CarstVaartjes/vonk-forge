@@ -49,6 +49,12 @@ class AuthSession(BaseModel):
     expires_at: datetime
 
 
+class LoginRequestInvalid(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    detail: Literal["login request is invalid"]
+
+
 def install_auth_routes(
     app: FastAPI,
     service: BrowserAuthService,
@@ -94,6 +100,12 @@ def install_auth_routes(
     @app.post(
         "/api/v1/auth/login",
         response_model=AuthSession,
+        responses={
+            422: {
+                "description": "Invalid login request",
+                "model": LoginRequestInvalid,
+            }
+        },
         operation_id="loginBrowser",
     )
     def login(body: LoginRequest, request: Request, response: Response) -> AuthSession:

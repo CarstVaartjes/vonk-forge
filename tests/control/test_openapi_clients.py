@@ -140,9 +140,19 @@ def test_generator_is_idempotent_and_admin_schema_is_secret_free() -> None:
     assert len(operation_ids) == len(set(operation_ids))
     assert all("_api_v1_" not in operation_id for operation_id in operation_ids)
     assert schema["components"]["securitySchemes"] == {
-        "BearerAuth": {"scheme": "bearer", "type": "http"}
+        "BearerAuth": {"scheme": "bearer", "type": "http"},
+        "BrowserSession": {
+            "in": "cookie",
+            "name": "vonk_session",
+            "type": "apiKey",
+        },
     }
-    assert all(operation["security"] == [{"BearerAuth": []}] for operation in operation_list)
+    assert all(
+        operation["security"] == [{"BearerAuth": []}]
+        for operation_id, operation in _operations(schema).items()
+        if operation_id
+        not in {"getBrowserSession", "loginBrowser", "logoutBrowser"}
+    )
 
     assert {
         "/api/v1/packages/families",
@@ -188,6 +198,35 @@ def test_generator_is_idempotent_and_admin_schema_is_secret_free() -> None:
         "token_digest",
     ):
         assert forbidden not in serialized
+
+
+def test_browser_auth_contract_declares_cookie_security_and_fixed_validation() -> None:
+    schema = json.loads(OPENAPI.read_text())
+    operations = _operations(schema)
+
+    assert operations["loginBrowser"]["security"] == []
+    assert operations["getBrowserSession"]["security"] == [
+        {"BrowserSession": []}
+    ]
+    assert operations["logoutBrowser"]["security"] == [{"BrowserSession": []}]
+    assert operations["loginBrowser"]["responses"]["422"]["content"][
+        "application/json"
+    ]["schema"] == {
+        "$ref": "#/components/schemas/LoginRequestInvalid"
+    }
+    assert schema["components"]["schemas"]["LoginRequestInvalid"] == {
+        "additionalProperties": False,
+        "properties": {
+            "detail": {
+                "const": "login request is invalid",
+                "title": "Detail",
+                "type": "string",
+            }
+        },
+        "required": ["detail"],
+        "title": "LoginRequestInvalid",
+        "type": "object",
+    }
 
 
 def test_generated_python_models_compile() -> None:
