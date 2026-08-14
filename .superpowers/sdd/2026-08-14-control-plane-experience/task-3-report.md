@@ -196,3 +196,42 @@ Integrated/final verification:
 2. Same-node overlapping telemetry requests are protected against corruption by transactions and uniqueness, but the repository does not explicitly serialize first-writer/latest-pointer work with a PostgreSQL node-row lock. A rare overlap may surface as a retryable database conflict rather than a clean idempotent response; Task 4 should avoid concurrent sends per node, and a future PostgreSQL race test can justify adding serialization.
 3. Several older migration tests still assert historical revisions as the sole Alembic head and therefore fail once any later migration exists. The requested admission linear-head assertion is updated; changing unrelated historical tests was intentionally out of scope.
 4. Pytest repeatedly warns that macOS temporary worker directories are not empty during cleanup. This predates Task 3 and does not affect focused results.
+
+## Fix round 1 — serialized ingestion and schema alignment
+
+Implementation commit: `b63092d` (`fix: serialize node telemetry ingestion`), based on the Task 3 implementation at `490df62` and its report-only follow-up `7189a40`. This commit is local only; it was not pushed and no pull request was opened.
+
+### Files
+
+- `control/src/vonk_control/telemetry.py` — locks the authoritative `AgentNode` row with PostgreSQL `FOR UPDATE` in the ingestion transaction before reading the latest pointer, replay identity, or per-boot head. Exact concurrent replays therefore observe the committed row and remain idempotent; no generic `IntegrityError` handler was added.
+- `control/src/vonk_control/models.py` — adds the `(node_id, id)` sample unique pair, a composite latest-pointer foreign key from `(node_id, sample_id)`, and database maxima matching the wire contract.
+- `control/migrations/versions/0023_node_telemetry.py` — applies the same composite key and bounds while revision `0023_node_telemetry` is still new; `down_revision` remains exactly `0022_observation_latest_index`.
+- `control/src/vonk_control/agent_api.py` — retains intentional Pydantic/domain `ValueError` behavior with a narrowly scoped Ruff exception.
+- `control/tests/test_telemetry.py` — adds portable lock-order/SQL compilation, cross-node pointer, and database-bound regression coverage.
+- `control/tests/test_telemetry_postgres.py` — adds deterministic concurrent identical-replay and delayed older-commit tests against disposable PostgreSQL.
+- `control/tests/test_admission_migration.py` — verifies the composite FK/unique pair and exact persisted maxima.
+
+### Task 4 wire contract
+
+There are no wire field additions, removals, or renames in this fix. Task 4 must continue to emit the exact envelope, sample, and `details` field names and ranges in the tables above. In particular, all six capacity fields remain inclusive `0..17,592,186,044,416` bytes (16 TiB), and `network_receive_bytes_per_second` plus `network_transmit_bytes_per_second` remain inclusive `0..1,000,000,000,000,000` finite numbers. The database checks now match those limits exactly.
+
+The exact allowed `details` keys remain enforced by the authenticated wire model and typed repository input. Cross-dialect SQL checks for JSON object shape/key sets were not added because portable JSON text/object semantics are not sound enough across SQLite and PostgreSQL; the database retains only its bounded serialized-size defense (`2..4,096` characters).
+
+### Fix-round TDD and verification
+
+| Phase | Command | Result |
+|---|---|---|
+| RED — lock and schema | `control/.venv/bin/pytest control/tests/test_telemetry.py -q` | `35 passed, 7 failed`; failures were exactly the missing node lock, cross-node latest-pointer acceptance, and five missing database maximum checks. |
+| GREEN — portable repository/migration | `control/.venv/bin/pytest control/tests/test_telemetry.py control/tests/test_admission_migration.py control/tests/test_migrations.py -q` | `45 passed`; 12 pre-existing macOS temporary-directory cleanup warnings. |
+| Authenticated telemetry API | `control/.venv/bin/pytest control/tests/test_agent_api.py -q -k telemetry` | `14 passed, 94 deselected`; 12 pre-existing temporary-directory cleanup warnings. |
+| PostgreSQL race suite | `control/.venv/bin/pytest control/tests/test_telemetry_postgres.py -q` | `2 skipped`; Docker is unavailable on this laptop. Both tests were collected. |
+| Ruff 0.16.1 | `uvx --from ruff==0.16.1 ruff check` over all Task 3 implementation/test files, including `test_telemetry_postgres.py` | `All checks passed!` |
+| Compile | `control/.venv/bin/python -m compileall -q` over Task 3 Python implementation/migration files | Exit 0. |
+
+### Fix-round concerns
+
+1. The earlier concurrency concern is resolved in `b63092d`: all telemetry head and replay reads occur after the per-node authoritative row lock in the same transaction.
+2. Docker is unavailable on this laptop, so the new real-PostgreSQL race tests could not execute locally. Portable coverage verifies that the lock is issued first and compiles to `FOR UPDATE OF agent_nodes`; CI or a Docker-capable host should execute the two integration cases.
+3. Exact JSON `details` keys deliberately remain repository/wire enforced rather than duplicated in dialect-sensitive SQL checks, as described above.
+4. The five stale migration-head tests identified by the controller remain unchanged and out of scope. The Task 3 migration tests pass.
+5. The unrelated in-progress Task 5 plan edit in the shared working tree was not staged or committed.
