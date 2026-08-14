@@ -143,6 +143,7 @@ git push
 - Create: `control/migrations/versions/0023_node_telemetry.py`
 - Create: `control/tests/test_telemetry.py`
 - Modify: `control/tests/test_agent_api.py`
+- Modify: `control/tests/test_admission_migration.py`
 
 **Interfaces:**
 - Produces: `TelemetrySampleInput`, `TelemetryRepository.record_batch(node_id, samples)`, `latest(node_ids)`, `history(node_id, start, end, maximum_points)`, and `POST /agent/v1/telemetry`.
@@ -155,7 +156,7 @@ def test_newer_telemetry_replaces_latest_and_replay_does_not(telemetry):
     telemetry.record_batch(NODE_A, (sample(sequence=4), sample(sequence=5)))
     telemetry.record_batch(NODE_A, (sample(sequence=4),))
     assert telemetry.latest((NODE_A,))[NODE_A].sequence == 5
-    assert telemetry.sample_count(NODE_A) == 2
+    assert [item.sequence for item in telemetry.history(NODE_A, START, END, 1500)] == [4, 5]
 ```
 
 Add separate tests for a new boot ID, future/stale time, NaN/negative/range violations, duplicate samples, batch size 17, history point cap 1,500, and transactional latest/history writes.
@@ -168,11 +169,21 @@ Expected: collection failure because the telemetry module does not exist.
 
 - [ ] **Step 3: Implement typed models, repository, and migration**
 
-Use a latest table keyed by node, a sample table unique on `(node_id, boot_id, sequence)`, typed nullable metric columns, bounded JSON details, and composite history indexes. Validate finite numeric ranges before opening a transaction.
+Use a latest table keyed by node and pointing at its current sample, a sample
+table unique on `(node_id, boot_id, sequence)`, typed nullable metric columns,
+bounded JSON details, and composite history indexes. For one boot, sequence and
+observation time increase together; a new boot may reset sequence but advances
+latest only when its observation is newer. Validate finite numeric ranges and
+cross-field free/total relationships before opening a transaction.
 
 - [ ] **Step 4: Write failing authenticated API tests**
 
-Verify certificate identity wins over payload identity, unauthorized requests fail, stale/future samples return 422, oversized batches return 422, and valid ordered samples return 204.
+Verify the body contains no node identity, certificate identity owns every
+row, unauthorized requests fail before parsing, stale/future samples return
+422, batches above 16 return 422, bodies above 64 KiB return 413 even without a
+truthful `Content-Length`, duplicate JSON keys return 422, and valid ordered
+samples return 204. Use a five-minute past and 30-second future acceptance
+window.
 
 - [ ] **Step 5: Implement and verify the agent endpoint**
 
@@ -183,7 +194,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit and push**
 
 ```bash
-git add control/src/vonk_control/telemetry.py control/src/vonk_control/models.py control/src/vonk_control/agent_api.py control/src/vonk_control/api.py control/migrations/versions/0023_node_telemetry.py control/tests/test_telemetry.py control/tests/test_agent_api.py
+git add control/src/vonk_control/telemetry.py control/src/vonk_control/models.py control/src/vonk_control/agent_api.py control/src/vonk_control/api.py control/migrations/versions/0023_node_telemetry.py control/tests/test_telemetry.py control/tests/test_agent_api.py control/tests/test_admission_migration.py
 git commit -m "feat: ingest bounded node telemetry"
 git push
 ```
