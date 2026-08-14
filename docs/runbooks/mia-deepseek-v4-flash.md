@@ -151,10 +151,13 @@ Rank 1 remains a native vLLM headless worker, so it does not provide its own
 OpenAI API. A minimal runtime-local readiness proxy exposes only
 `/v1/models` on rank 1 and forwards that probe over the selected fabric to rank
 0. The proxy runs only while the headless vLLM process is alive. Rank 0 cannot
-serve that endpoint until both tensor-parallel ranks have joined, so each
-agent's normal local readiness check proves the worker process is alive and the
-complete two-rank engine is serving. Client traffic and the published route
-still terminate only at rank 0.
+serve that endpoint during the initial start until both tensor-parallel ranks
+have joined, so the normal local checks gate initial publication. After an
+established NCCL process group loses a rank, however, the surviving rank-0 HTTP
+process can continue answering `/v1/models` even though inference is no longer
+usable. The acceptance driver's real chat request is therefore the
+authoritative recovery check. Client traffic and the published route still
+terminate only at rank 0.
 
 After a long image import, authenticated inventory can briefly be older than
 the installation admission limit. The driver retries only previews whose sole
@@ -236,8 +239,15 @@ in LiteLLM if the workstation or password-manager item is compromised.
 Use the run ID in the private evidence file. Follow the generic
 [rank failure and recovery procedure](development-agent-workloads.md#real-multi-node-failure-and-recovery):
 inspect all Vonk management labels, stop only rank 1's exact managed container,
-resume to `--stop-after route-withdrawn-after-failure`, start that same
-container, and resume to `--stop-after inference-recovered`.
+and resume to `--stop-after route-withdrawn-after-failure`.
+
+MIA's native tensor-parallel vLLM engine does not support hot rank rejoin. Once
+the withdrawal is proven, stop rank 0's exact managed container as well, then
+start the same rank-0 container followed by the same rank-1 container. This is
+a coordinated restart of the existing gang, not a rebuild, reinstall, or cache
+mutation. Do not accept a republished `/v1/models` route as recovery by itself;
+resume to `--stop-after inference-recovered` and require the real chat request
+to pass.
 
 Then perform the documented supervisor and NAS restart checkpoint and run the
 same command without `--stop-after`. It must prove fresh agents, healthy ranks,
