@@ -422,7 +422,7 @@ services:
       - dev-tailscale-secrets:/run/secrets:ro
       - dev-tailscale-state:/var/lib/tailscale
       - dev-tailscale-socket:/var/run/tailscale
-    tmpfs: [/tmp:size=64m,mode=1777]
+    tmpfs: ["/tmp:size=64m,mode=1777"]
     networks: [tailscale-egress, tailnet-web-edge]
     healthcheck:
       test: [CMD, tailscale, --socket=/var/run/tailscale/tailscaled.sock, status, --json]
@@ -443,7 +443,7 @@ services:
       - dev-tailscale-socket:/var/run/tailscale
       - dev-runtime-config:/run/vonk-runtime:ro
       - dev-tailscale-runtime:/run/vonk-tailnet
-    tmpfs: [/tmp:size=16m,mode=1777]
+    tmpfs: ["/tmp:size=16m,mode=1777"]
     depends_on:
       caddy: {condition: service_started}
       tailscale-gateway: {condition: service_healthy}
