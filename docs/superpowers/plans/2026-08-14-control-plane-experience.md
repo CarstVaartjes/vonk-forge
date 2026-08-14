@@ -83,6 +83,7 @@ git push
 - Create: `control/web/src/components/app-shell.test.tsx`
 - Modify: `control/web/src/app.tsx`
 - Modify: `control/web/src/styles.css`
+- Modify: `control/web/src/test-setup.ts`
 
 **Interfaces:**
 - Produces: `AppShell`, `StatusPill`, `Meter`, and code-native SVG icons shared by Fleet and Library.
@@ -101,9 +102,16 @@ test("groups primary tasks without hiding administrative routes", async () => {
 
 Name the break: restoring ten equal top-level links or removing the accessible mobile control must fail.
 
+Add a real in-memory `Storage` implementation to the shared test setup only
+when jsdom does not expose one. The baseline `updates.test.tsx` cleanup calls
+`localStorage.clear()`; its absence currently prevents Testing Library cleanup
+and makes later tests render duplicate pages. Add a regression assertion that
+`setItem`, `getItem`, `removeItem`, and `clear` provide browser-equivalent
+string semantics.
+
 - [ ] **Step 2: Run the test and verify RED**
 
-Run: `cd control/web && npm test -- src/components/app-shell.test.tsx --run`
+Run: `cd control/web && npm test -- src/components/app-shell.test.tsx src/pages/updates.test.tsx --run`
 
 Expected: FAIL because `AppShell` and Library do not exist.
 
@@ -113,14 +121,14 @@ Create a sticky desktop sidebar, compact mobile header, grouped Activity/System 
 
 - [ ] **Step 4: Run component tests and production build**
 
-Run: `cd control/web && npm test -- src/components/app-shell.test.tsx --run && npm run build`
+Run: `cd control/web && npm test -- src/components/app-shell.test.tsx src/pages/updates.test.tsx --run && npm run build`
 
 Expected: PASS with no TypeScript or Vite warnings.
 
 - [ ] **Step 5: Commit and push**
 
 ```bash
-git add control/web/src/app.tsx control/web/src/components control/web/src/styles.css
+git add control/web/src/app.tsx control/web/src/components control/web/src/styles.css control/web/src/test-setup.ts
 git commit -m "feat: add responsive control plane shell"
 git push
 ```
@@ -492,4 +500,3 @@ git add control/src/vonk_control/telemetry_maintenance.py control/tests/test_tel
 git commit -m "docs: complete control website operations and acceptance"
 git push
 ```
-
