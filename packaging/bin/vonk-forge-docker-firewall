@@ -236,6 +236,10 @@ verify_host_rules() {
     [ "$first_jump" = "-A INPUT -j $host_chain" ] \
         || fail "managed host firewall jump is not first"
     require_host_rule -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
+    require_host_rule -i lo -s "$node_fabric_ip" -d "$node_fabric_ip" \
+        -p tcp -j RETURN
+    require_host_rule -i lo -s "$node_fabric_ip" -d "$node_fabric_ip" \
+        -p udp -j RETURN
     host_count=0
     if [ -n "$host_endpoint_ports" ]; then
         old_ifs=$IFS
@@ -258,7 +262,7 @@ verify_host_rules() {
     require_host_rule -d "$node_fabric_ip" -p tcp -j DROP
     require_host_rule -d "$node_fabric_ip" -p udp -j DROP
     require_host_rule -m comment --comment "$marker" -j RETURN
-    expected=$((6 + 3 * host_count))
+    expected=$((8 + 3 * host_count))
     actual=$(ipt -S "$host_chain" | awk -v chain="$host_chain" \
         '$1 == "-A" && $2 == chain { count++ } END { print count+0 }')
     [ "$actual" -eq "$expected" ] \
@@ -319,6 +323,10 @@ ipt -F "$host_chain"
 while ipt -D INPUT -j "$host_chain" >/dev/null 2>&1; do :; done
 ipt -I INPUT 1 -j "$host_chain"
 ipt -A "$host_chain" -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
+ipt -A "$host_chain" -i lo -s "$node_fabric_ip" -d "$node_fabric_ip" \
+    -p tcp -j RETURN
+ipt -A "$host_chain" -i lo -s "$node_fabric_ip" -d "$node_fabric_ip" \
+    -p udp -j RETURN
 if [ -n "$host_endpoint_ports" ]; then
     old_ifs=$IFS
     IFS=,

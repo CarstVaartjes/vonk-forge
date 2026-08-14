@@ -73,6 +73,7 @@ class SliceServer(ThreadingHTTPServer):
         self.build_operation_state = "succeeded"
         self.distribution_operation_state = "succeeded"
         self.install_operation_state = "succeeded"
+        self.install_preview_blockers: list[str] = []
         self.retry_operation_state = "succeeded"
         self.start_operation_states: list[str] = []
         self.run_plan_digest = "f" * 64
@@ -429,12 +430,33 @@ class SliceHandler(BaseHTTPRequestHandler):
                 200,
                 {"build_input_sha256": "e" * 64, "source_bundle_sha256": "f" * 64},
             )
-        elif path.endswith(("install-plans/preview", "run-plans/preview")):
-            plan_digest = (
-                self.server.run_plan_digest
-                if path.endswith("run-plans/preview")
-                else "f" * 64
+        elif path.endswith("install-plans/preview"):
+            blocker = (
+                self.server.install_preview_blockers.pop(0)
+                if self.server.install_preview_blockers
+                else None
             )
+            self._json(
+                200,
+                {
+                    "allowed": blocker is None,
+                    "plan_digest": "f" * 64,
+                    "nodes": [
+                        {
+                            "node_id": node,
+                            "allowed": blocker is None,
+                            "blockers": (
+                                []
+                                if blocker is None
+                                else [{"code": blocker, "detail": "test blocker"}]
+                            ),
+                        }
+                        for node in self.server.nodes
+                    ],
+                },
+            )
+        elif path.endswith("run-plans/preview"):
+            plan_digest = self.server.run_plan_digest
             self._json(200, {"allowed": True, "plan_digest": plan_digest, "nodes": []})
         elif path == "/v1/chat/completions":
             if payload.get("model") == "dev-http-smoke":
@@ -813,6 +835,58 @@ def test_runner_accepts_litellm_empty_provider_metadata(
     assert result.returncode == 0, result.stderr
     evidence = json.loads(evidence_path.read_text())
     assert evidence["completed_states"] == STATES[:9]
+
+
+def test_runner_retries_transient_stale_install_inventory(
+    tmp_path: Path, server: SliceServer
+) -> None:
+    server.install_preview_blockers = ["install.stale_inventory"]
+
+    result, evidence_path = _run(tmp_path, server, "--stop-after", "installed")
+
+    assert result.returncode == 0, result.stderr
+    evidence = json.loads(evidence_path.read_text())
+    assert evidence["completed_states"] == STATES[:6]
+    assert (
+        sum(
+            path == "/api/v1/recipes/install-plans/preview"
+            for method, path, _body in server.request_bodies
+            if method == "POST"
+        )
+        == 2
+    )
+    assert (
+        sum(
+            path == "/api/v1/recipes/installations"
+            for method, path, _body in server.request_bodies
+            if method == "POST"
+        )
+        == 1
+    )
+
+
+def test_runner_does_not_retry_permanent_install_blocker(
+    tmp_path: Path, server: SliceServer
+) -> None:
+    server.install_preview_blockers = ["install.insufficient_disk"]
+
+    result, _evidence_path = _run(tmp_path, server, "--stop-after", "installed")
+
+    assert result.returncode == 1
+    assert "recipe installation is not admitted" in result.stderr
+    assert (
+        sum(
+            path == "/api/v1/recipes/install-plans/preview"
+            for method, path, _body in server.request_bodies
+            if method == "POST"
+        )
+        == 1
+    )
+    assert not any(
+        path == "/api/v1/recipes/installations"
+        for method, path, _body in server.request_bodies
+        if method == "POST"
+    )
 
 
 def test_runner_recovers_once_after_cleaned_failed_start(

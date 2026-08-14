@@ -256,6 +256,9 @@ ports only from loopback and the NAS management address, and drops every other
 source. It also permits TCP and UDP to the selected fabric address only from
 the declared peer on the selected fabric interface, which covers the native
 runtime's dynamic peer transport without opening the management interface.
+TCP and UDP from loopback are accepted only when both source and destination
+are the node's selected fabric address, allowing a distributed rank to join
+its own rendezvous store without widening peer or management access.
 
 ```ini
 VONK_NAS_MANAGEMENT_IP=<NAS_MANAGEMENT_IP>

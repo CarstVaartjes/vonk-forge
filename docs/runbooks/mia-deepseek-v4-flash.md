@@ -63,8 +63,10 @@ sudo /usr/lib/vonk-forge/vonk-forge-docker-firewall \
 
 The `VONK-FORGE-HOST` chain permits TCP 8888 only from loopback and the NAS
 management address. Spark peer TCP/UDP is accepted only on the selected fabric
-interface, from the declared peer, to the selected local fabric address. Do not
-add a wildcard `INPUT` rule.
+interface, from the declared peer, to the selected local fabric address. It
+also permits a process to reach its own selected fabric address over loopback;
+PyTorch rendezvous requires rank 0 to join its own store through that address.
+Do not add a wildcard `INPUT` rule.
 
 ## Qualify the exact inputs
 
@@ -135,6 +137,81 @@ while serving. It derives the fabric interface directly from
 unique RoCEv2 GID, so it does not depend on `iproute2` inside the runtime image.
 If that lookup fails, verify the selected direct-fabric address and the node's
 RoCEv2 GID configuration; do not add packages to a running container.
+
+After a long image import, authenticated inventory can briefly be older than
+the installation admission limit. The driver retries only previews whose sole
+blocker is `install.stale_inventory`, for at most two minutes and within the
+overall timeout. Every other blocker remains an immediate failure, and no
+installation is submitted until a fresh preview is allowed.
+
+## Connect Pi
+
+Create a dedicated LiteLLM virtual key restricted to the stable `deepseek`
+alias. Never copy `litellm-master-key` to a workstation. From the trusted local
+inference tunnel, with shell tracing disabled:
+
+```bash
+set +x
+umask 077
+master_key="$(< '<LOCAL_SECRETS_DIR>/litellm-master-key')"
+curl -fsS 'http://127.0.0.1:<LOCAL_INFERENCE_PORT>/key/generate' \
+  -H "Authorization: Bearer $master_key" \
+  -H 'Content-Type: application/json' \
+  --data '{"models":["deepseek"],"key_alias":"pi-dev"}' \
+  | jq -er '.key' > '<LOCAL_SECRETS_DIR>/pi-litellm-key'
+unset master_key
+```
+
+Store that generated value in the operator's password manager as
+`Vonk Forge Pi/LiteLLM API Key`. On the Tailscale-connected workstation, save
+this provider in `~/.pi/agent/models.json`:
+
+```json
+{
+  "providers": {
+    "vonk-forge": {
+      "baseUrl": "https://vonk-forge.tail46101a.ts.net/v1",
+      "api": "openai-completions",
+      "apiKey": "$VONK_PI_API_KEY",
+      "authHeader": true,
+      "compat": {
+        "supportsStore": false,
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": true,
+        "supportsUsageInStreaming": true,
+        "maxTokensField": "max_tokens"
+      },
+      "models": [
+        {
+          "id": "deepseek",
+          "name": "Vonk Forge DeepSeek V4 Flash",
+          "reasoning": true,
+          "input": ["text"],
+          "contextWindow": 1048576,
+          "maxTokens": 32768,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          }
+        }
+      ]
+    }
+  }
+}
+```
+
+Load the scoped key without writing it into Pi's configuration, then select the
+provider and model:
+
+```powershell
+$env:VONK_PI_API_KEY = op read 'op://Private/Vonk Forge Pi/LiteLLM API Key/password'
+pi --provider vonk-forge --model deepseek
+```
+
+The workstation must be connected to the same tailnet. Revoke this virtual key
+in LiteLLM if the workstation or password-manager item is compromised.
 
 ## Failure, recovery, and cleanup
 

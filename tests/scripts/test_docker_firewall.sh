@@ -48,8 +48,12 @@ test "$($iptables -S DOCKER-USER | sed -n '/^-A DOCKER-USER /{p;q;}')" = \
 test "$($iptables -S VONK-FORGE | awk '$1 == "-A" { count++ } END { print count+0 }')" = 12
 test "$($iptables -S INPUT | sed -n '/^-A INPUT /{p;q;}')" = \
     '-A INPUT -j VONK-FORGE-HOST'
-test "$($iptables -S VONK-FORGE-HOST | awk '$1 == "-A" { count++ } END { print count+0 }')" = 9
+test "$($iptables -S VONK-FORGE-HOST | awk '$1 == "-A" { count++ } END { print count+0 }')" = 11
 $iptables -C VONK-FORGE-HOST -i lo -p tcp --dport 8888 -j RETURN
+$iptables -C VONK-FORGE-HOST -i lo -s 192.168.100.10 \
+    -d 192.168.100.10 -p tcp -j RETURN
+$iptables -C VONK-FORGE-HOST -i lo -s 192.168.100.10 \
+    -d 192.168.100.10 -p udp -j RETURN
 $iptables -C VONK-FORGE-HOST -i vonk-mgmt -p tcp -s 192.168.1.231 \
     --dport 8888 -j RETURN
 $iptables -C VONK-FORGE-HOST -p tcp --dport 8888 -j DROP
