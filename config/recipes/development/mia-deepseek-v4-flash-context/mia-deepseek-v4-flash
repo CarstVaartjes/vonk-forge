@@ -20,22 +20,10 @@ if [[ -z ${model} ]]; then
   exit 1
 fi
 
-mapfile -t fabric_interfaces < <(
-  ip -o -4 address show | awk -v address="${VONK_LOCAL_ADDR}" '
-    {
-      value=$4
-      sub(/\/.*/, "", value)
-      if (value == address) print $2
-    }'
+read -r fabric_interface fabric_hca fabric_gid < <(
+  /opt/vonk/resolve-roce.py "${VONK_LOCAL_ADDR}"
 )
-if [[ ${#fabric_interfaces[@]} != 1 ]]; then
-  echo "controller-selected fabric address is not uniquely assigned" >&2
-  exit 1
-fi
-read -r fabric_hca fabric_gid < <(
-  /opt/vonk/resolve-roce.py "${fabric_interfaces[0]}" "${VONK_LOCAL_ADDR}"
-)
-if [[ -z ${fabric_hca:-} || -z ${fabric_gid:-} ]]; then
+if [[ -z ${fabric_interface:-} || -z ${fabric_hca:-} || -z ${fabric_gid:-} ]]; then
   echo "RoCEv2 fabric discovery failed" >&2
   exit 1
 fi
@@ -54,9 +42,9 @@ export NCCL_NET=IB
 export NCCL_IB_DISABLE=0
 export NCCL_IB_HCA="${fabric_hca}"
 export NCCL_IB_GID_INDEX="${fabric_gid}"
-export NCCL_SOCKET_IFNAME="${fabric_interfaces[0]}"
-export TP_SOCKET_IFNAME="${fabric_interfaces[0]}"
-export GLOO_SOCKET_IFNAME="${fabric_interfaces[0]}"
+export NCCL_SOCKET_IFNAME="${fabric_interface}"
+export TP_SOCKET_IFNAME="${fabric_interface}"
+export GLOO_SOCKET_IFNAME="${fabric_interface}"
 export NCCL_IB_ADDR_FAMILY=AF_INET
 export NCCL_IB_ROCE_VERSION_NUM=2
 export NCCL_CROSS_NIC=1
