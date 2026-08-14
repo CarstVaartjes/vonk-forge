@@ -19,6 +19,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Float,
     Index,
     Integer,
     String,
@@ -2107,6 +2108,108 @@ class NodeInventorySnapshot(Base):
     capabilities: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     evidence_digest: Mapped[str] = mapped_column(
         String(64), nullable=False, unique=True
+    )
+
+
+class NodeTelemetrySample(Base):
+    __tablename__ = "node_telemetry_samples"
+    __table_args__ = (
+        UniqueConstraint(
+            "node_id", "boot_id", "sequence", name="uq_telemetry_node_boot_sequence"
+        ),
+        CheckConstraint(_uuid_shape("boot_id"), name="ck_telemetry_boot_id_shape"),
+        CheckConstraint(
+            "sequence BETWEEN 0 AND 9223372036854775807 AND "
+            "gap_samples BETWEEN 0 AND 9223372036854775807",
+            name="ck_telemetry_sequences",
+        ),
+        CheckConstraint(
+            "(cpu_utilization_percent IS NULL OR "
+            "cpu_utilization_percent BETWEEN 0 AND 100) AND "
+            "(gpu_utilization_percent IS NULL OR "
+            "gpu_utilization_percent BETWEEN 0 AND 100)",
+            name="ck_telemetry_utilization",
+        ),
+        CheckConstraint(
+            "load_average_1m IS NULL OR load_average_1m BETWEEN 0 AND 1000000",
+            name="ck_telemetry_load",
+        ),
+        CheckConstraint(
+            "(memory_total_bytes IS NULL AND memory_available_bytes IS NULL) OR "
+            "(memory_total_bytes IS NOT NULL AND memory_available_bytes IS NOT NULL AND "
+            "memory_total_bytes >= 0 AND memory_available_bytes >= 0 AND "
+            "memory_available_bytes <= memory_total_bytes)",
+            name="ck_telemetry_memory",
+        ),
+        CheckConstraint(
+            "(disk_total_bytes IS NULL AND disk_free_bytes IS NULL) OR "
+            "(disk_total_bytes IS NOT NULL AND disk_free_bytes IS NOT NULL AND "
+            "disk_total_bytes >= 0 AND disk_free_bytes >= 0 AND "
+            "disk_free_bytes <= disk_total_bytes)",
+            name="ck_telemetry_disk",
+        ),
+        CheckConstraint(
+            "(gpu_memory_total_bytes IS NULL AND gpu_memory_free_bytes IS NULL) OR "
+            "(gpu_memory_total_bytes IS NOT NULL AND gpu_memory_free_bytes IS NOT NULL AND "
+            "gpu_memory_total_bytes >= 0 AND gpu_memory_free_bytes >= 0 AND "
+            "gpu_memory_free_bytes <= gpu_memory_total_bytes)",
+            name="ck_telemetry_gpu_memory",
+        ),
+        CheckConstraint(
+            "(temperature_c IS NULL OR temperature_c BETWEEN -100 AND 300) "
+            "AND (power_watts IS NULL OR power_watts BETWEEN 0 AND 100000) AND "
+            "(network_receive_bytes_per_second IS NULL OR "
+            "network_receive_bytes_per_second BETWEEN 0 AND 9223372036854775807) AND "
+            "(network_transmit_bytes_per_second IS NULL OR "
+            "network_transmit_bytes_per_second BETWEEN 0 AND 9223372036854775807)",
+            name="ck_telemetry_physical_metrics",
+        ),
+        CheckConstraint(
+            "length(CAST(details AS TEXT)) BETWEEN 2 AND 4096",
+            name="ck_telemetry_details",
+        ),
+        Index("ix_telemetry_node_observed", "node_id", "observed_at"),
+    )
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    node_id: Mapped[str] = mapped_column(
+        ForeignKey("agent_nodes.node_id", ondelete="CASCADE"), nullable=False
+    )
+    boot_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    cpu_utilization_percent: Mapped[float | None] = mapped_column(Float)
+    load_average_1m: Mapped[float | None] = mapped_column(Float)
+    memory_total_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    memory_available_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    disk_total_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    disk_free_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    gpu_utilization_percent: Mapped[float | None] = mapped_column(Float)
+    gpu_memory_total_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    gpu_memory_free_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    temperature_c: Mapped[float | None] = mapped_column(Float)
+    power_watts: Mapped[float | None] = mapped_column(Float)
+    network_receive_bytes_per_second: Mapped[float | None] = mapped_column(Float)
+    network_transmit_bytes_per_second: Mapped[float | None] = mapped_column(Float)
+    gap_samples: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    details: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+
+
+class NodeTelemetryLatest(Base):
+    __tablename__ = "node_telemetry_latest"
+    node_id: Mapped[str] = mapped_column(
+        ForeignKey("agent_nodes.node_id", ondelete="CASCADE"), primary_key=True
+    )
+    sample_id: Mapped[str] = mapped_column(
+        ForeignKey("node_telemetry_samples.id", ondelete="RESTRICT"),
+        nullable=False,
+        unique=True,
     )
 
 

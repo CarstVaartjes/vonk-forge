@@ -107,6 +107,8 @@ _RECIPE_IMAGE_UPLOAD = re.compile(
 )
 _MAX_IDENTITY_PROJECTION_BYTES = 64 * 1024
 _LOGIN_PATH = "/api/v1/auth/login"
+_TELEMETRY_PATH = "/agent/v1/telemetry"
+_MAX_TELEMETRY_BODY_BYTES = 64 * 1024
 
 
 class _DuplicateJsonKey(ValueError):
@@ -1039,6 +1041,25 @@ def create_app(
             media_type="application/json",
         )
 
+    @app.middleware("http")
+    async def telemetry_request_boundary(request: Request, call_next):
+        if request.method != "POST" or request.url.path != _TELEMETRY_PATH:
+            return await call_next(request)
+        try:
+            json.loads(
+                await _bounded_request_body(request, _MAX_TELEMETRY_BODY_BYTES),
+                object_pairs_hook=_reject_duplicate_json_keys,
+            )
+        except _RequestBodyTooLarge:
+            return Response(status_code=413)
+        except (UnicodeDecodeError, json.JSONDecodeError, _DuplicateJsonKey):
+            return Response(
+                content=canonical_message({"detail": "telemetry request is invalid"}),
+                status_code=422,
+                media_type="application/json",
+            )
+        return await call_next(request)
+
     app.add_middleware(
         TrustedProxyAgentIdentityMiddleware,
         trusted_proxy_auth=trusted_agent_proxy_auth,
@@ -1068,8 +1089,13 @@ def create_app(
             request.method == "PUT"
             and _RECIPE_IMAGE_UPLOAD.fullmatch(request.url.path) is not None
         )
+        telemetry_ingest = (
+            request.method == "POST" and request.url.path == _TELEMETRY_PATH
+        )
         maximum = MAX_RECIPE_IMAGE_BYTES if recipe_image_upload else 1_048_576
-        if length and int(length) > maximum and request.url.path != "/agent/v1/enroll":
+        if telemetry_ingest:
+            response = await call_next(request)
+        elif length and int(length) > maximum and request.url.path != "/agent/v1/enroll":
             response = Response(status_code=413)
         else:
             body_too_large = False
