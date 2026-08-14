@@ -450,6 +450,14 @@ file remains zero bytes, inspect the controller/Caddy response for the first
 range request; Docker has not been invoked and deleting image or model caches
 is not a remedy.
 
+An interrupted unsafe import can end in `waiting-for-operator` rather than
+`failed`. Retry that parent image-distribution operation through the same
+authenticated recipe retry endpoint. The controller requeues the exact stored
+plan, target set, authority digest, and per-node payloads; it does not re-plan
+against current inventory. Reusing the same request key replays the same retry,
+and a second active retry is rejected. Do not delete the repository, image,
+model, or agent-state volumes to clear this state.
+
 ## Real single-node model
 
 Create `model-qualification-input.json` from fresh read-only observations. It

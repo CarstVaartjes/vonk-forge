@@ -94,6 +94,10 @@ class RecipeRunObservation:
 
 
 _TERMINAL_JOB_STATES = frozenset({"succeeded", "failed", "expired"})
+_RETRYABLE_IMAGE_DISTRIBUTION_STATES = frozenset({"failed", "waiting-for-operator"})
+_RETRYABLE_IMAGE_OPERATION_STATES = _TERMINAL_JOB_STATES | frozenset(
+    {"waiting-for-operator"}
+)
 
 
 class RecipeOperationService:
@@ -711,7 +715,7 @@ class RecipeOperationService:
         request_id: str,
         now: datetime,
     ) -> Job:
-        if previous.state != "failed":
+        if previous.state not in _RETRYABLE_IMAGE_DISTRIBUTION_STATES:
             raise RecipeOperationConflict("recipe image distribution is not retryable")
         plan_digest = _required_string(previous.payload, "plan_digest")
         owner_id = _required_string(previous.payload, "owner_id")
@@ -757,7 +761,7 @@ class RecipeOperationService:
             or len(payload_identities) != 1
             or any(
                 child.kind != "recipe.image.import.v1"
-                or child.state not in _TERMINAL_JOB_STATES
+                or child.state not in _RETRYABLE_IMAGE_OPERATION_STATES
                 or child.base_commit != plan_digest[:40]
                 or child.payload_digest
                 != hashlib.sha256(canonical_message(child.payload)).hexdigest()
