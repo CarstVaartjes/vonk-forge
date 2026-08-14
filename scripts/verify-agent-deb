@@ -304,6 +304,12 @@ def _verify_payload(payload: Path, control: Path) -> None:
         raise VerificationError("helper cannot inspect host firewall addresses")
     if "RestrictAddressFamilies=AF_UNIX AF_NETLINK" not in helper.splitlines():
         raise VerificationError("helper address-family boundary is invalid")
+    if (
+        "CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_FSETID "
+        "CAP_NET_ADMIN CAP_SETGID CAP_SETUID"
+        not in helper.splitlines()
+    ):
+        raise VerificationError("helper capability boundary is invalid")
     for boundary in (
         "Wants=docker.service",
         "After=local-fs.target docker.service",

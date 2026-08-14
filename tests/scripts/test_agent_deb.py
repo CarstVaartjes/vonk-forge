@@ -314,6 +314,10 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
     assert "PrivateNetwork=yes" not in helper_unit
     assert "IPAddressDeny=any" in helper_unit
     assert "RestrictAddressFamilies=AF_UNIX AF_NETLINK" in helper_unit
+    assert (
+        "CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_FSETID "
+        "CAP_NET_ADMIN CAP_SETGID CAP_SETUID"
+    ) in helper_unit.splitlines()
     assert "AF_INET" not in helper_unit
     assert "usermod --add-subuids" in postinst
     assert "usermod --add-subgids" in postinst
