@@ -146,3 +146,10 @@ An interrupted attempt is resumed with the identical command and evidence path.
 Do not delete model/image caches, agent state, or containers to make a retry
 pass. Rollback means stop and uninstall the accepted recipe revision; it never
 means changing a mutable tag or editing a running container.
+
+If artifact acquisition ends in a failed installation, rerun that identical
+command. The acceptance driver submits one exact retry of the stored install
+plan, retaining the same installation identity, node set, authority digest,
+and immutable model and image caches. A second terminal failure stops the
+driver for diagnosis; it does not trigger another retry or destructive cache
+cleanup.
