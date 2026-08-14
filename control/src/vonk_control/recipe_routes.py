@@ -16,6 +16,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .litellm import LiteLlmGeneration, LiteLlmPolicy, LiteLlmPublisher
 from .models import (
+    LocalRecipeRevision,
+    RecipeInstallation,
     RecipeRun,
     Reconciliation,
     RoutePublication,
@@ -27,6 +29,7 @@ from .route_runtime import RECIPE_ROUTE_AUTHORITY_ID, ActivationMarker
 from .routes import RouteState
 
 _ALIAS = re.compile(r"[a-z0-9][a-z0-9._-]{0,62}\Z")
+_UPSTREAM_MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,119}\Z")
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _HEALTH_RECOVERY_ERROR = "recipe rank health requires recovery"
 
@@ -488,6 +491,7 @@ class RecipeRouteService:
         if now.tzinfo is None or now.utcoffset() is None:
             raise RecipeRouteError("recipe route clock must be timezone-aware")
         aliases: dict[str, str] = {}
+        upstream_models: dict[str, str] = {}
         endpoints: dict[str, _RecipeEndpoint] = {}
         included: set[str] = set()
         node_ids: set[str] = set()
@@ -514,6 +518,7 @@ class RecipeRouteService:
                     raise RecipeRouteError(
                         "recipe run alias is invalid or duplicated", run_id=run.id
                     )
+                upstream_model = _primary_model_alias(session, run)
                 nodes = tuple(
                     session.scalars(
                         select(RunNode)
@@ -580,6 +585,7 @@ class RecipeRouteService:
                     operation_id=f"recipe:{run.id}:rank:0",
                 )
                 aliases[run.alias] = endpoint.api_base
+                upstream_models[run.alias] = upstream_model
                 included.add(run.id)
                 endpoints[run.alias] = endpoint
                 run_identities.append(
@@ -587,6 +593,7 @@ class RecipeRouteService:
                         "run_id": run.id,
                         "alias": run.alias,
                         "plan_digest": run.plan_digest,
+                        "upstream_model": upstream_model,
                         # Observation time bounds the activation lease below;
                         # keeping it out of route identity avoids generating a
                         # new bundle for every otherwise identical heartbeat.
@@ -625,7 +632,11 @@ class RecipeRouteService:
         )
         policy = LiteLlmPolicy(
             models={
-                alias: {"requests_per_minute": 60, "tokens_per_minute": 1_000_000}
+                alias: {
+                    "requests_per_minute": 60,
+                    "tokens_per_minute": 1_000_000,
+                    "upstream_model": upstream_models[alias],
+                }
                 for alias in aliases
             }
         )
@@ -641,6 +652,30 @@ class RecipeRouteService:
             endpoints,
             expires_at,
         )
+
+
+def _primary_model_alias(session: Session, run: RecipeRun) -> str:
+    installation = session.get(RecipeInstallation, run.installation_id)
+    revision = (
+        session.get(LocalRecipeRevision, installation.recipe_revision_id)
+        if installation is not None
+        else None
+    )
+    runtime = revision.document.get("runtime") if revision is not None else None
+    endpoint = runtime.get("endpoint") if isinstance(runtime, Mapping) else None
+    model_aliases = (
+        endpoint.get("model_aliases") if isinstance(endpoint, Mapping) else None
+    )
+    primary = (
+        model_aliases[0]
+        if isinstance(model_aliases, list) and model_aliases
+        else None
+    )
+    if not isinstance(primary, str) or _UPSTREAM_MODEL.fullmatch(primary) is None:
+        raise RecipeRouteError(
+            "recipe runtime model authority is invalid", run_id=run.id
+        )
+    return primary
 
 
 def _aware(value: datetime) -> datetime:

@@ -15,6 +15,8 @@ from urllib.parse import urlsplit
 
 from .routes import RouteState
 
+_UPSTREAM_MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,119}\Z")
+
 
 class LiteLlmPolicyError(ValueError):
     pass
@@ -32,7 +34,7 @@ class LiteLlmDeployment:
 
 @dataclass(frozen=True)
 class LiteLlmPolicy:
-    models: Mapping[str, Mapping[str, int]]
+    models: Mapping[str, Mapping[str, int | str]]
     deployments: tuple[LiteLlmDeployment, ...] = ()
 
 
@@ -68,15 +70,23 @@ class LiteLlmPublisher:
         model_list = []
         for alias in sorted(models):
             quota = dict(models[alias])
-            if set(quota) != {"requests_per_minute", "tokens_per_minute"}:
+            required = {"requests_per_minute", "tokens_per_minute"}
+            fields = set(quota)
+            if fields not in (required, required | {"upstream_model"}):
                 raise LiteLlmPolicyError("LiteLLM model quota fields are invalid")
+            upstream_model = quota.pop("upstream_model", alias)
+            if (
+                not isinstance(upstream_model, str)
+                or _UPSTREAM_MODEL.fullmatch(upstream_model) is None
+            ):
+                raise LiteLlmPolicyError("LiteLLM upstream model is invalid")
             rpm, tpm = quota["requests_per_minute"], quota["tokens_per_minute"]
             if not isinstance(rpm, int) or not isinstance(tpm, int) or not 1 <= rpm <= 100_000 or not 1 <= tpm <= 100_000_000:
                 raise LiteLlmPolicyError("LiteLLM model quotas are outside allowed bounds")
             model_list.append({
                 "model_name": alias,
                 "litellm_params": {
-                    "model": f"openai/{alias}",
+                    "model": f"openai/{upstream_model}",
                     "api_base": routes.aliases[alias].rstrip("/"),
                     "api_key": "os.environ/LITELLM_UPSTREAM_KEY",
                     "rpm": rpm,

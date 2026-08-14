@@ -140,6 +140,13 @@ unique RoCEv2 GID, so it does not depend on `iproute2` inside the runtime image.
 If that lookup fails, verify the selected direct-fabric address and the node's
 RoCEv2 GID configuration; do not add packages to a running container.
 
+The acceptance run publishes the stable client-facing model name
+`mia-deepseek-v4-flash`. The runtime itself serves the recipe's primary
+`runtime.endpoint.model_aliases` value, `deepseek-v4-flash-dspark`. The control
+worker binds those two names in the acknowledged LiteLLM generation; clients
+must use the public name and never depend on the runtime-local name. A missing
+or invalid primary runtime alias blocks route publication.
+
 Rank 1 remains a native vLLM headless worker, so it does not provide its own
 OpenAI API. A minimal runtime-local readiness proxy exposes only
 `/v1/models` on rank 1 and forwards that probe over the selected fabric to rank
@@ -157,9 +164,9 @@ installation is submitted until a fresh preview is allowed.
 
 ## Connect Pi
 
-Create a dedicated LiteLLM virtual key restricted to the stable `deepseek`
-alias. Never copy `litellm-master-key` to a workstation. From the trusted local
-inference tunnel, with shell tracing disabled:
+Create a dedicated LiteLLM virtual key restricted to the stable
+`mia-deepseek-v4-flash` alias. Never copy `litellm-master-key` to a workstation.
+From the trusted local inference tunnel, with shell tracing disabled:
 
 ```bash
 set +x
@@ -168,7 +175,7 @@ master_key="$(< '<LOCAL_SECRETS_DIR>/litellm-master-key')"
 curl -fsS 'http://127.0.0.1:<LOCAL_INFERENCE_PORT>/key/generate' \
   -H "Authorization: Bearer $master_key" \
   -H 'Content-Type: application/json' \
-  --data '{"models":["deepseek"],"key_alias":"pi-dev"}' \
+  --data '{"models":["mia-deepseek-v4-flash"],"key_alias":"pi-dev"}' \
   | jq -er '.key' > '<LOCAL_SECRETS_DIR>/pi-litellm-key'
 unset master_key
 ```
@@ -194,7 +201,7 @@ this provider in `~/.pi/agent/models.json`:
       },
       "models": [
         {
-          "id": "deepseek",
+          "id": "mia-deepseek-v4-flash",
           "name": "Vonk Forge DeepSeek V4 Flash",
           "reasoning": true,
           "input": ["text"],
@@ -218,7 +225,7 @@ provider and model:
 
 ```powershell
 $env:VONK_PI_API_KEY = op read 'op://Private/Vonk Forge Pi/LiteLLM API Key/password'
-pi --provider vonk-forge --model deepseek
+pi --provider vonk-forge --model mia-deepseek-v4-flash
 ```
 
 The workstation must be connected to the same tailnet. Revoke this virtual key
