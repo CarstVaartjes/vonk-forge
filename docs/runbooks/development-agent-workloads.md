@@ -622,6 +622,11 @@ the exact stopped rank without rebuilding or deleting its managed state:
 ssh '<SPARK_2_SSH_TARGET>' sudo docker start "vonk-$RUN_ID"
 ```
 
+This rank-only start applies only to runtimes whose workers can rejoin a live
+coordinator. A recipe runbook may instead require a coordinated restart of all
+exact managed containers in the gang. Follow that recipe-specific rule while
+preserving the same run ID, containers, installation, and caches.
+
 Wait for its health endpoint and next authenticated snapshot, then resume with:
 
 ```text

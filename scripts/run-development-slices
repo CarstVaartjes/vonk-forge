@@ -65,6 +65,7 @@ ALL_STATES = tuple(
 NODE = re.compile(r"spk_[0-9a-f]{32}\Z")
 MAXIMUM_TOKEN_BYTES = 16 * 1024
 MAXIMUM_EVIDENCE_BYTES = 2 * 1024 * 1024
+MODEL_ACCEPTANCE_MAX_TOKENS = 128
 SOURCE_MEDIA_TYPE = "application/vnd.vonk-forge.source-bundle.v1+tar"
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 
@@ -1352,7 +1353,7 @@ class Runner:
                     {"role": "user", "content": "Reply with exactly: VONK MODEL OK"}
                 ],
                 "temperature": 0,
-                "max_tokens": 16,
+                "max_tokens": MODEL_ACCEPTANCE_MAX_TOKENS,
                 "stream": False,
             }
             expected = None
