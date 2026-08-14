@@ -555,6 +555,25 @@ fn installation_records_and_rechecks_a_content_manifest() {
     let installation_id = "cb555393-764b-4eb6-8f15-b416d289428f";
 
     runtime.install(&spec(), installation_id, DIGEST).unwrap();
+    let calls = runner.calls.borrow();
+    let metadata_request = calls
+        .iter()
+        .find(|(program, arguments)| {
+            *program == Program::Curl
+                && arguments
+                    .iter()
+                    .any(|value| value.ends_with(".huggingface-model.json"))
+        })
+        .unwrap();
+    let expected_metadata_url = format!(
+        "https://huggingface.co/api/models/publisher/model/revision/{}",
+        "b".repeat(40)
+    );
+    assert_eq!(
+        metadata_request.1.last().map(String::as_str),
+        Some(expected_metadata_url.as_str())
+    );
+    drop(calls);
     runtime.verify_installation(installation_id).unwrap();
     let weights = fs::read_dir(directory.path().join("models").join("sha256"))
         .unwrap()
