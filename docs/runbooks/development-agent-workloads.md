@@ -85,10 +85,14 @@ permission errors during storage accounting.
 
 The package also enables a lingering `vonk-agent` user manager. Podman uses
 that account's read-only user D-Bus endpoint and the systemd cgroup manager;
-the service keeps `ProtectControlGroups=yes`. `AF_NETLINK` permits `runc` to
-create the isolated namespace but does not grant build egress: accepted source
-builds still require `--network=none`. Treat a missing user bus, `Linger=no`,
-or a Podman cgroup fallback as a failed node preflight.
+the service keeps `ProtectControlGroups=yes`. It deliberately sets
+`ProtectHostname=no` because rootless `runc` must set the hostname inside each
+build's private UTS namespace. The dedicated service user has no ambient
+hostname capability, so this does not authorize changing the host hostname.
+`AF_NETLINK` permits `runc` to create the isolated namespace but does not grant
+build egress: accepted source builds still require `--network=none`. Treat a
+missing user bus, `Linger=no`, or a Podman cgroup fallback as a failed node
+preflight.
 
 ## PKI and NAS project
 

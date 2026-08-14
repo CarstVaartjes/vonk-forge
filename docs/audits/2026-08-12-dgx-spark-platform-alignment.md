@@ -113,7 +113,10 @@ remain visual physical gates.
   manager owns Podman's delegated cgroup v2 scopes. The network agent remains
   a hardened system service with `ProtectControlGroups=yes`; only the
   read-only user runtime and the `AF_NETLINK` family required by `runc`
-  namespace setup are exposed, and source builds remain `--network=none`.
+  namespace setup are exposed. `ProtectHostname=no` permits `runc` to set only
+  the build container's private UTS hostname; the unprivileged agent retains
+  no ambient authority over the host hostname. Source builds remain
+  `--network=none`.
 - Services: offline `systemd-analyze security` rates the packaged Rust agent,
   A/B supervisor, and privileged helper `4.8 OK`, `1.4 OK`, and `1.7 OK`.
   The agent's larger surface is the reviewed rootless-build namespace/device
