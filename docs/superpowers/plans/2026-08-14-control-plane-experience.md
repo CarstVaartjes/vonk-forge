@@ -255,17 +255,23 @@ git push
 ### Task 5: Add Fleet Projection, History, and Live Delivery
 
 **Files:**
+- Create: `control/migrations/versions/0024_fleet_stream_events.py`
+- Modify: `control/src/vonk_control/models.py`
+- Create: `control/src/vonk_control/fleet_events.py`
 - Create: `control/src/vonk_control/fleet_projection.py`
 - Create: `control/src/vonk_control/fleet_stream.py`
 - Modify: `control/src/vonk_control/api.py`
 - Modify: `control/src/vonk_control/operation_api.py`
+- Create: `control/tests/test_fleet_events.py`
 - Create: `control/tests/test_fleet_projection.py`
 - Create: `control/tests/test_fleet_stream.py`
+- Modify: `control/tests/test_admission_migration.py`
 - Modify: `control/tests/test_operation_api.py`
 
 **Interfaces:**
 - Produces: `FleetProjection.read()`, `GET /api/v1/fleet`, `GET /api/v1/nodes/{node_id}/telemetry`, and authenticated `GET /api/v1/fleet/stream` SSE.
 - SSE events: initial `fleet-snapshot`, then `node-telemetry`, `recipe-state`, and `operation-state`, each with numeric database event ID.
+- Durable resume: migration `0024_fleet_stream_events` adds a serialized transactional cursor/outbox. A plain sequence is not commit ordered and is not sufficient for `Last-Event-ID` replay.
 
 - [ ] **Step 1: Write failing projection tests**
 
@@ -281,20 +287,20 @@ Expected: FAIL because `FleetProjection` does not exist.
 
 Use fixed latest/subquery projections; no history scan. Keep capacity-sensitive fields timestamped. Return stable response models suitable for complete frontend fixtures.
 
-- [ ] **Step 4: Write failing history and SSE tests**
+- [ ] **Step 4: Write failing durable event, history, and SSE tests**
 
-Assert at most 1,500 points, bucket selection, authenticated stream, correct `text/event-stream`, initial snapshot, keepalive, ordered IDs, `Last-Event-ID` resume, and disconnect cleanup.
+Assert source mutation and event commit/rollback together, committed IDs are strictly ordered under concurrent PostgreSQL writers, payloads are bounded and secret-free, and irrelevant updates emit no event. Assert at most 1,500 history points, bucket selection, authenticated stream, correct `text/event-stream`, initial snapshot, keepalive, ordered IDs, retention/cursor reset semantics, `Last-Event-ID` resume, and disconnect cleanup.
 
 - [ ] **Step 5: Implement history and SSE delivery**
 
-SSE may perform a bounded latest-event query once per second; it must not hold a database transaction open between yields. Emit a keepalive every 15 seconds and rely on EventSource retry semantics.
+Record telemetry latest-pointer, recipe/install/run rank, job, and agent-operation transitions through a proven transactional recorder without editing MIA runtime/readiness paths. Allocate IDs by locking a singleton cursor row in the source transaction so commit order is preserved. SSE may read at most 128 events once per second and hydrate telemetry in one batch query; it must not hold a database transaction open between yields. Emit a keepalive every 15 seconds and rely on EventSource retry semantics. Retain a 24-hour semantic replay window and issue a fresh snapshot reset for retention gaps or cursors ahead of the database.
 
 - [ ] **Step 6: Run API/projection tests and commit**
 
-Run: `control/.venv/bin/pytest control/tests/test_fleet_projection.py control/tests/test_fleet_stream.py control/tests/test_operation_api.py -q`
+Run: `control/.venv/bin/pytest control/tests/test_fleet_events.py control/tests/test_fleet_projection.py control/tests/test_fleet_stream.py control/tests/test_operation_api.py control/tests/test_admission_migration.py -q`
 
 ```bash
-git add control/src/vonk_control/fleet_projection.py control/src/vonk_control/fleet_stream.py control/src/vonk_control/api.py control/src/vonk_control/operation_api.py control/tests/test_fleet_projection.py control/tests/test_fleet_stream.py control/tests/test_operation_api.py
+git add control/migrations/versions/0024_fleet_stream_events.py control/src/vonk_control/models.py control/src/vonk_control/fleet_events.py control/src/vonk_control/fleet_projection.py control/src/vonk_control/fleet_stream.py control/src/vonk_control/api.py control/src/vonk_control/operation_api.py control/tests/test_fleet_events.py control/tests/test_fleet_projection.py control/tests/test_fleet_stream.py control/tests/test_admission_migration.py control/tests/test_operation_api.py
 git commit -m "feat: project and stream live fleet state"
 git push
 ```
@@ -473,7 +479,7 @@ git push
 
 - [ ] **Step 1: Write failing rollup and pruning tests**
 
-Use a fixed clock and literal samples to assert min/mean/max buckets, idempotent reruns, late samples, bounded deletion, and exact 24-hour/30-day/365-day boundaries.
+Use a fixed clock and literal samples to assert min/mean/max buckets, idempotent reruns, late samples, bounded deletion, exact 24-hour/30-day/365-day telemetry boundaries, and bounded pruning of expired Fleet stream events without advancing or rewriting the durable cursor.
 
 - [ ] **Step 2: Implement maintenance and verify RED → GREEN**
 
