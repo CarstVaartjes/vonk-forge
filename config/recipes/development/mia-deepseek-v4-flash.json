@@ -24,7 +24,7 @@
   },
   "build": {
     "context": {
-      "sha256": "3a00db8c9467a62d8462c87d85dbb3afb14efa019de99cc217732c9ca286e326",
+      "sha256": "0cd3ce22ca57b10904a09904c972e5f47a6cfc885cb4241accb0771de0bde19e",
       "expected_bytes": 225280,
       "media_type": "application/vnd.vonk-forge.source-bundle.v1+tar"
     },

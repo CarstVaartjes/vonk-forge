@@ -8,8 +8,8 @@ Mia recipe from GitHub
 ## Outcome
 
 Add a source-first Vonk recipe for the official text-only
-`MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark` lane at commit
-`103af68cad84a153c8e6bd3b15e6414a12b71e05`. It runs one real tensor-parallel
+`MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark` lane, currently reviewed at
+commit `f752cd04ab30f2cf42077dd8811a5e1e682d63e7`. It runs one real tensor-parallel
 vLLM service across exactly two DGX Sparks. It does not reuse the existing
 two-replica DS4 smoke profile and does not rewrite the historically accepted
 legacy Mia adapter.
@@ -20,7 +20,7 @@ hotfix is digest-bound.
 
 ## Exact upstream inputs
 
-- Git source: `103af68cad84a153c8e6bd3b15e6414a12b71e05`.
+- Git source: `f752cd04ab30f2cf42077dd8811a5e1e682d63e7`.
 - Model: `deepseek-ai/DeepSeek-V4-Flash-0731` revision
   `9e165c30e2704aec5d9d593cce3eebd58bbef1cb`.
 - Model snapshot size: `166898660330` bytes from the immutable Hugging Face
@@ -63,9 +63,15 @@ address; no lab interface name is baked into the recipe.
 Host mode makes the endpoint use its declared host port directly. The
 persistent host firewall must permit TCP 8888 only from loopback and the NAS
 management address on both nodes, and reject every other interface/source.
-Rank 1 remains headless and therefore has no endpoint listener. Host-network
+Rank 1 remains headless and therefore has no native API listener. Host-network
 traffic traverses the host `INPUT` path, not Docker's `DOCKER-USER` chain, so
-acceptance verifies both rule sets.
+acceptance verifies both rule sets. Because the generic agent requires local
+readiness from every rank, rank 1 pairs the native headless process with a
+minimal readiness proxy that exposes only `/v1/models` and forwards that probe
+to rank 0 over the selected fabric. The proxy exits with the headless process.
+Rank 0's endpoint becomes ready only after the complete tensor-parallel world
+has joined; external inference and the published route still target rank 0
+only.
 
 ## Immutable runtime image
 
@@ -109,5 +115,5 @@ recovery, stop, and uninstall. Existing historical evidence is not reused.
 ## Provenance
 
 - [Official repository](https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark)
-- [Selected commit](https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark/tree/103af68cad84a153c8e6bd3b15e6414a12b71e05)
-- [Selected Compose recipe](https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark/blob/103af68cad84a153c8e6bd3b15e6414a12b71e05/docker-compose.dspark.yml)
+- [Selected commit](https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark/tree/f752cd04ab30f2cf42077dd8811a5e1e682d63e7)
+- [Selected Compose recipe](https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark/blob/f752cd04ab30f2cf42077dd8811a5e1e682d63e7/docker-compose.dspark.yml)

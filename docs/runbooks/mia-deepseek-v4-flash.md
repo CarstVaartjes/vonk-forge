@@ -138,6 +138,15 @@ unique RoCEv2 GID, so it does not depend on `iproute2` inside the runtime image.
 If that lookup fails, verify the selected direct-fabric address and the node's
 RoCEv2 GID configuration; do not add packages to a running container.
 
+Rank 1 remains a native vLLM headless worker, so it does not provide its own
+OpenAI API. A minimal runtime-local readiness proxy exposes only
+`/v1/models` on rank 1 and forwards that probe over the selected fabric to rank
+0. The proxy runs only while the headless vLLM process is alive. Rank 0 cannot
+serve that endpoint until both tensor-parallel ranks have joined, so each
+agent's normal local readiness check proves the worker process is alive and the
+complete two-rank engine is serving. Client traffic and the published route
+still terminate only at rank 0.
+
 After a long image import, authenticated inventory can briefly be older than
 the installation admission limit. The driver retries only previews whose sole
 blocker is `install.stale_inventory`, for at most two minutes and within the

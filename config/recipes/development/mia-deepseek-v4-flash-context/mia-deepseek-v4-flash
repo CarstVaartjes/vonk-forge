@@ -81,7 +81,7 @@ if [[ ${VONK_RANK} == 1 ]]; then
   headless=(--headless)
 fi
 
-exec /usr/local/bin/vllm serve "${model}" \
+vllm=(/usr/local/bin/vllm serve "${model}" \
   --served-model-name deepseek-v4-flash-dspark \
   --host "${VONK_LISTEN_HOST}" \
   --port "${VONK_LISTEN_PORT}" \
@@ -115,4 +115,29 @@ exec /usr/local/bin/vllm serve "${model}" \
   --node-rank "${VONK_RANK}" \
   --master-addr "${VONK_MASTER_ADDR}" \
   --master-port "${VONK_MASTER_PORT}" \
-  "${headless[@]}"
+  "${headless[@]}")
+
+if [[ ${VONK_RANK} == 0 ]]; then
+  exec "${vllm[@]}"
+fi
+
+"${vllm[@]}" &
+vllm_pid=$!
+/opt/vonk/worker-readiness-proxy.py \
+  --listen-host "${VONK_LISTEN_HOST}" \
+  --listen-port "${VONK_LISTEN_PORT}" \
+  --master-address "${VONK_MASTER_ADDR}" \
+  --master-port "${VONK_LISTEN_PORT}" &
+proxy_pid=$!
+
+terminate() {
+  kill -TERM "${vllm_pid}" "${proxy_pid}" 2>/dev/null || true
+}
+trap terminate TERM INT
+set +e
+wait -n "${vllm_pid}" "${proxy_pid}"
+status=$?
+set -e
+terminate
+wait "${vllm_pid}" "${proxy_pid}" 2>/dev/null || true
+exit "${status}"
