@@ -282,15 +282,20 @@ def _render_compose(
     old_agent = "VONK_AGENT_HOSTNAME: agents.vonk-forge.lan"
     old_fabric = 'VONK_DIRECT_FABRIC_CIDRS: ""'
     old_project = "name: vonk-forge-dev\n\n"
+    accepted_start = "x-dev-generation: &dev-generation\n"
+    if text.startswith(old_project):
+        rendered = text.removeprefix(old_project)
+    elif text.startswith(accepted_start):
+        rendered = text
+    else:
+        raise ProjectPublicationError("source Compose hostname contract is unexpected")
     if (
-        text.count(old_project) != 1
-        or not text.startswith(old_project)
-        or text.count(old_enroll) != 1
-        or text.count(old_agent) != 1
-        or text.count(old_fabric) != 2
+        rendered.count(old_project) != 0
+        or rendered.count(old_enroll) != 1
+        or rendered.count(old_agent) != 1
+        or rendered.count(old_fabric) != 2
     ):
         raise ProjectPublicationError("source Compose hostname contract is unexpected")
-    rendered = text.removeprefix(old_project)
     rendered = rendered.replace(old_enroll, f"VONK_AGENT_ENROLL_HOSTNAME: {enroll}")
     rendered = rendered.replace(old_agent, f"VONK_AGENT_HOSTNAME: {agent}")
     rendered = rendered.replace(

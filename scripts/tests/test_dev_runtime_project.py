@@ -19,6 +19,11 @@ ROOT = Path(__file__).resolve().parents[2]
 SECRETS_SCRIPT = ROOT / "scripts" / "dev-runtime-secrets.py"
 PROJECT_SCRIPT = ROOT / "scripts" / "dev-runtime-project"
 SOURCE_COMPOSE = ROOT / "deploy" / "compose" / "compose.dev.images.yaml"
+PINNED_COMPATIBILITY_BLOCK = (
+    "# Compatibility input for the current pinned renderer. Task 5 must retain this\n"
+    "# token only for pinned output and omit it entirely from mutable output.\n"
+    'x-pinned-expected-commit: "__VONK_EXPECTED_COMMIT__"\n'
+)
 
 ENROLL_HOSTNAME = "enroll.example.test"
 AGENT_HOSTNAME = "agents.example.test"
@@ -98,6 +103,17 @@ def _run_project(
     source_compose: Path = SOURCE_COMPOSE,
     *extra: str,
 ) -> subprocess.CompletedProcess[str]:
+    if source_compose == SOURCE_COMPOSE:
+        source_compose = destination.parent / "accepted-docker-compose.dev.yml"
+        rendered = SOURCE_COMPOSE.read_text(encoding="utf-8")
+        rendered = rendered.removeprefix("name: vonk-forge-dev\n\n")
+        rendered = rendered.replace(
+            "__VONK_API_IMAGE__", "ghcr.io/carstvaartjes/vonk-forge-api:dev"
+        ).replace(
+            "__VONK_WORKER_IMAGE__", "ghcr.io/carstvaartjes/vonk-forge-worker:dev"
+        )
+        rendered = rendered.replace(PINNED_COMPATIBILITY_BLOCK, "", 1)
+        source_compose.write_text(rendered, encoding="utf-8")
     return subprocess.run(
         (
             sys.executable,
