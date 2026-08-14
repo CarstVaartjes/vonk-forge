@@ -426,6 +426,10 @@ def test_latest_mia_runbook_is_exact_reproducible_and_secret_free() -> None:
         assert value in text
     assert "No Hugging Face token" in normalized
     assert "rank 1 runs headless" in normalized.lower()
+    assert "failed installation" in normalized.lower()
+    assert "one exact retry" in normalized.lower()
+    assert "same installation identity" in normalized.lower()
+    assert "immutable model and image caches" in normalized.lower()
 
 
 def test_secret_docs_separate_local_backup_from_exact_nas_projection() -> None:

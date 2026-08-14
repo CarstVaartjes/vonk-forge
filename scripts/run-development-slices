@@ -656,11 +656,13 @@ class Runner:
         *,
         expected_nodes: list[str] | None = None,
         retry_request_key: str | None = None,
+        retry_terminal_states: frozenset[str] | None = None,
     ) -> tuple[str, str, dict[str, Any]]:
         operation_id, owner_id, current = self._terminal_operation(
             response,
             label,
             retry_request_key=retry_request_key,
+            retry_terminal_states=retry_terminal_states,
         )
         state = current.get("state")
         if state != "succeeded":
@@ -692,6 +694,7 @@ class Runner:
         label: str,
         *,
         retry_request_key: str | None = None,
+        retry_terminal_states: frozenset[str] | None = None,
     ) -> tuple[str, str, dict[str, Any]]:
         operation = _object(response, label)
         operation_id = operation.get("id")
@@ -707,7 +710,11 @@ class Runner:
             if state == "succeeded":
                 break
             if state in terminal_states:
-                if retry_request_key is None or retried:
+                retry_allowed = (
+                    retry_terminal_states is None
+                    or state in retry_terminal_states
+                )
+                if retry_request_key is None or retried or not retry_allowed:
                     break
                 _, retry_payload = self.control.request(
                     "POST",
@@ -1080,7 +1087,11 @@ class Runner:
             },
         )
         operation_id, installation_id, _result = self.operation(
-            response, "recipe installation", expected_nodes=self.targets
+            response,
+            "recipe installation",
+            expected_nodes=self.targets,
+            retry_request_key=self.request_key("installed", "install-retry"),
+            retry_terminal_states=frozenset({"failed"}),
         )
         self.complete(
             "installed",

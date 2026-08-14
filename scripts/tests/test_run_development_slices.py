@@ -72,6 +72,7 @@ class SliceServer(ThreadingHTTPServer):
         self.operation_plan_digests: dict[str, str] = {}
         self.build_operation_state = "succeeded"
         self.distribution_operation_state = "succeeded"
+        self.install_operation_state = "succeeded"
         self.retry_operation_state = "succeeded"
         self.start_operation_states: list[str] = []
         self.run_plan_digest = "f" * 64
@@ -478,11 +479,11 @@ class SliceHandler(BaseHTTPRequestHandler):
                 original_operation_id, "build"
             )
             self._operation(
-                (
-                    "20000000-0000-4000-8000-000000000002"
-                    if original_kind == "distribution"
-                    else "20000000-0000-4000-8000-000000000001"
-                ),
+                {
+                    "build": "20000000-0000-4000-8000-000000000001",
+                    "distribution": "20000000-0000-4000-8000-000000000002",
+                    "install": "20000000-0000-4000-8000-000000000003",
+                }[original_kind],
                 [NODE],
                 kind=original_kind,
                 state=self.server.retry_operation_state,
@@ -602,6 +603,8 @@ class SliceHandler(BaseHTTPRequestHandler):
             state = self.server.build_operation_state
         if state is None and kind == "distribution":
             state = self.server.distribution_operation_state
+        if state is None and kind == "install":
+            state = self.server.install_operation_state
         if state is not None:
             self.server.operation_states[operation_id] = state
         return {
@@ -1199,6 +1202,55 @@ def test_runner_stops_after_one_terminal_distribution_retry(
     assert result.returncode == 1
     assert "image distribution operation ended in failed" in result.stderr
     assert json.loads(evidence_path.read_text())["completed_states"] == STATES[:4]
+
+
+def test_runner_retries_one_failed_installation(
+    tmp_path: Path, server: SliceServer
+) -> None:
+    server.install_operation_state = "failed"
+
+    result, evidence_path = _run(tmp_path, server)
+
+    assert result.returncode == 0, result.stderr
+    evidence = json.loads(evidence_path.read_text())
+    expected_retry_key = str(
+        uuid.uuid5(uuid.UUID(evidence["acceptance_id"]), "installed:install-retry")
+    )
+    retry_bodies = [
+        json.loads(body)
+        for method, path, body in server.request_bodies
+        if method == "POST" and path.endswith("/retry")
+    ]
+    assert retry_bodies == [{"request_key": expected_retry_key}]
+    assert evidence["completed_states"] == STATES
+
+
+def test_runner_stops_after_one_failed_installation_retry(
+    tmp_path: Path, server: SliceServer
+) -> None:
+    server.install_operation_state = "failed"
+    server.retry_operation_state = "failed"
+
+    result, evidence_path = _run(tmp_path, server)
+
+    assert result.returncode == 1
+    assert "recipe installation operation ended in failed" in result.stderr
+    assert sum(path.endswith("/retry") for _, path, _ in server.requests) == 1
+    assert json.loads(evidence_path.read_text())["completed_states"] == STATES[:5]
+
+
+@pytest.mark.parametrize("terminal_state", ("waiting-for-operator", "expired"))
+def test_runner_does_not_retry_nonfailed_installation(
+    tmp_path: Path, server: SliceServer, terminal_state: str
+) -> None:
+    server.install_operation_state = terminal_state
+
+    result, evidence_path = _run(tmp_path, server)
+
+    assert result.returncode == 1
+    assert f"recipe installation operation ended in {terminal_state}" in result.stderr
+    assert not any(path.endswith("/retry") for _, path, _ in server.requests)
+    assert json.loads(evidence_path.read_text())["completed_states"] == STATES[:5]
 
 
 @pytest.mark.parametrize("failure", ("stale", "missing-build", "missing-runtime"))
