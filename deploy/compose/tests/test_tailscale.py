@@ -26,12 +26,8 @@ EXPECTED_MAP = {
     "version": "0.0.1",
     "services": {
         "svc:vonk-forge": {"endpoints": {"tcp:443": "http://caddy:8080"}},
-        "svc:hermes-api": {
-            "endpoints": {"tcp:443": "http://hermes-agent:8642"}
-        },
-        "svc:hermes-dashboard": {
-            "endpoints": {"tcp:443": "http://hermes-agent:9119"}
-        },
+        "svc:hermes-api": {"endpoints": {"tcp:443": "http://hermes-agent:8642"}},
+        "svc:hermes-dashboard": {"endpoints": {"tcp:443": "http://hermes-agent:9119"}},
     },
 }
 
@@ -90,13 +86,22 @@ def test_gateway_is_persistent_userspace_and_unpublished() -> None:
     assert gateway["environment"] == {
         "TS_AUTH_ONCE": "true",
         "TS_CLIENT_ID": "file:/run/secrets/tailscale-oauth-client-id",
-        "TS_CLIENT_SECRET": "file:/run/secrets/tailscale-oauth-client-secret",
         "TS_EXTRA_ARGS": "--advertise-tags=tag:vonk-gateway",
         "TS_HOSTNAME": "vonk-forge-gateway",
         "TS_SOCKET": "/var/run/tailscale/tailscaled.sock",
         "TS_STATE_DIR": "/var/lib/tailscale",
         "TS_USERSPACE": "true",
     }
+    assert gateway["command"][:3] == ["/bin/sh", "-eu", "-c"]
+    bootstrap = gateway["command"][3]
+    assert "?ephemeral=false&preauthorized=true" in bootstrap
+    assert (
+        "TS_CLIENT_SECRET=file:/tmp/tailscale-oauth-client-secret-non-ephemeral"
+        in bootstrap
+    )
+    assert "exec env" in bootstrap
+    assert "tr -d '\\r\\n'" in bootstrap
+    assert "echo" not in bootstrap
     volumes = _volume_targets(gateway)
     assert volumes["/var/lib/tailscale"]["type"] == "volume"
     assert volumes["/var/run/tailscale"]["type"] == "volume"
@@ -122,8 +127,16 @@ def test_configurator_waits_for_every_exact_backend_health_gate() -> None:
     assert configurator["restart"] == "unless-stopped"
     assert configurator["depends_on"] == {
         "caddy": {"condition": "service_healthy", "required": True, "restart": True},
-        "hermes-agent": {"condition": "service_healthy", "required": False, "restart": True},
-        "tailscale-gateway": {"condition": "service_healthy", "required": True, "restart": True},
+        "hermes-agent": {
+            "condition": "service_healthy",
+            "required": False,
+            "restart": True,
+        },
+        "tailscale-gateway": {
+            "condition": "service_healthy",
+            "required": True,
+            "restart": True,
+        },
     }
 
 
@@ -160,32 +173,35 @@ def test_configurator_repairs_plaintext_or_extra_service_map(tmp_path: Path) -> 
     repaired = tmp_path / "repaired"
     status_checks = tmp_path / "status-checks"
     fake = tmp_path / "tailscale"
-    healthy_status = json.dumps({
-        "Services": {
-            service: {"TCP": {"443": {"HTTPS": True}}}
-            for service in EXPECTED_MAP["services"]
-        }
-    }, separators=(",", ":"))
+    healthy_status = json.dumps(
+        {
+            "Services": {
+                service: {"TCP": {"443": {"HTTPS": True}}}
+                for service in EXPECTED_MAP["services"]
+            }
+        },
+        separators=(",", ":"),
+    )
     fake.write_text(
         "#!/bin/sh\n"
         f"log={log}\n"
         f"repaired={repaired}\n"
         f"status_checks={status_checks}\n"
-        "case \"$*\" in\n"
-        "  *\"serve get-config --all\"*)\n"
+        'case "$*" in\n'
+        '  *"serve get-config --all"*)\n'
         "    if [ -f \"$repaired\" ]; then printf '%s\\n' "
-        "'{\"version\":\"0.0.1\",\"services\":{\"svc:hermes-api\":{\"endpoints\":{\"tcp:443\":\"http://hermes-agent:8642\"}},\"svc:hermes-dashboard\":{\"endpoints\":{\"tcp:443\":\"http://hermes-agent:9119\"}},\"svc:vonk-forge\":{\"endpoints\":{\"tcp:443\":\"http://caddy:8080\"}}}}'; "
-        "else printf '%s\\n' '{\"version\":\"0.0.1\",\"services\":{\"svc:extra\":{\"endpoints\":{\"tcp:99\":\"tcp://unexpected:99\"}}}}'; fi ;;\n"
-        "  *\"serve status --json\"*)\n"
-        "    if [ -f \"$repaired\" ]; then count=0; "
-        "[ ! -f \"$status_checks\" ] || count=$(cat \"$status_checks\"); "
-        "count=$((count + 1)); printf '%s\\n' \"$count\" >\"$status_checks\"; "
+        '\'{"version":"0.0.1","services":{"svc:hermes-api":{"endpoints":{"tcp:443":"http://hermes-agent:8642"}},"svc:hermes-dashboard":{"endpoints":{"tcp:443":"http://hermes-agent:9119"}},"svc:vonk-forge":{"endpoints":{"tcp:443":"http://caddy:8080"}}}}\'; '
+        'else printf \'%s\\n\' \'{"version":"0.0.1","services":{"svc:extra":{"endpoints":{"tcp:99":"tcp://unexpected:99"}}}}\'; fi ;;\n'
+        '  *"serve status --json"*)\n'
+        '    if [ -f "$repaired" ]; then count=0; '
+        '[ ! -f "$status_checks" ] || count=$(cat "$status_checks"); '
+        'count=$((count + 1)); printf \'%s\\n\' "$count" >"$status_checks"; '
         f"if [ \"$count\" -le 2 ]; then printf '%s\\n' '{{\"Services\":{{}}}}'; else printf '%s\\n' '{healthy_status}'; fi; "
-        "else printf '%s\\n' '{\"Services\":{\"svc:vonk-forge\":{\"TCP\":{\"443\":{\"HTTP\":true}}}}}'; fi ;;\n"
-        "  *\"--service=svc:vonk-forge --https=443 http://caddy:8080\"*)\n"
-        "    printf '%s\\n' \"$*\" >>\"$log\"; touch \"$repaired\" ;;\n"
-        "  *\"status --json\"*) printf '%s\\n' '{\"Self\":{\"CapMap\":{\"services/vonk-forge\":[],\"services/hermes-api\":[],\"services/hermes-dashboard\":[]}}}' ;;\n"
-        "  *) printf '%s\\n' \"$*\" >>\"$log\" ;;\n"
+        'else printf \'%s\\n\' \'{"Services":{"svc:vonk-forge":{"TCP":{"443":{"HTTP":true}}}}}\'; fi ;;\n'
+        '  *"--service=svc:vonk-forge --https=443 http://caddy:8080"*)\n'
+        '    printf \'%s\\n\' "$*" >>"$log"; touch "$repaired" ;;\n'
+        '  *"status --json"*) printf \'%s\\n\' \'{"Self":{"CapMap":{"services/vonk-forge":[],"services/hermes-api":[],"services/hermes-dashboard":[]}}}\' ;;\n'
+        '  *) printf \'%s\\n\' "$*" >>"$log" ;;\n'
         "esac\n"
     )
     fake.chmod(0o755)

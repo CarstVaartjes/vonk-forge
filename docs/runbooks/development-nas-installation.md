@@ -217,7 +217,13 @@ administrator login still controls application access.
    transcript. The generator reads these mode `0600` files through
    `--tailscale-oauth-client-id-file` and
    `--tailscale-oauth-client-secret-file`; the publisher creates the matching
-   NAS files without printing their contents.
+   NAS files without printing their contents. Keep the client secret raw and
+   do not add OAuth query parameters. At gateway startup, Compose derives a
+   mode-`0400` tmpfs-only copy with
+   `?ephemeral=false&preauthorized=true` without placing the raw value in a
+   shell variable or output, and passes only that derived file path to
+   Tailscale. Preauthorization covers the tag-scoped gateway device only; it
+   does not replace the exact `svc:vonk-forge` grant or Service-host approval.
 
 The gateway reconciles one HTTPS-only Serve endpoint:
 `svc:vonk-forge` HTTPS 443 to `http://caddy:8080`. Tailscale Funnel remains
@@ -233,6 +239,12 @@ pending `vonk-forge-dev-gateway` host if the console presents it. Check the
 `tailscale-configurator` log for `approval from an admin is required`. Do not
 enable Funnel to resolve this condition: Funnel grants public-internet ingress
 and is unrelated to private Service-host approval.
+
+The connected `vonk-forge-dev-gateway` host must not carry Tailscale's
+**Ephemeral** label. That label means the project is running an older Compose
+artifact whose OAuth default can discard the gateway identity after an
+extended disconnect. Pull the corrected Compose before continuing; do not
+approve an ephemeral host as the final installation.
 
 ## Generate and copy the NAS secret bundle
 
@@ -636,8 +648,13 @@ as a substitute for restoring PostgreSQL or generated-secret state.
   If Tailscale state is lost, the scoped OAuth client may create one replacement
   tagged gateway. Verify exactly one current gateway advertises
   `svc:vonk-forge`, revoke any orphan, and recheck the exact HTTPS-only Serve
-  map. Application data and browser session rows remain separate from
-  Tailscale state.
+  map. The replacement must not be marked **Ephemeral**. To repair a gateway
+  created by an older Compose artifact, first publish the corrected artifact,
+  stop only `tailscale-configurator` and `tailscale-gateway`, remove only the
+  project's `dev-tailscale-state` and `dev-tailscale-socket` volumes, then
+  redeploy. Approve the new advertisement if required and revoke the old node.
+  Application data and browser session rows remain separate from Tailscale
+  state; never remove unrelated volumes for this repair.
 - For OAuth compromise, revoke the OAuth client in **Trust credentials**, revoke
   the affected gateway node and Service approval, and create a replacement
   client with the same narrow scope. Capture both replacement values in new
