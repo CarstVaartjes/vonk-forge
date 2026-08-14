@@ -414,9 +414,10 @@ def test_latest_mia_runbook_is_exact_reproducible_and_secret_free() -> None:
     normalized = _normalized_text(MIA_TWO_SPARK)
 
     for value in (
-        "103af68cad84a153c8e6bd3b15e6414a12b71e05",
+        "f752cd04ab30f2cf42077dd8811a5e1e682d63e7",
         "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
         "166898660330",
+        "mia-mit",
         "VONK_HOST_ENDPOINT_PORTS=8888",
         "check-host-port 8888",
         "--recipe config/recipes/development/mia-deepseek-v4-flash.json",

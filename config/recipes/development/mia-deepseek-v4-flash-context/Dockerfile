@@ -4,8 +4,14 @@ COPY --chmod=0644 encoding/encoding_dsv4.py /opt/vonk/encoding/encoding_dsv4.py
 COPY --chmod=0755 patches/ /opt/vonk/patches/
 COPY --chmod=0755 apply-reasoning-default.py resolve-model.py resolve-roce.py mia-deepseek-v4-flash /opt/vonk/
 RUN set -eux; \
+    if getent passwd 10001 >/dev/null || getent passwd vonk >/dev/null; then echo 'runtime user already exists' >&2; exit 1; fi; \
+    if getent group 10001 >/dev/null || getent group vonk >/dev/null; then echo 'runtime group already exists' >&2; exit 1; fi; \
+    groupadd --gid 10001 vonk; \
+    useradd --uid 10001 --gid 10001 --home-dir /state --no-create-home --shell /usr/sbin/nologin --comment 'Vonk runtime' vonk; \
     cp /opt/vonk/encoding/encoding_dsv4.py /usr/local/lib/python3.12/dist-packages/vllm/tokenizers/deepseek_v4_encoding.py; \
     python3 /opt/vonk/patches/hotfix-encoding-dsv4-issue21.py; \
+    python3 /opt/vonk/patches/hotfix-dsv4-issue31-v2-thinking-budget-gpu.py; \
+    python3 /opt/vonk/patches/hotfix-dsv4-issue55-tool-truncation.py; \
     bash /opt/vonk/patches/hotfix-nvfp4-ds-mla-issue22.sh; \
     bash /opt/vonk/patches/hotfix-dsv4-mtp-buffer-50312.sh; \
     bash /opt/vonk/patches/hotfix-dsv4-adaptive-topk-50004.sh; \
@@ -22,7 +28,13 @@ RUN set -eux; \
     python3 -m py_compile \
       /opt/vonk/resolve-model.py \
       /opt/vonk/resolve-roce.py \
+      /usr/local/lib/python3.12/dist-packages/vllm/config/vllm.py \
+      /usr/local/lib/python3.12/dist-packages/vllm/entrypoints/openai/chat_completion/serving.py \
+      /usr/local/lib/python3.12/dist-packages/vllm/v1/engine/input_processor.py \
       /usr/local/lib/python3.12/dist-packages/vllm/v1/core/sched/scheduler.py \
+      /usr/local/lib/python3.12/dist-packages/vllm/v1/worker/gpu/model_runner.py \
+      /usr/local/lib/python3.12/dist-packages/vllm/v1/worker/gpu/sample/sampler.py \
+      /usr/local/lib/python3.12/dist-packages/vllm/v1/worker/gpu/sample/thinking_budget_gpu.py \
       /usr/local/lib/python3.12/dist-packages/vllm/tokenizers/deepseek_v4_encoding.py \
       /usr/local/lib/python3.12/dist-packages/vllm/tokenizers/deepseek_v4.py
 LABEL ai.vonkforge.runtime-interface="v1"
