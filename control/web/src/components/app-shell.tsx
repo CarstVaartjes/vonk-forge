@@ -1,4 +1,4 @@
-import {useState} from "react";
+import {useEffect, useRef, useState} from "react";
 import type {MouseEvent, ReactNode} from "react";
 import {ActivityIcon, ChevronIcon, CloseIcon, FleetIcon, LibraryIcon, MenuIcon, SystemIcon} from "./icons";
 
@@ -51,6 +51,13 @@ function NavGroup({activeRoute, icon, label, onNavigate, routes}: {activeRoute: 
 
 export function AppShell({activeRoute, children, onNavigate, operator}: AppShellProps) {
   const [navigationOpen, setNavigationOpen] = useState(false);
+  const mainContent = useRef<HTMLElement>(null);
+  const previousRoute = useRef(activeRoute);
+  useEffect(() => {
+    if (previousRoute.current === activeRoute) return;
+    previousRoute.current = activeRoute;
+    mainContent.current?.focus();
+  }, [activeRoute]);
   function navigate(event: MouseEvent<HTMLAnchorElement>, route: AppRoute) {
     setNavigationOpen(false);
     onNavigate(event, route);
@@ -84,6 +91,6 @@ export function AppShell({activeRoute, children, onNavigate, operator}: AppShell
         </div>
       </div>
     </aside>
-    <main id="main-content" tabIndex={-1}><div className="content-frame">{children}</div></main>
+    <main ref={mainContent} id="main-content" tabIndex={-1}><div className="content-frame">{children}</div></main>
   </div>;
 }

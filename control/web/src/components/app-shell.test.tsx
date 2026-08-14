@@ -1,4 +1,4 @@
-import {render, screen, within} from "@testing-library/react";
+import {render, screen, waitFor, within} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {App} from "../app";
 import type {CatalogApi, ControlApi} from "../api/types";
@@ -110,6 +110,23 @@ test("opens Library on meaningful existing catalog content", async () => {
   expect(await screen.findByRole("heading", {name: "Recipe catalog"})).toBeVisible();
   expect(location.pathname).toBe("/catalog");
   expect(screen.getByRole("link", {name: "Library"})).toHaveAttribute("aria-current", "page");
+});
+
+test("moves focus to main content after mobile route activation", async () => {
+  // Break caught: closing the mobile navigation leaves keyboard focus on the
+  // activated link after its navigation container becomes hidden.
+  render(<App api={apiFixture}/>);
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", {name: "Open system navigation"}));
+  const library = screen.getByRole("link", {name: "Library"});
+
+  library.focus();
+  expect(library).toHaveFocus();
+  await user.click(library);
+
+  expect(await screen.findByRole("heading", {name: "Recipe catalog"})).toBeVisible();
+  await waitFor(() => expect(screen.getByRole("main")).toHaveFocus());
+  expect(screen.getByRole("button", {name: "Open system navigation"})).toHaveAttribute("aria-expanded", "false");
 });
 
 test("renders reusable status and capacity components with native semantics", () => {
