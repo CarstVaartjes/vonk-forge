@@ -6,8 +6,10 @@ hostname_output=${TS_HOSTNAME_OUTPUT:-/run/vonk-tailnet/control-hostname}
 authority_output=${hostname_output}.ready
 generation_file=${TS_GENERATION_FILE:-/tmp/vonk-tailnet-generation}
 reconcile_interval=60
+activation_wait_interval=2
 remaining=120
-expected_service_map='{"services":{"svc:vonk-forge":{"endpoints":{"tcp:443":"http://caddy:8080"}}},"version":"0.0.1"}'
+expected_service_map_services_first='{"services":{"svc:vonk-forge":{"endpoints":{"tcp:443":"http://caddy:8080"}}},"version":"0.0.1"}'
+expected_service_map_version_first='{"version":"0.0.1","services":{"svc:vonk-forge":{"endpoints":{"tcp:443":"http://caddy:8080"}}}}'
 snapshot_directory=$(mktemp -d /tmp/vonk-tailnet-snapshots.XXXXXX)
 serve_status_snapshot=${snapshot_directory}/serve-status.json
 serve_config_snapshot=${snapshot_directory}/serve-config.json
@@ -28,6 +30,7 @@ trap cleanup_snapshots EXIT
 
 if [ "${TS_CONFIGURE_TEST_MODE:-0}" = "1" ]; then
     reconcile_interval=${TS_RECONCILE_INTERVAL:-1}
+    activation_wait_interval=1
     case "${reconcile_interval}" in
         "" | *[!0-9]*)
             printf 'ERROR: test reconciliation interval is invalid.\n' >&2
@@ -65,11 +68,13 @@ serve_is_exact() {
     tr -d '[:space:]' <"${serve_status_snapshot}" >"${serve_status_compact}"
     tr -d '[:space:]' <"${serve_config_snapshot}" >"${serve_config_compact}"
 
+    actual_service_map=$(cat "${serve_config_compact}")
     grep -Fq '"svc:vonk-forge":{"TCP":{"443":{"HTTPS":true}}' \
         "${serve_status_compact}" \
         && ! grep -Fq '"443":{"HTTP":true}' "${serve_status_compact}" \
         && ! grep -Fq '"TCPForward"' "${serve_status_compact}" \
-        && [ "$(cat "${serve_config_compact}")" = "${expected_service_map}" ]
+        && { [ "${actual_service_map}" = "${expected_service_map_services_first}" ] \
+            || [ "${actual_service_map}" = "${expected_service_map_version_first}" ]; }
 }
 
 configure_service() {
@@ -78,9 +83,22 @@ configure_service() {
     ts serve advertise svc:vonk-forge
 }
 
+wait_for_exact_service() {
+    activation_remaining=120
+    while [ "${activation_remaining}" -gt 0 ]; do
+        if serve_is_exact; then
+            return 0
+        fi
+        sleep "${activation_wait_interval}"
+        activation_remaining=$((activation_remaining - activation_wait_interval))
+    done
+    return 1
+}
+
 verify_capability_and_suffix() {
     ts status --json >"${tailscale_status_snapshot}"
-    if ! grep -Fq 'service-host' "${tailscale_status_snapshot}"; then
+    if ! grep -Fq '"service-host"' "${tailscale_status_snapshot}" \
+        && ! grep -Fq '"services/vonk-forge"' "${tailscale_status_snapshot}"; then
         printf 'ERROR: the gateway lacks the required Service hosting capability.\n' >&2
         return 1
     fi
@@ -206,7 +224,7 @@ fi
 if ! serve_is_exact; then
     configure_service
 fi
-if ! serve_is_exact; then
+if ! wait_for_exact_service; then
     printf 'ERROR: the exact HTTPS Service map is not active.\n' >&2
     exit 1
 fi

@@ -176,34 +176,41 @@ def test_hostname_handoff_orders_caddy_without_a_startup_cycle() -> None:
 def _fake_cli(
     tmp_path: Path,
     *,
-    expected: str,
     suffix: str,
     drifted: bool,
+    activation_delay: int = 0,
 ) -> tuple[Path, Path]:
     calls = tmp_path / "calls.log"
     repaired = tmp_path / "repaired"
+    status_checks = tmp_path / "status-checks"
     fake = tmp_path / "tailscale"
     initial_config = (
         '{"version":"0.0.1","services":{"svc:vonk-forge":'
         '{"endpoints":{"tcp:443":"http://wrong:80"}},"svc:extra":'
         '{"endpoints":{"tcp:80":"http://plaintext:80"}}}}'
         if drifted
-        else expected
+        else '{"version":"0.0.1","services":{"svc:vonk-forge":{"endpoints":{"tcp:443":"http://caddy:8080"}}}}'
     )
     fake.write_text(
         "#!/bin/sh\n"
         f"calls={calls}\n"
         f"repaired={repaired}\n"
+        f"status_checks={status_checks}\n"
         "printf '%s\\n' \"$*\" >>\"$calls\"\n"
         "case \"$*\" in\n"
         "  *\"serve get-config --all\"*)\n"
-        f"    if [ -f \"$repaired\" ]; then printf '%s\\n' '{expected}'; "
+        "    if [ -f \"$repaired\" ]; then printf '%s\\n' "
+        "'{\"version\":\"0.0.1\",\"services\":{\"svc:vonk-forge\":{\"endpoints\":{\"tcp:443\":\"http://caddy:8080\"}}}}'; "
         f"else printf '%s\\n' '{initial_config}'; fi ;;\n"
         "  *\"serve status --json\"*)\n"
-        "    if [ -f \"$repaired\" ]; then printf '%s\\n' '{\"Services\":{\"svc:vonk-forge\":{\"TCP\":{\"443\":{\"HTTPS\":true}}}}}'; "
+        "    if [ -f \"$repaired\" ]; then "
+        "count=0; [ ! -f \"$status_checks\" ] || count=$(cat \"$status_checks\"); "
+        "count=$((count + 1)); printf '%s\\n' \"$count\" >\"$status_checks\"; "
+        f"if [ \"$count\" -le {activation_delay} ]; then printf '%s\\n' '{{\"Services\":{{}}}}'; "
+        "else printf '%s\\n' '{\"Services\":{\"svc:vonk-forge\":{\"TCP\":{\"443\":{\"HTTPS\":true}}}}}'; fi; "
         "else printf '%s\\n' '{\"Services\":{\"svc:vonk-forge\":{\"TCP\":{\"443\":{\"HTTP\":true}}}}}'; fi ;;\n"
         "  *\"--service=svc:vonk-forge --https=443 http://caddy:8080\"*) touch \"$repaired\" ;;\n"
-        f"  *\"status --json\"*) printf '%s\\n' '{{\"CurrentTailnet\":{{\"MagicDNSSuffix\":\"{suffix}\"}},\"Self\":{{\"CapMap\":{{\"service-host\":[]}}}}}}' ;;\n"
+        f"  *\"status --json\"*) printf '%s\\n' '{{\"CurrentTailnet\":{{\"MagicDNSSuffix\":\"{suffix}\"}},\"Self\":{{\"CapMap\":{{\"services/vonk-forge\":[{{\"Name\":\"svc:vonk-forge\",\"Ports\":[\"tcp:443\"]}}]}}}}}}' ;;\n"
         "esac\n",
         encoding="utf-8",
     )
@@ -216,6 +223,7 @@ def _run_reconciler(
     *,
     suffix: str,
     drifted: bool,
+    activation_delay: int = 0,
 ) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
     socket_path = tmp_path / "tailscaled.sock"
     daemon_socket = socket.socket(socket.AF_UNIX)
@@ -224,12 +232,11 @@ def _run_reconciler(
     output.mkdir()
     target = output / "control-hostname"
     target.write_text("vonk-forge.stale-tailnet.ts.net\n", encoding="utf-8")
-    expected = json.dumps(EXPECTED_MAP, sort_keys=True, separators=(",", ":"))
     _, calls = _fake_cli(
         tmp_path,
-        expected=expected,
         suffix=suffix,
         drifted=drifted,
+        activation_delay=activation_delay,
     )
     try:
         result = subprocess.run(
@@ -276,6 +283,21 @@ def test_reconciler_repairs_drift_and_publishes_exact_live_service_hostname(
         assert command in commands
     for forbidden in ("svc:extra", "svc:hermes", "funnel", "--http=", "--tcp="):
         assert forbidden not in commands
+
+
+def test_reconciler_waits_for_service_host_approval_to_propagate(
+    tmp_path: Path,
+) -> None:
+    result, target, calls = _run_reconciler(
+        tmp_path,
+        suffix="team-example.ts.net",
+        drifted=True,
+        activation_delay=2,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert target.read_text() == "vonk-forge.team-example.ts.net\n"
+    assert calls.read_text().count("serve advertise svc:vonk-forge") == 1
 
 
 def test_reconciler_rejects_invalid_tailnet_suffix_without_stale_publication(

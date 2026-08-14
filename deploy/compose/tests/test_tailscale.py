@@ -158,8 +158,8 @@ def test_configurator_repairs_plaintext_or_extra_service_map(tmp_path: Path) -> 
     daemon_socket.bind(str(socket_path))
     log = tmp_path / "calls.log"
     repaired = tmp_path / "repaired"
+    status_checks = tmp_path / "status-checks"
     fake = tmp_path / "tailscale"
-    expected = json.dumps(EXPECTED_MAP, sort_keys=True, separators=(",", ":"))
     healthy_status = json.dumps({
         "Services": {
             service: {"TCP": {"443": {"HTTPS": True}}}
@@ -170,16 +170,21 @@ def test_configurator_repairs_plaintext_or_extra_service_map(tmp_path: Path) -> 
         "#!/bin/sh\n"
         f"log={log}\n"
         f"repaired={repaired}\n"
+        f"status_checks={status_checks}\n"
         "case \"$*\" in\n"
         "  *\"serve get-config --all\"*)\n"
-        f"    if [ -f \"$repaired\" ]; then printf '%s\\n' '{expected}'; "
+        "    if [ -f \"$repaired\" ]; then printf '%s\\n' "
+        "'{\"version\":\"0.0.1\",\"services\":{\"svc:hermes-api\":{\"endpoints\":{\"tcp:443\":\"http://hermes-agent:8642\"}},\"svc:hermes-dashboard\":{\"endpoints\":{\"tcp:443\":\"http://hermes-agent:9119\"}},\"svc:vonk-forge\":{\"endpoints\":{\"tcp:443\":\"http://caddy:8080\"}}}}'; "
         "else printf '%s\\n' '{\"version\":\"0.0.1\",\"services\":{\"svc:extra\":{\"endpoints\":{\"tcp:99\":\"tcp://unexpected:99\"}}}}'; fi ;;\n"
         "  *\"serve status --json\"*)\n"
-        f"    if [ -f \"$repaired\" ]; then printf '%s\\n' '{healthy_status}'; "
+        "    if [ -f \"$repaired\" ]; then count=0; "
+        "[ ! -f \"$status_checks\" ] || count=$(cat \"$status_checks\"); "
+        "count=$((count + 1)); printf '%s\\n' \"$count\" >\"$status_checks\"; "
+        f"if [ \"$count\" -le 2 ]; then printf '%s\\n' '{{\"Services\":{{}}}}'; else printf '%s\\n' '{healthy_status}'; fi; "
         "else printf '%s\\n' '{\"Services\":{\"svc:vonk-forge\":{\"TCP\":{\"443\":{\"HTTP\":true}}}}}'; fi ;;\n"
         "  *\"--service=svc:vonk-forge --https=443 http://caddy:8080\"*)\n"
         "    printf '%s\\n' \"$*\" >>\"$log\"; touch \"$repaired\" ;;\n"
-        "  *\"status --json\"*) printf '%s\\n' '{\"Capabilities\":[\"service-host\"]}' ;;\n"
+        "  *\"status --json\"*) printf '%s\\n' '{\"Self\":{\"CapMap\":{\"services/vonk-forge\":[],\"services/hermes-api\":[],\"services/hermes-dashboard\":[]}}}' ;;\n"
         "  *) printf '%s\\n' \"$*\" >>\"$log\" ;;\n"
         "esac\n"
     )
