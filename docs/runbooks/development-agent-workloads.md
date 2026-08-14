@@ -103,7 +103,7 @@ private local filesystem. The supported publication commands are:
 set -euo pipefail
 cd '<REPOSITORY_CHECKOUT>'
 install -d -m 0700 '<LOCAL_STAGING_DIRECTORY>'
-scripts/dev-runtime-secrets.py \
+uv run --project control --frozen scripts/dev-runtime-secrets.py \
   --secrets-dir '<LOCAL_SECRETS_DIR>' \
   --management-cidrs '<NODE_MANAGEMENT_CIDR>' \
   --enroll-hostname '<ENROLLMENT_HOSTNAME>' \
@@ -111,7 +111,7 @@ scripts/dev-runtime-secrets.py \
   --registry-hostname '<REGISTRY_HOSTNAME>' \
   --tailscale-oauth-client-id-file '<LOCAL_OAUTH_INPUT_DIRECTORY>/client-id' \
   --tailscale-oauth-client-secret-file '<LOCAL_OAUTH_INPUT_DIRECTORY>/client-secret'
-scripts/dev-runtime-project \
+uv run --project control --frozen scripts/dev-runtime-project \
   --source-compose '<DOWNLOAD_DIRECTORY>/docker-compose.dev.yml' \
   --secrets-dir '<LOCAL_SECRETS_DIR>' \
   --destination '<MOUNTED_NAS_PARENT>/vonk-forge' \
@@ -450,6 +450,14 @@ file remains zero bytes, inspect the controller/Caddy response for the first
 range request; Docker has not been invoked and deleting image or model caches
 is not a remedy.
 
+An interrupted unsafe import can end in `waiting-for-operator` rather than
+`failed`. Retry that parent image-distribution operation through the same
+authenticated recipe retry endpoint. The controller requeues the exact stored
+plan, target set, authority digest, and per-node payloads; it does not re-plan
+against current inventory. Reusing the same request key replays the same retry,
+and a second active retry is rejected. Do not delete the repository, image,
+model, or agent-state volumes to clear this state.
+
 ## Real single-node model
 
 Create `model-qualification-input.json` from fresh read-only observations. It
@@ -716,7 +724,7 @@ set -euo pipefail
 cd '<REPOSITORY_CHECKOUT>'
 ACCEPTANCE_ROOT=$(mktemp -d)
 chmod 0700 "$ACCEPTANCE_ROOT"
-scripts/dev-runtime-secrets.py \
+uv run --project control --frozen scripts/dev-runtime-secrets.py \
   --secrets-dir "$ACCEPTANCE_ROOT/secrets" \
   --management-cidrs '<NODE_MANAGEMENT_CIDR>' \
   --enroll-hostname '<ENROLLMENT_HOSTNAME>' \
@@ -724,7 +732,7 @@ scripts/dev-runtime-secrets.py \
   --registry-hostname '<REGISTRY_HOSTNAME>' \
   --tailscale-oauth-client-id-file '<LOCAL_OAUTH_INPUT_DIRECTORY>/client-id' \
   --tailscale-oauth-client-secret-file '<LOCAL_OAUTH_INPUT_DIRECTORY>/client-secret'
-scripts/dev-runtime-project \
+uv run --project control --frozen scripts/dev-runtime-project \
   --source-compose '<DOWNLOAD_DIRECTORY>/docker-compose.dev.yml' \
   --secrets-dir "$ACCEPTANCE_ROOT/secrets" \
   --destination "$ACCEPTANCE_ROOT/project" \

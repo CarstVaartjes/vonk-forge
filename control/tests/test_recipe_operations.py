@@ -490,8 +490,9 @@ def test_partial_install_fails_as_a_group_and_can_retry(tmp_path: Path) -> None:
         service.retry(first.id, actor="admin", request_id="3" * 35 + "4")
 
 
-def test_failed_image_distribution_retry_requeues_exact_persisted_group(
-    tmp_path: Path,
+@pytest.mark.parametrize("terminal_state", ("failed", "waiting-for-operator"))
+def test_terminal_image_distribution_retry_requeues_exact_persisted_group(
+    tmp_path: Path, terminal_state: str
 ) -> None:
     sessions, service, queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, nodes=2
@@ -541,6 +542,19 @@ def test_failed_image_distribution_retry_requeues_exact_persisted_group(
         succeeded=False,
         evidence={"reason": "helper grant expired"},
     )
+    if terminal_state == "waiting-for-operator":
+        with sessions.begin() as session:
+            parent = session.get(Job, first.id)
+            held_child = session.scalar(
+                select(AgentOperation).where(
+                    AgentOperation.parent_job_id == first.id,
+                    AgentOperation.node_id == nodes[1],
+                )
+            )
+            assert parent is not None
+            assert held_child is not None
+            parent.state = terminal_state
+            held_child.state = terminal_state
 
     retry = service.retry(first.id, actor="admin", request_id="5" * 36)
     replay = service.retry(first.id, actor="admin", request_id="5" * 36)
