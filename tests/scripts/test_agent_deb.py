@@ -311,6 +311,10 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
     assert (
         "After=" in helper_unit and "vonk-forge-docker-firewall.service" in helper_unit
     )
+    assert "PrivateNetwork=yes" not in helper_unit
+    assert "IPAddressDeny=any" in helper_unit
+    assert "RestrictAddressFamilies=AF_UNIX AF_NETLINK" in helper_unit
+    assert "AF_INET" not in helper_unit
     assert "usermod --add-subuids" in postinst
     assert "usermod --add-subgids" in postinst
     assert "SUB_UID_MIN" in postinst

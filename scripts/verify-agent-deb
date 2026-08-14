@@ -299,14 +299,17 @@ def _verify_payload(payload: Path, control: Path) -> None:
         raise VerificationError("rootless container storage is invalid")
     if "SocketGroup=vonk-agent" not in units["vonk-forge-package-helper.socket"]:
         raise VerificationError("helper socket group is invalid")
-    if "PrivateNetwork=yes" not in units["vonk-forge-package-helper.service"]:
-        raise VerificationError("helper unit is not network isolated")
     helper = units["vonk-forge-package-helper.service"]
+    if "PrivateNetwork=yes" in helper:
+        raise VerificationError("helper cannot inspect host firewall addresses")
+    if "RestrictAddressFamilies=AF_UNIX AF_NETLINK" not in helper.splitlines():
+        raise VerificationError("helper address-family boundary is invalid")
     for boundary in (
         "Wants=docker.service",
         "After=local-fs.target docker.service",
         "Requires=vonk-forge-package-helper.socket",
         "Requires=vonk-forge-docker-firewall.service",
+        "IPAddressDeny=any",
         "vonk-forge-docker-firewall.service",
         "BindReadOnlyPaths=-/run/docker.sock -/run/vonk-forge-agent/runtime-requests -/var/lib/vonk-forge-agent/image-imports",
         "ReadWritePaths=-/var/lib/vonk-forge-agent/models -/var/lib/vonk-forge-agent/runs -/var/lib/vonk-forge-agent/run-metadata",
