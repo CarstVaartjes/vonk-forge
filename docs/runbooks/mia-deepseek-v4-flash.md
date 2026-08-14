@@ -127,7 +127,11 @@ identity, installs the model independently on both nodes, starts both ranks,
 waits for `/v1/models`, publishes one NAS route, and requires a real chat
 response through LiteLLM. The MIA launcher selects only the model revision from
 the signed runtime contract and keeps Hugging Face and Transformers offline
-while serving.
+while serving. It derives the fabric interface directly from
+`/sys/class/infiniband` by matching the controller-selected IPv4 address to one
+unique RoCEv2 GID, so it does not depend on `iproute2` inside the runtime image.
+If that lookup fails, verify the selected direct-fabric address and the node's
+RoCEv2 GID configuration; do not add packages to a running container.
 
 ## Failure, recovery, and cleanup
 

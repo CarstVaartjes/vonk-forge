@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import runpy
 import tarfile
 from pathlib import Path
 
@@ -256,11 +257,48 @@ def test_source_context_is_immutable_offline_and_contains_exact_upstream_hotfixe
     assert "--nnodes 2" in launcher
     assert "VONK_RANK" in launcher and "--headless" in launcher
     assert "NCCL_IB_GID_INDEX" in launcher
+    assert "ip -o -4 address show" not in launcher
+    assert "read -r fabric_interface fabric_hca fabric_gid" in launcher
+    assert '/opt/vonk/resolve-roce.py "${VONK_LOCAL_ADDR}"' in launcher
     assert "DSPARK_SUPPRESS_STOPS_IN_REASONING=1" in launcher
     assert "HF_HUB_OFFLINE=1" in launcher
     assert "/opt/vonk/resolve-model.py" in launcher
     for forbidden in ("curl ", "wget ", "git clone", "ssh ", "pip install"):
         assert forbidden not in launcher
+
+
+def test_roce_resolver_derives_interface_from_the_selected_ipv4(
+    tmp_path: Path,
+) -> None:
+    namespace = runpy.run_path(str(CONTEXT / "resolve-roce.py"))
+    resolve_roce = namespace["resolve_roce"]
+    root = tmp_path / "infiniband"
+    port = root / "rocep1s0f1" / "ports" / "1"
+    for relative, value in (
+        ("gid_attrs/ndevs/3", "enp1s0f1np1\n"),
+        ("gid_attrs/types/3", "RoCE v2\n"),
+        ("gids/3", "::ffff:192.168.100.10\n"),
+    ):
+        path = port / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(value, encoding="utf-8")
+
+    assert resolve_roce(root, "192.168.100.10") == (
+        "enp1s0f1np1",
+        "rocep1s0f1",
+        "3",
+    )
+
+    duplicate = root / "rocep2s0f1" / "ports" / "1"
+    for relative, value in (
+        ("gid_attrs/ndevs/3", "enp2s0f1np1\n"),
+        ("gid_attrs/types/3", "RoCE v2\n"),
+        ("gids/3", "::ffff:192.168.100.10\n"),
+    ):
+        path = duplicate / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(value, encoding="utf-8")
+    assert resolve_roce(root, "192.168.100.10") is None
 
 
 def test_legacy_mia_adapter_remains_the_accepted_immutable_release() -> None:
