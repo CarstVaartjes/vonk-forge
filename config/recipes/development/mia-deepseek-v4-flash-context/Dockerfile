@@ -2,10 +2,7 @@ FROM ghcr.io/anemll/dspark-vllm-gx10@sha256:a83948492cf13df455170fb42885f5ef4db5
 USER 0
 COPY --chmod=0644 encoding/encoding_dsv4.py /opt/vonk/encoding/encoding_dsv4.py
 COPY --chmod=0755 patches/ /opt/vonk/patches/
-COPY --chmod=0755 apply-reasoning-default.py /opt/vonk/apply-reasoning-default.py
-COPY --chmod=0755 resolve-model.py /opt/vonk/resolve-model.py
-COPY --chmod=0755 resolve-roce.py /opt/vonk/resolve-roce.py
-COPY --chmod=0755 mia-deepseek-v4-flash /opt/vonk/mia-deepseek-v4-flash
+COPY --chmod=0755 apply-reasoning-default.py resolve-model.py resolve-roce.py mia-deepseek-v4-flash /opt/vonk/
 RUN set -eux; \
     cp /opt/vonk/encoding/encoding_dsv4.py /usr/local/lib/python3.12/dist-packages/vllm/tokenizers/deepseek_v4_encoding.py; \
     python3 /opt/vonk/patches/hotfix-encoding-dsv4-issue21.py; \

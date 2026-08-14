@@ -54,7 +54,10 @@ ProtectKernelModules=yes
 ProtectKernelLogs=yes
 ProtectControlGroups=yes
 ProtectClock=yes
-ProtectHostname=yes
+# Rootless runc creates a private UTS namespace and must set that container's
+# hostname. The dedicated service user has no ambient host capability, so the
+# host hostname remains protected by normal kernel capability checks.
+ProtectHostname=no
 # newuidmap/newgidmap must inspect the Podman child under /proc. Other procfs
 # protections remain enabled and the service still runs as the dedicated user.
 ProtectProc=default

@@ -212,6 +212,15 @@ def test_source_context_is_immutable_offline_and_contains_exact_upstream_hotfixe
     assert source["runtime_image"] in dockerfile
     assert enforce_build_source_policy(recipe, bundle).passed is True
 
+    # Every COPY commits the complete 18.8 GB base through rootless
+    # fuse-overlayfs on Spark. Keep the independently permissioned encoding
+    # and patch directories, but install the four executable files together.
+    assert dockerfile.count("\nCOPY ") <= 3
+    assert (
+        "COPY --chmod=0755 apply-reasoning-default.py resolve-model.py "
+        "resolve-roce.py mia-deepseek-v4-flash /opt/vonk/"
+    ) in dockerfile
+
     for filename, expected_sha256 in PATCH_SHA256.items():
         payload = (CONTEXT / "patches" / filename).read_bytes()
         if filename in {

@@ -261,6 +261,10 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
     assert "Environment=HOME=/var/lib/vonk-forge-agent" in unit
     assert "Environment=XDG_RUNTIME_DIR=/run/vonk-forge-agent" in unit
     assert "ProtectControlGroups=yes" in unit
+    # Rootless runc must set the hostname inside each build's private UTS
+    # namespace. The dedicated service user still has no ambient host
+    # capability, so ProtectHostname would only break container creation.
+    assert "ProtectHostname=no" in unit
     assert "ProtectHome=no" in unit
     assert "InaccessiblePaths=/home /root -/run/docker.sock" in unit
     assert "BindReadOnlyPaths=/run/user" not in unit
