@@ -242,6 +242,24 @@ publications.
 - Identity-loss recovery: for expiry, key loss, or storage replacement, create
   a fresh one-use grant and repeat the original grant/pair/approve/pair
   sequence. Recovery is always a new local key plus a new certificate.
+- Start-limit recovery: `Restart=on-failure` is deliberately bounded. If
+  `systemctl status` reports `start-limit-hit`, first make the controller and
+  its authenticated agent endpoint healthy, then inspect the node journal for
+  the original failure. Once that cause is resolved, clear the failed counter
+  exactly once and start the same installed slot:
+
+  ```bash
+  sudo systemctl status --no-pager --full vonk-forge-agent.service
+  sudo journalctl -u vonk-forge-agent.service -n 100 --no-pager
+  sudo systemctl reset-failed vonk-forge-agent.service
+  sudo systemctl start vonk-forge-agent.service
+  sudo systemctl is-active vonk-forge-agent.service
+  ```
+
+  Confirm the controller receives a fresh inventory from the same `node_id`.
+  Do not loop `reset-failed`, re-pair, delete agent state, or switch A/B slots
+  merely to clear the limit. If the unit reaches the limit again, stop and fix
+  the still-present journaled cause.
 - Removal: stop the running units first, then remove the package:
 
   ```bash

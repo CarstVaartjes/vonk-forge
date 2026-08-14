@@ -219,6 +219,27 @@ def test_generic_path_covers_secret_safe_backup_identity_recovery_and_package_re
     assert "Never commit a backup" in nas_recovery
 
 
+def test_agent_recovery_documents_bounded_start_limit_procedure() -> None:
+    lifecycle = _section(INSTALL_AGENT, "Rotation, recovery, and removal")
+    fresh = _normalized_text(FRESH_DEVELOPMENT_INSTALL)
+    blocks = _fenced_blocks(INSTALL_AGENT, "bash", "sh", "shell")
+    recovery = next(
+        block
+        for block in blocks
+        if "systemctl reset-failed vonk-forge-agent.service" in block
+    )
+
+    assert "start-limit-hit" in lifecycle
+    assert "controller" in lifecycle
+    assert "healthy" in lifecycle
+    assert "journalctl" in recovery
+    assert "systemctl start vonk-forge-agent.service" in recovery
+    assert "systemctl is-active vonk-forge-agent.service" in recovery
+    assert recovery.index("journalctl") < recovery.index("systemctl reset-failed")
+    assert "`start-limit-hit`" in fresh
+    assert "install-vonk-agent.md#rotation-recovery-and-removal" in fresh
+
+
 def test_generic_onboarding_uses_hosts_placeholders_for_nas_and_agent_nodes() -> None:
     combined = " ".join(
         path.read_text()

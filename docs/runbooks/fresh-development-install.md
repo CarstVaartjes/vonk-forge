@@ -239,6 +239,10 @@ For each node, complete this order without reusing its one-use token:
 
 The controller must show the same certificate-bound node ID, Rust protocol 3,
 migration `complete`, and fresh inventory. Repeat for each additional node.
+If a resolved controller outage left the node at `start-limit-hit`, use the
+installation guide's bounded
+[start-limit recovery](../operations/install-vonk-agent.md#rotation-recovery-and-removal);
+do not re-pair the node or delete its state.
 
 ## 7. Prove the installation
 
