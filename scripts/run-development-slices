@@ -711,8 +711,7 @@ class Runner:
                 break
             if state in terminal_states:
                 retry_allowed = (
-                    retry_terminal_states is None
-                    or state in retry_terminal_states
+                    retry_terminal_states is None or state in retry_terminal_states
                 )
                 if retry_request_key is None or retried or not retry_allowed:
                     break
@@ -1069,14 +1068,43 @@ class Runner:
             "mapping_id": self.outputs["mapping_id"],
             "recipe_build_id": self.outputs["recipe_build_id"],
         }
-        _, preview_payload = self.control.request(
-            "POST", "/api/v1/recipes/install-plans/preview", request
-        )
-        preview = _object(preview_payload, "install preview")
-        if preview.get("allowed") is not True or not isinstance(
-            preview.get("plan_digest"), str
-        ):
-            raise SliceError("recipe installation is not admitted")
+        deadline = time.monotonic() + min(self.args.timeout_seconds, 120.0)
+        while True:
+            _, preview_payload = self.control.request(
+                "POST", "/api/v1/recipes/install-plans/preview", request
+            )
+            preview = _object(preview_payload, "install preview")
+            if preview.get("allowed") is True and isinstance(
+                preview.get("plan_digest"), str
+            ):
+                break
+            nodes = preview.get("nodes")
+            blocker_codes: list[str] = []
+            blockers_valid = isinstance(nodes, list) and bool(nodes)
+            if blockers_valid:
+                for node in nodes:
+                    blockers = node.get("blockers") if isinstance(node, dict) else None
+                    if not isinstance(blockers, list):
+                        blockers_valid = False
+                        break
+                    for blocker in blockers:
+                        code = (
+                            blocker.get("code") if isinstance(blocker, dict) else None
+                        )
+                        if not isinstance(code, str):
+                            blockers_valid = False
+                            break
+                        blocker_codes.append(code)
+                    if not blockers_valid:
+                        break
+            transient = (
+                blockers_valid
+                and bool(blocker_codes)
+                and set(blocker_codes) == {"install.stale_inventory"}
+            )
+            if not transient or time.monotonic() >= deadline:
+                raise SliceError("recipe installation is not admitted")
+            time.sleep(self.args.poll_seconds)
         _, response = self.control.request(
             "POST",
             "/api/v1/recipes/installations",
