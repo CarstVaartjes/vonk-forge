@@ -117,6 +117,11 @@ uv run --project control --frozen scripts/dev-runtime-project \
   --registry-hostname '<REGISTRY_HOSTNAME>'
 ```
 
+Supply the raw OAuth client secret exactly as issued. The generated Compose
+derives the required non-ephemeral enrollment credential only in the
+Tailscale gateway's tmpfs; neither the local secret generation nor the NAS
+project contains a second plaintext credential file.
+
 Back up exactly 21 local source files as one encrypted generation. Create a
 1Password Password item named **Vonk Forge NAS Development Administrator**,
 set its username to exact `admin`, and store the local `admin-password` there

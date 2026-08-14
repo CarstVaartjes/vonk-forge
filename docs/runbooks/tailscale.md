@@ -82,10 +82,30 @@ sudo vonk-control-offline doctor
 sudo vonk-control-offline maintenance status
 ```
 
-Persisted state and `TS_AUTH_ONCE=true` retain node identity. After clean state
-loss, the scoped OAuth client performs unattended tagged enrollment and the
-exact auto-approvals restore advertisements. Authentication or approval failure
-leaves ingress closed; there is no LAN fallback.
+Keep the OAuth client secret file equal to the raw value issued by Tailscale;
+do not append query parameters to the operator copy. At startup, the Compose
+gateway writes a mode-`0400` derivative containing
+`?ephemeral=false&preauthorized=true` into its bounded tmpfs without placing
+the raw value in a shell variable or output, and passes only the tmpfs path to
+the official Tailscale bootstrap. The tag-scoped preauthorization covers device
+enrollment after state loss; it does not grant access to a Service or approve a
+Service advertisement. Persisted state, explicit non-ephemeral enrollment, and
+`TS_AUTH_ONCE=true` retain node identity across container, NAS, and extended
+offline restarts. Tagged device identity also disables node-key expiry by
+default; revoking the OAuth client, node, tag, or Service remains the recovery
+boundary. After clean state loss, the scoped OAuth client performs unattended
+tagged enrollment and the exact Service auto-approvals restore advertisements.
+Authentication or approval failure leaves ingress closed; there is no LAN
+fallback.
+
+If the Tailscale console labels a permanent gateway **Ephemeral**, do not treat
+its Service approval as final. Select a corrected platform generation, stop
+only the Tailscale gateway/configurator, remove only that generation's
+Tailscale state and socket volumes, and start the selected generation again.
+Approve the replacement advertisement if the exact Service auto-approval has
+not yet been installed, verify it is no longer ephemeral, then revoke the old
+gateway entry. Never delete database, repository, model, control-state, or
+other application volumes during this repair.
 
 The configurator tolerates the bounded control-plane propagation delay after a
 new advertisement. It accepts both the legacy `service-host` capability and

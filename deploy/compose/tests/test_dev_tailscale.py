@@ -17,11 +17,7 @@ TAILSCALE_IMAGE = (
     "d54b2e6a9c09f0e5ec52e82b9ad4af3d446b54a7c08075e92f11c39dd410105f"
 )
 EXPECTED_MAP = {
-    "services": {
-        "svc:vonk-forge": {
-            "endpoints": {"tcp:443": "http://caddy:8080"}
-        }
-    },
+    "services": {"svc:vonk-forge": {"endpoints": {"tcp:443": "http://caddy:8080"}}},
     "version": "0.0.1",
 }
 
@@ -61,13 +57,22 @@ def test_development_gateway_is_pinned_userspace_and_least_privilege() -> None:
     assert gateway["environment"] == {
         "TS_AUTH_ONCE": "true",
         "TS_CLIENT_ID": "file:/run/secrets/tailscale-oauth-client-id",
-        "TS_CLIENT_SECRET": "file:/run/secrets/tailscale-oauth-client-secret",
         "TS_EXTRA_ARGS": "--advertise-tags=tag:vonk-gateway",
         "TS_HOSTNAME": "vonk-forge-dev-gateway",
         "TS_SOCKET": "/var/run/tailscale/tailscaled.sock",
         "TS_STATE_DIR": "/var/lib/tailscale",
         "TS_USERSPACE": "true",
     }
+    assert gateway["command"][:3] == ["/bin/sh", "-eu", "-c"]
+    bootstrap = gateway["command"][3]
+    assert "?ephemeral=false&preauthorized=true" in bootstrap
+    assert (
+        "TS_CLIENT_SECRET=file:/tmp/tailscale-oauth-client-secret-non-ephemeral"
+        in bootstrap
+    )
+    assert "exec env" in bootstrap
+    assert "tr -d '\\r\\n'" in bootstrap
+    assert "echo" not in bootstrap
     assert set(gateway["networks"]) == {"tailscale-egress", "tailnet-web-edge"}
     assert gateway["tmpfs"] == ["/tmp:size=64m,mode=1777"]
     assert not gateway.get("secrets")
@@ -84,6 +89,46 @@ def test_development_gateway_is_pinned_userspace_and_least_privilege() -> None:
     assert all(
         volume["target"] != "/var/run/docker.sock" for volume in volumes.values()
     )
+
+
+def test_development_gateway_derives_a_non_ephemeral_oauth_secret_in_tmpfs(
+    tmp_path: Path,
+) -> None:
+    gateway = _rendered()["services"]["tailscale-gateway"]
+    bootstrap = gateway["command"][3]
+    source = tmp_path / "oauth-client-secret"
+    destination = tmp_path / "derived-oauth-client-secret"
+    containerboot = tmp_path / "containerboot"
+    source.write_text("synthetic-oauth-client-secret\n", encoding="ascii")
+    containerboot.write_text(
+        "#!/bin/sh\n"
+        f'test "$TS_CLIENT_SECRET" = "file:{destination}"\n'
+        f'test "$(cat "{destination}")" = '
+        '"synthetic-oauth-client-secret?ephemeral=false&preauthorized=true"\n',
+        encoding="ascii",
+    )
+    containerboot.chmod(0o700)
+    bootstrap = (
+        bootstrap.replace("/run/secrets/tailscale-oauth-client-secret", str(source))
+        .replace("/tmp/tailscale-oauth-client-secret-non-ephemeral", str(destination))
+        .replace("/usr/local/bin/containerboot", str(containerboot))
+    )
+
+    result = subprocess.run(
+        ["/bin/sh", "-eu", "-c", bootstrap],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""
+    assert result.stderr == ""
+    assert destination.read_text(encoding="ascii") == (
+        "synthetic-oauth-client-secret?ephemeral=false&preauthorized=true"
+    )
+    assert destination.stat().st_mode & 0o777 == 0o400
 
 
 def test_development_configurator_has_only_bounded_runtime_authority() -> None:
@@ -122,7 +167,7 @@ def test_development_configurator_has_only_bounded_runtime_authority() -> None:
         "tailscale-gateway": {
             "condition": "service_healthy",
             "required": True,
-        }
+        },
     }
 
 
@@ -196,21 +241,21 @@ def _fake_cli(
         f"calls={calls}\n"
         f"repaired={repaired}\n"
         f"status_checks={status_checks}\n"
-        "printf '%s\\n' \"$*\" >>\"$calls\"\n"
-        "case \"$*\" in\n"
-        "  *\"serve get-config --all\"*)\n"
+        'printf \'%s\\n\' "$*" >>"$calls"\n'
+        'case "$*" in\n'
+        '  *"serve get-config --all"*)\n'
         "    if [ -f \"$repaired\" ]; then printf '%s\\n' "
-        "'{\"version\":\"0.0.1\",\"services\":{\"svc:vonk-forge\":{\"endpoints\":{\"tcp:443\":\"http://caddy:8080\"}}}}'; "
+        '\'{"version":"0.0.1","services":{"svc:vonk-forge":{"endpoints":{"tcp:443":"http://caddy:8080"}}}}\'; '
         f"else printf '%s\\n' '{initial_config}'; fi ;;\n"
-        "  *\"serve status --json\"*)\n"
-        "    if [ -f \"$repaired\" ]; then "
-        "count=0; [ ! -f \"$status_checks\" ] || count=$(cat \"$status_checks\"); "
-        "count=$((count + 1)); printf '%s\\n' \"$count\" >\"$status_checks\"; "
+        '  *"serve status --json"*)\n'
+        '    if [ -f "$repaired" ]; then '
+        'count=0; [ ! -f "$status_checks" ] || count=$(cat "$status_checks"); '
+        'count=$((count + 1)); printf \'%s\\n\' "$count" >"$status_checks"; '
         f"if [ \"$count\" -le {activation_delay} ]; then printf '%s\\n' '{{\"Services\":{{}}}}'; "
-        "else printf '%s\\n' '{\"Services\":{\"svc:vonk-forge\":{\"TCP\":{\"443\":{\"HTTPS\":true}}}}}'; fi; "
-        "else printf '%s\\n' '{\"Services\":{\"svc:vonk-forge\":{\"TCP\":{\"443\":{\"HTTP\":true}}}}}'; fi ;;\n"
-        "  *\"--service=svc:vonk-forge --https=443 http://caddy:8080\"*) touch \"$repaired\" ;;\n"
-        f"  *\"status --json\"*) printf '%s\\n' '{{\"CurrentTailnet\":{{\"MagicDNSSuffix\":\"{suffix}\"}},\"Self\":{{\"CapMap\":{{\"services/vonk-forge\":[{{\"Name\":\"svc:vonk-forge\",\"Ports\":[\"tcp:443\"]}}]}}}}}}' ;;\n"
+        'else printf \'%s\\n\' \'{"Services":{"svc:vonk-forge":{"TCP":{"443":{"HTTPS":true}}}}}\'; fi; '
+        'else printf \'%s\\n\' \'{"Services":{"svc:vonk-forge":{"TCP":{"443":{"HTTP":true}}}}}\'; fi ;;\n'
+        '  *"--service=svc:vonk-forge --https=443 http://caddy:8080"*) touch "$repaired" ;;\n'
+        f'  *"status --json"*) printf \'%s\\n\' \'{{"CurrentTailnet":{{"MagicDNSSuffix":"{suffix}"}},"Self":{{"CapMap":{{"services/vonk-forge":[{{"Name":"svc:vonk-forge","Ports":["tcp:443"]}}]}}}}}}\' ;;\n'
         "esac\n",
         encoding="utf-8",
     )
@@ -331,23 +376,23 @@ def test_overlapping_reconcilers_parse_only_their_own_tailscale_snapshots(
         "set -eu\n"
         "role=${TS_FAKE_ROLE:?}\n"
         "root=${TS_FAKE_ROOT:?}\n"
-        "case \"$*\" in\n"
+        'case "$*" in\n'
         f"  *\"serve get-config --all\"*) printf '%s\\n' '{expected}' ;;\n"
         "  *\"serve status --json\"*) printf '%s\\n' "
-        "'{\"Services\":{\"svc:vonk-forge\":{\"TCP\":{\"443\":{\"HTTPS\":true}}}}}' ;;\n"
-        "  *\"status --json\"*)\n"
+        '\'{"Services":{"svc:vonk-forge":{"TCP":{"443":{"HTTPS":true}}}}}\' ;;\n'
+        '  *"status --json"*)\n'
         "    count_file=$root/$role.count\n"
         "    count=0\n"
-        "    if [ -f \"$count_file\" ]; then count=$(cat \"$count_file\"); fi\n"
+        '    if [ -f "$count_file" ]; then count=$(cat "$count_file"); fi\n'
         "    count=$((count + 1))\n"
-        "    printf '%s\\n' \"$count\" >\"$count_file\"\n"
-        "    printf '{\"CurrentTailnet\":{\"MagicDNSSuffix\":\"%s-team.ts.net\"},' \"$role\"\n"
-        "    printf '\"Self\":{\"CapMap\":{\"service-host\":[]}}}\\n'\n"
-        "    if [ \"$role\" = first ] && [ \"$count\" -eq 2 ]; then\n"
-        "      : >\"$root/first-snapshot-written\"\n"
-        "      while [ ! -f \"$root/second-snapshot-written\" ]; do sleep 0.01; done\n"
-        "    elif [ \"$role\" = second ] && [ \"$count\" -eq 2 ]; then\n"
-        "      : >\"$root/second-snapshot-written\"\n"
+        '    printf \'%s\\n\' "$count" >"$count_file"\n'
+        '    printf \'{"CurrentTailnet":{"MagicDNSSuffix":"%s-team.ts.net"},\' "$role"\n'
+        '    printf \'"Self":{"CapMap":{"service-host":[]}}}\\n\'\n'
+        '    if [ "$role" = first ] && [ "$count" -eq 2 ]; then\n'
+        '      : >"$root/first-snapshot-written"\n'
+        '      while [ ! -f "$root/second-snapshot-written" ]; do sleep 0.01; done\n'
+        '    elif [ "$role" = second ] && [ "$count" -eq 2 ]; then\n'
+        '      : >"$root/second-snapshot-written"\n'
         "    fi ;;\n"
         "esac\n",
         encoding="utf-8",
@@ -433,7 +478,9 @@ def _wait_for_text(path: Path, expected: str, *, timeout: float = 8) -> list[str
         if content == expected:
             return observed
         time.sleep(0.02)
-    raise AssertionError(f"{path.name} did not become {expected!r}; observed {observed!r}")
+    raise AssertionError(
+        f"{path.name} did not become {expected!r}; observed {observed!r}"
+    )
 
 
 def test_continuous_reconciler_republishes_live_suffix_and_health_rejects_stale(
@@ -453,13 +500,13 @@ def test_continuous_reconciler_republishes_live_suffix_and_health_rejects_stale(
     fake_tailscale = tmp_path / "tailscale"
     fake_tailscale.write_text(
         "#!/bin/sh\n"
-        "case \"$*\" in\n"
+        'case "$*" in\n'
         f"  *\"serve get-config --all\"*) printf '%s\\n' '{expected}' ;;\n"
         "  *\"serve status --json\"*) printf '%s\\n' "
-        "'{\"Services\":{\"svc:vonk-forge\":{\"TCP\":{\"443\":{\"HTTPS\":true}}}}}' ;;\n"
-        f"  *\"status --json\"*) value=$(cat {suffix}); printf "
-        "'{\"CurrentTailnet\":{\"MagicDNSSuffix\":\"%s\"},"
-        "\"Self\":{\"CapMap\":{\"service-host\":[]}}}\\n' \"$value\" ;;\n"
+        '\'{"Services":{"svc:vonk-forge":{"TCP":{"443":{"HTTPS":true}}}}}\' ;;\n'
+        f'  *"status --json"*) value=$(cat {suffix}); printf '
+        '\'{"CurrentTailnet":{"MagicDNSSuffix":"%s"},'
+        '"Self":{"CapMap":{"service-host":[]}}}\\n\' "$value" ;;\n'
         "esac\n",
         encoding="utf-8",
     )
@@ -488,14 +535,10 @@ def test_continuous_reconciler_republishes_live_suffix_and_health_rejects_stale(
         _wait_for_text(hostname, "vonk-forge.first-team.ts.net\n")
         ready_observed = _wait_for_text(
             authority,
-            "11111111-1111-4111-8111-111111111111 "
-            "vonk-forge.first-team.ts.net\n",
+            "11111111-1111-4111-8111-111111111111 vonk-forge.first-team.ts.net\n",
         )
         assert set(ready_observed) == {
-            (
-                "11111111-1111-4111-8111-111111111111 "
-                "vonk-forge.first-team.ts.net\n"
-            )
+            ("11111111-1111-4111-8111-111111111111 vonk-forge.first-team.ts.net\n")
         }
 
         healthy = subprocess.run(
@@ -527,22 +570,15 @@ def test_continuous_reconciler_republishes_live_suffix_and_health_rejects_stale(
         )
         ready_observed = _wait_for_text(
             authority,
-            "11111111-1111-4111-8111-111111111111 "
-            "vonk-forge.second-team.ts.net\n",
+            "11111111-1111-4111-8111-111111111111 vonk-forge.second-team.ts.net\n",
         )
         assert set(hostname_observed) <= {
             "vonk-forge.first-team.ts.net\n",
             "vonk-forge.second-team.ts.net\n",
         }
         assert set(ready_observed) <= {
-            (
-                "11111111-1111-4111-8111-111111111111 "
-                "vonk-forge.first-team.ts.net\n"
-            ),
-            (
-                "11111111-1111-4111-8111-111111111111 "
-                "vonk-forge.second-team.ts.net\n"
-            ),
+            ("11111111-1111-4111-8111-111111111111 vonk-forge.first-team.ts.net\n"),
+            ("11111111-1111-4111-8111-111111111111 vonk-forge.second-team.ts.net\n"),
         }
 
         healthy_again = subprocess.run(
