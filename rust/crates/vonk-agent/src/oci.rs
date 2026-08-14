@@ -873,7 +873,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
     ) -> Result<(), OciError> {
         let repository = huggingface_repository(&artifact.repository)?;
         let mut metadata_url =
-            Url::parse("https://huggingface.co/api/models/").map_err(|_| OciError::Artifact)?;
+            Url::parse("https://huggingface.co/api/models").map_err(|_| OciError::Artifact)?;
         metadata_url
             .path_segments_mut()
             .map_err(|_| OciError::Artifact)?
