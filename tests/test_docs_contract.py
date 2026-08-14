@@ -580,6 +580,17 @@ def test_security_and_recovery_docs_split_network_and_application_authority() ->
     assert "trusted offline operator boundary" in threat
 
 
+def test_threat_model_documents_helper_network_observation_boundary() -> None:
+    threat = _normalized_text(THREAT_MODEL)
+
+    for required in (
+        "observes host interface addresses through `AF_NETLINK`",
+        "`IPAddressDeny=any`",
+        "no `AF_INET` or `AF_INET6` sockets",
+    ):
+        assert required in threat
+
+
 def test_development_updates_do_not_replace_the_production_trust_boundary() -> None:
     combined = " ".join(
         _normalized_text(path)
