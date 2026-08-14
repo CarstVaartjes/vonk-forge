@@ -240,6 +240,27 @@ verify_host_rules() {
         -p tcp -j RETURN
     require_host_rule -i lo -s "$node_fabric_ip" -d "$node_fabric_ip" \
         -p udp -j RETURN
+    require_host_rule -i "$fabric_interface" -s "$peer_fabric_ip" \
+        -d "$node_fabric_ip" -p tcp -j RETURN
+    require_host_rule -i "$fabric_interface" -s "$peer_fabric_ip" \
+        -d "$node_fabric_ip" -p udp -j RETURN
+    peer_tcp_position=$(ipt -S "$host_chain" | awk \
+        -v chain="$host_chain" \
+        -v interface="$fabric_interface" \
+        -v source="$peer_fabric_ip/32" \
+        -v destination="$node_fabric_ip/32" '
+        $1 == "-A" && $2 == chain {
+            input = source_rule = destination_rule = protocol = verdict = 0
+            for (field = 3; field <= NF; field++) {
+                if ($field == "-i" && $(field + 1) == interface) input = 1
+                if ($field == "-s" && $(field + 1) == source) source_rule = 1
+                if ($field == "-d" && $(field + 1) == destination) destination_rule = 1
+                if ($field == "-p" && $(field + 1) == "tcp") protocol = 1
+                if ($field == "-j" && $(field + 1) == "RETURN") verdict = 1
+            }
+            if (input && source_rule && destination_rule && protocol && verdict) print NR
+        }')
+    [ -n "$peer_tcp_position" ] || fail "peer fabric TCP rule is unavailable"
     host_count=0
     if [ -n "$host_endpoint_ports" ]; then
         old_ifs=$IFS
@@ -252,13 +273,24 @@ verify_host_rules() {
             require_host_rule -i "$management_interface" -p tcp \
                 -s "$nas_management_ip" --dport "$port" -j RETURN
             require_host_rule -p tcp --dport "$port" -j DROP
+            endpoint_drop_position=$(ipt -S "$host_chain" | awk \
+                -v chain="$host_chain" -v port="$port" '
+                $1 == "-A" && $2 == chain {
+                    protocol = destination_port = verdict = 0
+                    for (field = 3; field <= NF; field++) {
+                        if ($field == "-p" && $(field + 1) == "tcp") protocol = 1
+                        if ($field == "--dport" && $(field + 1) == port) destination_port = 1
+                        if ($field == "-j" && $(field + 1) == "DROP") verdict = 1
+                    }
+                    if (protocol && destination_port && verdict) print NR
+                }')
+            [ -n "$endpoint_drop_position" ] \
+                || fail "host endpoint drop rule is unavailable"
+            [ "$peer_tcp_position" -lt "$endpoint_drop_position" ] \
+                || fail "host endpoint drop shadows peer fabric traffic"
             host_count=$((host_count + 1))
         done
     fi
-    require_host_rule -i "$fabric_interface" -s "$peer_fabric_ip" \
-        -d "$node_fabric_ip" -p tcp -j RETURN
-    require_host_rule -i "$fabric_interface" -s "$peer_fabric_ip" \
-        -d "$node_fabric_ip" -p udp -j RETURN
     require_host_rule -d "$node_fabric_ip" -p tcp -j DROP
     require_host_rule -d "$node_fabric_ip" -p udp -j DROP
     require_host_rule -m comment --comment "$marker" -j RETURN
@@ -327,6 +359,10 @@ ipt -A "$host_chain" -i lo -s "$node_fabric_ip" -d "$node_fabric_ip" \
     -p tcp -j RETURN
 ipt -A "$host_chain" -i lo -s "$node_fabric_ip" -d "$node_fabric_ip" \
     -p udp -j RETURN
+ipt -A "$host_chain" -i "$fabric_interface" -s "$peer_fabric_ip" \
+    -d "$node_fabric_ip" -p tcp -j RETURN
+ipt -A "$host_chain" -i "$fabric_interface" -s "$peer_fabric_ip" \
+    -d "$node_fabric_ip" -p udp -j RETURN
 if [ -n "$host_endpoint_ports" ]; then
     old_ifs=$IFS
     IFS=,
@@ -340,10 +376,6 @@ if [ -n "$host_endpoint_ports" ]; then
         ipt -A "$host_chain" -p tcp --dport "$port" -j DROP
     done
 fi
-ipt -A "$host_chain" -i "$fabric_interface" -s "$peer_fabric_ip" \
-    -d "$node_fabric_ip" -p tcp -j RETURN
-ipt -A "$host_chain" -i "$fabric_interface" -s "$peer_fabric_ip" \
-    -d "$node_fabric_ip" -p udp -j RETURN
 ipt -A "$host_chain" -d "$node_fabric_ip" -p tcp -j DROP
 ipt -A "$host_chain" -d "$node_fabric_ip" -p udp -j DROP
 ipt -A "$host_chain" -m comment --comment "$marker" -j RETURN

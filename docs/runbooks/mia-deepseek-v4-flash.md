@@ -66,7 +66,9 @@ management address. Spark peer TCP/UDP is accepted only on the selected fabric
 interface, from the declared peer, to the selected local fabric address. It
 also permits a process to reach its own selected fabric address over loopback;
 PyTorch rendezvous requires rank 0 to join its own store through that address.
-Do not add a wildcard `INPUT` rule.
+The exact peer-fabric acceptance must precede host-endpoint port drops so the
+headless worker can reach rank 0's readiness endpoint. Do not add a wildcard
+`INPUT` rule.
 
 ## Qualify the exact inputs
 
