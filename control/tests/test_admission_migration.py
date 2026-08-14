@@ -45,5 +45,38 @@ def test_admission_tables_upgrade_and_downgrade(tmp_path: Path) -> None:
         column["name"]
         for column in inspect(engine).get_columns("node_telemetry_latest")
     }
+    sample_uniques = {
+        (constraint["name"], tuple(constraint["column_names"]))
+        for constraint in inspect(engine).get_unique_constraints(
+            "node_telemetry_samples"
+        )
+    }
+    assert (
+        "uq_telemetry_node_sample",
+        ("node_id", "id"),
+    ) in sample_uniques
+    latest_foreign_keys = inspect(engine).get_foreign_keys("node_telemetry_latest")
+    assert any(
+        foreign_key["constrained_columns"] == ["node_id", "sample_id"]
+        and foreign_key["referred_table"] == "node_telemetry_samples"
+        and foreign_key["referred_columns"] == ["node_id", "id"]
+        for foreign_key in latest_foreign_keys
+    )
+    checks = {
+        constraint["name"]: constraint["sqltext"]
+        for constraint in inspect(engine).get_check_constraints(
+            "node_telemetry_samples"
+        )
+    }
+    capacity_limit = "17592186044416"
+    assert all(
+        capacity_limit in checks[name]
+        for name in (
+            "ck_telemetry_memory",
+            "ck_telemetry_disk",
+            "ck_telemetry_gpu_memory",
+        )
+    )
+    assert "1000000000000000" in checks["ck_telemetry_physical_metrics"]
     command.downgrade(config(url), "0016_recipe_deployment_authority")
     assert not tables & set(inspect(engine).get_table_names())

@@ -429,7 +429,10 @@ class TelemetrySampleRequest(BaseModel):
     @classmethod
     def rfc3339_observed_at(cls, value: object) -> object:
         if not isinstance(value, str):
-            raise ValueError("telemetry observed time must be an RFC 3339 string")
+            # Pydantic turns ValueError into the stable request validation response.
+            raise ValueError(  # noqa: TRY004
+                "telemetry observed time must be an RFC 3339 string"
+            )
         return value
 
     @model_validator(mode="after")

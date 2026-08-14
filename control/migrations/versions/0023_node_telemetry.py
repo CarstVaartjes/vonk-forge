@@ -71,6 +71,8 @@ def upgrade() -> None:
             "(memory_total_bytes IS NULL AND memory_available_bytes IS NULL) OR "
             "(memory_total_bytes IS NOT NULL AND memory_available_bytes IS NOT NULL AND "
             "memory_total_bytes >= 0 AND memory_available_bytes >= 0 AND "
+            "memory_total_bytes <= 17592186044416 AND "
+            "memory_available_bytes <= 17592186044416 AND "
             "memory_available_bytes <= memory_total_bytes)",
             name="ck_telemetry_memory",
         ),
@@ -78,6 +80,8 @@ def upgrade() -> None:
             "(disk_total_bytes IS NULL AND disk_free_bytes IS NULL) OR "
             "(disk_total_bytes IS NOT NULL AND disk_free_bytes IS NOT NULL AND "
             "disk_total_bytes >= 0 AND disk_free_bytes >= 0 AND "
+            "disk_total_bytes <= 17592186044416 AND "
+            "disk_free_bytes <= 17592186044416 AND "
             "disk_free_bytes <= disk_total_bytes)",
             name="ck_telemetry_disk",
         ),
@@ -85,6 +89,8 @@ def upgrade() -> None:
             "(gpu_memory_total_bytes IS NULL AND gpu_memory_free_bytes IS NULL) OR "
             "(gpu_memory_total_bytes IS NOT NULL AND gpu_memory_free_bytes IS NOT NULL AND "
             "gpu_memory_total_bytes >= 0 AND gpu_memory_free_bytes >= 0 AND "
+            "gpu_memory_total_bytes <= 17592186044416 AND "
+            "gpu_memory_free_bytes <= 17592186044416 AND "
             "gpu_memory_free_bytes <= gpu_memory_total_bytes)",
             name="ck_telemetry_gpu_memory",
         ),
@@ -92,9 +98,9 @@ def upgrade() -> None:
             "(temperature_c IS NULL OR temperature_c BETWEEN -100 AND 300) "
             "AND (power_watts IS NULL OR power_watts BETWEEN 0 AND 100000) AND "
             "(network_receive_bytes_per_second IS NULL OR "
-            "network_receive_bytes_per_second BETWEEN 0 AND 9223372036854775807) AND "
+            "network_receive_bytes_per_second BETWEEN 0 AND 1000000000000000) AND "
             "(network_transmit_bytes_per_second IS NULL OR "
-            "network_transmit_bytes_per_second BETWEEN 0 AND 9223372036854775807)",
+            "network_transmit_bytes_per_second BETWEEN 0 AND 1000000000000000)",
             name="ck_telemetry_physical_metrics",
         ),
         sa.CheckConstraint(
@@ -104,6 +110,7 @@ def upgrade() -> None:
         sa.UniqueConstraint(
             "node_id", "boot_id", "sequence", name="uq_telemetry_node_boot_sequence"
         ),
+        sa.UniqueConstraint("node_id", "id", name="uq_telemetry_node_sample"),
     )
     op.create_index(
         "ix_telemetry_node_observed",
@@ -121,9 +128,14 @@ def upgrade() -> None:
         sa.Column(
             "sample_id",
             sa.String(36),
-            sa.ForeignKey("node_telemetry_samples.id", ondelete="RESTRICT"),
             nullable=False,
             unique=True,
+        ),
+        sa.ForeignKeyConstraint(
+            ("node_id", "sample_id"),
+            ("node_telemetry_samples.node_id", "node_telemetry_samples.id"),
+            name="fk_telemetry_latest_node_sample",
+            ondelete="RESTRICT",
         ),
     )
 

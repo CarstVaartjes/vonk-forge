@@ -7,9 +7,9 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import create_engine, event, func, select
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
-
 from vonk_control.models import (
     AgentNode,
     Base,
@@ -28,6 +28,8 @@ BOOT_A = uuid.UUID("00000000-0000-4000-8000-000000000001")
 BOOT_B = uuid.UUID("00000000-0000-4000-8000-000000000002")
 NOW = datetime(2026, 8, 3, 12, tzinfo=UTC)
 START = NOW - timedelta(minutes=5)
+MAX_CAPACITY_BYTES = 16 * 1024**4
+MAX_NETWORK_BYTES_PER_SECOND = 1_000_000_000_000_000
 
 
 class Clock:
@@ -158,6 +160,13 @@ def test_new_boot_resets_sequence_but_only_newer_observation_advances_latest(
         ({"temperature_c": 300.01}, "temperature"),
         ({"power_watts": -0.01}, "power"),
         ({"network_receive_bytes_per_second": -0.01}, "network receive rate"),
+        (
+            {"network_receive_bytes_per_second": MAX_NETWORK_BYTES_PER_SECOND + 1},
+            "network receive rate",
+        ),
+        ({"memory_total_bytes": MAX_CAPACITY_BYTES + 1}, "memory total"),
+        ({"disk_total_bytes": MAX_CAPACITY_BYTES + 1}, "disk total"),
+        ({"gpu_memory_total_bytes": MAX_CAPACITY_BYTES + 1}, "GPU memory total"),
         ({"gap_samples": 2**63}, "gap samples"),
     ],
 )
@@ -202,21 +211,116 @@ def test_sample_rejects_nil_boot_id() -> None:
 
 def test_database_rejects_half_present_capacity_pair(telemetry) -> None:
     _, sessions, _, _ = telemetry
-    with pytest.raises(IntegrityError):
-        with sessions.begin() as session:
-            session.add(
-                NodeTelemetrySample(
-                    node_id=NODE_A,
-                    boot_id=str(BOOT_A),
-                    sequence=1,
-                    observed_at=NOW,
-                    received_at=NOW,
-                    memory_total_bytes=1,
-                    memory_available_bytes=None,
-                    gap_samples=0,
-                    details={},
-                )
+    with pytest.raises(IntegrityError), sessions.begin() as session:
+        session.add(
+            NodeTelemetrySample(
+                node_id=NODE_A,
+                boot_id=str(BOOT_A),
+                sequence=1,
+                observed_at=NOW,
+                received_at=NOW,
+                memory_total_bytes=1,
+                memory_available_bytes=None,
+                gap_samples=0,
+                details={},
             )
+        )
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {
+            "memory_total_bytes": MAX_CAPACITY_BYTES + 1,
+            "memory_available_bytes": MAX_CAPACITY_BYTES + 1,
+        },
+        {
+            "disk_total_bytes": MAX_CAPACITY_BYTES + 1,
+            "disk_free_bytes": MAX_CAPACITY_BYTES + 1,
+        },
+        {
+            "gpu_memory_total_bytes": MAX_CAPACITY_BYTES + 1,
+            "gpu_memory_free_bytes": MAX_CAPACITY_BYTES + 1,
+        },
+        {"network_receive_bytes_per_second": MAX_NETWORK_BYTES_PER_SECOND + 1},
+        {"network_transmit_bytes_per_second": MAX_NETWORK_BYTES_PER_SECOND + 1},
+    ],
+)
+def test_database_rejects_metrics_above_wire_maximums(
+    telemetry, values: dict[str, object]
+) -> None:
+    _, sessions, _, _ = telemetry
+    with pytest.raises(IntegrityError), sessions.begin() as session:
+        session.add(
+            NodeTelemetrySample(
+                node_id=NODE_A,
+                boot_id=str(BOOT_A),
+                sequence=1,
+                observed_at=NOW,
+                received_at=NOW,
+                gap_samples=0,
+                details={},
+                **values,
+            )
+        )
+
+
+def test_latest_pointer_cannot_reference_a_sample_from_another_node() -> None:
+    engine = create_engine("sqlite://")
+
+    def enable_foreign_keys(connection, _record) -> None:
+        connection.execute("PRAGMA foreign_keys=ON")
+
+    event.listen(engine, "connect", enable_foreign_keys)
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    with sessions.begin() as session:
+        session.add_all(
+            (
+                AgentNode(node_id=NODE_A, state="active", capabilities=[]),
+                AgentNode(node_id=NODE_B, state="active", capabilities=[]),
+            )
+        )
+        row = NodeTelemetrySample(
+            node_id=NODE_A,
+            boot_id=str(BOOT_A),
+            sequence=1,
+            observed_at=NOW,
+            received_at=NOW,
+            gap_samples=0,
+            details={},
+        )
+        session.add(row)
+        session.flush()
+        sample_id = row.id
+
+    with pytest.raises(IntegrityError), sessions.begin() as session:
+        session.add(NodeTelemetryLatest(node_id=NODE_B, sample_id=sample_id))
+
+
+def test_record_batch_locks_node_before_reading_latest_projection(telemetry) -> None:
+    repository, sessions, _, _ = telemetry
+    observed: list[tuple[type[object], object]] = []
+
+    def capture_statement(state) -> None:
+        if not state.is_select:
+            return
+        for description in state.statement.column_descriptions:
+            entity = description.get("entity")
+            if entity in {AgentNode, NodeTelemetryLatest}:
+                observed.append((entity, state.statement))
+                break
+
+    event.listen(sessions.class_, "do_orm_execute", capture_statement)
+    try:
+        repository.record_batch(NODE_A, (sample(sequence=1),))
+    finally:
+        event.remove(sessions.class_, "do_orm_execute", capture_statement)
+
+    assert [entity for entity, _ in observed[:2]] == [AgentNode, NodeTelemetryLatest]
+    lock_statement = observed[0][1]
+    compiled = str(lock_statement.compile(dialect=postgresql.dialect()))
+    assert "FOR UPDATE OF agent_nodes" in compiled
 
 
 def test_record_batch_rejects_time_window_before_opening_transaction(

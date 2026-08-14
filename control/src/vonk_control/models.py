@@ -18,8 +18,9 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
-    ForeignKey,
     Float,
+    ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -2117,6 +2118,7 @@ class NodeTelemetrySample(Base):
         UniqueConstraint(
             "node_id", "boot_id", "sequence", name="uq_telemetry_node_boot_sequence"
         ),
+        UniqueConstraint("node_id", "id", name="uq_telemetry_node_sample"),
         CheckConstraint(_uuid_shape("boot_id"), name="ck_telemetry_boot_id_shape"),
         CheckConstraint(
             "sequence BETWEEN 0 AND 9223372036854775807 AND "
@@ -2138,6 +2140,8 @@ class NodeTelemetrySample(Base):
             "(memory_total_bytes IS NULL AND memory_available_bytes IS NULL) OR "
             "(memory_total_bytes IS NOT NULL AND memory_available_bytes IS NOT NULL AND "
             "memory_total_bytes >= 0 AND memory_available_bytes >= 0 AND "
+            "memory_total_bytes <= 17592186044416 AND "
+            "memory_available_bytes <= 17592186044416 AND "
             "memory_available_bytes <= memory_total_bytes)",
             name="ck_telemetry_memory",
         ),
@@ -2145,6 +2149,8 @@ class NodeTelemetrySample(Base):
             "(disk_total_bytes IS NULL AND disk_free_bytes IS NULL) OR "
             "(disk_total_bytes IS NOT NULL AND disk_free_bytes IS NOT NULL AND "
             "disk_total_bytes >= 0 AND disk_free_bytes >= 0 AND "
+            "disk_total_bytes <= 17592186044416 AND "
+            "disk_free_bytes <= 17592186044416 AND "
             "disk_free_bytes <= disk_total_bytes)",
             name="ck_telemetry_disk",
         ),
@@ -2152,6 +2158,8 @@ class NodeTelemetrySample(Base):
             "(gpu_memory_total_bytes IS NULL AND gpu_memory_free_bytes IS NULL) OR "
             "(gpu_memory_total_bytes IS NOT NULL AND gpu_memory_free_bytes IS NOT NULL AND "
             "gpu_memory_total_bytes >= 0 AND gpu_memory_free_bytes >= 0 AND "
+            "gpu_memory_total_bytes <= 17592186044416 AND "
+            "gpu_memory_free_bytes <= 17592186044416 AND "
             "gpu_memory_free_bytes <= gpu_memory_total_bytes)",
             name="ck_telemetry_gpu_memory",
         ),
@@ -2159,9 +2167,9 @@ class NodeTelemetrySample(Base):
             "(temperature_c IS NULL OR temperature_c BETWEEN -100 AND 300) "
             "AND (power_watts IS NULL OR power_watts BETWEEN 0 AND 100000) AND "
             "(network_receive_bytes_per_second IS NULL OR "
-            "network_receive_bytes_per_second BETWEEN 0 AND 9223372036854775807) AND "
+            "network_receive_bytes_per_second BETWEEN 0 AND 1000000000000000) AND "
             "(network_transmit_bytes_per_second IS NULL OR "
-            "network_transmit_bytes_per_second BETWEEN 0 AND 9223372036854775807)",
+            "network_transmit_bytes_per_second BETWEEN 0 AND 1000000000000000)",
             name="ck_telemetry_physical_metrics",
         ),
         CheckConstraint(
@@ -2203,11 +2211,18 @@ class NodeTelemetrySample(Base):
 
 class NodeTelemetryLatest(Base):
     __tablename__ = "node_telemetry_latest"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ("node_id", "sample_id"),
+            ("node_telemetry_samples.node_id", "node_telemetry_samples.id"),
+            name="fk_telemetry_latest_node_sample",
+            ondelete="RESTRICT",
+        ),
+    )
     node_id: Mapped[str] = mapped_column(
         ForeignKey("agent_nodes.node_id", ondelete="CASCADE"), primary_key=True
     )
     sample_id: Mapped[str] = mapped_column(
-        ForeignKey("node_telemetry_samples.id", ondelete="RESTRICT"),
         nullable=False,
         unique=True,
     )

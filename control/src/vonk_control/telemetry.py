@@ -12,8 +12,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .models import NodeTelemetryLatest, NodeTelemetrySample
-
+from .models import AgentNode, NodeTelemetryLatest, NodeTelemetrySample
 
 _NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
 _MAX_SIGNED_BIGINT = 9_223_372_036_854_775_807
@@ -33,7 +32,7 @@ def _finite_number(
     if value is None:
         return
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"telemetry {label} is invalid")
+        raise ValueError(f"telemetry {label} is invalid")  # noqa: TRY004
     if not math.isfinite(value) or not minimum <= value <= maximum:
         raise ValueError(f"telemetry {label} is invalid")
 
@@ -127,7 +126,7 @@ class TelemetrySampleInput:
         ):
             raise ValueError("telemetry sequence is invalid")
         if not isinstance(self.observed_at, datetime):
-            raise ValueError("telemetry observation time is invalid")
+            raise ValueError("telemetry observation time is invalid")  # noqa: TRY004
         _finite_number(
             self.cpu_utilization_percent,
             label="CPU utilization",
@@ -194,7 +193,7 @@ class TelemetrySampleInput:
         ):
             raise ValueError("telemetry gap samples is invalid")
         if not isinstance(self.details, TelemetryDetailsInput):
-            raise ValueError("telemetry details are invalid")
+            raise ValueError("telemetry details are invalid")  # noqa: TRY004
 
 
 @dataclass(frozen=True, slots=True)
@@ -224,7 +223,7 @@ class TelemetrySampleView:
 
 def _canonical_sample(value: TelemetrySampleInput, now: datetime) -> TelemetrySampleInput:
     if not isinstance(value, TelemetrySampleInput):
-        raise ValueError("telemetry sample is invalid")
+        raise ValueError("telemetry sample is invalid")  # noqa: TRY004
     observed_at = _aware_utc(value.observed_at, label="telemetry observation time")
     if observed_at > now + timedelta(seconds=30) or now - observed_at > timedelta(
         minutes=5
@@ -336,6 +335,13 @@ class TelemetryRepository:
 
         stored: list[NodeTelemetrySample] = []
         with self._sessions.begin() as session:
+            node = session.scalar(
+                select(AgentNode)
+                .where(AgentNode.node_id == node_id)
+                .with_for_update(of=AgentNode)
+            )
+            if node is None:
+                raise ValueError("telemetry node ID is unknown")
             pointer = session.get(NodeTelemetryLatest, node_id)
             latest = (
                 None
