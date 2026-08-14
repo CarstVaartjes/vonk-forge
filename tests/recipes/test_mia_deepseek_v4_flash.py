@@ -13,7 +13,7 @@ from vonk_control.source_policy import enforce_build_source_policy
 ROOT = Path(__file__).resolve().parents[2]
 RECIPE_ROOT = ROOT / "config/recipes/development"
 CONTEXT = RECIPE_ROOT / "mia-deepseek-v4-flash-context"
-UPSTREAM_COMMIT = "103af68cad84a153c8e6bd3b15e6414a12b71e05"
+UPSTREAM_COMMIT = "f752cd04ab30f2cf42077dd8811a5e1e682d63e7"
 MODEL_REVISION = "9e165c30e2704aec5d9d593cce3eebd58bbef1cb"
 RUNTIME_IMAGE = (
     "ghcr.io/anemll/dspark-vllm-gx10"
@@ -21,6 +21,8 @@ RUNTIME_IMAGE = (
 )
 PATCH_SHA256 = {
     "hotfix-encoding-dsv4-issue21.py": "1a74f6c4ec6a2b7cd2ff01f19b52fbf4ced980a22f08b9d75a6aae1bff0d0548",
+    "hotfix-dsv4-issue31-v2-thinking-budget-gpu.py": "7e6ee3e6852dc4003a5d9e7f1c62e316010858722ff3644467e1f4db57d2d909",
+    "hotfix-dsv4-issue55-tool-truncation.py": "53f26da9039eb6d99baa6c141c6ed916b292d406da292a5e762012c5ef423dec",
     "hotfix-nvfp4-ds-mla-issue22.sh": "4999ed58c4c2ca0903bc21fcdb6db50d481396ded62066e4132ea609096b13bf",
     "hotfix-dsv4-mtp-buffer-50312.sh": "18dee7b92db1c6c55983c7a9df4d6c27c5a09d9be2225cd54207837fe94ecfe0",
     "hotfix-dsv4-adaptive-topk-50004.sh": "561a6ebd295964e3a37df07c96259a1a2eb0d7e6aaef5ac5ca73ecb0cebf7493",
@@ -92,7 +94,7 @@ def test_recipe_tracks_the_latest_reviewed_official_mia_release() -> None:
         "runtime_image": RUNTIME_IMAGE,
         "runtime_interface_label": "v1",
         "runtime_user": "10001:10001",
-        "license_id": "mia-apache-2.0",
+        "license_id": "mia-mit",
     }
     assert recipe["provenance"]["source_reference"].endswith(UPSTREAM_COMMIT)
     assert artifacts["artifacts"] == [
@@ -198,6 +200,10 @@ def test_source_context_is_immutable_offline_and_contains_exact_upstream_hotfixe
             if path.is_file()
         }
     )
+    assert not any(
+        path.suffix == ".pyc" or "__pycache__" in path.parts
+        for path in CONTEXT.rglob("*")
+    )
 
     assert recipe["build"]["context"] == {
         "sha256": digest,
@@ -212,6 +218,15 @@ def test_source_context_is_immutable_offline_and_contains_exact_upstream_hotfixe
     assert "wget " not in dockerfile
     assert source["runtime_image"] in dockerfile
     assert enforce_build_source_policy(recipe, bundle).passed is True
+    assert "groupadd --gid 10001 vonk" in dockerfile
+    assert "useradd --uid 10001 --gid 10001" in dockerfile
+    assert "--home-dir /state --no-create-home" in dockerfile
+    assert "--shell /usr/sbin/nologin" in dockerfile
+    assert "export USER=vonk" in launcher
+    assert "export LOGNAME=vonk" in launcher
+    assert 'export XDG_CACHE_HOME="${state}/cache"' in launcher
+    assert 'export TORCHINDUCTOR_CACHE_DIR="${state}/cache/torchinductor"' in launcher
+    assert 'export TRITON_CACHE_DIR="${state}/cache/triton"' in launcher
 
     # Every COPY commits the complete 18.8 GB base through rootless
     # fuse-overlayfs on Spark. Keep the independently permissioned encoding
@@ -227,6 +242,7 @@ def test_source_context_is_immutable_offline_and_contains_exact_upstream_hotfixe
         if filename in {
             "hotfix-dsv4-issue27-partial-prefill-concurrency.py",
             "hotfix-dsv4-issue43-decode-fairness-and-diag.py",
+            "hotfix-dsv4-issue55-tool-truncation.py",
         }:
             # Upstream omits these files' final newlines; the source bundle
             # normalizes them while preserving every source character.
@@ -234,7 +250,10 @@ def test_source_context_is_immutable_offline_and_contains_exact_upstream_hotfixe
         assert hashlib.sha256(payload).hexdigest() == expected_sha256
         assert filename in dockerfile
     assert (
-        dockerfile.index("hotfix-dsv4-issue27-partial-prefill-concurrency.py")
+        dockerfile.index("hotfix-encoding-dsv4-issue21.py")
+        < dockerfile.index("hotfix-dsv4-issue31-v2-thinking-budget-gpu.py")
+        < dockerfile.index("hotfix-dsv4-issue55-tool-truncation.py")
+        < dockerfile.index("hotfix-dsv4-issue27-partial-prefill-concurrency.py")
         < dockerfile.index("hotfix-dsv4-issue43-decode-fairness-and-diag.py")
         < dockerfile.index("hotfix-dsv4-issue26-hybrid-swa-min.py")
     )

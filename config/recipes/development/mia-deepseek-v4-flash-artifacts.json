@@ -2,7 +2,7 @@
   "schema_version": 1,
   "license_ids": [
     "deepseek-model",
-    "mia-apache-2.0"
+    "mia-mit"
   ],
   "artifacts": [
     {
@@ -14,4 +14,3 @@
     }
   ]
 }
-

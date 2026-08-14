@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "repository": "https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark",
-  "commit": "103af68cad84a153c8e6bd3b15e6414a12b71e05",
+  "commit": "f752cd04ab30f2cf42077dd8811a5e1e682d63e7",
   "runtime_image": "ghcr.io/anemll/dspark-vllm-gx10@sha256:a83948492cf13df455170fb42885f5ef4db54fefe0feff0f841ecbff464ac9d8",
   "runtime_interface_label": "v1",
   "runtime_user": "10001:10001",
-  "license_id": "mia-apache-2.0"
+  "license_id": "mia-mit"
 }

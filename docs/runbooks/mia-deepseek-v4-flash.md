@@ -9,18 +9,21 @@ before Vonk accepts it.
 
 | Input | Accepted identity |
 |---|---|
-| MIA source | `103af68cad84a153c8e6bd3b15e6414a12b71e05` |
+| MIA source | `f752cd04ab30f2cf42077dd8811a5e1e682d63e7` |
 | Model | `deepseek-ai/DeepSeek-V4-Flash-0731` |
 | Model revision | `9e165c30e2704aec5d9d593cce3eebd58bbef1cb` |
 | Model bytes per Spark | `166898660330` |
 | Runtime | `ghcr.io/anemll/dspark-vllm-gx10@sha256:a83948492cf13df455170fb42885f5ef4db54fefe0feff0f841ecbff464ac9d8` |
 | API port | `8888` |
 
-The source bundle includes MIA's current reviewed hotfixes, including bounded
-decode service from issue 43 and suppress-stops-during-reasoning. The
+The source bundle includes MIA's current reviewed hotfixes, including the
+GPU-resident per-request thinking budget, safe tool-call truncation, bounded
+decode service from issue 43, and suppress-stops-during-reasoning. The
 networkless image build applies them once and the runtime root filesystem
 remains read-only. Optional scheduler diagnostics stay off by default. Rank 1
-runs headless; rank 0 owns the OpenAI-compatible endpoint.
+runs headless; rank 0 owns the OpenAI-compatible endpoint. Clients may omit
+`thinking_token_budget` for the normal fast path, use `0` to skip reasoning, or
+set a positive token limit; the server does not inject a hidden default.
 
 No Hugging Face token is needed or accepted. The public model is downloaded as
 a separate content-addressed artifact on each Spark. No provider token, NAS
@@ -80,8 +83,8 @@ For each node, the artifact evidence must be exactly:
 }
 ```
 
-The top-level `accepted_licenses` must contain `deepseek-model` and
-`mia-apache-2.0`. Qualify against the MIA sidecars rather than the older DS4
+The top-level `accepted_licenses` must contain `deepseek-model` and `mia-mit`.
+Qualify against the MIA sidecars rather than the older DS4
 defaults:
 
 ```bash

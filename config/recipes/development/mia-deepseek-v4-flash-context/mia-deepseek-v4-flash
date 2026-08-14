@@ -31,11 +31,16 @@ fi
 state=${VONK_STATE_ROOT:?}
 install -d -m 0700 "${state}/cache" "${state}/tmp"
 export HOME="${state}"
+export USER=vonk
+export LOGNAME=vonk
+export XDG_CACHE_HOME="${state}/cache"
 export HF_HOME="${state}/cache"
 export HF_HUB_OFFLINE=1
 export TRANSFORMERS_OFFLINE=1
 export HF_HUB_DISABLE_TELEMETRY=1
 export VLLM_CACHE_ROOT="${state}/cache/vllm"
+export TORCHINDUCTOR_CACHE_DIR="${state}/cache/torchinductor"
+export TRITON_CACHE_DIR="${state}/cache/triton"
 export TMPDIR="${state}/tmp"
 export VLLM_HOST_IP="${VONK_LOCAL_ADDR}"
 export NCCL_NET=IB
