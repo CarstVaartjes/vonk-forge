@@ -2,7 +2,7 @@ FROM ghcr.io/anemll/dspark-vllm-gx10@sha256:a83948492cf13df455170fb42885f5ef4db5
 USER 0
 COPY --chmod=0644 encoding/encoding_dsv4.py /opt/vonk/encoding/encoding_dsv4.py
 COPY --chmod=0755 patches/ /opt/vonk/patches/
-COPY --chmod=0755 apply-reasoning-default.py resolve-model.py resolve-roce.py mia-deepseek-v4-flash /opt/vonk/
+COPY --chmod=0755 apply-reasoning-default.py resolve-model.py resolve-roce.py worker-readiness-proxy.py mia-deepseek-v4-flash /opt/vonk/
 RUN set -eux; \
     if getent passwd 10001 >/dev/null || getent passwd vonk >/dev/null; then echo 'runtime user already exists' >&2; exit 1; fi; \
     if getent group 10001 >/dev/null || getent group vonk >/dev/null; then echo 'runtime group already exists' >&2; exit 1; fi; \
@@ -28,6 +28,7 @@ RUN set -eux; \
     python3 -m py_compile \
       /opt/vonk/resolve-model.py \
       /opt/vonk/resolve-roce.py \
+      /opt/vonk/worker-readiness-proxy.py \
       /usr/local/lib/python3.12/dist-packages/vllm/config/vllm.py \
       /usr/local/lib/python3.12/dist-packages/vllm/entrypoints/openai/chat_completion/serving.py \
       /usr/local/lib/python3.12/dist-packages/vllm/v1/engine/input_processor.py \

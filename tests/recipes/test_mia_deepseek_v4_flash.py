@@ -5,6 +5,10 @@ import io
 import json
 import runpy
 import tarfile
+import threading
+import urllib.error
+import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from vonk_control.source_bundles import generate_source_bundle
@@ -230,11 +234,11 @@ def test_source_context_is_immutable_offline_and_contains_exact_upstream_hotfixe
 
     # Every COPY commits the complete 18.8 GB base through rootless
     # fuse-overlayfs on Spark. Keep the independently permissioned encoding
-    # and patch directories, but install the four executable files together.
+    # and patch directories, but install the five executable files together.
     assert dockerfile.count("\nCOPY ") <= 3
     assert (
         "COPY --chmod=0755 apply-reasoning-default.py resolve-model.py "
-        "resolve-roce.py mia-deepseek-v4-flash /opt/vonk/"
+        "resolve-roce.py worker-readiness-proxy.py mia-deepseek-v4-flash /opt/vonk/"
     ) in dockerfile
 
     for filename, expected_sha256 in PATCH_SHA256.items():
@@ -275,6 +279,9 @@ def test_source_context_is_immutable_offline_and_contains_exact_upstream_hotfixe
     assert "--distributed-executor-backend mp" in launcher
     assert "--nnodes 2" in launcher
     assert "VONK_RANK" in launcher and "--headless" in launcher
+    assert "worker-readiness-proxy.py" in launcher
+    assert 'if [[ ${VONK_RANK} == 1 ]]; then' in launcher
+    assert 'wait -n "${vllm_pid}" "${proxy_pid}"' in launcher
     assert "NCCL_IB_GID_INDEX" in launcher
     assert "ip -o -4 address show" not in launcher
     assert "read -r fabric_interface fabric_hca fabric_gid" in launcher
@@ -284,6 +291,57 @@ def test_source_context_is_immutable_offline_and_contains_exact_upstream_hotfixe
     assert "/opt/vonk/resolve-model.py" in launcher
     for forbidden in ("curl ", "wget ", "git clone", "ssh ", "pip install"):
         assert forbidden not in launcher
+
+    readiness_proxy = CONTEXT / "worker-readiness-proxy.py"
+    assert readiness_proxy.is_file()
+    assert "worker-readiness-proxy.py" in dockerfile
+    assert str(readiness_proxy.name) in dockerfile
+
+
+def test_worker_readiness_proxy_exposes_only_rank_zero_models() -> None:
+    class UpstreamHandler(BaseHTTPRequestHandler):
+        def log_message(self, _format: str, *_args: object) -> None:
+            return
+
+        def do_GET(self) -> None:
+            body = b'{"object":"list","data":[]}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    namespace = runpy.run_path(str(CONTEXT / "worker-readiness-proxy.py"))
+    handler = namespace["ReadinessHandler"]
+    upstream = ThreadingHTTPServer(("127.0.0.1", 0), UpstreamHandler)
+    handler.upstream = f"http://127.0.0.1:{upstream.server_port}/v1/models"
+    proxy = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threads = [
+        threading.Thread(target=server.serve_forever, daemon=True)
+        for server in (upstream, proxy)
+    ]
+    for thread in threads:
+        thread.start()
+    try:
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{proxy.server_port}/v1/models", timeout=2
+        ) as response:
+            assert response.status == 200
+            assert json.loads(response.read()) == {"object": "list", "data": []}
+        try:
+            urllib.request.urlopen(
+                f"http://127.0.0.1:{proxy.server_port}/health", timeout=2
+            )
+        except urllib.error.HTTPError as error:
+            assert error.code == 404
+        else:
+            raise AssertionError("worker readiness proxy exposed an unexpected path")
+    finally:
+        for server in (proxy, upstream):
+            server.shutdown()
+            server.server_close()
+        for thread in threads:
+            thread.join(timeout=2)
 
 
 def test_roce_resolver_derives_interface_from_the_selected_ipv4(
