@@ -3,7 +3,8 @@ set -eu
 
 socket=${TS_SOCKET_PATH:-/var/run/tailscale/tailscaled.sock}
 remaining=120
-expected_service_map='{"services":{"svc:hermes-api":{"endpoints":{"tcp:443":"http://hermes-agent:8642"}},"svc:hermes-dashboard":{"endpoints":{"tcp:443":"http://hermes-agent:9119"}},"svc:vonk-forge":{"endpoints":{"tcp:443":"http://caddy:8080"}}},"version":"0.0.1"}'
+expected_service_map_services_first='{"services":{"svc:hermes-api":{"endpoints":{"tcp:443":"http://hermes-agent:8642"}},"svc:hermes-dashboard":{"endpoints":{"tcp:443":"http://hermes-agent:9119"}},"svc:vonk-forge":{"endpoints":{"tcp:443":"http://caddy:8080"}}},"version":"0.0.1"}'
+expected_service_map_version_first='{"version":"0.0.1","services":{"svc:hermes-api":{"endpoints":{"tcp:443":"http://hermes-agent:8642"}},"svc:hermes-dashboard":{"endpoints":{"tcp:443":"http://hermes-agent:9119"}},"svc:vonk-forge":{"endpoints":{"tcp:443":"http://caddy:8080"}}}}'
 
 ts() {
     tailscale --socket="${socket}" "$@"
@@ -28,6 +29,7 @@ serve_is_exact() {
     tr -d '[:space:]' </tmp/tailscale-serve-status.json >/tmp/tailscale-serve-status.compact
     tr -d '[:space:]' </tmp/tailscale-serve-config.json >/tmp/tailscale-serve-config.compact
 
+    actual_service_map=$(cat /tmp/tailscale-serve-config.compact)
     grep -Fq '"svc:vonk-forge":{"TCP":{"443":{"HTTPS":true}}' \
         /tmp/tailscale-serve-status.compact \
         && ! grep -Fq '"443":{"HTTP":true}' /tmp/tailscale-serve-status.compact \
@@ -36,7 +38,8 @@ serve_is_exact() {
             /tmp/tailscale-serve-status.compact \
         && grep -Fq '"svc:hermes-dashboard":{"TCP":{"443":{"HTTPS":true}}' \
             /tmp/tailscale-serve-status.compact \
-        && [ "$(cat /tmp/tailscale-serve-config.compact)" = "${expected_service_map}" ]
+        && { [ "${actual_service_map}" = "${expected_service_map_services_first}" ] \
+            || [ "${actual_service_map}" = "${expected_service_map_version_first}" ]; }
 }
 
 configure_services() {
@@ -54,16 +57,34 @@ configure_services() {
     ts serve advertise svc:hermes-dashboard
 }
 
+wait_for_exact_services() {
+    activation_remaining=120
+    while [ "${activation_remaining}" -gt 0 ]; do
+        if serve_is_exact; then
+            return 0
+        fi
+        sleep 2
+        activation_remaining=$((activation_remaining - 2))
+    done
+    return 1
+}
+
 if ! serve_is_exact; then
     configure_services
 fi
-if ! serve_is_exact; then
+if ! wait_for_exact_services; then
     echo "ERROR: Tailscale Services do not have the exact HTTPS listeners." >&2
     exit 1
 fi
 
 ts status --json >/tmp/tailscale-status.json
-if ! grep -Fq 'service-host' /tmp/tailscale-status.json; then
+if grep -Fq '"service-host"' /tmp/tailscale-status.json; then
+    :
+elif grep -Fq '"services/vonk-forge"' /tmp/tailscale-status.json \
+    && grep -Fq '"services/hermes-api"' /tmp/tailscale-status.json \
+    && grep -Fq '"services/hermes-dashboard"' /tmp/tailscale-status.json; then
+    :
+else
     echo "ERROR: the gateway lacks the Tailscale service-host capability." >&2
     exit 1
 fi
@@ -79,6 +100,6 @@ while :; do
     sleep 60
     if ! serve_is_exact; then
         configure_services
-        serve_is_exact || exit 1
+        wait_for_exact_services || exit 1
     fi
 done

@@ -224,6 +224,16 @@ The gateway reconciles one HTTPS-only Serve endpoint:
 disabled, Caddy's browser edge stays private to Docker, and there is no
 human-facing LAN port.
 
+After the project starts, **Services → Advertised → vonk-forge** must report at
+least one connected host. `0 hosts` is not a usable installation. Allow up to
+two minutes for the exact auto-approval to propagate. If it remains at zero,
+confirm that the gateway machine has `tag:vonk-gateway`, the policy contains
+the exact `autoApprovers.services` entry from the example, and approve the
+pending `vonk-forge-dev-gateway` host if the console presents it. Check the
+`tailscale-configurator` log for `approval from an admin is required`. Do not
+enable Funnel to resolve this condition: Funnel grants public-internet ingress
+and is unrelated to private Service-host approval.
+
 ## Generate and copy the NAS secret bundle
 
 Generate secrets on a private local Linux filesystem, never directly on SMB:

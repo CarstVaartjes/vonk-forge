@@ -37,6 +37,15 @@ Development uses only `svc:vonk-forge`; the two Hermes Services belong to the
 full production graph. In both graphs, Tailscale Funnel is forbidden and no
 human-facing LAN port is a fallback.
 
+The Services page must show at least one connected host for every Service in
+use. A defined Service showing `0 hosts` has no active ingress. Allow the
+configurator's bounded two-minute approval window to complete, then verify the
+gateway carries `tag:vonk-gateway` and the exact named Service is present under
+`autoApprovers.services`. If the console shows a pending host, approve that
+specific gateway advertisement. Never add the `funnel` node attribute as a
+workaround; it enables public internet exposure rather than approving a
+tailnet-only Service host.
+
 ## Secrets and unattended startup
 
 The OAuth client is created under **Tailscale admin console → Trust credentials
@@ -77,6 +86,11 @@ Persisted state and `TS_AUTH_ONCE=true` retain node identity. After clean state
 loss, the scoped OAuth client performs unattended tagged enrollment and the
 exact auto-approvals restore advertisements. Authentication or approval failure
 leaves ingress closed; there is no LAN fallback.
+
+The configurator tolerates the bounded control-plane propagation delay after a
+new advertisement. It accepts both the legacy `service-host` capability and
+the current per-Service `services/<name>` capability, but still requires the
+exact HTTPS listeners and upstream map before publishing browser readiness.
 
 The configurator waits for Caddy and Hermes health. It resets any missing,
 extra, downgraded, or retargeted Serve map and deterministically creates:
