@@ -587,6 +587,7 @@ def test_threat_model_documents_helper_network_observation_boundary() -> None:
         "observes host interface addresses through `AF_NETLINK`",
         "`IPAddressDeny=any`",
         "no `AF_INET` or `AF_INET6` sockets",
+        "read-only iptables policy verification requires `CAP_NET_ADMIN`",
     ):
         assert required in threat
 
