@@ -156,6 +156,14 @@ mapped node has acknowledged the same build and run evidence. The global
 catalog, when enabled, stores recipe metadata and source bundles; it does not
 store image layers or registry credentials.
 
+The run alias is the stable client-facing model name. A recipe may serve a
+different implementation-local model name: the first ordered value in
+`runtime.endpoint.model_aliases` is its primary upstream name. Route
+publication derives that value from the immutable installed recipe revision
+and writes an explicit LiteLLM public-to-upstream mapping. Invalid or missing
+runtime model authority withdraws or blocks the route instead of forwarding the
+public name blindly.
+
 ## External release and future global services
 
 The local control plane is complete without any hosted global service. This
