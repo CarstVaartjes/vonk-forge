@@ -91,11 +91,13 @@ the ID and secret only in the two mode `0600` local input files; never put
 their values in command arguments or output.
 
 Generate secrets on a private Linux filesystem, not directly on SMB:
+Run these commands from the repository checkout with `uv` installed; the
+locked control environment supplies the cryptography and Argon2 dependencies.
 
 ```bash
 set -euo pipefail
 install -d -m 0700 '<LOCAL_STAGING_DIRECTORY>'
-scripts/dev-runtime-secrets.py \
+uv run --project control --frozen scripts/dev-runtime-secrets.py \
   --secrets-dir '<LOCAL_STAGING_DIRECTORY>/secrets' \
   --management-cidrs '<NODE_MANAGEMENT_CIDR>' \
   --enroll-hostname '<ENROLLMENT_HOSTNAME>' \
@@ -103,7 +105,7 @@ scripts/dev-runtime-secrets.py \
   --registry-hostname '<REGISTRY_HOSTNAME>' \
   --tailscale-oauth-client-id-file '<LOCAL_OAUTH_INPUT_DIRECTORY>/client-id' \
   --tailscale-oauth-client-secret-file '<LOCAL_OAUTH_INPUT_DIRECTORY>/client-secret'
-scripts/dev-runtime-project \
+uv run --project control --frozen scripts/dev-runtime-project \
   --source-compose '<DOWNLOAD_DIRECTORY>/docker-compose.dev.yml' \
   --secrets-dir '<LOCAL_STAGING_DIRECTORY>/secrets' \
   --destination '<MOUNTED_NAS_PARENT>/vonk-forge' \

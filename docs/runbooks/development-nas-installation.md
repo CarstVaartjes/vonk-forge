@@ -241,7 +241,7 @@ Generate secrets on a private local Linux filesystem, never directly on SMB:
 ```bash
 set -euo pipefail
 install -d -m 0700 '<LOCAL_STAGING_DIRECTORY>'
-scripts/dev-runtime-secrets.py \
+uv run --project control --frozen scripts/dev-runtime-secrets.py \
   --secrets-dir '<LOCAL_STAGING_DIRECTORY>/secrets' \
   --management-cidrs '<NODE_MANAGEMENT_CIDR>' \
   --enroll-hostname '<ENROLLMENT_HOSTNAME>' \
@@ -289,7 +289,7 @@ and safely finishes or rolls back its own interrupted add-only transaction.
 Publish the accepted Compose and that exact bundle to the mounted NAS share:
 
 ```bash
-scripts/dev-runtime-project \
+uv run --project control --frozen scripts/dev-runtime-project \
   --source-compose '<DOWNLOAD_DIRECTORY>/docker-compose.dev.yml' \
   --secrets-dir '<LOCAL_STAGING_DIRECTORY>/secrets' \
   --destination '<MOUNTED_NAS_PARENT>/vonk-forge' \
