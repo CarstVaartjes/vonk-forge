@@ -119,6 +119,14 @@ class AuditEvent(Base):
 
 class Observation(Base):
     __tablename__ = "observations"
+    __table_args__ = (
+        Index(
+            "ix_observations_kind_node_observed",
+            "kind",
+            "node_id",
+            "observed_at",
+        ),
+    )
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )

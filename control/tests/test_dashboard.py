@@ -2,7 +2,7 @@ import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from vonk_control.dashboard import DashboardService
 from vonk_control.inventory_repository import (
@@ -69,6 +69,60 @@ def test_dashboard_joins_repository_fleet_with_latest_observation(tmp_path) -> N
     assert "management" not in result["nodes"][0]
     assert node["probe_age_seconds"] == 301.0
     assert node["stale"] is True
+
+
+def test_fleet_queries_only_latest_health_per_node(tmp_path) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'latest-health.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    node_id = "spk_00000000000000000000000000000001"
+    with sessions.begin() as session:
+        session.add_all(
+            (
+                Observation(
+                    node_id=node_id,
+                    kind="health",
+                    payload={"status": "unhealthy", "memory_available_bytes": 100},
+                    observed_at=NOW - timedelta(minutes=2),
+                ),
+                Observation(
+                    node_id=node_id,
+                    kind="health",
+                    payload={"status": "warning", "memory_available_bytes": 200},
+                    observed_at=NOW - timedelta(minutes=1),
+                ),
+                Observation(
+                    node_id=node_id,
+                    kind="health",
+                    payload={"status": "healthy", "memory_available_bytes": 300},
+                    observed_at=NOW,
+                ),
+                Observation(
+                    node_id="spk_00000000000000000000000000000002",
+                    kind="management-address",
+                    payload={"address": "10.0.0.42"},
+                    observed_at=NOW,
+                ),
+            )
+        )
+    statements = []
+
+    @event.listens_for(engine, "before_cursor_execute")
+    def capture_statement(connection, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    result = DashboardService(Repository(), sessions, clock=lambda: NOW).fleet()
+
+    assert result["nodes"][0]["healthy"] is True
+    assert result["nodes"][0]["memory_available_bytes"] == 300
+    assert len([row for row in result["nodes"] if row["id"] == node_id]) == 1
+    health_queries = [
+        statement
+        for statement in statements
+        if "FROM observations" in statement and "observations.kind" in statement
+    ]
+    assert len(health_queries) == 1
+    assert "ROW_NUMBER() OVER" in health_queries[0].upper()
 
 
 def test_dashboard_projects_agent_availability_without_addresses(tmp_path) -> None:
