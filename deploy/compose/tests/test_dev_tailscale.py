@@ -69,6 +69,7 @@ def test_development_gateway_is_pinned_userspace_and_least_privilege() -> None:
         "TS_USERSPACE": "true",
     }
     assert set(gateway["networks"]) == {"tailscale-egress", "tailnet-web-edge"}
+    assert gateway["tmpfs"] == ["/tmp:size=64m,mode=1777"]
     assert not gateway.get("secrets")
     volumes = _volumes_by_target(gateway)
     assert volumes["/var/lib/tailscale"]["source"] == "dev-tailscale-state"
@@ -94,6 +95,7 @@ def test_development_configurator_has_only_bounded_runtime_authority() -> None:
     assert configurator["read_only"] is True
     assert configurator["cap_drop"] == ["ALL"]
     assert configurator["security_opt"] == ["no-new-privileges:true"]
+    assert configurator["tmpfs"] == ["/tmp:size=16m,mode=1777"]
     for forbidden in (
         "ports",
         "networks",
