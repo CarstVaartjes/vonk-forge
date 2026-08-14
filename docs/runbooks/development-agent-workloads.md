@@ -439,6 +439,17 @@ wait for fresh inventory, then run the same phase with
 `synthetic-2.json`. Existing immutable source/artifact content may be reused;
 the accepted receipts and final normal cleanup must still be complete.
 
+Recipe image distribution uses bounded 8 MiB range requests from the
+controller's content-addressed store. The controller verifies the complete
+archive while accepting the builder upload; each target agent independently
+rehashes the completed download before requesting Docker import. The range
+endpoint therefore streams only the requested bytes and never recopies or
+rehashes a multi-gigabyte archive for every range. If an import fails with
+`exact OCI image archive is unavailable` and its operation-private staging
+file remains zero bytes, inspect the controller/Caddy response for the first
+range request; Docker has not been invoked and deleting image or model caches
+is not a remedy.
+
 ## Real single-node model
 
 Create `model-qualification-input.json` from fresh read-only observations. It

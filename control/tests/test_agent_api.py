@@ -2436,6 +2436,42 @@ def test_artifact_access_is_owned_content_addressed_and_range_bounded(
     )
 
 
+def test_recipe_image_range_does_not_snapshot_the_complete_archive(
+    agent_system, monkeypatch
+) -> None:
+    client, services, _, clock = agent_system
+    payload = b"accepted recipe image archive"
+    digest = hashlib.sha256(payload).hexdigest()
+    (services.artifact_root / digest).write_bytes(payload)
+    services.operations.enqueue(
+        parent(services.sessions, clock).id,
+        NODE_A,
+        "recipe.image.import.v1",
+        "a" * 40,
+        {
+            "schema_version": 1,
+            "kind": "recipe.image.import.v1",
+            "oci_layout_sha256": digest,
+            "image_bytes": len(payload),
+        },
+    )
+
+    def fail_snapshot(*_args, **_kwargs):
+        raise AssertionError("recipe image ranges must not snapshot the archive")
+
+    monkeypatch.setattr("vonk_control.agent_api._sealed_snapshot", fail_snapshot)
+    response = client.get(
+        f"/agent/v1/artifacts/{digest}",
+        headers={**agent_headers(NODE_A, "serial-a"), "Range": "bytes=1-3"},
+    )
+
+    assert (
+        response.status_code,
+        response.content,
+        response.headers["content-range"],
+    ) == (206, payload[1:4], f"bytes 1-3/{len(payload)}")
+
+
 def test_artifact_symlink_is_never_served(agent_system, tmp_path) -> None:
     client, services, _, clock = agent_system
     digest = "a" * 64

@@ -708,7 +708,7 @@ def _unlink_if_present(path: Path) -> None:
 
 def _open_owned_artifact(
     services: AgentApiServices, identity: AgentIdentity, digest: str
-) -> tuple[int, int, int]:
+) -> tuple[int, int, int, bool]:
     if _DIGEST.fullmatch(digest) is None:
         raise HTTPException(status_code=404, detail="artifact not found")
     with services.sessions() as session:
@@ -727,10 +727,11 @@ def _open_owned_artifact(
     ]
     if not owners:
         raise HTTPException(status_code=404, detail="artifact not found")
+    recipe_image = any(
+        operation.kind == "recipe.image.import.v1" for operation in owners
+    )
     maximum = (
-        services.max_recipe_image_bytes
-        if any(operation.kind == "recipe.image.import.v1" for operation in owners)
-        else services.max_artifact_bytes
+        services.max_recipe_image_bytes if recipe_image else services.max_artifact_bytes
     )
     root_flags = (
         os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
@@ -751,7 +752,7 @@ def _open_owned_artifact(
                 status_code=404 if not stat.S_ISREG(metadata.st_mode) else 413,
                 detail="artifact not available",
             )
-        return descriptor, metadata.st_size, maximum
+        return descriptor, metadata.st_size, maximum, recipe_image
     except Exception:
         os.close(descriptor)
         raise
@@ -1812,7 +1813,9 @@ def install_agent_routes(
         _scope_identity(request)
         required = _require_services(services)
         identity = _authenticated_identity(request, required)
-        descriptor, size, maximum = _open_owned_artifact(required, identity, sha256)
+        descriptor, size, maximum, recipe_image = _open_owned_artifact(
+            required, identity, sha256
+        )
         try:
             requested = _range(
                 request.headers.get("range"), size, required.max_range_bytes
@@ -1832,6 +1835,19 @@ def install_agent_routes(
         headers = {"Accept-Ranges": "bytes", "Content-Length": str(length)}
         if code == status.HTTP_206_PARTIAL_CONTENT:
             headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+        if recipe_image:
+            # Recipe images are verified while they enter the content-addressed
+            # store and rehashed by the agent before Docker sees them. Reading
+            # only the requested range keeps multi-gigabyte images resumable;
+            # snapshotting and hashing the complete archive for every 8 MiB
+            # request is quadratic and can exceed the agent's HTTP deadline
+            # before the first response byte.
+            return StreamingResponse(
+                _read_chunks(descriptor, start, length),
+                status_code=code,
+                headers=headers,
+                media_type="application/octet-stream",
+            )
         snapshot = _sealed_snapshot(descriptor, size, maximum, sha256)
         return _SnapshotResponse(
             snapshot,
