@@ -30,7 +30,7 @@
 **Files:**
 - Modify: `control/src/vonk_control/models.py`
 - Modify: `control/src/vonk_control/dashboard.py`
-- Create: `control/migrations/versions/0020_observation_latest_index.py`
+- Create: `control/migrations/versions/0022_observation_latest_index.py`
 - Modify: `control/tests/test_dashboard.py`
 
 **Interfaces:**
@@ -68,7 +68,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit and push**
 
 ```bash
-git add control/src/vonk_control/models.py control/src/vonk_control/dashboard.py control/migrations/versions/0020_observation_latest_index.py control/tests/test_dashboard.py
+git add control/src/vonk_control/models.py control/src/vonk_control/dashboard.py control/migrations/versions/0022_observation_latest_index.py control/tests/test_dashboard.py
 git commit -m "perf: bound fleet health projection"
 git push
 ```
@@ -140,7 +140,7 @@ git push
 - Modify: `control/src/vonk_control/models.py`
 - Modify: `control/src/vonk_control/agent_api.py`
 - Modify: `control/src/vonk_control/api.py`
-- Create: `control/migrations/versions/0021_node_telemetry.py`
+- Create: `control/migrations/versions/0023_node_telemetry.py`
 - Create: `control/tests/test_telemetry.py`
 - Modify: `control/tests/test_agent_api.py`
 
@@ -183,7 +183,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit and push**
 
 ```bash
-git add control/src/vonk_control/telemetry.py control/src/vonk_control/models.py control/src/vonk_control/agent_api.py control/src/vonk_control/api.py control/migrations/versions/0021_node_telemetry.py control/tests/test_telemetry.py control/tests/test_agent_api.py
+git add control/src/vonk_control/telemetry.py control/src/vonk_control/models.py control/src/vonk_control/agent_api.py control/src/vonk_control/api.py control/migrations/versions/0023_node_telemetry.py control/tests/test_telemetry.py control/tests/test_agent_api.py
 git commit -m "feat: ingest bounded node telemetry"
 git push
 ```
