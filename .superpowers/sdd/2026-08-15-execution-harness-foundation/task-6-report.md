@@ -322,3 +322,17 @@ npm run test:e2e --prefix control/web -- e2e/fleet-library.spec.ts
   library path; this environment's known `libnspr4`/`libnss` issue was not
   changed in code. No deterministic transient-infrastructure cause was found,
   so no infrastructure code change was made.
+
+### Controller browser verification
+
+The browser verification finding is addressed.
+
+```text
+LD_LIBRARY_PATH=/tmp/vonk-playwright-libs.3oQg9j/root/usr/lib/x86_64-linux-gnu npm run test:e2e --prefix control/web -- e2e/fleet-library.spec.ts
+```
+
+Output: `Running 6 tests using 1 worker`; all six named Fleet/Library tests
+passed; final `6 passed (4.8s)`.
+
+Warnings only: Node reported that `NO_COLOR` was ignored because `FORCE_COLOR`
+is set. This is harness color-environment noise, not an application failure.
