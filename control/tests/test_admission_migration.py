@@ -19,12 +19,12 @@ def config(url: str) -> Config:
     value.set_main_option("script_location", str(root / "migrations")); value.set_main_option("sqlalchemy.url", url); return value
 
 
-def test_database_migrations_are_one_exact_linear_chain_at_0026() -> None:
+def test_database_migrations_are_one_exact_linear_chain_at_0027() -> None:
     script = ScriptDirectory.from_config(config("sqlite://"))
-    assert script.get_heads() == ["0026_telemetry_maintenance_state"]
+    assert script.get_heads() == ["0027_execution_harness_catalog"]
     assert (
-        script.get_revision("0025_telemetry_retention").down_revision
-        == "0024_fleet_stream_events"
+        script.get_revision("0027_execution_harness_catalog").down_revision
+        == "0026_telemetry_maintenance_state"
     )
     assert [
         revision.revision
@@ -56,11 +56,12 @@ def test_database_migrations_are_one_exact_linear_chain_at_0026() -> None:
         "0024_fleet_stream_events",
         "0025_telemetry_retention",
         "0026_telemetry_maintenance_state",
+        "0027_execution_harness_catalog",
     ]
 
 
 def test_admission_tables_upgrade_and_downgrade(tmp_path: Path) -> None:
-    url = f"sqlite:///{tmp_path/'admission.sqlite'}"; command.upgrade(config(url), "head"); engine = create_engine(url)
+    url = f"sqlite:///{tmp_path/'admission.sqlite'}"; command.upgrade(config(url), "0026_telemetry_maintenance_state"); engine = create_engine(url)
     tables = {"node_inventory_snapshots", "node_artifacts", "resource_reservations", "recipe_installations", "installation_nodes", "recipe_runs", "run_nodes", "node_telemetry_samples", "node_telemetry_latest"}
     assert tables <= set(inspect(engine).get_table_names())
     assert {"recipe_revision_id", "plan_digest", "state"} <= {column["name"] for column in inspect(engine).get_columns("recipe_installations")}

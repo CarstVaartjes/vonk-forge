@@ -2038,7 +2038,7 @@ def production_app() -> FastAPI:
     )
     from .artifact_sizes import DeclaredArtifactSizeResolver
     from .audit import SqlAuditStore
-    from .catalog_seeds import seed_standard_families
+    from .catalog_seeds import seed_builtin_harnesses
     from .code_host import RepositoryCodeHost
     from .dashboard import DashboardService
     from .db import build_engine, session_factory
@@ -2129,7 +2129,7 @@ def production_app() -> FastAPI:
     if actual_revision != generation.database_revision:
         raise RuntimeError("selected database revision does not match generation")
     with sessions.begin() as session:
-        seed_standard_families(session, clock())
+        seed_builtin_harnesses(session, clock())
 
     online_lock = OnlineLock(settings.state_path / "offline.lock")
     online_lock.__enter__()

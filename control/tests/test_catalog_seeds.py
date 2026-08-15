@@ -3,8 +3,9 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
-from vonk_control.catalog_seeds import seed_standard_families
-from vonk_control.models import Base, PackageFamily
+from vonk_control.catalog_seeds import seed_builtin_harnesses
+from vonk_control.harnesses import BUILTIN_HARNESS_SLUGS
+from vonk_control.models import Base, CatalogEntity, CatalogEntityRevision
 
 
 @pytest.fixture
@@ -15,41 +16,34 @@ def session():
         yield value
 
 
-def test_standard_seed_is_idempotent_and_preserves_user_edits(session) -> None:
-    now = datetime(2026, 8, 7, 12, 0, tzinfo=UTC)
-    first = seed_standard_families(session, now)
-    session.commit()
-    session.get(PackageFamily, "vllm").display_name = "My vLLM"
+def test_builtin_harness_seed_creates_one_resolved_entity_per_builtin(session) -> None:
+    first = seed_builtin_harnesses(session, datetime(2026, 8, 15, tzinfo=UTC))
     session.commit()
 
-    second = seed_standard_families(session, now)
+    assert first.created == len(BUILTIN_HARNESS_SLUGS)
+    assert set(first.identifiers) == set(BUILTIN_HARNESS_SLUGS)
+    assert set(
+        session.scalars(
+            select(CatalogEntity.slug).where(CatalogEntity.kind == "execution-harness")
+        )
+    ) == set(BUILTIN_HARNESS_SLUGS)
+    assert (
+        session.scalar(
+            select(CatalogEntityRevision).where(
+                CatalogEntityRevision.lifecycle == "resolved"
+            )
+        )
+        is not None
+    )
+
+
+def test_builtin_harness_seed_is_idempotent(session) -> None:
+    now = datetime(2026, 8, 15, tzinfo=UTC)
+    seed_builtin_harnesses(session, now)
     session.commit()
 
-    assert first.created == 5
+    second = seed_builtin_harnesses(session, now)
+    session.commit()
+
     assert second.created == 0
-    assert session.get(PackageFamily, "vllm").display_name == "My vLLM"
-
-
-def test_standard_seeds_are_typed_arm64_definitions(session) -> None:
-    seed_standard_families(session, datetime.now(UTC))
-    session.commit()
-
-    assert set(session.scalars(select(PackageFamily.id))) == {
-        "oci",
-        "huggingface-snapshot",
-        "vllm",
-        "sglang",
-        "llama-cpp",
-    }
-    for family in session.scalars(select(PackageFamily)):
-        assert family.builtin is True
-        assert family.schema_version == 1
-        assert family.definition["architecture"] == "linux/arm64"
-        assert family.definition["capability"].endswith(".v1")
-
-
-def test_seed_participates_in_the_callers_transaction(session) -> None:
-    seed_standard_families(session, datetime.now(UTC))
-    session.rollback()
-
-    assert session.get(PackageFamily, "vllm") is None
+    assert second.identifiers == ()

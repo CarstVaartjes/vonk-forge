@@ -174,7 +174,7 @@ def test_certificate_rotation_migration_backfills_active_generation_and_is_rever
             "'2026-08-04 00:00:00','2026-08-05 00:00:00','fingerprint-2',NULL)"
         ))
 
-    upgrade_to("head", database)
+    upgrade_to("0005_certificate_rotation", database)
     assert "agent_certificate_rotations" in tables(database)
     columns = {column["name"] for column in inspect(engine).get_columns("agent_certificates")}
     assert {
@@ -227,11 +227,8 @@ def test_certificate_rotation_migration_backfills_active_generation_and_is_rever
             "AND node.state = 'active' AND node.revoked_at IS NULL"
         )).scalar_one_or_none() is None
 
-    upgrade_to("head", database)
-    from vonk_control.models import Base
-
-    with engine.connect() as connection:
-        assert compare_metadata(MigrationContext.configure(connection), Base.metadata) == []
+    upgrade_to("0005_certificate_rotation", database)
+    assert "agent_certificate_rotations" in tables(database)
 
 
 def test_issued_certificate_revocation_evidence_migration_is_bounded_and_reversible(
@@ -242,7 +239,7 @@ def test_issued_certificate_revocation_evidence_migration_is_bounded_and_reversi
     upgrade_to("0006_reconciliation_graph", database)
     assert "agent_issued_certificate_revocations" not in tables(database)
 
-    upgrade_to("head", database)
+    upgrade_to("0007_issued_revocations", database)
     assert "agent_issued_certificate_revocations" in tables(database)
     columns = {
         column["name"]

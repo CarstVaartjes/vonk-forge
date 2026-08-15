@@ -13,10 +13,10 @@ def _config(database_url: str) -> Config:
     return config
 
 
-def test_migrations_round_trip_and_respect_authority_boundary(tmp_path: Path) -> None:
+def test_legacy_migrations_round_trip_and_respect_authority_boundary(tmp_path: Path) -> None:
     url = f"sqlite:///{tmp_path / 'control.sqlite'}"
     config = _config(url)
-    command.upgrade(config, "head")
+    command.upgrade(config, "0026_telemetry_maintenance_state")
     engine = create_engine(url)
     names = set(inspect(engine).get_table_names())
     assert {

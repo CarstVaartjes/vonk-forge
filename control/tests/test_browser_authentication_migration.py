@@ -37,7 +37,7 @@ def test_password_verifier_migration_preserves_users_and_downgrades_only_its_col
             )
         )
 
-    command.upgrade(migration_config, "head")
+    command.upgrade(migration_config, "0021_browser_authentication")
     columns = {column["name"]: column for column in inspect(engine).get_columns("users")}
     assert columns["password_verifier"]["type"].length == 255
     assert columns["password_verifier"]["nullable"] is True

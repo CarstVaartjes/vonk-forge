@@ -26,7 +26,7 @@ EXPECTED_SOURCE_SHA256 = (
     "3bcb427bb551833bfece49d1724935d7ddf5e93bd802aa74a3e806023da39caf"
 )
 EXPECTED_RECIPE_SHA256 = (
-    "544c30a6d5af4106573b2e9d74ebd405a60ed89604edfe81a600302cc09a5e47"
+    "b9a12da76e3fe2b1b572f9579268be523ad1bb28311e2ba651bed9dd65270456"
 )
 EXPECTED_ARTIFACT_SOURCE = (
     "https://raw.githubusercontent.com/CarstVaartjes/vonk-forge/"
