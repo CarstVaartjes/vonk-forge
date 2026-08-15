@@ -2,6 +2,10 @@
   min-width: 0;
 }
 
+.library-page :where(code, dd, p, small, span, strong) {
+  overflow-wrap: anywhere;
+}
+
 .library-browser {
   align-items: start;
   display: grid;
@@ -9,11 +13,17 @@
 }
 
 .library-pane {
-  background: var(--surface, #fff);
-  border: 1px solid var(--border, #d8dee8);
+  background: var(--surface-panel, #101d1a);
+  border: 1px solid var(--border, #29413a);
   border-radius: 0.8rem;
+  color: var(--text, #edf4f2);
   min-width: 0;
   overflow: hidden;
+}
+
+.library-back {
+  align-items: center;
+  min-height: 44px;
 }
 
 .library-pane-heading,
@@ -36,6 +46,10 @@
   gap: 0.6rem;
 }
 
+.library-models .library-pane-heading > small {
+  display: none;
+}
+
 .library-pane-heading h3,
 .library-step {
   margin: 0;
@@ -43,9 +57,9 @@
 
 .library-step {
   align-items: center;
-  background: var(--ink, #172033);
+  background: var(--mint, #68e5b3);
   border-radius: 50%;
-  color: #fff;
+  color: var(--mint-ink, #062017);
   display: inline-flex;
   font-size: 0.75rem;
   height: 1.6rem;
@@ -65,14 +79,41 @@
   text-decoration: none;
 }
 
+.library-row {
+  color: inherit;
+}
+
+.library-row span,
+.library-row small,
+.library-pane-heading > small,
+.library-placeholder {
+  color: var(--text-muted, #9bb1aa);
+}
+
+.library-back,
+.advanced-workflows a {
+  color: var(--mint-strong, #8bf0c6);
+}
+
+.library-row:focus-visible,
+.library-back:focus-visible {
+  outline-offset: -3px;
+}
+
+.library-row,
+.library-pane button,
+.library-pane summary {
+  min-height: 44px;
+}
+
 .library-row[aria-current="page"] {
-  background: var(--surface-raised, #f2f6fb);
-  box-shadow: inset 3px 0 0 var(--accent, #315cf4);
+  background: var(--surface-raised, #14231f);
+  box-shadow: inset 3px 0 0 var(--mint, #68e5b3);
 }
 
 .library-primary-control,
 .placement-section {
-  border-color: var(--accent, #315cf4);
+  border-color: var(--mint, #68e5b3);
 }
 
 .placement-actions {
@@ -96,12 +137,32 @@
 
 @media (min-width: 900px) {
   .library-browser {
-    grid-template-columns: minmax(12rem, 0.72fr) minmax(15rem, 0.9fr) minmax(28rem, 2fr);
+    grid-template-columns: minmax(0, 0.72fr) minmax(0, 0.9fr) minmax(0, 2fr);
   }
 
   .library-models,
   .library-recipes {
     position: sticky;
     top: 1rem;
+  }
+
+  .library-back {
+    display: none;
+  }
+}
+
+@media (max-width: 899px) {
+  .library-pane {
+    display: none;
+  }
+
+  .route-root .library-models,
+  .route-model .library-recipes,
+  .route-recipe .library-detail {
+    display: block;
+  }
+
+  .library-back {
+    display: flex;
   }
 }

@@ -41,6 +41,8 @@ export function LibraryPage({api, path, onNavigate}: {
   const [detailLoading, setDetailLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [paginationError, setPaginationError] = useState("");
+  const [snapshotAttempt, setSnapshotAttempt] = useState(0);
+  const [detailAttempt, setDetailAttempt] = useState(0);
   const loadMoreController = useRef<AbortController | undefined>(undefined);
   const heading = useRef<HTMLHeadingElement>(null);
 
@@ -53,7 +55,7 @@ export function LibraryPage({api, path, onNavigate}: {
         if (!controller.signal.aborted) setError(value instanceof Error ? value.message.slice(0, 256) : "Unable to load Library");
       });
     return () => controller.abort();
-  }, [api]);
+  }, [api, snapshotAttempt]);
 
   useEffect(() => () => loadMoreController.current?.abort(), []);
 
@@ -104,7 +106,7 @@ export function LibraryPage({api, path, onNavigate}: {
         }
       });
     return () => controller.abort();
-  }, [api, recipeId]);
+  }, [api, detailAttempt, recipeId]);
 
   useEffect(() => {
     let active = true;
@@ -120,7 +122,7 @@ export function LibraryPage({api, path, onNavigate}: {
         <p className="fleet-introduction">Choose a model, its exact recipe, and one complete placement group before reviewing any change.</p>
       </div>
     </header>
-    {error && <section className="fleet-error" role="alert"><h3>Library unavailable</h3><p>{error}</p></section>}
+    {error && <section className="fleet-error" role="alert"><h3>Library unavailable</h3><p>{error}</p><button type="button" onClick={() => setSnapshotAttempt(value => value + 1)}>Retry Library</button></section>}
     {!error && !snapshot && <section className="fleet-loading" role="status" aria-label="Loading Library"><span className="loading-orb" aria-hidden="true"/><div><h3>Opening Library</h3><p>Loading model, recipe, and placement authority…</p></div></section>}
     {snapshot && snapshot.models.length === 0 && snapshot.unlinked_recipes.length === 0 && <section className="fleet-empty"><h3>No recipes in the Library</h3><p>Create or import a recipe through the advanced catalog workflow.</p><a className="button" href="/catalog" onClick={event => onNavigate(event, "/catalog")}>Open advanced catalog</a></section>}
     {snapshot && (snapshot.models.length > 0 || snapshot.unlinked_recipes.length > 0) && <LibraryBrowser
@@ -130,6 +132,7 @@ export function LibraryPage({api, path, onNavigate}: {
       detailLoading={detailLoading}
       onNavigate={onNavigate}
       onRefresh={refreshDetail}
+      onRetryDetail={() => setDetailAttempt(value => value + 1)}
       route={route}
       snapshot={snapshot}
     />}

@@ -1,4 +1,4 @@
-import {useCallback, useRef, useState} from "react";
+import {useCallback, useEffect, useRef, useState} from "react";
 import type {LibraryRecipeDetail, LibrarySnapshot} from "../api/types";
 import type {LibraryApi, LibraryOperation} from "../api/types";
 import {formatBytes} from "../lib/fleet";
@@ -8,6 +8,8 @@ import {LibraryReasons} from "./library-reasons";
 import {LibraryActionDialog} from "./library-action-dialog";
 import type {LibraryActionName, LibraryActionReview, LibraryActionTarget, LibraryPlacementGroup} from "./library-action-types";
 import {LibraryOperationProgress, operationSettled} from "./library-operation-progress";
+import {LibraryRecipeAdvanced} from "./library-recipe-advanced";
+import "./library-recipe-detail.css";
 
 type Profile = LibraryRecipeDetail["profiles"][number];
 
@@ -45,10 +47,22 @@ export function LibraryRecipeAuthority({api, detail, onRefresh, policy}: {
   const [review, setReview] = useState<LibraryActionReview>();
   const [operation, setOperation] = useState<LibraryOperation>();
   const [operationName, setOperationName] = useState<LibraryActionName>("Load");
+  const canonicalPreviewKey = [
+    detail.recipe.recipe_id,
+    detail.selected_revision?.id ?? "",
+    detail.selected_revision?.content_sha256 ?? "",
+    JSON.stringify(detail.visual_recipe),
+  ].join(":");
+  const [preview, setPreview] = useState({document: detail.visual_recipe, canonicalKey: canonicalPreviewKey});
   const trigger = useRef<HTMLButtonElement | null>(null);
-  const visual = detail.visual_recipe;
+  const visual = preview.canonicalKey === canonicalPreviewKey ? preview.document : detail.visual_recipe;
   const revision = detail.selected_revision;
-  const alias = visual?.runtime.model_aliases[0] ?? detail.recipe.slug;
+  const alias = detail.visual_recipe?.runtime.model_aliases[0] ?? detail.recipe.slug;
+  useEffect(() => {
+    setPreview(current => current.canonicalKey === canonicalPreviewKey
+      ? current
+      : {document: detail.visual_recipe, canonicalKey: canonicalPreviewKey});
+  }, [canonicalPreviewKey, detail.visual_recipe]);
   const closeReview = useCallback(() => {
     setReview(undefined);
     const returnTo = trigger.current;
@@ -108,6 +122,11 @@ export function LibraryRecipeAuthority({api, detail, onRefresh, policy}: {
       </section>
     </>}
     <LibraryReasons reasons={detail.reasons}/>
+    {detail.visual_recipe && <LibraryRecipeAdvanced
+      key={canonicalPreviewKey}
+      document={detail.visual_recipe}
+      onValidDocument={document => setPreview({document, canonicalKey: canonicalPreviewKey})}
+    />}
     <nav className="advanced-workflows" aria-label="Advanced recipe workflows">
       <a href={`/catalog/${encodeURIComponent(detail.recipe.recipe_id)}/source`}>Source and build</a>
       <a href={`/catalog/${encodeURIComponent(detail.recipe.recipe_id)}/map`}>Cluster mapping</a>

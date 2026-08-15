@@ -1,10 +1,34 @@
 import {expect, test, type Page} from "@playwright/test";
+import {fullLibraryDetail, librarySnapshot, minimalLibraryDetail, unlinkedRecipe} from "../src/test-fixtures/library";
 
 const GIB = 1024 ** 3;
 const nodeId = "spk_0123456789abcdef0123456789abcdef";
 const borealisId = "spk_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const commit = "a".repeat(40);
 const browserProblems = new WeakMap<Page, string[]>();
+type LibraryFixtureState = {
+  detailFailuresRemaining: number;
+  empty: boolean;
+  lastApplyBody?: Record<string, unknown>;
+  retryCount: number;
+  snapshotFailuresRemaining: number;
+};
+const libraryFixtures = new WeakMap<Page, LibraryFixtureState>();
+
+function libraryLoadPlan() {
+  return {
+    alias: "qwen-chat", allowed: true, installation_id: "installation-chat", mapping_generation: 4, mapping_id: "mapping-chat",
+    nodes: [
+      {active_reserved_bytes: 4 * GIB, allowed: true, available_memory_bytes: 100 * GIB, blockers: [], endpoint_owner: true, fabric_address: "fabric://node-alpha", fabric_bandwidth_mbps: 25_000, free_after_bytes: 36 * GIB, inventory_observed_at: "2026-08-15T11:59:50Z", memory_floor_bytes: 8 * GIB, memory_kind: "unified", node_id: "node-alpha", port: 8000, rank: 0, rendezvous_port: 29500, required_memory_bytes: 60 * GIB, role: "leader", warnings: [{code: "run.coexistence_confirmed", detail: "Authoritative capacity evidence permits Qwen Code to coexist."}]},
+      {active_reserved_bytes: 4 * GIB, allowed: true, available_memory_bytes: 100 * GIB, blockers: [], endpoint_owner: false, fabric_address: "fabric://node-beta", fabric_bandwidth_mbps: 25_000, free_after_bytes: 36 * GIB, inventory_observed_at: "2026-08-15T11:59:45Z", memory_floor_bytes: 8 * GIB, memory_kind: "unified", node_id: "node-beta", port: 8000, rank: 1, rendezvous_port: null, required_memory_bytes: 60 * GIB, role: "worker", warnings: []},
+    ],
+    plan_digest: "load-plan-digest", recipe_revision_id: "revision-chat",
+  };
+}
+
+function libraryOperation(state: string) {
+  return {id: "operation-load", kind: "run", owner_id: "installation-chat", state, plan_digest: "load-plan-digest", nodes: ["node-alpha", "node-beta"], result: {job_id: "job-load"}};
+}
 
 function telemetry(observedAt: string, sequence = 4, telemetryNodeId = nodeId) {
   return {
@@ -81,6 +105,8 @@ function localSnapshot() {
 
 async function installLocalFleetFixture(page: Page) {
   const snapshot = localSnapshot();
+  const libraryState: LibraryFixtureState = {detailFailuresRemaining: 0, empty: false, retryCount: 0, snapshotFailuresRemaining: 0};
+  libraryFixtures.set(page, libraryState);
   const platformVersion = `6.0.0-${"release".repeat(24)}`;
   const targetSha256 = "f".repeat(64);
   await page.route("**/api/v1/auth/session", route => route.fulfill({json: {subject: "admin", role: "administrator", expires_at: "2099-01-01T00:00:00Z"}}));
@@ -100,6 +126,46 @@ async function installLocalFleetFixture(page: Page) {
     body: `retry: 60000\nid: ${snapshot.event_cursor}\nevent: fleet-snapshot\ndata: ${JSON.stringify({schema_version: 1, reset_reason: "initial", snapshot})}\n\n`,
   }));
   await page.route("**/api/v1/fleet", route => route.fulfill({json: snapshot}));
+  await page.route("**/api/v1/library?*", route => {
+    if (libraryState.snapshotFailuresRemaining > 0) {
+      libraryState.snapshotFailuresRemaining -= 1;
+      return route.fulfill({status: 200, contentType: "application/json", body: "{"});
+    }
+    const body = libraryState.empty ? {...librarySnapshot, models: [], unlinked_recipes: []} : librarySnapshot;
+    return route.fulfill({json: body});
+  });
+  await page.route("**/api/v1/library/recipes/recipe-chat", route => {
+    if (libraryState.detailFailuresRemaining > 0) {
+      libraryState.detailFailuresRemaining -= 1;
+      return route.fulfill({status: 200, contentType: "application/json", body: "{"});
+    }
+    return route.fulfill({json: fullLibraryDetail});
+  });
+  await page.route("**/api/v1/library/recipes/recipe-unlinked", route => route.fulfill({json: {
+    ...minimalLibraryDetail,
+    recipe: {
+      recipe_id: unlinkedRecipe.recipe_id,
+      slug: unlinkedRecipe.slug,
+      title: unlinkedRecipe.title,
+      description: unlinkedRecipe.description,
+      source_kind: unlinkedRecipe.source_kind,
+    },
+  }}));
+  await page.route("**/api/v1/recipes/run-plans/preview", route => route.fulfill({json: libraryLoadPlan()}));
+  await page.route("**/api/v1/recipes/runs", async route => {
+    libraryState.lastApplyBody = await route.request().postDataJSON() as Record<string, unknown>;
+    return route.fulfill({json: libraryOperation("queued")});
+  });
+  await page.route("**/api/v1/recipes/operations/operation-load", route => route.fulfill({json: libraryOperation("partial")}));
+  await page.route("**/api/v1/recipes/operations/operation-load/retry", route => {
+    libraryState.retryCount += 1;
+    return route.fulfill({json: libraryOperation("queued")});
+  });
+  await page.route("**/api/v1/jobs/job-load*", route => route.fulfill({json: {
+    id: "job-load", kind: "run", state: "failed", base_commit: "", current_attempt: 1,
+    operation_total: 2, operations: [], progress: {completed: 1, failed: 1, running: 0, total: 2},
+    target_total: 2, targets: ["node-alpha", "node-beta"],
+  }}));
   await page.route("**/api/v1/nodes/*/telemetry?*", route => {
     const url = new URL(route.request().url());
     const start = url.searchParams.get("start") ?? snapshot.generated_at;
@@ -179,4 +245,179 @@ test("Fleet has no document overflow from phone through large desktop", async ({
   await page.getByRole("button", {name: "Close Aurora details"}).click();
   const columns = await page.locator(".node-grid").evaluate(element => getComputedStyle(element).gridTemplateColumns.split(" ").length);
   expect(columns).toBeGreaterThanOrEqual(2);
+});
+
+test("Library keeps URL drill-down below 900px and three coordinated panes above it", async ({page}, testInfo) => {
+  await page.setViewportSize({width: 360, height: 800});
+  await page.goto("/library");
+
+  const models = page.getByRole("region", {name: "Models"});
+  const recipes = page.getByRole("region", {name: "Recipes"});
+  const detail = page.getByRole("region", {name: "Recipe detail"});
+  await expect(models).toBeVisible();
+  await expect(recipes).toBeHidden();
+  await expect(detail).toBeHidden();
+
+  await models.getByRole("link", {name: /Qwen 3/}).focus();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/library\/models\/qwen%2F3$/);
+  await expect(page.getByRole("heading", {name: "Library", exact: true})).toBeFocused();
+  await expect(models).toBeHidden();
+  await expect(page.getByRole("region", {name: "Recipes for Qwen 3"})).toBeVisible();
+  await expect(detail).toBeHidden();
+
+  await page.getByRole("link", {name: /Qwen Chat/}).click();
+  await expect(page).toHaveURL(/\/library\/recipes\/recipe-chat$/);
+  await expect(page.getByRole("heading", {name: "Library", exact: true})).toBeFocused();
+  await expect(models).toBeHidden();
+  await expect(page.getByRole("region", {name: "Recipes for Qwen 3"})).toBeHidden();
+  await expect(detail).toBeVisible();
+
+  await page.goBack();
+  await expect(page).toHaveURL(/\/library\/models\/qwen%2F3$/);
+  await expect(page.getByRole("region", {name: "Recipes for Qwen 3"})).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL(/\/library$/);
+  await expect(models).toBeVisible();
+
+  await models.getByRole("link", {name: /Unlinked/}).click();
+  await expect(page).toHaveURL(/\/library\/models\/~unlinked$/);
+  const unlinked = page.getByRole("region", {name: "Unlinked recipes"});
+  await unlinked.getByRole("link", {name: /Custom Runtime/}).click();
+  await expect(page).toHaveURL(/\/library\/recipes\/recipe-unlinked$/);
+  const backToUnlinked = page.getByRole("link", {name: "Back to Unlinked recipes"});
+  await expect(backToUnlinked).toHaveAttribute("href", "/library/models/~unlinked");
+  await backToUnlinked.click();
+  await expect(page).toHaveURL(/\/library\/models\/~unlinked$/);
+  await expect(unlinked).toBeVisible();
+
+  await page.setViewportSize({width: 1280, height: 900});
+  await models.getByRole("link", {name: /Qwen 3/}).click();
+  await page.getByRole("link", {name: /Qwen Chat/}).click();
+  await expect(models).toBeVisible();
+  await expect(page.getByRole("region", {name: "Recipes for Qwen 3"})).toBeVisible();
+  await expect(detail).toBeVisible();
+
+  for (const width of [320, 360, 768, 899, 900, 1280, 1920]) {
+    await page.setViewportSize({width, height: width < 900 ? 800 : 900});
+    await expect.poll(() => page.evaluate(() => ({
+      body: document.body.scrollWidth,
+      document: document.documentElement.scrollWidth,
+      viewport: window.innerWidth,
+    }))).toEqual({body: width, document: width, viewport: width});
+  }
+
+  await page.setViewportSize({width: 899, height: 900});
+  await expect(models).toBeHidden();
+  await expect(detail).toBeVisible();
+  await page.setViewportSize({width: 900, height: 900});
+  await expect(models).toBeVisible();
+  await expect(page.getByRole("region", {name: "Recipes for Qwen 3"})).toBeVisible();
+  await expect(detail).toBeVisible();
+  await page.setViewportSize({width: 360, height: 800});
+  await page.evaluate(() => scrollTo(0, 0));
+  await page.screenshot({path: testInfo.outputPath("library-mobile.png")});
+});
+
+test("Library fixture journey keeps visual authority primary through preview, partial retry, and Advanced recovery", async ({page}, testInfo) => {
+  await page.setViewportSize({width: 1280, height: 900});
+  await page.goto("/library/recipes/recipe-chat");
+
+  const models = page.getByRole("region", {name: "Models"});
+  const recipes = page.getByRole("region", {name: "Recipes for Qwen 3"});
+  const authority = page.getByRole("region", {name: "Qwen Chat recipe authority"});
+  await expect(models.getByRole("link", {name: /Unlinked/})).toBeVisible();
+  await expect(recipes.getByRole("link", {name: /Qwen Chat/})).toBeVisible();
+  await expect(recipes.getByRole("link", {name: /Qwen Code/})).toBeVisible();
+  await expect(authority).toContainText("Immutable revision 3");
+  await expect(authority).toContainText("Bounded search is incomplete");
+  await expect(authority).toContainText("Inventory fresh · 10s");
+  await expect(authority).toContainText("node-alpha + node-beta");
+  const authorityContrast = await authority.evaluate(element => {
+    const channels = (value: string) => value.match(/[\d.]+/g)!.slice(0, 3).map(Number);
+    const luminance = (value: string) => {
+      const linear = channels(value).map(channel => {
+        const normalized = channel / 255;
+        return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+    };
+    const foreground = luminance(getComputedStyle(element).color);
+    const pane = element.closest<HTMLElement>(".library-pane")!;
+    const background = luminance(getComputedStyle(pane).backgroundColor);
+    return (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05);
+  });
+  expect(authorityContrast).toBeGreaterThanOrEqual(4.5);
+
+  const selector = authority.getByRole("button", {name: "Select complete group node-alpha and node-beta"});
+  await selector.focus();
+  await page.keyboard.press("Space");
+  await expect(selector).toHaveAttribute("aria-pressed", "true");
+  const review = authority.getByRole("button", {name: "Review Load"});
+  await review.click();
+  let dialog = page.getByRole("dialog", {name: "Review Load"});
+  await expect(dialog).toContainText("Existing recipes remain loaded. Forge will not unload anything automatically.");
+  await expect(dialog).toContainText("Authoritative capacity evidence permits Qwen Code to coexist.");
+  await dialog.getByRole("button", {name: "Cancel"}).click();
+  await expect(dialog).toBeHidden();
+  await expect(review).toBeFocused();
+
+  await review.click();
+  dialog = page.getByRole("dialog", {name: "Review Load"});
+  await dialog.getByRole("button", {name: "Load selected installation"}).click();
+  const progress = page.getByRole("region", {name: "Load operation progress"});
+  await expect(progress).toContainText("Operation incomplete");
+  await expect(progress).toContainText("1 of 2 ranks completed · 1 failed");
+  const state = libraryFixtures.get(page)!;
+  expect(state.lastApplyBody).toMatchObject({alias: "qwen-chat", installation_id: "installation-chat", plan_digest: "load-plan-digest"});
+  await progress.getByRole("button", {name: "Retry incomplete operation"}).click();
+  await expect.poll(() => state.retryCount).toBe(1);
+  await expect(progress).toContainText("Operation incomplete");
+
+  const advanced = page.getByRole("group", {name: "Advanced recipe document"});
+  await advanced.getByText("Advanced recipe document").click();
+  const editor = advanced.getByRole("textbox", {name: "Recipe JSON"});
+  const firstValid = {...fullLibraryDetail.visual_recipe!, workload: {...fullLibraryDetail.visual_recipe!.workload, family: "qwen/e2e"}};
+  await editor.fill(JSON.stringify(firstValid, null, 2));
+  await expect(authority.getByRole("region", {name: "Model and runtime"})).toContainText("qwen/e2e");
+  const invalid = {...firstValid, workload: {...firstValid.workload, family: 4}};
+  await editor.fill(JSON.stringify(invalid, null, 2));
+  await expect(advanced.getByRole("alert")).toContainText("$.workload.family must be a string.");
+  await expect(editor).toBeFocused();
+  await expect(authority.getByRole("region", {name: "Model and runtime"})).toContainText("qwen/e2e");
+
+  const upload = advanced.getByLabel("Upload recipe JSON");
+  const uploaded = {...firstValid, workload: {...firstValid.workload, family: "qwen/uploaded"}};
+  await upload.focus();
+  await upload.setInputFiles({name: "recipe.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(uploaded))});
+  await expect(advanced.getByRole("alert")).toHaveCount(0);
+  await expect(upload).toBeFocused();
+  await expect(authority.getByRole("region", {name: "Model and runtime"})).toContainText("qwen/uploaded");
+  await expect(page.getByRole("link", {name: "Source and build"})).toBeVisible();
+  await expect(page.getByRole("link", {name: "Cluster mapping"})).toBeVisible();
+  await expect(page.getByRole("link", {name: "Raw editor"})).toBeVisible();
+
+  await page.evaluate(() => scrollTo(0, 0));
+  await page.screenshot({path: testInfo.outputPath("library-desktop.png")});
+});
+
+test("Library local fixture recovers from errors and exposes an empty-state escape hatch", async ({page}) => {
+  const state = libraryFixtures.get(page)!;
+  state.snapshotFailuresRemaining = 1;
+  await page.goto("/library");
+  await expect(page.getByRole("alert")).toBeVisible();
+  await page.getByRole("button", {name: "Retry Library"}).click();
+  await expect(page.getByRole("region", {name: "Models"})).toBeVisible();
+
+  state.detailFailuresRemaining = 1;
+  await page.getByRole("link", {name: /Qwen 3/}).click();
+  await page.getByRole("link", {name: /Qwen Chat/}).click();
+  await expect(page.getByRole("alert")).toBeVisible();
+  await page.getByRole("button", {name: "Retry recipe detail"}).click();
+  await expect(page.getByRole("region", {name: "Qwen Chat recipe authority"})).toBeVisible();
+
+  state.empty = true;
+  await page.goto("/library");
+  await expect(page.getByRole("heading", {name: "No recipes in the Library"})).toBeVisible();
+  await expect(page.getByRole("link", {name: "Open advanced catalog"})).toHaveAttribute("href", "/catalog");
 });

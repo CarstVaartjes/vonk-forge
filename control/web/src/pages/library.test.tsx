@@ -165,3 +165,80 @@ test("changes URL selection only on activation and preserves drill-down history"
   expect(screen.getByRole("region", {name: "Recipes for Qwen 3"})).toBeVisible();
   await waitFor(() => expect(heading).toHaveFocus());
 });
+
+test("preserves the explicit unlinked-list parent through detail and Back navigation", async () => {
+  // Break caught: a recipe without a model family loses its recipe list and
+  // returns to the Library root instead of its addressable unlinked parent.
+  history.replaceState(null, "", "/library");
+  const unlinkedDetail = {
+    ...minimalLibraryDetail,
+    recipe: {
+      recipe_id: unlinkedRecipe.recipe_id,
+      slug: unlinkedRecipe.slug,
+      title: unlinkedRecipe.title,
+      description: unlinkedRecipe.description,
+      source_kind: unlinkedRecipe.source_kind,
+    },
+  };
+  const api = {
+    librarySnapshot: async () => librarySnapshot,
+    libraryRecipe: async () => unlinkedDetail,
+  } as unknown as ControlApi;
+  const user = userEvent.setup();
+  render(<App api={api}/>);
+
+  const models = await screen.findByRole("region", {name: "Models"});
+  await user.click(within(models).getByRole("link", {name: /Unlinked/}));
+  expect(location.pathname).toBe("/library/models/~unlinked");
+  const recipes = screen.getByRole("region", {name: "Unlinked recipes"});
+  await user.click(within(recipes).getByRole("link", {name: /Custom Runtime/}));
+
+  expect(location.pathname).toBe("/library/recipes/recipe-unlinked");
+  expect(screen.getByRole("region", {name: "Unlinked recipes"})).toBeInTheDocument();
+  const back = screen.getByRole("link", {name: "Back to Unlinked recipes"});
+  expect(back).toHaveAttribute("href", "/library/models/~unlinked");
+  await user.click(back);
+  expect(location.pathname).toBe("/library/models/~unlinked");
+  expect(screen.getByRole("region", {name: "Unlinked recipes"})).toBeVisible();
+});
+
+test("recovers in place from snapshot and recipe-detail request errors", async () => {
+  // Break caught: a transient local authority error strands the operator on a
+  // dead-end alert and requires an unrelated route or full-page navigation.
+  history.replaceState(null, "", "/library");
+  const librarySnapshotRequest = vi.fn()
+    .mockRejectedValueOnce(new Error("fixture snapshot unavailable"))
+    .mockResolvedValue(librarySnapshot);
+  const snapshotApi = {librarySnapshot: librarySnapshotRequest} as unknown as ControlApi;
+  const user = userEvent.setup();
+  const first = render(<App api={snapshotApi}/>);
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("fixture snapshot unavailable");
+  await user.click(screen.getByRole("button", {name: "Retry Library"}));
+  expect(await screen.findByRole("region", {name: "Models"})).toBeVisible();
+  expect(librarySnapshotRequest).toHaveBeenCalledTimes(2);
+  first.unmount();
+
+  history.replaceState(null, "", "/library/recipes/recipe-chat");
+  const libraryRecipe = vi.fn()
+    .mockRejectedValueOnce(new Error("fixture detail unavailable"))
+    .mockResolvedValue(fullLibraryDetail);
+  render(<App api={{librarySnapshot: async () => librarySnapshot, libraryRecipe} as unknown as ControlApi}/>);
+
+  const detailAlert = await screen.findByRole("alert");
+  expect(detailAlert).toHaveTextContent("fixture detail unavailable");
+  await user.click(screen.getByRole("button", {name: "Retry recipe detail"}));
+  await waitFor(() => expect(libraryRecipe).toHaveBeenCalledTimes(2));
+  expect(await screen.findByRole("region", {name: "Qwen Chat recipe authority"})).toBeVisible();
+});
+
+test("offers the advanced catalog workflow when the Library is empty", async () => {
+  // Break caught: an empty local fixture produces a blank workspace with no
+  // explicit route to create or import a recipe.
+  history.replaceState(null, "", "/library");
+  const empty = {...librarySnapshot, models: [], unlinked_recipes: []};
+  render(<App api={{librarySnapshot: async () => empty} as unknown as ControlApi}/>);
+
+  expect(await screen.findByRole("heading", {name: "No recipes in the Library"})).toBeVisible();
+  expect(screen.getByRole("link", {name: "Open advanced catalog"})).toHaveAttribute("href", "/catalog");
+});

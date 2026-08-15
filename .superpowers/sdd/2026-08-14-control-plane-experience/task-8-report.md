@@ -111,3 +111,14 @@ This round fixes only the two remaining Important findings from `task-8a-review-
 - Build (`npm run build`): TypeScript and Vite passed; 65 modules transformed.
 - `git diff --check`: clean before the implementation commit.
 - Scope audit: seven handwritten Library source/test files changed. No Task 8B UI, backend, generated client, Rust, dependency, migration, e2e, live-system, Advanced JSON/upload, or responsive-below-900px file changed.
+
+## Final Task 8B checkpoint
+
+Task 8B is complete on `work/control-plane-frontend-ux`, built from approved Task 8A base `1eb5e80b71e6c4b7938c5c836be3ce9de5742509`.
+
+- Library now presents three coordinated panes at 900 px and wider and a URL/history-preserving one-pane drill-down below 900 px. Explicit model and Unlinked Back contexts are retained, selection changes only on activation, route focus is predictable, and live updates do not steal focus.
+- Advanced canonical JSON editing and JSON upload provide strict field-path validation and a last-valid visual preview without saving or applying. Unsafe integers are rejected at their exact field path rather than rounded. Canonical recipe identity, revision, digest, or visual-content changes reset draft and preview state; same-revision refresh and A→B→A regressions prove stale drafts cannot return.
+- Fixture Playwright covers 360, 768, 1280, and 1920 px, plus 320 and both sides of the 900 px breakpoint, with no document overflow, console warnings/errors, or page errors. Mobile and desktop screenshots were inspected and show the intended responsive hierarchy without clipping.
+- Final verification: focused Vitest 39/39; full Vitest 172 passed with 1 intentional skip; TypeScript/Vite build passed with 68 modules; full local fixture E2E 8/8; diff checks clean.
+- The three final Important concerns—numeric precision, canonical Advanced-state reset, and unlinked-list Back context—were reproduced RED and fixed without weakening canonical validation. The complete evidence is in `task-8b-report.md`.
+- Scope remained handwritten frontend/tests/reports only. The lockfile is unchanged, no dependency or `node_modules` artifact is included, no live system was contacted, and nothing was pushed.
