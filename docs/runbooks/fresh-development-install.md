@@ -105,10 +105,20 @@ uv run --project control --frozen scripts/dev-runtime-secrets.py \
   --registry-hostname '<REGISTRY_HOSTNAME>' \
   --tailscale-oauth-client-id-file '<LOCAL_OAUTH_INPUT_DIRECTORY>/client-id' \
   --tailscale-oauth-client-secret-file '<LOCAL_OAUTH_INPUT_DIRECTORY>/client-secret'
-uv run --project control --frozen scripts/dev-runtime-project \
+```
+
+Use the generic remote publisher for a NAS reached from Windows or WSL. This is
+the recommended Windows/WSL path because publication occurs on the NAS's real
+Linux filesystem, not through the `Z:`/SMB client view:
+
+```bash
+uv run --project control --frozen scripts/dev-runtime-project-remote \
   --source-compose '<DOWNLOAD_DIRECTORY>/docker-compose.dev.yml' \
   --secrets-dir '<LOCAL_STAGING_DIRECTORY>/secrets' \
-  --destination '<MOUNTED_NAS_PARENT>/vonk-forge' \
+  --ssh-target '<NAS_SSH_TARGET>' \
+  --identity-file '<ABSOLUTE_SSH_IDENTITY_FILE>' \
+  --remote-destination '<NAS_LINUX_DOCKER_PARENT>/vonk-forge' \
+  --docker-mode sudo \
   --nas-address '<NAS_MANAGEMENT_IP>' \
   --management-cidrs '<NODE_MANAGEMENT_CIDR>' \
   --direct-fabric-cidrs '<DIRECT_FABRIC_CIDRS_OR_NONE>' \
@@ -116,6 +126,27 @@ uv run --project control --frozen scripts/dev-runtime-project \
   --agent-hostname '<CONTROLLER_HOSTNAME>' \
   --registry-hostname '<REGISTRY_HOSTNAME>'
 ```
+
+The remote operator must already have strict SSH host-key trust and either
+direct Docker access (`--docker-mode direct`) or non-interactive Docker access
+through `sudo -n` (`--docker-mode sudo`). Docker access is root-equivalent; do
+not grant `NOPASSWD: ALL`. The helper uses batch-mode SSH, pulls the public
+accepted API image anonymously, stages inputs RAM-only under NAS tmpfs, and
+runs the existing publisher without network, capabilities, a writable root, or
+additional host mounts. It removes the exact tmpfs stage after success, error,
+interrupt, or SSH disconnect. It does not clone this repository onto the NAS.
+
+After success, the Windows share or NAS file manager must show only
+`docker-compose.yml` plus `secrets/` inside `vonk-forge/`. Keep
+`docker-compose.pinned.yml` and the complete 22-file source generation off the
+NAS project.
+
+An advanced Linux operator may instead give `docker-compose.dev.yml` to
+`scripts/dev-runtime-project` with a directly mounted absolute destination.
+That path is supported only when the mount itself provides the required POSIX
+ownership, `fchmod`, local staging, and exclusive `flock`. WSL `9p`, DrvFs,
+CIFS, and many SMB mounts do not. A failure there is a security result: do not
+weaken modes, locking, or publisher checks; use the remote command above.
 
 Supply the raw OAuth client secret exactly as issued. The generated Compose
 derives the required non-ephemeral enrollment credential only in the
@@ -130,12 +161,12 @@ copies exactly 18 files to the NAS. The four local-only files are
 `admin-password`, `controller-ca-key`, `git-signing-key.pub`, and
 `host-runtime-grant-public-key`; the plaintext administrator password is never
 published to the NAS. Do not display secret contents while checking the
-result. The publisher takes a nonblocking Linux file lock on the
-mounted share and rejects a concurrent invocation; it fails closed if locking
-is unavailable. If an SMB write, mount, or workstation is interrupted, do not
+result. The underlying publisher takes a nonblocking Linux file lock on the
+NAS filesystem and rejects a concurrent invocation; it fails closed if locking
+is unavailable. If a publication, SSH connection, or workstation is interrupted, do not
 edit the destination or delete the hidden `.vonk-forge-publish` recovery
-journal or `.vonk-forge-publish.cleanup` tombstone. Remount the same share and
-rerun the same command; under the exclusive lock, a stale rollback journal is
+journal or `.vonk-forge-publish.cleanup` tombstone. Rerun the same command;
+under the exclusive lock, a stale rollback journal is
 restored and a stale cleanup tombstone is safely discarded before publication
 retries. A stable hidden lock file beside (never inside) the project coordinates
 publishers across workstations and is safe to retain. A successful run removes

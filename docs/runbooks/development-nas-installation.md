@@ -300,13 +300,18 @@ or the workstation process is lost during the browser upgrade, leave the hidden
 `.browser-access-upgrade-*` transaction untouched and rerun the identical
 command with the same OAuth inputs.
 
-Publish the accepted Compose and that exact bundle to the mounted NAS share:
+Publish the accepted Compose and that exact bundle on the NAS's real Linux
+filesystem. For Windows, WSL, and ordinary SMB clients, use the generic remote
+publisher:
 
 ```bash
-uv run --project control --frozen scripts/dev-runtime-project \
+uv run --project control --frozen scripts/dev-runtime-project-remote \
   --source-compose '<DOWNLOAD_DIRECTORY>/docker-compose.dev.yml' \
   --secrets-dir '<LOCAL_STAGING_DIRECTORY>/secrets' \
-  --destination '<MOUNTED_NAS_PARENT>/vonk-forge' \
+  --ssh-target '<NAS_SSH_TARGET>' \
+  --identity-file '<ABSOLUTE_SSH_IDENTITY_FILE>' \
+  --remote-destination '<NAS_LINUX_DOCKER_PARENT>/vonk-forge' \
+  --docker-mode sudo \
   --nas-address '<NAS_MANAGEMENT_IP>' \
   --management-cidrs '<NODE_MANAGEMENT_CIDR>' \
   --direct-fabric-cidrs '<DIRECT_FABRIC_CIDRS_OR_NONE>' \
@@ -315,9 +320,29 @@ uv run --project control --frozen scripts/dev-runtime-project \
   --registry-hostname '<REGISTRY_HOSTNAME>'
 ```
 
-This is the supported copy operation: it renders only the site hostnames,
-the explicit direct-fabric policy, verifies every source and destination byte,
-and permits only
+This is the recommended Windows/WSL copy operation. The remote operator must
+already have strict SSH host-key trust and either direct Docker access with
+`--docker-mode direct` or non-interactive Docker access through `sudo -n` with
+`--docker-mode sudo`. Docker authority is root-equivalent; never grant
+`NOPASSWD: ALL` merely to run this helper. Batch-mode SSH transports one
+bounded validated generation into a RAM-only NAS tmpfs stage. The helper pulls
+the accepted public API image anonymously and runs the existing publisher with
+no network, read-only root, all capabilities dropped, `no-new-privileges`, the
+NAS operator's numeric identity, and only the destination parent writable. Its
+trap removes the exact tmpfs stage after success, failure, interruption, or
+disconnect. It does not clone this repository onto the NAS.
+
+The existing `scripts/dev-runtime-project` remains the underlying publisher
+and the direct-mounted alternative. A Linux operator may give
+`docker-compose.dev.yml` to `scripts/dev-runtime-project` with an absolute
+mounted destination only when that mount provides real POSIX ownership,
+`fchmod`, local staging, and exclusive `flock`. WSL `9p`, DrvFs, CIFS, and many
+SMB mounts cannot. Windows write access is not evidence that these operations
+work. Failure is intentional: do not weaken file modes, locking, or publisher
+checks; use `scripts/dev-runtime-project-remote` instead.
+
+Both entrypoints render only the site hostnames and explicit direct-fabric
+policy, verify every source and destination byte, and permit only
 `docker-compose.yml` plus `secrets/` at the destination. The helper takes a
 nonblocking exclusive Linux file lock in a stable hidden sibling of the project
 before inspecting or recovering a transaction. The lock remains outside the
@@ -373,13 +398,21 @@ configuration output into diagnostics.
 
 ## SMB/file-manager preparation
 
-Use an SMB client only as the mounted destination of
-`scripts/dev-runtime-project`; secret generation occurs on private local
-storage. The SMB client must create regular files with the exact names and
-content rules above; it must not leave a public key, temporary copy, or
-duplicate filename in the project directory. If publication is interrupted,
-leave its hidden journal untouched and rerun the publisher before importing or
-redeploying the NAS project.
+For the recommended remote path, the SMB client is only a read-only operator
+view after publication: use Windows Explorer or the NAS file manager to confirm
+that `vonk-forge/` visibly contains `docker-compose.yml` plus `secrets/`, then
+select that directory in the Docker UI. Secret generation and validation occur
+on private local Linux storage, while mutation occurs on the NAS's real Linux
+filesystem. Do not manually copy a public key, temporary file, pinned Compose,
+or duplicate filename into the project directory. If publication is
+interrupted, leave its hidden journal untouched and rerun the remote publisher
+before importing or redeploying the NAS project.
+
+A directly mounted Linux destination is an advanced alternative only after the
+publisher itself accepts the mount's POSIX semantics. `9p`, DrvFs, CIFS, and
+SMB rejection must not be bypassed. The NAS share remains useful for viewing
+the final two-item project; it is not the authority for Linux mode or lock
+behavior.
 
 Obtain the unencrypted private key through the approved secret-management
 process, then copy it as a regular file from protected local storage. SMB is a
@@ -678,15 +711,16 @@ as a substitute for restoring PostgreSQL or generated-secret state.
   with its mode and ownership, and rolls back an interrupted install before a
   retry. A retry with the same UUID is idempotent even after final transaction
   cleanup; a different UUID cannot authorize an unchanged pair. Back up the
-  completed 22-file generation and its receipt, republish it with
-  `scripts/dev-runtime-project`, then choose **Pull** then **Redeploy** while
-  preserving every named volume. Rotate the
+  completed 22-file generation and its receipt, republish it with the supported
+  project publisher—normally `scripts/dev-runtime-project-remote` from
+  Windows/WSL—then choose **Pull** then **Redeploy** while preserving every
+  named volume. Rotate the
   administrator password and revoke browser sessions separately if application
   authority may also have been exposed.
 - To rotate the Git signing key, create a complete replacement local generation
   with the secret generator, retain the former public key wherever historical
   development signatures are verified, and publish the complete validated
-  generation with `scripts/dev-runtime-project`. Never edit the active NAS
+  generation with the same supported project publisher. Never edit the active NAS
   `secrets/` directory file by file. The offline `dev-init` refreshes the
   API-only projection during redeploy.
 - The PostgreSQL password and `database-url` are one credential pair. Never

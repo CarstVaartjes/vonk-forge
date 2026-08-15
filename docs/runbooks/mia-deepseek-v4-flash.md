@@ -165,6 +165,18 @@ blocker is `install.stale_inventory`, for at most two minutes and within the
 overall timeout. Every other blocker remains an immediate failure, and no
 installation is submitted until a fresh preview is allowed.
 
+Keep the two large data classes separate when judging that wait. The accepted
+wrapper is an 18,908,041,728-byte runtime image; the 155.43 GiB model checkpoint
+is an independently verified read-only cache object and is not baked into that
+image. Reusing a cache does not redownload either object, but a new installation
+still needs a new signed import receipt. Each target therefore performs full
+digest verification before Docker import rather than trusting a mutable local
+tag. In the 2026-08-15 two-Spark acceptance, the parallel image-import job took
+about 19 minutes and native checkpoint loading took 146 seconds before kernel
+and CUDA-graph warmup. Those values explain the observed phases; they are not a
+release SLA. Do not disable hashing or delete caches to make this gate appear
+faster.
+
 ## Connect Pi
 
 Create a dedicated LiteLLM virtual key restricted to the stable

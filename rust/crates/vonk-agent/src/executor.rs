@@ -471,10 +471,19 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
             }
             RecipeOperationRequest::Uninstall(request) => {
                 let installation_id = request.installation_id.to_string();
-                if self.runtime.recipe_digest(&installation_id).ok().as_deref()
-                    != Some(&request.recipe_content_sha256)
-                {
-                    return failed("installed recipe identity does not match uninstall request");
+                match self.runtime.recipe_digest_if_present(&installation_id) {
+                    Ok(None) => {
+                        return ExecutionResult {
+                            state: "succeeded",
+                            body: json!({"uninstalled": true, "already_absent": true}),
+                        };
+                    }
+                    Ok(Some(recipe_digest)) if recipe_digest == request.recipe_content_sha256 => {}
+                    Ok(Some(_)) | Err(_) => {
+                        return failed(
+                            "installed recipe identity does not match uninstall request",
+                        );
+                    }
                 }
                 if self.runtime.uninstall(&installation_id).is_err() {
                     failed("installed recipe could not be safely removed")

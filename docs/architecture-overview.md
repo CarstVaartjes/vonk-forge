@@ -56,6 +56,24 @@ flowchart LR
     operator -. break-glass only .-> sn
 ```
 
+## One control contract at every fleet size
+
+There is no fixed fleet size. Every enrolled Spark has one stable `spk_…`
+identity backed by its own key and certificate; an IP address is not identity.
+The control/runtime contract stays the same as nodes are added:
+
+| Shape | Runtime behavior | Client and control behavior |
+| --- | --- | --- |
+| **One Spark** | A single-node runtime owns its model endpoint and all local artifacts. No fabric fields are required. | The agent calls `agents.vonk-forge.lan:8443`; after health evidence, the controller publishes one accepted route. |
+| **Two Sparks** | A tensor-parallel gang assigns an entrypoint rank and a worker rank on the direct fabric. Only the entrypoint serves the model API. | Both certificate-bound ranks must acknowledge the same run before `mia-deepseek-v4-flash` is published. One stale or failed rank withdraws the whole route. |
+| **Many Sparks** | The planner places independent workloads and gangs across compatible nodes. A gang can use any accepted subset; other nodes remain available for other work. | Each node still pulls only its fenced operations. The controller publishes each healthy entrypoint independently; it does not broadcast Docker commands or turn IP addresses into authority. |
+
+For every shape, user inference follows **Tailscale → Caddy → LiteLLM → one
+accepted entrypoint**. Caddy knows paths, LiteLLM knows controller-published
+aliases, and neither discovers containers. GPU nodes initiate outbound mTLS to
+the NAS; they do not run Tailscale, Caddy, LiteLLM, PostgreSQL, or the control
+API.
+
 ## Trust and control flow
 
 Vonk Forge has an explicit authority split. PostgreSQL is authoritative for the

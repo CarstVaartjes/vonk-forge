@@ -67,6 +67,7 @@ jobs:
             scripts/tests/test_render_dev_compose.py \
             scripts/tests/test_dev_runtime_secrets.py \
             scripts/tests/test_dev_runtime_project.py \
+            scripts/tests/test_dev_runtime_project_remote.py \
             scripts/tests/test_dev_admin_token.py \
             scripts/tests/test_verify_dev_image_secrets.py \
             scripts/tests/test_dev_image_acceptance.py \

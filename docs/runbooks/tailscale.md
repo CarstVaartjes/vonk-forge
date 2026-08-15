@@ -56,7 +56,9 @@ without putting either value in a command argument or terminal output.
 For development, use the silent-input procedure in
 [Prepare private Tailscale browser access](development-nas-installation.md#prepare-private-tailscale-browser-access),
 pass those files to `scripts/dev-runtime-secrets.py`, and let
-`scripts/dev-runtime-project` publish the exact files. For production, create
+`scripts/dev-runtime-project-remote` publish the exact files on the NAS's real
+filesystem. A direct POSIX-capable Linux mount may use the underlying
+`scripts/dev-runtime-project`. For production, create
 the two empty root-owned mode `0600` NAS files, edit them with the host's
 privileged secret editor, and verify only metadata—never file contents:
 

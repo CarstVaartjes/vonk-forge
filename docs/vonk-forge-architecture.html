@@ -163,6 +163,33 @@
       letter-spacing: -.025em;
     }
 
+    .scales {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    .scales article {
+      min-height: 170px;
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--panel);
+    }
+
+    .scales h3 { margin: 0 0 8px; color: var(--node); }
+    .scales p { margin: 0; color: var(--muted); }
+
+    .scale-contract {
+      margin: 0 0 24px;
+      padding: 16px 18px;
+      border-left: 3px solid var(--mint);
+      border-radius: 0 14px 14px 0;
+      color: #c9ddd6;
+      background: rgba(85, 219, 171, .06);
+    }
+
     .flows {
       display: grid;
       gap: 12px;
@@ -253,6 +280,7 @@
     }
 
     @media (max-width: 900px) {
+      .scales { grid-template-columns: 1fr; }
       .knowledge { grid-template-columns: repeat(2, 1fr); }
       .flow { grid-template-columns: 44px 1fr; }
       .route { grid-column: 2; }
@@ -287,6 +315,14 @@
       <div><strong>No worker exposed</strong><span>A multi-node workload publishes only its healthy entrypoint; ranks use the GPU node fabric.</span></div>
     </section>
 
+    <h2 class="section-title">One contract, any fleet size</h2>
+    <section class="scales" aria-label="Supported fleet shapes">
+      <article><h3>One Spark</h3><p>A single-node runtime owns its endpoint and artifacts. The agent calls <code>agents.vonk-forge.lan:8443</code>; the controller publishes one route after fresh health evidence.</p></article>
+      <article><h3>Two Sparks</h3><p>A tensor-parallel gang has one entrypoint and one worker rank on the direct fabric. Both stable <code>spk_…</code> identities must acknowledge the same run before <code>mia-deepseek-v4-flash</code> appears.</p></article>
+      <article><h3>Many Sparks</h3><p>The planner places independent workloads and gangs across compatible nodes. Each gang can use an accepted subset; every other Spark remains available for different work.</p></article>
+    </section>
+    <p class="scale-contract">There is no fixed fleet size, and an IP address is not identity. Client inference always follows <strong>Tailscale → Caddy → LiteLLM → one accepted entrypoint</strong>. GPU nodes never receive Tailscale OAuth, database, signing, or client API keys. LiteLLM never discovers containers; it uses only routes published from authenticated agent evidence.</p>
+
     <section class="map" aria-label="Vonk Forge network and control architecture">
       <svg viewBox="0 0 1120 660" role="img" aria-labelledby="map-heading map-description">
         <title id="map-heading">Vonk Forge architecture</title>
@@ -305,7 +341,7 @@
 
         <text x="38" y="126" class="map-title">Users</text>
         <text x="258" y="77" class="map-title">NAS / computer · Docker Compose</text>
-        <text x="792" y="126" class="map-title">Vonk Forge GPU node execution plane</text>
+        <text x="792" y="126" class="map-title">One or more Spark execution nodes</text>
 
         <!-- Client side -->
         <rect x="42" y="168" width="142" height="72" rx="13" fill="#102520" stroke="#55dbab"/>
@@ -347,7 +383,7 @@
 
         <rect x="268" y="500" width="400" height="66" rx="13" fill="#111d1a" stroke="#35584d"/>
         <text x="468" y="527" text-anchor="middle" class="map-label">Agent backend endpoint on NAS LAN</text>
-        <text x="468" y="548" text-anchor="middle" class="map-small">agents.vonk.lan:8443 · mTLS · no human access</text>
+        <text x="468" y="548" text-anchor="middle" class="map-small">agents.vonk-forge.lan:8443 · mTLS · no human access</text>
 
         <!-- GPU nodes -->
         <rect x="798" y="168" width="276" height="158" rx="16" fill="#1d1b15" stroke="#8c6023"/>
@@ -404,14 +440,14 @@
     <section class="flows">
       <article class="flow">
         <span class="num">1</span>
-        <div><h3>The NAS gets a stable name</h3><p>The Compose installation uses a reserved NAS address and local DNS. The agent endpoint is something stable such as <code>agents.vonk.lan:8443</code>.</p></div>
+        <div><h3>The NAS gets a stable name</h3><p>The Compose installation uses a reserved NAS address and local DNS. The agent endpoint is something stable such as <code>agents.vonk-forge.lan:8443</code>.</p></div>
         <div class="route">No mDNS, no subnet scan, no guessing which machine is the controller.</div>
       </article>
 
       <article class="flow">
         <span class="num">2</span>
         <div><h3>Each GPU node is paired once</h3><p><code>vonk-agent pair</code> stores the controller URL and CA, creates the key on the GPU node, and exchanges an approved pairing code for its node certificate.</p></div>
-        <div class="route">GPU node → agents.vonk.lan → Caddy's agent-only SNI → controller</div>
+        <div class="route">Spark → agents.vonk-forge.lan → Caddy's agent-only SNI → controller</div>
       </article>
 
       <article class="flow">
@@ -435,7 +471,7 @@
       <article class="flow">
         <span class="num">6</span>
         <div><h3>The controller publishes the route</h3><p>It verifies node identity, management CIDR, recipe-declared port, model identity, freshness and health. Then it atomically generates LiteLLM's alias-to-endpoint configuration.</p></div>
-        <div class="route">deepseek → openai/deepseek → http://192.168.20.41:8000/v1</div>
+        <div class="route">mia-deepseek-v4-flash → runtime-local alias → accepted Spark entrypoint</div>
       </article>
 
       <article class="flow">

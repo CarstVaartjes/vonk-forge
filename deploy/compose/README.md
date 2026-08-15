@@ -20,9 +20,11 @@ Use the image-only development stack to try the control API, bundled web
 interface, PostgreSQL catalog, and worker on any Docker Compose-capable NAS.
 GitHub Actions builds and accepts the API and worker from `main`, then publishes
 the bare mutable `:dev` `docker-compose.dev.yml` artifact. Publish it once as
-`docker-compose.yml` with `scripts/dev-runtime-project`; normal development is
-a Docker-UI pull/redeploy of that unchanged file, never a checkout build,
-manual copy, file replacement, or restart. Keep
+`docker-compose.yml` with `scripts/dev-runtime-project-remote` when the NAS is
+reached through Windows/WSL, or with the underlying
+`scripts/dev-runtime-project` on a POSIX-capable direct mount. Normal
+development is a Docker-UI pull/redeploy of that unchanged file, never a
+checkout build, manual copy, file replacement, or restart. Keep
 `docker-compose.pinned.yml` for explicit reproduction or state-aware recovery.
 Signed releases publish `docker-compose.production.yml` from the full production
 graph, but it is selected only through the production host updater.
