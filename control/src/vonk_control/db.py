@@ -10,4 +10,8 @@ def build_engine(database_url: str) -> Engine:
 
 
 def session_factory(engine: Engine) -> sessionmaker[Session]:
-    return sessionmaker(engine, expire_on_commit=False)
+    from .fleet_events import FleetEventRecorder
+
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    FleetEventRecorder.install(sessions)
+    return sessions

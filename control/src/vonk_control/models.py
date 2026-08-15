@@ -23,6 +23,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
+    SmallInteger,
     String,
     Text,
     UniqueConstraint,
@@ -2225,6 +2226,56 @@ class NodeTelemetryLatest(Base):
     sample_id: Mapped[str] = mapped_column(
         nullable=False,
         unique=True,
+    )
+
+
+class FleetEventCursor(Base):
+    __tablename__ = "fleet_event_cursor"
+    __table_args__ = (
+        CheckConstraint(
+            "singleton_id = 1", name="ck_fleet_event_cursor_singleton"
+        ),
+        CheckConstraint("last_id >= 0", name="ck_fleet_event_cursor_last_id"),
+    )
+    singleton_id: Mapped[int] = mapped_column(SmallInteger, primary_key=True)
+    last_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+
+@event.listens_for(FleetEventCursor.__table__, "after_create")
+def _seed_fleet_event_cursor(_target, connection, **_kw) -> None:
+    connection.execute(
+        FleetEventCursor.__table__.insert().values(singleton_id=1, last_id=0)
+    )
+
+
+class FleetStreamEvent(Base):
+    __tablename__ = "fleet_stream_events"
+    __table_args__ = (
+        CheckConstraint(
+            "event_type IN ('node-telemetry','recipe-state','operation-state')",
+            name="ck_fleet_stream_events_event_type",
+        ),
+        CheckConstraint(
+            "expires_at > occurred_at", name="ck_fleet_stream_events_expiry"
+        ),
+        CheckConstraint(
+            "length(CAST(payload AS TEXT)) BETWEEN 2 AND 8192",
+            name="ck_fleet_stream_events_payload_size",
+        ),
+        Index("ix_fleet_stream_events_expires_id", "expires_at", "id"),
+        Index("ix_fleet_stream_events_node_id", "node_id", "id"),
+    )
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    node_id: Mapped[str | None] = mapped_column(String(36))
+    entity_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    entity_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
     )
 
 

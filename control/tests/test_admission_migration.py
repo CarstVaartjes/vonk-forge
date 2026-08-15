@@ -3,7 +3,8 @@ from pathlib import Path
 from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, inspect, text
+from vonk_control.models import FleetEventCursor, FleetStreamEvent
 
 
 def config(url: str) -> Config:
@@ -11,14 +12,42 @@ def config(url: str) -> Config:
     value.set_main_option("script_location", str(root / "migrations")); value.set_main_option("sqlalchemy.url", url); return value
 
 
-def test_admission_state_is_linear_head() -> None:
+def test_database_migrations_are_one_exact_linear_chain_at_0024() -> None:
     script = ScriptDirectory.from_config(config("sqlite://"))
-    assert script.get_heads() == ["0023_node_telemetry"]
+    assert script.get_heads() == ["0024_fleet_stream_events"]
     assert (
-        script.get_revision("0023_node_telemetry").down_revision
-        == "0022_observation_latest_index"
+        script.get_revision("0024_fleet_stream_events").down_revision
+        == "0023_node_telemetry"
     )
-    assert script.get_revision("0017_admission_and_run_state").down_revision == "0016_recipe_deployment_authority"
+    assert [
+        revision.revision
+        for revision in reversed(tuple(script.walk_revisions()))
+    ] == [
+        "0001_operational_state",
+        "0002_agent_operations",
+        "0003_retry_disposition",
+        "0004_agent_enrollment",
+        "0005_certificate_rotation",
+        "0006_reconciliation_graph",
+        "0007_issued_revocations",
+        "0008_resolved_plan",
+        "0009_reconciliation_execution",
+        "0010_agent_runtime_identity",
+        "0011_update_rollouts",
+        "0012_control_process_heartbeats",
+        "0013_workload_packages",
+        "0014_package_action_plans",
+        "0015_recipe_catalog",
+        "0016_recipe_deployment_authority",
+        "0017_admission_and_run_state",
+        "0018_agent_inventory_runtime",
+        "0019_rust_agent_migration",
+        "0020_recipe_catalog_bridge",
+        "0021_browser_authentication",
+        "0022_observation_latest_index",
+        "0023_node_telemetry",
+        "0024_fleet_stream_events",
+    ]
 
 
 def test_admission_tables_upgrade_and_downgrade(tmp_path: Path) -> None:
@@ -80,3 +109,99 @@ def test_admission_tables_upgrade_and_downgrade(tmp_path: Path) -> None:
     assert "1000000000000000" in checks["ck_telemetry_physical_metrics"]
     command.downgrade(config(url), "0016_recipe_deployment_authority")
     assert not tables & set(inspect(engine).get_table_names())
+
+
+def test_fleet_event_tables_upgrade_seed_and_downgrade_at_0024(
+    tmp_path: Path,
+) -> None:
+    url = f"sqlite:///{tmp_path / 'fleet-events.sqlite'}"
+    migration_config = config(url)
+    command.upgrade(migration_config, "0024_fleet_stream_events")
+    engine = create_engine(url)
+    inspector = inspect(engine)
+
+    assert {"fleet_event_cursor", "fleet_stream_events"} <= set(
+        inspector.get_table_names()
+    )
+    assert [column["name"] for column in inspector.get_columns("fleet_event_cursor")] == [
+        "singleton_id",
+        "last_id",
+    ]
+    assert [column["name"] for column in inspector.get_columns("fleet_stream_events")] == [
+        "id",
+        "event_type",
+        "node_id",
+        "entity_kind",
+        "entity_id",
+        "payload",
+        "occurred_at",
+        "expires_at",
+    ]
+    assert {
+        constraint["name"]
+        for constraint in inspector.get_check_constraints("fleet_stream_events")
+    } == {
+        "ck_fleet_stream_events_event_type",
+        "ck_fleet_stream_events_expiry",
+        "ck_fleet_stream_events_payload_size",
+    }
+    assert {
+        (index["name"], tuple(index["column_names"]))
+        for index in inspector.get_indexes("fleet_stream_events")
+    } == {
+        ("ix_fleet_stream_events_expires_id", ("expires_at", "id")),
+        ("ix_fleet_stream_events_node_id", ("node_id", "id")),
+    }
+    with engine.connect() as connection:
+        assert connection.execute(
+            text("SELECT singleton_id,last_id FROM fleet_event_cursor")
+        ).one() == (1, 0)
+
+    command.downgrade(migration_config, "0023_node_telemetry")
+    assert not {"fleet_event_cursor", "fleet_stream_events"} & set(
+        inspect(engine).get_table_names()
+    )
+
+
+def test_fleet_event_migration_and_model_metadata_have_exact_schema_parity(
+    tmp_path: Path,
+) -> None:
+    url = f"sqlite:///{tmp_path / 'fleet-events-parity.sqlite'}"
+    command.upgrade(config(url), "0024_fleet_stream_events")
+    engine = create_engine(url)
+    inspector = inspect(engine)
+
+    for model_table in (FleetEventCursor.__table__, FleetStreamEvent.__table__):
+        reflected_columns = [
+            (
+                column["name"],
+                str(column["type"].compile(dialect=engine.dialect)),
+                column["nullable"],
+                column["primary_key"],
+            )
+            for column in inspector.get_columns(model_table.name)
+        ]
+        model_columns = [
+            (
+                column.name,
+                str(column.type.compile(dialect=engine.dialect)),
+                column.nullable,
+                column.primary_key,
+            )
+            for column in model_table.columns
+        ]
+        assert reflected_columns == model_columns
+        assert {
+            constraint["name"]: " ".join(constraint["sqltext"].split())
+            for constraint in inspector.get_check_constraints(model_table.name)
+        } == {
+            constraint.name: " ".join(str(constraint.sqltext).split())
+            for constraint in model_table.constraints
+            if constraint.name is not None
+        }
+        assert {
+            (index["name"], tuple(index["column_names"]))
+            for index in inspector.get_indexes(model_table.name)
+        } == {
+            (index.name, tuple(index.columns.keys())) for index in model_table.indexes
+        }
