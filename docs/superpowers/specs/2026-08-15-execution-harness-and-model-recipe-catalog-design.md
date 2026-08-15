@@ -543,6 +543,19 @@ independently verified by their content digests may be reused.
 4. Remove old model-specific runtime identities and every prototype contract
    path in the same cutover; there is no dual-contract period.
 
+The merged Fleet and Library experience remains the presentation layer, but
+its prototype profile vocabulary does not. It presents the one exact topology
+from each recipe revision and the exact model-version, harness,
+runtime-distribution, and optional patch identities. Mapping and installation
+flows never ask the operator to select a deployment profile.
+
+The v1 schema is added after the merged Alembic head. This is schema
+construction for a fresh pre-production database, not an upgrade contract:
+there is no row-preservation or data-translation test. Operators remove all
+pre-production Vonk Forge control state, start the fresh schema, create the
+administrator again, and re-enroll agents. Only independently
+content-addressed caches may survive after digest verification.
+
 ### Model recipe acceptance
 
 1. Resolve and record exact upstream identities and terms.

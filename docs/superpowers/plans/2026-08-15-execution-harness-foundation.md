@@ -35,7 +35,7 @@
 - `control/src/vonk_control/harnesses/`: shared compiler contract, registry, and eight built-in compilers.
 - `control/src/vonk_control/interface_adapters.py`: LiteLLM versus artifact-job publication policy.
 - `control/src/vonk_control/harness_conformance.py`: deterministic synthetic lifecycle acceptance.
-- `control/migrations/versions/0022_execution_harness_catalog.py`: bounded destructive pre-production recipe-domain cutover.
+- `control/migrations/versions/0027_execution_harness_catalog.py`: fresh v1 schema head after the merged control-plane migrations; it contains no prototype data conversion.
 - `config/model-groups/`, `config/models/`, `config/model-versions/`, `config/execution-harnesses/`, `config/runtime-distributions/`, `config/patch-bundles/`, and `config/recipes/`: authoritative built-in documents.
 
 ---
@@ -473,10 +473,66 @@ git rm -r control/src/vonk_control/runtime_compilers
 git commit -m "feat: implement built-in execution harnesses"
 ```
 
-### Task 6: Cut over the pre-production database and remove the prototype
+### Task 6: Reconcile the merged Fleet and Library experience with v1
 
 **Files:**
-- Create: `control/migrations/versions/0022_execution_harness_catalog.py`
+- Modify: `control/src/vonk_control/library_contract.py`
+- Modify: `control/src/vonk_control/library_projection.py`
+- Modify: `control/src/vonk_control/fleet_projection.py`
+- Modify: `control/src/vonk_control/recipe_api.py`
+- Modify: `control/src/vonk_control/recipe_action_plans.py`
+- Modify: `control/web/src/api/`
+- Modify: `control/web/src/components/`
+- Modify: `control/web/src/pages/`
+- Modify: `control/web/src/lib/`
+- Modify: `control/web/src/test-fixtures/`
+- Modify: `control/openapi.json`
+- Modify: `src/cluster_profiles/generated_control/`
+- Modify: focused backend, web, generated-client, and browser tests covering these surfaces
+
+**Interfaces:**
+- Consumes: the merged responsive Fleet and Library presentation from `origin/main` plus the replacement one-topology recipe and exact catalog entity contracts.
+- Produces: Fleet, Library, preview, and action payloads that expose `topology_name`, never ask an operator to select a profile, and visualize exact model-version, harness, runtime-distribution, and optional patch identities.
+
+- [ ] **Step 1: Add failing v1 projection and browser tests**
+
+Cover one topology per recipe, topology-derived rank placement, exact execution identities, one install choice per recipe revision, and the absence of `deployment_profiles`, `profile_name`, and `runtime.adapter` in active UI and API payloads.
+
+- [ ] **Step 2: Confirm the merged prototype assumptions fail**
+
+Run: `uv run --project control --frozen python -m pytest control/tests/test_library_projection.py control/tests/test_library_api.py control/tests/test_fleet_projection.py control/tests/test_recipe_api.py -q`
+
+Run the focused web tests defined by `control/web/package.json`.
+
+Expected: FAIL because the merged experience still projects deployment profiles and the prototype runtime adapter.
+
+- [ ] **Step 3: Replace profile projection with the exact topology**
+
+Rename public and internal placement fields to `topology_name`. Compute one placement section from `recipe_topology(document)`. Mapping previews and applies take recipe revision, nodes, and parameters only; topology identity comes from the immutable recipe revision.
+
+- [ ] **Step 4: Render exact v1 execution identity**
+
+The Library detail view presents the selected model version, execution harness, runtime distribution, optional patch bundle, interfaces, topology, resources, and lifecycle ordering from the strict v1 document. Keep the merged visual design and responsive behavior.
+
+- [ ] **Step 5: Regenerate OpenAPI and clients**
+
+Run the repository generators rather than hand-editing generated artifacts. Assert generated clients contain `topology_name` and no prototype profile-selection fields.
+
+- [ ] **Step 6: Pass focused backend and web suites**
+
+Run the backend tests from Step 2 plus recipe operation, admission, route, OpenAPI-client, and admin-equivalence tests. Run the web unit suite and the Fleet/Library browser slice.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add control src/cluster_profiles/generated_control tests/control tests/e2e
+git commit -m "refactor: align the control experience with recipe v1"
+```
+
+### Task 7: Create the fresh pre-production v1 schema and remove the prototype
+
+**Files:**
+- Create: `control/migrations/versions/0027_execution_harness_catalog.py`
 - Create: `control/tests/test_execution_harness_catalog_migration.py`
 - Delete: `control/tests/test_recipe_catalog_migration.py`
 - Modify: `schemas/global/contract.lock.json`
@@ -486,34 +542,29 @@ git commit -m "feat: implement built-in execution harnesses"
 
 **Interfaces:**
 - Consumes: new entity models and `ClusterMapping.topology_name`.
-- Produces: Alembic head `0022_execution_harness_catalog` with no prototype state or dual-contract runtime.
+- Produces: Alembic head `0027_execution_harness_catalog`, based on merged head `0026_telemetry_maintenance_state`, with no prototype state, compatibility layer, or data-conversion path.
 
-- [ ] **Step 1: Write a failing bounded-reset migration test**
+- [ ] **Step 1: Write a failing fresh-schema migration test**
 
 ```python
-def test_upgrade_discards_only_prototype_recipe_domain(connection) -> None:
-    upgrade_to("0021_browser_authentication", connection)
-    seed_prototype_recipe_graph(connection)
-    seed_user_and_agent(connection)
-    upgrade_to("0022_execution_harness_catalog", connection)
+def test_fresh_database_reaches_the_v1_catalog_head(connection) -> None:
+    upgrade_fresh_database_to_head(connection)
     assert scalar(connection, "select count(*) from local_recipe_revisions") == 0
     assert table_exists(connection, "catalog_entities")
     assert table_exists(connection, "catalog_entity_revisions")
     assert column_exists(connection, "cluster_mappings", "topology_name")
     assert not column_exists(connection, "cluster_mappings", "profile_name")
-    assert scalar(connection, "select count(*) from users") == 1
-    assert scalar(connection, "select count(*) from agent_nodes") == 1
 ```
 
-- [ ] **Step 2: Confirm revision 0022 is absent**
+- [ ] **Step 2: Confirm revision 0027 is absent**
 
 Run: `uv run --project control --frozen python -m pytest control/tests/test_execution_harness_catalog_migration.py -q`
 
 Expected: FAIL because the cutover revision does not exist.
 
-- [ ] **Step 3: Implement the dependency-ordered recipe-domain reset**
+- [ ] **Step 3: Implement the post-merge v1 schema head**
 
-Delete route publications, run nodes, runs, installation nodes, installations, mapping nodes, mappings, builds, reports, global links, import items, imports, and recipe revisions/recipes before changing constraints. Preserve users, sessions, agent nodes, inventories, deployment identity, signing authority, unrelated control state, and independently content-addressed model/build caches. Create entity tables and replace `profile_name` with `topology_name`.
+Set `down_revision` to `0026_telemetry_maintenance_state`. Create the entity tables and replace `profile_name` with `topology_name` in the schema reached by a fresh database. Do not translate, preserve, or test upgrade of prototype recipe, catalog, installation, run, route, acceptance, user, session, or agent rows. The development deployment is reset and re-enrolled before this schema is used.
 
 - [ ] **Step 4: Remove every prototype semantic path**
 
@@ -536,7 +587,7 @@ git add control/migrations control/src control/tests schemas scripts config depl
 git commit -m "refactor: replace prototype recipe state"
 ```
 
-### Task 7: Recreate DS4 and Mia as native v1 recipes
+### Task 8: Recreate DS4 and Mia as native v1 recipes
 
 **Files:**
 - Rewrite: `adapters/deepseek/ds4/`
@@ -629,7 +680,7 @@ git add adapters/deepseek config control/tests/test_development_recipe_fixture.p
 git commit -m "feat: recreate DS4 and Mia as v1 recipes"
 ```
 
-### Task 8: Fresh reset, physical acceptance, and operator documentation
+### Task 9: Fresh reset, physical acceptance, and operator documentation
 
 **Files:**
 - Create: `scripts/reset-development-recipe-domain`
@@ -673,7 +724,7 @@ Expected: FAIL because the scripts do not exist.
 
 - [ ] **Step 3: Implement bounded reset and acceptance scripts**
 
-The reset script prints only named Vonk Forge recipe-domain state, requires the exact confirmation flag, stops recipe workloads, preserves users/agents/control identity/model cache, applies Alembic head, seeds the supported v1 catalog, and verifies no prototype shape remains. The acceptance script validates exact node count, records node/image/entity identities, executes each ladder phase, stores canonical evidence, and never advances state beyond completed evidence.
+The reset script requires the exact development-only confirmation flag, stops Vonk Forge workloads, removes the complete pre-production Vonk Forge control database and runtime state, applies Alembic head to a fresh database, seeds the supported v1 catalog, and requires users and agents to be created or enrolled again. It may retain only independently content-addressed model/build caches after verifying their digests. The acceptance script validates exact node count, records node/image/entity identities, executes each ladder phase, stores canonical evidence, and never advances state beyond completed evidence.
 
 - [ ] **Step 4: Publish repository and website-ready explanations**
 
