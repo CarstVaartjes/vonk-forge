@@ -70,7 +70,7 @@ class RecipeRevisionSummary(_StrictModel):
     id: UuidId
     revision_number: int = Field(ge=1, le=2_147_483_647)
     lifecycle: Literal["draft", "blocked", "resolved", "deprecated"]
-    schema_version: int = Field(ge=1, le=2_147_483_647)
+    schema_version: Literal[1] = 1
     content_sha256: Digest | None
     created_at: datetime
 
@@ -118,9 +118,15 @@ class LibraryRecipeSummary(LibraryRecipeIdentity):
     reasons: list[ProjectionReason] = Field(max_length=16)
 
 
+class ModelVersionIdentity(_StrictModel):
+    kind: Literal["model-version"]
+    publisher: Text128
+    slug: Text128
+    content_sha256: Digest
+
+
 class LibraryModel(_StrictModel):
-    family: Text128
-    display_name: Text128
+    model: ModelVersionIdentity
     page_local: Literal[True] = True
     recipes: list[LibraryRecipeSummary] = Field(min_length=1, max_length=100)
 

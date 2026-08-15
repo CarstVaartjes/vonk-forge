@@ -59,7 +59,7 @@ export function LibraryRecipeAuthority({api, detail, onRefresh, policy}: {
   const visual = preview.canonicalKey === canonicalPreviewKey ? preview.document : detail.visual_recipe;
   const localPreview = visual !== null && preview.canonicalKey === canonicalPreviewKey && preview.local;
   const revision = detail.selected_revision;
-  const alias = detail.visual_recipe?.interfaces[0]?.model_aliases?.[0] ?? detail.recipe.slug;
+  const alias = detail.visual_recipe?.interfaces.find(item => item.adapter === "openai")?.model_aliases?.[0] ?? detail.recipe.slug;
   useEffect(() => {
     setPreview(current => current.canonicalKey === canonicalPreviewKey
       ? current

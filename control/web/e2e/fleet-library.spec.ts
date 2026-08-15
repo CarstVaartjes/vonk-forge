@@ -5,6 +5,8 @@ const GIB = 1024 ** 3;
 const nodeId = "spk_0123456789abcdef0123456789abcdef";
 const borealisId = "spk_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const commit = "a".repeat(40);
+const qwenModel = `qwen/3@${"e".repeat(64)}`;
+const qwenModelPath = `/library/models/${encodeURIComponent(qwenModel)}`;
 const browserProblems = new WeakMap<Page, string[]>();
 type LibraryFixtureState = {
   detailFailuresRemaining: number;
@@ -294,24 +296,24 @@ test("Library keeps URL drill-down below 900px and three coordinated panes above
   await expect(recipes).toBeHidden();
   await expect(detail).toBeHidden();
 
-  await models.getByRole("link", {name: /Qwen 3/}).focus();
+  await models.getByRole("link", {name: new RegExp(qwenModel)}).focus();
   await page.keyboard.press("Enter");
-  await expect(page).toHaveURL(/\/library\/models\/qwen%2F3$/);
+  await expect(page).toHaveURL(new RegExp(`${qwenModelPath}$`));
   await expect(page.getByRole("heading", {name: "Library", exact: true})).toBeFocused();
   await expect(models).toBeHidden();
-  await expect(page.getByRole("region", {name: "Recipes for Qwen 3"})).toBeVisible();
+  await expect(page.getByRole("region", {name: `Recipes for ${qwenModel}`})).toBeVisible();
   await expect(detail).toBeHidden();
 
   await page.getByRole("link", {name: /Qwen Chat/}).click();
   await expect(page).toHaveURL(/\/library\/recipes\/recipe-chat$/);
   await expect(page.getByRole("heading", {name: "Library", exact: true})).toBeFocused();
   await expect(models).toBeHidden();
-  await expect(page.getByRole("region", {name: "Recipes for Qwen 3"})).toBeHidden();
+  await expect(page.getByRole("region", {name: `Recipes for ${qwenModel}`})).toBeHidden();
   await expect(detail).toBeVisible();
 
   await page.goBack();
-  await expect(page).toHaveURL(/\/library\/models\/qwen%2F3$/);
-  await expect(page.getByRole("region", {name: "Recipes for Qwen 3"})).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`${qwenModelPath}$`));
+  await expect(page.getByRole("region", {name: `Recipes for ${qwenModel}`})).toBeVisible();
   await page.goBack();
   await expect(page).toHaveURL(/\/library$/);
   await expect(models).toBeVisible();
@@ -328,10 +330,10 @@ test("Library keeps URL drill-down below 900px and three coordinated panes above
   await expect(unlinked).toBeVisible();
 
   await page.setViewportSize({width: 1280, height: 900});
-  await models.getByRole("link", {name: /Qwen 3/}).click();
+  await models.getByRole("link", {name: new RegExp(qwenModel)}).click();
   await page.getByRole("link", {name: /Qwen Chat/}).click();
   await expect(models).toBeVisible();
-  await expect(page.getByRole("region", {name: "Recipes for Qwen 3"})).toBeVisible();
+  await expect(page.getByRole("region", {name: `Recipes for ${qwenModel}`})).toBeVisible();
   await expect(detail).toBeVisible();
 
   for (const width of [320, 360, 768, 899, 900, 1280, 1920]) {
@@ -348,7 +350,7 @@ test("Library keeps URL drill-down below 900px and three coordinated panes above
   await expect(detail).toBeVisible();
   await page.setViewportSize({width: 900, height: 900});
   await expect(models).toBeVisible();
-  await expect(page.getByRole("region", {name: "Recipes for Qwen 3"})).toBeVisible();
+  await expect(page.getByRole("region", {name: `Recipes for ${qwenModel}`})).toBeVisible();
   await expect(detail).toBeVisible();
 
   await page.setViewportSize({width: 1280, height: 900});
@@ -371,7 +373,7 @@ test("Library keeps URL drill-down below 900px and three coordinated panes above
     }
   });
   await expect(fractionalFrame.getByRole("region", {name: "Models"})).toBeHidden();
-  await expect(fractionalFrame.getByRole("region", {name: "Recipes for Qwen 3"})).toBeHidden();
+  await expect(fractionalFrame.getByRole("region", {name: `Recipes for ${qwenModel}`})).toBeHidden();
   await expect(fractionalFrame.getByRole("region", {name: "Recipe detail"})).toBeVisible();
   await page.locator('iframe[title="Fractional Library viewport"]').evaluate(element => element.remove());
 
@@ -385,7 +387,7 @@ test("Library fixture journey keeps visual authority primary through preview, pa
   await page.goto("/library/recipes/recipe-chat");
 
   const models = page.getByRole("region", {name: "Models"});
-  const recipes = page.getByRole("region", {name: "Recipes for Qwen 3"});
+  const recipes = page.getByRole("region", {name: `Recipes for ${qwenModel}`});
   const authority = page.getByRole("region", {name: "Qwen Chat recipe authority"});
   await expect(models.getByRole("link", {name: /Unlinked/})).toBeVisible();
   await expect(recipes.getByRole("link", {name: /Qwen Chat/})).toBeVisible();
@@ -471,7 +473,7 @@ test("Library local fixture recovers from errors and exposes an empty-state esca
   await expect(page.getByRole("region", {name: "Models"})).toBeVisible();
 
   state.detailFailuresRemaining = 1;
-  await page.getByRole("link", {name: /Qwen 3/}).click();
+  await page.getByRole("link", {name: new RegExp(qwenModel)}).click();
   await page.getByRole("link", {name: /Qwen Chat/}).click();
   await expect(page.getByRole("alert")).toBeVisible();
   await page.getByRole("button", {name: "Retry recipe detail"}).click();

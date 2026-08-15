@@ -2,7 +2,7 @@ import {useCallback, useEffect, useRef, useState} from "react";
 import type {MouseEvent} from "react";
 import type {LibraryApi, LibraryModel, LibraryRecipeDetail, LibraryRecipeSummary, LibrarySnapshot} from "../api/types";
 import {LibraryBrowser} from "../components/library-browser";
-import {libraryRoute} from "../lib/library-route";
+import {libraryRoute, modelVersionKey} from "../lib/library-route";
 import type {LibraryRoute} from "../lib/library-route";
 import "./library.css";
 
@@ -22,15 +22,16 @@ function boundedItems<T>(items: T[], limit: number, key: (item: T) => string, pi
 }
 
 function mergeSnapshot(current: LibrarySnapshot | undefined, next: LibrarySnapshot, route: LibraryRoute): {snapshot: LibrarySnapshot; truncated: boolean} {
-  const models = new Map((current?.models ?? []).map(model => [model.family, {...model, recipes: [...model.recipes]}]));
+  const models = new Map((current?.models ?? []).map(model => [modelVersionKey(model.model), {...model, recipes: [...model.recipes]}]));
   for (const model of next.models) {
-    const existing = models.get(model.family);
+    const modelKey = modelVersionKey(model.model);
+    const existing = models.get(modelKey);
     if (!existing) {
-      models.set(model.family, {...model, recipes: [...model.recipes]});
+      models.set(modelKey, {...model, recipes: [...model.recipes]});
       continue;
     }
     const recipeIds = new Set(existing.recipes.map(recipe => recipe.recipe_id));
-    models.set(model.family, {
+    models.set(modelKey, {
       ...existing,
       recipes: existing.recipes.concat(model.recipes.filter(recipe => !recipeIds.has(recipe.recipe_id))),
     });
@@ -42,10 +43,13 @@ function mergeSnapshot(current: LibrarySnapshot | undefined, next: LibrarySnapsh
     truncated ||= bounded.truncated;
     return {...model, recipes: bounded.items};
   });
-  const selectedFamily = route.kind === "model" && !route.unlinked
-    ? route.family
-    : modelItems.find(model => recipeId && model.recipes.some(recipe => recipe.recipe_id === recipeId))?.family;
-  const boundedModels = boundedItems(modelItems, LIBRARY_MODEL_WINDOW, model => model.family, selectedFamily);
+  const recipeModel = modelItems.find(
+    model => recipeId && model.recipes.some(recipe => recipe.recipe_id === recipeId),
+  );
+  const selectedModelKey = route.kind === "model" && !route.unlinked
+    ? route.modelKey
+    : recipeModel ? modelVersionKey(recipeModel.model) : undefined;
+  const boundedModels = boundedItems(modelItems, LIBRARY_MODEL_WINDOW, model => modelVersionKey(model.model), selectedModelKey);
   truncated ||= boundedModels.truncated;
 
   const currentUnlinked = current?.unlinked_recipes ?? [];
@@ -85,7 +89,7 @@ function restoreRouteParent(snapshot: LibrarySnapshot, recipeId: string, parent:
     return {...snapshot, unlinked_recipes: unlinked.items};
   }
 
-  const existing = snapshot.models.find(model => model.family === parent.model.family);
+  const existing = snapshot.models.find(model => modelVersionKey(model.model) === modelVersionKey(parent.model.model));
   const restoredModel = existing
     ? {
         ...existing,
@@ -98,11 +102,11 @@ function restoreRouteParent(snapshot: LibrarySnapshot, recipeId: string, parent:
       }
     : {...parent.model, recipes: [parent.recipe]};
   const models = existing
-    ? snapshot.models.map(model => model.family === restoredModel.family ? restoredModel : model)
+    ? snapshot.models.map(model => modelVersionKey(model.model) === modelVersionKey(restoredModel.model) ? restoredModel : model)
     : snapshot.models.concat(restoredModel);
   return {
     ...snapshot,
-    models: boundedItems(models, LIBRARY_MODEL_WINDOW, model => model.family, restoredModel.family).items,
+    models: boundedItems(models, LIBRARY_MODEL_WINDOW, model => modelVersionKey(model.model), modelVersionKey(restoredModel.model)).items,
   };
 }
 

@@ -36,6 +36,12 @@ function recipeDocument(fields: Fields, sourceSha256: string, archiveBytes: numb
   const stagingBytes = positive(fields.stagingBytes, "Staging size");
   const memoryBytes = positive(fields.memoryBytes, "Runtime memory");
   const reserveBytes = positive(fields.systemReserveBytes, "System reserve");
+  const multiNode = nodes > 1;
+  const artifactRoles = multiNode ? ["entrypoint", "worker"] : ["entrypoint"];
+  const topologyRoles = [
+    {name: "entrypoint", count: 1, endpoint_owner: true, artifacts: ["weights"], resources: {disk: {image_bytes: imageBytes, artifact_bytes: artifactBytes, staging_bytes: stagingBytes, cache_bytes: 1, rollback_bytes: 0, safety_margin_bytes: 10000000000}, memory: {kind: "unified" as const, startup_peak_bytes: memoryBytes, steady_state_bytes: memoryBytes, runtime_growth_bytes: 1, system_reserve_bytes: reserveBytes}}},
+    ...(multiNode ? [{name: "worker", count: nodes - 1, endpoint_owner: false, artifacts: ["weights"], resources: {disk: {image_bytes: imageBytes, artifact_bytes: artifactBytes, staging_bytes: stagingBytes, cache_bytes: 1, rollback_bytes: 0, safety_margin_bytes: 10000000000}, memory: {kind: "unified" as const, startup_peak_bytes: memoryBytes, steady_state_bytes: memoryBytes, runtime_growth_bytes: 1, system_reserve_bytes: reserveBytes}}}] : []),
+  ];
   return {
     schema_version: 1,
     identity: {publisher: fields.publisher, slug: fields.slug},
@@ -47,18 +53,19 @@ function recipeDocument(fields: Fields, sourceSha256: string, archiveBytes: numb
       dockerfile: "Dockerfile", platform: "linux/arm64", arguments: [], network: {mode: "none", hosts: []},
       resources: {download_bytes: positive(fields.buildDownloadBytes, "Build download"), temporary_bytes: positive(fields.buildTemporaryBytes, "Build temporary size"), memory_bytes: positive(fields.buildMemoryBytes, "Build memory"), timeout_seconds: 3600},
     },
-    artifacts: [{id: "weights", kind: "huggingface.snapshot", repository: fields.repository, revision: fields.revision, download_bytes: artifactBytes, installed_bytes: artifactBytes, mount: {target: "/models", read_only: true}, roles: ["entrypoint"]}],
+    artifacts: [{id: "weights", kind: "huggingface.snapshot", repository: fields.repository, revision: fields.revision, download_bytes: artifactBytes, installed_bytes: artifactBytes, mount: {target: "/models", read_only: true}, roles: artifactRoles}],
     runtime: {
       distribution: {kind: "runtime-distribution", publisher: fields.publisher, slug: fields.runtimeDistribution, content_sha256: fields.runtimeDigest}, entrypoint: lines(fields.entrypoint), arguments: [], environment: [],
       security: {devices: ["nvidia.com/gpu=all"], capabilities: [], host_network: false, privileged: false, user: "65532:65532", mounts: [{source: "model", target: "/models", read_only: true}, {source: "state", target: "/state", read_only: false}]},
       lifecycle: {pre_start: [], post_stop: [], stop_timeout_seconds: 30},
     },
     topology: {
-      name: nodes === 1 ? "solo" : `${nodes}-node`, mode: nodes === 1 ? "single" : "tensor_parallel", node_count: nodes,
+      name: nodes === 1 ? "solo" : `tensor-${nodes}`, mode: nodes === 1 ? "single" : "tensor_parallel", node_count: nodes,
       parallelism: {tensor: nodes, pipeline: 1, data: 1, backend: nodes === 1 ? "local" : "nccl"},
-      roles: [{name: "entrypoint", count: nodes, endpoint_owner: true, artifacts: ["weights"], resources: {disk: {image_bytes: imageBytes, artifact_bytes: artifactBytes, staging_bytes: stagingBytes, cache_bytes: 1, rollback_bytes: 0, safety_margin_bytes: 10000000000}, memory: {kind: "unified", startup_peak_bytes: memoryBytes, steady_state_bytes: memoryBytes, runtime_growth_bytes: 1, system_reserve_bytes: reserveBytes}}}],
-      fabric: {connectivity: nodes === 1 ? "none" : "connected", minimum_bandwidth_mbps: nodes === 1 ? 0 : 10000}, start_order: ["entrypoint"], stop_order: ["entrypoint"],
+      roles: topologyRoles,
+      fabric: {connectivity: nodes === 1 ? "none" : "connected", minimum_bandwidth_mbps: nodes === 1 ? 0 : 10000}, start_order: artifactRoles, stop_order: [...artifactRoles].reverse(),
     },
+    parameters: [],
     interfaces: [{adapter: "openai", port: positive(fields.port, "Endpoint port"), model_aliases: list(fields.alias), health_path: "/v1/models"}],
     validation: {validators: [{interface: "openai", checks: ["container.started", "endpoint.healthy", "inference.completed"]}], benchmarks: []},
     provenance: {source_kind: "local", source_reference: null, attribution: []},

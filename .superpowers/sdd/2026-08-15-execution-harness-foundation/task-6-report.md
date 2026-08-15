@@ -171,3 +171,154 @@ Output: Playwright discovered all 6 Fleet/Library browser tests successfully.
   `openapi-python-client` subprocess segfaulted). Each minimal reproducer and
   the final focused suites passed on rerun. No deterministic Task 6 failure was
   found.
+
+---
+
+## Review fix round 1/5
+
+### Result
+
+Resolved all four review findings. Library model groups and routes are now
+keyed and displayed by the full immutable `publisher/slug@content_sha256`
+model-version identity. The editor produces a valid multi-node entrypoint plus
+worker topology. Run targets are only projected for recipes exposing an OpenAI
+interface, and `RecipeRevisionSummary.schema_version` is literal v1 with
+fail-closed projection for any stored non-v1 revision.
+
+### Changed files
+
+- `control/src/vonk_control/library_contract.py`
+- `control/src/vonk_control/library_projection.py`
+- `control/tests/test_library_projection.py`
+- `tests/control/test_openapi_clients.py`
+- `control/openapi.json`
+- `src/cluster_profiles/generated_control/models/__init__.py`
+- `src/cluster_profiles/generated_control/models/library_model.py`
+- `src/cluster_profiles/generated_control/models/model_version_identity.py`
+- `src/cluster_profiles/generated_control/models/recipe_revision_summary.py`
+- `control/web/src/api/generated.d.ts`
+- `control/web/src/components/library-browser.tsx`
+- `control/web/src/components/library-recipe-detail.tsx`
+- `control/web/src/lib/library-route.ts`
+- `control/web/src/pages/library.tsx`
+- `control/web/src/pages/library.test.tsx`
+- `control/web/src/pages/recipe-editor.tsx`
+- `control/web/src/pages/recipe-editor.test.tsx`
+- `control/web/src/test-fixtures/library.ts`
+- `control/web/e2e/fleet-library.spec.ts`
+
+### TDD evidence
+
+Added the collision, non-v1 revision, job-only action, and multi-node editor
+tests before implementation.
+
+```text
+uv run --project control --frozen python -m pytest control/tests/test_library_projection.py::test_root_separates_same_slug_model_versions_by_portable_identity control/tests/test_library_projection.py::test_non_v1_revision_schema_fails_closed_in_library_projection control/tests/test_library_projection.py::test_job_only_recipe_does_not_offer_an_openai_load_action -q
+```
+
+Initial output: `FFF`; failures respectively showed no `LibraryModel.model`,
+the invalid schema still appeared in a Library model group, and preview targets
+were `mapping`, `install`, `run` rather than `mapping`, `install`.
+
+```text
+npm test --prefix control/web -- --run src/pages/recipe-editor.test.tsx
+```
+
+Initial output: `1 failed | 2 passed`; the emitted entrypoint role had
+`count: 2` instead of `count: 1` with a worker role.
+
+After implementation:
+
+```text
+uv run --project control --frozen python -m pytest control/tests/test_library_projection.py::test_root_separates_same_slug_model_versions_by_portable_identity control/tests/test_library_projection.py::test_non_v1_revision_schema_fails_closed_in_library_projection control/tests/test_library_projection.py::test_job_only_recipe_does_not_offer_an_openai_load_action -q
+```
+
+Output: `3 passed in 0.61s`.
+
+```text
+npm test --prefix control/web -- --run src/pages/recipe-editor.test.tsx
+```
+
+Output: `3 passed`.
+
+### Generated artifacts
+
+```text
+./scripts/generate-control-clients
+```
+
+Output:
+
+```text
+Generating /home/carst/vonk-forge/.worktrees/execution-harness-foundation/src/cluster_profiles/generated_control
+✨ openapi-typescript 7.13.0
+🚀 /home/carst/vonk-forge/.worktrees/execution-harness-foundation/control/openapi.json → /home/carst/vonk-forge/.worktrees/execution-harness-foundation/control/web/src/api/generated.d.ts [165ms]
+```
+
+Regenerated `control/openapi.json`, Python generated client models (including
+new `model_version_identity.py`), and `control/web/src/api/generated.d.ts`.
+
+### Verification
+
+```text
+uv run --project control --frozen python -m pytest control/tests/test_library_projection.py control/tests/test_library_api.py tests/control/test_openapi_clients.py -q
+```
+
+Output: `67 passed in 11.19s`.
+
+```text
+npm test --prefix control/web -- --run src/pages/library.test.tsx src/pages/recipe-editor.test.tsx src/components/library-actions.test.tsx src/components/library-recipe-advanced.test.tsx
+```
+
+Output: `Test Files 4 passed (4)` and `Tests 24 passed (24)`.
+
+```text
+npm run build --prefix control/web
+```
+
+Output: `tsc --noEmit` passed and Vite built successfully (`69 modules transformed`).
+
+```text
+npm run test:e2e --prefix control/web -- --list
+```
+
+Output: `Total: 9 tests in 2 files`.
+
+```text
+uvx ruff@0.16.1 check control/src/vonk_control/library_contract.py control/src/vonk_control/library_projection.py control/tests/test_library_projection.py tests/control/test_openapi_clients.py
+git diff --check
+```
+
+Output: `All checks passed!`; no whitespace errors.
+
+Required controller browser command (with the prepared `LD_LIBRARY_PATH`
+prefix when needed):
+
+```text
+npm run test:e2e --prefix control/web -- e2e/fleet-library.spec.ts
+```
+
+### Self-review
+
+- Confirmed exact model-version groups differ when publisher or digest differs,
+  and every browser key, route, merge, selection, label, and E2E assertion uses
+  that complete portable identity rather than `family`.
+- Confirmed the multi-node editor emits one endpoint-owning entrypoint rank,
+  worker ranks for the remainder, complete artifact coverage, valid topology
+  names, and reversed stop order.
+- Confirmed job-only interfaces cannot yield a `run` preview target; the UI has
+  no Load action without that server-provided target and now chooses aliases
+  only from an OpenAI interface.
+- Confirmed OpenAPI, TypeScript, and Python generated contracts expose
+  literal `schema_version: 1`; projection unlinks non-v1 revisions and omits
+  their selected revision/visual detail.
+- Preserved lock-first admission and topology-ordered lifecycle code paths;
+  no Task 5 or Task 7 scope was changed.
+
+### Concerns
+
+- Focused unit, discovery, and build verification pass. Full Playwright browser
+  execution remains for the controller with its prepared non-root Chromium
+  library path; this environment's known `libnspr4`/`libnss` issue was not
+  changed in code. No deterministic transient-infrastructure cause was found,
+  so no infrastructure code change was made.

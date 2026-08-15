@@ -545,7 +545,9 @@ def test_root_groups_page_local_families_and_paginates_every_recipe_once() -> No
     ] + [recipe for page in pages for recipe in page.unlinked_recipes]
     assert [recipe.slug for recipe in visible] == ["alpha", "bravo", "charlie", "delta"]
     assert len({recipe.recipe_id for recipe in visible}) == 4
-    assert [model.family for page in pages for model in page.models] == ["shared-model"]
+    assert [model.model.slug for page in pages for model in page.models] == [
+        "shared-model"
+    ]
     assert all(model.page_local is True for page in pages for model in page.models)
     assert [recipe.title for recipe in visible[:2]] == [
         "Alpha human title",
@@ -570,6 +572,54 @@ def test_root_groups_page_local_families_and_paginates_every_recipe_once() -> No
             cursor=pages[0].next_cursor[:-1]
             + ("A" if pages[0].next_cursor[-1] != "A" else "B"),
         )
+
+
+def test_root_separates_same_slug_model_versions_by_portable_identity() -> None:
+    """Break caught: model-version publisher or digest collisions share a pane."""
+
+    _engine, sessions = _database()
+    first = _document(family="shared-model", title="First exact model")
+    second = _document(family="shared-model", title="Second exact model")
+    first["model"].update({"publisher": "alpha", "content_sha256": "1" * 64})
+    second["model"].update({"publisher": "beta", "content_sha256": "2" * 64})
+    with sessions.begin() as session:
+        _recipe(session, 501, slug="first", title="First", document=first)
+        _recipe(session, 502, slug="second", title="Second", document=second)
+
+    models = _projection(sessions).list().models
+
+    assert [(model.model.publisher, model.model.slug, model.model.content_sha256) for model in models] == [
+        ("alpha", "shared-model", "1" * 64),
+        ("beta", "shared-model", "2" * 64),
+    ]
+    assert [[recipe.slug for recipe in model.recipes] for model in models] == [
+        ["first"],
+        ["second"],
+    ]
+
+
+def test_non_v1_revision_schema_fails_closed_in_library_projection() -> None:
+    """Break caught: an arbitrary revision schema is exposed as active Library v1."""
+
+    _engine, sessions = _database()
+    with sessions.begin() as session:
+        _recipe(
+            session,
+            503,
+            slug="wrong-schema",
+            title="Wrong schema",
+            document=_document(family="wrong-schema", title="Wrong schema"),
+        )[1].schema_version = 2
+
+    projection = _projection(sessions)
+    summary = projection.list()
+    detail = projection.detail(_uuid(503))
+
+    assert summary.models == []
+    assert summary.unlinked_recipes[0].selected_revision is None
+    assert detail.selected_revision is None
+    assert detail.visual_recipe is None
+    assert "recipe.schema_version_unsupported" in {reason.code for reason in detail.reasons}
 
 
 def test_root_operational_summaries_are_exact_bounded_and_fair_per_recipe() -> None:
@@ -1236,6 +1286,33 @@ def test_visual_projection_keeps_non_openai_interface_path_without_endpoint_fiel
     assert interface.port is None
     assert interface.model_aliases == []
     assert interface.health_path is None
+
+
+def test_job_only_recipe_does_not_offer_an_openai_load_action() -> None:
+    """Break caught: job interfaces receive a LiteLLM/OpenAI run target."""
+
+    _engine, sessions = _database()
+    document = _document(family="artifact-job", title="Artifact job")
+    document["interfaces"] = [{"adapter": "artifact-job", "path": "/result"}]
+    document["validation"]["validators"] = [
+        {"interface": "artifact-job", "checks": ["job.completed"]}
+    ]
+    validate_recipe(document)
+    with sessions.begin() as session:
+        _recipe(
+            session,
+            602,
+            slug="artifact-job",
+            title="Artifact job catalog title",
+            document=document,
+        )
+        revision = session.get(LocalRecipeRevision, _uuid(7_021))
+        node = _node(session, 1)
+        _operational_group(session, revision, (node,), value=602, installed=True)
+
+    targets = _projection(sessions).detail(_uuid(602)).placement[0].recommendations[0].preview_targets
+
+    assert [target.kind for target in targets] == ["mapping", "install"]
 
 
 @pytest.mark.parametrize("rank_evidence", ["stale", "missing", "failed"])
@@ -2475,7 +2552,7 @@ def test_family_spans_pages_with_signed_compound_cursor_binding() -> None:
     second = projection.list(limit=1, cursor=first.next_cursor)
     third = projection.list(limit=1, cursor=second.next_cursor)
 
-    assert [page.models[0].family for page in (first, second, third)] == [
+    assert [page.models[0].model.slug for page in (first, second, third)] == [
         "paged-family",
         "paged-family",
         "paged-family",

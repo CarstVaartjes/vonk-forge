@@ -2291,10 +2291,7 @@ export interface components {
         };
         /** LibraryModel */
         LibraryModel: {
-            /** Display Name */
-            display_name: string;
-            /** Family */
-            family: string;
+            model: components["schemas"]["ModelVersionIdentity"];
             /**
              * Page Local
              * @default true
@@ -2538,6 +2535,20 @@ export interface components {
              * @default 600
              */
             ttl_seconds: number;
+        };
+        /** ModelVersionIdentity */
+        ModelVersionIdentity: {
+            /** Content Sha256 */
+            content_sha256: string;
+            /**
+             * Kind
+             * @constant
+             */
+            kind: "model-version";
+            /** Publisher */
+            publisher: string;
+            /** Slug */
+            slug: string;
         };
         /** NodeConnection */
         NodeConnection: {
@@ -3777,8 +3788,12 @@ export interface components {
             lifecycle: "draft" | "blocked" | "resolved" | "deprecated";
             /** Revision Number */
             revision_number: number;
-            /** Schema Version */
-            schema_version: number;
+            /**
+             * Schema Version
+             * @default 1
+             * @constant
+             */
+            schema_version: 1;
         };
         /** RecipeRole */
         RecipeRole: {

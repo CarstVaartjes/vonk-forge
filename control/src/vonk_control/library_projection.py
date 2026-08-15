@@ -203,7 +203,9 @@ def _projection_bound_reasons(
     return reasons
 
 
-def _revision_summary(value: LocalRecipeRevision) -> RecipeRevisionSummary:
+def _revision_summary(value: LocalRecipeRevision) -> RecipeRevisionSummary | None:
+    if value.schema_version != 1:
+        return None
     return RecipeRevisionSummary(
         id=value.id,
         revision_number=value.revision_number,
@@ -232,6 +234,14 @@ def _validated_document(
             _reason(
                 "recipe.unresolved",
                 "The recipe has no stored revision.",
+                "error",
+            )
+        ]
+    if revision.schema_version != 1:
+        return None, [
+            _reason(
+                "recipe.schema_version_unsupported",
+                "Only recipe schema version 1 can be projected.",
                 "error",
             )
         ]
@@ -779,7 +789,7 @@ class LibraryProjection:
                     healthy=health.healthy and not root_members_truncated,
                 )
             )
-        grouped: dict[str, list[LibraryRecipeSummary]] = {}
+        grouped: dict[tuple[str, str, str], list[LibraryRecipeSummary]] = {}
         unlinked: list[LibraryRecipeSummary] = []
         for recipe, revision in page:
             document, reasons = _validated_document(revision)
@@ -801,10 +811,14 @@ class LibraryProjection:
                 )
             capabilities: list[str] = []
             topology_name: str | None = None
-            family: str | None = None
+            model_identity: tuple[str, str, str] | None = None
             if document is not None:
                 model = document["model"]
-                family = str(model["slug"])
+                model_identity = (
+                    str(model["publisher"]),
+                    str(model["slug"]),
+                    str(model["content_sha256"]),
+                )
                 capabilities = [
                     _bounded_text(item["adapter"], 64)
                     for item in document["interfaces"]
@@ -851,10 +865,10 @@ class LibraryProjection:
                 runs_truncated=run_total > len(recipe_runs),
                 reasons=_bounded_reasons(reasons, 16),
             )
-            if family is None:
+            if model_identity is None:
                 unlinked.append(summary)
             else:
-                grouped.setdefault(family, []).append(summary)
+                grouped.setdefault(model_identity, []).append(summary)
         next_cursor = None
         if len(rows) > limit and page:
             last_recipe = page[-1][0]
@@ -868,11 +882,17 @@ class LibraryProjection:
             generated_at=current,
             models=[
                 LibraryModel(
-                    family=family,
-                    display_name=family,
+                    model={
+                        "kind": "model-version",
+                        "publisher": publisher,
+                        "slug": slug,
+                        "content_sha256": content_sha256,
+                    },
                     recipes=values,
                 )
-                for family, values in sorted(grouped.items())
+                for (publisher, slug, content_sha256), values in sorted(
+                    grouped.items()
+                )
             ],
             unlinked_recipes=unlinked,
             next_cursor=next_cursor,
@@ -2307,7 +2327,11 @@ class LibraryProjection:
                     )
                 )
             )
-        if revision_operable and complete_installation_ids:
+        if (
+            revision_operable
+            and any(item["adapter"] == "openai" for item in document["interfaces"])
+            and complete_installation_ids
+        ):
             preview_targets.append(
                 RunPreviewTarget(
                     input=RunPreviewInput(installation_id=complete_installation_ids[0])

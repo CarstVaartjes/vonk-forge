@@ -2193,17 +2193,8 @@
       "LibraryModel": {
         "additionalProperties": false,
         "properties": {
-          "display_name": {
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Display Name",
-            "type": "string"
-          },
-          "family": {
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Family",
-            "type": "string"
+          "model": {
+            "$ref": "#/components/schemas/ModelVersionIdentity"
           },
           "page_local": {
             "const": true,
@@ -2222,8 +2213,7 @@
           }
         },
         "required": [
-          "family",
-          "display_name",
+          "model",
           "recipes"
         ],
         "title": "LibraryModel",
@@ -2916,6 +2906,41 @@
           }
         },
         "title": "MigrationGrantRequest",
+        "type": "object"
+      },
+      "ModelVersionIdentity": {
+        "additionalProperties": false,
+        "properties": {
+          "content_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Content Sha256",
+            "type": "string"
+          },
+          "kind": {
+            "const": "model-version",
+            "title": "Kind",
+            "type": "string"
+          },
+          "publisher": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Publisher",
+            "type": "string"
+          },
+          "slug": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "publisher",
+          "slug",
+          "content_sha256"
+        ],
+        "title": "ModelVersionIdentity",
         "type": "object"
       },
       "NodeConnection": {
@@ -6884,8 +6909,8 @@
             "type": "integer"
           },
           "schema_version": {
-            "maximum": 2147483647.0,
-            "minimum": 1.0,
+            "const": 1,
+            "default": 1,
             "title": "Schema Version",
             "type": "integer"
           }
@@ -6894,7 +6919,6 @@
           "id",
           "revision_number",
           "lifecycle",
-          "schema_version",
           "content_sha256",
           "created_at"
         ],

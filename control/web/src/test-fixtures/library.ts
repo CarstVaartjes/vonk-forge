@@ -6,7 +6,7 @@ const revision = {
   id: "revision-chat",
   lifecycle: "resolved" as const,
   revision_number: 3,
-  schema_version: 1,
+  schema_version: 1 as const,
 };
 
 export function libraryRecipeSummary(input: Partial<LibraryRecipeSummary> & Pick<LibraryRecipeSummary, "recipe_id" | "slug" | "title">): LibraryRecipeSummary {
@@ -37,7 +37,7 @@ export const librarySnapshot: LibrarySnapshot = {
   schema_version: 1,
   generated_at: "2026-08-15T12:00:00Z",
   freshness_policy: {inventory_fresh_seconds: 300, telemetry_live_seconds: 6, telemetry_delayed_seconds: 20},
-  models: [{family: "qwen/3", display_name: "Qwen 3", page_local: true, recipes: [chatRecipe, codeRecipe]}],
+  models: [{model: {kind: "model-version", publisher: "qwen", slug: "3", content_sha256: "e".repeat(64)}, page_local: true, recipes: [chatRecipe, codeRecipe]}],
   unlinked_recipes: [unlinkedRecipe],
   next_cursor: null,
 };

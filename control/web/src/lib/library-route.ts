@@ -1,6 +1,6 @@
 export type LibraryRoute =
   | {kind: "root"}
-  | {kind: "model"; family: string; unlinked: boolean}
+  | {kind: "model"; modelKey: string; unlinked: boolean}
   | {kind: "recipe"; recipeId: string};
 
 const UNLINKED_SEGMENT = "~unlinked";
@@ -13,9 +13,9 @@ export function libraryRoute(path: string): LibraryRoute {
   if (path === "/library" || path === "/library/") return {kind: "root"};
   const model = /^\/library\/models\/([^/]+)$/.exec(path);
   if (model) {
-    if (model[1] === UNLINKED_SEGMENT) return {kind: "model", family: "", unlinked: true};
-    const family = decode(model[1]);
-    if (family !== undefined) return {kind: "model", family, unlinked: false};
+    if (model[1] === UNLINKED_SEGMENT) return {kind: "model", modelKey: "", unlinked: true};
+    const modelKey = decode(model[1]);
+    if (modelKey !== undefined) return {kind: "model", modelKey, unlinked: false};
   }
   const recipe = /^\/library\/recipes\/([^/]+)$/.exec(path);
   if (recipe) {
@@ -25,8 +25,12 @@ export function libraryRoute(path: string): LibraryRoute {
   return {kind: "root"};
 }
 
-export function modelLibraryPath(family: string): string {
-  return `/library/models/${encodeURIComponent(family)}`;
+export function modelVersionKey(model: {publisher: string; slug: string; content_sha256: string}): string {
+  return `${model.publisher}/${model.slug}@${model.content_sha256}`;
+}
+
+export function modelLibraryPath(modelKey: string): string {
+  return `/library/models/${encodeURIComponent(modelKey)}`;
 }
 
 export function unlinkedLibraryPath(): string {

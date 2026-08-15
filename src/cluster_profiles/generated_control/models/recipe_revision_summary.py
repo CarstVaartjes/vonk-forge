@@ -8,9 +8,11 @@ from ..types import UNSET, Unset
 
 from ..models.recipe_revision_summary_lifecycle import check_recipe_revision_summary_lifecycle
 from ..models.recipe_revision_summary_lifecycle import RecipeRevisionSummaryLifecycle
+from ..types import UNSET, Unset
 from dateutil.parser import isoparse
 from typing import cast
 from typing import cast, Union
+from typing import Literal, Union, cast
 import datetime
 
 
@@ -31,7 +33,7 @@ class RecipeRevisionSummary:
             id (str):
             lifecycle (RecipeRevisionSummaryLifecycle):
             revision_number (int):
-            schema_version (int):
+            schema_version (Union[Literal[1], Unset]):  Default: 1.
      """
 
     content_sha256: Union[None, str]
@@ -39,7 +41,7 @@ class RecipeRevisionSummary:
     id: str
     lifecycle: RecipeRevisionSummaryLifecycle
     revision_number: int
-    schema_version: int
+    schema_version: Union[Literal[1], Unset] = 1
 
 
 
@@ -68,8 +70,9 @@ class RecipeRevisionSummary:
             "id": id,
             "lifecycle": lifecycle,
             "revision_number": revision_number,
-            "schema_version": schema_version,
         })
+        if schema_version is not UNSET:
+            field_dict["schema_version"] = schema_version
 
         return field_dict
 
@@ -100,7 +103,9 @@ class RecipeRevisionSummary:
 
         revision_number = d.pop("revision_number")
 
-        schema_version = d.pop("schema_version")
+        schema_version = cast(Union[Literal[1], Unset] , d.pop("schema_version", UNSET))
+        if schema_version != 1 and not isinstance(schema_version, Unset):
+            raise ValueError(f"schema_version must match const 1, got '{schema_version}'")
 
         recipe_revision_summary = cls(
             content_sha256=content_sha256,

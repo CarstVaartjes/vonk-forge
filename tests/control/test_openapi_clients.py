@@ -106,6 +106,33 @@ def test_tracked_admin_contract_has_secret_free_decisions_and_typed_errors() -> 
     assert "chain_pem" not in serialized
 
 
+def test_library_contract_uses_exact_model_versions_and_v1_revisions() -> None:
+    schema = json.loads(OPENAPI.read_text())
+    components = schema["components"]["schemas"]
+    library_model = components["LibraryModel"]
+    assert set(library_model["properties"]) == {"model", "page_local", "recipes"}
+    assert library_model["properties"]["model"] == {
+        "$ref": "#/components/schemas/ModelVersionIdentity"
+    }
+    model_identity = components["ModelVersionIdentity"]
+    assert model_identity["properties"]["kind"]["const"] == "model-version"
+    assert set(model_identity["required"]) == {
+        "kind",
+        "publisher",
+        "slug",
+        "content_sha256",
+    }
+    assert components["RecipeRevisionSummary"]["properties"]["schema_version"][
+        "const"
+    ] == 1
+
+    typescript = TYPESCRIPT_CLIENT.read_text()
+    assert 'model: components["schemas"]["ModelVersionIdentity"];' in typescript
+    assert "schema_version: 1;" in typescript
+    python_client = (PYTHON_CLIENT / "models/recipe_revision_summary.py").read_text()
+    assert "schema_version: Union[Literal[1], Unset] = 1" in python_client
+
+
 def test_generator_is_idempotent_and_admin_schema_is_secret_free() -> None:
     tracked_digests = _digests()
     first = _generate()

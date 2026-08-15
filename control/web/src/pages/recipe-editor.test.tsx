@@ -47,6 +47,39 @@ test("uploads source first and authors a source-first typed recipe", async () =>
   expect(input.document.topology.node_count).toBe(1);
 });
 
+test("authors a valid multi-node entrypoint and worker topology", async () => {
+  const created: Array<{document: Record<string, any>}> = [];
+  const api = {
+    uploadSourceBundle: async (sha256: string) => ({sha256, archive_bytes: 1, total_bytes: 1, file_count: 1, files: ["Dockerfile"]}),
+    createCatalogRecipe: async (input: {document: Record<string, any>}) => {
+      created.push(input);
+      return {recipe_id: "10000000-0000-4000-8000-000000000002", revision_number: 1};
+    },
+  };
+  render(<RecipeEditorPage api={api as any}/>);
+  const user = userEvent.setup();
+
+  await user.type(screen.getByLabelText("Recipe slug"), "two-node-model");
+  await user.type(screen.getByLabelText("Title"), "Two node model");
+  await user.type(screen.getByLabelText("Description"), "A valid two node recipe.");
+  await user.type(screen.getByLabelText("Model-version slug"), "two-node-model-fp16");
+  await user.type(screen.getByLabelText("Artifact repository"), "Example/TwoNode");
+  await user.type(screen.getByLabelText("Artifact revision"), "0123456789abcdef0123456789abcdef01234567");
+  await user.clear(screen.getByLabelText("Topology node count"));
+  await user.type(screen.getByLabelText("Topology node count"), "2");
+  await user.click(screen.getByRole("button", {name: "Verify source & save draft"}));
+
+  expect(await screen.findByRole("status")).toHaveTextContent("Source verified and draft saved as revision 1");
+  const topology = created[0].document.topology;
+  expect(topology.roles.map((role: {name: string; count: number; endpoint_owner: boolean}) => [role.name, role.count, role.endpoint_owner])).toEqual([
+    ["entrypoint", 1, true],
+    ["worker", 1, false],
+  ]);
+  expect(topology.start_order).toEqual(["entrypoint", "worker"]);
+  expect(topology.stop_order).toEqual(["worker", "entrypoint"]);
+  expect(created[0].document.artifacts[0].roles).toEqual(["entrypoint", "worker"]);
+});
+
 test("attaches local test evidence and exports for an exact publisher namespace", async () => {
   const recipe = {
     recipe_id: "10000000-0000-4000-8000-000000000001", revision_number: 2,

@@ -92,6 +92,7 @@ from .mapping_request import MappingRequest
 from .mapping_request_parameters import MappingRequestParameters
 from .mapping_response import MappingResponse
 from .migration_grant_request import MigrationGrantRequest
+from .model_version_identity import ModelVersionIdentity
 from .node_connection import NodeConnection
 from .node_connection_agent_state import NodeConnectionAgentState
 from .node_connection_certificate_state import NodeConnectionCertificateState
@@ -374,6 +375,7 @@ __all__ = (
     "MappingRequestParameters",
     "MappingResponse",
     "MigrationGrantRequest",
+    "ModelVersionIdentity",
     "NodeConnection",
     "NodeConnectionAgentState",
     "NodeConnectionCertificateState",
