@@ -794,6 +794,12 @@ def test_litellm_supervisor_uses_the_safer_v2_migration_resolver() -> None:
     ]
 
 
+def test_litellm_supervisor_allows_first_run_database_migrations() -> None:
+    supervisor = _litellm_supervisor()
+
+    assert supervisor.STARTUP_SECONDS == 120
+
+
 @pytest.mark.parametrize(
     ("marker", "fault"),
     (

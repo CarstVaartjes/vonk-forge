@@ -403,6 +403,7 @@ def test_image_template_runs_litellm_on_application_and_loopback_ingress() -> No
         "interval": "15s",
         "timeout": "5s",
         "retries": 10,
+        "start_period": "2m0s",
     }
     assert litellm["depends_on"] == {
         "dev-litellm-database-init": {

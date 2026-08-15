@@ -25,7 +25,7 @@ ACK_ROOT = Path("/supervisor")
 ACK = ACK_ROOT / "ack.json"
 POLL_SECONDS = 2
 TERMINATE_SECONDS = 30
-STARTUP_SECONDS = 30
+STARTUP_SECONDS = 120
 HEALTH_TIMEOUT_SECONDS = 3
 MAXIMUM_LEASE = timedelta(seconds=300)
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")

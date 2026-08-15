@@ -573,7 +573,7 @@ def _assert_litellm_management_denied(*, port: int, key: str) -> None:
 
 
 def _wait_for_litellm_port(port: int) -> None:
-    deadline = time.monotonic() + 60
+    deadline = time.monotonic() + 120
     while time.monotonic() < deadline:
         try:
             with urllib.request.urlopen(
