@@ -8,16 +8,15 @@ from ...types import Response, UNSET
 from ... import errors
 
 from ...models.http_validation_error import HTTPValidationError
-from ...models.operation_response import OperationResponse
-from ...models.stop_request import StopRequest
+from ...models.uninstall_plan_response import UninstallPlanResponse
+from ...models.uninstall_preview_request import UninstallPreviewRequest
 from typing import cast
 
 
 
 def _get_kwargs(
-    run_id: str,
     *,
-    body: StopRequest,
+    body: UninstallPreviewRequest,
 
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
@@ -29,7 +28,7 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "post",
-        "url": "/api/v1/recipes/runs/{run_id}/stop".format(run_id=run_id,),
+        "url": "/api/v1/recipes/uninstall-plans/preview",
     }
 
     _kwargs["json"] = body.to_dict()
@@ -42,13 +41,13 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[HTTPValidationError, OperationResponse]]:
-    if response.status_code == 202:
-        response_202 = OperationResponse.from_dict(response.json())
+def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[HTTPValidationError, UninstallPlanResponse]]:
+    if response.status_code == 200:
+        response_200 = UninstallPlanResponse.from_dict(response.json())
 
 
 
-        return response_202
+        return response_200
 
     if response.status_code == 422:
         response_422 = HTTPValidationError.from_dict(response.json())
@@ -63,7 +62,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[HTTPValidationError, OperationResponse]]:
+def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[HTTPValidationError, UninstallPlanResponse]]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -73,30 +72,27 @@ def _build_response(*, client: Union[AuthenticatedClient, Client], response: htt
 
 
 def sync_detailed(
-    run_id: str,
     *,
     client: AuthenticatedClient,
-    body: StopRequest,
+    body: UninstallPreviewRequest,
 
-) -> Response[Union[HTTPValidationError, OperationResponse]]:
-    """ Stop
+) -> Response[Union[HTTPValidationError, UninstallPlanResponse]]:
+    """ Preview Uninstall
 
     Args:
-        run_id (str):
-        body (StopRequest):
+        body (UninstallPreviewRequest):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[HTTPValidationError, OperationResponse]]
+        Response[Union[HTTPValidationError, UninstallPlanResponse]]
      """
 
 
     kwargs = _get_kwargs(
-        run_id=run_id,
-body=body,
+        body=body,
 
     )
 
@@ -107,59 +103,53 @@ body=body,
     return _build_response(client=client, response=response)
 
 def sync(
-    run_id: str,
     *,
     client: AuthenticatedClient,
-    body: StopRequest,
+    body: UninstallPreviewRequest,
 
-) -> Optional[Union[HTTPValidationError, OperationResponse]]:
-    """ Stop
+) -> Optional[Union[HTTPValidationError, UninstallPlanResponse]]:
+    """ Preview Uninstall
 
     Args:
-        run_id (str):
-        body (StopRequest):
+        body (UninstallPreviewRequest):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[HTTPValidationError, OperationResponse]
+        Union[HTTPValidationError, UninstallPlanResponse]
      """
 
 
     return sync_detailed(
-        run_id=run_id,
-client=client,
+        client=client,
 body=body,
 
     ).parsed
 
 async def asyncio_detailed(
-    run_id: str,
     *,
     client: AuthenticatedClient,
-    body: StopRequest,
+    body: UninstallPreviewRequest,
 
-) -> Response[Union[HTTPValidationError, OperationResponse]]:
-    """ Stop
+) -> Response[Union[HTTPValidationError, UninstallPlanResponse]]:
+    """ Preview Uninstall
 
     Args:
-        run_id (str):
-        body (StopRequest):
+        body (UninstallPreviewRequest):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[HTTPValidationError, OperationResponse]]
+        Response[Union[HTTPValidationError, UninstallPlanResponse]]
      """
 
 
     kwargs = _get_kwargs(
-        run_id=run_id,
-body=body,
+        body=body,
 
     )
 
@@ -170,30 +160,27 @@ body=body,
     return _build_response(client=client, response=response)
 
 async def asyncio(
-    run_id: str,
     *,
     client: AuthenticatedClient,
-    body: StopRequest,
+    body: UninstallPreviewRequest,
 
-) -> Optional[Union[HTTPValidationError, OperationResponse]]:
-    """ Stop
+) -> Optional[Union[HTTPValidationError, UninstallPlanResponse]]:
+    """ Preview Uninstall
 
     Args:
-        run_id (str):
-        body (StopRequest):
+        body (UninstallPreviewRequest):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[HTTPValidationError, OperationResponse]
+        Union[HTTPValidationError, UninstallPlanResponse]
      """
 
 
     return (await asyncio_detailed(
-        run_id=run_id,
-client=client,
+        client=client,
 body=body,
 
     )).parsed
