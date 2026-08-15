@@ -9,17 +9,28 @@ branch_labels = None
 depends_on = None
 
 
-_MIGRATION_OWNED_EMPTY_CHAIN_TABLES = {
-    # Alembic's own revision marker is required to locate the 0026 starting point.
-    "alembic_version",
-    # Revision 0024 creates the stream cursor singleton at id 1.
-    "fleet_event_cursor",
-    # Revision 0008 creates the reconciliation-completion generation singleton.
-    "reconciliation_completion_generation",
-    # Revision 0009 creates the route-publication ownership singleton.
-    "route_publication_owner",
-    # Revision 0026 creates the telemetry-maintenance singleton at id 1.
-    "telemetry_maintenance_state",
+_MIGRATION_OWNED_EMPTY_CHAIN_ROWS = {
+    # Alembic's required marker immediately before 0027 executes.
+    "alembic_version": ({"version_num": "0026_telemetry_maintenance_state"},),
+    # Revision 0024's stream cursor singleton.
+    "fleet_event_cursor": ({"singleton_id": 1, "last_id": 0},),
+    # Revision 0008's reconciliation-completion generation singleton.
+    "reconciliation_completion_generation": (
+        {"singleton_id": 1, "last_generation": 0},
+    ),
+    # Revision 0009's route-publication ownership singleton.
+    "route_publication_owner": (
+        {
+            "singleton_id": 1,
+            "reconciliation_id": None,
+            "owner_generation": 0,
+            "updated_at": None,
+        },
+    ),
+    # Revision 0026's telemetry-maintenance singleton.
+    "telemetry_maintenance_state": (
+        {"singleton_id": 1, "next_resolution_seconds": 60},
+    ),
 }
 
 
@@ -41,9 +52,27 @@ def _mutable_application_state_tables(bind: sa.Connection) -> tuple[str, ...]:
     return tuple(
         sorted(
             set(sa.inspect(bind).get_table_names())
-            - _MIGRATION_OWNED_EMPTY_CHAIN_TABLES
+            - set(_MIGRATION_OWNED_EMPTY_CHAIN_ROWS)
         )
     )
+
+
+def _row_set(rows: tuple[dict[str, object], ...]) -> set[tuple[tuple[str, object], ...]]:
+    return {tuple(sorted(row.items())) for row in rows}
+
+
+def _require_exact_empty_chain_system_rows(bind: sa.Connection) -> None:
+    for table_name, expected_rows in _MIGRATION_OWNED_EMPTY_CHAIN_ROWS.items():
+        actual_rows = tuple(
+            dict(row)
+            for row in bind.execute(sa.text(f"SELECT * FROM {table_name}")).mappings()
+        )
+        if _row_set(actual_rows) != _row_set(expected_rows):
+            raise RuntimeError(
+                "0027_execution_harness_catalog requires a fresh pre-production "
+                f"database; system seed rows do not match the clean 0026 chain in "
+                f"{table_name}"
+            )
 
 
 def _require_empty_mutable_application_state() -> None:
@@ -58,6 +87,7 @@ def _require_empty_mutable_application_state() -> None:
 
 def upgrade() -> None:
     _require_empty_mutable_application_state()
+    _require_exact_empty_chain_system_rows(op.get_bind())
     op.create_table(
         "catalog_entities",
         sa.Column("id", sa.String(36), primary_key=True),

@@ -183,22 +183,34 @@ def assert_no_v1_ddl_has_run(connection: Connection) -> None:
     assert not column_exists(connection, "cluster_mappings", "topology_name")
 
 
-def test_fence_covers_every_0026_mutable_application_table(
+def test_fence_covers_every_0026_table_with_exact_system_seed_validation(
     connection: Connection,
 ) -> None:
     upgrade_database_to(connection, "0026_telemetry_maintenance_state")
     migration = cutover_migration_module()
-    seeded = set(getattr(migration, "_MIGRATION_OWNED_EMPTY_CHAIN_TABLES", ()))
+    seeded_rows = getattr(migration, "_MIGRATION_OWNED_EMPTY_CHAIN_ROWS", {})
     mutable = set(migration._mutable_application_state_tables(connection))
+    nonempty = {
+        table_name
+        for table_name in inspect(connection).get_table_names()
+        if scalar(connection, f"SELECT count(*) FROM {table_name}") != 0
+    }
 
-    assert seeded == {
+    assert set(seeded_rows) == {
         "alembic_version",
         "fleet_event_cursor",
         "reconciliation_completion_generation",
         "route_publication_owner",
         "telemetry_maintenance_state",
     }
-    assert mutable == set(inspect(connection).get_table_names()) - seeded
+    assert set(seeded_rows) == nonempty
+    assert mutable == set(inspect(connection).get_table_names()) - set(seeded_rows)
+    for table_name, expected_rows in seeded_rows.items():
+        actual_rows = tuple(
+            dict(row)
+            for row in connection.execute(text(f"SELECT * FROM {table_name}")).mappings()
+        )
+        assert actual_rows == expected_rows
 
 
 def test_fresh_database_reaches_the_v1_catalog_head(connection: Connection) -> None:
@@ -390,6 +402,37 @@ def test_sqlite_fence_rejects_user_session_and_agent_operation_state_before_v1_d
     assert_no_v1_ddl_has_run(connection)
 
 
+def test_sqlite_fence_rejects_extra_reconciliation_completion_seed_row_before_v1_ddl(
+    connection: Connection,
+) -> None:
+    upgrade_database_to(connection, "0026_telemetry_maintenance_state")
+    connection.execute(
+        text(
+            "INSERT INTO reconciliation_completion_generation "
+            "(singleton_id, last_generation) VALUES (2, 0)"
+        )
+    )
+    connection.commit()
+
+    with pytest.raises(RuntimeError, match="reconciliation_completion_generation"):
+        upgrade_fresh_database_to_head(connection)
+
+    assert_no_v1_ddl_has_run(connection)
+
+
+def test_sqlite_fence_rejects_changed_fleet_cursor_seed_row_before_v1_ddl(
+    connection: Connection,
+) -> None:
+    upgrade_database_to(connection, "0026_telemetry_maintenance_state")
+    connection.execute(text("UPDATE fleet_event_cursor SET last_id = 1"))
+    connection.commit()
+
+    with pytest.raises(RuntimeError, match="fleet_event_cursor"):
+        upgrade_fresh_database_to_head(connection)
+
+    assert_no_v1_ddl_has_run(connection)
+
+
 def test_fresh_postgresql_database_reaches_the_v1_catalog_head(
     postgres_engine: Engine,
 ) -> None:
@@ -443,6 +486,41 @@ def test_postgresql_fence_rejects_user_session_and_agent_operation_state_before_
         seed_user_session_and_agent_operation_state(connection)
 
     with pytest.raises(RuntimeError, match="agent_nodes"):
+        command.upgrade(migration_config(url), "head")
+
+    with postgres_engine.connect() as connection:
+        assert_no_v1_ddl_has_run(connection)
+
+
+def test_postgresql_fence_rejects_extra_reconciliation_completion_seed_row_before_v1_ddl(
+    postgres_engine: Engine,
+) -> None:
+    url = postgres_engine.url.render_as_string(hide_password=False)
+    command.upgrade(migration_config(url), "0026_telemetry_maintenance_state")
+    with postgres_engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO reconciliation_completion_generation "
+                "(singleton_id, last_generation) VALUES (2, 0)"
+            )
+        )
+
+    with pytest.raises(RuntimeError, match="reconciliation_completion_generation"):
+        command.upgrade(migration_config(url), "head")
+
+    with postgres_engine.connect() as connection:
+        assert_no_v1_ddl_has_run(connection)
+
+
+def test_postgresql_fence_rejects_changed_fleet_cursor_seed_row_before_v1_ddl(
+    postgres_engine: Engine,
+) -> None:
+    url = postgres_engine.url.render_as_string(hide_password=False)
+    command.upgrade(migration_config(url), "0026_telemetry_maintenance_state")
+    with postgres_engine.begin() as connection:
+        connection.execute(text("UPDATE fleet_event_cursor SET last_id = 1"))
+
+    with pytest.raises(RuntimeError, match="fleet_event_cursor"):
         command.upgrade(migration_config(url), "head")
 
     with postgres_engine.connect() as connection:

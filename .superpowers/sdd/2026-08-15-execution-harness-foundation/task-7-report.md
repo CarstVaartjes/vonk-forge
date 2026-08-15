@@ -311,3 +311,81 @@ covered by the focused migration suite.
 
 No approved schema-version or seed behavior was changed.  No Library
 projection code or the known native 16,384-object test crash was touched.
+
+## Review fix round 3/5
+
+### Changes
+
+Round 2's table-level system exemption has been replaced with exact
+clean-chain row validation before v1 DDL. The migration now requires these
+complete row sets, with no extra rows or changed values:
+
+- `alembic_version`: `version_num = '0026_telemetry_maintenance_state'`.
+- `fleet_event_cursor`: `(singleton_id=1, last_id=0)`.
+- `reconciliation_completion_generation`:
+  `(singleton_id=1, last_generation=0)`.
+- `route_publication_owner`: `(singleton_id=1, reconciliation_id=NULL,
+  owner_generation=0, updated_at=NULL)`.
+- `telemetry_maintenance_state`:
+  `(singleton_id=1, next_resolution_seconds=60)`.
+
+All other tables in the live 0026 schema remain subject to the empty-table
+fence. System rows are normalized as complete key/value row sets, so a
+counter/state mutation or an extra singleton row fails with its table name
+before catalog creation or the topology rename.
+
+### RED evidence
+
+```text
+$ uv run --project control --frozen python -m pytest \
+  control/tests/test_execution_harness_catalog_migration.py::test_fence_covers_every_0026_table_with_exact_system_seed_validation \
+  control/tests/test_execution_harness_catalog_migration.py::test_sqlite_fence_rejects_extra_reconciliation_completion_seed_row_before_v1_ddl \
+  control/tests/test_execution_harness_catalog_migration.py::test_sqlite_fence_rejects_changed_fleet_cursor_seed_row_before_v1_ddl \
+  control/tests/test_execution_harness_catalog_migration.py::test_postgresql_fence_rejects_extra_reconciliation_completion_seed_row_before_v1_ddl \
+  control/tests/test_execution_harness_catalog_migration.py::test_postgresql_fence_rejects_changed_fleet_cursor_seed_row_before_v1_ddl -q
+FFFFF                                                                    [100%]
+5 failed in 5.80s
+```
+
+The existing wholesale exemption had no expected-row map and allowed both the
+extra `reconciliation_completion_generation` row and a changed
+`fleet_event_cursor.last_id` through on SQLite and PostgreSQL.
+
+### GREEN evidence
+
+```text
+$ uv run --project control --frozen python -m pytest \
+  control/tests/test_execution_harness_catalog_migration.py::test_fence_covers_every_0026_table_with_exact_system_seed_validation \
+  control/tests/test_execution_harness_catalog_migration.py::test_sqlite_fence_rejects_extra_reconciliation_completion_seed_row_before_v1_ddl \
+  control/tests/test_execution_harness_catalog_migration.py::test_sqlite_fence_rejects_changed_fleet_cursor_seed_row_before_v1_ddl \
+  control/tests/test_execution_harness_catalog_migration.py::test_postgresql_fence_rejects_extra_reconciliation_completion_seed_row_before_v1_ddl \
+  control/tests/test_execution_harness_catalog_migration.py::test_postgresql_fence_rejects_changed_fleet_cursor_seed_row_before_v1_ddl -q
+.....                                                                    [100%]
+5 passed in 5.36s
+
+$ uv run --project control --frozen python -m pytest \
+  control/tests/test_execution_harness_catalog_migration.py \
+  control/tests/test_admission_migration.py \
+  control/tests/test_wheel_runtime_assets.py -q
+.......................                                                  [100%]
+23 passed in 18.06s
+
+$ uvx ruff@0.16.1 check \
+  control/migrations/versions/0027_execution_harness_catalog.py \
+  control/tests/test_execution_harness_catalog_migration.py
+All checks passed!
+
+$ git diff --check
+```
+
+The validator-exhaustiveness test upgrades a clean database to 0026, derives
+every nonempty table, requires each to have an exact expected-row validator,
+and confirms all remaining tables are subject to the mutable-state fence.
+SQLite and disposable PostgreSQL both reject an extra completion row and a
+mutated fleet cursor without creating v1 tables or renaming `profile_name`.
+
+### Review self-check
+
+The migration still performs no deletion, transformation, or preservation of
+pre-production state. No approved schema-version or startup-seed behavior was
+changed, and no Library projection code or known native crash was touched.
