@@ -20,7 +20,7 @@ Use the image-only development stack to try the control API, bundled web
 interface, PostgreSQL catalog, and worker on any Docker Compose-capable NAS.
 GitHub Actions builds and accepts the API and worker from `main`, then publishes
 the bare mutable `:dev` `docker-compose.dev.yml` artifact. Publish it once as
-`docker-compose.yml` with `scripts/dev-runtime-project-remote` when the NAS is
+`docker-compose.yaml` with `scripts/dev-runtime-project-remote` when the NAS is
 reached through Windows/WSL, or with the underlying
 `scripts/dev-runtime-project` on a POSIX-capable direct mount. Normal
 development is a Docker-UI pull/redeploy of that unchanged file, never a
@@ -33,7 +33,7 @@ The complete NAS project contains only:
 
 ```text
 vonk-forge/
-├── docker-compose.yml
+├── docker-compose.yaml
 └── secrets/
     ├── postgres-password
     ├── database-url

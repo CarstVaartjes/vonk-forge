@@ -91,9 +91,9 @@ private Tailscale HTTPS `svc:vonk-forge` Service in a browser without an SSH or
 PowerShell tunnel. The exact URL and login steps are in
 [Open the stable browser URL](docs/runbooks/development-nas-installation.md#open-the-stable-browser-url).
 For a NAS, create one NAS-local project containing only
-`docker-compose.yml` and `secrets/`. Download and retain
+`docker-compose.yaml` and `secrets/`. Download and retain
 `docker-compose.dev.yml` locally; the project publisher installs it as
-`docker-compose.yml`, which remains unchanged during normal development.
+`docker-compose.yaml`, which remains unchanged during normal development.
 Accepted `main` advances the mutable
 `:dev` channel; operators update development by pulling/redeploying the
 unchanged project file. Keep `docker-compose.pinned.yml` only for explicit

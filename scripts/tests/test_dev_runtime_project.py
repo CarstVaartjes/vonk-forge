@@ -36,7 +36,7 @@ OAUTH_CLIENT_SECRET = b"synthetic-tailscale-client-secret\n"
 OAUTH_ROTATION_ID = "2fdb4cf7-f240-4a6f-b52f-06fdb4058d50"
 
 EXPECTED_PROJECT_FILES = {
-    "docker-compose.yml",
+    "docker-compose.yaml",
     "secrets/admin-password-verifier",
     "secrets/agent-ca-certificate",
     "secrets/agent-ca-key",
@@ -184,7 +184,7 @@ def test_publishes_exact_two_item_project_without_secret_output(tmp_path: Path) 
     assert result.stdout == f"{destination}\n"
     assert result.stderr == ""
     assert sorted(path.name for path in destination.iterdir()) == [
-        "docker-compose.yml",
+        "docker-compose.yaml",
         "secrets",
     ]
     assert _project_listing(destination) == EXPECTED_PROJECT_FILES
@@ -206,7 +206,7 @@ def test_publishes_exact_two_item_project_without_secret_output(tmp_path: Path) 
             hashlib.sha256(copied.read_bytes()).digest()
             == hashlib.sha256(source.read_bytes()).digest()
         )
-    compose = (destination / "docker-compose.yml").read_text(encoding="utf-8")
+    compose = (destination / "docker-compose.yaml").read_text(encoding="utf-8")
     assert not compose.startswith("name:")
     assert "VONK_AGENT_ENROLL_HOSTNAME: enroll.example.test" in compose
     assert "VONK_AGENT_HOSTNAME: agents.example.test" in compose
@@ -459,23 +459,42 @@ def test_replaces_only_validated_project_children_and_rejects_extras(
 
     assert rejected.returncode == 1
     assert (destination / ".env").read_text(encoding="utf-8") == "must-not-be-kept\n"
-    assert not (destination / "docker-compose.yml").exists()
+    assert not (destination / "docker-compose.yaml").exists()
 
     (destination / ".env").unlink()
     accepted = _run_project(destination, secrets_dir)
 
     assert accepted.returncode == 0, accepted.stderr
     first_digest = hashlib.sha256(
-        (destination / "docker-compose.yml").read_bytes()
+        (destination / "docker-compose.yaml").read_bytes()
     ).hexdigest()
     accepted_again = _run_project(destination, secrets_dir)
     second_digest = hashlib.sha256(
-        (destination / "docker-compose.yml").read_bytes()
+        (destination / "docker-compose.yaml").read_bytes()
     ).hexdigest()
     assert accepted_again.returncode == 0, accepted_again.stderr
     assert second_digest == first_digest
     assert sorted(path.name for path in destination.iterdir()) == [
-        "docker-compose.yml",
+        "docker-compose.yaml",
+        "secrets",
+    ]
+
+
+def test_migrates_the_legacy_yml_project_filename(tmp_path: Path) -> None:
+    secrets_dir = _prepare_source_secrets(tmp_path)
+    destination = tmp_path / "nas-project"
+    initial = _run_project(destination, secrets_dir)
+    assert initial.returncode == 0, initial.stderr
+    (destination / "docker-compose.yaml").rename(
+        destination / "docker-compose.yml"
+    )
+
+    migrated = _run_project(destination, secrets_dir)
+
+    assert migrated.returncode == 0, migrated.stderr
+    assert not (destination / "docker-compose.yml").exists()
+    assert sorted(path.name for path in destination.iterdir()) == [
+        "docker-compose.yaml",
         "secrets",
     ]
 
@@ -487,7 +506,7 @@ def test_rejects_unsafe_source_secret_and_preserves_destination(
     destination = tmp_path / "nas-project"
     existing = "previous compose\n"
     destination.mkdir()
-    (destination / "docker-compose.yml").write_text(existing, encoding="utf-8")
+    (destination / "docker-compose.yaml").write_text(existing, encoding="utf-8")
     secret_destination = destination / "secrets"
     secret_destination.mkdir()
     (secret_destination / "postgres-password").write_text(
@@ -500,7 +519,7 @@ def test_rejects_unsafe_source_secret_and_preserves_destination(
 
     assert result.returncode == 1
     assert result.stdout == ""
-    assert (destination / "docker-compose.yml").read_text(encoding="utf-8") == existing
+    assert (destination / "docker-compose.yaml").read_text(encoding="utf-8") == existing
     assert (secret_destination / "postgres-password").read_text(
         encoding="utf-8"
     ) == "previous\n"
@@ -633,7 +652,7 @@ def test_local_staging_writes_stay_on_pinned_directory_after_path_swap(
         dir_fd: int | None = None,
     ) -> int:
         nonlocal swapped
-        if path == "docker-compose.yml" and dir_fd is not None and not swapped:
+        if path == "docker-compose.yaml" and dir_fd is not None and not swapped:
             staging = next(temporary.glob(".vonk-forge-project-*"))
             staging.rename(renamed)
             staging.symlink_to(redirected, target_is_directory=True)
@@ -711,7 +730,7 @@ def test_requires_an_explicit_single_node_fabric_choice(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    compose = (destination / "docker-compose.yml").read_text(encoding="utf-8")
+    compose = (destination / "docker-compose.yaml").read_text(encoding="utf-8")
     assert compose.count('VONK_DIRECT_FABRIC_CIDRS: ""') == 2
 
 
@@ -786,7 +805,7 @@ def test_interrupted_publish_restores_the_complete_previous_generation(
 
     assert _project_contents(destination) == previous
     assert sorted(path.name for path in destination.iterdir()) == [
-        "docker-compose.yml",
+        "docker-compose.yaml",
         "secrets",
     ]
 
@@ -859,7 +878,7 @@ def test_rerun_recovers_a_process_interruption_before_publishing(
     )
 
     assert (
-        (destination / "docker-compose.yml")
+        (destination / "docker-compose.yaml")
         .read_bytes()
         .endswith(b"# second generation\n")
     )
@@ -868,7 +887,7 @@ def test_rerun_recovers_a_process_interruption_before_publishing(
             second_secrets / name
         ).read_bytes()
     assert sorted(path.name for path in destination.iterdir()) == [
-        "docker-compose.yml",
+        "docker-compose.yaml",
         "secrets",
     ]
 
@@ -943,11 +962,11 @@ def test_rerun_discards_partial_cleanup_tombstone_after_successful_publish(
     )
 
     assert sorted(path.name for path in destination.iterdir()) == [
-        "docker-compose.yml",
+        "docker-compose.yaml",
         "secrets",
     ]
     assert (
-        (destination / "docker-compose.yml")
+        (destination / "docker-compose.yaml")
         .read_bytes()
         .endswith(b"# second generation\n")
     )
@@ -1009,7 +1028,7 @@ def test_live_publisher_is_rejected_and_stale_journal_recovers_on_rerun(
     )
 
     assert sorted(path.name for path in destination.iterdir()) == [
-        "docker-compose.yml",
+        "docker-compose.yaml",
         "secrets",
     ]
     assert _project_listing(destination) == EXPECTED_PROJECT_FILES

@@ -6,7 +6,7 @@ uses public `:dev` control images and the signed APT `dev` channel produced
 from accepted `main` commits. Production uses the separate trusted host
 updater and is not installed with this guide.
 
-The finished NAS directory contains only `docker-compose.yml` and `secrets/`.
+The finished NAS directory contains only `docker-compose.yaml` and `secrets/`.
 GPU nodes receive only the public controller CA and their own locally generated
 identity. No GitHub, GHCR, R2, database, signing, or model credential is copied
 to a GPU node or baked into an image.
@@ -67,12 +67,12 @@ Open the successful **Development images** GitHub Actions run for the accepted
 artifact:
 
 - retain `docker-compose.dev.yml` as the publisher input; the publisher writes
-  it to the NAS as `docker-compose.yml`;
+  it to the NAS as `docker-compose.yaml`;
 - retain `docker-compose.pinned.yml` off the NAS for exact reproduction or
   guarded recovery.
 
 Both GHCR packages must pull anonymously. Do not install a registry token on
-the NAS. Normal updates pull/redeploy the unchanged `docker-compose.yml`;
+the NAS. Normal updates pull/redeploy the unchanged `docker-compose.yaml`;
 restarting containers alone does not fetch a moved `:dev` tag.
 
 ## 3. Generate and publish the NAS project
@@ -137,7 +137,7 @@ additional host mounts. It removes the exact tmpfs stage after success, error,
 interrupt, or SSH disconnect. It does not clone this repository onto the NAS.
 
 After success, the Windows share or NAS file manager must show only
-`docker-compose.yml` plus `secrets/` inside `vonk-forge/`. Keep
+`docker-compose.yaml` plus `secrets/` inside `vonk-forge/`. Keep
 `docker-compose.pinned.yml` and the complete 22-file source generation off the
 NAS project.
 
@@ -171,7 +171,7 @@ restored and a stale cleanup tombstone is safely discarded before publication
 retries. A stable hidden lock file beside (never inside) the project coordinates
 publishers across workstations and is safe to retain. A successful run removes
 both hidden transaction states from the project and leaves exactly
-`docker-compose.yml` plus `secrets/`.
+`docker-compose.yaml` plus `secrets/`.
 
 An existing installation with a valid 21-file browser-access generation can be
 upgraded without rotating its CA, control database password, or other
@@ -201,7 +201,7 @@ Allow the GPU-node management CIDR to reach NAS TCP 8443 and reject other
 sources. In the NAS Docker/Compose UI:
 
 1. Import the `vonk-forge/` directory as a project.
-2. Select `docker-compose.yml` and choose **Pull**, then **Redeploy**.
+2. Select `docker-compose.yaml` and choose **Pull**, then **Redeploy**.
 3. Keep all named volumes.
 4. Wait for PostgreSQL, API, worker, Caddy, and LiteLLM to become healthy.
 
