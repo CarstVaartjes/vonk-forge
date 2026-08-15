@@ -22,10 +22,10 @@ all exact dependency versions, one exact topology, and the complete procedure
 for building, installing, running, validating, recovering, and stopping that
 combination.
 
-The existing recipe-v1 contract is pre-production scaffolding. It is replaced
-directly. There is no long-lived v1/v2 compatibility layer, no legacy import
-mode, and no duplicate old catalog after the existing Mia and DS4 assets have
-been migrated.
+The existing prototype recipe contract is pre-production scaffolding. It is
+replaced directly. There is no compatibility layer, legacy import mode, or
+duplicate old catalog after the existing Mia and DS4 assets have been
+recreated.
 
 ## Goals
 
@@ -155,11 +155,12 @@ remains pinned to its exact revision until the operator changes it.
 
 ## Clean recipe-contract replacement
 
-The replacement contract is the only writable recipe contract after this work.
-Its schema version is 2 because its meaning is materially different, but v1 is
-removed rather than supported alongside it.
+The replacement contract is the first supported recipe contract and the only
+writable recipe contract after this work. Its schema version is 1. The
+incompatible pre-production prototype is discarded rather than treated as a
+public version that requires migration or compatibility.
 
-The current v1 shortcomings that require replacement are:
+The current prototype shortcomings that require replacement are:
 
 - model group, model, and model version are collapsed into free-form workload
   metadata and artifact entries;
@@ -171,7 +172,7 @@ The current v1 shortcomings that require replacement are:
 - engine distribution and recipe-local patch lineage are not first-class;
 - output validation cannot honestly represent images, audio, video, or meshes.
 
-The v2 catalog is split into independently validated documents:
+The v1 catalog is split into independently validated documents:
 
 ```text
 config/model-groups/
@@ -526,15 +527,21 @@ Harness acceptance precedes full model-recipe acceptance.
 5. Tiny permitted-model or synthetic GPU canary on one Spark.
 6. Distributed synthetic collective canary for each distributed mechanism.
 
-### Existing-runtime migration
+### Existing-runtime replacement
 
-1. Migrate DS4 to the DS4 harness and one exact single-Spark recipe.
-2. Migrate Mia to the vLLM harness, Anemll distribution, Mia patch bundle, and
+This is a pre-production cutover. The implementation does not preserve,
+translate, or provide compatibility for prototype catalog, installation, run,
+or acceptance records. Deploying the replacement requires a clean reset of the
+recipe-domain development state. Only immutable model and build caches that are
+independently verified by their content digests may be reused.
+
+1. Replace DS4 with the DS4 harness and one exact single-Spark recipe.
+2. Replace Mia with the vLLM harness, Anemll distribution, Mia patch bundle, and
    one exact two-Spark recipe.
 3. Repeat all existing DS4 and Mia physical acceptance rather than reusing
    historical evidence.
-4. Remove old model-specific runtime identities and recipe-v1 paths only after
-   equivalence passes.
+4. Remove old model-specific runtime identities and every prototype contract
+   path in the same cutover; there is no dual-contract period.
 
 ### Model recipe acceptance
 
@@ -575,8 +582,8 @@ The implementation order is fixed:
 1. Replace the recipe schema and identity model.
 2. Implement shared lifecycle conformance fixtures.
 3. Implement the target-driven execution harnesses.
-4. Migrate and re-accept DS4.
-5. Migrate and re-accept Mia.
+4. Replace and freshly accept DS4.
+5. Replace and freshly accept Mia.
 6. Add language and multimodal-understanding model versions and recipes.
 7. Add image model versions and recipes.
 8. Add video and audio model versions and recipes.
