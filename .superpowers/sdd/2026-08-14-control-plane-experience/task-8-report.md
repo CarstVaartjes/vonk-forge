@@ -87,3 +87,27 @@ After implementation, the same focused command passed 3 files and all 27 tests. 
 - Advanced JSON editing/upload and last-valid visual preview.
 - Responsive behavior below 900px and four-width browser work.
 - `control/web/e2e/fleet-library.spec.ts` changes and E2E execution.
+
+## Task 8A review fix round 2
+
+Implementation commit: `ccf9e56f610bf7cf73bbe2fb4cd15658f4f13b11` (`fix(control-web): bind Library refresh authority`).
+
+This round fixes only the two remaining Important findings from `task-8a-review-round-2.md`.
+
+### Fixes delivered
+
+1. Install freshness no longer uses `LibraryRecipeDetail.generated_at`. The action dialog records when each server preview response is received, and Install classifies observation age against that preview-receipt time. Typed `inventory.stale` and `inventory.unavailable` preview evidence takes precedence, so the UI cannot claim fresh when the server supplied contrary authority. Typed unavailable evidence is described truthfully even when an observation timestamp is present.
+2. Apply-owned and terminal-poll refreshes now pass their owning `AbortSignal` through every `onRefresh` boundary into `libraryRecipe`. `LibraryPage.refreshDetail` checks that signal before requesting, after awaiting, before detail/error state updates, and terminal/apply callbacks retain their post-await abort guards.
+
+### Strict TDD evidence
+
+- Install preview-time RED: `npm test -- --run src/components/library-actions.test.tsx -t "applies Mapping and Install only"` failed because the old detail timestamp rendered both later observations as `Inventory fresh · 0s` instead of typed/receipt-time stale states. A second RED for typed unavailable evidence failed on the false `observation not reported` wording while an observation timestamp was present. The focused test passed after each minimal fix.
+- Refresh-cleanup RED: `npm test -- --run src/components/library-actions.test.tsx -t "detail refresh"` ran two regressions and both failed because apply and terminal refresh callbacks received `undefined` instead of an `AbortSignal`. GREEN proves closing/unmounting aborts the deferred detail request, its late response cannot overwrite the still-mounted page, and terminal `onChange` is not called after late completion.
+
+### Final verification
+
+- Focused Vitest: 3 files passed; 29 tests passed.
+- Full Vitest (`npm test -- --run`): 27 passed and 1 skipped files; 147 passed and 1 skipped tests.
+- Build (`npm run build`): TypeScript and Vite passed; 65 modules transformed.
+- `git diff --check`: clean before the implementation commit.
+- Scope audit: seven handwritten Library source/test files changed. No Task 8B UI, backend, generated client, Rust, dependency, migration, e2e, live-system, Advanced JSON/upload, or responsive-below-900px file changed.
