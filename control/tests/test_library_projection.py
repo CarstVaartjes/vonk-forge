@@ -2121,14 +2121,194 @@ def test_more_than_512_active_exact_runs_fail_closed_for_placement_inputs() -> N
     assert placement.evidence_counts.truncated_collections == ["runs"]
     assert placement.recommendations == []
     assert group.eligible is False
-    assert group.install_state == "not_present"
-    assert group.load_state == "not_loaded"
+    assert group.install_state == "unknown"
+    assert group.load_state == "unknown"
     assert group.installation_ids == []
     assert group.run_ids == []
     assert {target.kind for target in group.preview_targets} == {"mapping"}
     assert "projection.evidence_truncated" in codes
     assert "install.complete" not in codes
     assert "run.loaded" not in codes
+
+
+@pytest.mark.parametrize("mapping_fault", ["stale_generation", "not_ready"])
+def test_installation_coverage_matches_run_admission_mapping_authority(
+    mapping_fault: str,
+) -> None:
+    _engine, sessions = _database()
+    document = _document(
+        family="install-mapping-parity", nodes=2, title="Mapping parity"
+    )
+    with sessions.begin() as session:
+        _recipe(
+            session,
+            88,
+            slug=f"install-mapping-{mapping_fault}",
+            title="Install mapping parity",
+            document=document,
+        )
+        revision = session.get(LocalRecipeRevision, _uuid(1_881))
+        node_a = _node(session, 1)
+        node_b = _node(session, 2)
+        identifiers = _operational_group(
+            session,
+            revision,
+            (node_a, node_b),
+            value=88,
+            installed=True,
+        )
+        mapping = session.get(ClusterMapping, identifiers["mapping_id"])
+        if mapping_fault == "stale_generation":
+            mapping.generation = 2
+        else:
+            mapping.state = "planned"
+
+    with pytest.raises(
+        ValueError, match="cluster mapping generation changed after installation"
+    ):
+        RunAdmissionService(
+            sessions,
+            inventory_max_age=300,
+            memory_floor_bytes=50,
+        ).plan_run(identifiers["installation_id"], now=NOW)
+
+    projection = _projection(sessions)
+    summary = projection.list().models[0].recipes[0].installations[0]
+    recommendation = projection.detail(_uuid(88)).placement[0].recommendations[0]
+
+    assert summary.complete is False
+    assert recommendation.install_state != "complete"
+    assert not any(target.kind == "run" for target in recommendation.preview_targets)
+
+
+def test_run_health_uses_immutable_plan_roles_like_run_status() -> None:
+    _engine, sessions = _database()
+    document = _document(family="run-plan-parity", nodes=2, title="Plan parity")
+    with sessions.begin() as session:
+        _recipe(
+            session,
+            89,
+            slug="run-plan-role-parity",
+            title="Run plan role parity",
+            document=document,
+        )
+        revision = session.get(LocalRecipeRevision, _uuid(1_891))
+        identifiers = _operational_group(
+            session,
+            revision,
+            (_node(session, 1), _node(session, 2)),
+            value=89,
+            installed=True,
+            running=True,
+        )
+        run = session.get(RecipeRun, identifiers["run_id"])
+        plan = deepcopy(run.plan)
+        plan["nodes"][1]["role"] = "changed-after-start"
+        run.plan = plan
+
+    authoritative = _run_status_service(sessions).run_status(identifiers["run_id"])
+    projection = _projection(sessions)
+    summary = projection.list().models[0].recipes[0].runs[0]
+    recommendation = projection.detail(_uuid(89)).placement[0].recommendations[0]
+
+    assert authoritative.healthy is False
+    assert summary.healthy is authoritative.healthy
+    assert "run.degraded" in {reason.code for reason in recommendation.reasons}
+
+
+@pytest.mark.parametrize(
+    ("plan_nodes", "evidence_code"),
+    [
+        (None, "run.plan_invalid"),
+        (["not-a-member"], "run.plan_invalid"),
+        (
+            [
+                {"node_id": _node_id(1), "rank": 0, "role": "entrypoint"},
+                {"node_id": _node_id(1), "rank": 0, "role": "entrypoint"},
+            ],
+            "run.plan_invalid",
+        ),
+        (
+            [
+                {"node_id": _node_id(value + 1), "rank": value, "role": "worker"}
+                for value in range(33)
+            ],
+            "projection.evidence_truncated",
+        ),
+    ],
+)
+def test_malformed_or_oversized_run_plan_fails_closed_with_explicit_evidence(
+    plan_nodes: object,
+    evidence_code: str,
+) -> None:
+    _engine, sessions = _database()
+    document = _document(family="run-plan-bounds", title="Plan bounds")
+    with sessions.begin() as session:
+        _recipe(
+            session,
+            90,
+            slug=f"run-plan-bounds-{evidence_code}",
+            title="Run plan bounds",
+            document=document,
+        )
+        revision = session.get(LocalRecipeRevision, _uuid(1_901))
+        identifiers = _operational_group(
+            session,
+            revision,
+            (_node(session, 1),),
+            value=90,
+            installed=True,
+            running=True,
+        )
+        run = session.get(RecipeRun, identifiers["run_id"])
+        run.plan = {"schema_version": 1, "nodes": plan_nodes}
+
+    authoritative = _run_status_service(sessions).run_status(identifiers["run_id"])
+    projection = _projection(sessions)
+    recipe = projection.list().models[0].recipes[0]
+    recommendation = projection.detail(_uuid(90)).placement[0].recommendations[0]
+
+    assert authoritative.healthy is False
+    assert recipe.runs[0].healthy is authoritative.healthy
+    assert evidence_code in {reason.code for reason in recipe.reasons}
+    assert evidence_code in {reason.code for reason in recommendation.reasons}
+    assert "run.degraded" in {reason.code for reason in recommendation.reasons}
+
+
+def test_degraded_pending_route_copy_does_not_assert_rank_health() -> None:
+    _engine, sessions = _database()
+    document = _document(family="route-copy", nodes=2, title="Route copy")
+    with sessions.begin() as session:
+        _recipe(
+            session,
+            91,
+            slug="degraded-pending-route",
+            title="Degraded pending route",
+            document=document,
+        )
+        revision = session.get(LocalRecipeRevision, _uuid(1_911))
+        identifiers = _operational_group(
+            session,
+            revision,
+            (_node(session, 1), _node(session, 2)),
+            value=91,
+            installed=True,
+            running=True,
+        )
+        run = session.get(RecipeRun, identifiers["run_id"])
+        run.route_state = "pending"
+        rank = session.query(RunNode).filter_by(run_id=run.id, rank=1).one()
+        rank.state = "failed"
+
+    recommendation = (
+        _projection(sessions).detail(_uuid(91)).placement[0].recommendations[0]
+    )
+    reasons = {reason.code: reason.detail for reason in recommendation.reasons}
+
+    assert "run.degraded" in reasons
+    assert reasons["run.route_pending"] == (
+        "Route publication is pending. Rank health is projected separately."
+    )
 
 
 def test_display_scalars_are_bounded_without_changing_mapping_action_inputs() -> None:

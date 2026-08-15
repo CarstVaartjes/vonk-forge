@@ -137,7 +137,7 @@ class LibraryRunSummary(_StrictModel):
     state: Literal["planned", "starting", "running", "stopping"]
     route_state: Literal["withdrawn", "pending", "published", "failed"]
     healthy_rank_count: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    expected_rank_count: int = Field(ge=1, le=_MAX_SIGNED_BIGINT)
+    expected_rank_count: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
     healthy: bool
 
 
@@ -471,8 +471,8 @@ class PlacementRecommendation(_StrictModel):
     eligible: bool
     ranking_scope: Literal["bounded-advisory"] = "bounded-advisory"
     score: PlacementScore
-    install_state: Literal["complete", "partial", "not_present"]
-    load_state: Literal["loaded", "not_loaded"]
+    install_state: Literal["complete", "partial", "not_present", "unknown"]
+    load_state: Literal["loaded", "not_loaded", "unknown"]
     mapping_id: UuidId | None
     recipe_build_id: UuidId | None
     installation_ids: list[UuidId] = Field(max_length=16)
@@ -616,6 +616,8 @@ class _RunHealth:
     expected_rank_count: int
     healthy_rank_count: int
     healthy: bool
+    evidence_code: str | None = None
+    evidence_detail: str | None = None
 
 
 def _members_are_exact(
@@ -634,6 +636,9 @@ def _members_are_exact(
 
 def _installation_coverage(
     installation_state: str,
+    mapping_state: str | None,
+    mapping_generation: int | None,
+    installation_mapping_generation: int,
     expected: Sequence[_MemberEvidence],
     actual: Sequence[_MemberEvidence],
     *,
@@ -649,6 +654,8 @@ def _installation_coverage(
     }
     complete = (
         installation_state == "installed"
+        and mapping_state == "ready"
+        and mapping_generation == installation_mapping_generation
         and len(expected) == declared_expected_count
         and _members_are_exact(expected, actual)
         and all(item.state == "installed" for item in actual)
@@ -661,13 +668,59 @@ def _installation_coverage(
 
 
 def _run_health(
-    expected: Sequence[_MemberEvidence],
+    plan: object,
     actual: Sequence[_MemberEvidence],
     *,
     current: datetime,
-    declared_expected_count: int,
 ) -> _RunHealth:
-    """Match run_status rank health independently of aggregate and route state."""
+    """Match run_status using bounded immutable plan membership evidence."""
+
+    raw_expected = plan.get("nodes") if isinstance(plan, Mapping) else None
+    if not isinstance(raw_expected, list):
+        return _RunHealth(
+            expected_rank_count=0,
+            healthy_rank_count=0,
+            healthy=False,
+            evidence_code="run.plan_invalid",
+            evidence_detail="The persisted run plan does not contain a valid nodes list; rank health fails closed.",
+        )
+    expected_count = len(raw_expected)
+    if expected_count > _MAX_CANDIDATE_NODES:
+        return _RunHealth(
+            expected_rank_count=expected_count,
+            healthy_rank_count=0,
+            healthy=False,
+            evidence_code="projection.evidence_truncated",
+            evidence_detail=f"The persisted run plan has {expected_count} members, above the active {_MAX_CANDIDATE_NODES}-member evidence limit; rank health fails closed.",
+        )
+    expected: list[_MemberEvidence] = []
+    for item in raw_expected:
+        if not isinstance(item, Mapping):
+            expected = []
+            break
+        node_id = item.get("node_id")
+        rank = item.get("rank")
+        role = item.get("role")
+        if (
+            not isinstance(node_id, str)
+            or len(node_id) > 36
+            or type(rank) is not int
+            or not 0 <= rank < _MAX_CANDIDATE_NODES
+            or not isinstance(role, str)
+            or not role
+            or len(role) > 64
+        ):
+            expected = []
+            break
+        expected.append(_MemberEvidence(node_id=node_id, rank=rank, role=role))
+    if not expected or len({item.identity for item in expected}) != len(expected):
+        return _RunHealth(
+            expected_rank_count=expected_count,
+            healthy_rank_count=0,
+            healthy=False,
+            evidence_code="run.plan_invalid",
+            evidence_detail="The persisted run plan has malformed or duplicate member evidence; rank health fails closed.",
+        )
 
     expected_identities = {item.identity for item in expected}
     healthy_identities = {
@@ -681,12 +734,11 @@ def _run_health(
         < timedelta(seconds=_RUN_RANK_FRESH_SECONDS)
     }
     healthy = (
-        len(expected) == declared_expected_count
-        and _members_are_exact(expected, actual)
-        and len(healthy_identities) == declared_expected_count
+        _members_are_exact(expected, actual)
+        and len(healthy_identities) == expected_count
     )
     return _RunHealth(
-        expected_rank_count=declared_expected_count,
+        expected_rank_count=expected_count,
         healthy_rank_count=len(healthy_identities),
         healthy=healthy,
     )
@@ -1284,6 +1336,11 @@ class LibraryProjection:
                     RecipeInstallation.recipe_revision_id.label("recipe_revision_id"),
                     RecipeInstallation.mapping_id.label("mapping_id"),
                     RecipeInstallation.state.label("state"),
+                    RecipeInstallation.mapping_generation.label(
+                        "installation_mapping_generation"
+                    ),
+                    ClusterMapping.state.label("mapping_state"),
+                    ClusterMapping.generation.label("mapping_generation"),
                     ClusterMapping.node_count.label("expected_rank_count"),
                     func.count()
                     .over(partition_by=LocalRecipeRevision.recipe_id)
@@ -1320,6 +1377,9 @@ class LibraryProjection:
                         ranked_installations.c.recipe_revision_id,
                         ranked_installations.c.mapping_id,
                         ranked_installations.c.state,
+                        ranked_installations.c.installation_mapping_generation,
+                        ranked_installations.c.mapping_state,
+                        ranked_installations.c.mapping_generation,
                         ranked_installations.c.expected_rank_count,
                         ranked_installations.c.total_count,
                     )
@@ -1339,6 +1399,7 @@ class LibraryProjection:
                     RecipeInstallation.recipe_revision_id.label("recipe_revision_id"),
                     RecipeRun.state.label("state"),
                     RecipeRun.route_state.label("route_state"),
+                    RecipeRun.plan.label("plan"),
                     ClusterMapping.node_count.label("expected_rank_count"),
                     func.count()
                     .over(partition_by=LocalRecipeRevision.recipe_id)
@@ -1378,6 +1439,7 @@ class LibraryProjection:
                         ranked_runs.c.recipe_revision_id,
                         ranked_runs.c.state,
                         ranked_runs.c.route_state,
+                        ranked_runs.c.plan,
                         ranked_runs.c.expected_rank_count,
                         ranked_runs.c.total_count,
                     )
@@ -1438,6 +1500,9 @@ class LibraryProjection:
         for row in installation_rows:
             coverage = _installation_coverage(
                 row.state,
+                row.mapping_state,
+                int(row.mapping_generation),
+                int(row.installation_mapping_generation),
                 _member_evidence(mapping_members.get(row.mapping_id, [])),
                 _member_evidence(installation_members.get(row.installation_id, [])),
                 declared_expected_count=int(row.expected_rank_count),
@@ -1459,13 +1524,21 @@ class LibraryProjection:
             )
         runs: dict[str, list[LibraryRunSummary]] = {}
         run_totals: dict[str, int] = {}
+        run_evidence_reasons: dict[str, list[ProjectionReason]] = {}
         for row in run_rows:
             health = _run_health(
-                _member_evidence(mapping_members.get(row.mapping_id, [])),
+                row.plan,
                 _member_evidence(run_members.get(row.run_id, [])),
                 current=current,
-                declared_expected_count=int(row.expected_rank_count),
             )
+            if health.evidence_code is not None and health.evidence_detail is not None:
+                run_evidence_reasons.setdefault(row.recipe_id, []).append(
+                    _reason(
+                        health.evidence_code,
+                        health.evidence_detail,
+                        "warning",
+                    )
+                )
             expected = _saturating_nonnegative(health.expected_rank_count)
             healthy = _saturating_nonnegative(health.healthy_rank_count)
             run_totals[row.recipe_id] = _saturating_nonnegative(row.total_count)
@@ -1492,6 +1565,7 @@ class LibraryProjection:
                     include_visual_text=False,
                 )
             )
+            reasons.extend(run_evidence_reasons.get(recipe.id, []))
             if root_members_truncated:
                 reasons.append(
                     _reason(
@@ -2693,9 +2767,21 @@ class LibraryProjection:
             for item in operational.installations
             if not operational_evidence_truncated and item.state != "uninstalled"
         }
+        mapping_by_id = {item.id: item for item in operational.mappings}
         complete_installation_by_id = {
             item.id: _installation_coverage(
                 item.state,
+                (
+                    None
+                    if mapping_by_id.get(item.mapping_id) is None
+                    else mapping_by_id[item.mapping_id].state
+                ),
+                (
+                    None
+                    if mapping_by_id.get(item.mapping_id) is None
+                    else mapping_by_id[item.mapping_id].generation
+                ),
+                item.mapping_generation,
                 expected_members,
                 _member_evidence(operational.installation_members.get(item.id, [])),
                 declared_expected_count=profile.node_count,
@@ -2761,7 +2847,7 @@ class LibraryProjection:
             if complete:
                 complete_installation_ids.append(installation.id)
         if operational_evidence_truncated:
-            install_state = "not_present"
+            install_state = "unknown"
             reasons.append(
                 _reason(
                     "install.evidence_unavailable",
@@ -2803,23 +2889,39 @@ class LibraryProjection:
             if item.installation_id in matching_installation_ids
             and item.state in _ACTIVE_RUN_STATES
         ][:16]
-        load_state = "loaded" if active_runs else "not_loaded"
+        load_state = (
+            "unknown"
+            if operational_evidence_truncated
+            else "loaded"
+            if active_runs
+            else "not_loaded"
+        )
         if active_runs:
             degraded_count = 0
             for run in active_runs:
                 health = _run_health(
-                    expected_members,
+                    run.plan,
                     _member_evidence(operational.run_members.get(run.id, [])),
                     current=current,
-                    declared_expected_count=profile.node_count,
                 )
                 if not health.healthy:
                     degraded_count += 1
+                if (
+                    health.evidence_code is not None
+                    and health.evidence_detail is not None
+                ):
+                    reasons.append(
+                        _reason(
+                            health.evidence_code,
+                            health.evidence_detail,
+                            "warning",
+                        )
+                    )
                 if run.route_state == "pending":
                     reasons.append(
                         _reason(
                             "run.route_pending",
-                            "Exact rank health is complete, but route publication is pending.",
+                            "Route publication is pending. Rank health is projected separately.",
                             "warning",
                         )
                     )
@@ -2827,7 +2929,7 @@ class LibraryProjection:
                     reasons.append(
                         _reason(
                             "run.route_failed",
-                            "Exact rank health is projected separately from failed route publication.",
+                            "Route publication failed. Rank health is projected separately.",
                             "warning",
                         )
                     )
@@ -2835,7 +2937,7 @@ class LibraryProjection:
                     reasons.append(
                         _reason(
                             "run.route_withdrawn",
-                            "Exact rank health is projected separately from a withdrawn route.",
+                            "Route publication is withdrawn. Rank health is projected separately.",
                             "warning",
                         )
                     )
