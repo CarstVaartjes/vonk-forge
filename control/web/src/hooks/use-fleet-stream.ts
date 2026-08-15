@@ -58,6 +58,7 @@ export function useFleetStream(api: ControlApi) {
     let appliedCursor = -1;
     let requiredRefreshCursor: number | null = null;
     let refreshAttempt = 0;
+    let timelineGeneration = 0;
     let sparseRefreshTimer: ReturnType<typeof setTimeout> | undefined;
     let pollingTimer: ReturnType<typeof setInterval> | undefined;
     let reconciliationTimer: ReturnType<typeof setInterval> | undefined;
@@ -86,11 +87,14 @@ export function useFleetStream(api: ControlApi) {
         return;
       }
       const controller = new AbortController();
+      const requestTimelineGeneration = timelineGeneration;
       controllers.add(controller);
       requestInFlight = true;
       try {
         const snapshot = await api.visualFleet(controller.signal);
-        if (active && !controller.signal.aborted && snapshot.event_cursor >= appliedCursor) {
+        if (active && !controller.signal.aborted
+            && requestTimelineGeneration === timelineGeneration
+            && snapshot.event_cursor >= appliedCursor) {
           dispatch({type: "requested-snapshot", snapshot});
           appliedCursor = snapshot.event_cursor;
           if (requiredRefreshCursor !== null && snapshot.event_cursor >= requiredRefreshCursor) {
@@ -99,7 +103,9 @@ export function useFleetStream(api: ControlApi) {
           }
         }
       } catch (value) {
-        if (active && !controller.signal.aborted && reason === "initial") {
+        if (active && !controller.signal.aborted
+            && requestTimelineGeneration === timelineGeneration
+            && reason === "initial") {
           dispatch({type: "request-error", message: errorMessage(value)});
         }
       } finally {
@@ -109,7 +115,7 @@ export function useFleetStream(api: ControlApi) {
           const queued = refreshQueued;
           refreshQueued = false;
           if (queued) scheduleRefresh();
-          else scheduleRefreshRetry();
+          else if (requestTimelineGeneration === timelineGeneration) scheduleRefreshRetry();
         }
       }
     }
@@ -161,6 +167,7 @@ export function useFleetStream(api: ControlApi) {
           || typeof data.reset_reason !== "string"
           || typeof data.snapshot !== "object" || data.snapshot === null
           || data.snapshot.event_cursor !== cursor) return;
+      timelineGeneration += 1;
       appliedCursor = cursor;
       requiredRefreshCursor = null;
       refreshAttempt = 0;

@@ -212,6 +212,41 @@ test("authoritative cursor-ahead reset cancels old sparse retries and starts a n
   expect(screen.getByTestId("cpu")).toHaveTextContent("77");
 });
 
+test("ignores an old-timeline sparse response already in flight across an authoritative reset", async () => {
+  vi.useFakeTimers();
+  let resolveOldTimeline!: (value: VisualFleetSnapshot) => void;
+  const oldTimelineRequest = new Promise<VisualFleetSnapshot>(resolve => { resolveOldTimeline = resolve; });
+  const visualFleet = vi.fn()
+    .mockResolvedValueOnce(snapshot(10))
+    .mockReturnValueOnce(oldTimelineRequest)
+    .mockResolvedValueOnce(snapshot(22, 22));
+  render(<Probe control={api(visualFleet)}/>);
+  await flush();
+  const stream = FakeEventSource.instances[0];
+
+  act(() => {
+    stream.emit("recipe-state", {schema_version: 1, projection_refresh_required: true}, "100");
+    vi.advanceTimersByTime(100);
+  });
+  expect(visualFleet).toHaveBeenCalledTimes(2);
+
+  act(() => {
+    stream.emit("fleet-snapshot", {schema_version: 1, reset_reason: "cursor-ahead", snapshot: snapshot(20, 20)}, "20");
+    stream.emit("node-telemetry", {schema_version: 1, node_id: "node-a", sample: point(77)}, "21");
+    stream.emit("operation-state", {schema_version: 1, projection_refresh_required: true}, "22");
+  });
+  await act(async () => resolveOldTimeline(snapshot(100, 100)));
+  act(() => vi.advanceTimersByTime(100));
+  await flush();
+
+  expect(visualFleet).toHaveBeenCalledTimes(3);
+  expect(screen.getByTestId("cursor")).toHaveTextContent("22");
+  expect(screen.getByTestId("cpu")).toHaveTextContent("22");
+  act(() => vi.advanceTimersByTime(10_000));
+  await flush();
+  expect(visualFleet).toHaveBeenCalledTimes(3);
+});
+
 test("retries a failed sparse refresh until the required cursor is reconciled", async () => {
   vi.useFakeTimers();
   const visualFleet = vi.fn()
