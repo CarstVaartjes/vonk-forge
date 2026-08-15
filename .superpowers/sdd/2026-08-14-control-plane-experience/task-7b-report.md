@@ -97,3 +97,59 @@ models. They occur in the pre-existing generated files `fleet_snapshot.py`,
 Relevant pytest runs also emitted macOS temporary-directory cleanup warnings for
 stale `test_stage_runtime_secrets_rej*` garbage directories. These warnings were
 outside the changed code and did not cause test failures.
+
+## Fix round 1 — exact replay preflight
+
+Frontend review found that the API recomputed run admission before consulting
+operation idempotency. A successful first start consumes reservations, so that
+recomputation can no longer reproduce an allowed plan and an otherwise exact API
+replay could incorrectly conflict.
+
+Implementation commit:
+`de1d9ab8d08f5964d0f8c01dd4992739e77b3adc` (`fix(control): preflight exact run replays`).
+
+The fix adds a read-only `replay_start` preflight. It returns the persisted
+operation only when the request key resolves to a `recipe.start` job and the
+submitted installation, alias, and plan digest exactly match both that job's
+authority payload and its persisted `RecipeRun`. The API uses that result before
+repreviewing. Every missing or mismatched field returns to the existing fresh
+preview and digest validation path, so alias/digest mismatches still fail before
+request-key conflict handling, audit, reservations, jobs, agent operations,
+queue notifications, or route side effects.
+
+The development-slice authority fixture now records previewed installation/alias
+authority and committed request-key installation/alias/digest authority. It
+implements production ordering: exact committed replay first, then fresh
+preview/digest validation, then generic request-key conflict, then creation.
+Initial, retry, resumed, and interrupted-start caller tests assert preview/apply
+alias parity.
+
+### Round 1 RED evidence
+
+The new tests were run before implementation and failed for the reviewed gaps:
+
+- `test_start_rejects_alias_mismatched_digest_before_side_effects_and_replays_exactly`
+  failed with `AttributeError` because `RecipeOperationService.replay_start` did
+  not exist after the first admission had invalidated a fresh preview.
+- `test_identical_start_api_replay_returns_original_without_repreview_or_audit`
+  observed a second `preview_run`/`start` call instead of a read-only replay.
+- `test_fake_run_authority_replays_only_exact_previewed_alias_and_digest`
+  observed HTTP 202 for an alias-mismatched replay where HTTP 409 was required.
+
+### Round 1 GREEN and verification evidence
+
+- `uv run --project control --frozen --with-editable . pytest control/tests/test_recipe_operations.py -q`
+  — 45 passed, 5 skipped.
+- `uv run --project control --frozen --with-editable . pytest control/tests/test_recipe_api.py -q`
+  — 7 passed.
+- `uv run --frozen pytest scripts/tests/test_run_development_slices.py -q`
+  — 55 passed.
+- `uvx --from ruff==0.16.1 ruff check --force-exclude` over all five changed
+  handwritten Python files — all checks passed.
+- `uv run --project control --frozen python -m py_compile` over all five changed
+  Python files — passed.
+- `git diff --check` — passed with no whitespace errors.
+
+The pytest runs retained the previously documented macOS temporary-directory
+cleanup warnings; all test processes exited successfully. No generated
+contracts changed in this review round, and no excluded scope was touched.
