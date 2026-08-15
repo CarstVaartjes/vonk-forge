@@ -6,8 +6,8 @@ import {LibraryRecipeAuthority} from "./library-recipe-detail";
 
 type Navigate = (event: MouseEvent<HTMLAnchorElement>, path: string) => void;
 
-function countLabel(count: number): string {
-  return `${count} recipe${count === 1 ? "" : "s"}`;
+function countLabel(count: number, windowed: boolean): string {
+  return `${count} recipe${count === 1 ? "" : "s"}${windowed ? " shown" : ""}`;
 }
 
 function RecipeLink({onNavigate, recipe, selected}: {onNavigate: Navigate; recipe: LibraryRecipeSummary; selected: boolean}) {
@@ -35,7 +35,7 @@ function selectedRecipe(snapshot: LibrarySnapshot, route: LibraryRoute): Library
     .find(recipe => recipe.recipe_id === route.recipeId);
 }
 
-export function LibraryBrowser({api, detail, detailError, detailLoading, onNavigate, onRefresh, onRetryDetail, route, snapshot}: {
+export function LibraryBrowser({api, detail, detailError, detailLoading, onNavigate, onRefresh, onRetryDetail, route, snapshot, windowed}: {
   api: LibraryApi;
   detail?: LibraryRecipeDetail;
   detailError: string;
@@ -45,6 +45,7 @@ export function LibraryBrowser({api, detail, detailError, detailLoading, onNavig
   onRetryDetail(): void;
   route: LibraryRoute;
   snapshot: LibrarySnapshot;
+  windowed: boolean;
 }) {
   const model = selectedModel(snapshot, route);
   const recipe = selectedRecipe(snapshot, route);
@@ -63,19 +64,19 @@ export function LibraryBrowser({api, detail, detailError, detailLoading, onNavig
           className="library-row"
           aria-current={model?.family === item.family ? "page" : undefined}
           onClick={event => onNavigate(event, modelLibraryPath(item.family))}
-        ><strong>{item.display_name}</strong><span>{item.family}</span><small>{countLabel(item.recipes.length)}</small></a>)}
+        ><strong>{item.display_name}</strong><span>{item.family}</span><small>{countLabel(item.recipes.length, windowed)}</small></a>)}
         {snapshot.unlinked_recipes.length > 0 && <a
           href={unlinkedLibraryPath()}
           className="library-row library-unlinked"
           aria-current={unlinked ? "page" : undefined}
           onClick={event => onNavigate(event, unlinkedLibraryPath())}
-        ><strong>Unlinked</strong><span>Recipes without a valid model family</span><small>{countLabel(snapshot.unlinked_recipes.length)}</small></a>}
+        ><strong>Unlinked</strong><span>Recipes without a valid model family</span><small>{countLabel(snapshot.unlinked_recipes.length, windowed)}</small></a>}
       </div>
     </section>
 
     <section className="library-pane library-recipes" aria-label={model ? `Recipes for ${model.display_name}` : unlinked ? "Unlinked recipes" : "Recipes"}>
       <a className="library-back" href="/library" onClick={event => onNavigate(event, "/library")}>Back to Models</a>
-      <div className="library-pane-heading"><div><p className="library-step">2</p><h3>{model?.display_name ?? (unlinked ? "Unlinked" : "Recipes")}</h3></div>{recipes && <small>{countLabel(recipes.length)}</small>}</div>
+      <div className="library-pane-heading"><div><p className="library-step">2</p><h3>{model?.display_name ?? (unlinked ? "Unlinked" : "Recipes")}</h3></div>{recipes && <small>{countLabel(recipes.length, windowed)}</small>}</div>
       {recipes ? <div className="library-list">{recipes.map(item => <RecipeLink key={item.recipe_id} onNavigate={onNavigate} recipe={item} selected={item.recipe_id === recipe?.recipe_id}/>)}</div> : <p className="library-placeholder">Select a model to see all of its recipes.</p>}
     </section>
 

@@ -102,9 +102,85 @@ test("never lets a local Advanced alias edit change server action authority", as
   ));
 });
 
-test("resets visual and raw preview state on canonical refresh and A to B to A navigation", () => {
-  // Break caught: a same-revision content refresh or returning to recipe A can
-  // resurrect a local draft that no longer matches canonical authority.
+test("renders every canonical visual section from the valid local preview and labels it as unsaved", async () => {
+  // Break caught: only workload/runtime summary fields react to a local edit,
+  // leaving canonical hero/build/artifact fields beside a supposedly valid preview.
+  renderAuthority();
+  const user = userEvent.setup();
+  const advanced = screen.getByRole("group", {name: "Advanced recipe document"});
+  await user.click(within(advanced).getByText("Advanced recipe document"));
+  const local = {
+    ...fullLibraryDetail.visual_recipe!,
+    identity: {publisher: "preview-publisher", slug: "preview-slug"},
+    metadata: {title: "Preview title", description: "Preview description", tags: ["preview-tag"]},
+    workload: {family: "preview/family", capabilities: ["preview.capability"]},
+    build: {
+      context: {sha256: "e".repeat(64), expected_bytes: 1234, media_type: "application/preview+tar"},
+      dockerfile: "Preview.Dockerfile",
+      platform: "linux/amd64",
+      network_mode: "allowlist",
+      network_hosts: ["preview.example"],
+      download_bytes: 111,
+      temporary_bytes: 222,
+      memory_bytes: 333,
+      timeout_seconds: 44,
+    },
+    artifacts: [{
+      id: "preview-artifact",
+      kind: "preview.kind",
+      repository: "preview/repository",
+      revision: "preview-revision",
+      download_bytes: 444,
+      installed_bytes: 555,
+      roles: ["preview-role"],
+    }],
+    runtime: {
+      interface: "preview.interface.v1",
+      adapter: "preview-adapter",
+      adapter_version: 2,
+      endpoint_protocol: "grpc",
+      endpoint_port: 9001,
+      model_aliases: ["preview-alias", "preview-backup"],
+      health_path: "/preview-ready",
+    },
+    provenance: {source_kind: "fork" as const, source_reference: "preview-source", attribution: ["Preview Author"]},
+    validation: {checks: ["preview.check"], benchmark_count: 7},
+  };
+
+  fireEvent.change(within(advanced).getByRole("textbox", {name: "Recipe JSON"}), {target: {value: JSON.stringify(local)}});
+
+  const authority = screen.getByRole("region", {name: "Qwen Chat recipe authority"});
+  expect(within(authority).getByText("Local preview · not saved")).toBeVisible();
+  expect(within(authority).getByText("preview-publisher/preview-slug")).toBeVisible();
+  expect(within(authority).getByText("Preview title")).toBeVisible();
+  expect(within(authority).getByText("Preview description")).toBeVisible();
+  expect(within(authority).getByText("preview-tag")).toBeVisible();
+
+  const model = within(authority).getByRole("region", {name: "Model and runtime"});
+  expect(model).toHaveTextContent("preview/family");
+  expect(model).toHaveTextContent("preview.capability");
+
+  const build = within(authority).getByRole("region", {name: "Build and artifacts"});
+  for (const value of [
+    "Schema version 1", "Preview.Dockerfile", "linux/amd64", "allowlist", "preview.example",
+    "1,234 bytes", "application/preview+tar", `sha256:${"e".repeat(64)}`,
+    "111 bytes", "222 bytes", "333 bytes", "44 seconds",
+    "preview-artifact", "preview.kind", "preview/repository", "preview-revision",
+    "444 bytes", "555 bytes", "preview-role",
+  ]) expect(build).toHaveTextContent(value);
+
+  const runtime = within(authority).getByRole("region", {name: "Runtime contract"});
+  for (const value of ["preview.interface.v1", "preview-adapter", "Version 2", "grpc", "Port 9,001", "preview-alias", "preview-backup", "/preview-ready"])
+    expect(runtime).toHaveTextContent(value);
+
+  const evidence = within(authority).getByRole("region", {name: "Provenance and validation"});
+  for (const value of ["fork", "preview-source", "Preview Author", "preview.check", "7 benchmarks"])
+    expect(evidence).toHaveTextContent(value);
+});
+
+test("resets canonical preview state without remounting focused controls and ignores polling-only refresh", async () => {
+  // Break caught: using a React key to reset Advanced destroys the focused
+  // editor/upload, while failing to reset can resurrect stale A to B to A state.
   const props = {
     api: {} as LibraryApi,
     onRefresh: async () => undefined,
@@ -120,6 +196,9 @@ test("resets visual and raw preview state on canonical refresh and A to B to A n
   };
   fireEvent.change(editor, {target: {value: JSON.stringify(local)}});
   expect(screen.getByRole("region", {name: "Model and runtime"})).toHaveTextContent("qwen/local-preview");
+  fireEvent.change(editor, {target: {value: JSON.stringify({...local, workload: {...local.workload, family: 4}})}});
+  expect(within(advanced).getByRole("alert")).toHaveTextContent("$.workload.family must be a string.");
+  editor.focus();
 
   const refreshedVisual = {
     ...fullLibraryDetail.visual_recipe!,
@@ -127,11 +206,36 @@ test("resets visual and raw preview state on canonical refresh and A to B to A n
   };
   const refreshedDetail = {...fullLibraryDetail, visual_recipe: refreshedVisual};
   view.rerender(<LibraryRecipeAuthority {...props} detail={refreshedDetail}/>);
-  expect(screen.getByRole("region", {name: "Model and runtime"})).toHaveTextContent("qwen/server-refresh");
+  await waitFor(() => expect(screen.getByRole("region", {name: "Model and runtime"})).toHaveTextContent("qwen/server-refresh"));
   let nextAdvanced = screen.getByRole("group", {name: "Advanced recipe document"});
-  expect(nextAdvanced).not.toHaveAttribute("open");
-  fireEvent.click(within(nextAdvanced).getByText("Advanced recipe document"));
-  expect(within(nextAdvanced).getByRole("textbox", {name: "Recipe JSON"})).toHaveValue(JSON.stringify(refreshedVisual, null, 2));
+  expect(nextAdvanced).toHaveAttribute("open");
+  expect(within(nextAdvanced).getByRole("textbox", {name: "Recipe JSON"})).toBe(editor);
+  expect(editor).toHaveValue(JSON.stringify(refreshedVisual, null, 2));
+  expect(within(nextAdvanced).queryByRole("alert")).not.toBeInTheDocument();
+  expect(editor).toHaveFocus();
+
+  const upload = within(nextAdvanced).getByLabelText("Upload recipe JSON");
+  upload.focus();
+  const secondRefreshedVisual = {
+    ...refreshedVisual,
+    metadata: {...refreshedVisual.metadata, title: "Qwen Server Refresh Two"},
+  };
+  const secondRefreshedDetail = {...refreshedDetail, visual_recipe: secondRefreshedVisual};
+  view.rerender(<LibraryRecipeAuthority {...props} detail={secondRefreshedDetail}/>);
+  await waitFor(() => expect(editor).toHaveValue(JSON.stringify(secondRefreshedVisual, null, 2)));
+  expect(within(nextAdvanced).getByLabelText("Upload recipe JSON")).toBe(upload);
+  expect(upload).toHaveFocus();
+
+  const pollingDraft = {...secondRefreshedVisual, workload: {...secondRefreshedVisual.workload, family: "qwen/polling-draft"}};
+  fireEvent.change(editor, {target: {value: JSON.stringify(pollingDraft)}});
+  upload.focus();
+  view.rerender(<LibraryRecipeAuthority
+    {...props}
+    detail={{...secondRefreshedDetail, operational_state: {...secondRefreshedDetail.operational_state, runs: []}}}
+  />);
+  expect(editor).toHaveValue(JSON.stringify(pollingDraft));
+  expect(screen.getByRole("region", {name: "Model and runtime"})).toHaveTextContent("qwen/polling-draft");
+  expect(upload).toHaveFocus();
 
   const recipeBVisual = {
     ...fullLibraryDetail.visual_recipe!,
@@ -144,12 +248,11 @@ test("resets visual and raw preview state on canonical refresh and A to B to A n
     visual_recipe: recipeBVisual,
   };
   view.rerender(<LibraryRecipeAuthority {...props} detail={recipeBDetail}/>);
-  expect(screen.getByRole("region", {name: "Model and runtime"})).toHaveTextContent("qwen/code");
+  await waitFor(() => expect(screen.getByRole("region", {name: "Model and runtime"})).toHaveTextContent("qwen/code"));
   view.rerender(<LibraryRecipeAuthority {...props} detail={fullLibraryDetail}/>);
-  expect(screen.getByRole("region", {name: "Model and runtime"})).toHaveTextContent("qwen/3");
+  await waitFor(() => expect(screen.getByRole("region", {name: "Model and runtime"})).toHaveTextContent("qwen/3"));
   expect(screen.getByRole("region", {name: "Model and runtime"})).not.toHaveTextContent("qwen/local-preview");
   nextAdvanced = screen.getByRole("group", {name: "Advanced recipe document"});
-  expect(nextAdvanced).not.toHaveAttribute("open");
-  fireEvent.click(within(nextAdvanced).getByText("Advanced recipe document"));
+  expect(nextAdvanced).toHaveAttribute("open");
   expect(within(nextAdvanced).getByRole("textbox", {name: "Recipe JSON"})).toHaveValue(JSON.stringify(fullLibraryDetail.visual_recipe, null, 2));
 });

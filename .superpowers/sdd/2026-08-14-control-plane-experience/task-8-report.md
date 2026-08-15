@@ -122,3 +122,15 @@ Task 8B is complete on `work/control-plane-frontend-ux`, built from approved Tas
 - Final verification: focused Vitest 39/39; full Vitest 172 passed with 1 intentional skip; TypeScript/Vite build passed with 68 modules; full local fixture E2E 8/8; diff checks clean.
 - The three final Important concerns—numeric precision, canonical Advanced-state reset, and unlinked-list Back context—were reproduced RED and fixed without weakening canonical validation. The complete evidence is in `task-8b-report.md`.
 - Scope remained handwritten frontend/tests/reports only. The lockfile is unchanged, no dependency or `node_modules` artifact is included, no live system was contacted, and nothing was pushed.
+
+## Task 8B review fix round 1
+
+All five Important findings from `task-8b-review-round-1.md` are resolved with focused RED→GREEN evidence:
+
+- Integer fields are validated from their original JSON lexemes before conversion, so decimal, exponent, underflow, unsafe, and signed-bigint-overflow literals retain strict field-path behavior.
+- Advanced state resets through a canonical token without remounting focused controls; canonical changes reset state, polling-only refresh does not, and A→B→A remains clean.
+- The local preview now renders every canonical visual field and is explicitly labeled unsaved, while operational actions remain bound to canonical server detail.
+- Mobile/single-pane CSS is the default with only a 900px desktop override; fixture E2E covers the fractional boundary.
+- Pagination renders bounded windows of 40 models and 50 recipes, pins active route context, preserves Unlinked navigation, and reports cursor/window state honestly.
+
+Fix-round verification: focused Vitest 45/45; full Vitest 178 passed with 1 intentional skip; TypeScript/Vite build passed with 69 modules; full local fixture E2E 8/8; diff check clean. The lockfile and dependencies remain unchanged, no live system was contacted, and nothing was pushed. The single Minor stylesheet/E2E-size finding remains deferred for final branch review exactly as requested.

@@ -11,6 +11,131 @@ class DocumentValidationError extends Error {}
 type JsonObject = Record<string, unknown>;
 const MAX_SIGNED_BIGINT = 9_223_372_036_854_775_807;
 const MAX_SIGNED_BIGINT_LABEL = "9223372036854775807";
+const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
+const MAX_SIGNED_BIGINT_EXACT = BigInt(MAX_SIGNED_BIGINT_LABEL);
+
+class JsonLexemeScanError extends Error {}
+
+type JsonPathPart = string | number;
+
+function jsonPath(parts: readonly JsonPathPart[]): string {
+  return parts.reduce<string>((path, part) => typeof part === "number"
+    ? `${path}[${part}]`
+    : /^[A-Za-z_][A-Za-z0-9_]*$/.test(part) ? `${path}.${part}` : `${path}[${JSON.stringify(part)}]`, "$" );
+}
+
+function integerLexemeMaximum(parts: readonly JsonPathPart[]): bigint | undefined {
+  const path = jsonPath(parts);
+  if (path === "$.schema_version") return 1n;
+  if (path === "$.build.timeout_seconds") return 86_400n;
+  if (path === "$.runtime.endpoint_port") return 65_535n;
+  if (path === "$.validation.benchmark_count") return 32n;
+  if (path === "$.build.context.expected_bytes"
+    || ["download_bytes", "memory_bytes", "temporary_bytes"].some(field => path === `$.build.${field}`)
+    || /^\$\.artifacts\[\d+\]\.(download_bytes|installed_bytes)$/.test(path)
+    || path === "$.runtime.adapter_version") return MAX_SIGNED_BIGINT_EXACT;
+  return undefined;
+}
+
+function scanIntegerLexemes(text: string): void {
+  let index = 0;
+
+  function whitespace() {
+    while (/\s/.test(text[index] ?? "")) index += 1;
+  }
+
+  function stringToken(): string {
+    const start = index;
+    if (text[index] !== '"') throw new JsonLexemeScanError();
+    index += 1;
+    while (index < text.length) {
+      if (text[index] === '"') {
+        index += 1;
+        return JSON.parse(text.slice(start, index)) as string;
+      }
+      if (text[index] === "\\") {
+        index += text[index + 1] === "u" ? 6 : 2;
+      } else {
+        index += 1;
+      }
+    }
+    throw new JsonLexemeScanError();
+  }
+
+  function numberToken(parts: readonly JsonPathPart[]) {
+    const source = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/.exec(text.slice(index))?.[0];
+    if (!source) throw new JsonLexemeScanError();
+    index += source.length;
+    const maximum = integerLexemeMaximum(parts);
+    if (maximum === undefined) return;
+    const path = jsonPath(parts);
+    if (!/^-?(?:0|[1-9]\d*)$/.test(source)) {
+      throw new DocumentValidationError(`${path} must use an integer JSON literal without a decimal point or exponent.`);
+    }
+    const exact = BigInt(source);
+    if (exact > maximum) {
+      if (path === "$.schema_version") throw new DocumentValidationError("$.schema_version must equal 1.");
+      const minimum = ["$.build.timeout_seconds", "$.runtime.adapter_version", "$.runtime.endpoint_port"].includes(path) ? 1 : 0;
+      throw new DocumentValidationError(`${path} must be an integer from ${minimum} through ${maximum}.`);
+    }
+    if (exact > MAX_SAFE_BIGINT) {
+      throw new DocumentValidationError(`${path} cannot be preserved exactly; use an integer from 0 through ${Number.MAX_SAFE_INTEGER}.`);
+    }
+  }
+
+  function value(parts: readonly JsonPathPart[]): void {
+    whitespace();
+    const token = text[index];
+    if (token === "{") {
+      index += 1;
+      whitespace();
+      if (text[index] === "}") { index += 1; return; }
+      while (index < text.length) {
+        whitespace();
+        const key = stringToken();
+        whitespace();
+        if (text[index] !== ":") throw new JsonLexemeScanError();
+        index += 1;
+        value([...parts, key]);
+        whitespace();
+        if (text[index] === "}") { index += 1; return; }
+        if (text[index] !== ",") throw new JsonLexemeScanError();
+        index += 1;
+      }
+      throw new JsonLexemeScanError();
+    }
+    if (token === "[") {
+      index += 1;
+      whitespace();
+      if (text[index] === "]") { index += 1; return; }
+      let item = 0;
+      while (index < text.length) {
+        value([...parts, item]);
+        item += 1;
+        whitespace();
+        if (text[index] === "]") { index += 1; return; }
+        if (text[index] !== ",") throw new JsonLexemeScanError();
+        index += 1;
+      }
+      throw new JsonLexemeScanError();
+    }
+    if (token === '"') { stringToken(); return; }
+    if (token === "-" || /\d/.test(token ?? "")) { numberToken(parts); return; }
+    for (const literal of ["true", "false", "null"]) {
+      if (text.startsWith(literal, index)) { index += literal.length; return; }
+    }
+    throw new JsonLexemeScanError();
+  }
+
+  try {
+    value([]);
+    whitespace();
+    if (index !== text.length) throw new JsonLexemeScanError();
+  } catch (value) {
+    if (value instanceof JsonLexemeScanError) return;
+    throw value;
+  }
+}
 
 function object(value: unknown, path: string, allowed?: readonly string[]): JsonObject {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new DocumentValidationError(`${path} must be an object.`);
@@ -148,6 +273,7 @@ function syntaxLocation(text: string, error: SyntaxError): string {
 
 export function parseVisualRecipeDocument(text: string): VisualRecipeParseResult {
   try {
+    scanIntegerLexemes(text);
     return {ok: true, document: validateDocument(JSON.parse(text) as unknown)};
   } catch (value) {
     if (value instanceof DocumentValidationError) return {ok: false, error: value.message};

@@ -4,10 +4,22 @@ import type {LibraryApi, LibrarySnapshot} from "../api/types";
 import type {LibraryRecipeDetail} from "../api/types";
 import {LibraryBrowser} from "../components/library-browser";
 import {libraryRoute} from "../lib/library-route";
+import type {LibraryRoute} from "../lib/library-route";
 import "./library.css";
 
-function mergeSnapshot(current: LibrarySnapshot, next: LibrarySnapshot): LibrarySnapshot {
-  const models = new Map(current.models.map(model => [model.family, {...model, recipes: [...model.recipes]}]));
+const LIBRARY_MODEL_WINDOW = 40;
+const LIBRARY_RECIPE_WINDOW = 50;
+
+function boundedItems<T>(items: T[], limit: number, key: (item: T) => string, pinnedKey?: string): {items: T[]; truncated: boolean} {
+  if (items.length <= limit) return {items, truncated: false};
+  const window = items.slice(-limit);
+  const pinned = pinnedKey ? items.find(item => key(item) === pinnedKey) : undefined;
+  if (pinned && !window.some(item => key(item) === pinnedKey)) window.splice(0, 1, pinned);
+  return {items: window, truncated: true};
+}
+
+function mergeSnapshot(current: LibrarySnapshot | undefined, next: LibrarySnapshot, route: LibraryRoute): {snapshot: LibrarySnapshot; truncated: boolean} {
+  const models = new Map((current?.models ?? []).map(model => [model.family, {...model, recipes: [...model.recipes]}]));
   for (const model of next.models) {
     const existing = models.get(model.family);
     if (!existing) {
@@ -20,13 +32,30 @@ function mergeSnapshot(current: LibrarySnapshot, next: LibrarySnapshot): Library
       recipes: existing.recipes.concat(model.recipes.filter(recipe => !recipeIds.has(recipe.recipe_id))),
     });
   }
-  const unlinkedIds = new Set(current.unlinked_recipes.map(recipe => recipe.recipe_id));
-  return {
-    ...current,
-    models: [...models.values()],
+  let truncated = false;
+  const recipeId = route.kind === "recipe" ? route.recipeId : undefined;
+  const modelItems = [...models.values()].map(model => {
+    const bounded = boundedItems(model.recipes, LIBRARY_RECIPE_WINDOW, recipe => recipe.recipe_id, recipeId);
+    truncated ||= bounded.truncated;
+    return {...model, recipes: bounded.items};
+  });
+  const selectedFamily = route.kind === "model" && !route.unlinked
+    ? route.family
+    : modelItems.find(model => recipeId && model.recipes.some(recipe => recipe.recipe_id === recipeId))?.family;
+  const boundedModels = boundedItems(modelItems, LIBRARY_MODEL_WINDOW, model => model.family, selectedFamily);
+  truncated ||= boundedModels.truncated;
+
+  const currentUnlinked = current?.unlinked_recipes ?? [];
+  const unlinkedIds = new Set(currentUnlinked.map(recipe => recipe.recipe_id));
+  const mergedUnlinked = currentUnlinked.concat(next.unlinked_recipes.filter(recipe => !unlinkedIds.has(recipe.recipe_id)));
+  const boundedUnlinked = boundedItems(mergedUnlinked, LIBRARY_RECIPE_WINDOW, recipe => recipe.recipe_id, recipeId);
+  truncated ||= boundedUnlinked.truncated;
+  return {snapshot: {
+    ...(current ?? next),
+    models: boundedModels.items,
     next_cursor: next.next_cursor,
-    unlinked_recipes: current.unlinked_recipes.concat(next.unlinked_recipes.filter(recipe => !unlinkedIds.has(recipe.recipe_id))),
-  };
+    unlinked_recipes: boundedUnlinked.items,
+  }, truncated};
 }
 
 export function LibraryPage({api, path, onNavigate}: {
@@ -41,16 +70,24 @@ export function LibraryPage({api, path, onNavigate}: {
   const [detailLoading, setDetailLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [paginationError, setPaginationError] = useState("");
+  const [paginationWindowed, setPaginationWindowed] = useState(false);
   const [snapshotAttempt, setSnapshotAttempt] = useState(0);
   const [detailAttempt, setDetailAttempt] = useState(0);
   const loadMoreController = useRef<AbortController | undefined>(undefined);
   const heading = useRef<HTMLHeadingElement>(null);
+  const route = libraryRoute(path);
 
   useEffect(() => {
     const controller = new AbortController();
     setError("");
+    setPaginationWindowed(false);
     void api.librarySnapshot(undefined, controller.signal)
-      .then(value => { if (!controller.signal.aborted) setSnapshot(value); })
+      .then(value => {
+        if (controller.signal.aborted) return;
+        const bounded = mergeSnapshot(undefined, value, route);
+        setSnapshot(bounded.snapshot);
+        setPaginationWindowed(bounded.truncated);
+      })
       .catch(value => {
         if (!controller.signal.aborted) setError(value instanceof Error ? value.message.slice(0, 256) : "Unable to load Library");
       });
@@ -69,7 +106,11 @@ export function LibraryPage({api, path, onNavigate}: {
     setPaginationError("");
     try {
       const next = await api.librarySnapshot(cursor, controller.signal);
-      if (!controller.signal.aborted) setSnapshot(current => current ? mergeSnapshot(current, next) : next);
+      if (!controller.signal.aborted) {
+        const bounded = mergeSnapshot(snapshot, next, route);
+        setSnapshot(bounded.snapshot);
+        if (bounded.truncated) setPaginationWindowed(true);
+      }
     } catch (value) {
       if (!controller.signal.aborted) setPaginationError(value instanceof Error ? value.message.slice(0, 256) : "Unable to load more Library recipes");
     } finally {
@@ -78,7 +119,6 @@ export function LibraryPage({api, path, onNavigate}: {
     }
   }
 
-  const route = libraryRoute(path);
   const recipeId = route.kind === "recipe" ? route.recipeId : undefined;
   const refreshDetail = useCallback(async (signal: AbortSignal) => {
     if (!recipeId || signal.aborted) return;
@@ -135,9 +175,11 @@ export function LibraryPage({api, path, onNavigate}: {
       onRetryDetail={() => setDetailAttempt(value => value + 1)}
       route={route}
       snapshot={snapshot}
+      windowed={paginationWindowed}
     />}
-    {snapshot?.next_cursor && <div className="library-pagination">
-      <button type="button" className="button secondary" disabled={loadingMore} onClick={() => void loadMore()}>{loadingMore ? "Loading more recipes…" : "Load more Library recipes"}</button>
+    {snapshot && (snapshot.next_cursor || paginationWindowed) && <div className="library-pagination">
+      {paginationWindowed && <p role="status" aria-label="Bounded Library window">Showing up to {LIBRARY_RECIPE_WINDOW} recipes per list and {LIBRARY_MODEL_WINDOW} models. Earlier loaded rows leave this bounded window; selected context stays pinned. {snapshot.next_cursor ? "More server pages remain." : "No more server pages remain."}</p>}
+      {snapshot.next_cursor && <button type="button" className="button secondary" disabled={loadingMore} onClick={() => void loadMore()}>{loadingMore ? "Loading more recipes…" : "Load more Library recipes"}</button>}
       {paginationError && <p role="alert">{paginationError}</p>}
     </div>}
   </div>;

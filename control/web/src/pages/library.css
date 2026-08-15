@@ -17,13 +17,21 @@
   border: 1px solid var(--border, #29413a);
   border-radius: 0.8rem;
   color: var(--text, #edf4f2);
+  display: none;
   min-width: 0;
   overflow: hidden;
 }
 
 .library-back {
   align-items: center;
+  display: flex;
   min-height: 44px;
+}
+
+.route-root .library-models,
+.route-model .library-recipes,
+.route-recipe .library-detail {
+  display: block;
 }
 
 .library-pane-heading,
@@ -146,23 +154,11 @@
     top: 1rem;
   }
 
-  .library-back {
-    display: none;
-  }
-}
-
-@media (max-width: 899px) {
   .library-pane {
-    display: none;
-  }
-
-  .route-root .library-models,
-  .route-model .library-recipes,
-  .route-recipe .library-detail {
     display: block;
   }
 
   .library-back {
-    display: flex;
+    display: none;
   }
 }

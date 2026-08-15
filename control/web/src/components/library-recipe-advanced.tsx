@@ -1,17 +1,23 @@
-import {useId, useState} from "react";
+import {useEffect, useId, useState} from "react";
 import type {ChangeEvent} from "react";
 import type {LibraryRecipeDetail} from "../api/types";
 import {parseVisualRecipeDocument} from "../lib/library-recipe-document";
 
 type VisualRecipeDocument = NonNullable<LibraryRecipeDetail["visual_recipe"]>;
 
-export function LibraryRecipeAdvanced({document, onValidDocument}: {
+export function LibraryRecipeAdvanced({document, onValidDocument, resetToken}: {
   document: VisualRecipeDocument;
   onValidDocument(document: VisualRecipeDocument): void;
+  resetToken: string;
 }) {
   const [text, setText] = useState(() => JSON.stringify(document, null, 2));
   const [error, setError] = useState("");
   const errorId = useId();
+
+  useEffect(() => {
+    setText(JSON.stringify(document, null, 2));
+    setError("");
+  }, [resetToken]);
 
   function preview(nextText: string) {
     setText(nextText);

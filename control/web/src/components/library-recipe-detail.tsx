@@ -9,6 +9,7 @@ import {LibraryActionDialog} from "./library-action-dialog";
 import type {LibraryActionName, LibraryActionReview, LibraryActionTarget, LibraryPlacementGroup} from "./library-action-types";
 import {LibraryOperationProgress, operationSettled} from "./library-operation-progress";
 import {LibraryRecipeAdvanced} from "./library-recipe-advanced";
+import {LibraryRecipeVisual} from "./library-recipe-visual";
 import "./library-recipe-detail.css";
 
 type Profile = LibraryRecipeDetail["profiles"][number];
@@ -56,6 +57,7 @@ export function LibraryRecipeAuthority({api, detail, onRefresh, policy}: {
   const [preview, setPreview] = useState({document: detail.visual_recipe, canonicalKey: canonicalPreviewKey});
   const trigger = useRef<HTMLButtonElement | null>(null);
   const visual = preview.canonicalKey === canonicalPreviewKey ? preview.document : detail.visual_recipe;
+  const localPreview = visual !== null && visual !== detail.visual_recipe;
   const revision = detail.selected_revision;
   const alias = detail.visual_recipe?.runtime.model_aliases[0] ?? detail.recipe.slug;
   useEffect(() => {
@@ -79,8 +81,16 @@ export function LibraryRecipeAuthority({api, detail, onRefresh, policy}: {
   const actionBlocked = operation !== undefined && (!operationSettled(operation.state) || ["partial", "failed", "cancelled", "canceled", "lost"].includes(operation.state));
   return <div className="recipe-authority" role="region" aria-label={`${detail.recipe.title} recipe authority`}>
     <header className="recipe-authority-hero">
-      <div><p className="fleet-kicker">{detail.recipe.source_kind} recipe</p><strong className="recipe-authority-title">{detail.recipe.title}</strong><p>{detail.recipe.description}</p></div>
-      <StatusPill tone={revision?.lifecycle === "resolved" ? "healthy" : "warning"}>{revision ? `${revision.lifecycle === "resolved" ? "Immutable" : revision.lifecycle} revision ${revision.revision_number}` : "No valid revision"}</StatusPill>
+      <div>
+        <p className="fleet-kicker">{visual ? `${visual.identity.publisher}/${visual.identity.slug}` : `${detail.recipe.source_kind} recipe`}</p>
+        <strong className="recipe-authority-title">{visual?.metadata.title ?? detail.recipe.title}</strong>
+        <p>{visual?.metadata.description ?? detail.recipe.description}</p>
+        {visual && <p className="recipe-metadata-tags">{visual.metadata.tags.length > 0 ? visual.metadata.tags.join(" · ") : "No tags declared"}</p>}
+      </div>
+      <div className="recipe-authority-statuses">
+        {localPreview && <StatusPill tone="warning">Local preview · not saved</StatusPill>}
+        <StatusPill tone={revision?.lifecycle === "resolved" ? "healthy" : "warning"}>{revision ? `${revision.lifecycle === "resolved" ? "Immutable" : revision.lifecycle} revision ${revision.revision_number}` : "No valid revision"}</StatusPill>
+      </div>
     </header>
     <section className="library-section library-primary-control" aria-label="Recent operation state">
       <div className="section-heading"><div><p className="fleet-kicker">Current authority</p><h4>Recent operation state</h4></div></div>
@@ -101,12 +111,7 @@ export function LibraryRecipeAuthority({api, detail, onRefresh, policy}: {
     {operation && <LibraryOperationProgress api={api} name={operationName} onChange={setOperation} onRefresh={onRefresh} operation={operation}/>}
     <LibraryPlacement actionsDisabled={actionBlocked} detail={detail} onReview={openReview} policy={policy}/>
     {visual && <>
-      <section className="library-section recipe-essentials" aria-label="Model and runtime">
-        <div><span>Model family</span><strong>{visual.workload.family}</strong></div>
-        <div><span>Capabilities</span><strong className="capability-chips">{visual.workload.capabilities.length > 0 ? visual.workload.capabilities.map(capability => <span key={capability}>{capability}</span>) : "Not declared"}</strong></div>
-        <div><span>Runtime</span><strong>{visual.runtime.adapter} v{visual.runtime.adapter_version}</strong></div>
-        <div><span>Endpoint</span><strong>{visual.runtime.endpoint_protocol} · {visual.runtime.endpoint_port}</strong></div>
-      </section>
+      <LibraryRecipeVisual document={visual}/>
       <section className="library-section" aria-label="Topology and resources">
         <div className="section-heading"><div><p className="fleet-kicker">Declared topology</p><h4>Profiles and ranks</h4></div></div>
         {detail.profiles.map(profile => <article className="topology-card" key={profile.name}>
@@ -116,16 +121,12 @@ export function LibraryRecipeAuthority({api, detail, onRefresh, policy}: {
           <p className="topology-fabric">{profile.fabric.connectivity} fabric · {profile.fabric.minimum_bandwidth_mbps.toLocaleString()} Mbps minimum · {profile.parallelism.backend}</p>
         </article>)}
       </section>
-      <section className="library-section evidence-columns" aria-label="Provenance and validation">
-        <div><h4>Provenance</h4><p>{visual.provenance.source_kind} · {visual.provenance.source_reference ?? "No external reference"}</p><p>{visual.provenance.attribution.join(" · ") || "No attribution declared"}</p><code>sha256:{visual.build.context.sha256}</code></div>
-        <div><h4>Validation</h4><p>{visual.validation.checks.join(" · ")}</p><p>{visual.validation.benchmark_count} benchmarks</p></div>
-      </section>
     </>}
     <LibraryReasons reasons={detail.reasons}/>
     {detail.visual_recipe && <LibraryRecipeAdvanced
-      key={canonicalPreviewKey}
       document={detail.visual_recipe}
       onValidDocument={document => setPreview({document, canonicalKey: canonicalPreviewKey})}
+      resetToken={canonicalPreviewKey}
     />}
     <nav className="advanced-workflows" aria-label="Advanced recipe workflows">
       <a href={`/catalog/${encodeURIComponent(detail.recipe.recipe_id)}/source`}>Source and build</a>

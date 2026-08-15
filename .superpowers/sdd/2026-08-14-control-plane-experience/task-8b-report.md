@@ -69,3 +69,43 @@ The automated contrast assertion for the authority pane is at least 4.5:1.
 ## Concerns and disposition
 
 The three final Important concerns—unsafe integer rounding, stale Advanced state across canonical refresh/navigation, and lost unlinked-list Back context—are resolved and covered by RED-first regressions. The visual/editor path intentionally accepts only integers JavaScript can preserve exactly; larger otherwise-canonical signed integers receive a precise field-path error instead of being rounded. No known blocker or unresolved Task 8B concern remains. Per the finalization instruction, no additional broad self-review loop was started after the complete green verification sweep.
+
+## Task 8B review fix round 1
+
+This round starts from Task 8B checkpoint `8db578c4aba0e8e1f4e65357661213f94be15d5b` and addresses all five Important findings in `task-8b-review-round-1.md` without reopening Task 8A or backend authority.
+
+### Fixes delivered
+
+1. Canonical integer validation now walks JSON tokens and their object/array paths before `JSON.parse` can erase numeric spelling. Integer fields reject decimal, exponent, and underflowing-exponent literals with their exact field path. Plain integer tokens are compared as `BigInt`, preserving both signed-bigint range errors and the separate JavaScript exact-preservation error for otherwise-canonical unsafe values.
+2. Advanced no longer uses a changing React `key`. Its controlled draft and error state reset from an explicit canonical token composed from recipe identity, revision identity/digest, and visual content. Canonical refresh, same-revision content change, and A→B→A reset correctly without replacing the `<details>`, textarea, or upload node; polling-only detail updates retain draft and focus.
+3. Every field of the valid local visual document now drives the visible preview: schema version; identity; metadata title, description, and tags; workload; build context, network, byte budgets, and timeout; all artifact fields; runtime interface, adapter, endpoint, aliases, and health path; provenance; and validation. A warning pill labels `Local preview · not saved`. Placement, operation state, revision lifecycle, and action preview/apply aliases remain canonical server authority.
+4. Single-pane behavior is now the base CSS cascade. Only `@media (min-width: 900px)` overrides it with the coordinated desktop panes, eliminating the theoretical fractional gap between legacy max/min queries. Fixture Playwright exercises an actual 899.5px iframe and the no-matching-rule cascade, plus 899 and 900 px.
+5. Cursor merging is bounded to 40 models and 50 recipes per linked/unlinked list. The merge retains the active model or recipe when older rows leave the window, keeps Unlinked navigation available, continues using the authoritative server cursor, and displays an honest bounded-window message including whether more server pages remain.
+
+### Strict RED→GREEN evidence
+
+- Numeric lexemes: the focused parser run failed 3 tests and passed 18 because `1000.0`, `1e3`, and `1e-9999` were accepted as 1000, 1000, and 0. A follow-up range regression failed because pre-parse precision handling initially masked the signed-bigint maximum. The final focused parser run passed 22/22, including unsafe-in-range and out-of-range literals.
+- Advanced reset/focus: the focused regression failed because canonical refresh replaced the open Advanced group, dropping textarea focus. After replacing remounting with the reset token, the focused regression passed; the complete Advanced file passed 4/4 at that cycle. It proves textarea and upload focus survive canonical changes, state resets, polling-only refresh preserves an unchanged draft, and A→B→A cannot revive stale state.
+- Complete preview: the focused regression failed at the absent `Local preview · not saved` state while canonical hero/build fields remained visible. It passed after the focused visual projection was added. The combined Advanced and Library run passed 11/11, including the existing canonical action-alias guard.
+- Fractional breakpoint: after correcting a test-harness cleanup mistake, the valid browser RED failed because Models remained visible when neither legacy media rule applied at the 899.5px boundary. The same responsive journey passed 1/1 after making mobile behavior the default cascade.
+- Bounded pagination: a four-page fixture accumulated 80 linked recipes, 80 unlinked recipes, and more than 40 models; RED failed because there was no bounded-window status and all rows remained. GREEN passed with capped rows, pinned `Pinned Recipe`, reachable latest linked/unlinked recipes, and the terminal `No more server pages` state.
+
+### Fix-round verification
+
+All commands ran in `control/web` with conflicting color variables removed.
+
+- Focused Vitest:
+  `npm test -- --run src/lib/library-recipe-document.test.ts src/components/library-recipe-advanced.test.tsx src/components/library-actions.test.tsx src/pages/library.test.tsx`
+  — 4 files passed; 45 tests passed.
+- Full Vitest:
+  `npm test -- --run`
+  — 29 files passed and 1 skipped; 178 tests passed and 1 skipped.
+- Production build:
+  `npm run build`
+  — TypeScript passed; Vite transformed 69 modules and emitted production assets.
+- Full local fixture Playwright:
+  `npm run test:e2e`
+  — 8/8 passed, including the fractional breakpoint. Console warnings, console errors, and page errors remained empty.
+- `git diff --check` passed. `control/web/package-lock.json` is unchanged, and no dependency or `node_modules` artifact is included.
+
+The review's one Minor finding—large stylesheet and combined Fleet/Library E2E files—is deliberately deferred to final branch review as instructed. No unrelated file split or refactor was performed. No live system was contacted and no push was performed.

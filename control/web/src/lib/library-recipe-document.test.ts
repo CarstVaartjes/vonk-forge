@@ -40,7 +40,7 @@ test.each([
   ["empty bounded string", {...visual, identity: {...visual.identity, publisher: ""}}, "$.identity.publisher must contain 1 to 128 characters."],
   ["oversized bounded string", {...visual, metadata: {...visual.metadata, title: "x".repeat(201)}}, "$.metadata.title must contain 1 to 200 characters."],
   ["malformed digest", {...visual, build: {...visual.build, context: {...visual.build.context, sha256: "not-a-digest"}}}, "$.build.context.sha256 must be 64 lowercase hexadecimal characters."],
-  ["fractional integer", {...visual, runtime: {...visual.runtime, adapter_version: 1.5}}, "$.runtime.adapter_version must be an integer from 1 through 9223372036854775807."],
+  ["fractional integer", {...visual, runtime: {...visual.runtime, adapter_version: 1.5}}, "$.runtime.adapter_version must use an integer JSON literal without a decimal point or exponent."],
   ["out-of-range port", {...visual, runtime: {...visual.runtime, endpoint_port: 65536}}, "$.runtime.endpoint_port must be an integer from 1 through 65535."],
   ["negative byte count", {...visual, build: {...visual.build, download_bytes: -1}}, "$.build.download_bytes must be an integer from 0 through 9223372036854775807."],
   ["oversized array", {...visual, metadata: {...visual.metadata, tags: Array.from({length: 65}, () => "tag")}}, "$.metadata.tags must contain at most 64 items."],
@@ -59,5 +59,31 @@ test("rejects an integer the visual path cannot preserve without rounding", () =
   expect(parseVisualRecipeDocument(unsafeText)).toEqual({
     ok: false,
     error: "$.build.download_bytes cannot be preserved exactly; use an integer from 0 through 9007199254740991.",
+  });
+});
+
+test("retains the canonical range error for a plain integer beyond signed bigint", () => {
+  // Break caught: pre-parse precision checks mask the stricter canonical
+  // signed-bigint bound for literals that are both unsafe and out of range.
+  const integerText = JSON.stringify({...visual, build: {...visual.build, download_bytes: 1000}});
+  const text = integerText.replace('"download_bytes":1000', '"download_bytes":9223372036854775808');
+  expect(parseVisualRecipeDocument(text)).toEqual({
+    ok: false,
+    error: "$.build.download_bytes must be an integer from 0 through 9223372036854775807.",
+  });
+});
+
+test.each([
+  ["decimal", "1000.0"],
+  ["exponent", "1e3"],
+  ["underflowing exponent", "1e-9999"],
+])("rejects a %s token for a canonical integer field before JSON conversion", (_case, literal) => {
+  // Break caught: JSON.parse erases numeric spelling, allowing strict-schema-
+  // invalid decimal/exponent tokens to masquerade as integer values.
+  const integerText = JSON.stringify({...visual, build: {...visual.build, download_bytes: 1000}});
+  const text = integerText.replace('"download_bytes":1000', `"download_bytes":${literal}`);
+  expect(parseVisualRecipeDocument(text)).toEqual({
+    ok: false,
+    error: "$.build.download_bytes must use an integer JSON literal without a decimal point or exponent.",
   });
 });

@@ -111,6 +111,67 @@ test("loads and merges cursor pages without splitting model or unlinked recipe g
   expect(screen.queryByRole("button", {name: "Load more Library recipes"})).not.toBeInTheDocument();
 });
 
+test("bounds repeated cursor pages while pinning selected and unlinked navigation context", async () => {
+  // Break caught: every cursor page remains mounted, so model/recipe DOM grows
+  // without limit or a capped merge silently drops the active route context.
+  history.replaceState(null, "", "/library/recipes/recipe-pinned");
+  const pinned = {...codeRecipe, recipe_id: "recipe-pinned", slug: "pinned", title: "Pinned Recipe"};
+  const page = (pageNumber: number) => {
+    const linked = Array.from({length: 20}, (_, index) => pageNumber === 0 && index === 0
+      ? pinned
+      : {...codeRecipe, recipe_id: `recipe-${pageNumber}-${index}`, slug: `recipe-${pageNumber}-${index}`, title: `Recipe ${pageNumber}-${index}`});
+    const unlinked = Array.from({length: 20}, (_, index) => ({
+      ...unlinkedRecipe,
+      recipe_id: `unlinked-${pageNumber}-${index}`,
+      slug: `unlinked-${pageNumber}-${index}`,
+      title: `Unlinked ${pageNumber}-${index}`,
+    }));
+    const extraModels = Array.from({length: 20}, (_, index) => ({
+      family: `family/${pageNumber}-${index}`,
+      display_name: `Family ${pageNumber}-${index}`,
+      page_local: true,
+      recipes: [{...codeRecipe, recipe_id: `family-recipe-${pageNumber}-${index}`, slug: `family-${pageNumber}-${index}`, title: `Family recipe ${pageNumber}-${index}`}],
+    }));
+    return {
+      ...librarySnapshot,
+      models: [{...librarySnapshot.models[0], recipes: linked}, ...extraModels],
+      unlinked_recipes: unlinked,
+      next_cursor: pageNumber < 3 ? `page-${pageNumber + 1}` : null,
+    };
+  };
+  const librarySnapshotRequest = vi.fn(async (cursor?: string) => page(cursor ? Number(cursor.slice(5)) : 0));
+  const api = {
+    librarySnapshot: librarySnapshotRequest,
+    libraryRecipe: async () => ({...minimalLibraryDetail, recipe: {...minimalLibraryDetail.recipe, recipe_id: pinned.recipe_id, slug: pinned.slug, title: pinned.title}}),
+  } as unknown as ControlApi;
+  const user = userEvent.setup();
+  render(<App api={api}/>);
+
+  await screen.findByRole("region", {name: "Pinned Recipe recipe authority"});
+  for (let pageNumber = 1; pageNumber <= 3; pageNumber += 1) {
+    await user.click(screen.getByRole("button", {name: "Load more Library recipes"}));
+    await waitFor(() => expect(librarySnapshotRequest).toHaveBeenCalledTimes(pageNumber + 1));
+  }
+
+  const notice = screen.getByRole("status", {name: "Bounded Library window"});
+  expect(notice).toHaveTextContent("Showing up to 50 recipes per list and 40 models");
+  expect(notice).toHaveTextContent("No more server pages");
+  expect(screen.queryByRole("button", {name: "Load more Library recipes"})).not.toBeInTheDocument();
+
+  const models = screen.getByRole("region", {name: "Models"});
+  expect(within(models).getAllByRole("link").length).toBeLessThanOrEqual(41);
+  expect(within(models).getByRole("link", {name: /Qwen 3/})).toBeVisible();
+  const recipes = screen.getByRole("region", {name: "Recipes for Qwen 3"});
+  expect(recipes.querySelectorAll(".library-row")).toHaveLength(50);
+  expect(within(recipes).getByRole("link", {name: /Pinned Recipe/})).toBeVisible();
+  expect(within(recipes).getByRole("link", {name: /Recipe 3-19/})).toBeVisible();
+
+  await user.click(within(models).getByRole("link", {name: /Unlinked/}));
+  const unlinked = screen.getByRole("region", {name: "Unlinked recipes"});
+  expect(unlinked.querySelectorAll(".library-row")).toHaveLength(50);
+  expect(within(unlinked).getByRole("link", {name: /Unlinked 3-19/})).toBeVisible();
+});
+
 test("changes URL selection only on activation and preserves drill-down history", async () => {
   // Break caught: focus selects or fetches a model/recipe, one-family recipes
   // collapse into one row, unlinked recipes disappear, or navigation replaces

@@ -314,6 +314,31 @@ test("Library keeps URL drill-down below 900px and three coordinated panes above
   await expect(models).toBeVisible();
   await expect(page.getByRole("region", {name: "Recipes for Qwen 3"})).toBeVisible();
   await expect(detail).toBeVisible();
+
+  await page.setViewportSize({width: 1280, height: 900});
+  await page.evaluate(() => {
+    const frame = document.createElement("iframe");
+    frame.title = "Fractional Library viewport";
+    frame.style.width = "899.5px";
+    frame.style.height = "800px";
+    frame.src = "/library/recipes/recipe-chat";
+    document.body.append(frame);
+  });
+  const fractionalFrame = page.frameLocator('iframe[title="Fractional Library viewport"]');
+  await expect.poll(() => page.locator('iframe[title="Fractional Library viewport"]').evaluate(element => element.getBoundingClientRect().width)).toBe(899.5);
+  await fractionalFrame.locator(".library-browser").waitFor();
+  await fractionalFrame.locator("html").evaluate(() => {
+    for (const sheet of Array.from(document.styleSheets)) {
+      for (const rule of Array.from(sheet.cssRules)) {
+        if (rule instanceof CSSMediaRule && /(?:899|900)px/.test(rule.conditionText)) rule.media.mediaText = "not all";
+      }
+    }
+  });
+  await expect(fractionalFrame.getByRole("region", {name: "Models"})).toBeHidden();
+  await expect(fractionalFrame.getByRole("region", {name: "Recipes for Qwen 3"})).toBeHidden();
+  await expect(fractionalFrame.getByRole("region", {name: "Recipe detail"})).toBeVisible();
+  await page.locator('iframe[title="Fractional Library viewport"]').evaluate(element => element.remove());
+
   await page.setViewportSize({width: 360, height: 800});
   await page.evaluate(() => scrollTo(0, 0));
   await page.screenshot({path: testInfo.outputPath("library-mobile.png")});

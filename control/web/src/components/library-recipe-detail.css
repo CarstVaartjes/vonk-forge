@@ -19,6 +19,14 @@
   min-width: 0;
 }
 
+.recipe-authority-statuses {
+  align-items: flex-end;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
 .recipe-authority-title {
   display: block;
   font-size: 1.15rem;
@@ -30,6 +38,10 @@
 .topology-card > p,
 .advanced-workflows {
   color: var(--text-muted);
+}
+
+.recipe-metadata-tags {
+  font-size: 0.82rem;
 }
 
 .library-section,
@@ -266,6 +278,47 @@
   overflow-wrap: anywhere;
 }
 
+.visual-field-grid {
+  display: grid;
+  gap: 0.55rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0.8rem 0 0;
+}
+
+.visual-field-grid > div {
+  background: #07110e8c;
+  border-radius: 0.55rem;
+  min-width: 0;
+  padding: 0.6rem;
+}
+
+.visual-field-grid dt,
+.visual-digest span {
+  color: var(--text-subtle);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+}
+
+.visual-field-grid dd {
+  margin: 0.2rem 0 0;
+}
+
+.visual-digest {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.visual-artifacts {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.visual-artifacts article {
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  padding: 0.7rem;
+}
+
 .library-advanced-content {
   display: grid;
   gap: 0.75rem;
@@ -311,7 +364,12 @@
   }
 
   .recipe-essentials,
-  .evidence-columns {
+  .evidence-columns,
+  .visual-field-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .recipe-authority-statuses {
+    align-items: flex-start;
   }
 }
