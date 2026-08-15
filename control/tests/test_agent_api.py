@@ -19,8 +19,9 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import sessionmaker
+from test_catalog_service import _seed_recipe_dependencies
 from vonk_agent_protocol import canonical_message
 from vonk_control.agent_api import (
     AgentApiServices,
@@ -33,6 +34,7 @@ from vonk_control.agent_jobs import AgentJobService
 from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
+from vonk_control.catalog_service import CatalogService
 from vonk_control.enrollment import EnrollmentDenied, EnrollmentService
 from vonk_control.metrics import MetricsRegistry, OperationalMetricsCollector
 from vonk_control.models import (
@@ -1686,6 +1688,29 @@ def test_agent_rejects_recipe_spec_without_exact_resolved_dependencies(
 
     assert response.status_code == 409
     assert response.json()["detail"] == "recipe specification dependencies are stale"
+    catalog = CatalogService(
+        services.sessions,
+        clock=lambda: clock.now,
+        cursors=TokenCodec(b"c" * 32).cursor_codec(),
+    )
+    _seed_recipe_dependencies(catalog, document)
+    with services.sessions.begin() as session:
+        session.execute(
+            update(LocalRecipeRevision)
+            .where(LocalRecipeRevision.id == revision_id)
+            .values(
+                document=document,
+                content_sha256=recipe_content_sha256(document),
+            )
+        )
+    resolved = client.get(
+        f"/agent/v1/recipe-installations/{installation_id}/spec",
+        headers=agent_headers(NODE_A, "serial-a"),
+    )
+    assert resolved.status_code == 200
+    assert resolved.json()["identity"][
+        "recipe_revision_sha256"
+    ] == recipe_content_sha256(document)
     assert (
         client.get(
             f"/agent/v1/recipe-installations/{uuid.uuid4()}/spec",

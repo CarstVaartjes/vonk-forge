@@ -57,6 +57,16 @@ def validate_topology(
         raise TopologyError(
             "topology.role_mismatch", "placement roles do not match the topology"
         )
+    parallelism = topology.get("parallelism")
+    if (
+        topology.get("mode") == "data_parallel"
+        and isinstance(parallelism, Mapping)
+        and int(parallelism.get("tensor", 0)) * int(parallelism.get("pipeline", 0)) > 1
+    ):
+        raise TopologyError(
+            "topology.replica_not_distributed",
+            "replica topology cannot substitute for genuinely distributed ranks",
+        )
     if any("runtime.vonk.v1" not in capabilities.get(node, ()) for node in nodes):
         raise TopologyError(
             "topology.runtime_capability_missing",

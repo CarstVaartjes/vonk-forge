@@ -93,6 +93,7 @@ def test_resolved_recipe_maps_without_git_remote(tmp_path: Path) -> None:
     document = json.loads(
         (Path(__file__).parent / "fixtures/global/recipe-v1-minimal.json").read_text()
     )
+    document["identity"]["slug"] = "qwen3-vllm"
     draft = catalog.create_recipe(
         "admin", RecipeDraftInput(slug="qwen3-vllm", document=document)
     )
@@ -101,7 +102,6 @@ def test_resolved_recipe_maps_without_git_remote(tmp_path: Path) -> None:
 
     plan = service.preview(
         resolved.id,
-        "solo",
         (node_id,),
         {},
         "admin",

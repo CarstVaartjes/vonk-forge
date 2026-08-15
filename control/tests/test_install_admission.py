@@ -11,7 +11,7 @@ from vonk_control.artifact_sizes import ArtifactSize, StaticArtifactSizeResolver
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog_service import CatalogService, RecipeDraftInput
 from vonk_control.cluster_mappings import ClusterMappingService
-from vonk_control.install_admission import InstallAdmissionService
+from vonk_control.install_admission import InstallAdmissionService, InstallPlanConflict
 from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
@@ -179,6 +179,35 @@ def test_accepted_plan_persists_mapping_build_and_disk_reservation(tmp_path) -> 
         assert installation.recipe_build_id == build
         assert installation.mapping_generation == 1
         assert reservation.amount_bytes == plan.nodes[0].required_bytes
+
+
+def test_queue_rejects_artifact_or_reservation_mutation_after_preview(tmp_path) -> None:
+    sessions, now, node, mapping, build, sizes = setup(tmp_path, free=200)
+    service = InstallAdmissionService(
+        sessions, sizes=sizes, inventory_max_age=300, disk_floor_bytes=10
+    )
+    plan = service.plan_install(mapping, build, now=now)
+    with sessions.begin() as session:
+        artifact = session.scalar(
+            select(NodeArtifact).where(NodeArtifact.node_id == node)
+        )
+        assert artifact is not None
+        artifact.state = "missing"
+        session.add(
+            ResourceReservation(
+                node_id=node,
+                kind="disk",
+                resource_key="between-preview-and-queue",
+                amount_bytes=200,
+                owner_kind="installation",
+                owner_id="1" * 36,
+                state="active",
+                plan_digest="a" * 64,
+                created_at=now,
+            )
+        )
+    with pytest.raises(InstallPlanConflict, match="install.plan_stale_or_blocked"):
+        service.accept_install(plan, actor="admin", now=now)
 
 
 def test_stale_and_read_only_inventory_are_blocking(tmp_path) -> None:

@@ -116,3 +116,27 @@ def test_role_identity_is_bound_to_each_rank() -> None:
         validate_topology(multinode(), values, capabilities(values))
 
     assert caught.value.code == "topology.role_mismatch"
+
+
+def test_replica_topology_cannot_substitute_for_distributed_ranks() -> None:
+    document = multinode()
+    document["topology"]["mode"] = "data_parallel"
+    values = placements()
+
+    with pytest.raises(TopologyError) as caught:
+        validate_topology(document, values, capabilities(values))
+
+    assert caught.value.code == "topology.replica_not_distributed"
+
+
+def test_multiple_endpoint_owners_are_rejected() -> None:
+    values = (
+        Placement("spk_" + "1" * 32, 0, "entrypoint", True),
+        Placement("spk_" + "2" * 32, 1, "worker", True),
+        Placement("spk_" + "3" * 32, 2, "worker", False),
+    )
+
+    with pytest.raises(TopologyError) as caught:
+        validate_topology(multinode(), values, capabilities(values))
+
+    assert caught.value.code == "topology.role_mismatch"

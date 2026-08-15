@@ -20,6 +20,7 @@ from .models import (
     InstallationNode,
     LocalRecipeRevision,
     NodeArtifact,
+    NodeInventorySnapshot,
     RecipeBuild,
     RecipeInstallation,
     ResourceReservation,
@@ -226,6 +227,7 @@ class InstallAdmissionService:
                     mapping_node.node_id,
                     now=now,
                     maximum_age=self._inventory_max_age,
+                    _session=_session,
                 )
             except KeyError:
                 snapshot = None
@@ -249,7 +251,9 @@ class InstallAdmissionService:
                         "The GPU node artifact store is read-only.",
                     )
                 )
-            with self._sessions() as session:
+            with (
+                nullcontext(_session) if _session is not None else self._sessions()
+            ) as session:
                 present = tuple(
                     session.scalars(
                         select(NodeArtifact).where(
@@ -371,15 +375,6 @@ class InstallAdmissionService:
         actor: str,
         now: datetime,
     ) -> str:
-        fresh = self.plan_install(
-            plan.mapping_id, plan.recipe_build_id, now=now, _session=session
-        )
-        if (
-            not fresh.allowed
-            or fresh.plan_digest != plan.plan_digest
-            or fresh.mapping_generation != plan.mapping_generation
-        ):
-            raise InstallPlanConflict("installation plan is stale or blocked")
         mapping = session.get(ClusterMapping, plan.mapping_id, with_for_update=True)
         build = session.get(RecipeBuild, plan.recipe_build_id, with_for_update=True)
         if (
@@ -402,6 +397,34 @@ class InstallAdmissionService:
                 .with_for_update()
             )
         )
+        node_ids = tuple(node.node_id for node in mapping_nodes)
+        session.scalars(
+            select(AgentNode).where(AgentNode.node_id.in_(node_ids)).with_for_update()
+        ).all()
+        session.scalars(
+            select(NodeArtifact)
+            .where(NodeArtifact.node_id.in_(node_ids))
+            .with_for_update()
+        ).all()
+        session.scalars(
+            select(ResourceReservation)
+            .where(ResourceReservation.node_id.in_(node_ids))
+            .with_for_update()
+        ).all()
+        session.scalars(
+            select(NodeInventorySnapshot)
+            .where(NodeInventorySnapshot.node_id.in_(node_ids))
+            .with_for_update()
+        ).all()
+        fresh = self.plan_install(
+            plan.mapping_id, plan.recipe_build_id, now=now, _session=session
+        )
+        if (
+            not fresh.allowed
+            or fresh.plan_digest != plan.plan_digest
+            or fresh.mapping_generation != plan.mapping_generation
+        ):
+            raise InstallPlanConflict("install.plan_stale_or_blocked")
         if (
             revision is None
             or revision.lifecycle != "resolved"

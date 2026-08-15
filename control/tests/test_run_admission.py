@@ -283,6 +283,30 @@ def test_accept_rechecks_memory_reservations_while_holding_node_lock(tmp_path) -
         service.accept_run(plan, alias="qwen", actor="admin", now=now)
 
 
+def test_queue_rejects_reservation_mutation_after_preview(tmp_path) -> None:
+    sessions, now, node, installation = setup(tmp_path, free_memory=300)
+    service = RunAdmissionService(
+        sessions, inventory_max_age=300, memory_floor_bytes=50
+    )
+    plan = service.plan_run(installation, now=now)
+    with sessions.begin() as session:
+        session.add(
+            ResourceReservation(
+                node_id=node,
+                kind="unified-memory",
+                resource_key="between-preview-and-queue",
+                amount_bytes=50,
+                owner_kind="run",
+                owner_id="2" * 36,
+                state="active",
+                plan_digest="d" * 64,
+                created_at=now,
+            )
+        )
+    with pytest.raises(RunPlanConflict, match="run.plan_stale_or_blocked"):
+        service.accept_run(plan, alias="qwen", actor="admin", now=now)
+
+
 def test_postgres_competing_admissions_have_one_capacity_winner(
     tmp_path, postgres_engine
 ) -> None:

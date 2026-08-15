@@ -132,7 +132,10 @@ class RunAdmissionService:
         for placement in placements:
             try:
                 snapshot = self._inventory.latest(
-                    placement.node_id, now=now, maximum_age=self._max_age
+                    placement.node_id,
+                    now=now,
+                    maximum_age=self._max_age,
+                    _session=_session,
                 )
                 snapshots[placement.node_id] = snapshot
                 capabilities[placement.node_id] = snapshot.capabilities
@@ -216,7 +219,9 @@ class RunAdmissionService:
                 "host": "host-memory",
                 "accelerator": "gpu-memory",
             }[memory_kind]
-            with self._sessions() as session:
+            with (
+                nullcontext(_session) if _session is not None else self._sessions()
+            ) as session:
                 reserved = int(
                     session.scalar(
                         select(
@@ -370,13 +375,6 @@ class RunAdmissionService:
         actor: str,
         now: datetime,
     ) -> str:
-        fresh = self.plan_run(plan.installation_id, now=now, _session=session)
-        if (
-            not fresh.allowed
-            or fresh.plan_digest != plan.plan_digest
-            or fresh.mapping_generation != plan.mapping_generation
-        ):
-            raise RunPlanConflict("run plan is stale or blocked")
         mapping = session.get(ClusterMapping, plan.mapping_id, with_for_update=True)
         if (
             mapping is None
@@ -398,6 +396,32 @@ class RunAdmissionService:
                 .with_for_update()
             )
         )
+        node_ids = tuple(node.node_id for node in mapping_nodes)
+        session.scalars(
+            select(AgentNode).where(AgentNode.node_id.in_(node_ids)).with_for_update()
+        ).all()
+        session.scalars(
+            select(InstallationNode)
+            .where(InstallationNode.installation_id == plan.installation_id)
+            .with_for_update()
+        ).all()
+        session.scalars(
+            select(ResourceReservation)
+            .where(ResourceReservation.node_id.in_(node_ids))
+            .with_for_update()
+        ).all()
+        session.scalars(
+            select(NodeInventorySnapshot)
+            .where(NodeInventorySnapshot.node_id.in_(node_ids))
+            .with_for_update()
+        ).all()
+        fresh = self.plan_run(plan.installation_id, now=now, _session=session)
+        if (
+            not fresh.allowed
+            or fresh.plan_digest != plan.plan_digest
+            or fresh.mapping_generation != plan.mapping_generation
+        ):
+            raise RunPlanConflict("run.plan_stale_or_blocked")
         if (
             installation is None
             or installation.mapping_id != plan.mapping_id
