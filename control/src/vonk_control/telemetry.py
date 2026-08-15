@@ -8,11 +8,18 @@ import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .models import AgentNode, NodeTelemetryLatest, NodeTelemetrySample
+from .models import (
+    AgentNode,
+    NodeTelemetryLatest,
+    NodeTelemetryRollupBucket,
+    NodeTelemetryRollupMetric,
+    NodeTelemetrySample,
+)
 from .telemetry_maintenance import mark_rollup_dirty
 
 _NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
@@ -21,6 +28,13 @@ _MAX_BYTES = 16 * 1024**4
 _MAX_RATE = 1_000_000_000_000_000.0
 _MAX_HISTORY_POINTS = 1_500
 _MAX_BATCH_SAMPLES = 16
+TelemetryResolution = Literal["raw", "minute", "fifteen-minute"]
+_HISTORY_WINDOWS: dict[str, timedelta] = {
+    "raw": timedelta(hours=24),
+    "minute": timedelta(days=30),
+    "fifteen-minute": timedelta(days=365),
+}
+_ROLLUP_SECONDS: dict[str, int] = {"minute": 60, "fifteen-minute": 900}
 
 
 def _finite_number(
@@ -222,7 +236,28 @@ class TelemetrySampleView:
     details: TelemetryDetailsInput
 
 
-def _canonical_sample(value: TelemetrySampleInput, now: datetime) -> TelemetrySampleInput:
+@dataclass(frozen=True, slots=True)
+class TelemetryMetricView:
+    count: int
+    minimum: float
+    mean: float
+    maximum: float
+
+
+@dataclass(frozen=True, slots=True)
+class TelemetryRollupPointView:
+    node_id: str
+    resolution: Literal["minute", "fifteen-minute"]
+    bucket_start: datetime
+    bucket_end: datetime
+    source_sample_count: int
+    gap_samples: int
+    metrics: dict[str, TelemetryMetricView]
+
+
+def _canonical_sample(
+    value: TelemetrySampleInput, now: datetime
+) -> TelemetrySampleInput:
     if not isinstance(value, TelemetrySampleInput):
         raise ValueError("telemetry sample is invalid")  # noqa: TRY004
     observed_at = _aware_utc(value.observed_at, label="telemetry observation time")
@@ -293,9 +328,7 @@ def _view(row: NodeTelemetrySample) -> TelemetrySampleView:
         gap_samples=row.gap_samples,
         details=TelemetryDetailsInput(
             accelerator_name=details.get("accelerator_name"),
-            accelerator_performance_state=details.get(
-                "accelerator_performance_state"
-            ),
+            accelerator_performance_state=details.get("accelerator_performance_state"),
         ),
     )
 
@@ -409,8 +442,7 @@ class TelemetryRepository:
                 elif latest.boot_id == boot_id:
                     advances = (
                         value.sequence > latest.sequence
-                        and value.observed_at
-                        > _stored_utc(latest.observed_at)
+                        and value.observed_at > _stored_utc(latest.observed_at)
                     )
                 else:
                     advances = value.observed_at > _stored_utc(latest.observed_at)
@@ -448,9 +480,7 @@ class TelemetryRepository:
         ).all()
         return {row.node_id: _view(row) for row in rows}
 
-    def by_ids(
-        self, sample_ids: Sequence[str]
-    ) -> dict[str, TelemetrySampleView]:
+    def by_ids(self, sample_ids: Sequence[str]) -> dict[str, TelemetrySampleView]:
         """Hydrate one bounded stream batch without per-event reads."""
 
         identities = tuple(dict.fromkeys(sample_ids))
@@ -472,7 +502,9 @@ class TelemetryRepository:
         start: datetime,
         end: datetime,
         maximum_points: int,
-    ) -> tuple[TelemetrySampleView, ...]:
+        *,
+        resolution: TelemetryResolution,
+    ) -> tuple[TelemetrySampleView | TelemetryRollupPointView, ...]:
         if not isinstance(node_id, str) or _NODE_ID.fullmatch(node_id) is None:
             raise ValueError("telemetry history node ID is invalid")
         if (
@@ -484,20 +516,83 @@ class TelemetryRepository:
         end_utc = _aware_utc(end, label="telemetry history end")
         if start_utc >= end_utc:
             raise ValueError("telemetry history window is invalid")
+        if resolution not in _HISTORY_WINDOWS:
+            raise ValueError("telemetry history resolution is invalid")
+        if end_utc - start_utc > _HISTORY_WINDOWS[resolution]:
+            window = {
+                "raw": "24 hours",
+                "minute": "30 days",
+                "fifteen-minute": "365 days",
+            }[resolution]
+            raise ValueError(f"telemetry history {resolution} window exceeds {window}")
         with self._sessions() as session:
-            rows = session.scalars(
-                select(NodeTelemetrySample)
+            if resolution == "raw":
+                rows = session.scalars(
+                    select(NodeTelemetrySample)
+                    .where(
+                        NodeTelemetrySample.node_id == node_id,
+                        NodeTelemetrySample.observed_at >= start_utc,
+                        NodeTelemetrySample.observed_at < end_utc,
+                    )
+                    .order_by(
+                        NodeTelemetrySample.observed_at.desc(),
+                        NodeTelemetrySample.sequence.desc(),
+                        NodeTelemetrySample.id.desc(),
+                    )
+                    .limit(maximum_points)
+                ).all()
+                rows.reverse()
+                return tuple(_view(row) for row in rows)
+
+            resolution_seconds = _ROLLUP_SECONDS[resolution]
+            buckets = session.scalars(
+                select(NodeTelemetryRollupBucket)
                 .where(
-                    NodeTelemetrySample.node_id == node_id,
-                    NodeTelemetrySample.observed_at >= start_utc,
-                    NodeTelemetrySample.observed_at <= end_utc,
+                    NodeTelemetryRollupBucket.resolution_seconds == resolution_seconds,
+                    NodeTelemetryRollupBucket.node_id == node_id,
+                    NodeTelemetryRollupBucket.bucket_start >= start_utc,
+                    NodeTelemetryRollupBucket.bucket_start < end_utc,
                 )
-                .order_by(
-                    NodeTelemetrySample.observed_at.desc(),
-                    NodeTelemetrySample.sequence.desc(),
-                    NodeTelemetrySample.id.desc(),
-                )
+                .order_by(NodeTelemetryRollupBucket.bucket_start)
                 .limit(maximum_points)
             ).all()
-        rows.reverse()
-        return tuple(_view(row) for row in rows)
+            starts = [_stored_utc(row.bucket_start) for row in buckets]
+            metrics_by_bucket: dict[datetime, dict[str, TelemetryMetricView]] = {
+                start: {} for start in starts
+            }
+            if starts:
+                metric_rows = session.scalars(
+                    select(NodeTelemetryRollupMetric)
+                    .where(
+                        NodeTelemetryRollupMetric.resolution_seconds
+                        == resolution_seconds,
+                        NodeTelemetryRollupMetric.node_id == node_id,
+                        NodeTelemetryRollupMetric.bucket_start.in_(starts),
+                    )
+                    .order_by(
+                        NodeTelemetryRollupMetric.bucket_start,
+                        NodeTelemetryRollupMetric.metric_name,
+                    )
+                ).all()
+                for metric in metric_rows:
+                    metrics_by_bucket[_stored_utc(metric.bucket_start)][
+                        metric.metric_name
+                    ] = TelemetryMetricView(
+                        count=int(metric.sample_count),
+                        minimum=float(metric.minimum),
+                        mean=float(metric.mean),
+                        maximum=float(metric.maximum),
+                    )
+            return tuple(
+                TelemetryRollupPointView(
+                    node_id=node_id,
+                    resolution=resolution,
+                    bucket_start=_stored_utc(bucket.bucket_start),
+                    bucket_end=_stored_utc(bucket.bucket_start)
+                    + timedelta(seconds=resolution_seconds),
+                    source_sample_count=int(bucket.source_sample_count),
+                    gap_samples=int(bucket.gap_samples),
+                    metrics=metrics_by_bucket[_stored_utc(bucket.bucket_start)],
+                )
+                for bucket in buckets
+            )

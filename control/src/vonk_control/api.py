@@ -96,6 +96,7 @@ from .reconcile import IneligibleCommit, StaleFleetEvidence
 from .repository import RepositoryPolicyError
 from .settings import StartupMode
 from .source_bundles import SourceBundleStore
+from .telemetry import TelemetryResolution
 from .workload_run_api import install_workload_run_routes
 from .workload_run_workflow import WorkloadRunWorkflow
 
@@ -1102,7 +1103,9 @@ def create_app(
         maximum = MAX_RECIPE_IMAGE_BYTES if recipe_image_upload else 1_048_576
         if telemetry_ingest:
             response = await call_next(request)
-        elif length and int(length) > maximum and request.url.path != "/agent/v1/enroll":
+        elif (
+            length and int(length) > maximum and request.url.path != "/agent/v1/enroll"
+        ):
             response = Response(status_code=413)
         else:
             body_too_large = False
@@ -1282,9 +1285,7 @@ def create_app(
         response_class=StreamingResponse,
         responses={
             200: {
-                "content": {
-                    "text/event-stream": {"schema": {"type": "string"}}
-                },
+                "content": {"text/event-stream": {"schema": {"type": "string"}}},
                 "description": "Durable Fleet event stream",
             },
             **bounded_error_responses(400, 401, 503),
@@ -1341,6 +1342,7 @@ def create_app(
         node_id: Annotated[str, ApiPath(pattern=r"^spk_[0-9a-f]{32}$")],
         start: Annotated[datetime, Query()],
         end: Annotated[datetime, Query()],
+        resolution: Annotated[TelemetryResolution, Query()],
         maximum_points: Annotated[int, Query(ge=1, le=1_500)] = 1_500,
         _actor: Actor = authenticated_actor,
     ) -> TelemetryHistoryResponse:
@@ -1352,6 +1354,7 @@ def create_app(
                 start=start,
                 end=end,
                 maximum_points=maximum_points,
+                resolution=resolution,
             )
         except KeyError:
             raise HTTPException(

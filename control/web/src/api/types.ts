@@ -7,6 +7,8 @@ export type VisualFleetNode = components["schemas"]["FleetNode"];
 export type FleetEvidenceResponse = components["schemas"]["FleetStatusResponse"];
 export type TelemetryHistory = components["schemas"]["TelemetryHistoryResponse"];
 export type TelemetryPoint = components["schemas"]["TelemetryPoint"];
+export type TelemetryResolution = "raw" | "minute" | "fifteen-minute";
+export type TelemetryHistoryPoint = TelemetryHistory["points"][number];
 export type AgentSummary = components["schemas"]["AgentSummary"];
 export type AgentsResponse = components["schemas"]["AgentsResponse"];
 export type EnrollmentSummary = components["schemas"]["EnrollmentSummary"];
@@ -173,7 +175,7 @@ export interface ControlApi extends LibraryApi {
   visualFleet(signal?: AbortSignal): Promise<VisualFleetSnapshot>;
   fleetEvidence(signal?: AbortSignal): Promise<FleetEvidenceResponse>;
   nodeStatuses(signal?: AbortSignal): Promise<FleetEvidenceResponse>;
-  nodeTelemetryHistory(nodeId: string, start: string, end: string, maximumPoints: number, signal?: AbortSignal): Promise<TelemetryHistory>;
+  nodeTelemetryHistory(nodeId: string, start: string, end: string, resolution: TelemetryResolution, maximumPoints: number, signal?: AbortSignal): Promise<TelemetryHistory>;
   documents(kind: "models" | "profiles"): Promise<DocumentList>;
   jobs(cursor?: string): Promise<JobsResponse>;
   job(jobId: string, operationCursor?: string, targetCursor?: string): Promise<JobDetail>;

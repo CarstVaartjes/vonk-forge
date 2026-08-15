@@ -8,6 +8,8 @@ from ...types import Response, UNSET
 from ... import errors
 
 from ...models.bounded_error_response import BoundedErrorResponse
+from ...models.get_node_telemetry_history_resolution import check_get_node_telemetry_history_resolution
+from ...models.get_node_telemetry_history_resolution import GetNodeTelemetryHistoryResolution
 from ...models.telemetry_history_response import TelemetryHistoryResponse
 from ...types import UNSET, Unset
 from dateutil.parser import isoparse
@@ -22,6 +24,7 @@ def _get_kwargs(
     *,
     start: datetime.datetime,
     end: datetime.datetime,
+    resolution: GetNodeTelemetryHistoryResolution,
     maximum_points: Union[Unset, int] = 1500,
 
 ) -> dict[str, Any]:
@@ -36,6 +39,9 @@ def _get_kwargs(
 
     json_end = end.isoformat()
     params["end"] = json_end
+
+    json_resolution: str = resolution
+    params["resolution"] = json_resolution
 
     params["maximum_points"] = maximum_points
 
@@ -111,6 +117,7 @@ def sync_detailed(
     client: AuthenticatedClient,
     start: datetime.datetime,
     end: datetime.datetime,
+    resolution: GetNodeTelemetryHistoryResolution,
     maximum_points: Union[Unset, int] = 1500,
 
 ) -> Response[Union[BoundedErrorResponse, TelemetryHistoryResponse]]:
@@ -120,6 +127,7 @@ def sync_detailed(
         node_id (str):
         start (datetime.datetime):
         end (datetime.datetime):
+        resolution (GetNodeTelemetryHistoryResolution):
         maximum_points (Union[Unset, int]):  Default: 1500.
 
     Raises:
@@ -135,6 +143,7 @@ def sync_detailed(
         node_id=node_id,
 start=start,
 end=end,
+resolution=resolution,
 maximum_points=maximum_points,
 
     )
@@ -151,6 +160,7 @@ def sync(
     client: AuthenticatedClient,
     start: datetime.datetime,
     end: datetime.datetime,
+    resolution: GetNodeTelemetryHistoryResolution,
     maximum_points: Union[Unset, int] = 1500,
 
 ) -> Optional[Union[BoundedErrorResponse, TelemetryHistoryResponse]]:
@@ -160,6 +170,7 @@ def sync(
         node_id (str):
         start (datetime.datetime):
         end (datetime.datetime):
+        resolution (GetNodeTelemetryHistoryResolution):
         maximum_points (Union[Unset, int]):  Default: 1500.
 
     Raises:
@@ -176,6 +187,7 @@ def sync(
 client=client,
 start=start,
 end=end,
+resolution=resolution,
 maximum_points=maximum_points,
 
     ).parsed
@@ -186,6 +198,7 @@ async def asyncio_detailed(
     client: AuthenticatedClient,
     start: datetime.datetime,
     end: datetime.datetime,
+    resolution: GetNodeTelemetryHistoryResolution,
     maximum_points: Union[Unset, int] = 1500,
 
 ) -> Response[Union[BoundedErrorResponse, TelemetryHistoryResponse]]:
@@ -195,6 +208,7 @@ async def asyncio_detailed(
         node_id (str):
         start (datetime.datetime):
         end (datetime.datetime):
+        resolution (GetNodeTelemetryHistoryResolution):
         maximum_points (Union[Unset, int]):  Default: 1500.
 
     Raises:
@@ -210,6 +224,7 @@ async def asyncio_detailed(
         node_id=node_id,
 start=start,
 end=end,
+resolution=resolution,
 maximum_points=maximum_points,
 
     )
@@ -226,6 +241,7 @@ async def asyncio(
     client: AuthenticatedClient,
     start: datetime.datetime,
     end: datetime.datetime,
+    resolution: GetNodeTelemetryHistoryResolution,
     maximum_points: Union[Unset, int] = 1500,
 
 ) -> Optional[Union[BoundedErrorResponse, TelemetryHistoryResponse]]:
@@ -235,6 +251,7 @@ async def asyncio(
         node_id (str):
         start (datetime.datetime):
         end (datetime.datetime):
+        resolution (GetNodeTelemetryHistoryResolution):
         maximum_points (Union[Unset, int]):  Default: 1500.
 
     Raises:
@@ -251,6 +268,7 @@ async def asyncio(
 client=client,
 start=start,
 end=end,
+resolution=resolution,
 maximum_points=maximum_points,
 
     )).parsed

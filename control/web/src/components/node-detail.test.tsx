@@ -23,6 +23,7 @@ function history(start = "2026-08-15T11:00:00.000Z", end = "2026-08-15T12:00:00.
     node_id: node().id,
     start,
     end,
+    resolution: "raw",
     maximum_points: 360,
     points: [{
       id: "sample-1", node_id: node().id, boot_id: "00000000-0000-0000-0000-000000000001", sequence: 1,
@@ -49,23 +50,25 @@ function history(start = "2026-08-15T11:00:00.000Z", end = "2026-08-15T12:00:00.
 }
 
 test("loads bounded history ranges and renders accessible summaries", async () => {
-  const calls: Array<{end: string; maximum: number; signal?: AbortSignal; start: string}> = [];
+  const calls: Array<{end: string; maximum: number; resolution: string; signal?: AbortSignal; start: string}> = [];
   const control = {
-    nodeTelemetryHistory: async (_nodeId: string, start: string, end: string, maximum: number, signal?: AbortSignal) => {
-      calls.push({end, maximum, signal, start});
+    nodeTelemetryHistory: async (_nodeId: string, start: string, end: string, resolution: string, maximum: number, signal?: AbortSignal) => {
+      calls.push({end, maximum, resolution, signal, start});
       return history(start, end);
     },
-  } as ControlApi;
+  } as unknown as ControlApi;
   const view = render(<NodeDetail api={control} node={node()} now={NOW} onClose={() => undefined}/>);
 
   expect(screen.getByRole("button", {name: "Close Spark One details"})).toHaveFocus();
-  expect(await screen.findByRole("img", {name: "Spark One GPU utilization history"})).toHaveAccessibleDescription("Latest 30%; range 20% to 30%; 2 reported samples.");
+  expect(await screen.findByRole("img", {name: "Spark One GPU utilization history"})).toHaveAccessibleDescription("Mean 25%; latest mean 30%; reported range 20% to 30%; 2 reported samples.");
   expect(screen.getByRole("img", {name: "Spark One available memory history"})).toHaveAccessibleDescription(/75 B/);
   expect(screen.getByRole("img", {name: "Spark One temperature history"})).toHaveAccessibleDescription(/42 °C/);
+  expect(screen.getAllByText(/Mean 25%/).length).toBeGreaterThan(0);
   expect(calls[0]).toMatchObject({
     start: "2026-08-15T11:00:00.000Z",
     end: "2026-08-15T12:00:00.000Z",
     maximum: 360,
+    resolution: "raw",
   });
 
   await userEvent.click(screen.getByRole("button", {name: "24 hours"}));
@@ -75,6 +78,7 @@ test("loads bounded history ranges and renders accessible summaries", async () =
     start: "2026-08-14T12:00:00.000Z",
     end: "2026-08-15T12:00:00.000Z",
     maximum: 1440,
+    resolution: "raw",
   });
   expect(screen.getByRole("button", {name: "24 hours"})).toHaveAttribute("aria-pressed", "true");
 
@@ -116,10 +120,32 @@ test("does not present the previous range as the newly selected history", async 
 
   await userEvent.click(screen.getByRole("button", {name: "24 hours"}));
 
-  expect(screen.getByRole("status")).toHaveTextContent("Loading bounded telemetry history");
+  expect(screen.getByText("Loading bounded telemetry history…")).toBeVisible();
   expect(screen.queryByRole("img", {name: "Spark One GPU utilization history"})).not.toBeInTheDocument();
   resolveNext(history("2026-08-14T12:00:00.000Z"));
   expect(await screen.findByRole("img", {name: "Spark One GPU utilization history"})).toBeVisible();
+});
+
+test("selects an honest rollup resolution for long history windows", async () => {
+  const calls: Array<{resolution: string; maximum: number; start: string; end: string}> = [];
+  const control = {
+    nodeTelemetryHistory: async (_nodeId: string, start: string, end: string, resolution: string, maximum: number) => {
+      calls.push({end, maximum, resolution, start});
+      return history(start, end);
+    },
+  } as unknown as ControlApi;
+  render(<NodeDetail api={control} node={node()} now={NOW} onClose={() => undefined}/>);
+  await screen.findByRole("img", {name: "Spark One GPU utilization history"});
+
+  await userEvent.click(screen.getByRole("button", {name: "7 days"}));
+  await waitFor(() => expect(calls).toHaveLength(2));
+  expect(calls[1]).toMatchObject({resolution: "minute", maximum: 1500});
+  expect(screen.getByText(/minute samples/i)).toBeVisible();
+
+  await userEvent.click(screen.getByRole("button", {name: "1 year"}));
+  await waitFor(() => expect(calls).toHaveLength(3));
+  expect(calls[2]).toMatchObject({resolution: "fifteen-minute", maximum: 1500});
+  expect(screen.getByText(/15-minute samples/i)).toBeVisible();
 });
 
 test("separates complete and healthy recipe evidence from transitional group state", async () => {

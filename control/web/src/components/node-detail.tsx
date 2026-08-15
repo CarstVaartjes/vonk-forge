@@ -1,16 +1,39 @@
 import {useEffect, useId, useRef, useState} from "react";
-import type {ControlApi, TelemetryHistory, VisualFleetNode} from "../api/types";
+import type {ControlApi, TelemetryHistory, TelemetryHistoryPoint, TelemetryResolution, VisualFleetNode} from "../api/types";
 import {formatBytes, installationGroupLabel, nodeWarningsAt, runGroupLabel} from "../lib/fleet";
-import {Sparkline} from "./sparkline";
+import {Sparkline, type SparklineSeriesPoint} from "./sparkline";
 import {StatusPill} from "./status-pill";
 
-type HistoryRange = "1h" | "6h" | "24h";
+type HistoryRange = "1h" | "6h" | "24h" | "7d" | "30d" | "90d" | "1y";
 
-const HISTORY_RANGES: Record<HistoryRange, {hours: number; label: string; maximumPoints: number}> = {
-  "1h": {hours: 1, label: "1 hour", maximumPoints: 360},
-  "6h": {hours: 6, label: "6 hours", maximumPoints: 720},
-  "24h": {hours: 24, label: "24 hours", maximumPoints: 1440},
+const HISTORY_RANGES: Record<HistoryRange, {hours: number; label: string; maximumPoints: number; resolution: TelemetryResolution; resolutionLabel: string}> = {
+  "1h": {hours: 1, label: "1 hour", maximumPoints: 360, resolution: "raw", resolutionLabel: "raw samples"},
+  "6h": {hours: 6, label: "6 hours", maximumPoints: 720, resolution: "raw", resolutionLabel: "raw samples"},
+  "24h": {hours: 24, label: "24 hours", maximumPoints: 1440, resolution: "raw", resolutionLabel: "raw samples"},
+  "7d": {hours: 24 * 7, label: "7 days", maximumPoints: 1500, resolution: "minute", resolutionLabel: "minute samples"},
+  "30d": {hours: 24 * 30, label: "30 days", maximumPoints: 1500, resolution: "minute", resolutionLabel: "minute samples"},
+  "90d": {hours: 24 * 90, label: "90 days", maximumPoints: 1500, resolution: "fifteen-minute", resolutionLabel: "15-minute samples"},
+  "1y": {hours: 24 * 365, label: "1 year", maximumPoints: 1500, resolution: "fifteen-minute", resolutionLabel: "15-minute samples"},
 };
+
+type RawMetricName = "gpu_utilization_percent" | "memory_available_bytes" | "temperature_c";
+
+function isRollupPoint(point: TelemetryHistoryPoint): point is Extract<TelemetryHistoryPoint, {resolution: string}> {
+  return "resolution" in point;
+}
+
+function metricSeries(points: readonly TelemetryHistoryPoint[], name: RawMetricName): (SparklineSeriesPoint | null)[] {
+  return points.map(point => {
+    if (isRollupPoint(point)) {
+      const metric = point.metrics[name];
+      return metric ? {minimum: metric.minimum, mean: metric.mean, maximum: metric.maximum} : null;
+    }
+    const value = point[name];
+    return typeof value === "number" && Number.isFinite(value)
+      ? {minimum: value, mean: value, maximum: value}
+      : null;
+  });
+}
 
 function boundedError(value: unknown): string {
   const message = value instanceof Error ? value.message : "Telemetry history is unavailable";
@@ -51,6 +74,7 @@ export function NodeDetail({
       node.id,
       start.toISOString(),
       end.toISOString(),
+      selection.resolution,
       selection.maximumPoints,
       controller.signal,
     ).then(result => {
@@ -112,12 +136,15 @@ export function NodeDetail({
           {(Object.entries(HISTORY_RANGES) as [HistoryRange, typeof HISTORY_RANGES[HistoryRange]][]).map(([value, option]) => <button key={value} type="button" aria-pressed={range === value} onClick={() => setRange(value)}>{option.label}</button>)}
         </div>
       </div>
+      <p className="history-resolution" role="status">Showing {HISTORY_RANGES[range].resolutionLabel} for the selected window. Ranges are reported values; no samples are filled in.</p>
+      {warnings.some(warning => warning.code === "telemetry.delayed" || warning.code === "telemetry.stale") && <p className="history-stale" role="status">Telemetry delivery is delayed; this history may be behind the live node.</p>}
       {historyLoading && <p role="status">Loading bounded telemetry history…</p>}
       {historyError && <div className="history-error"><p role="alert">{historyError}</p><button type="button" onClick={() => setRetryRevision(value => value + 1)}>Retry history</button></div>}
-      {history && <div className="history-grid">
-        <Sparkline label={`${node.display_name} GPU utilization history`} values={points.map(point => point.gpu_utilization_percent)} formatValue={value => `${Math.round(value)}%`}/>
-        <Sparkline label={`${node.display_name} available memory history`} values={points.map(point => point.memory_available_bytes)} formatValue={formatBytes}/>
-        <Sparkline label={`${node.display_name} temperature history`} values={points.map(point => point.temperature_c)} formatValue={value => `${Number(value.toFixed(1))} °C`}/>
+      {history && points.length === 0 && <p role="status">No telemetry samples are available in this window.</p>}
+      {history && points.length > 0 && <div className="history-grid">
+        <Sparkline label={`${node.display_name} GPU utilization history`} values={[]} series={metricSeries(points, "gpu_utilization_percent")} sampleLabel={history.resolution === "raw" ? "samples" : "buckets"} formatValue={value => `${Math.round(value)}%`}/>
+        <Sparkline label={`${node.display_name} available memory history`} values={[]} series={metricSeries(points, "memory_available_bytes")} sampleLabel={history.resolution === "raw" ? "samples" : "buckets"} formatValue={formatBytes}/>
+        <Sparkline label={`${node.display_name} temperature history`} values={[]} series={metricSeries(points, "temperature_c")} sampleLabel={history.resolution === "raw" ? "samples" : "buckets"} formatValue={value => `${Number(value.toFixed(1))} °C`}/>
       </div>}
     </section>
 

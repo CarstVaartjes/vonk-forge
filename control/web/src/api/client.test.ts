@@ -139,6 +139,7 @@ it("requests bounded node telemetry history through the generated operation", as
     "spk_0123456789abcdef0123456789abcdef",
     "2026-08-15T11:00:00.000Z",
     "2026-08-15T12:00:00.000Z",
+    "raw",
     360,
   );
 
@@ -147,6 +148,7 @@ it("requests bounded node telemetry history through the generated operation", as
   expect(Object.fromEntries(url.searchParams)).toEqual({
     end: "2026-08-15T12:00:00.000Z",
     maximum_points: "360",
+    resolution: "raw",
     start: "2026-08-15T11:00:00.000Z",
   });
 });

@@ -15,7 +15,9 @@ from vonk_control.models import (
     AgentNode,
     Base,
     NodeTelemetryLatest,
+    NodeTelemetryRollupBucket,
     NodeTelemetryRollupDirty,
+    NodeTelemetryRollupMetric,
     NodeTelemetrySample,
 )
 from vonk_control.telemetry import (
@@ -97,7 +99,8 @@ def test_newer_telemetry_replaces_latest_and_replay_does_not(telemetry) -> None:
 
     assert repository.latest((NODE_A,))[NODE_A].sequence == 5
     assert [
-        item.sequence for item in repository.history(NODE_A, START, NOW, 1_500)
+        item.sequence
+        for item in repository.history(NODE_A, START, NOW, 1_500, resolution="raw")
     ] == [4, 5]
 
 
@@ -141,9 +144,10 @@ def test_exact_replay_does_not_requeue_clean_rollup_bucket(telemetry) -> None:
     repository.record_batch(NODE_A, (value,))
 
     with sessions() as session:
-        assert session.scalar(
-            select(func.count()).select_from(NodeTelemetryRollupDirty)
-        ) == 0
+        assert (
+            session.scalar(select(func.count()).select_from(NodeTelemetryRollupDirty))
+            == 0
+        )
 
 
 def test_rollup_bucket_flooring_is_utc_aware_and_exact() -> None:
@@ -201,7 +205,8 @@ def test_new_boot_resets_sequence_but_only_newer_observation_advances_latest(
     assert latest[NODE_A].sequence == 0
     assert NODE_B not in latest
     assert [
-        item.observed_at for item in repository.history(NODE_A, START, NOW, 1_500)
+        item.observed_at
+        for item in repository.history(NODE_A, START, NOW, 1_500, resolution="raw")
     ] == [
         START + timedelta(seconds=8),
         START + timedelta(seconds=9),
@@ -481,11 +486,133 @@ def test_conflicting_replay_is_rejected(telemetry) -> None:
 def test_history_rejects_invalid_or_unbounded_windows(telemetry) -> None:
     repository, _, _, _ = telemetry
     with pytest.raises(ValueError, match="maximum points"):
-        repository.history(NODE_A, START, NOW, 1_501)
+        repository.history(NODE_A, START, NOW, 1_501, resolution="raw")
     with pytest.raises(ValueError, match="history window"):
-        repository.history(NODE_A, NOW, START, 1_500)
+        repository.history(NODE_A, NOW, START, 1_500, resolution="raw")
     with pytest.raises(ValueError, match="timezone-aware"):
-        repository.history(NODE_A, START.replace(tzinfo=None), NOW, 1_500)
+        repository.history(
+            NODE_A,
+            START.replace(tzinfo=None),
+            NOW,
+            1_500,
+            resolution="raw",
+        )
+
+
+def test_history_returns_ordered_minute_rollups_with_nullable_metrics_omitted(
+    telemetry,
+) -> None:
+    repository, sessions, _, _ = telemetry
+    first = datetime(2026, 8, 3, 11, 55, tzinfo=UTC)
+    second = first + timedelta(minutes=1)
+    with sessions.begin() as session:
+        session.add_all(
+            [
+                NodeTelemetryRollupBucket(
+                    resolution_seconds=60,
+                    node_id=NODE_A,
+                    bucket_start=first,
+                    source_sample_count=4,
+                    gap_samples=2,
+                ),
+                NodeTelemetryRollupMetric(
+                    resolution_seconds=60,
+                    node_id=NODE_A,
+                    bucket_start=first,
+                    metric_name="cpu_utilization_percent",
+                    sample_count=3,
+                    minimum=10,
+                    mean=20,
+                    maximum=30,
+                ),
+                NodeTelemetryRollupBucket(
+                    resolution_seconds=60,
+                    node_id=NODE_A,
+                    bucket_start=second,
+                    source_sample_count=1,
+                    gap_samples=0,
+                ),
+                NodeTelemetryRollupMetric(
+                    resolution_seconds=60,
+                    node_id=NODE_A,
+                    bucket_start=second,
+                    metric_name="temperature_c",
+                    sample_count=1,
+                    minimum=41.5,
+                    mean=41.5,
+                    maximum=41.5,
+                ),
+            ]
+        )
+
+    points = repository.history(
+        NODE_A,
+        first - timedelta(minutes=1),
+        second + timedelta(minutes=1),
+        1_500,
+        resolution="minute",
+    )
+
+    assert [point.bucket_start for point in points] == [first, second]
+    assert points[0].resolution == "minute"
+    assert points[0].source_sample_count == 4
+    assert points[0].gap_samples == 2
+    assert points[0].metrics["cpu_utilization_percent"].count == 3
+    assert points[0].metrics["cpu_utilization_percent"].minimum == 10.0
+    assert points[0].metrics["cpu_utilization_percent"].mean == 20.0
+    assert points[0].metrics["cpu_utilization_percent"].maximum == 30.0
+    assert points[1].metrics["temperature_c"].count == 1
+    assert points[1].metrics["temperature_c"].minimum == 41.5
+    assert points[1].metrics["temperature_c"].mean == 41.5
+    assert points[1].metrics["temperature_c"].maximum == 41.5
+
+
+@pytest.mark.parametrize(
+    ("resolution", "window", "message"),
+    [
+        ("raw", timedelta(hours=24, microseconds=1), "24 hours"),
+        ("minute", timedelta(days=30, microseconds=1), "30 days"),
+        ("fifteen-minute", timedelta(days=365, microseconds=1), "365 days"),
+    ],
+)
+def test_history_enforces_resolution_specific_windows(
+    telemetry, resolution: str, window: timedelta, message: str
+) -> None:
+    repository, _, _, _ = telemetry
+
+    with pytest.raises(ValueError, match=message):
+        repository.history(
+            NODE_A,
+            NOW - window,
+            NOW,
+            1_500,
+            resolution=resolution,
+        )
+
+
+@pytest.mark.parametrize(
+    ("resolution", "window"),
+    [
+        ("raw", timedelta(hours=24)),
+        ("minute", timedelta(days=30)),
+        ("fifteen-minute", timedelta(days=365)),
+    ],
+)
+def test_history_accepts_exact_resolution_windows(
+    telemetry, resolution: str, window: timedelta
+) -> None:
+    repository, _, _, _ = telemetry
+
+    assert (
+        repository.history(
+            NODE_A,
+            NOW - window,
+            NOW,
+            1_500,
+            resolution=resolution,
+        )
+        == ()
+    )
 
 
 def test_history_and_latest_writes_are_one_transaction(telemetry) -> None:
@@ -510,8 +637,6 @@ def test_history_and_latest_writes_are_one_transaction(telemetry) -> None:
             session.scalar(select(func.count()).select_from(NodeTelemetryLatest)) == 0
         )
         assert (
-            session.scalar(
-                select(func.count()).select_from(NodeTelemetryRollupDirty)
-            )
+            session.scalar(select(func.count()).select_from(NodeTelemetryRollupDirty))
             == 0
         )

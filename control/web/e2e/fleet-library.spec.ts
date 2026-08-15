@@ -170,10 +170,24 @@ async function installLocalFleetFixture(page: Page) {
     const url = new URL(route.request().url());
     const start = url.searchParams.get("start") ?? snapshot.generated_at;
     const end = url.searchParams.get("end") ?? snapshot.generated_at;
+    const resolution = url.searchParams.get("resolution") ?? "raw";
     const maximumPoints = Number(url.searchParams.get("maximum_points") ?? 360);
     const first = telemetry(start, 1);
     const last = {...telemetry(end, 2), gpu_utilization_percent: 72, temperature_c: 45};
-    return route.fulfill({json: {schema_version: 1, node_id: nodeId, start, end, maximum_points: maximumPoints, points: [first, last]}});
+    const points = resolution === "raw" ? [first, last] : [{
+      node_id: nodeId,
+      resolution,
+      bucket_start: start,
+      bucket_end: end,
+      source_sample_count: 2,
+      gap_samples: 0,
+      metrics: {
+        gpu_utilization_percent: {count: 2, minimum: 61, mean: 66.5, maximum: 72},
+        memory_available_bytes: {count: 2, minimum: 90 * GIB, mean: 91 * GIB, maximum: 92 * GIB},
+        temperature_c: {count: 2, minimum: 43.5, mean: 44.25, maximum: 45},
+      },
+    }];
+    return route.fulfill({json: {schema_version: 1, node_id: nodeId, start, end, resolution, maximum_points: maximumPoints, points}});
   });
 }
 
@@ -212,9 +226,31 @@ test("Fleet cards and bounded history are keyboard-accessible with local evidenc
   await page.keyboard.press("Enter");
   await expect(page.getByRole("complementary", {name: "Aurora details"})).toBeVisible();
   await expect(page.getByRole("button", {name: "Close Aurora details"})).toBeFocused();
-  await expect(page.getByRole("img", {name: "Aurora GPU utilization history"})).toHaveAccessibleDescription(/2 reported samples/);
+  await expect(page.getByRole("img", {name: "Aurora GPU utilization history"})).toHaveAccessibleDescription(/2 reported (samples|buckets)/);
   await page.getByRole("button", {name: "24 hours"}).click();
   await expect(page.getByRole("button", {name: "24 hours"})).toHaveAttribute("aria-pressed", "true");
+});
+
+test("Node history chooses honest rollups on desktop and mobile", async ({page}) => {
+  for (const width of [1280, 360]) {
+    await page.setViewportSize({width, height: width === 360 ? 800 : 900});
+    await page.goto("/fleet");
+    await page.getByRole("button", {name: "View Aurora details"}).click();
+    await expect(page.getByRole("button", {name: "Close Aurora details"})).toBeFocused();
+
+    await page.getByRole("button", {name: "7 days"}).click();
+    await expect(page.getByRole("button", {name: "7 days"})).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByText(/Showing minute samples/)).toBeVisible();
+    await expect(page.getByRole("img", {name: "Aurora GPU utilization history"})).toHaveAccessibleDescription(/reported buckets/);
+
+    await page.getByRole("button", {name: "1 year"}).click();
+    await expect(page.getByText(/Showing 15-minute samples/)).toBeVisible();
+    await expect.poll(() => page.evaluate(() => ({
+      body: document.body.scrollWidth,
+      document: document.documentElement.scrollWidth,
+      viewport: window.innerWidth,
+    }))).toEqual({body: width, document: width, viewport: width});
+  }
 });
 
 test("Fleet has no document overflow from phone through large desktop", async ({page}) => {

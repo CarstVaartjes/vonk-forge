@@ -30,6 +30,7 @@ from .fleet_snapshot import FleetSnapshot
 from .fleet_status_response import FleetStatusResponse
 from .fork_recipe_request import ForkRecipeRequest
 from .freshness_policy import FreshnessPolicy
+from .get_node_telemetry_history_resolution import GetNodeTelemetryHistoryResolution
 from .get_platform_update_response_update_status_api_v1_updates_rollout_id_get import GetPlatformUpdateResponseUpdateStatusApiV1UpdatesRolloutIdGet
 from .get_platform_update_skew_response_update_skew_api_v1_updates_skew_get import GetPlatformUpdateSkewResponseUpdateSkewApiV1UpdatesSkewGet
 from .get_repository_response_repository_view_api_v1_repository_get import GetRepositoryResponseRepositoryViewApiV1RepositoryGet
@@ -236,7 +237,12 @@ from .stop_request import StopRequest
 from .submit_change_response_submit_change_api_v1_changes_post import SubmitChangeResponseSubmitChangeApiV1ChangesPost
 from .telemetry_details import TelemetryDetails
 from .telemetry_history_response import TelemetryHistoryResponse
+from .telemetry_history_response_resolution import TelemetryHistoryResponseResolution
+from .telemetry_metric_summary import TelemetryMetricSummary
 from .telemetry_point import TelemetryPoint
+from .telemetry_rollup_point import TelemetryRollupPoint
+from .telemetry_rollup_point_metrics import TelemetryRollupPointMetrics
+from .telemetry_rollup_point_resolution import TelemetryRollupPointResolution
 from .telemetry_state import TelemetryState
 from .telemetry_state_freshness import TelemetryStateFreshness
 from .test_report_request import TestReportRequest
@@ -297,6 +303,7 @@ __all__ = (
     "FleetStatusResponse",
     "ForkRecipeRequest",
     "FreshnessPolicy",
+    "GetNodeTelemetryHistoryResolution",
     "GetPlatformUpdateResponseUpdateStatusApiV1UpdatesRolloutIdGet",
     "GetPlatformUpdateSkewResponseUpdateSkewApiV1UpdatesSkewGet",
     "GetRepositoryResponseRepositoryViewApiV1RepositoryGet",
@@ -503,7 +510,12 @@ __all__ = (
     "SubmitChangeResponseSubmitChangeApiV1ChangesPost",
     "TelemetryDetails",
     "TelemetryHistoryResponse",
+    "TelemetryHistoryResponseResolution",
+    "TelemetryMetricSummary",
     "TelemetryPoint",
+    "TelemetryRollupPoint",
+    "TelemetryRollupPointMetrics",
+    "TelemetryRollupPointResolution",
     "TelemetryState",
     "TelemetryStateFreshness",
     "TestReportRequest",

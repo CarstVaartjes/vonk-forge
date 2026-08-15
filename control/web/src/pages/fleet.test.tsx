@@ -55,7 +55,7 @@ function snapshot(nodes: VisualFleetNode[], cursor = 5): VisualFleetSnapshot {
   return {schema_version: 1, event_cursor: cursor, generated_at: NOW.toISOString(), repository_commit: "a".repeat(40), nodes};
 }
 
-function control(visualFleet: ControlApi["visualFleet"], history: ControlApi["nodeTelemetryHistory"] = async (nodeId, start, end, maximumPoints) => ({schema_version: 1, node_id: nodeId, start, end, maximum_points: maximumPoints, points: []})): ControlApi {
+function control(visualFleet: ControlApi["visualFleet"], history: ControlApi["nodeTelemetryHistory"] = async (nodeId, start, end, resolution, maximumPoints) => ({schema_version: 1, node_id: nodeId, start, end, resolution, maximum_points: maximumPoints, points: []})): ControlApi {
   return {visualFleet, nodeTelemetryHistory: history} as ControlApi;
 }
 

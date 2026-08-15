@@ -33,6 +33,7 @@ import type {
   WorkloadRunApplied,
   WorkloadRunPreview,
   TelemetryHistory,
+  TelemetryResolution,
   VisualFleetSnapshot,
   SourceBundleReceipt,
   SourcePolicyReport,
@@ -441,13 +442,14 @@ export class ApiClient implements ControlApi {
     nodeId: string,
     start: string,
     end: string,
+    resolution: TelemetryResolution,
     maximumPoints: number,
     signal?: AbortSignal,
   ): Promise<TelemetryHistory> {
     return resultData(await this.generated.GET("/api/v1/nodes/{node_id}/telemetry", {
       params: {
         path: {node_id: nodeId},
-        query: {start, end, maximum_points: maximumPoints},
+        query: {start, end, resolution, maximum_points: maximumPoints},
       },
       signal,
     }));

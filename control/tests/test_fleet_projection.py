@@ -49,20 +49,24 @@ NON_RFC_BOOT_ID = "00000000-0000-0000-0000-000000000001"
 class Repository:
     def __init__(self, nodes: dict[str, dict[str, object]] | None = None) -> None:
         self.calls: list[str] = []
-        self.nodes = nodes if nodes is not None else {
-            NODE_B: {
-                "display_name": "Beta",
-                "hostname": "beta.internal",
-                "lifecycle": "managed",
-                "labels": {"rack": "right"},
-            },
-            NODE_A: {
-                "display_name": "Alpha",
-                "hostname": "alpha.internal",
-                "lifecycle": "managed",
-                "labels": {"rack": "left"},
-            },
-        }
+        self.nodes = (
+            nodes
+            if nodes is not None
+            else {
+                NODE_B: {
+                    "display_name": "Beta",
+                    "hostname": "beta.internal",
+                    "lifecycle": "managed",
+                    "labels": {"rack": "right"},
+                },
+                NODE_A: {
+                    "display_name": "Alpha",
+                    "hostname": "alpha.internal",
+                    "lifecycle": "managed",
+                    "labels": {"rack": "left"},
+                },
+            }
+        )
 
     def head(self) -> str:
         self.calls.append("head")
@@ -392,8 +396,9 @@ def test_read_uses_repository_membership_latest_rows_and_a_bounded_query_set() -
         statement for statement in selects if "agent_certificates" in statement
     ]
     assert len(certificate_reads) == 1
-    assert "row_number() over (partition by agent_certificates.node_id" in (
-        certificate_reads[0]
+    assert (
+        "row_number() over (partition by agent_certificates.node_id"
+        in (certificate_reads[0])
     )
     telemetry_reads = [
         statement for statement in selects if "node_telemetry_samples" in statement
@@ -404,8 +409,9 @@ def test_read_uses_repository_membership_latest_rows_and_a_bounded_query_set() -
         statement for statement in selects if "node_inventory_snapshots" in statement
     ]
     assert len(inventory_reads) == 1
-    assert "row_number() over (partition by node_inventory_snapshots.node_id" in (
-        inventory_reads[0]
+    assert (
+        "row_number() over (partition by node_inventory_snapshots.node_id"
+        in (inventory_reads[0])
     )
     assert EXTRA_NODE not in {node.id for node in snapshot.nodes}
 
@@ -437,7 +443,9 @@ def test_read_captures_the_committed_cursor_before_repository_projection() -> No
     assert snapshot.event_cursor == 41
 
 
-def test_projection_dtos_reject_coercion_unbounded_values_and_open_vocabularies() -> None:
+def test_projection_dtos_reject_coercion_unbounded_values_and_open_vocabularies() -> (
+    None
+):
     with pytest.raises(ValidationError, match="event_cursor"):
         FleetSnapshot(
             event_cursor="1",
@@ -553,26 +561,28 @@ def test_projection_schema_is_finite_for_states_items_and_task3_numbers() -> Non
         "failed",
         "lost",
     ]
-    assert definitions["RecipePresence"]["properties"]["member_node_ids"][
-        "items"
-    ]["pattern"] == "^spk_[0-9a-f]{32}$"
+    assert (
+        definitions["RecipePresence"]["properties"]["member_node_ids"]["items"][
+            "pattern"
+        ]
+        == "^spk_[0-9a-f]{32}$"
+    )
     telemetry = definitions["TelemetryPoint"]["properties"]
     assert telemetry["boot_id"]["pattern"] == (
         "^(?!00000000-0000-0000-0000-000000000000$)"
         "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
     )
     assert telemetry["load_average_1m"]["anyOf"][0]["maximum"] == 1_000_000
-    assert telemetry["memory_total_bytes"]["anyOf"][0]["maximum"] == (
-        16 * 1024**4
-    )
+    assert telemetry["memory_total_bytes"]["anyOf"][0]["maximum"] == (16 * 1024**4)
     assert telemetry["temperature_c"]["anyOf"][0] == {
         "maximum": 300.0,
         "minimum": -100.0,
         "type": "number",
     }
-    assert telemetry["network_receive_bytes_per_second"]["anyOf"][0][
-        "maximum"
-    ] == 1_000_000_000_000_000
+    assert (
+        telemetry["network_receive_bytes_per_second"]["anyOf"][0]["maximum"]
+        == 1_000_000_000_000_000
+    )
 
 
 def test_connection_uses_certificate_authority_and_finite_offline_precedence() -> None:
@@ -605,11 +615,36 @@ def test_connection_uses_certificate_authority_and_finite_offline_precedence() -
                     capabilities=[],
                     last_seen_at=NOW,
                 ),
-                AgentNode(node_id=node_ids[3], state="active", capabilities=[], last_seen_at=NOW),
-                AgentNode(node_id=node_ids[4], state="active", capabilities=[], last_seen_at=NOW),
-                AgentNode(node_id=node_ids[5], state="active", capabilities=[], last_seen_at=NOW),
-                AgentNode(node_id=node_ids[6], state="active", capabilities=[], last_seen_at=NOW),
-                AgentNode(node_id=node_ids[7], state="active", capabilities=[], last_seen_at=NOW),
+                AgentNode(
+                    node_id=node_ids[3],
+                    state="active",
+                    capabilities=[],
+                    last_seen_at=NOW,
+                ),
+                AgentNode(
+                    node_id=node_ids[4],
+                    state="active",
+                    capabilities=[],
+                    last_seen_at=NOW,
+                ),
+                AgentNode(
+                    node_id=node_ids[5],
+                    state="active",
+                    capabilities=[],
+                    last_seen_at=NOW,
+                ),
+                AgentNode(
+                    node_id=node_ids[6],
+                    state="active",
+                    capabilities=[],
+                    last_seen_at=NOW,
+                ),
+                AgentNode(
+                    node_id=node_ids[7],
+                    state="active",
+                    capabilities=[],
+                    last_seen_at=NOW,
+                ),
                 AgentNode(node_id=node_ids[8], state="active", capabilities=[]),
                 AgentNode(
                     node_id=node_ids[9],
@@ -623,7 +658,12 @@ def test_connection_uses_certificate_authority_and_finite_offline_precedence() -
                     capabilities=[],
                     last_seen_at=NOW - timedelta(seconds=151),
                 ),
-                AgentNode(node_id=node_ids[11], state="active", capabilities=[], last_seen_at=NOW),
+                AgentNode(
+                    node_id=node_ids[11],
+                    state="active",
+                    capabilities=[],
+                    last_seen_at=NOW,
+                ),
             ]
         )
         session.flush()
@@ -745,9 +785,7 @@ def test_freshness_boundaries_keep_telemetry_agent_and_inventory_independent() -
             session.flush()
             session.add(NodeTelemetryLatest(node_id=node_id, sample_id=sample.id))
 
-    snapshot = FleetProjection(
-        Repository(nodes), sessions, clock=lambda: NOW
-    ).read()
+    snapshot = FleetProjection(Repository(nodes), sessions, clock=lambda: NOW).read()
 
     assert [
         (
@@ -1115,9 +1153,7 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank() -> None:
             ]
         )
 
-    snapshot = FleetProjection(
-        Repository(nodes), sessions, clock=lambda: NOW
-    ).read()
+    snapshot = FleetProjection(Repository(nodes), sessions, clock=lambda: NOW).read()
     alpha, beta = snapshot.nodes
     complete = next(
         value
@@ -1130,9 +1166,7 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank() -> None:
         if value.installation_id == partial_installation_id
     )
     healthy = next(value for value in alpha.loaded if value.run_id == healthy_run_id)
-    degraded = next(
-        value for value in alpha.loaded if value.run_id == degraded_run_id
-    )
+    degraded = next(value for value in alpha.loaded if value.run_id == degraded_run_id)
     route_failed = next(
         value for value in alpha.loaded if value.run_id == route_failed_run_id
     )
@@ -1205,9 +1239,13 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank() -> None:
         "run.degraded",
     ]
 
-    repository_only = FleetProjection(
-        Repository({NODE_A: nodes[NODE_A]}), sessions, clock=lambda: NOW
-    ).read().nodes[0]
+    repository_only = (
+        FleetProjection(
+            Repository({NODE_A: nodes[NODE_A]}), sessions, clock=lambda: NOW
+        )
+        .read()
+        .nodes[0]
+    )
     external_install = next(
         value
         for value in repository_only.installed
@@ -1287,6 +1325,7 @@ def test_history_is_repository_authorized_raw_bounded_and_chronological() -> Non
         start=NOW - timedelta(hours=1),
         end=NOW,
         maximum_points=2,
+        resolution="raw",
     )
 
     document = history.model_dump(mode="json")
@@ -1295,6 +1334,7 @@ def test_history_is_repository_authorized_raw_bounded_and_chronological() -> Non
         "node_id": NODE_A,
         "start": "2026-08-15T11:00:00Z",
         "end": "2026-08-15T12:00:00Z",
+        "resolution": "raw",
         "maximum_points": 2,
     }
     assert [
@@ -1325,6 +1365,7 @@ def test_history_is_repository_authorized_raw_bounded_and_chronological() -> Non
             start=NOW - timedelta(hours=1),
             end=NOW,
             maximum_points=2,
+            resolution="raw",
         )
     with pytest.raises(ValueError, match="maximum points"):
         projection.telemetry_history(
@@ -1332,6 +1373,7 @@ def test_history_is_repository_authorized_raw_bounded_and_chronological() -> Non
             start=NOW - timedelta(hours=1),
             end=NOW,
             maximum_points=1_501,
+            resolution="raw",
         )
     with pytest.raises(ValueError, match="raw window"):
         projection.telemetry_history(
@@ -1339,6 +1381,7 @@ def test_history_is_repository_authorized_raw_bounded_and_chronological() -> Non
             start=NOW - timedelta(hours=24, microseconds=1),
             end=NOW,
             maximum_points=2,
+            resolution="raw",
         )
 
 
@@ -1377,6 +1420,7 @@ def test_non_rfc_non_nil_boot_id_flows_through_snapshot_and_history() -> None:
         start=NOW - timedelta(minutes=1),
         end=NOW,
         maximum_points=1,
+        resolution="raw",
     )
 
     assert snapshot.nodes[0].telemetry.sample.boot_id == NON_RFC_BOOT_ID
@@ -1512,9 +1556,7 @@ def test_projection_selects_only_the_latest_512_current_installation_groups() ->
                 )
             )
 
-    snapshot = FleetProjection(
-        Repository(nodes), sessions, clock=lambda: NOW
-    ).read()
+    snapshot = FleetProjection(Repository(nodes), sessions, clock=lambda: NOW).read()
 
     installation_ids = [value.installation_id for value in snapshot.nodes[0].installed]
     assert len(installation_ids) == 512
@@ -1523,7 +1565,9 @@ def test_projection_selects_only_the_latest_512_current_installation_groups() ->
     assert "install-000" not in installation_ids
 
 
-def test_projection_rejects_more_than_500_repository_nodes_before_state_queries() -> None:
+def test_projection_rejects_more_than_500_repository_nodes_before_state_queries() -> (
+    None
+):
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)

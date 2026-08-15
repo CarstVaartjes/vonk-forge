@@ -4155,7 +4155,12 @@ export interface components {
             /** Node Id */
             node_id: string;
             /** Points */
-            points: components["schemas"]["TelemetryPoint"][];
+            points: (components["schemas"]["TelemetryPoint"] | components["schemas"]["TelemetryRollupPoint"])[];
+            /**
+             * Resolution
+             * @enum {string}
+             */
+            resolution: "raw" | "minute" | "fifteen-minute";
             /**
              * Schema Version
              * @default 1
@@ -4167,6 +4172,17 @@ export interface components {
              * Format: date-time
              */
             start: string;
+        };
+        /** TelemetryMetricSummary */
+        TelemetryMetricSummary: {
+            /** Count */
+            count: number;
+            /** Maximum */
+            maximum: number;
+            /** Mean */
+            mean: number;
+            /** Minimum */
+            minimum: number;
         };
         /** TelemetryPoint */
         TelemetryPoint: {
@@ -4217,6 +4233,34 @@ export interface components {
             sequence: number;
             /** Temperature C */
             temperature_c?: number | null;
+        };
+        /** TelemetryRollupPoint */
+        TelemetryRollupPoint: {
+            /**
+             * Bucket End
+             * Format: date-time
+             */
+            bucket_end: string;
+            /**
+             * Bucket Start
+             * Format: date-time
+             */
+            bucket_start: string;
+            /** Gap Samples */
+            gap_samples: number;
+            /** Metrics */
+            metrics: {
+                [key: string]: components["schemas"]["TelemetryMetricSummary"];
+            };
+            /** Node Id */
+            node_id: string;
+            /**
+             * Resolution
+             * @enum {string}
+             */
+            resolution: "minute" | "fifteen-minute";
+            /** Source Sample Count */
+            source_sample_count: number;
         };
         /** TelemetryState */
         TelemetryState: {
@@ -7066,6 +7110,7 @@ export interface operations {
             query: {
                 start: string;
                 end: string;
+                resolution: "raw" | "minute" | "fifteen-minute";
                 maximum_points?: number;
             };
             header?: never;

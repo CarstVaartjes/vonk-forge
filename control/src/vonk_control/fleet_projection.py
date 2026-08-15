@@ -28,6 +28,8 @@ from .models import (
 from .telemetry import (
     TelemetryDetailsInput,
     TelemetryRepository,
+    TelemetryResolution,
+    TelemetryRollupPointView,
     TelemetrySampleView,
 )
 
@@ -131,9 +133,7 @@ class NodeConnection(_StrictModel):
     online_state: Literal["online", "offline", "unregistered"]
     offline_reason: OfflineReason | None
     last_seen_at: datetime | None
-    last_seen_age_seconds: float | None = Field(
-        ge=0, le=float(_MAX_SIGNED_BIGINT)
-    )
+    last_seen_age_seconds: float | None = Field(ge=0, le=float(_MAX_SIGNED_BIGINT))
 
 
 class InventoryState(_StrictModel):
@@ -151,9 +151,7 @@ class InventoryState(_StrictModel):
     artifact_store_read_only: bool
     capabilities: list[Text64] = Field(max_length=64)
     fabric_address: str | None = Field(default=None, max_length=45)
-    fabric_bandwidth_mbps: int | None = Field(
-        default=None, ge=1, le=_MAX_SIGNED_BIGINT
-    )
+    fabric_bandwidth_mbps: int | None = Field(default=None, ge=1, le=_MAX_SIGNED_BIGINT)
     nvidia_driver_version: Text256
     container_runtime_version: Text256
 
@@ -174,18 +172,12 @@ class TelemetryPoint(_StrictModel):
     received_at: datetime
     cpu_utilization_percent: float | None = Field(default=None, ge=0, le=100)
     load_average_1m: float | None = Field(default=None, ge=0, le=1_000_000)
-    memory_total_bytes: int | None = Field(
-        default=None, ge=0, le=_MAX_TELEMETRY_BYTES
-    )
+    memory_total_bytes: int | None = Field(default=None, ge=0, le=_MAX_TELEMETRY_BYTES)
     memory_available_bytes: int | None = Field(
         default=None, ge=0, le=_MAX_TELEMETRY_BYTES
     )
-    disk_total_bytes: int | None = Field(
-        default=None, ge=0, le=_MAX_TELEMETRY_BYTES
-    )
-    disk_free_bytes: int | None = Field(
-        default=None, ge=0, le=_MAX_TELEMETRY_BYTES
-    )
+    disk_total_bytes: int | None = Field(default=None, ge=0, le=_MAX_TELEMETRY_BYTES)
+    disk_free_bytes: int | None = Field(default=None, ge=0, le=_MAX_TELEMETRY_BYTES)
     gpu_utilization_percent: float | None = Field(default=None, ge=0, le=100)
     gpu_memory_total_bytes: int | None = Field(
         default=None, ge=0, le=_MAX_TELEMETRY_BYTES
@@ -203,6 +195,23 @@ class TelemetryPoint(_StrictModel):
     )
     gap_samples: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
     details: TelemetryDetails
+
+
+class TelemetryMetricSummary(_StrictModel):
+    count: int = Field(ge=1, le=_MAX_SIGNED_BIGINT)
+    minimum: float
+    mean: float
+    maximum: float
+
+
+class TelemetryRollupPoint(_StrictModel):
+    node_id: NodeId
+    resolution: Literal["minute", "fifteen-minute"]
+    bucket_start: datetime
+    bucket_end: datetime
+    source_sample_count: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
+    gap_samples: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
+    metrics: dict[str, TelemetryMetricSummary] = Field(max_length=64)
 
 
 class TelemetryState(_StrictModel):
@@ -286,8 +295,9 @@ class TelemetryHistoryResponse(_StrictModel):
     node_id: NodeId
     start: datetime
     end: datetime
+    resolution: TelemetryResolution
     maximum_points: int = Field(ge=1, le=1_500)
-    points: list[TelemetryPoint] = Field(max_length=1_500)
+    points: list[TelemetryPoint | TelemetryRollupPoint] = Field(max_length=1_500)
 
 
 def telemetry_point(value: TelemetrySampleView) -> TelemetryPoint:
@@ -313,6 +323,26 @@ def telemetry_point(value: TelemetrySampleView) -> TelemetryPoint:
         network_transmit_bytes_per_second=value.network_transmit_bytes_per_second,
         gap_samples=value.gap_samples,
         details=_telemetry_details(value.details),
+    )
+
+
+def telemetry_rollup_point(value: TelemetryRollupPointView) -> TelemetryRollupPoint:
+    return TelemetryRollupPoint(
+        node_id=value.node_id,
+        resolution=value.resolution,
+        bucket_start=value.bucket_start,
+        bucket_end=value.bucket_end,
+        source_sample_count=value.source_sample_count,
+        gap_samples=value.gap_samples,
+        metrics={
+            name: TelemetryMetricSummary(
+                count=metric.count,
+                minimum=metric.minimum,
+                mean=metric.mean,
+                maximum=metric.maximum,
+            )
+            for name, metric in value.metrics.items()
+        },
     )
 
 
@@ -372,7 +402,10 @@ class FleetProjection:
         return self.read_at(self._events.high_watermark())
 
     def read_at(self, event_cursor: int) -> FleetSnapshot:
-        if type(event_cursor) is not int or not 0 <= event_cursor <= 9_223_372_036_854_775_807:
+        if (
+            type(event_cursor) is not int
+            or not 0 <= event_cursor <= 9_223_372_036_854_775_807
+        ):
             raise ValueError("Fleet event cursor is invalid")
         commit, fleet_nodes = self._repository_nodes()
         node_ids = tuple(sorted(fleet_nodes))
@@ -391,9 +424,7 @@ class FleetProjection:
             telemetry = self._telemetry.latest_in_session(session, node_ids)
             installation_rows = self._installation_rows(session, node_ids)
             run_rows = self._run_rows(session, node_ids)
-            mapping_ids = {
-                row[2].id for row in (*installation_rows, *run_rows)
-            }
+            mapping_ids = {row[2].id for row in (*installation_rows, *run_rows)}
             mapping_nodes = tuple(
                 session.scalars(
                     select(ClusterMappingNode)
@@ -437,6 +468,7 @@ class FleetProjection:
         start: datetime,
         end: datetime,
         maximum_points: int,
+        resolution: TelemetryResolution,
     ) -> TelemetryHistoryResponse:
         if type(maximum_points) is not int or not 1 <= maximum_points <= 1_500:
             raise ValueError("telemetry history maximum points is invalid")
@@ -451,8 +483,6 @@ class FleetProjection:
         end_utc = end.astimezone(UTC)
         if start_utc >= end_utc:
             raise ValueError("telemetry history window is invalid")
-        if end_utc - start_utc > timedelta(hours=24):
-            raise ValueError("telemetry history raw window exceeds 24 hours")
         _, nodes = self._repository_nodes()
         if node_id not in nodes:
             raise KeyError(node_id)
@@ -461,13 +491,20 @@ class FleetProjection:
             start_utc,
             end_utc,
             maximum_points,
+            resolution=resolution,
         )
         return TelemetryHistoryResponse(
             node_id=node_id,
             start=start_utc,
             end=end_utc,
+            resolution=resolution,
             maximum_points=maximum_points,
-            points=[telemetry_point(value) for value in points],
+            points=[
+                telemetry_point(value)
+                if isinstance(value, TelemetrySampleView)
+                else telemetry_rollup_point(value)
+                for value in points
+            ],
         )
 
     def _repository_nodes(self) -> tuple[str, dict[str, Mapping[str, object]]]:
@@ -583,7 +620,9 @@ class FleetProjection:
                     RecipeInstallation,
                     RecipeInstallation.id == InstallationNode.installation_id,
                 )
-                .join(ClusterMapping, ClusterMapping.id == RecipeInstallation.mapping_id)
+                .join(
+                    ClusterMapping, ClusterMapping.id == RecipeInstallation.mapping_id
+                )
                 .join(
                     LocalRecipeRevision,
                     LocalRecipeRevision.id == RecipeInstallation.recipe_revision_id,
@@ -656,9 +695,7 @@ class FleetProjection:
             mapping = group[0][2]
             revision = group[0][3]
             recipe = group[0][4]
-            visible_nodes = [
-                node for node in nodes if node.node_id in fleet_node_ids
-            ]
+            visible_nodes = [node for node in nodes if node.node_id in fleet_node_ids]
             reason = self._exact_group_reason(
                 expected_count=mapping.node_count,
                 expected=mappings.get(mapping.id, ()),
@@ -723,9 +760,7 @@ class FleetProjection:
             mapping = group[0][2]
             revision = group[0][4]
             recipe = group[0][5]
-            visible_nodes = [
-                node for node in nodes if node.node_id in fleet_node_ids
-            ]
+            visible_nodes = [node for node in nodes if node.node_id in fleet_node_ids]
             reason = self._exact_group_reason(
                 expected_count=mapping.node_count,
                 expected=mappings.get(mapping.id, ()),
@@ -968,7 +1003,11 @@ class FleetProjection:
                 last_seen_age_seconds=None,
             )
         last_seen = None if value.last_seen_at is None else _utc(value.last_seen_at)
-        age = None if last_seen is None else max(0.0, (current - last_seen).total_seconds())
+        age = (
+            None
+            if last_seen is None
+            else max(0.0, (current - last_seen).total_seconds())
+        )
         if value.state == "revoked" or value.revoked_at is not None:
             offline_reason = "agent-revoked"
         elif value.state != "active":
@@ -993,9 +1032,7 @@ class FleetProjection:
         )
 
     @staticmethod
-    def _certificate_state(
-        value: AgentCertificate | None, current: datetime
-    ) -> str:
+    def _certificate_state(value: AgentCertificate | None, current: datetime) -> str:
         if value is None:
             return "missing"
         if (
