@@ -1,0 +1,123 @@
+import {render, screen, waitFor} from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import type {ControlApi, TelemetryHistory, VisualFleetNode} from "../api/types";
+import {NodeDetail} from "./node-detail";
+
+const NOW = new Date("2026-08-15T12:00:00Z");
+
+function node(): VisualFleetNode {
+  return {
+    id: "spk_0123456789abcdef0123456789abcdef", display_name: "Spark One", hostname: "spark-one.internal", lifecycle: "managed", labels: {rack: "left"},
+    connection: {agent_state: "active", certificate_state: "valid", online_state: "online", offline_reason: null, last_seen_at: "2026-08-15T11:59:59Z", last_seen_age_seconds: 1},
+    inventory: null,
+    telemetry: null,
+    installed: [], loaded: [],
+    reservations: {disk_bytes: 0, unified_memory_bytes: 0, host_memory_bytes: 0, gpu_memory_bytes: 0, port_count: 0},
+    warnings: [{code: "telemetry.delayed", detail: "Telemetry delivery is delayed.", severity: "warning"}],
+  };
+}
+
+function history(start = "2026-08-15T11:00:00.000Z", end = "2026-08-15T12:00:00.000Z"): TelemetryHistory {
+  return {
+    schema_version: 1,
+    node_id: node().id,
+    start,
+    end,
+    maximum_points: 360,
+    points: [{
+      id: "sample-1", node_id: node().id, boot_id: "00000000-0000-0000-0000-000000000001", sequence: 1,
+      observed_at: "2026-08-15T11:30:00Z", received_at: "2026-08-15T11:30:01Z",
+      cpu_utilization_percent: 10, load_average_1m: 1,
+      memory_total_bytes: 100, memory_available_bytes: 80,
+      disk_total_bytes: 100, disk_free_bytes: 50,
+      gpu_utilization_percent: 20, gpu_memory_total_bytes: 100, gpu_memory_free_bytes: 70,
+      temperature_c: 40, power_watts: 18,
+      network_receive_bytes_per_second: 1000, network_transmit_bytes_per_second: 500,
+      gap_samples: 0, details: {accelerator_name: "NVIDIA GB10", accelerator_performance_state: "P0"},
+    }, {
+      id: "sample-2", node_id: node().id, boot_id: "00000000-0000-0000-0000-000000000001", sequence: 2,
+      observed_at: "2026-08-15T11:45:00Z", received_at: "2026-08-15T11:45:01Z",
+      cpu_utilization_percent: null, load_average_1m: null,
+      memory_total_bytes: 100, memory_available_bytes: 75,
+      disk_total_bytes: null, disk_free_bytes: null,
+      gpu_utilization_percent: 30, gpu_memory_total_bytes: null, gpu_memory_free_bytes: null,
+      temperature_c: 42, power_watts: null,
+      network_receive_bytes_per_second: null, network_transmit_bytes_per_second: null,
+      gap_samples: 1, details: {accelerator_name: null, accelerator_performance_state: null},
+    }],
+  };
+}
+
+test("loads bounded history ranges and renders accessible summaries", async () => {
+  const calls: Array<{end: string; maximum: number; signal?: AbortSignal; start: string}> = [];
+  const control = {
+    nodeTelemetryHistory: async (_nodeId: string, start: string, end: string, maximum: number, signal?: AbortSignal) => {
+      calls.push({end, maximum, signal, start});
+      return history(start, end);
+    },
+  } as ControlApi;
+  const view = render(<NodeDetail api={control} node={node()} now={NOW} onClose={() => undefined}/>);
+
+  expect(screen.getByRole("button", {name: "Close Spark One details"})).toHaveFocus();
+  expect(await screen.findByRole("img", {name: "Spark One GPU utilization history"})).toHaveAccessibleDescription("Latest 30%; range 20% to 30%; 2 reported samples.");
+  expect(screen.getByRole("img", {name: "Spark One available memory history"})).toHaveAccessibleDescription(/75 B/);
+  expect(screen.getByRole("img", {name: "Spark One temperature history"})).toHaveAccessibleDescription(/42 °C/);
+  expect(calls[0]).toMatchObject({
+    start: "2026-08-15T11:00:00.000Z",
+    end: "2026-08-15T12:00:00.000Z",
+    maximum: 360,
+  });
+
+  await userEvent.click(screen.getByRole("button", {name: "24 hours"}));
+  await waitFor(() => expect(calls).toHaveLength(2));
+  expect(calls[0].signal?.aborted).toBe(true);
+  expect(calls[1]).toMatchObject({
+    start: "2026-08-14T12:00:00.000Z",
+    end: "2026-08-15T12:00:00.000Z",
+    maximum: 1440,
+  });
+  expect(screen.getByRole("button", {name: "24 hours"})).toHaveAttribute("aria-pressed", "true");
+
+  view.unmount();
+  expect(calls[1].signal?.aborted).toBe(true);
+});
+
+test("shows structured node evidence and a retryable history error", async () => {
+  let fail = true;
+  const control = {
+    nodeTelemetryHistory: async () => {
+      if (fail) throw new Error("Control API returned 503: history unavailable");
+      return history();
+    },
+  } as unknown as ControlApi;
+  render(<NodeDetail api={control} node={node()} now={NOW} onClose={() => undefined}/>);
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("history unavailable");
+  expect(screen.getByRole("complementary", {name: "Spark One details"})).toHaveTextContent("Telemetry delivery is delayed.");
+  await userEvent.click(screen.getByText("Technical details"));
+  expect(screen.getByText(node().id)).toBeVisible();
+  expect(screen.getByText("valid")).toBeVisible();
+
+  fail = false;
+  await userEvent.click(screen.getByRole("button", {name: "Retry history"}));
+  expect(await screen.findByRole("img", {name: "Spark One GPU utilization history"})).toBeVisible();
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
+
+test("does not present the previous range as the newly selected history", async () => {
+  let calls = 0;
+  let resolveNext!: (value: TelemetryHistory) => void;
+  const nextHistory = new Promise<TelemetryHistory>(resolve => { resolveNext = resolve; });
+  const control = {
+    nodeTelemetryHistory: async () => ++calls === 1 ? history() : nextHistory,
+  } as unknown as ControlApi;
+  render(<NodeDetail api={control} node={node()} now={NOW} onClose={() => undefined}/>);
+  expect(await screen.findByRole("img", {name: "Spark One GPU utilization history"})).toBeVisible();
+
+  await userEvent.click(screen.getByRole("button", {name: "24 hours"}));
+
+  expect(screen.getByRole("status")).toHaveTextContent("Loading bounded telemetry history");
+  expect(screen.queryByRole("img", {name: "Spark One GPU utilization history"})).not.toBeInTheDocument();
+  resolveNext(history("2026-08-14T12:00:00.000Z"));
+  expect(await screen.findByRole("img", {name: "Spark One GPU utilization history"})).toBeVisible();
+});

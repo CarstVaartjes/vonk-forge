@@ -10,7 +10,7 @@ import type {
   EnrollmentDecisionResponse,
   EnrollmentGrantResponse,
   EnrollmentListResponse,
-  FleetResponse,
+  FleetEvidenceResponse,
   JobDetail,
   JobResumeResponse,
   JobsResponse,
@@ -32,6 +32,8 @@ import type {
   GlobalRecipeRevision,
   WorkloadRunApplied,
   WorkloadRunPreview,
+  TelemetryHistory,
+  VisualFleetSnapshot,
   SourceBundleReceipt,
   SourcePolicyReport,
   RecipeBuildPlan,
@@ -312,8 +314,32 @@ export class ApiClient implements ControlApi {
     return this.request("/api/v1/catalog/imports/workload_run", {method: "POST", body: JSON.stringify({source_yaml: sourceYaml, source_sha256: sourceSha256, report_digest: reportDigest})});
   }
 
-  async fleet(): Promise<FleetResponse> {
-    return resultData(await this.generated.GET("/api/v1/fleet"));
+  async visualFleet(signal?: AbortSignal): Promise<VisualFleetSnapshot> {
+    return resultData(await this.generated.GET("/api/v1/fleet", {signal}));
+  }
+
+  async nodeStatuses(signal?: AbortSignal): Promise<FleetEvidenceResponse> {
+    return resultData(await this.generated.GET("/api/v1/nodes/status", {signal}));
+  }
+
+  fleetEvidence(signal?: AbortSignal): Promise<FleetEvidenceResponse> {
+    return this.nodeStatuses(signal);
+  }
+
+  async nodeTelemetryHistory(
+    nodeId: string,
+    start: string,
+    end: string,
+    maximumPoints: number,
+    signal?: AbortSignal,
+  ): Promise<TelemetryHistory> {
+    return resultData(await this.generated.GET("/api/v1/nodes/{node_id}/telemetry", {
+      params: {
+        path: {node_id: nodeId},
+        query: {start, end, maximum_points: maximumPoints},
+      },
+      signal,
+    }));
   }
 
   async agents(): Promise<AgentsResponse> {

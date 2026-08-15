@@ -3,7 +3,7 @@ import type {SVGProps} from "react";
 type IconProps = Omit<SVGProps<SVGSVGElement>, "children">;
 
 function Icon({children, ...props}: IconProps & {children: React.ReactNode}) {
-  return <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" {...props}>{children}</svg>;
+  return <svg {...props} aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{children}</svg>;
 }
 
 export function FleetIcon(props: IconProps) {

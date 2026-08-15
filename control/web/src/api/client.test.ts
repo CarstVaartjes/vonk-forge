@@ -8,21 +8,77 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it("uses the generated fleet operation with same-origin credentials", async () => {
-  let captured: Request | undefined;
+it("keeps visual Fleet snapshots separate from reconciliation evidence", async () => {
+  const captured: Request[] = [];
   vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
-    captured = input as Request;
-    return new Response(JSON.stringify({commit: "a".repeat(40), nodes: []}), {
+    const request = input as Request;
+    captured.push(request);
+    const pathname = new URL(request.url).pathname;
+    const body = pathname === "/api/v1/fleet"
+      ? {
+        schema_version: 1,
+        event_cursor: 7,
+        generated_at: "2026-08-15T12:00:00Z",
+        repository_commit: "a".repeat(40),
+        nodes: [],
+      }
+      : {commit: "a".repeat(40), evidence_digest: "e".repeat(64), nodes: []};
+    return new Response(JSON.stringify(body), {
       headers: {"Content-Type": "application/json"},
       status: 200,
     });
   });
+  const api = new ApiClient();
 
-  const fleet = await new ApiClient().fleet();
+  const visual = await api.visualFleet();
+  const evidence = await api.fleetEvidence();
+  const statuses = await api.nodeStatuses();
 
-  expect(fleet).toEqual({commit: "a".repeat(40), nodes: []});
-  expect(new URL(captured!.url).pathname).toBe("/api/v1/fleet");
-  expect(captured!.credentials).toBe("same-origin");
+  expect(visual).toEqual({
+    schema_version: 1,
+    event_cursor: 7,
+    generated_at: "2026-08-15T12:00:00Z",
+    repository_commit: "a".repeat(40),
+    nodes: [],
+  });
+  expect(evidence.evidence_digest).toBe("e".repeat(64));
+  expect(statuses.evidence_digest).toBe("e".repeat(64));
+  expect(captured.map(request => new URL(request.url).pathname)).toEqual([
+    "/api/v1/fleet",
+    "/api/v1/nodes/status",
+    "/api/v1/nodes/status",
+  ]);
+  expect(captured.every(request => request.credentials === "same-origin")).toBe(true);
+});
+
+it("requests bounded node telemetry history through the generated operation", async () => {
+  let captured: Request | undefined;
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+    captured = input as Request;
+    return new Response(JSON.stringify({
+      schema_version: 1,
+      node_id: "spk_0123456789abcdef0123456789abcdef",
+      start: "2026-08-15T11:00:00.000Z",
+      end: "2026-08-15T12:00:00.000Z",
+      maximum_points: 360,
+      points: [],
+    }), {headers: {"Content-Type": "application/json"}, status: 200});
+  });
+
+  await new ApiClient().nodeTelemetryHistory(
+    "spk_0123456789abcdef0123456789abcdef",
+    "2026-08-15T11:00:00.000Z",
+    "2026-08-15T12:00:00.000Z",
+    360,
+  );
+
+  const url = new URL(captured!.url);
+  expect(url.pathname).toBe("/api/v1/nodes/spk_0123456789abcdef0123456789abcdef/telemetry");
+  expect(Object.fromEntries(url.searchParams)).toEqual({
+    end: "2026-08-15T12:00:00.000Z",
+    maximum_points: "360",
+    start: "2026-08-15T11:00:00.000Z",
+  });
 });
 
 it("uses exact browser-auth documents and the CSRF cookie for server logout", async () => {
@@ -63,7 +119,7 @@ it("throws and emits one centralized authentication signal for an API 401", asyn
   let signals = 0;
   api.onAuthenticationRequired(() => { signals += 1; });
 
-  await expect(api.fleet()).rejects.toBeInstanceOf(AuthenticationRequired);
+  await expect(api.visualFleet()).rejects.toBeInstanceOf(AuthenticationRequired);
   expect(signals).toBe(1);
 });
 

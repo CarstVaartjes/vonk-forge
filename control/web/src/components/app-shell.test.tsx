@@ -4,9 +4,10 @@ import {App} from "../app";
 import type {CatalogApi, ControlApi} from "../api/types";
 import {Meter} from "./meter";
 import {StatusPill} from "./status-pill";
+import {FleetIcon} from "./icons";
 
 const apiFixture = {
-  fleet: async () => ({commit: "a".repeat(40), nodes: []}),
+  visualFleet: async () => ({schema_version: 1, event_cursor: 0, generated_at: "2026-08-15T12:00:00Z", repository_commit: "a".repeat(40), nodes: []}),
   updateSkew: async () => ({
     affected_nodes: [],
     digest: `sha256:${"b".repeat(64)}`,
@@ -136,4 +137,12 @@ test("renders reusable status and capacity components with native semantics", ()
   expect(screen.getByText("24 of 32 GB", {selector: "strong"})).toBeVisible();
   expect(screen.getByRole("meter", {name: "Unified memory"})).toHaveAttribute("value", "24");
   expect(screen.getByRole("meter", {name: "Unified memory"})).toHaveAttribute("max", "32");
+});
+
+test("decorative icons cannot be exposed by caller prop overrides", () => {
+  const {container} = render(<FleetIcon aria-hidden={false} focusable="true"/>);
+  const icon = container.querySelector("svg");
+
+  expect(icon).toHaveAttribute("aria-hidden", "true");
+  expect(icon).toHaveAttribute("focusable", "false");
 });
