@@ -8,6 +8,7 @@ from vonk_control.catalog_contract import catalog_content_sha256
 from vonk_control.harness_conformance import (
     HarnessConformanceError,
     LifecycleRequest,
+    _conformance_recipe,
     _documents,
     run_synthetic_conformance,
     validate_terminal_evidence,
@@ -89,13 +90,14 @@ def test_conformance_rejects_schema_valid_terminal_evidence_with_wrong_identity(
     None
 ):
     harness, distribution = _documents("vllm")
+    recipe = _conformance_recipe("vllm", harness, distribution)
     projection = HarnessRegistry.with_builtins().compile(
         harness,
-        recipe={"runtime": {"entrypoint": ["synthetic-runner", "--offline"]}},
+        recipe=recipe,
         distribution=distribution,
         patch=None,
         parameters={},
-        topology={"node_count": 1},
+        topology=recipe["topology"],
         role="entrypoint",
         rank=0,
     )

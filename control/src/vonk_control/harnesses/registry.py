@@ -31,7 +31,6 @@ from ..source_bundles import (
 )
 from .common import (
     HarnessCompileError,
-    SyntheticHarnessCompiler,
     custom_adapter_command,
     validate_projection,
 )
@@ -216,11 +215,7 @@ class HarnessRegistry:
 
     @classmethod
     def with_builtins(cls) -> HarnessRegistry:
-        return cls.from_trusted_builtins(
-            TrustedBuiltinComposition(
-                tuple(SyntheticHarnessCompiler(slug) for slug in BUILTIN_HARNESS_SLUGS)
-            )
-        )
+        return cls.from_trusted_builtins(_trusted_builtin_composition())
 
     @classmethod
     def from_trusted_builtins(
@@ -294,6 +289,8 @@ class HarnessRegistry:
                 or tuple(adapters) != compiler.spec.interfaces
             ):
                 raise HarnessCompileError("adapter interface expectation is invalid")
+        else:
+            _validate_builtin_harness(harness, compiler, recipe, topology)
         runtime_distribution = _resolved_document(distribution, "runtime distribution")
         distribution_kind = runtime_distribution.get("kind")
         distribution_platform = runtime_distribution.get("platform")
@@ -340,6 +337,18 @@ class HarnessRegistry:
         ):
             raise HarnessCompileError("runtime distribution does not implement harness")
         distribution_digest = _resolved_digest(distribution, runtime_distribution)
+        _validate_recipe_bindings(
+            recipe,
+            harness,
+            harness_digest,
+            runtime_distribution,
+            distribution_digest,
+            patch,
+            topology,
+        )
+        validated_patch = _validated_patch(
+            patch, runtime_distribution, distribution_digest
+        )
         node_count = (
             topology.get("node_count") if isinstance(topology, Mapping) else None
         )
@@ -353,7 +362,13 @@ class HarnessRegistry:
         ):
             raise HarnessCompileError("harness topology binding is invalid")
         projection = compiler.compile(
-            recipe, runtime_distribution, patch, parameters, topology, role, rank
+            recipe,
+            runtime_distribution,
+            validated_patch,
+            parameters,
+            topology,
+            role,
+            rank,
         )
         _require_compiler_identity(compiler, slug)
         if type(projection.slug) is not str or projection.slug != slug:
@@ -371,11 +386,14 @@ class HarnessRegistry:
         validate_projection(projection)
         return projection
 
-    def _compiler_for(self, slug: str, bundle: Mapping[str, object]) -> HarnessCompiler:
+    def _compiler_for(
+        self, slug: str, bundle: Mapping[str, object] | None
+    ) -> HarnessCompiler:
         registered = self._custom.get(slug)
         if registered is not None:
             if (
                 self._source_bundle_store is None
+                or bundle is None
                 or _bundle_identity(bundle) != registered.identity
             ):
                 raise HarnessCompileError(
@@ -392,7 +410,7 @@ class HarnessRegistry:
                 raise HarnessCompileError("custom adapter document identity is invalid")
             return _BundleHarnessCompiler(spec)
         compiler = self._compilers.get(slug)
-        if compiler is None:
+        if compiler is None or bundle is not None:
             raise HarnessCompileError("unknown execution harness")
         _require_compiler_identity(compiler, slug)
         return compiler
@@ -711,7 +729,7 @@ def _resolved_digest(
 
 def _harness_identity(
     document: Mapping[str, object],
-) -> tuple[str, Mapping[str, object]]:
+) -> tuple[str, Mapping[str, object] | None]:
     identity = document.get("identity")
     bundle = document.get("source_bundle")
     kind = document.get("kind")
@@ -726,11 +744,176 @@ def _harness_identity(
         or runtime_interface != "vonk.runtime.v1"
         or not isinstance(identity, Mapping)
         or type(slug) is not str
-        or not isinstance(bundle, Mapping)
     ):
         raise HarnessCompileError("resolved execution harness is invalid")
-    _bundle_identity(bundle)
+    if bundle is not None:
+        if not isinstance(bundle, Mapping):
+            raise HarnessCompileError("resolved execution harness is invalid")
+        _bundle_identity(bundle)
     return slug, bundle
+
+
+def _trusted_builtin_composition() -> TrustedBuiltinComposition:
+    """Construct the complete production built-in set at its only composition root."""
+    from .comfyui import ComfyUiHarnessCompiler
+    from .diffusers import DiffusersHarnessCompiler
+    from .ds4 import Ds4HarnessCompiler
+    from .llama_cpp import LlamaCppHarnessCompiler
+    from .pytorch_pipeline import PytorchPipelineHarnessCompiler
+    from .sglang import SglangHarnessCompiler
+    from .tensorrt_llm import TensorRtLlmHarnessCompiler
+    from .vllm import VllmHarnessCompiler
+
+    return TrustedBuiltinComposition(
+        (
+            VllmHarnessCompiler(),
+            SglangHarnessCompiler(),
+            TensorRtLlmHarnessCompiler(),
+            LlamaCppHarnessCompiler(),
+            Ds4HarnessCompiler(),
+            DiffusersHarnessCompiler(),
+            ComfyUiHarnessCompiler(),
+            PytorchPipelineHarnessCompiler(),
+        )
+    )
+
+
+def _validate_builtin_harness(
+    harness: Mapping[str, object],
+    compiler: HarnessCompiler,
+    recipe: Mapping[str, object],
+    topology: Mapping[str, object],
+) -> None:
+    compiler_slug = harness.get("compiler_slug")
+    contract_version = harness.get("contract_version")
+    topology_modes = harness.get("topology_modes")
+    adapters = harness.get("adapters")
+    capabilities = harness.get("capability_requirements")
+    exceptions = harness.get("security_exceptions")
+    mode = topology.get("mode") if isinstance(topology, Mapping) else None
+    interfaces = recipe.get("interfaces")
+    interface_names = (
+        tuple(
+            interface.get("adapter") if isinstance(interface, Mapping) else None
+            for interface in interfaces
+        )
+        if type(interfaces) is list
+        else ()
+    )
+    if (
+        type(compiler_slug) is not str
+        or compiler_slug != compiler.slug
+        or type(contract_version) is not int
+        or contract_version != compiler.contract_version
+        or type(topology_modes) is not list
+        or type(adapters) is not list
+        or type(capabilities) is not list
+        or type(exceptions) is not list
+    ):
+        raise HarnessCompileError("resolved built-in harness contract is invalid")
+    if type(mode) is not str or mode not in topology_modes:
+        raise HarnessCompileError("resolved built-in harness topology is incompatible")
+    if not interface_names or any(
+        type(name) is not str or name not in adapters for name in interface_names
+    ):
+        raise HarnessCompileError("resolved built-in harness interface is incompatible")
+    runtime = recipe.get("runtime")
+    security = runtime.get("security") if isinstance(runtime, Mapping) else None
+    devices = security.get("devices") if isinstance(security, Mapping) else None
+    if "nvidia-gpu" in capabilities and (
+        type(devices) is not list or "nvidia.com/gpu=all" not in devices
+    ):
+        raise HarnessCompileError("built-in harness capability requirement is missing")
+    arguments = runtime.get("arguments") if isinstance(runtime, Mapping) else None
+    trusts_remote_code = type(arguments) is list and any(
+        isinstance(item, Mapping)
+        and item.get("name") == "trust-remote-code"
+        and item.get("value") is True
+        for item in arguments
+    )
+    if trusts_remote_code and "model.trust-remote-code" not in exceptions:
+        raise HarnessCompileError("built-in harness security exception is missing")
+
+
+def _validate_recipe_bindings(
+    recipe: Mapping[str, object],
+    harness: Mapping[str, object],
+    harness_digest: str,
+    distribution: Mapping[str, object],
+    distribution_digest: str,
+    patch: Mapping[str, object] | None,
+    topology: Mapping[str, object],
+) -> None:
+    execution = recipe.get("execution")
+    runtime = recipe.get("runtime")
+    harness_reference = (
+        execution.get("harness") if isinstance(execution, Mapping) else None
+    )
+    distribution_reference = (
+        runtime.get("distribution") if isinstance(runtime, Mapping) else None
+    )
+    harness_identity = harness.get("identity")
+    distribution_identity = distribution.get("identity")
+    expected_harness = _reference_for(
+        "execution-harness", harness_identity, harness_digest
+    )
+    expected_distribution = _reference_for(
+        "runtime-distribution", distribution_identity, distribution_digest
+    )
+    if (
+        not isinstance(recipe, Mapping)
+        or harness_reference != expected_harness
+        or distribution_reference != expected_distribution
+        or recipe.get("topology") != topology
+    ):
+        raise HarnessCompileError("harness recipe exact bindings are invalid")
+    patch_reference = (
+        execution.get("patch_bundle") if isinstance(execution, Mapping) else None
+    )
+    if (patch is None) != (patch_reference is None):
+        raise HarnessCompileError("harness patch exact binding is invalid")
+    if patch is not None:
+        patch_document = _resolved_document(patch, "patch bundle")
+        if patch_reference != _reference_for(
+            "patch-bundle",
+            patch_document.get("identity"),
+            _resolved_digest(patch, patch_document),
+        ):
+            raise HarnessCompileError("harness patch exact binding is invalid")
+
+
+def _validated_patch(
+    patch: Mapping[str, object] | None,
+    distribution: Mapping[str, object],
+    distribution_digest: str,
+) -> Mapping[str, object] | None:
+    if patch is None:
+        return None
+    document = _resolved_document(patch, "patch bundle")
+    if document.get("kind") != "patch-bundle" or document.get(
+        "applies_to"
+    ) != _reference_for(
+        "runtime-distribution", distribution.get("identity"), distribution_digest
+    ):
+        raise HarnessCompileError("patch bundle does not apply to runtime distribution")
+    return document
+
+
+def _reference_for(
+    kind: str, identity: object, content_sha256: str
+) -> dict[str, object]:
+    if not isinstance(identity, Mapping):
+        raise HarnessCompileError("resolved catalog identity is invalid")
+    publisher = identity.get("publisher")
+    slug = identity.get("slug")
+    if type(publisher) is not str or type(slug) is not str:
+        raise HarnessCompileError("resolved catalog identity is invalid")
+    return {
+        "kind": kind,
+        "publisher": publisher,
+        "slug": slug,
+        "content_sha256": content_sha256,
+    }
 
 
 def _bundle_identity(bundle: Mapping[str, object]) -> tuple[str, int, str]:

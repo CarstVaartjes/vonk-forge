@@ -41,6 +41,7 @@ class HarnessProjection:
     capabilities: tuple[str, ...]
     model_mounts: tuple[HarnessMount, ...]
     output_mount: HarnessMount
+    environment: tuple[tuple[str, str], ...] = ()
     binding: HarnessBinding | None = None
 
 

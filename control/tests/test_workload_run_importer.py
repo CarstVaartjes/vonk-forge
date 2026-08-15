@@ -102,3 +102,18 @@ def test_runtime_name_requires_exact_execution_harness_resolution() -> None:
         "unresolved-distribution"
     )
     validate_recipe(result.draft_document)
+
+
+def test_raw_workload_run_command_never_becomes_builtin_harness_authority() -> None:
+    source = parse_workload_run_yaml((FIXTURES / "minimal-vllm.yaml").read_bytes())
+
+    result = import_workload_run(source)
+
+    command_item = next(
+        item for item in result.report if item.source_path == "/command"
+    )
+    assert command_item.disposition is ImportDisposition.UNSUPPORTED_BLOCKING
+    assert command_item.reason_code == "runtime.command_unsupported"
+    assert result.draft_document["runtime"]["entrypoint"] == ["unresolved-runtime"]
+    assert result.draft_document["runtime"]["arguments"] == []
+    assert result.draft_document["runtime"]["environment"] == []

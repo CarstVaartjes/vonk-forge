@@ -115,7 +115,24 @@
     "executionHarness": {
       "allOf": [
         {"$ref": "#/$defs/base"},
-        {"properties": {"kind": {"const": "execution-harness"}, "runtime_interface": {"const": "vonk.runtime.v1"}, "adapters": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["openai", "image-job", "audio-job", "video-job", "mesh-job", "artifact-job"]}}, "source_bundle": {"$ref": "#/$defs/sourceBundle"}}, "required": ["runtime_interface", "adapters", "source_bundle"]}
+        {
+          "properties": {
+            "kind": {"const": "execution-harness"},
+            "runtime_interface": {"const": "vonk.runtime.v1"},
+            "adapters": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["openai", "image-job", "audio-job", "video-job", "mesh-job", "artifact-job"]}},
+            "source_bundle": {"$ref": "#/$defs/sourceBundle"},
+            "compiler_slug": {"enum": ["vllm", "sglang", "tensorrt-llm", "llama-cpp", "ds4", "diffusers", "comfyui", "pytorch-pipeline"]},
+            "contract_version": {"const": 1},
+            "topology_modes": {"type": "array", "minItems": 1, "maxItems": 7, "uniqueItems": true, "items": {"enum": ["single", "tensor_parallel", "pipeline_parallel", "data_parallel", "hybrid", "ray", "mpi"]}},
+            "capability_requirements": {"type": "array", "minItems": 1, "maxItems": 8, "uniqueItems": true, "items": {"enum": ["nvidia-gpu", "immutable-workflow", "signed-source-bundle"]}},
+            "security_exceptions": {"type": "array", "maxItems": 8, "uniqueItems": true, "items": {"enum": ["model.trust-remote-code"]}}
+          },
+          "required": ["runtime_interface", "adapters"],
+          "oneOf": [
+            {"required": ["source_bundle"], "not": {"anyOf": [{"required": ["compiler_slug"]}, {"required": ["contract_version"]}, {"required": ["topology_modes"]}, {"required": ["capability_requirements"]}, {"required": ["security_exceptions"]}]}},
+            {"required": ["compiler_slug", "contract_version", "topology_modes", "capability_requirements", "security_exceptions"], "not": {"required": ["source_bundle"]}}
+          ]
+        }
       ],
       "unevaluatedProperties": false
     },

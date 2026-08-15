@@ -35,7 +35,7 @@ class Models:
         )
 
 
-def test_complete_overlays_resolve_import_to_valid_recipe() -> None:
+def test_exact_overlays_do_not_authorize_a_raw_runtime_command() -> None:
     raw = (
         Path(__file__).parent / "fixtures/workload_run/minimal-vllm.yaml"
     ).read_bytes()
@@ -86,7 +86,7 @@ def test_complete_overlays_resolve_import_to_valid_recipe() -> None:
         models=Models(),
     )
 
-    assert result.runnable is True
+    assert result.runnable is False
     assert (
         result.bundle.files["Dockerfile"]
         .decode()
@@ -95,4 +95,8 @@ def test_complete_overlays_resolve_import_to_valid_recipe() -> None:
     assert result.document["build"]["context"]["sha256"] == result.bundle.sha256
     assert result.document["artifacts"][0]["download_bytes"] == 100
     assert result.document["topology"]["name"] == "solo"
-    assert not result.blockers
+    assert [item.reason_code for item in result.blockers] == [
+        "runtime.command_unsupported"
+    ]
+    assert result.document["runtime"]["entrypoint"] == ["unresolved-runtime"]
+    assert result.document["runtime"]["arguments"] == []

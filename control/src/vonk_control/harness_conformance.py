@@ -5,11 +5,17 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
+from importlib.resources import files
+from pathlib import Path
 
 from jsonschema import Draft202012Validator
 
-from .catalog_contract import catalog_content_sha256
-from .harnesses import HarnessProjection, HarnessRegistry
+from .catalog_contract import (
+    canonical_catalog_document,
+    catalog_content_sha256,
+    parse_catalog_json,
+)
+from .harnesses import BUILTIN_HARNESS_SLUGS, HarnessProjection, HarnessRegistry
 from .harnesses.common import HarnessCompileError
 from .schema_resources import read_runtime_schema
 
@@ -245,16 +251,19 @@ def run_synthetic_conformance(
     slug: str, *, registry: HarnessRegistry | None = None
 ) -> HarnessEvidence:
     """Compile first, then construct the lifecycle executor from that projection only."""
+    if slug not in BUILTIN_HARNESS_SLUGS:
+        raise HarnessConformanceError("unknown execution harness")
     harness, distribution = _documents(slug)
+    recipe = _conformance_recipe(slug, harness, distribution)
     active_registry = registry or HarnessRegistry.with_builtins()
     try:
         projection = active_registry.compile(
             harness,
-            recipe={"runtime": {"entrypoint": ["synthetic-runner", "--offline"]}},
+            recipe=recipe,
             distribution=distribution,
             patch=None,
             parameters={},
-            topology={"node_count": 1},
+            topology=recipe["topology"],
             role="entrypoint",
             rank=0,
         )
@@ -463,27 +472,14 @@ def _mount_paths_are_isolated(projection: HarnessProjection) -> bool:
 
 
 def _documents(slug: str) -> tuple[dict[str, object], dict[str, object]]:
-    harness = {
-        "schema_version": 1,
-        "kind": "execution-harness",
-        "identity": {"publisher": "vonk-forge", "slug": slug},
-        "metadata": {
-            "title": f"{slug} synthetic harness",
-            "description": "Synthetic lifecycle harness for conformance.",
-            "tags": ["synthetic"],
-        },
-        "runtime_interface": "vonk.runtime.v1",
-        "adapters": ["openai"],
-        "source_bundle": {
-            "sha256": "a" * 64,
-            "expected_bytes": 2048,
-            "media_type": "application/vnd.vonk-forge.source-bundle.v1+tar",
-        },
-    }
+    harness = _builtin_harness_document(slug)
     distribution = {
         "schema_version": 1,
         "kind": "runtime-distribution",
-        "identity": {"publisher": "vonk-forge", "slug": "synthetic-arm64"},
+        "identity": {
+            "publisher": "vonk-forge",
+            "slug": f"{slug}-conformance-arm64",
+        },
         "metadata": {
             "title": "Synthetic ARM64 runtime",
             "description": "Offline digest-pinned runtime for conformance.",
@@ -506,3 +502,197 @@ def _documents(slug: str) -> tuple[dict[str, object], dict[str, object]]:
         "sha256": "d" * 64,
     }
     return harness, distribution
+
+
+def _builtin_harness_document(slug: str) -> dict[str, object]:
+    packaged = files("vonk_control").joinpath("execution-harnesses", f"{slug}.json")
+    if packaged.is_file():
+        payload = packaged.read_bytes()
+    else:
+        root = Path(__file__).resolve().parents[3]
+        payload = (root / "config/execution-harnesses" / f"{slug}.json").read_bytes()
+    document = dict(parse_catalog_json(payload))
+    if payload != canonical_catalog_document(document) + b"\n":
+        raise HarnessConformanceError(
+            "built-in harness catalog document is noncanonical"
+        )
+    return document
+
+
+def _conformance_recipe(
+    slug: str,
+    harness: Mapping[str, object],
+    distribution: Mapping[str, object],
+) -> dict[str, object]:
+    cases: dict[str, tuple[list[str], list[dict[str, object]], str]] = {
+        "vllm": (
+            ["/opt/vonk/bin/vllm", "serve", "/models"],
+            [
+                {"name": "max-model-len", "value": 32768},
+                {"name": "tensor-parallel-size", "value": 1},
+            ],
+            "openai",
+        ),
+        "sglang": (
+            ["/opt/vonk/bin/sglang-serve"],
+            [
+                {"name": "model-path", "value": "/models"},
+                {"name": "context-length", "value": 32768},
+                {"name": "tensor-parallel-size", "value": 1},
+            ],
+            "openai",
+        ),
+        "tensorrt-llm": (
+            ["/usr/local/bin/trtllm-serve", "serve", "/models"],
+            [
+                {"name": "backend", "value": "pytorch"},
+                {"name": "max-batch-size", "value": 8},
+                {"name": "max-num-tokens", "value": 4096},
+                {"name": "max-seq-len", "value": 32768},
+                {"name": "tp-size", "value": 1},
+                {"name": "pp-size", "value": 1},
+                {"name": "ep-size", "value": 1},
+            ],
+            "openai",
+        ),
+        "llama-cpp": (
+            ["/opt/vonk/bin/llama-server"],
+            [
+                {"name": "model", "value": "/models/model.gguf"},
+                {"name": "ctx-size", "value": 32768},
+                {"name": "n-gpu-layers", "value": 999},
+            ],
+            "openai",
+        ),
+        "ds4": (
+            ["/opt/vonk/bin/ds4-serve"],
+            [
+                {"name": "model", "value": "/models/target.gguf"},
+                {"name": "draft-model", "value": "/models/drafter.gguf"},
+                {"name": "ctx-size", "value": 32768},
+            ],
+            "openai",
+        ),
+        "diffusers": (
+            ["/opt/vonk/bin/diffusers-job"],
+            [
+                {"name": "pipeline", "value": "text-to-image"},
+                {"name": "output-mime", "value": "image/png"},
+            ],
+            "image-job",
+        ),
+        "comfyui": (
+            ["/opt/vonk/bin/comfyui-job"],
+            [
+                {
+                    "name": "workflow",
+                    "value": "/opt/vonk/source/workflows/image.json",
+                },
+                {"name": "workflow-sha256", "value": "e" * 64},
+                {"name": "output-mime", "value": "image/png"},
+            ],
+            "image-job",
+        ),
+        "pytorch-pipeline": (
+            ["/opt/vonk/bin/pytorch-pipeline"],
+            [
+                {
+                    "name": "entrypoint",
+                    "value": "/opt/vonk/source/pipelines/run.py",
+                },
+                {"name": "output-mime", "value": "model/gltf-binary"},
+            ],
+            "mesh-job",
+        ),
+    }
+    entrypoint, arguments, interface = cases[slug]
+    harness_identity = harness["identity"]
+    distribution_identity = distribution["identity"]
+    assert isinstance(harness_identity, Mapping)
+    assert isinstance(distribution_identity, Mapping)
+    job = interface != "openai"
+    interfaces = (
+        [{"adapter": interface, "path": "/outputs"}]
+        if job
+        else [
+            {
+                "adapter": "openai",
+                "port": 8000,
+                "model_aliases": ["synthetic"],
+                "health_path": "/v1/models",
+            }
+        ]
+    )
+    checks = (
+        [
+            "artifact.mime."
+            + str(
+                next(
+                    item["value"] for item in arguments if item["name"] == "output-mime"
+                )
+            ).replace("/", "-")
+        ]
+        if job
+        else ["endpoint.healthy"]
+    )
+    topology = {
+        "mode": "single",
+        "node_count": 1,
+        "parallelism": {
+            "tensor": 1,
+            "pipeline": 1,
+            "data": 1,
+            "backend": "local",
+        },
+        "fabric": {"connectivity": "none", "minimum_bandwidth_mbps": 0},
+        "roles": [{"name": "entrypoint", "count": 1}],
+    }
+    return {
+        "execution": {
+            "harness": {
+                "kind": "execution-harness",
+                "publisher": harness_identity["publisher"],
+                "slug": harness_identity["slug"],
+                "content_sha256": catalog_content_sha256(harness),
+            },
+            "patch_bundle": None,
+        },
+        "runtime": {
+            "distribution": {
+                "kind": "runtime-distribution",
+                "publisher": distribution_identity["publisher"],
+                "slug": distribution_identity["slug"],
+                "content_sha256": catalog_content_sha256(distribution),
+            },
+            "entrypoint": entrypoint,
+            "arguments": arguments,
+            "environment": [],
+            "security": {
+                "devices": ["nvidia.com/gpu=all"],
+                "capabilities": [],
+                "host_network": False,
+                "privileged": False,
+                "user": "10001:10001",
+                "mounts": [
+                    {"source": "model", "target": "/models", "read_only": True},
+                    {
+                        "source": "outputs",
+                        "target": "/outputs",
+                        "read_only": False,
+                    },
+                ],
+            },
+        },
+        "parameters": [],
+        "build": {
+            "context": {
+                "sha256": "f" * 64,
+                "expected_bytes": 2048,
+                "media_type": "application/vnd.vonk-forge.source-bundle.v1+tar",
+            }
+        },
+        "artifacts": [{"mount": {"target": "/models", "read_only": True}}],
+        "interfaces": interfaces,
+        "validation": {"validators": [{"interface": interface, "checks": checks}]},
+        "topology": topology,
+    }

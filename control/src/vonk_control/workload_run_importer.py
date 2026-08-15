@@ -13,7 +13,6 @@ from .import_report import (
     ImportReportBuilder,
     ImportReportItem,
 )
-from .runtime_compilers import RuntimeCompileError, RuntimeProjection, compile_runtime
 from .source_bundles import GeneratedSourceBundle, generate_source_bundle
 from .workload_run_source import WorkloadRunSource
 
@@ -38,14 +37,8 @@ class WorkloadRunImportResult:
 
 def import_workload_run(source: WorkloadRunSource) -> WorkloadRunImportResult:
     builder = ImportReportBuilder(source.leaf_paths())
-    projection: RuntimeProjection | None = None
-    compiler_error: str | None = None
-    try:
-        projection = compile_runtime(source, builder)
-    except RuntimeCompileError as error:
-        compiler_error = str(error)[:240]
     for path in source.leaf_paths():
-        _classify(source, builder, path, compiler_error=compiler_error)
+        _classify(source, builder, path)
     builder.record(
         "/@missing/resources",
         ImportDisposition.OVERLAY_REQUIRED,
@@ -90,7 +83,7 @@ def import_workload_run(source: WorkloadRunSource) -> WorkloadRunImportResult:
     )
     bundle = _bundle(source)
     return WorkloadRunImportResult(
-        draft_document=_draft(source, projection, bundle),
+        draft_document=_draft(source, bundle),
         bundle=bundle,
         report=report,
         source_sha256=source.source_sha256,
@@ -104,8 +97,6 @@ def _classify(
     source: WorkloadRunSource,
     builder: ImportReportBuilder,
     path: str,
-    *,
-    compiler_error: str | None,
 ) -> None:
     top = path.split("/", 2)[1] if path.startswith("/") else ""
     destination: str | None = None
@@ -195,39 +186,21 @@ def _classify(
             False,
         )
     elif top == "command":
-        if compiler_error is None:
-            disposition, destination, reason, detail, blocking = (
-                ImportDisposition.TRANSFORMED,
-                "/runtime/arguments",
-                "runtime.command",
-                "The command was parsed as an allowlisted runtime grammar; it was never executed as shell text.",
-                False,
-            )
-        else:
-            disposition, reason, detail, blocking = (
-                ImportDisposition.UNSUPPORTED_BLOCKING,
-                "runtime.command_unsupported",
-                f"The command cannot be represented safely: {compiler_error}",
-                True,
-            )
+        disposition, reason, detail, blocking = (
+            ImportDisposition.UNSUPPORTED_BLOCKING,
+            "runtime.command_unsupported",
+            "Raw WorkloadRun commands cannot select or configure an exact execution harness.",
+            True,
+        )
     elif top == "env":
         suffix = path.removeprefix("/env")
-        if compiler_error is None:
-            disposition, destination, reason, detail, blocking = (
-                ImportDisposition.TRANSFORMED,
-                f"/runtime/environment{suffix}",
-                "runtime.environment",
-                "The allowlisted environment value is imported as typed container configuration.",
-                False,
-            )
-        else:
-            disposition, destination, reason, detail, blocking = (
-                ImportDisposition.RESOLUTION_REQUIRED,
-                f"/runtime/environment{suffix}",
-                "runtime.environment_review",
-                "This literal environment setting requires runtime-specific review; secret values are never accepted.",
-                True,
-            )
+        disposition, destination, reason, detail, blocking = (
+            ImportDisposition.RESOLUTION_REQUIRED,
+            f"/runtime/environment{suffix}",
+            "runtime.environment_review",
+            "This literal environment setting requires runtime-specific review; secret values are never accepted.",
+            True,
+        )
     elif top in {"mods", "tuning"}:
         suffix = path.removeprefix(f"/{top}")
         disposition, destination, reason, detail, blocking = (
@@ -256,7 +229,6 @@ def _classify(
 
 def _draft(
     source: WorkloadRunSource,
-    projection: RuntimeProjection | None,
     bundle: GeneratedSourceBundle,
 ) -> dict[str, object]:
     slug = re.sub(r"[^a-z0-9-]+", "-", source.model.rsplit("/", 1)[-1].lower()).strip(
@@ -268,13 +240,6 @@ def _draft(
     minimum = source.min_nodes or 1
     maximum = source.max_nodes or minimum
     node_count = min(maximum, minimum + 63)
-    family = projection.family if projection is not None else source.runtime
-    runtime_family = re.sub(r"[^a-z0-9_]+", "_", family.lower()).strip("_") or "custom"
-    entrypoints = {
-        "vllm": ["vllm", "serve", "/models"],
-        "sglang": ["python", "-m", "sglang.launch_server", "--model-path", "/models"],
-        "llama_cpp": ["llama-server"],
-    }
     return {
         "schema_version": 1,
         "identity": {"publisher": "workload-run", "slug": slug},
@@ -323,16 +288,9 @@ def _draft(
             "distribution": _catalog_reference(
                 "runtime-distribution", "unresolved-distribution"
             ),
-            "entrypoint": entrypoints.get(runtime_family, [runtime_family]),
-            "arguments": projection.recipe_arguments()
-            if projection is not None
-            else [],
-            "environment": [
-                {"name": name, "value": value}
-                for name, value in sorted(
-                    (projection.environment if projection is not None else {}).items()
-                )
-            ],
+            "entrypoint": ["unresolved-runtime"],
+            "arguments": [],
+            "environment": [],
             "security": {
                 "devices": ["nvidia.com/gpu=all"],
                 "capabilities": [],
@@ -350,13 +308,9 @@ def _draft(
         "interfaces": [
             {
                 "adapter": "openai",
-                "port": int(projection.endpoint["port"])
-                if projection is not None
-                else 8000,
+                "port": 8000,
                 "model_aliases": [slug],
-                "health_path": str(projection.endpoint["health_path"])
-                if projection is not None
-                else "/v1/models",
+                "health_path": "/v1/models",
             }
         ],
         "validation": {

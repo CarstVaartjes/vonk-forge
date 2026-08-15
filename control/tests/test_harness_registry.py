@@ -30,7 +30,7 @@ from vonk_control.source_bundles import SourceBundleStore, generate_source_bundl
 def harness_document(
     slug: str, *, source_bundle: dict[str, object] | None = None
 ) -> dict[str, object]:
-    return {
+    document = {
         "schema_version": 1,
         "kind": "execution-harness",
         "identity": {"publisher": "vonk-forge", "slug": slug},
@@ -41,13 +41,24 @@ def harness_document(
         },
         "runtime_interface": "vonk.runtime.v1",
         "adapters": ["openai"],
-        "source_bundle": source_bundle
-        or {
+    }
+    if slug in BUILTIN_HARNESS_SLUGS and source_bundle is None:
+        document.update(
+            {
+                "compiler_slug": slug,
+                "contract_version": 1,
+                "topology_modes": ["single"],
+                "capability_requirements": ["nvidia-gpu"],
+                "security_exceptions": [],
+            }
+        )
+    else:
+        document["source_bundle"] = source_bundle or {
             "sha256": "a" * 64,
             "expected_bytes": 2048,
             "media_type": "application/vnd.vonk-forge.source-bundle.v1+tar",
-        },
-    }
+        }
+    return document
 
 
 def distribution_document(harness_slug: str = "vllm") -> dict[str, object]:
@@ -85,23 +96,79 @@ def compile_harness(registry: HarnessRegistry, document: dict[str, object]):
     implements_harness = distribution["implements_harness"]
     assert isinstance(implements_harness, dict)
     implements_harness["content_sha256"] = catalog_content_sha256(document)
+    recipe = recipe_document(document, distribution)
+    topology = recipe["topology"]
+    assert isinstance(topology, dict)
     return registry.compile(
         document,
-        recipe={"runtime": {"entrypoint": ["serve", "--model", "/models"]}},
+        recipe=recipe,
         distribution=distribution,
         patch=None,
         parameters={},
-        topology={"node_count": 1},
+        topology=topology,
         role="entrypoint",
         rank=0,
     )
 
 
-@pytest.mark.parametrize("slug", BUILTIN_HARNESS_SLUGS)
-def test_registry_compiles_each_exact_builtin_harness_slug(slug: str) -> None:
-    projection = compile_harness(
-        HarnessRegistry.with_builtins(), harness_document(slug)
+def recipe_document(
+    harness: dict[str, object], distribution: dict[str, object]
+) -> dict[str, object]:
+    harness_identity = harness["identity"]
+    distribution_identity = distribution["identity"]
+    assert isinstance(harness_identity, dict)
+    assert isinstance(distribution_identity, dict)
+    return {
+        "execution": {
+            "harness": {
+                "kind": "execution-harness",
+                "publisher": harness_identity["publisher"],
+                "slug": harness_identity["slug"],
+                "content_sha256": catalog_content_sha256(harness),
+            },
+            "patch_bundle": None,
+        },
+        "runtime": {
+            "distribution": {
+                "kind": "runtime-distribution",
+                "publisher": distribution_identity["publisher"],
+                "slug": distribution_identity["slug"],
+                "content_sha256": catalog_content_sha256(distribution),
+            },
+            "entrypoint": ["serve", "--model", "/models"],
+            "environment": [],
+            "security": {"devices": ["nvidia.com/gpu=all"]},
+        },
+        "interfaces": [{"adapter": "openai"}],
+        "topology": {
+            "mode": "single",
+            "node_count": 1,
+            "parallelism": {
+                "tensor": 1,
+                "pipeline": 1,
+                "data": 1,
+                "backend": "local",
+            },
+            "fabric": {
+                "connectivity": "none",
+                "minimum_bandwidth_mbps": 0,
+            },
+            "roles": [{"name": "entrypoint", "count": 1}],
+        },
+    }
+
+
+def synthetic_registry() -> HarnessRegistry:
+    return HarnessRegistry.from_trusted_builtins(
+        TrustedBuiltinComposition(
+            tuple(SyntheticHarnessCompiler(slug) for slug in BUILTIN_HARNESS_SLUGS)
+        )
     )
+
+
+@pytest.mark.parametrize("slug", BUILTIN_HARNESS_SLUGS)
+def test_registry_compiles_each_trusted_builtin_harness_slug(slug: str) -> None:
+    projection = compile_harness(synthetic_registry(), harness_document(slug))
 
     assert projection.slug == slug
     assert projection.command == ("serve", "--model", "/models")
@@ -118,20 +185,21 @@ def test_registry_compiles_each_exact_builtin_harness_slug(slug: str) -> None:
 
 def test_registry_fails_closed_for_an_unknown_builtin_slug() -> None:
     with pytest.raises(HarnessCompileError, match="unknown execution harness"):
-        compile_harness(
-            HarnessRegistry.with_builtins(), harness_document("unknown-harness")
-        )
+        compile_harness(synthetic_registry(), harness_document("unknown-harness"))
 
 
 def test_registry_rejects_a_distribution_for_a_different_harness() -> None:
     with pytest.raises(HarnessCompileError, match="does not implement harness"):
-        HarnessRegistry.with_builtins().compile(
-            harness_document("sglang"),
-            recipe={"runtime": {"entrypoint": ["serve"]}},
-            distribution=distribution_document("vllm"),
+        harness = harness_document("sglang")
+        distribution = distribution_document("vllm")
+        recipe = recipe_document(harness, distribution)
+        synthetic_registry().compile(
+            harness,
+            recipe=recipe,
+            distribution=distribution,
             patch=None,
             parameters={},
-            topology={"node_count": 1},
+            topology=recipe["topology"],
             role="entrypoint",
             rank=0,
         )
@@ -148,7 +216,7 @@ def test_registry_uses_the_canonical_execution_harness_schema(mutation: str) -> 
     with pytest.raises(
         HarnessCompileError, match="resolved execution harness is invalid"
     ):
-        compile_harness(HarnessRegistry.with_builtins(), document)
+        compile_harness(synthetic_registry(), document)
 
 
 @pytest.fixture
@@ -393,9 +461,7 @@ def test_reserved_builtin_slug_cannot_be_taken_over_by_custom_registration(
 
 
 def test_mount_validation_rejects_noncanonical_root_and_cross_boundary_paths() -> None:
-    projection = compile_harness(
-        HarnessRegistry.with_builtins(), harness_document("vllm")
-    )
+    projection = compile_harness(synthetic_registry(), harness_document("vllm"))
 
     for changed in (
         replace(
@@ -853,9 +919,7 @@ def test_custom_adapter_rejects_unknown_document_fields(tmp_path: Path) -> None:
 def test_projection_rejects_non_boolean_security_and_mount_values(
     field: str, value: object
 ) -> None:
-    projection = compile_harness(
-        HarnessRegistry.with_builtins(), harness_document("vllm")
-    )
+    projection = compile_harness(synthetic_registry(), harness_document("vllm"))
     if field == "no_new_privileges":
         changed = replace(projection, no_new_privileges=value)
     elif field == "model_read_only":
@@ -883,9 +947,7 @@ def test_projection_rejects_non_boolean_security_and_mount_values(
 def test_projection_requires_exact_empty_capabilities_tuple(
     capabilities: object,
 ) -> None:
-    projection = compile_harness(
-        HarnessRegistry.with_builtins(), harness_document("vllm")
-    )
+    projection = compile_harness(synthetic_registry(), harness_document("vllm"))
 
     with pytest.raises(HarnessCompileError, match="capabilities"):
         validate_projection(replace(projection, capabilities=capabilities))
@@ -902,9 +964,7 @@ def test_command_parsers_reject_a_string_subclass_before_using_it(parser) -> Non
 
 
 def test_projection_command_rejects_a_string_subclass_before_using_it() -> None:
-    projection = compile_harness(
-        HarnessRegistry.with_builtins(), harness_document("vllm")
-    )
+    projection = compile_harness(synthetic_registry(), harness_document("vllm"))
     argument = CallbackString("--model")
 
     with pytest.raises(HarnessCompileError, match="command"):
@@ -925,15 +985,16 @@ def test_registry_role_rejects_a_string_subclass_before_using_it() -> None:
     assert isinstance(implementation, dict)
     implementation["content_sha256"] = catalog_content_sha256(document)
     role = CallbackString("entrypoint")
+    recipe = recipe_document(document, distribution)
 
     with pytest.raises(HarnessCompileError, match="topology binding"):
-        HarnessRegistry.with_builtins().compile(
+        synthetic_registry().compile(
             document,
-            recipe={"runtime": {"entrypoint": ["serve"]}},
+            recipe=recipe,
             distribution=distribution,
             patch=None,
             parameters={},
-            topology={"node_count": 1},
+            topology=recipe["topology"],
             role=role,
             rank=0,
         )
@@ -953,9 +1014,7 @@ def test_registry_role_rejects_a_string_subclass_before_using_it() -> None:
     ],
 )
 def test_projection_rejects_wrong_security_contract_types(change) -> None:
-    projection = compile_harness(
-        HarnessRegistry.with_builtins(), harness_document("vllm")
-    )
+    projection = compile_harness(synthetic_registry(), harness_document("vllm"))
 
     with pytest.raises(HarnessCompileError):
         validate_projection(change(projection))
@@ -1055,9 +1114,7 @@ def test_custom_adapter_rejects_non_exact_contract_version(
     ],
 )
 def test_projection_rejects_runtime_security_bypasses(change, message: str) -> None:
-    projection = compile_harness(
-        HarnessRegistry.with_builtins(), harness_document("vllm")
-    )
+    projection = compile_harness(synthetic_registry(), harness_document("vllm"))
 
     with pytest.raises(HarnessCompileError, match=message):
         validate_projection(change(projection))

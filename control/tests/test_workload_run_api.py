@@ -5,6 +5,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
@@ -17,7 +18,10 @@ from vonk_control.model_resolution import ModelFile, SnapshotEnvelope
 from vonk_control.models import Base, LocalRecipe, RecipeImport
 from vonk_control.registry_resolution import ManifestEnvelope
 from vonk_control.source_bundles import SourceBundleStore
-from vonk_control.workload_run_workflow import WorkloadRunWorkflow
+from vonk_control.workload_run_workflow import (
+    WorkloadRunWorkflow,
+    WorkloadRunWorkflowError,
+)
 
 
 class Jobs:
@@ -128,7 +132,9 @@ def test_apply_rejects_stale_preview_and_operator(tmp_path: Path) -> None:
     assert stale.json()["code"] == "workload_run.stale_preview"
 
 
-def test_workflow_resolves_with_verified_metadata_and_overlays(tmp_path: Path) -> None:
+def test_workflow_keeps_raw_runtime_command_blocked_after_exact_overlays(
+    tmp_path: Path,
+) -> None:
     engine = create_engine(f"sqlite:///{tmp_path / 'resolve.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
@@ -163,50 +169,52 @@ def test_workflow_resolves_with_verified_metadata_and_overlays(tmp_path: Path) -
         actor="admin",
     )
 
-    resolved = workflow.resolve(
-        applied.recipe_id,
-        expected_revision=1,
-        overlays={
-            "build_resources": {
-                "download_bytes": 50,
-                "temporary_bytes": 50,
-                "memory_bytes": 100,
-                "timeout_seconds": 600,
+    with pytest.raises(WorkloadRunWorkflowError) as captured:
+        workflow.resolve(
+            applied.recipe_id,
+            expected_revision=1,
+            overlays={
+                "build_resources": {
+                    "download_bytes": 50,
+                    "temporary_bytes": 50,
+                    "memory_bytes": 100,
+                    "timeout_seconds": 600,
+                },
+                "artifact_sizes": {
+                    "weights": {"download_bytes": 100, "installed_bytes": 150}
+                },
+                "catalog_references": {
+                    "model": exact["model"],
+                    "execution_harness": exact["execution"]["harness"],
+                    "runtime_distribution": exact["runtime"]["distribution"],
+                    "patch_bundle": exact["execution"]["patch_bundle"],
+                },
+                "topology_resources": {
+                    "entrypoint": {
+                        "disk": {
+                            "image_bytes": 50,
+                            "artifact_bytes": 150,
+                            "staging_bytes": 50,
+                            "cache_bytes": 10,
+                            "rollback_bytes": 50,
+                            "safety_margin_bytes": 20,
+                        },
+                        "memory": {
+                            "kind": "unified",
+                            "startup_peak_bytes": 225,
+                            "steady_state_bytes": 200,
+                            "runtime_growth_bytes": 25,
+                            "system_reserve_bytes": 25,
+                        },
+                    }
+                },
+                "security_acknowledged": True,
             },
-            "artifact_sizes": {
-                "weights": {"download_bytes": 100, "installed_bytes": 150}
-            },
-            "catalog_references": {
-                "model": exact["model"],
-                "execution_harness": exact["execution"]["harness"],
-                "runtime_distribution": exact["runtime"]["distribution"],
-                "patch_bundle": exact["execution"]["patch_bundle"],
-            },
-            "topology_resources": {
-                "entrypoint": {
-                    "disk": {
-                        "image_bytes": 50,
-                        "artifact_bytes": 150,
-                        "staging_bytes": 50,
-                        "cache_bytes": 10,
-                        "rollback_bytes": 50,
-                        "safety_margin_bytes": 20,
-                    },
-                    "memory": {
-                        "kind": "unified",
-                        "startup_peak_bytes": 225,
-                        "steady_state_bytes": 200,
-                        "runtime_growth_bytes": 25,
-                        "system_reserve_bytes": 25,
-                    },
-                }
-            },
-            "security_acknowledged": True,
-        },
-        actor="admin",
-    )
-    assert resolved.revision_number == 2
-    assert len(resolved.content_sha256) == 64
+            actor="admin",
+        )
+
+    assert captured.value.code == "workload_run.import_blocked"
+    assert "runtime.command_unsupported" in str(captured.value)
 
 
 class _Registry:
