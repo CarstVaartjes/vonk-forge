@@ -418,4 +418,3 @@ agent work is isolated in a new module and generic client/control endpoints.
   <https://www.postgresql.org/docs/current/ddl-partitioning.html>
 - PostgreSQL, Materialized views:
   <https://www.postgresql.org/docs/current/rules-materializedviews.html>
-
