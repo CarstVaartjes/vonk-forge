@@ -24,6 +24,7 @@ test("uploads source first and authors a source-first typed recipe", async () =>
   await user.type(screen.getByLabelText("Recipe slug"), "my-model");
   await user.type(screen.getByLabelText("Title"), "My model");
   await user.type(screen.getByLabelText("Description"), "A locally authored model recipe.");
+  await user.type(screen.getByLabelText("Model-version slug"), "my-model-fp16");
   await user.type(screen.getByLabelText("Artifact repository"), "Example/MyModel");
   await user.type(screen.getByLabelText("Artifact revision"), "0123456789abcdef0123456789abcdef01234567");
   await user.clear(screen.getByLabelText("Artifact bytes"));
@@ -38,10 +39,12 @@ test("uploads source first and authors a source-first typed recipe", async () =>
   expect(input.document.runtime.security.privileged).toBe(false);
   expect(input.document.runtime.security.host_network).toBe(false);
   expect(input.document.build.platform).toBe("linux/arm64");
-  expect(input.document.runtime.interface).toBe("vonk.runtime.v1");
-  expect(input.document.runtime).not.toHaveProperty("image");
+  expect(input.document.model).toEqual(expect.objectContaining({kind: "model-version", slug: "my-model-fp16"}));
+  expect(input.document.execution.harness).toEqual(expect.objectContaining({kind: "execution-harness"}));
+  expect(input.document.runtime.distribution).toEqual(expect.objectContaining({kind: "runtime-distribution"}));
+  expect(input.document.runtime).not.toHaveProperty("adapter");
   expect(input.document.build.context.sha256).toBe(uploaded[0]);
-  expect(input.document.deployment_profiles[0].node_count).toBe(1);
+  expect(input.document.topology.node_count).toBe(1);
 });
 
 test("attaches local test evidence and exports for an exact publisher namespace", async () => {
@@ -49,7 +52,7 @@ test("attaches local test evidence and exports for an exact publisher namespace"
     recipe_id: "10000000-0000-4000-8000-000000000001", revision_number: 2,
     slug: "qwen", title: "Qwen", description: "Test", origin: "local", lifecycle: "resolved",
     content_sha256: "a".repeat(64), schema_version: 1, created_by: "admin", created_at: "2026-08-07T10:00:00Z",
-    document: {identity: {publisher: "local", slug: "qwen"}, metadata: {title: "Qwen", description: "Test", tags: []}, workload: {family: "qwen", capabilities: ["openai.chat"]}, artifacts: [{kind: "huggingface.snapshot", repository: "Qwen/Qwen", revision: "b".repeat(40), expected_bytes: 1}], runtime: {interface: "vonk.runtime.v1", family: "vllm", image: `ghcr.io/vonk/qwen@sha256:${"c".repeat(64)}`, architecture: "linux/arm64", arguments: []}, resources: {per_node: {download_bytes: 1, installed_bytes: 1, staging_bytes: 1, resident_memory_bytes: 1, activation_memory_bytes: 1}, measurement: "measured"}, topology: {kind: "single", min_nodes: 1, max_nodes: 1, tested_node_counts: [1]}, endpoint: {protocol: "openai", port: 8000, model_aliases: ["qwen"], health_path: "/v1/models"}, security: {devices: ["nvidia.com/gpu=all"], capabilities: [], host_network: false, privileged: false, mounts: [{source: "model", target: "/models", read_only: true}, {source: "state", target: "/state", read_only: false}]}, provenance: {source_kind: "local", source_reference: null, attribution: []}},
+    document: {schema_version: 1, identity: {publisher: "local", slug: "qwen"}, model: {kind: "model-version", publisher: "local", slug: "qwen-fp16", content_sha256: "b".repeat(64)}, execution: {harness: {kind: "execution-harness", publisher: "local", slug: "vllm-openai", content_sha256: "c".repeat(64)}, patch_bundle: null}, runtime: {distribution: {kind: "runtime-distribution", publisher: "local", slug: "python-312-cuda", content_sha256: "d".repeat(64)}, entrypoint: ["vllm"]}, topology: {name: "solo", mode: "single", node_count: 1}, interfaces: [{adapter: "openai", port: 8000, model_aliases: ["qwen"], health_path: "/v1/models"}]},
   } as any;
   const reports: unknown[] = [];
   const exports: string[] = [];

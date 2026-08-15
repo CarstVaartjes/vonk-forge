@@ -13,8 +13,9 @@ USER 65532:65532
 `;
 const initial: Fields = {
   publisher: "local", slug: "", title: "", description: "", tags: "text",
-  family: "custom", capabilities: "openai.chat", repository: "", revision: "",
-  artifactBytes: "1", adapter: "vllm", entrypoint: "vllm\nserve\n/models",
+  repository: "", revision: "", modelVersion: "", modelDigest: zeroDigest,
+  executionHarness: "vllm-openai", harnessDigest: zeroDigest, runtimeDistribution: "python-312-cuda", runtimeDigest: zeroDigest,
+  artifactBytes: "1", entrypoint: "vllm\nserve\n/models",
   alias: "model", port: "8000", nodeCount: "1", imageBytes: "5000000000",
   stagingBytes: "8000000000", memoryBytes: "80000000000", systemReserveBytes: "8000000000",
   buildMemoryBytes: "8000000000", buildTemporaryBytes: "12000000000", buildDownloadBytes: "1",
@@ -39,27 +40,27 @@ function recipeDocument(fields: Fields, sourceSha256: string, archiveBytes: numb
     schema_version: 1,
     identity: {publisher: fields.publisher, slug: fields.slug},
     metadata: {title: fields.title, description: fields.description, tags: list(fields.tags)},
-    workload: {family: fields.family, capabilities: list(fields.capabilities)},
+    model: {kind: "model-version", publisher: fields.publisher, slug: fields.modelVersion || fields.slug, content_sha256: fields.modelDigest},
+    execution: {harness: {kind: "execution-harness", publisher: fields.publisher, slug: fields.executionHarness, content_sha256: fields.harnessDigest}, patch_bundle: null},
     build: {
       context: {sha256: sourceSha256, expected_bytes: archiveBytes, media_type: "application/vnd.vonk-forge.source-bundle.v1+tar"},
       dockerfile: "Dockerfile", platform: "linux/arm64", arguments: [], network: {mode: "none", hosts: []},
       resources: {download_bytes: positive(fields.buildDownloadBytes, "Build download"), temporary_bytes: positive(fields.buildTemporaryBytes, "Build temporary size"), memory_bytes: positive(fields.buildMemoryBytes, "Build memory"), timeout_seconds: 3600},
     },
-    parameters: [],
     artifacts: [{id: "weights", kind: "huggingface.snapshot", repository: fields.repository, revision: fields.revision, download_bytes: artifactBytes, installed_bytes: artifactBytes, mount: {target: "/models", read_only: true}, roles: ["entrypoint"]}],
     runtime: {
-      interface: "vonk.runtime.v1", adapter: fields.adapter, adapter_version: 1, entrypoint: lines(fields.entrypoint), arguments: [], environment: [],
-      endpoint: {protocol: "openai", port: positive(fields.port, "Endpoint port"), model_aliases: list(fields.alias), health_path: "/v1/models"},
+      distribution: {kind: "runtime-distribution", publisher: fields.publisher, slug: fields.runtimeDistribution, content_sha256: fields.runtimeDigest}, entrypoint: lines(fields.entrypoint), arguments: [], environment: [],
       security: {devices: ["nvidia.com/gpu=all"], capabilities: [], host_network: false, privileged: false, user: "65532:65532", mounts: [{source: "model", target: "/models", read_only: true}, {source: "state", target: "/state", read_only: false}]},
       lifecycle: {pre_start: [], post_stop: [], stop_timeout_seconds: 30},
     },
-    deployment_profiles: [{
-      name: nodes === 1 ? "solo" : `${nodes}-node`, description: nodes === 1 ? "One GPU node." : `${nodes} connected GPU nodes.`, node_count: nodes,
-      strategy: nodes === 1 ? "single" : "tensor_parallel", parallelism: {tensor: nodes, pipeline: 1, data: 1, backend: nodes === 1 ? "local" : "nccl"},
+    topology: {
+      name: nodes === 1 ? "solo" : `${nodes}-node`, mode: nodes === 1 ? "single" : "tensor_parallel", node_count: nodes,
+      parallelism: {tensor: nodes, pipeline: 1, data: 1, backend: nodes === 1 ? "local" : "nccl"},
       roles: [{name: "entrypoint", count: nodes, endpoint_owner: true, artifacts: ["weights"], resources: {disk: {image_bytes: imageBytes, artifact_bytes: artifactBytes, staging_bytes: stagingBytes, cache_bytes: 1, rollback_bytes: 0, safety_margin_bytes: 10000000000}, memory: {kind: "unified", startup_peak_bytes: memoryBytes, steady_state_bytes: memoryBytes, runtime_growth_bytes: 1, system_reserve_bytes: reserveBytes}}}],
-      fabric: {connectivity: nodes === 1 ? "none" : "connected", minimum_bandwidth_mbps: nodes === 1 ? 0 : 10000}, parameter_overrides: {}, measurement: "declared",
-    }],
-    validation: {checks: ["container.started", "endpoint.healthy", "inference.completed"], benchmarks: []},
+      fabric: {connectivity: nodes === 1 ? "none" : "connected", minimum_bandwidth_mbps: nodes === 1 ? 0 : 10000}, start_order: ["entrypoint"], stop_order: ["entrypoint"],
+    },
+    interfaces: [{adapter: "openai", port: positive(fields.port, "Endpoint port"), model_aliases: list(fields.alias), health_path: "/v1/models"}],
+    validation: {validators: [{interface: "openai", checks: ["container.started", "endpoint.healthy", "inference.completed"]}], benchmarks: []},
     provenance: {source_kind: "local", source_reference: null, attribution: []},
   };
 }
@@ -124,12 +125,12 @@ export function RecipeEditorPage({api, recipeId}: {api: EditorApi; recipeId?: st
     {recipe?.lifecycle === "resolved" && <section className="confirmation"><h3>Publish through vonkforge.ai</h3><p>Attach evidence from an actual local build, install, health check, and inference test before export.</p><label>Local test report JSON<input type="file" accept="application/json,.json" onChange={event => void attachReport(event.target.files?.[0])}/></label><label>Target publisher namespace<input value={targetPublisher} onChange={event => setTargetPublisher(event.target.value)}/></label><button type="button" onClick={() => void downloadExport()}>Download publication JSON</button></section>}
   </>;
 
-  const metadataFields: [string, string][] = [["slug", "Recipe slug"], ["title", "Title"], ["description", "Description"], ["repository", "Artifact repository"], ["revision", "Artifact revision"], ["artifactBytes", "Artifact bytes"], ["nodeCount", "Node count"], ["memoryBytes", "Runtime memory bytes per node"], ["imageBytes", "Expected image bytes per node"]];
+  const metadataFields: [string, string][] = [["slug", "Recipe slug"], ["title", "Title"], ["description", "Description"], ["modelVersion", "Model-version slug"], ["modelDigest", "Model-version content sha256"], ["executionHarness", "Execution-harness slug"], ["harnessDigest", "Execution-harness content sha256"], ["runtimeDistribution", "Runtime-distribution slug"], ["runtimeDigest", "Runtime-distribution content sha256"], ["repository", "Artifact repository"], ["revision", "Artifact revision"], ["artifactBytes", "Artifact bytes"], ["nodeCount", "Topology node count"], ["memoryBytes", "Runtime memory bytes per node"], ["imageBytes", "Expected image bytes per node"]];
   return <>
     <div className="page-heading"><div><h2>Create local recipe</h2><p>Start from a source template, import WorkloadRun, or describe a fully custom OCI build. No prebuilt image is required.</p></div><a className="button" href="/catalog/import/workload_run">Import WorkloadRun instead</a></div>
     {error && <p role="alert">{error}</p>}{message && <p role="status">{message}</p>}
     <form className="recipe-editor" onSubmit={save}>
-      <fieldset><legend>Recipe and capacity</legend>{metadataFields.map(([name, label]) => <label className={name === "description" ? "wide" : undefined} key={name}>{label}{name === "description" ? <textarea value={fields[name]} onChange={event => set(name, event.target.value)} required/> : <input aria-label={label} value={fields[name]} onChange={event => set(name, event.target.value)} required/>}</label>)}<label>Runtime adapter<select value={fields.adapter} onChange={event => set("adapter", event.target.value)}><option value="vllm">vLLM</option><option value="sglang">SGLang</option><option value="llama.cpp">llama.cpp</option><option value="custom">Custom</option></select></label><label className="wide">Entrypoint, one argument per line<textarea value={fields.entrypoint} onChange={event => set("entrypoint", event.target.value)} required/></label></fieldset>
+      <fieldset><legend>Recipe and capacity</legend>{metadataFields.map(([name, label]) => <label className={name === "description" ? "wide" : undefined} key={name}>{label}{name === "description" ? <textarea value={fields[name]} onChange={event => set(name, event.target.value)} required/> : <input aria-label={label} value={fields[name]} onChange={event => set(name, event.target.value)} required/>}</label>)}<label className="wide">Entrypoint, one argument per line<textarea value={fields.entrypoint} onChange={event => set("entrypoint", event.target.value)} required/></label></fieldset>
       <fieldset><legend>Source bundle</legend><p className="wide">The source is hashed and uploaded to the local catalog first. Compose is inspected as policy metadata and is never granted host privileges. The GPU node independently repeats the check before rootless Podman builds it.</p><label className="wide">Dockerfile<textarea aria-label="Dockerfile" rows={12} value={dockerfile} onChange={event => setDockerfile(event.target.value)} required/></label><label className="wide">Optional Compose policy document<textarea aria-label="Optional Compose policy document" rows={8} value={compose} onChange={event => setCompose(event.target.value)} placeholder="services: {}"/></label></fieldset>
       <div className="actions"><button type="submit">Verify source &amp; save draft</button></div>
     </form>

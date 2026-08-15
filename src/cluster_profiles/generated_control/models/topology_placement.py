@@ -19,12 +19,12 @@ if TYPE_CHECKING:
 
 
 
-T = TypeVar("T", bound="ProfilePlacement")
+T = TypeVar("T", bound="TopologyPlacement")
 
 
 
 @_attrs_define
-class ProfilePlacement:
+class TopologyPlacement:
     """
         Attributes:
             candidate_node_ids (list[str]):
@@ -32,13 +32,13 @@ class ProfilePlacement:
             evidence_counts (PlacementEvidenceCounts):
             limits (PlacementLimits):
             node_count (int):
-            profile_name (str):
             reasons (list['LibraryProjectionReason']):
             recommendations (list['PlacementRecommendation']):
             rejected_evidence_truncated (bool):
             rejected_groups (list['PlacementRecommendation']):
             rejected_nodes (list['RejectedNode']):
             search_complete (bool):
+            topology_name (str):
      """
 
     candidate_node_ids: list[str]
@@ -46,13 +46,13 @@ class ProfilePlacement:
     evidence_counts: 'PlacementEvidenceCounts'
     limits: 'PlacementLimits'
     node_count: int
-    profile_name: str
     reasons: list['LibraryProjectionReason']
     recommendations: list['PlacementRecommendation']
     rejected_evidence_truncated: bool
     rejected_groups: list['PlacementRecommendation']
     rejected_nodes: list['RejectedNode']
     search_complete: bool
+    topology_name: str
 
 
 
@@ -75,8 +75,6 @@ class ProfilePlacement:
         limits = self.limits.to_dict()
 
         node_count = self.node_count
-
-        profile_name = self.profile_name
 
         reasons = []
         for reasons_item_data in self.reasons:
@@ -110,6 +108,8 @@ class ProfilePlacement:
 
         search_complete = self.search_complete
 
+        topology_name = self.topology_name
+
 
         field_dict: dict[str, Any] = {}
 
@@ -119,13 +119,13 @@ class ProfilePlacement:
             "evidence_counts": evidence_counts,
             "limits": limits,
             "node_count": node_count,
-            "profile_name": profile_name,
             "reasons": reasons,
             "recommendations": recommendations,
             "rejected_evidence_truncated": rejected_evidence_truncated,
             "rejected_groups": rejected_groups,
             "rejected_nodes": rejected_nodes,
             "search_complete": search_complete,
+            "topology_name": topology_name,
         })
 
         return field_dict
@@ -156,8 +156,6 @@ class ProfilePlacement:
 
 
         node_count = d.pop("node_count")
-
-        profile_name = d.pop("profile_name")
 
         reasons = []
         _reasons = d.pop("reasons")
@@ -203,19 +201,21 @@ class ProfilePlacement:
 
         search_complete = d.pop("search_complete")
 
-        profile_placement = cls(
+        topology_name = d.pop("topology_name")
+
+        topology_placement = cls(
             candidate_node_ids=candidate_node_ids,
             evaluated_group_count=evaluated_group_count,
             evidence_counts=evidence_counts,
             limits=limits,
             node_count=node_count,
-            profile_name=profile_name,
             reasons=reasons,
             recommendations=recommendations,
             rejected_evidence_truncated=rejected_evidence_truncated,
             rejected_groups=rejected_groups,
             rejected_nodes=rejected_nodes,
             search_complete=search_complete,
+            topology_name=topology_name,
         )
 
-        return profile_placement
+        return topology_placement

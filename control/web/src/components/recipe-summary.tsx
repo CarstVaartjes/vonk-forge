@@ -9,11 +9,11 @@ function bytes(value: number): string {
 }
 
 export function RecipeSummary({recipe}: {recipe: CatalogRecipeSummary}) {
-  const nodes = recipe.profile_node_counts.map(count => `${count} node${count === 1 ? "" : "s"}`).join(", ");
+  const nodes = `${recipe.node_count} node${recipe.node_count === 1 ? "" : "s"}`;
   return <article className="recipe-card">
     <div className="recipe-card-heading"><div><span className={`origin origin-${recipe.origin}`}>{originLabels[recipe.origin]}</span><h3>{recipe.title}</h3></div><span className="status">{recipe.lifecycle}</span></div>
     <dl className="recipe-facts">
-      <div><dt>Runtime</dt><dd>{recipe.runtime_family}</dd></div><div><dt>Topology</dt><dd>{nodes}</dd></div>
+      <div><dt>Runtime</dt><dd>{recipe.runtime_distribution}</dd></div><div><dt>Topology</dt><dd>{recipe.topology_name} · {nodes}</dd></div>
       <div><dt>Install</dt><dd>up to {bytes(recipe.maximum_installed_bytes_per_node)} disk / node</dd></div>
       <div><dt>Run</dt><dd>up to {bytes(recipe.maximum_runtime_memory_bytes_per_node)} RAM / node</dd></div>
     </dl>

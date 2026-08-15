@@ -14,12 +14,12 @@ from typing import Literal, Union, cast
 import datetime
 
 if TYPE_CHECKING:
-  from ..models.profile_placement import ProfilePlacement
   from ..models.operational_state import OperationalState
-  from ..models.library_projection_reason import LibraryProjectionReason
   from ..models.library_recipe_identity import LibraryRecipeIdentity
   from ..models.recipe_revision_summary import RecipeRevisionSummary
-  from ..models.recipe_profile import RecipeProfile
+  from ..models.recipe_topology import RecipeTopology
+  from ..models.topology_placement import TopologyPlacement
+  from ..models.library_projection_reason import LibraryProjectionReason
   from ..models.visual_recipe_document import VisualRecipeDocument
 
 
@@ -36,22 +36,22 @@ class LibraryRecipeDetail:
         Attributes:
             generated_at (datetime.datetime):
             operational_state (OperationalState):
-            placement (list['ProfilePlacement']):
-            profiles (list['RecipeProfile']):
+            placement (list['TopologyPlacement']):
             reasons (list['LibraryProjectionReason']):
             recipe (LibraryRecipeIdentity):
             selected_revision (Union['RecipeRevisionSummary', None]):
+            topology (Union['RecipeTopology', None]):
             visual_recipe (Union['VisualRecipeDocument', None]):
             schema_version (Union[Literal[1], Unset]):  Default: 1.
      """
 
     generated_at: datetime.datetime
     operational_state: 'OperationalState'
-    placement: list['ProfilePlacement']
-    profiles: list['RecipeProfile']
+    placement: list['TopologyPlacement']
     reasons: list['LibraryProjectionReason']
     recipe: 'LibraryRecipeIdentity'
     selected_revision: Union['RecipeRevisionSummary', None]
+    topology: Union['RecipeTopology', None]
     visual_recipe: Union['VisualRecipeDocument', None]
     schema_version: Union[Literal[1], Unset] = 1
 
@@ -60,12 +60,12 @@ class LibraryRecipeDetail:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.profile_placement import ProfilePlacement
         from ..models.operational_state import OperationalState
-        from ..models.library_projection_reason import LibraryProjectionReason
         from ..models.library_recipe_identity import LibraryRecipeIdentity
         from ..models.recipe_revision_summary import RecipeRevisionSummary
-        from ..models.recipe_profile import RecipeProfile
+        from ..models.recipe_topology import RecipeTopology
+        from ..models.topology_placement import TopologyPlacement
+        from ..models.library_projection_reason import LibraryProjectionReason
         from ..models.visual_recipe_document import VisualRecipeDocument
         generated_at = self.generated_at.isoformat()
 
@@ -75,13 +75,6 @@ class LibraryRecipeDetail:
         for placement_item_data in self.placement:
             placement_item = placement_item_data.to_dict()
             placement.append(placement_item)
-
-
-
-        profiles = []
-        for profiles_item_data in self.profiles:
-            profiles_item = profiles_item_data.to_dict()
-            profiles.append(profiles_item)
 
 
 
@@ -100,6 +93,12 @@ class LibraryRecipeDetail:
         else:
             selected_revision = self.selected_revision
 
+        topology: Union[None, dict[str, Any]]
+        if isinstance(self.topology, RecipeTopology):
+            topology = self.topology.to_dict()
+        else:
+            topology = self.topology
+
         visual_recipe: Union[None, dict[str, Any]]
         if isinstance(self.visual_recipe, VisualRecipeDocument):
             visual_recipe = self.visual_recipe.to_dict()
@@ -115,10 +114,10 @@ class LibraryRecipeDetail:
             "generated_at": generated_at,
             "operational_state": operational_state,
             "placement": placement,
-            "profiles": profiles,
             "reasons": reasons,
             "recipe": recipe,
             "selected_revision": selected_revision,
+            "topology": topology,
             "visual_recipe": visual_recipe,
         })
         if schema_version is not UNSET:
@@ -130,12 +129,12 @@ class LibraryRecipeDetail:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.profile_placement import ProfilePlacement
         from ..models.operational_state import OperationalState
-        from ..models.library_projection_reason import LibraryProjectionReason
         from ..models.library_recipe_identity import LibraryRecipeIdentity
         from ..models.recipe_revision_summary import RecipeRevisionSummary
-        from ..models.recipe_profile import RecipeProfile
+        from ..models.recipe_topology import RecipeTopology
+        from ..models.topology_placement import TopologyPlacement
+        from ..models.library_projection_reason import LibraryProjectionReason
         from ..models.visual_recipe_document import VisualRecipeDocument
         d = dict(src_dict)
         generated_at = isoparse(d.pop("generated_at"))
@@ -151,21 +150,11 @@ class LibraryRecipeDetail:
         placement = []
         _placement = d.pop("placement")
         for placement_item_data in (_placement):
-            placement_item = ProfilePlacement.from_dict(placement_item_data)
+            placement_item = TopologyPlacement.from_dict(placement_item_data)
 
 
 
             placement.append(placement_item)
-
-
-        profiles = []
-        _profiles = d.pop("profiles")
-        for profiles_item_data in (_profiles):
-            profiles_item = RecipeProfile.from_dict(profiles_item_data)
-
-
-
-            profiles.append(profiles_item)
 
 
         reasons = []
@@ -201,6 +190,24 @@ class LibraryRecipeDetail:
         selected_revision = _parse_selected_revision(d.pop("selected_revision"))
 
 
+        def _parse_topology(data: object) -> Union['RecipeTopology', None]:
+            if data is None:
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                topology_type_0 = RecipeTopology.from_dict(data)
+
+
+
+                return topology_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union['RecipeTopology', None], data)
+
+        topology = _parse_topology(d.pop("topology"))
+
+
         def _parse_visual_recipe(data: object) -> Union['VisualRecipeDocument', None]:
             if data is None:
                 return data
@@ -227,10 +234,10 @@ class LibraryRecipeDetail:
             generated_at=generated_at,
             operational_state=operational_state,
             placement=placement,
-            profiles=profiles,
             reasons=reasons,
             recipe=recipe,
             selected_revision=selected_revision,
+            topology=topology,
             visual_recipe=visual_recipe,
             schema_version=schema_version,
         )

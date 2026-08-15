@@ -19,7 +19,7 @@ function RecipeLink({onNavigate, recipe, selected}: {onNavigate: Navigate; recip
   >
     <strong>{recipe.title}</strong>
     <span>{recipe.description}</span>
-    <small>{recipe.profiles.map(profile => `${profile.node_count} node`).join(" · ") || "No valid placement profile"}</small>
+    <small>{recipe.topology_name ? `Topology ${recipe.topology_name}` : "No valid topology"}</small>
   </a>;
 }
 

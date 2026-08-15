@@ -118,7 +118,7 @@ test("labels installation and running groups from complete group evidence", () =
     recipe_id: "20000000-0000-4000-8000-000000000001",
     recipe_revision_id: "30000000-0000-4000-8000-000000000001",
     title: "Qwen pair",
-    profile_name: "pair",
+    topology_name: "pair",
     expected_rank_count: 2,
     present_ranks: [0],
     member_node_ids: ["node-a"],
@@ -159,7 +159,7 @@ test("labels installation and running groups from complete group evidence", () =
 
 test("summarizes live delayed stale and offline nodes without treating null as capacity", () => {
   const completeInstallation: VisualFleetNode["installed"][number] = {
-    installation_id: "install-1", recipe_id: "recipe-1", recipe_revision_id: "revision-1", title: "Qwen", profile_name: "pair", expected_rank_count: 1, present_ranks: [0], member_node_ids: ["node-a"], rank: 0, role: "primary", rank_state: "installed", group_state: "installed", complete: true, degraded_reason: null,
+    installation_id: "install-1", recipe_id: "recipe-1", recipe_revision_id: "revision-1", title: "Qwen", topology_name: "pair", expected_rank_count: 1, present_ranks: [0], member_node_ids: ["node-a"], rank: 0, role: "primary", rank_state: "installed", group_state: "installed", complete: true, degraded_reason: null,
   };
   const healthyRun: VisualFleetNode["loaded"][number] = {
     run_id: "run-1", installation_id: "install-1", recipe_id: "recipe-1", recipe_revision_id: "revision-1", title: "Qwen", alias: "chat", expected_rank_count: 1, present_ranks: [0], member_node_ids: ["node-a"], rank: 0, role: "primary", rank_state: "running", rank_age_seconds: 2, rank_fresh: true, run_state: "running", route_state: "published", group_state: "healthy", healthy: true, degraded_reason: null,

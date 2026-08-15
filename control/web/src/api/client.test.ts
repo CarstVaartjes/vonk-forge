@@ -62,7 +62,7 @@ it("uses distinct digest-bound Library action operations", async () => {
     requests.push(request);
     const path = new URL(request.url).pathname;
     if (path === "/api/v1/library") return new Response(JSON.stringify({schema_version: 1, generated_at: "2026-08-15T12:00:00Z", freshness_policy: {inventory_fresh_seconds: 300, telemetry_live_seconds: 6, telemetry_delayed_seconds: 20}, models: [], unlinked_recipes: [], next_cursor: null}), {status: 200});
-    if (path === "/api/v1/library/recipes/recipe%2Fone") return new Response(JSON.stringify({schema_version: 1, generated_at: "2026-08-15T12:00:00Z", recipe: {recipe_id: "recipe/one", slug: "one", title: "One", description: "", source_kind: "local"}, selected_revision: null, visual_recipe: null, profiles: [], operational_state: {builds: [], mappings: [], installations: [], runs: []}, placement: [], reasons: []}), {status: 200});
+    if (path === "/api/v1/library/recipes/recipe%2Fone") return new Response(JSON.stringify({schema_version: 1, generated_at: "2026-08-15T12:00:00Z", recipe: {recipe_id: "recipe/one", slug: "one", title: "One", description: "", source_kind: "local"}, selected_revision: null, visual_recipe: null, topology: null, operational_state: {builds: [], mappings: [], installations: [], runs: []}, placement: [], reasons: []}), {status: 200});
     if (path.startsWith("/api/v1/jobs/")) return new Response(JSON.stringify({id: "job-1", kind: "recipe.install", state: "running", base_commit: "a".repeat(40), current_attempt: 1, operations: [], operation_total: 0, targets: [], target_total: 0, progress: {completed: 0, failed: 0, running: 1, total: 1}}), {status: 200});
     return new Response(JSON.stringify({
       id: "operation-1", kind: "recipe.install", owner_id: "owner-1", state: "queued",
@@ -75,8 +75,8 @@ it("uses distinct digest-bound Library action operations", async () => {
 
   await api.librarySnapshot("cursor-1");
   await api.libraryRecipe("recipe/one");
-  await api.previewLibraryMapping({recipe_revision_id: "revision-1", profile_name: "pair", node_ids: ["node-a", "node-b"], parameters: {tensor: 2}}, controller.signal);
-  await api.applyLibraryMapping({recipe_revision_id: "revision-1", profile_name: "pair", node_ids: ["node-a", "node-b"], parameters: {tensor: 2}, placement_digest: "map-plan", request_key: "00000000-0000-4000-8000-000000000001"});
+  await api.previewLibraryMapping({recipe_revision_id: "revision-1", node_ids: ["node-a", "node-b"], parameters: {tensor: 2}}, controller.signal);
+  await api.applyLibraryMapping({recipe_revision_id: "revision-1", node_ids: ["node-a", "node-b"], parameters: {tensor: 2}, placement_digest: "map-plan", request_key: "00000000-0000-4000-8000-000000000001"});
   await api.previewLibraryInstall({recipe_build_id: "build-1", mapping_id: "mapping-1"});
   await api.applyLibraryInstall({recipe_build_id: "build-1", mapping_id: "mapping-1", plan_digest: "install-plan", request_key: "00000000-0000-4000-8000-000000000001"});
   await api.previewLibraryLoad({installation_id: "installation-1", alias: "chat"});
@@ -110,7 +110,7 @@ it("uses distinct digest-bound Library action operations", async () => {
     ["GET", "/api/v1/jobs/job-1"],
   ]);
   expect(Object.fromEntries(new URL(requests[0].url).searchParams)).toEqual({cursor: "cursor-1", limit: "100"});
-  expect(await requests[3].clone().json()).toEqual({recipe_revision_id: "revision-1", profile_name: "pair", node_ids: ["node-a", "node-b"], parameters: {tensor: 2}, placement_digest: "map-plan", request_key: "00000000-0000-4000-8000-000000000001"});
+  expect(await requests[3].clone().json()).toEqual({recipe_revision_id: "revision-1", node_ids: ["node-a", "node-b"], parameters: {tensor: 2}, placement_digest: "map-plan", request_key: "00000000-0000-4000-8000-000000000001"});
   expect(await requests[5].clone().json()).toEqual({recipe_build_id: "build-1", mapping_id: "mapping-1", plan_digest: "install-plan", request_key: "00000000-0000-4000-8000-000000000001"});
   expect(await requests[6].clone().json()).toEqual({installation_id: "installation-1", alias: "chat"});
   expect(await requests[7].clone().json()).toEqual({installation_id: "installation-1", alias: "chat", plan_digest: "load-plan", request_key: "00000000-0000-4000-8000-000000000001"});

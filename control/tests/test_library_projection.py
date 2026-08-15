@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control.auth import TokenCodec
 from vonk_control.cluster_mappings import ClusterMappingService
@@ -15,6 +15,8 @@ from vonk_control.library_projection import LibraryProjection
 from vonk_control.models import (
     AgentNode,
     Base,
+    CatalogEntity,
+    CatalogEntityRevision,
     ClusterMapping,
     ClusterMappingNode,
     InstallationNode,
@@ -46,6 +48,26 @@ def _node_id(value: int) -> str:
     return "spk_" + f"{value:032x}"
 
 
+def test_mapping_preview_input_derives_one_topology_from_the_recipe_revision() -> None:
+    """Break caught: callers can select a topology for a v1 recipe."""
+
+    from vonk_control.library_contract import MappingPreviewInput
+
+    preview = MappingPreviewInput.model_validate(
+        {
+            "recipe_revision_id": _uuid(1),
+            "node_ids": [_node_id(1)],
+            "parameters": {"max_model_len": 32_768},
+        }
+    )
+
+    assert preview.model_dump() == {
+        "recipe_revision_id": _uuid(1),
+        "node_ids": [_node_id(1)],
+        "parameters": {"max_model_len": 32_768},
+    }
+
+
 def _database() -> tuple[object, sessionmaker[Session]]:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -53,26 +75,36 @@ def _database() -> tuple[object, sessionmaker[Session]]:
 
 
 def _document(*, family: str, nodes: int = 1, title: str = "Visual title") -> dict:
-    name = "recipe-v1-minimal.json" if nodes == 1 else "recipe-v1-multinode.json"
-    document = json.loads((FIXTURES / name).read_text())
-    document["workload"]["family"] = family
+    document = json.loads((FIXTURES / "recipe-v1-minimal.json").read_text())
+    document["model"]["slug"] = family.replace("/", "-")
     document["metadata"]["title"] = title
     document["metadata"]["description"] = f"{title} purpose"
     document["identity"]["slug"] = title.lower().replace(" ", "-")
-    profile = document["deployment_profiles"][0]
+    topology = document["topology"]
     if nodes != 1:
-        profile["node_count"] = nodes
-        profile["parallelism"] = {
+        topology["name"] = "pair" if nodes == 2 else f"nodes_{nodes}"
+        topology["mode"] = "tensor_parallel"
+        topology["node_count"] = nodes
+        topology["parallelism"] = {
             "tensor": nodes,
             "pipeline": 1,
             "data": 1,
             "backend": "native",
         }
-        profile["roles"][1]["count"] = nodes - 1
+        topology["fabric"] = {
+            "connectivity": "connected",
+            "minimum_bandwidth_mbps": 10_000,
+        }
+        worker = deepcopy(topology["roles"][0])
+        worker.update({"name": "worker", "count": nodes - 1, "endpoint_owner": False})
+        topology["roles"].append(worker)
+        topology["start_order"] = ["entrypoint", "worker"]
+        topology["stop_order"] = ["worker", "entrypoint"]
+        document["artifacts"][0]["roles"].append("worker")
     for artifact in document["artifacts"]:
         artifact["download_bytes"] = 100
         artifact["installed_bytes"] = 100
-    for role in profile["roles"]:
+    for role in topology["roles"]:
         role["resources"]["disk"] = {
             "image_bytes": 100,
             "artifact_bytes": 100,
@@ -119,6 +151,8 @@ def _recipe(
         session.add(recipe)
     if document is None:
         return recipe, None
+    if "model" in document:
+        _ensure_catalog_entities(session, document)
     revision = LocalRecipeRevision(
         id=_uuid(1_000 + value * 10 + revision_number),
         recipe_id=identifier,
@@ -134,6 +168,69 @@ def _recipe(
     )
     session.add(revision)
     return recipe, revision
+
+
+def _ensure_catalog_entities(session: Session, document: dict) -> None:
+    def reference(kind: str, slug: str, digest: str) -> dict[str, str]:
+        return {
+            "kind": kind,
+            "publisher": "vonk-forge",
+            "slug": slug,
+            "content_sha256": digest,
+        }
+
+    model_version = document["model"]
+    harness = document["execution"]["harness"]
+    distribution = document["runtime"]["distribution"]
+    model = reference("model", "synthetic-tiny", "e" * 64)
+    group = reference("model-group", "synthetic", "f" * 64)
+    entities = (
+        ("model-group", group, {}),
+        ("model", model, {"model_group": group}),
+        ("model-version", model_version, {"model": model}),
+        ("execution-harness", harness, {}),
+        (
+            "runtime-distribution",
+            distribution,
+            {"implements_harness": harness},
+        ),
+    )
+    for kind, identity, entity_document in entities:
+        existing = session.scalar(
+            select(CatalogEntityRevision)
+            .join(CatalogEntity)
+            .where(
+                CatalogEntity.kind == kind,
+                CatalogEntity.publisher == identity["publisher"],
+                CatalogEntity.slug == identity["slug"],
+                CatalogEntityRevision.content_sha256 == identity["content_sha256"],
+            )
+        )
+        if existing is not None:
+            continue
+        entity = CatalogEntity(
+            kind=kind,
+            publisher=identity["publisher"],
+            slug=identity["slug"],
+            title=f"{kind} {identity['slug']}",
+            created_by="operator",
+            created_at=NOW,
+            updated_at=NOW,
+        )
+        session.add(entity)
+        session.flush()
+        session.add(
+            CatalogEntityRevision(
+                entity_id=entity.id,
+                revision_number=1,
+                lifecycle="resolved",
+                schema_version=1,
+                document=entity_document,
+                content_sha256=identity["content_sha256"],
+                created_by="operator",
+                created_at=NOW,
+            )
+        )
 
 
 def _node(
@@ -156,7 +253,8 @@ def _node(
             node_id=node_id,
             state=state,
             architecture=architecture,
-            capabilities=[],
+            capabilities=capabilities
+            or ["runtime.vonk.v1", "fabric.full_mesh.mbps.100000"],
             last_seen_at=NOW - timedelta(seconds=2),
         )
     )
@@ -254,16 +352,16 @@ def _operational_group(
     installed: bool = True,
     running: bool = False,
 ) -> dict[str, str]:
-    profile = revision.document["deployment_profiles"][0]
+    topology = revision.document["topology"]
     expanded_roles = [
         (role["name"], role["endpoint_owner"])
-        for role in profile["roles"]
+        for role in topology["roles"]
         for _ in range(role["count"])
     ]
     mapping = ClusterMapping(
         id=_uuid(40_000 + value),
         recipe_revision_id=revision.id,
-        profile_name=profile["name"],
+        topology_name=topology["name"],
         generation=1,
         node_count=len(node_ids),
         state="ready",
@@ -615,7 +713,7 @@ def test_detail_selects_latest_revision_but_keeps_older_active_state_exact() -> 
     assert detail.recipe.title == "Catalog title"
     assert detail.selected_revision.revision_number == 2
     assert detail.visual_recipe.metadata.title == "New visual title"
-    assert detail.visual_recipe.workload.family == "family-a"
+    assert detail.visual_recipe.model.slug == "family-a"
     assert detail.operational_state.installations[0].recipe_revision_id == _uuid(1_101)
     assert (
         detail.operational_state.installations[0].installation_id
@@ -659,7 +757,7 @@ def test_detail_keeps_a_recipe_without_revisions_visible_without_fabricated_ids(
     assert detail.recipe.title == "Revision missing title"
     assert detail.selected_revision is None
     assert detail.visual_recipe is None
-    assert detail.profiles == []
+    assert detail.topology is None
     assert detail.placement == []
     assert detail.operational_state.model_dump() == {
         "builds": [],
@@ -967,7 +1065,7 @@ def test_rejected_node_and_group_evidence_preserves_capacity_and_fabric_reasons(
     assert {node_a, node_b, node_c} == set(placement.candidate_node_ids)
 
 
-def test_placement_bounds_are_observable_and_unsupported_profiles_do_not_search() -> (
+def test_placement_bounds_are_observable_and_unsupported_topologies_do_not_search() -> (
     None
 ):
     _engine, sessions = _database()
@@ -1015,7 +1113,7 @@ def test_placement_bounds_are_observable_and_unsupported_profiles_do_not_search(
     assert wide.evaluated_group_count == 0
     assert wide.search_complete is False
     assert [reason.code for reason in wide.reasons] == [
-        "profile.node_count_unsupported"
+        "topology.node_count_unsupported"
     ]
 
 
@@ -1076,18 +1174,11 @@ def test_detail_uses_a_fixed_set_query_count_instead_of_candidate_services() -> 
     assert sum("resource_reservations" in statement for statement in second) == 1
 
 
-def test_valid_long_visual_fields_and_profile_lists_are_bounded_with_reasons() -> None:
+def test_valid_long_v1_visual_fields_are_bounded_without_profile_projection() -> None:
     _engine, sessions = _database()
     document = _document(family="bounded-visual", title="Preserved visual title")
     document["metadata"]["description"] = "d" * 4_000
-    document["workload"]["capabilities"] = [
-        f"capability.{value:03d}" for value in range(70)
-    ]
     document["artifacts"][0]["repository"] = "r" * 512
-    profile = document["deployment_profiles"][0]
-    document["deployment_profiles"] = [
-        {**deepcopy(profile), "name": f"profile_{value:02d}"} for value in range(64)
-    ]
     validate_recipe(document)
     with sessions.begin() as session:
         recipe, _revision = _recipe(
@@ -1104,29 +1195,47 @@ def test_valid_long_visual_fields_and_profile_lists_are_bounded_with_reasons() -
     summary = root.models[0].recipes[0]
     detail = projection.detail(_uuid(60))
 
-    expected_profiles = [f"profile_{value:02d}" for value in range(32)]
     assert summary.title == "Preserved catalog title"
     assert summary.description == "c" * 4_096
-    assert summary.capabilities == [f"capability.{value:03d}" for value in range(64)]
-    assert [item.name for item in summary.profiles] == expected_profiles
+    assert summary.capabilities == ["openai"]
+    assert summary.topology_name == "solo"
     assert detail.recipe.title == "Preserved catalog title"
     assert detail.recipe.description == "c" * 4_096
     assert detail.visual_recipe.metadata.title == "Preserved visual title"
-    assert detail.visual_recipe.workload.family == "bounded-visual"
+    assert detail.visual_recipe.model.slug == "bounded-visual"
     assert detail.visual_recipe.metadata.description == "d" * 512
     assert detail.visual_recipe.artifacts[0].repository == "r" * 256
-    assert detail.visual_recipe.workload.capabilities == [
-        f"capability.{value:03d}" for value in range(64)
-    ]
-    assert [item.name for item in detail.profiles] == expected_profiles
-    assert [item.profile_name for item in detail.placement] == expected_profiles
-    for reasons in (summary.reasons, detail.reasons):
-        reason_by_code = {item.code: item for item in reasons}
-        assert reason_by_code["recipe.profiles_truncated"].detail == (
-            "Recipe declares 64 profiles; returning the first 32 in canonical order."
-        )
-        assert "recipe.capabilities_truncated" in reason_by_code
+    assert detail.topology.name == "solo"
+    assert detail.placement[0].topology_name == "solo"
     assert "recipe.visual_text_truncated" in {item.code for item in detail.reasons}
+
+
+def test_visual_projection_keeps_non_openai_interface_path_without_endpoint_fields() -> None:
+    """Break caught: job interfaces fail visual projection without an OpenAI port."""
+
+    _engine, sessions = _database()
+    document = _document(family="image-job", title="Image job")
+    document["interfaces"] = [{"adapter": "image-job", "path": "/generate"}]
+    document["validation"]["validators"] = [
+        {"interface": "image-job", "checks": ["job.completed"]}
+    ]
+    validate_recipe(document)
+    with sessions.begin() as session:
+        _recipe(
+            session,
+            601,
+            slug="image-job",
+            title="Image job catalog title",
+            document=document,
+        )
+
+    interface = _projection(sessions).detail(_uuid(601)).visual_recipe.interfaces[0]
+
+    assert interface.adapter == "image-job"
+    assert interface.path == "/generate"
+    assert interface.port is None
+    assert interface.model_aliases == []
+    assert interface.health_path is None
 
 
 @pytest.mark.parametrize("rank_evidence", ["stale", "missing", "failed"])
@@ -1309,7 +1418,7 @@ def test_active_run_lineage_precedes_512_newer_operational_rows_without_more_que
                     ClusterMapping(
                         id=mapping_id,
                         recipe_revision_id=revision.id,
-                        profile_name="single",
+                        topology_name="single",
                         generation=1,
                         node_count=1,
                         state="stale",
@@ -1463,7 +1572,7 @@ def test_active_mapping_precedes_newer_ready_historical_mapping_for_same_group()
         newer_mapping = ClusterMapping(
             id=_uuid(90_000),
             recipe_revision_id=revision.id,
-            profile_name="solo",
+            topology_name="solo",
             generation=2,
             node_count=1,
             state="ready",
@@ -1534,7 +1643,7 @@ def test_active_mapping_precedes_newer_ready_historical_mapping_for_same_group()
 def test_grouped_reservations_do_not_hide_later_candidate_port_conflict() -> None:
     _engine, sessions = _database()
     document = _document(family="reservation-bound", title="Reservation bound")
-    endpoint_port = str(document["runtime"]["endpoint"]["port"])
+    endpoint_port = str(document["interfaces"][0]["port"])
     with sessions.begin() as session:
         _recipe(
             session,
@@ -1589,13 +1698,13 @@ def test_grouped_reservations_do_not_hide_later_candidate_port_conflict() -> Non
     assert by_node[conflicted_node].eligible is False
 
 
-def test_huge_profile_role_count_is_projected_with_constant_bounded_memory() -> None:
+def test_huge_topology_role_count_is_projected_with_constant_bounded_memory() -> None:
     _engine, sessions = _database()
     document = _document(family="huge-profile", nodes=2, title="Huge profile")
-    profile = document["deployment_profiles"][0]
-    profile["node_count"] = 1_000_000
-    profile["roles"][1]["count"] = 999_999
-    profile["parallelism"]["tensor"] = 1_000_000
+    topology = document["topology"]
+    topology["node_count"] = 1_000_000
+    topology["roles"][1]["count"] = 999_999
+    topology["parallelism"]["tensor"] = 1_000_000
     validate_recipe(document)
     with sessions.begin() as session:
         _recipe(
@@ -1611,8 +1720,8 @@ def test_huge_profile_role_count_is_projected_with_constant_bounded_memory() -> 
     _current, peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()
 
-    assert summary.profiles[0].node_count == 1_000_000
-    assert summary.profiles[0].roles == ["entrypoint"] + ["worker"] * 63
+    assert summary.topology_name == "pair"
+    assert _projection(sessions).detail(_uuid(74)).topology.node_count == 1_000_000
     assert peak < 4_000_000
 
 
@@ -1622,9 +1731,9 @@ def test_rendezvous_checks_declared_endpoint_owner_and_runtime_port(
 ) -> None:
     _engine, sessions = _database()
     document = _document(family="rendezvous", nodes=2, title="Rendezvous")
-    document["runtime"]["endpoint"]["port"] = endpoint_port
-    document["deployment_profiles"][0]["roles"][0]["endpoint_owner"] = False
-    document["deployment_profiles"][0]["roles"][1]["endpoint_owner"] = True
+    document["interfaces"][0]["port"] = endpoint_port
+    document["topology"]["roles"][0]["endpoint_owner"] = False
+    document["topology"]["roles"][1]["endpoint_owner"] = True
     validate_recipe(document)
     with sessions.begin() as session:
         _recipe(
@@ -1702,12 +1811,12 @@ def test_schema_valid_oversized_recipe_numbers_are_saturated_with_a_reason() -> 
     huge = 1 << 80
     maximum = 9_223_372_036_854_775_807
     document = _document(family="numeric-bounds", nodes=2, title="Numeric bounds")
-    profile = document["deployment_profiles"][0]
-    profile["node_count"] = huge + 1
-    profile["roles"][1]["count"] = huge
-    profile["parallelism"]["tensor"] = huge + 1
-    profile["fabric"]["minimum_bandwidth_mbps"] = huge
-    for role in profile["roles"]:
+    topology = document["topology"]
+    topology["node_count"] = huge + 1
+    topology["roles"][1]["count"] = huge
+    topology["parallelism"]["tensor"] = huge + 1
+    topology["fabric"]["minimum_bandwidth_mbps"] = huge
+    for role in topology["roles"]:
         for field in role["resources"]["disk"]:
             role["resources"]["disk"][field] = huge
         for field in role["resources"]["memory"]:
@@ -1719,7 +1828,6 @@ def test_schema_valid_oversized_recipe_numbers_are_saturated_with_a_reason() -> 
     document["build"]["resources"]["download_bytes"] = huge
     document["build"]["resources"]["temporary_bytes"] = huge
     document["build"]["resources"]["memory_bytes"] = huge
-    document["runtime"]["adapter_version"] = huge
     validate_recipe(document)
     with sessions.begin() as session:
         _recipe(
@@ -1734,13 +1842,12 @@ def test_schema_valid_oversized_recipe_numbers_are_saturated_with_a_reason() -> 
     summary = projection.list().models[0].recipes[0]
     detail = projection.detail(_uuid(77))
 
-    assert summary.profiles[0].node_count == maximum
-    assert detail.profiles[0].node_count == maximum
-    assert detail.profiles[0].roles[1].count == maximum
+    assert summary.topology_name == "pair"
+    assert detail.topology.node_count == maximum
+    assert detail.topology.roles[1].count == maximum
     assert detail.visual_recipe.artifacts[0].installed_bytes == maximum
-    assert detail.visual_recipe.runtime.adapter_version == maximum
     assert {
-        "profile.node_count_unsupported",
+        "topology.node_count_unsupported",
         "projection.numeric_truncated",
     } <= {item.code for item in detail.placement[0].reasons}
     for reasons in (summary.reasons, detail.reasons):
@@ -1774,6 +1881,8 @@ def test_root_run_health_uses_mapping_count_and_strict_freshness_boundary(
         )
         session.flush()
         if rank_evidence == "missing":
+            session.get(ClusterMapping, identifiers["mapping_id"]).state = "stale"
+            session.flush()
             mapping_rank = (
                 session.query(ClusterMappingNode)
                 .filter_by(mapping_id=identifiers["mapping_id"], rank=1)
@@ -2311,90 +2420,35 @@ def test_degraded_pending_route_copy_does_not_assert_rank_health() -> None:
     )
 
 
-def test_display_scalars_are_bounded_without_changing_mapping_action_inputs() -> None:
+def test_mapping_action_inputs_are_bound_to_the_recipe_topology() -> None:
     _engine, sessions = _database()
-    document = _document(family="display-scalars", title="Display scalars")
-    huge = 1 << 80
-    long_text = "x" * 100_000
-    document["parameters"].extend(
-        [
-            {
-                "name": "display_text",
-                "description": "Display text",
-                "type": "string",
-                "default": "default",
-                "change_effect": "restart",
-            },
-            {
-                "name": "positive_value",
-                "description": "Positive value",
-                "type": "integer",
-                "default": 1,
-                "change_effect": "restart",
-            },
-            {
-                "name": "negative_value",
-                "description": "Negative value",
-                "type": "integer",
-                "default": -1,
-                "change_effect": "restart",
-            },
-            {
-                "name": "enabled",
-                "description": "Enabled",
-                "type": "boolean",
-                "default": False,
-                "change_effect": "restart",
-            },
-        ]
-    )
-    overrides = document["deployment_profiles"][0]["parameter_overrides"]
-    overrides.update(
-        {
-            "display_text": long_text,
-            "positive_value": huge,
-            "negative_value": -huge,
-            "enabled": True,
-        }
-    )
-    validate_recipe(document)
+    document = _document(family="mapping-inputs", title="Mapping inputs")
     with sessions.begin() as session:
         _recipe(
             session,
             86,
-            slug="display-scalars",
-            title="Display scalar catalog title",
+            slug="mapping-inputs",
+            title="Mapping input catalog title",
             document=document,
         )
         revision = session.get(LocalRecipeRevision, _uuid(1_861))
         node_id = _node(session, 1)
 
     detail = _projection(sessions).detail(_uuid(86))
-    profile = detail.profiles[0]
     recommendation = detail.placement[0].recommendations[0]
     mapping_target = next(
         target for target in recommendation.preview_targets if target.kind == "mapping"
     )
-    authoritative = ClusterMappingService(sessions).plan(
+    authoritative = ClusterMappingService(sessions).preview(
         revision.id,
-        profile.name,
         (node_id,),
         parameters=mapping_target.input.parameters,
+        actor="operator",
     )
 
-    assert len(profile.parameter_overrides["display_text"]) == 512
-    assert profile.parameter_overrides["positive_value"] == 9_223_372_036_854_775_807
-    assert profile.parameter_overrides["negative_value"] == -9_223_372_036_854_775_807
-    assert profile.parameter_overrides["enabled"] is True
     assert mapping_target.input.parameters == {}
-    assert authoritative.parameters["display_text"] == long_text
-    assert authoritative.parameters["positive_value"] == huge
-    assert authoritative.parameters["negative_value"] == -huge
-    assert authoritative.parameters["enabled"] is True
-    assert {
-        "recipe.display_scalar_truncated",
-        "recipe.numeric_truncated",
-    } <= {reason.code for reason in detail.reasons}
+    assert authoritative.topology_name == "solo"
+    assert authoritative.parameters == {"max_model_len": 32_768}
 
 
 def test_family_spans_pages_with_signed_compound_cursor_binding() -> None:

@@ -307,12 +307,12 @@ export class ApiClient implements ControlApi {
     return this.request("/api/v1/recipes/builds", {method: "POST", body: JSON.stringify({recipe_revision_id: plan.recipe_revision_id, builder_node_id: plan.builder_node_id, build_input_sha256: plan.build_input_sha256, request_key: crypto.randomUUID()})});
   }
 
-  previewRecipeMapping(recipeRevisionId: string, profileName: string, nodeIds: string[]): Promise<RecipeMappingPlan> {
-    return this.request("/api/v1/recipes/mapping-plans/preview", {method: "POST", body: JSON.stringify({recipe_revision_id: recipeRevisionId, profile_name: profileName, node_ids: nodeIds, parameters: {}})});
+  previewRecipeMapping(recipeRevisionId: string, nodeIds: string[]): Promise<RecipeMappingPlan> {
+    return this.request("/api/v1/recipes/mapping-plans/preview", {method: "POST", body: JSON.stringify({recipe_revision_id: recipeRevisionId, node_ids: nodeIds, parameters: {}})});
   }
 
   createRecipeMapping(plan: RecipeMappingPlan): Promise<{mapping_id: string; generation: number; placement_digest: string}> {
-    return this.request("/api/v1/recipes/mappings", {method: "POST", body: JSON.stringify({recipe_revision_id: plan.recipe_revision_id, profile_name: plan.profile_name, node_ids: plan.nodes.map(node => node.node_id), parameters: plan.parameters, placement_digest: plan.placement_digest, request_key: crypto.randomUUID()})});
+    return this.request("/api/v1/recipes/mappings", {method: "POST", body: JSON.stringify({recipe_revision_id: plan.recipe_revision_id, node_ids: plan.nodes.map(node => node.node_id), parameters: plan.parameters, placement_digest: plan.placement_digest, request_key: crypto.randomUUID()})});
   }
 
   previewWorkloadRun(sourceYaml: string): Promise<WorkloadRunPreview> {

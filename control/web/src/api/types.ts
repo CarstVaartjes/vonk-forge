@@ -100,7 +100,7 @@ export type CatalogRecipeDocument = Record<string, unknown>;
 export type SourceBundleReceipt = {sha256: string; archive_bytes: number; total_bytes: number; file_count: number; files: string[]};
 export type SourcePolicyFinding = {code: string; path: string; line: number | null; detail: string};
 export type SourcePolicyReport = {passed: boolean; source_bundle_sha256: string; dockerfile: string; findings: SourcePolicyFinding[]};
-export type RecipeMappingPlan = {recipe_revision_id: string; recipe_content_sha256: string; profile_name: string; generation: number; parameters: Record<string, unknown>; nodes: Array<{node_id: string; rank: number; role: string; endpoint_owner: boolean}>; placement_digest: string};
+export type RecipeMappingPlan = {recipe_revision_id: string; recipe_content_sha256: string; topology_name: string; generation: number; parameters: Record<string, unknown>; nodes: Array<{node_id: string; rank: number; role: string; endpoint_owner: boolean}>; placement_digest: string};
 export type RecipeBuildPlan = {build_id: string; recipe_revision_id: string; recipe_content_sha256: string; builder_node_id: string; source_bundle_sha256: string; build_input_sha256: string};
 export type RecipeOperation = {id: string; kind: string; owner_id: string; state: string; plan_digest: string; nodes: string[]; result: Record<string, unknown> | null};
 export type LibrarySnapshot = components["schemas"]["LibrarySnapshot"];
@@ -142,7 +142,7 @@ export interface CatalogApi {
   checkRecipeSource(recipeRevisionId: string): Promise<SourcePolicyReport>;
   previewRecipeBuild(recipeRevisionId: string, builderNodeId: string): Promise<RecipeBuildPlan>;
   buildRecipe(plan: RecipeBuildPlan): Promise<RecipeOperation>;
-  previewRecipeMapping(recipeRevisionId: string, profileName: string, nodeIds: string[]): Promise<RecipeMappingPlan>;
+  previewRecipeMapping(recipeRevisionId: string, nodeIds: string[]): Promise<RecipeMappingPlan>;
   createRecipeMapping(plan: RecipeMappingPlan): Promise<{mapping_id: string; generation: number; placement_digest: string}>;
 }
 export type ImportDisposition = "imported" | "transformed" | "resolution_required" | "overlay_required" | "unsupported_blocking" | "dropped_redundant";

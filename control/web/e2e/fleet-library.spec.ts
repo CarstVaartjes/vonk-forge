@@ -73,7 +73,7 @@ function localSnapshot() {
       inventory: null,
       telemetry: {age_seconds: 0, freshness: "live", sample: telemetry(observedAt)},
       installed: [{
-        installation_id: "install-chat", recipe_id: "recipe-chat", recipe_revision_id: "revision-chat", title: "Qwen pair", profile_name: "pair", expected_rank_count: 2, present_ranks: [0, 1], member_node_ids: [nodeId, borealisId], rank: 0, role: "leader", rank_state: "installed", group_state: "installed", complete: true, degraded_reason: null,
+        installation_id: "install-chat", recipe_id: "recipe-chat", recipe_revision_id: "revision-chat", title: "Qwen pair", topology_name: "pair", expected_rank_count: 2, present_ranks: [0, 1], member_node_ids: [nodeId, borealisId], rank: 0, role: "leader", rank_state: "installed", group_state: "installed", complete: true, degraded_reason: null,
       }],
       loaded: [{
         run_id: "run-chat", installation_id: "install-chat", recipe_id: "recipe-chat", recipe_revision_id: "revision-chat", title: "Qwen pair", alias: "chat", expected_rank_count: 2, present_ranks: [0, 1], member_node_ids: [nodeId, borealisId], rank: 0, role: "leader", rank_state: "running", rank_age_seconds: 1, rank_fresh: true, run_state: "running", route_state: "failed", group_state: "degraded", healthy: false, degraded_reason: "route-not-published",
@@ -92,7 +92,7 @@ function localSnapshot() {
       inventory: null,
       telemetry: null,
       installed: [{
-        installation_id: "install-chat", recipe_id: "recipe-chat", recipe_revision_id: "revision-chat", title: "Qwen pair", profile_name: "pair", expected_rank_count: 2, present_ranks: [0, 1], member_node_ids: [nodeId, borealisId], rank: 1, role: "worker", rank_state: "installed", group_state: "installed", complete: true, degraded_reason: null,
+        installation_id: "install-chat", recipe_id: "recipe-chat", recipe_revision_id: "revision-chat", title: "Qwen pair", topology_name: "pair", expected_rank_count: 2, present_ranks: [0, 1], member_node_ids: [nodeId, borealisId], rank: 1, role: "worker", rank_state: "installed", group_state: "installed", complete: true, degraded_reason: null,
       }],
       loaded: [{
         run_id: "run-chat", installation_id: "install-chat", recipe_id: "recipe-chat", recipe_revision_id: "revision-chat", title: "Qwen pair", alias: "chat", expected_rank_count: 2, present_ranks: [0, 1], member_node_ids: [nodeId, borealisId], rank: 1, role: "worker", rank_state: "lost", rank_age_seconds: null, rank_fresh: false, run_state: "lost", route_state: "failed", group_state: "degraded", healthy: false, degraded_reason: "member-rank-unhealthy",
@@ -438,22 +438,22 @@ test("Library fixture journey keeps visual authority primary through preview, pa
   const advanced = page.getByRole("group", {name: "Advanced recipe document"});
   await advanced.getByText("Advanced recipe document").click();
   const editor = advanced.getByRole("textbox", {name: "Recipe JSON"});
-  const firstValid = {...fullLibraryDetail.visual_recipe!, workload: {...fullLibraryDetail.visual_recipe!.workload, family: "qwen/e2e"}};
+  const firstValid = {...fullLibraryDetail.visual_recipe!, model: {...fullLibraryDetail.visual_recipe!.model, slug: "qwen-e2e"}};
   await editor.fill(JSON.stringify(firstValid, null, 2));
-  await expect(authority.getByRole("region", {name: "Model and runtime"})).toContainText("qwen/e2e");
-  const invalid = {...firstValid, workload: {...firstValid.workload, family: 4}};
+  await expect(authority.getByRole("region", {name: "Model and runtime"})).toContainText("qwen/qwen-e2e@");
+  const invalid = {...firstValid, model: {...firstValid.model, content_sha256: "not-a-digest"}};
   await editor.fill(JSON.stringify(invalid, null, 2));
-  await expect(advanced.getByRole("alert")).toContainText("$.workload.family must be a string.");
+  await expect(advanced.getByRole("alert")).toContainText("$.model.content_sha256 must be 64 lowercase hexadecimal characters.");
   await expect(editor).toBeFocused();
-  await expect(authority.getByRole("region", {name: "Model and runtime"})).toContainText("qwen/e2e");
+  await expect(authority.getByRole("region", {name: "Model and runtime"})).toContainText("qwen/qwen-e2e@");
 
   const upload = advanced.getByLabel("Upload recipe JSON");
-  const uploaded = {...firstValid, workload: {...firstValid.workload, family: "qwen/uploaded"}};
+  const uploaded = {...firstValid, model: {...firstValid.model, slug: "qwen-uploaded"}};
   await upload.focus();
   await upload.setInputFiles({name: "recipe.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(uploaded))});
   await expect(advanced.getByRole("alert")).toHaveCount(0);
   await expect(upload).toBeFocused();
-  await expect(authority.getByRole("region", {name: "Model and runtime"})).toContainText("qwen/uploaded");
+  await expect(authority.getByRole("region", {name: "Model and runtime"})).toContainText("qwen/qwen-uploaded@");
   await expect(page.getByRole("link", {name: "Source and build"})).toBeVisible();
   await expect(page.getByRole("link", {name: "Cluster mapping"})).toBeVisible();
   await expect(page.getByRole("link", {name: "Raw editor"})).toBeVisible();

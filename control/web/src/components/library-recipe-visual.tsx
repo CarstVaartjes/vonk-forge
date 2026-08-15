@@ -10,15 +10,17 @@ function values(items: readonly string[], empty: string): string {
   return items.length > 0 ? items.join(" · ") : empty;
 }
 
+function identity(value: {publisher: string; slug: string; content_sha256: string}): string {
+  return `${value.publisher}/${value.slug}@${value.content_sha256}`;
+}
+
 export function LibraryRecipeVisual({document}: {document: VisualRecipeDocument}) {
   return <>
     <section className="library-section recipe-essentials" aria-label="Model and runtime">
-      <div><span>Model family</span><strong>{document.workload.family}</strong></div>
-      <div><span>Capabilities</span><strong className="capability-chips">{document.workload.capabilities.length > 0
-        ? document.workload.capabilities.map((capability, index) => <span key={`${capability}:${index}`}>{capability}</span>)
-        : "Not declared"}</strong></div>
-      <div><span>Runtime</span><strong>{document.runtime.adapter} v{document.runtime.adapter_version}</strong></div>
-      <div><span>Endpoint</span><strong>{document.runtime.endpoint_protocol} · {document.runtime.endpoint_port}</strong></div>
+      <div><span>Model version</span><strong>{identity(document.model)}</strong></div>
+      <div><span>Execution harness</span><strong>{identity(document.execution.harness)}</strong></div>
+      <div><span>Runtime distribution</span><strong>{identity(document.runtime.distribution)}</strong></div>
+      <div><span>Patch bundle</span><strong>{document.execution.patch_bundle ? identity(document.execution.patch_bundle) : "None"}</strong></div>
     </section>
 
     <section className="library-section visual-document-section" aria-label="Build and artifacts">
@@ -54,16 +56,20 @@ export function LibraryRecipeVisual({document}: {document: VisualRecipeDocument}
     </section>
 
     <section className="library-section visual-document-section" aria-label="Runtime contract">
-      <div className="section-heading"><div><p className="fleet-kicker">Declared interface</p><h4>Runtime contract</h4></div></div>
+      <div className="section-heading"><div><p className="fleet-kicker">Strict v1 runtime</p><h4>Runtime contract</h4></div></div>
       <dl className="visual-field-grid">
-        <div><dt>Interface</dt><dd> {document.runtime.interface}</dd></div>
-        <div><dt>Adapter</dt><dd> {document.runtime.adapter}</dd></div>
-        <div><dt>Version</dt><dd> {document.runtime.adapter_version}</dd></div>
-        <div><dt>Protocol</dt><dd> {document.runtime.endpoint_protocol}</dd></div>
-        <div><dt>Port</dt><dd> {document.runtime.endpoint_port.toLocaleString("en-US")}</dd></div>
-        <div><dt>Model aliases</dt><dd> {values(document.runtime.model_aliases, "None")}</dd></div>
-        <div><dt>Health path</dt><dd> {document.runtime.health_path}</dd></div>
+        <div><dt>Entrypoint</dt><dd> {values(document.runtime.entrypoint, "None")}</dd></div>
+        <div><dt>Pre-start phases</dt><dd> {document.runtime.lifecycle_pre_start_count}</dd></div>
+        <div><dt>Post-stop phases</dt><dd> {document.runtime.lifecycle_post_stop_count}</dd></div>
+        <div><dt>Stop timeout</dt><dd> {document.runtime.stop_timeout_seconds} seconds</dd></div>
       </dl>
+      {document.interfaces.map((item, index) => <dl className="visual-field-grid" key={`${item.adapter}:${index}`}>
+        <div><dt>Interface adapter</dt><dd> {item.adapter}</dd></div>
+        <div><dt>Port</dt><dd> {item.port?.toLocaleString("en-US") ?? "Not declared"}</dd></div>
+        <div><dt>Model aliases</dt><dd> {values(item.model_aliases ?? [], "None")}</dd></div>
+        <div><dt>Health path</dt><dd> {item.health_path ?? "Not declared"}</dd></div>
+        <div><dt>Job path</dt><dd> {item.path ?? "Not declared"}</dd></div>
+      </dl>)}
     </section>
 
     <section className="library-section evidence-columns" aria-label="Provenance and validation">

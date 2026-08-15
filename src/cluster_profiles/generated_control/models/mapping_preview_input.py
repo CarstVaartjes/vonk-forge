@@ -25,13 +25,11 @@ class MappingPreviewInput:
         Attributes:
             node_ids (list[str]):
             parameters (MappingPreviewInputParameters):
-            profile_name (str):
             recipe_revision_id (str):
      """
 
     node_ids: list[str]
     parameters: 'MappingPreviewInputParameters'
-    profile_name: str
     recipe_revision_id: str
 
 
@@ -46,8 +44,6 @@ class MappingPreviewInput:
 
         parameters = self.parameters.to_dict()
 
-        profile_name = self.profile_name
-
         recipe_revision_id = self.recipe_revision_id
 
 
@@ -56,7 +52,6 @@ class MappingPreviewInput:
         field_dict.update({
             "node_ids": node_ids,
             "parameters": parameters,
-            "profile_name": profile_name,
             "recipe_revision_id": recipe_revision_id,
         })
 
@@ -76,14 +71,11 @@ class MappingPreviewInput:
 
 
 
-        profile_name = d.pop("profile_name")
-
         recipe_revision_id = d.pop("recipe_revision_id")
 
         mapping_preview_input = cls(
             node_ids=node_ids,
             parameters=parameters,
-            profile_name=profile_name,
             recipe_revision_id=recipe_revision_id,
         )
 

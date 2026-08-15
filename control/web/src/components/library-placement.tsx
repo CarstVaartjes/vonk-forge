@@ -24,8 +24,8 @@ function telemetryFreshness(age: number, policy: FreshnessPolicy): string {
   return "stale";
 }
 
-function groupKey(profileName: string, group: Group): string {
-  return `${profileName}:${group.node_ids.join(":")}`;
+function groupKey(topologyName: string, group: Group): string {
+  return `${topologyName}:${group.node_ids.join(":")}`;
 }
 
 function GroupEvidence({group, policy, selected}: {group: Group; policy: FreshnessPolicy; selected: boolean}) {
@@ -60,18 +60,18 @@ export function LibraryPlacement({actionsDisabled = false, detail, onReview, pol
   policy: FreshnessPolicy;
 }) {
   const [selectedGroup, setSelectedGroup] = useState("");
-  if (detail.placement.length === 0) return <section className="library-section"><h4>Placement</h4><p className="library-placeholder">No valid complete placement profile is available.</p></section>;
+  if (detail.placement.length === 0) return <section className="library-section"><h4>Placement</h4><p className="library-placeholder">No valid complete topology placement is available.</p></section>;
   return <section className="library-section placement-section" aria-label="Complete placement groups">
     <div className="section-heading"><div><p className="fleet-kicker">One atomic group</p><h4>Complete placement groups</h4></div><small>Select all ranks together</small></div>
-    {detail.placement.map(profile => <section key={profile.profile_name} className="placement-profile" aria-label={`${profile.profile_name} placement`}>
-      <div className="placement-profile-heading"><h5>{profile.profile_name}</h5><span>{profile.node_count} nodes · {profile.recommendations.length} available</span></div>
-      {!profile.search_complete && <div className="bounded-search-notice" role="note">
+    {detail.placement.map(topology => <section key={topology.topology_name} className="placement-profile" aria-label={`${topology.topology_name} placement`}>
+      <div className="placement-profile-heading"><h5>{topology.topology_name}</h5><span>{topology.node_count} nodes · {topology.recommendations.length} available</span></div>
+      {!topology.search_complete && <div className="bounded-search-notice" role="note">
         <strong>Bounded search is incomplete</strong>
-        <p>{profile.reasons.find(reason => reason.code.includes("truncated"))?.detail ?? `The bounded search evaluated ${profile.evaluated_group_count} complete groups.`} This is bounded advisory evidence, not a globally optimal placement.</p>
+        <p>{topology.reasons.find(reason => reason.code.includes("truncated"))?.detail ?? `The bounded search evaluated ${topology.evaluated_group_count} complete groups.`} This is bounded advisory evidence, not a globally optimal placement.</p>
       </div>}
-      <LibraryReasons reasons={profile.reasons}/>
-      <div className="placement-groups">{profile.recommendations.map(group => {
-        const key = groupKey(profile.profile_name, group);
+      <LibraryReasons reasons={topology.reasons}/>
+      <div className="placement-groups">{topology.recommendations.map(group => {
+        const key = groupKey(topology.topology_name, group);
         const selected = selectedGroup === key;
         return <article key={key} className={`placement-group${selected ? " is-selected" : ""}`}>
           <button type="button" className="placement-selector" aria-pressed={selected} onClick={() => setSelectedGroup(key)} aria-label={`Select complete group ${group.node_ids.join(" and ")}`}>
@@ -89,11 +89,11 @@ export function LibraryPlacement({actionsDisabled = false, detail, onReview, pol
           <GroupEvidence group={group} policy={policy} selected={selected}/>
         </article>;
       })}</div>
-      {(profile.rejected_groups.length > 0 || profile.rejected_nodes.length > 0) && <details className="placement-rejections">
+      {(topology.rejected_groups.length > 0 || topology.rejected_nodes.length > 0) && <details className="placement-rejections">
         <summary>Unavailable placement evidence</summary>
-        {profile.rejected_groups.map(group => <RejectedEvidence key={groupKey(profile.profile_name, group)} group={group} policy={policy}/>)}
-        {profile.rejected_nodes.map(node => <div key={node.node_id} className="rejected-node"><strong>{node.node_id}</strong><LibraryReasons reasons={node.reasons}/></div>)}
-        {profile.rejected_evidence_truncated && <p className="bounded-copy">Rejected evidence is also truncated at the published server limit.</p>}
+        {topology.rejected_groups.map(group => <RejectedEvidence key={groupKey(topology.topology_name, group)} group={group} policy={policy}/>)}
+        {topology.rejected_nodes.map(node => <div key={node.node_id} className="rejected-node"><strong>{node.node_id}</strong><LibraryReasons reasons={node.reasons}/></div>)}
+        {topology.rejected_evidence_truncated && <p className="bounded-copy">Rejected evidence is also truncated at the published server limit.</p>}
       </details>}
     </section>)}
   </section>;

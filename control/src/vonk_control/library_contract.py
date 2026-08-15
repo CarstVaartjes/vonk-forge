@@ -25,7 +25,6 @@ _MAX_RECOMMENDATIONS = 16
 _MAX_REJECTED_NODES = 32
 _MAX_REJECTED_GROUPS = 16
 _MAX_NODE_ARTIFACTS_PER_NODE = 512
-_MAX_PROJECTED_PROFILES = 32
 _MAX_PROJECTED_CAPABILITIES = 64
 _MAX_SIGNED_BIGINT = 9_223_372_036_854_775_807
 
@@ -76,15 +75,6 @@ class RecipeRevisionSummary(_StrictModel):
     created_at: datetime
 
 
-class RecipeProfileSummary(_StrictModel):
-    name: Text64
-    description: Text512
-    node_count: int = Field(ge=1, le=_MAX_SIGNED_BIGINT)
-    roles: list[Text64] = Field(max_length=64)
-    fabric_connectivity: Literal["none", "connected", "full_mesh", "switch"]
-    minimum_bandwidth_mbps: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-
-
 class LibraryRecipeIdentity(_StrictModel):
     recipe_id: UuidId
     slug: Text128
@@ -116,7 +106,7 @@ class LibraryRunSummary(_StrictModel):
 class LibraryRecipeSummary(LibraryRecipeIdentity):
     selected_revision: RecipeRevisionSummary | None
     capabilities: list[Text64] = Field(max_length=64)
-    profiles: list[RecipeProfileSummary] = Field(max_length=32)
+    topology_name: Text64 | None
     installations: list[LibraryInstallationSummary] = Field(max_length=64)
     installation_total_count: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
     installation_returned_count: int = Field(ge=0, le=64)
@@ -155,9 +145,21 @@ class VisualMetadata(_StrictModel):
     tags: list[Text64] = Field(max_length=64)
 
 
-class VisualWorkload(_StrictModel):
-    family: Text128
-    capabilities: list[Text64] = Field(max_length=64)
+class VisualCatalogIdentity(_StrictModel):
+    kind: Literal[
+        "model-version",
+        "execution-harness",
+        "runtime-distribution",
+        "patch-bundle",
+    ]
+    publisher: Text128
+    slug: Text128
+    content_sha256: Digest
+
+
+class VisualExecution(_StrictModel):
+    harness: VisualCatalogIdentity
+    patch_bundle: VisualCatalogIdentity | None
 
 
 class VisualBuildContext(_StrictModel):
@@ -189,13 +191,19 @@ class VisualArtifact(_StrictModel):
 
 
 class VisualRuntime(_StrictModel):
-    interface: Text64
+    distribution: VisualCatalogIdentity
+    entrypoint: list[Text256] = Field(max_length=64)
+    lifecycle_pre_start_count: int = Field(ge=0, le=64)
+    lifecycle_post_stop_count: int = Field(ge=0, le=64)
+    stop_timeout_seconds: int = Field(ge=1, le=86_400)
+
+
+class VisualInterface(_StrictModel):
     adapter: Text64
-    adapter_version: int = Field(ge=1, le=_MAX_SIGNED_BIGINT)
-    endpoint_protocol: Text64
-    endpoint_port: int = Field(ge=1, le=65_535)
-    model_aliases: list[Text128] = Field(max_length=64)
-    health_path: Annotated[str, StringConstraints(min_length=1, max_length=512)]
+    port: int | None = Field(default=None, ge=1, le=65_535)
+    model_aliases: list[Text128] = Field(default_factory=list, max_length=64)
+    health_path: Annotated[str, StringConstraints(min_length=1, max_length=512)] | None = None
+    path: Annotated[str, StringConstraints(min_length=1, max_length=512)] | None = None
 
 
 class VisualValidation(_StrictModel):
@@ -213,10 +221,12 @@ class VisualRecipeDocument(_StrictModel):
     schema_version: Literal[1]
     identity: VisualIdentity
     metadata: VisualMetadata
-    workload: VisualWorkload
+    model: VisualCatalogIdentity
+    execution: VisualExecution
     build: VisualBuild
     artifacts: list[VisualArtifact] = Field(max_length=128)
     runtime: VisualRuntime
+    interfaces: list[VisualInterface] = Field(max_length=64)
     validation: VisualValidation
     provenance: VisualProvenance
 
@@ -259,16 +269,15 @@ class RecipeParallelism(_StrictModel):
     backend: Text64
 
 
-class RecipeProfile(_StrictModel):
+class RecipeTopology(_StrictModel):
     name: Text64
-    description: Text512
+    mode: Text64
     node_count: int = Field(ge=1, le=_MAX_SIGNED_BIGINT)
-    strategy: Text64
     parallelism: RecipeParallelism
     roles: list[RecipeRole] = Field(min_length=1, max_length=32)
     fabric: RecipeFabric
-    parameter_overrides: dict[Text64, DisplayScalar] = Field(max_length=128)
-    measurement: Literal["declared", "derived", "measured"]
+    start_order: list[Text64] = Field(max_length=32)
+    stop_order: list[Text64] = Field(max_length=32)
 
 
 class OperationalBuild(_StrictModel):
@@ -289,7 +298,7 @@ class OperationalMappingNode(_StrictModel):
 class OperationalMapping(_StrictModel):
     mapping_id: UuidId
     recipe_revision_id: UuidId
-    profile_name: Text64
+    topology_name: Text64
     generation: int = Field(ge=1, le=2_147_483_647)
     state: Literal["planned", "ready", "stale"]
     nodes: list[OperationalMappingNode] = Field(max_length=32)
@@ -329,7 +338,6 @@ class OperationalState(_StrictModel):
 
 class MappingPreviewInput(_StrictModel):
     recipe_revision_id: UuidId
-    profile_name: Text64
     node_ids: list[NodeId] = Field(min_length=1, max_length=32)
     parameters: dict[Text64, Scalar] = Field(max_length=128)
 
@@ -436,7 +444,7 @@ class PlacementScore(_StrictModel):
 
 class PlacementRecommendation(_StrictModel):
     recipe_revision_id: UuidId
-    profile_name: Text64
+    topology_name: Text64
     node_ids: list[NodeId] = Field(min_length=1, max_length=32)
     nodes: list[PlacementNode] = Field(min_length=1, max_length=32)
     group_complete: Literal[True] = True
@@ -458,8 +466,8 @@ class RejectedNode(_StrictModel):
     reasons: list[ProjectionReason] = Field(min_length=1, max_length=16)
 
 
-class ProfilePlacement(_StrictModel):
-    profile_name: Text64
+class TopologyPlacement(_StrictModel):
+    topology_name: Text64
     node_count: int = Field(ge=1, le=_MAX_SIGNED_BIGINT)
     candidate_node_ids: list[NodeId] = Field(max_length=32)
     recommendations: list[PlacementRecommendation] = Field(max_length=16)
@@ -479,9 +487,9 @@ class LibraryRecipeDetail(_StrictModel):
     recipe: LibraryRecipeIdentity
     selected_revision: RecipeRevisionSummary | None
     visual_recipe: VisualRecipeDocument | None
-    profiles: list[RecipeProfile] = Field(max_length=32)
+    topology: RecipeTopology | None
     operational_state: OperationalState
-    placement: list[ProfilePlacement] = Field(max_length=32)
+    placement: list[TopologyPlacement] = Field(max_length=1)
     reasons: list[ProjectionReason] = Field(max_length=16)
 
 

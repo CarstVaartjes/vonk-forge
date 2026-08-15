@@ -78,8 +78,8 @@ afterEach(() => {
 test("shows truthful cluster counts and live connection state", async () => {
   const live = node("node-a", "Alpha", "2026-08-15T11:59:58Z");
   live.installed = [
-    {installation_id: "install-1", recipe_id: "recipe-1", recipe_revision_id: "revision-1", title: "Qwen", profile_name: "solo", expected_rank_count: 1, present_ranks: [0], member_node_ids: ["node-a"], rank: 0, role: "primary", rank_state: "installed", group_state: "installed", complete: true, degraded_reason: null},
-    {installation_id: "install-2", recipe_id: "recipe-2", recipe_revision_id: "revision-2", title: "Vision", profile_name: "solo", expected_rank_count: 1, present_ranks: [], member_node_ids: [], rank: 0, role: "primary", rank_state: "installing", group_state: "partial", complete: false, degraded_reason: "missing-ranks"},
+    {installation_id: "install-1", recipe_id: "recipe-1", recipe_revision_id: "revision-1", title: "Qwen", topology_name: "solo", expected_rank_count: 1, present_ranks: [0], member_node_ids: ["node-a"], rank: 0, role: "primary", rank_state: "installed", group_state: "installed", complete: true, degraded_reason: null},
+    {installation_id: "install-2", recipe_id: "recipe-2", recipe_revision_id: "revision-2", title: "Vision", topology_name: "solo", expected_rank_count: 1, present_ranks: [], member_node_ids: [], rank: 0, role: "primary", rank_state: "installing", group_state: "partial", complete: false, degraded_reason: "missing-ranks"},
   ];
   live.loaded = [{run_id: "run-1", installation_id: "install-1", recipe_id: "recipe-1", recipe_revision_id: "revision-1", title: "Qwen", alias: "chat", expected_rank_count: 1, present_ranks: [0], member_node_ids: ["node-a"], rank: 0, role: "primary", rank_state: "running", rank_age_seconds: 2, rank_fresh: true, run_state: "running", route_state: "published", group_state: "healthy", healthy: true, degraded_reason: null}];
   render(<FleetPage api={control(async () => snapshot([

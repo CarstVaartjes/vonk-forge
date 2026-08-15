@@ -11,8 +11,15 @@ from .build_preview_request import BuildPreviewRequest
 from .build_request import BuildRequest
 from .cancel_reconciliation_response_cancel_reconciliation_api_v1_reconciliations_reconciliation_id_cancel_post import CancelReconciliationResponseCancelReconciliationApiV1ReconciliationsReconciliationIdCancelPost
 from .capacity_reservations import CapacityReservations
+from .catalog_entity_list_response import CatalogEntityListResponse
+from .catalog_entity_revision_response import CatalogEntityRevisionResponse
+from .catalog_entity_revision_response_document import CatalogEntityRevisionResponseDocument
+from .catalog_entity_revision_response_kind import CatalogEntityRevisionResponseKind
+from .catalog_entity_revision_response_lifecycle import CatalogEntityRevisionResponseLifecycle
 from .catalog_problem import CatalogProblem
 from .change_request import ChangeRequest
+from .create_catalog_entity_request import CreateCatalogEntityRequest
+from .create_catalog_entity_request_document import CreateCatalogEntityRequestDocument
 from .create_recipe_request import CreateRecipeRequest
 from .create_recipe_request_document import CreateRecipeRequestDocument
 from .deployment_response import DeploymentResponse
@@ -167,7 +174,6 @@ from .plan_workload_request import PlanWorkloadRequest
 from .plan_workload_requests import PlanWorkloadRequests
 from .preview_proposal_response_proposal_preview_api_v1_proposals_post import PreviewProposalResponseProposalPreviewApiV1ProposalsPost
 from .preview_request import PreviewRequest
-from .profile_placement import ProfilePlacement
 from .projection_reason import ProjectionReason
 from .projection_reason_code import ProjectionReasonCode
 from .projection_reason_severity import ProjectionReasonSeverity
@@ -186,11 +192,6 @@ from .recipe_presence import RecipePresence
 from .recipe_presence_degraded_reason_type_0 import RecipePresenceDegradedReasonType0
 from .recipe_presence_group_state import RecipePresenceGroupState
 from .recipe_presence_rank_state import RecipePresenceRankState
-from .recipe_profile import RecipeProfile
-from .recipe_profile_measurement import RecipeProfileMeasurement
-from .recipe_profile_parameter_overrides import RecipeProfileParameterOverrides
-from .recipe_profile_summary import RecipeProfileSummary
-from .recipe_profile_summary_fabric_connectivity import RecipeProfileSummaryFabricConnectivity
 from .recipe_revision_response import RecipeRevisionResponse
 from .recipe_revision_response_document import RecipeRevisionResponseDocument
 from .recipe_revision_response_lifecycle import RecipeRevisionResponseLifecycle
@@ -201,6 +202,7 @@ from .recipe_role import RecipeRole
 from .recipe_summary_response import RecipeSummaryResponse
 from .recipe_summary_response_lifecycle import RecipeSummaryResponseLifecycle
 from .recipe_summary_response_origin import RecipeSummaryResponseOrigin
+from .recipe_topology import RecipeTopology
 from .reconciliation_accepted_response import ReconciliationAcceptedResponse
 from .reconciliation_cancel_request import ReconciliationCancelRequest
 from .reconciliation_plan_request import ReconciliationPlanRequest
@@ -209,9 +211,12 @@ from .reconciliation_request import ReconciliationRequest
 from .reject_request import RejectRequest
 from .rejected_node import RejectedNode
 from .request_key import RequestKey
+from .resolve_catalog_entity_request import ResolveCatalogEntityRequest
 from .resolve_import_request import ResolveImportRequest
 from .resolve_import_request_overlays import ResolveImportRequestOverlays
 from .resolve_recipe_request import ResolveRecipeRequest
+from .revise_catalog_entity_request import ReviseCatalogEntityRequest
+from .revise_catalog_entity_request_document import ReviseCatalogEntityRequestDocument
 from .run_node_plan_response import RunNodePlanResponse
 from .run_plan_response import RunPlanResponse
 from .run_presence import RunPresence
@@ -247,6 +252,7 @@ from .telemetry_state import TelemetryState
 from .telemetry_state_freshness import TelemetryStateFreshness
 from .test_report_request import TestReportRequest
 from .test_report_request_report import TestReportRequestReport
+from .topology_placement import TopologyPlacement
 from .uninstall_active_run_response import UninstallActiveRunResponse
 from .uninstall_consequences_response import UninstallConsequencesResponse
 from .uninstall_node_impact_response import UninstallNodeImpactResponse
@@ -263,14 +269,17 @@ from .validation_error import ValidationError
 from .visual_artifact import VisualArtifact
 from .visual_build import VisualBuild
 from .visual_build_context import VisualBuildContext
+from .visual_catalog_identity import VisualCatalogIdentity
+from .visual_catalog_identity_kind import VisualCatalogIdentityKind
+from .visual_execution import VisualExecution
 from .visual_identity import VisualIdentity
+from .visual_interface import VisualInterface
 from .visual_metadata import VisualMetadata
 from .visual_provenance import VisualProvenance
 from .visual_provenance_source_kind import VisualProvenanceSourceKind
 from .visual_recipe_document import VisualRecipeDocument
 from .visual_runtime import VisualRuntime
 from .visual_validation import VisualValidation
-from .visual_workload import VisualWorkload
 
 __all__ = (
     "AgentsResponse",
@@ -284,8 +293,15 @@ __all__ = (
     "BuildRequest",
     "CancelReconciliationResponseCancelReconciliationApiV1ReconciliationsReconciliationIdCancelPost",
     "CapacityReservations",
+    "CatalogEntityListResponse",
+    "CatalogEntityRevisionResponse",
+    "CatalogEntityRevisionResponseDocument",
+    "CatalogEntityRevisionResponseKind",
+    "CatalogEntityRevisionResponseLifecycle",
     "CatalogProblem",
     "ChangeRequest",
+    "CreateCatalogEntityRequest",
+    "CreateCatalogEntityRequestDocument",
     "CreateRecipeRequest",
     "CreateRecipeRequestDocument",
     "DeploymentResponse",
@@ -440,7 +456,6 @@ __all__ = (
     "PlanWorkloadRequests",
     "PreviewProposalResponseProposalPreviewApiV1ProposalsPost",
     "PreviewRequest",
-    "ProfilePlacement",
     "ProjectionReason",
     "ProjectionReasonCode",
     "ProjectionReasonSeverity",
@@ -459,11 +474,6 @@ __all__ = (
     "RecipePresenceDegradedReasonType0",
     "RecipePresenceGroupState",
     "RecipePresenceRankState",
-    "RecipeProfile",
-    "RecipeProfileMeasurement",
-    "RecipeProfileParameterOverrides",
-    "RecipeProfileSummary",
-    "RecipeProfileSummaryFabricConnectivity",
     "RecipeRevisionResponse",
     "RecipeRevisionResponseDocument",
     "RecipeRevisionResponseLifecycle",
@@ -474,6 +484,7 @@ __all__ = (
     "RecipeSummaryResponse",
     "RecipeSummaryResponseLifecycle",
     "RecipeSummaryResponseOrigin",
+    "RecipeTopology",
     "ReconciliationAcceptedResponse",
     "ReconciliationCancelRequest",
     "ReconciliationPlanRequest",
@@ -482,9 +493,12 @@ __all__ = (
     "RejectedNode",
     "RejectRequest",
     "RequestKey",
+    "ResolveCatalogEntityRequest",
     "ResolveImportRequest",
     "ResolveImportRequestOverlays",
     "ResolveRecipeRequest",
+    "ReviseCatalogEntityRequest",
+    "ReviseCatalogEntityRequestDocument",
     "RunNodePlanResponse",
     "RunPlanResponse",
     "RunPresence",
@@ -520,6 +534,7 @@ __all__ = (
     "TelemetryStateFreshness",
     "TestReportRequest",
     "TestReportRequestReport",
+    "TopologyPlacement",
     "UninstallActiveRunResponse",
     "UninstallConsequencesResponse",
     "UninstallNodeImpactResponse",
@@ -536,12 +551,15 @@ __all__ = (
     "VisualArtifact",
     "VisualBuild",
     "VisualBuildContext",
+    "VisualCatalogIdentity",
+    "VisualCatalogIdentityKind",
+    "VisualExecution",
     "VisualIdentity",
+    "VisualInterface",
     "VisualMetadata",
     "VisualProvenance",
     "VisualProvenanceSourceKind",
     "VisualRecipeDocument",
     "VisualRuntime",
     "VisualValidation",
-    "VisualWorkload",
 )

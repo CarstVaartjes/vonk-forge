@@ -23,11 +23,11 @@ test("shows visual recipe truth and selects only one complete placement group on
 
   const detail = await screen.findByRole("region", {name: "Qwen Chat recipe authority"});
   expect(within(detail).getByText("Immutable revision 3")).toBeVisible();
-  expect(within(detail).getByText("qwen/3")).toBeVisible();
-  expect(within(detail).getByText("openai.chat")).toBeVisible();
-  expect(within(detail).getByText("tools")).toBeVisible();
+  expect(within(detail).getByText(`qwen/qwen3@${"e".repeat(64)}`)).toBeVisible();
+  expect(within(detail).getByText(`vonk-forge/vllm-openai@${"f".repeat(64)}`)).toBeVisible();
+  expect(within(detail).getByText(`vonk-forge/python-312-cuda@${"1".repeat(64)}`)).toBeVisible();
   const topology = within(detail).getByRole("region", {name: "Topology and resources"});
-  expect(within(topology).getByText("2 nodes · tensor_parallel · declared")).toBeVisible();
+  expect(within(topology).getByText("2 nodes · tensor_parallel")).toBeVisible();
   expect(within(topology).getByText("Rank 0 · leader · endpoint owner")).toBeVisible();
   expect(within(topology).getByText("Rank 1 · worker")).toBeVisible();
   expect(within(topology).getByText("144.0 GiB startup memory total")).toBeVisible();

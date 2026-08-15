@@ -27,7 +27,6 @@ class MappingRequest:
         Attributes:
             node_ids (list[str]):
             placement_digest (str):
-            profile_name (str):
             recipe_revision_id (str):
             request_key (str):
             parameters (Union[Unset, MappingRequestParameters]):
@@ -35,7 +34,6 @@ class MappingRequest:
 
     node_ids: list[str]
     placement_digest: str
-    profile_name: str
     recipe_revision_id: str
     request_key: str
     parameters: Union[Unset, 'MappingRequestParameters'] = UNSET
@@ -52,8 +50,6 @@ class MappingRequest:
 
         placement_digest = self.placement_digest
 
-        profile_name = self.profile_name
-
         recipe_revision_id = self.recipe_revision_id
 
         request_key = self.request_key
@@ -68,7 +64,6 @@ class MappingRequest:
         field_dict.update({
             "node_ids": node_ids,
             "placement_digest": placement_digest,
-            "profile_name": profile_name,
             "recipe_revision_id": recipe_revision_id,
             "request_key": request_key,
         })
@@ -88,8 +83,6 @@ class MappingRequest:
 
         placement_digest = d.pop("placement_digest")
 
-        profile_name = d.pop("profile_name")
-
         recipe_revision_id = d.pop("recipe_revision_id")
 
         request_key = d.pop("request_key")
@@ -107,7 +100,6 @@ class MappingRequest:
         mapping_request = cls(
             node_ids=node_ids,
             placement_digest=placement_digest,
-            profile_name=profile_name,
             recipe_revision_id=recipe_revision_id,
             request_key=request_key,
             parameters=parameters,

@@ -44,12 +44,12 @@ class PlacementRecommendation:
             node_ids (list[str]):
             nodes (list['PlacementNode']):
             preview_targets (list[Union['InstallPreviewTarget', 'MappingPreviewTarget', 'RunPreviewTarget']]):
-            profile_name (str):
             reasons (list['LibraryProjectionReason']):
             recipe_build_id (Union[None, str]):
             recipe_revision_id (str):
             run_ids (list[str]):
             score (PlacementScore):
+            topology_name (str):
             group_complete (Union[Unset, bool]):  Default: True.
             ranking_scope (Union[Literal['bounded-advisory'], Unset]):  Default: 'bounded-advisory'.
      """
@@ -62,12 +62,12 @@ class PlacementRecommendation:
     node_ids: list[str]
     nodes: list['PlacementNode']
     preview_targets: list[Union['InstallPreviewTarget', 'MappingPreviewTarget', 'RunPreviewTarget']]
-    profile_name: str
     reasons: list['LibraryProjectionReason']
     recipe_build_id: Union[None, str]
     recipe_revision_id: str
     run_ids: list[str]
     score: 'PlacementScore'
+    topology_name: str
     group_complete: Union[Unset, bool] = True
     ranking_scope: Union[Literal['bounded-advisory'], Unset] = 'bounded-advisory'
 
@@ -120,8 +120,6 @@ class PlacementRecommendation:
 
 
 
-        profile_name = self.profile_name
-
         reasons = []
         for reasons_item_data in self.reasons:
             reasons_item = reasons_item_data.to_dict()
@@ -140,6 +138,8 @@ class PlacementRecommendation:
 
         score = self.score.to_dict()
 
+        topology_name = self.topology_name
+
         group_complete = self.group_complete
 
         ranking_scope = self.ranking_scope
@@ -156,12 +156,12 @@ class PlacementRecommendation:
             "node_ids": node_ids,
             "nodes": nodes,
             "preview_targets": preview_targets,
-            "profile_name": profile_name,
             "reasons": reasons,
             "recipe_build_id": recipe_build_id,
             "recipe_revision_id": recipe_revision_id,
             "run_ids": run_ids,
             "score": score,
+            "topology_name": topology_name,
         })
         if group_complete is not UNSET:
             field_dict["group_complete"] = group_complete
@@ -254,8 +254,6 @@ class PlacementRecommendation:
             preview_targets.append(preview_targets_item)
 
 
-        profile_name = d.pop("profile_name")
-
         reasons = []
         _reasons = d.pop("reasons")
         for reasons_item_data in (_reasons):
@@ -284,6 +282,8 @@ class PlacementRecommendation:
 
 
 
+        topology_name = d.pop("topology_name")
+
         group_complete = d.pop("group_complete", UNSET)
 
         ranking_scope = cast(Union[Literal['bounded-advisory'], Unset] , d.pop("ranking_scope", UNSET))
@@ -299,12 +299,12 @@ class PlacementRecommendation:
             node_ids=node_ids,
             nodes=nodes,
             preview_targets=preview_targets,
-            profile_name=profile_name,
             reasons=reasons,
             recipe_build_id=recipe_build_id,
             recipe_revision_id=recipe_revision_id,
             run_ids=run_ids,
             score=score,
+            topology_name=topology_name,
             group_complete=group_complete,
             ranking_scope=ranking_scope,
         )

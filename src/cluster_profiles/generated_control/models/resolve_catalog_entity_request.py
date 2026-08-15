@@ -6,45 +6,37 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from typing import cast
 
 
 
 
 
 
-T = TypeVar("T", bound="VisualWorkload")
+T = TypeVar("T", bound="ResolveCatalogEntityRequest")
 
 
 
 @_attrs_define
-class VisualWorkload:
+class ResolveCatalogEntityRequest:
     """
         Attributes:
-            capabilities (list[str]):
-            family (str):
+            expected_revision (int):
      """
 
-    capabilities: list[str]
-    family: str
+    expected_revision: int
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        capabilities = self.capabilities
-
-
-
-        family = self.family
+        expected_revision = self.expected_revision
 
 
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
-            "capabilities": capabilities,
-            "family": family,
+            "expected_revision": expected_revision,
         })
 
         return field_dict
@@ -54,14 +46,10 @@ class VisualWorkload:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        capabilities = cast(list[str], d.pop("capabilities"))
+        expected_revision = d.pop("expected_revision")
 
-
-        family = d.pop("family")
-
-        visual_workload = cls(
-            capabilities=capabilities,
-            family=family,
+        resolve_catalog_entity_request = cls(
+            expected_revision=expected_revision,
         )
 
-        return visual_workload
+        return resolve_catalog_entity_request

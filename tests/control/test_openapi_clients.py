@@ -298,6 +298,31 @@ def test_generated_run_preview_contracts_require_digest_bound_alias() -> None:
     assert "alias: string;" in response_contract
 
 
+def test_generated_library_contract_has_one_recipe_topology_and_strict_identities() -> None:
+    schema = json.loads(OPENAPI.read_text())["components"]["schemas"]
+    mapping_preview = schema["MappingPreviewInput"]
+    mapping_request = schema["MappingRequest"]
+    detail = schema["LibraryRecipeDetail"]
+    visual = schema["VisualRecipeDocument"]
+
+    assert "profile_name" not in mapping_preview["properties"]
+    assert "profile_name" not in mapping_request["properties"]
+    assert set(detail["properties"]) >= {"topology", "placement", "visual_recipe"}
+    assert "profiles" not in detail["properties"]
+    assert set(visual["properties"]) >= {"model", "execution", "runtime", "interfaces"}
+    assert "workload" not in visual["properties"]
+    assert "adapter" not in schema["VisualRuntime"]["properties"]
+
+    typescript = TYPESCRIPT_CLIENT.read_text()
+    mapping_contract = typescript.split("MappingPreviewInput: {", 1)[1].split("};", 1)[0]
+    detail_contract = typescript.split("LibraryRecipeDetail: {", 1)[1].split("};", 1)[0]
+    runtime_contract = typescript.split("VisualRuntime: {", 1)[1].split("};", 1)[0]
+    assert "topology_name" not in mapping_contract
+    assert "profile_name" not in mapping_contract
+    assert "topology:" in detail_contract and "profiles:" not in detail_contract
+    assert "distribution:" in runtime_contract and "adapter:" not in runtime_contract
+
+
 def test_generated_python_client_imports_in_the_root_locked_environment() -> None:
     result = subprocess.run(
         [
