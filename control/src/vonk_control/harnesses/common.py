@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
+from pathlib import PurePosixPath
 
 from .contracts import HarnessMount, HarnessProjection
 
 _SAFE_ARGUMENT = re.compile(r"^[A-Za-z0-9_./:+@%=-]{1,2048}$")
 _NON_ROOT_UID = re.compile(r"^[1-9][0-9]*(?::[1-9][0-9]*)?$")
 _SHELL_EXECUTABLES = frozenset({"sh", "bash", "dash", "zsh", "/bin/sh", "/bin/bash"})
+_IMAGE = re.compile(r"^[a-z0-9][a-z0-9._:/-]*@sha256:[a-f0-9]{64}$")
+_SOCKET_NAMES = ("docker.sock", "podman.sock", "containerd.sock", "cri-dockerd.sock")
 
 
 class HarnessCompileError(ValueError):
@@ -22,7 +25,10 @@ def structured_command(value: object) -> tuple[str, ...]:
     command = tuple(value)
     if not command or len(command) > 64:
         raise HarnessCompileError("harness command size is invalid")
-    if any(not isinstance(item, str) or _SAFE_ARGUMENT.fullmatch(item) is None for item in command):
+    if any(
+        not isinstance(item, str) or _SAFE_ARGUMENT.fullmatch(item) is None
+        for item in command
+    ):
         raise HarnessCompileError("harness command contains unsafe shell syntax")
     if command[0] in _SHELL_EXECUTABLES or "-c" in command:
         raise HarnessCompileError("harness command contains unsafe shell syntax")
@@ -33,14 +39,16 @@ def validate_projection(projection: HarnessProjection) -> None:
     structured_command(projection.command)
     if projection.contract_version != 1:
         raise HarnessCompileError("harness contract version is invalid")
+    if _IMAGE.fullmatch(projection.image) is None:
+        raise HarnessCompileError("harness image must be digest-pinned")
+    if projection.network_mode != "none":
+        raise HarnessCompileError("harness projection requires an offline network")
     if projection.architecture != "linux/arm64":
         raise HarnessCompileError("harness projection must target linux/arm64")
     if _NON_ROOT_UID.fullmatch(projection.user) is None:
-        raise HarnessCompileError("harness projection user must be numeric and non-root")
-    if not projection.offline_runtime:
-        raise HarnessCompileError("harness runtime must be offline")
-    if projection.docker_socket:
-        raise HarnessCompileError("harness projection must not expose the Docker socket")
+        raise HarnessCompileError(
+            "harness projection user must be numeric and non-root"
+        )
     if not projection.no_new_privileges:
         raise HarnessCompileError("harness projection must set no-new-privileges")
     if projection.capabilities:
@@ -51,6 +59,30 @@ def validate_projection(projection: HarnessProjection) -> None:
         raise HarnessCompileError("harness model mounts must be read-only")
     if projection.output_mount.read_only or not projection.output_mount.isolated:
         raise HarnessCompileError("harness outputs must be isolated and writable")
+    for mount in (*projection.model_mounts, projection.output_mount):
+        _mount_path(mount.source)
+        _mount_path(mount.target)
+    for mount in projection.model_mounts:
+        if _overlaps(mount.target, projection.output_mount.target):
+            raise HarnessCompileError("harness model and output mounts overlap")
+
+
+def _mount_path(value: str) -> None:
+    if not isinstance(value, str) or not value.startswith("/"):
+        raise HarnessCompileError("harness mount paths must be absolute")
+    if value.startswith("//") or "\\" in value:
+        raise HarnessCompileError("harness mount path is escaping")
+    path = PurePosixPath(value)
+    if any(part in {".", ".."} for part in path.parts):
+        raise HarnessCompileError("harness mount path is escaping")
+    if any(name in value.lower() for name in _SOCKET_NAMES):
+        raise HarnessCompileError(
+            "harness mounts must not expose container runtime sockets"
+        )
+
+
+def _overlaps(left: str, right: str) -> bool:
+    return left == right or left.startswith(right + "/") or right.startswith(left + "/")
 
 
 class SyntheticHarnessCompiler:
@@ -58,8 +90,16 @@ class SyntheticHarnessCompiler:
 
     contract_version = 1
 
-    def __init__(self, slug: str) -> None:
+    def __init__(
+        self,
+        slug: str,
+        *,
+        source_bundle_digest: str | None = None,
+        source_bundle_signer: str | None = None,
+    ) -> None:
         self.slug = slug
+        self.source_bundle_digest = source_bundle_digest
+        self.source_bundle_signer = source_bundle_signer
 
     def compile(
         self,
@@ -73,18 +113,26 @@ class SyntheticHarnessCompiler:
     ) -> HarnessProjection:
         runtime = recipe.get("runtime")
         entrypoint = runtime.get("entrypoint") if isinstance(runtime, Mapping) else None
+        security = distribution.get("security")
+        if not isinstance(security, Mapping):
+            raise HarnessCompileError("runtime distribution security is invalid")
+        capabilities = security.get("capabilities")
+        if not isinstance(capabilities, list) or not all(
+            isinstance(value, str) for value in capabilities
+        ):
+            raise HarnessCompileError("runtime distribution capabilities are invalid")
         return HarnessProjection(
             slug=self.slug,
             contract_version=self.contract_version,
             command=structured_command(entrypoint),
+            image=str(distribution.get("image")),
+            network_mode=str(security.get("network_mode")),
             architecture="linux/arm64",
-            user="10001:10001",
-            offline_runtime=True,
-            docker_socket=False,
-            no_new_privileges=True,
-            capabilities=(),
-            model_mounts=(HarnessMount("model", "/models", read_only=True),),
+            user=str(security.get("user")),
+            no_new_privileges=security.get("no_new_privileges") is True,
+            capabilities=tuple(capabilities),
+            model_mounts=(HarnessMount("/run/vonk/models", "/models", read_only=True),),
             output_mount=HarnessMount(
-                "outputs", "/outputs", read_only=False, isolated=True
+                "/run/vonk/outputs", "/outputs", read_only=False, isolated=True
             ),
         )

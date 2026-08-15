@@ -22,10 +22,10 @@ class HarnessProjection:
     slug: str
     contract_version: int
     command: tuple[str, ...]
+    image: str
+    network_mode: str
     architecture: str
     user: str
-    offline_runtime: bool
-    docker_socket: bool
     no_new_privileges: bool
     capabilities: tuple[str, ...]
     model_mounts: tuple[HarnessMount, ...]

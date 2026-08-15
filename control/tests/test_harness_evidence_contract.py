@@ -4,7 +4,7 @@ import copy
 import json
 
 import pytest
-from jsonschema import Draft202012Validator, ValidationError
+from jsonschema import Draft202012Validator
 from vonk_control.schema_resources import read_runtime_schema
 
 

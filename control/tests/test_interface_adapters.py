@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import pytest
-
-from vonk_control.interface_adapters import InterfaceAdapterError, interface_adapter
+from vonk_control.interface_adapters import (
+    InterfaceAdapterError,
+    interface_adapter,
+)
 
 
 @pytest.mark.parametrize(
@@ -14,9 +16,7 @@ def test_job_interfaces_publish_artifacts(name: str) -> None:
     assert adapter.publication == "artifact"
     assert adapter.readiness({"ready": True}) is True
     assert adapter.invocation_request({"job": "submit"}) == {"job": "submit"}
-    assert adapter.evidence({"artifact": "result.json"}) == {
-        "artifact": "result.json"
-    }
+    assert adapter.evidence({"artifact": "result.json"}) == {"artifact": "result.json"}
     assert adapter.withdrawal() == {"publication": "artifact", "withdrawn": True}
 
 

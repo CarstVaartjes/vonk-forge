@@ -122,7 +122,7 @@
     "runtimeDistribution": {
       "allOf": [
         {"$ref": "#/$defs/base"},
-        {"properties": {"kind": {"const": "runtime-distribution"}, "implements_harness": {"$ref": "#/$defs/executionHarnessReference"}, "platform": {"const": "linux/arm64"}, "sha256": {"$ref": "#/$defs/sha256"}}, "required": ["implements_harness", "platform", "sha256"]}
+        {"properties": {"kind": {"const": "runtime-distribution"}, "implements_harness": {"$ref": "#/$defs/executionHarnessReference"}, "platform": {"const": "linux/arm64"}, "image": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._:/-]*@sha256:[a-f0-9]{64}$"}, "security": {"type": "object", "additionalProperties": false, "required": ["network_mode", "user", "no_new_privileges", "capabilities"], "properties": {"network_mode": {"const": "none"}, "user": {"type": "string", "pattern": "^(?!0(?::0)?$)[1-9][0-9]*(?::[1-9][0-9]*)?$"}, "no_new_privileges": {"const": true}, "capabilities": {"type": "array", "maxItems": 0}}}, "sha256": {"$ref": "#/$defs/sha256"}}, "required": ["implements_harness", "platform", "image", "security", "sha256"]}
       ],
       "unevaluatedProperties": false
     },

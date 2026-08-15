@@ -84,6 +84,13 @@ def runtime_distribution(
             "content_sha256": harness_digest,
         },
         "platform": "linux/arm64",
+        "image": "registry.example/vonk/python@sha256:" + "c" * 64,
+        "security": {
+            "network_mode": "none",
+            "user": "10001:10001",
+            "no_new_privileges": True,
+            "capabilities": [],
+        },
         "sha256": "d" * 64,
     }
 

@@ -149,6 +149,13 @@ def test_runtime_distribution_requires_one_exact_implemented_harness() -> None:
             "content_sha256": "b" * 64,
         },
         "platform": "linux/arm64",
+        "image": "registry.example/vonk/python@sha256:" + "c" * 64,
+        "security": {
+            "network_mode": "none",
+            "user": "10001:10001",
+            "no_new_privileges": True,
+            "capabilities": [],
+        },
         "sha256": "d" * 64,
     }
 
