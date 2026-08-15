@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from test_catalog_service import _seed_recipe_dependencies
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog_service import CatalogService, RecipeDraftInput
-from vonk_control.cluster_mappings import ClusterMappingService
+from vonk_control.cluster_mappings import ClusterMappingError, ClusterMappingService
 from vonk_control.models import AgentNode, Base, ClusterMapping, ClusterMappingNode
 
 
@@ -25,7 +27,7 @@ def setup(tmp_path: Path):
                 node_id=node_id,
                 state="active",
                 architecture="linux-arm64",
-                capabilities=["runtime.vonk.v1"],
+                capabilities=["runtime.vonk.v1", "fabric.full_mesh.mbps.10000"],
             )
             for node_id in node_ids
         )
@@ -117,3 +119,46 @@ def test_mapping_plan_binds_effective_parameters(tmp_path: Path) -> None:
 
     assert plan.parameters["max_model_len"] == 65536
     assert len(plan.placement_digest) == 64
+
+
+def test_mapping_rejects_wrong_node_count_and_missing_required_fabric(
+    tmp_path: Path,
+) -> None:
+    sessions, _now, node_ids, revision = setup(tmp_path)
+    service = ClusterMappingService(sessions)
+
+    with pytest.raises(ClusterMappingError) as caught:
+        service.plan(revision.id, node_ids[:2], parameters={})
+    assert caught.value.code == "mapping.node_count"
+
+    with sessions.begin() as session:
+        node = session.get(AgentNode, node_ids[0])
+        assert node is not None
+        node.capabilities = ["runtime.vonk.v1"]
+
+    with pytest.raises(ClusterMappingError) as caught:
+        service.plan(revision.id, node_ids, parameters={})
+    assert caught.value.code == "topology.fabric_insufficient"
+
+
+def test_mapping_rejects_forged_role_rank_and_endpoint_owner(tmp_path: Path) -> None:
+    sessions, now, node_ids, revision = setup(tmp_path)
+    service = ClusterMappingService(sessions)
+    plan = service.plan(revision.id, node_ids, parameters={})
+    forged_nodes = list(plan.nodes)
+    forged_nodes[0] = replace(forged_nodes[0], role="worker", endpoint_owner=False)
+    forged_nodes[1] = replace(forged_nodes[1], role="entrypoint", endpoint_owner=True)
+    forged = replace(plan, nodes=tuple(forged_nodes))
+
+    with pytest.raises(ClusterMappingError) as caught:
+        service.materialize(forged, actor="admin", now=now)
+    assert caught.value.code == "topology.role_mismatch"
+
+    forged_nodes = list(plan.nodes)
+    forged_nodes[0] = replace(forged_nodes[0], endpoint_owner=False)
+    forged_nodes[1] = replace(forged_nodes[1], endpoint_owner=True)
+    forged = replace(plan, nodes=tuple(forged_nodes))
+
+    with pytest.raises(ClusterMappingError) as caught:
+        service.materialize(forged, actor="admin", now=now)
+    assert caught.value.code == "topology.role_mismatch"

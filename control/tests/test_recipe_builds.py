@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 import vonk_control.recipe_builds as recipe_builds_module
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, delete, select
 from sqlalchemy.orm import sessionmaker
 from test_catalog_service import _seed_recipe_dependencies
 from vonk_agent_protocol import (
@@ -30,6 +30,8 @@ from vonk_control.models import (
     AgentNode,
     AgentOperation,
     Base,
+    CatalogEntity,
+    CatalogEntityRevision,
     ClusterMapping,
     ClusterMappingNode,
     Job,
@@ -174,6 +176,20 @@ def test_build_plan_is_typed_sandboxed_and_durable(tmp_path: Path) -> None:
     with sessions() as session:
         stored = session.get(RecipeBuild, plan.build_id)
         assert stored is not None and stored.state == "planned"
+
+
+def test_build_plan_rejects_missing_exact_recipe_dependency(tmp_path: Path) -> None:
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    with sessions.begin() as session:
+        session.execute(delete(CatalogEntityRevision))
+        session.execute(delete(CatalogEntity))
+
+    with pytest.raises(RecipeBuildError) as caught:
+        RecipeBuildService(sessions, bundles=bundles).plan(
+            revision.id, node_id, now=now
+        )
+
+    assert caught.value.code == "build.dependencies_stale"
 
 
 def test_build_identity_changes_when_builder_runtime_changes(tmp_path: Path) -> None:

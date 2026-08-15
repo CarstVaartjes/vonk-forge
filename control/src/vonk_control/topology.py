@@ -19,6 +19,7 @@ class Placement:
     node_id: str
     rank: int
     role: str
+    endpoint_owner: bool = False
 
 
 def validate_topology(
@@ -46,13 +47,13 @@ def validate_topology(
     roles = topology.get("roles")
     if not isinstance(roles, list):
         raise TopologyError("topology.invalid", "topology roles are invalid")
-    expected_roles = sorted(
-        str(role["name"])
+    expected_placements = [
+        (str(role["name"]), bool(role["endpoint_owner"]))
         for role in roles
         if isinstance(role, Mapping)
         for _ in range(int(role["count"]))
-    )
-    if sorted(item.role for item in ordered) != expected_roles:
+    ]
+    if [(item.role, item.endpoint_owner) for item in ordered] != expected_placements:
         raise TopologyError(
             "topology.role_mismatch", "placement roles do not match the topology"
         )

@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .models import AgentNode, ClusterMapping, ClusterMappingNode, LocalRecipeRevision
 from .recipe_contract import RecipeContractError, recipe_topology
+from .topology import Placement, TopologyError, validate_topology
 
 
 class ClusterMappingError(ValueError):
@@ -89,30 +90,37 @@ class ClusterMappingService:
                 (str(raw_role["name"]), bool(raw_role["endpoint_owner"]))
                 for _ in range(int(raw_role["count"]))
             )
-        ordered_nodes = sorted(nodes)
+        ordered_nodes = sorted(node.node_id for node in nodes)
         placements = tuple(
             ClusterMappingPlacement(node_id, rank, role, endpoint_owner)
             for rank, (node_id, (role, endpoint_owner)) in enumerate(
                 zip(ordered_nodes, expanded, strict=True)
             )
         )
-        identity = {
-            "schema_version": 1,
-            "recipe_revision_id": revision.id,
-            "recipe_content_sha256": revision.content_sha256,
-            "topology_name": str(topology["name"]),
-            "generation": 1,
-            "parameters": effective,
-            "nodes": [
-                {
-                    "node_id": item.node_id,
-                    "rank": item.rank,
-                    "role": item.role,
-                    "endpoint_owner": item.endpoint_owner,
-                }
-                for item in placements
-            ],
-        }
+        try:
+            validate_topology(
+                document,
+                tuple(
+                    Placement(
+                        item.node_id,
+                        item.rank,
+                        item.role,
+                        item.endpoint_owner,
+                    )
+                    for item in placements
+                ),
+                {node.node_id: tuple(node.capabilities) for node in nodes},
+            )
+        except TopologyError as error:
+            raise ClusterMappingError(error.code, str(error)) from error
+        identity = _plan_identity(
+            revision.id,
+            revision.content_sha256,
+            str(topology["name"]),
+            1,
+            effective,
+            placements,
+        )
         return ClusterMappingPlan(
             recipe_revision_id=revision.id,
             recipe_content_sha256=revision.content_sha256,
@@ -141,9 +149,42 @@ class ClusterMappingService:
                 raise ClusterMappingError(
                     "mapping.stale_plan", "recipe changed after mapping preview"
                 )
-            _active_nodes(
+            nodes = _active_nodes(
                 session, tuple(item.node_id for item in plan.nodes), lock=True
             )
+            document = copy.deepcopy(revision.document)
+            try:
+                validate_topology(
+                    document,
+                    tuple(
+                        Placement(
+                            item.node_id,
+                            item.rank,
+                            item.role,
+                            item.endpoint_owner,
+                        )
+                        for item in plan.nodes
+                    ),
+                    {node.node_id: tuple(node.capabilities) for node in nodes},
+                )
+            except TopologyError as error:
+                raise ClusterMappingError(error.code, str(error)) from error
+            topology = recipe_topology(document)
+            if plan.topology_name != str(
+                topology["name"]
+            ) or plan.placement_digest != _digest(
+                _plan_identity(
+                    plan.recipe_revision_id,
+                    plan.recipe_content_sha256,
+                    plan.topology_name,
+                    plan.generation,
+                    plan.parameters,
+                    plan.nodes,
+                )
+            ):
+                raise ClusterMappingError(
+                    "mapping.stale_plan", "mapping plan identity is invalid"
+                )
             existing = session.scalar(
                 select(ClusterMapping).where(
                     ClusterMapping.placement_digest == plan.placement_digest
@@ -188,7 +229,7 @@ class ClusterMappingService:
 
 def _active_nodes(
     session: Session, node_ids: tuple[str, ...], *, lock: bool = False
-) -> tuple[str, ...]:
+) -> tuple[AgentNode, ...]:
     if not node_ids or len(node_ids) != len(set(node_ids)):
         raise ClusterMappingError(
             "mapping.nodes_invalid", "mapping nodes must be unique and non-empty"
@@ -211,7 +252,34 @@ def _active_nodes(
             "mapping.node_incompatible",
             "a selected GPU node is inactive or incompatible",
         )
-    return tuple(row.node_id for row in rows)
+    return rows
+
+
+def _plan_identity(
+    recipe_revision_id: str,
+    recipe_content_sha256: str,
+    topology_name: str,
+    generation: int,
+    parameters: Mapping[str, object],
+    nodes: tuple[ClusterMappingPlacement, ...],
+) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "recipe_revision_id": recipe_revision_id,
+        "recipe_content_sha256": recipe_content_sha256,
+        "topology_name": topology_name,
+        "generation": generation,
+        "parameters": dict(parameters),
+        "nodes": [
+            {
+                "node_id": item.node_id,
+                "rank": item.rank,
+                "role": item.role,
+                "endpoint_owner": item.endpoint_owner,
+            }
+            for item in nodes
+        ],
+    }
 
 
 def _effective_parameters(

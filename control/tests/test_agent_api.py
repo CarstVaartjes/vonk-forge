@@ -1566,7 +1566,7 @@ def test_rust_agent_enrollment_shape_remains_controller_compatible(
     assert body["grant_token"] not in repr(event)
 
 
-def test_agent_reads_only_its_installation_bound_built_recipe_spec(
+def test_agent_rejects_recipe_spec_without_exact_resolved_dependencies(
     agent_system,
 ) -> None:
     client, services, _, clock = agent_system
@@ -1684,24 +1684,8 @@ def test_agent_reads_only_its_installation_bound_built_recipe_spec(
         headers=agent_headers(NODE_A, "serial-a"),
     )
 
-    assert response.status_code == 200
-    assert response.content == canonical_message(response.json())
-    assert set(response.json()) == {
-        "artifacts",
-        "interfaces",
-        "runtime",
-        "security",
-        "lifecycle",
-    }
-    assert (
-        response.json()["runtime"]["execution_harness"]
-        == document["execution"]["harness"]
-    )
-    assert (
-        response.json()["runtime"]["distribution"]
-        == document["runtime"]["distribution"]
-    )
-    assert response.json()["runtime"]["image"].endswith("@" + image_digest)
+    assert response.status_code == 409
+    assert response.json()["detail"] == "recipe specification dependencies are stale"
     assert (
         client.get(
             f"/agent/v1/recipe-installations/{uuid.uuid4()}/spec",

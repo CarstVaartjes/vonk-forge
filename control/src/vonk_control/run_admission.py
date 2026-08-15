@@ -25,6 +25,7 @@ from .models import (
     RunNode,
 )
 from .recipe_contract import recipe_topology
+from .recipe_runtime_specs import RecipeRuntimeSpecError, resolve_recipe_entities
 from .topology import Placement, TopologyError, validate_topology
 
 
@@ -97,6 +98,10 @@ class RunAdmissionService:
             revision = session.get(LocalRecipeRevision, installation.recipe_revision_id)
             if revision is None or revision.lifecycle != "resolved":
                 raise ValueError("recipe revision is unavailable")
+            try:
+                resolve_recipe_entities(session, revision.document)
+            except RecipeRuntimeSpecError as error:
+                raise ValueError("exact recipe dependencies are unavailable") from error
             mapping_nodes = tuple(
                 session.scalars(
                     select(ClusterMappingNode)
@@ -114,7 +119,8 @@ class RunAdmissionService:
                 )
             }
         placements = tuple(
-            Placement(item.node_id, item.rank, item.role) for item in mapping_nodes
+            Placement(item.node_id, item.rank, item.role, item.endpoint_owner)
+            for item in mapping_nodes
         )
         capabilities: dict[str, tuple[str, ...]] = {}
         snapshots = {}

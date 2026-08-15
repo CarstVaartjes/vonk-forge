@@ -24,6 +24,7 @@ from .models import (
     ResourceReservation,
 )
 from .recipe_contract import RecipeContractError, recipe_topology
+from .recipe_runtime_specs import RecipeRuntimeSpecError, resolve_recipe_entities
 from .source_bundles import SourceBundleError, SourceBundleStore
 from .source_policy import (
     SourcePolicyError,
@@ -94,6 +95,13 @@ class RecipeBuildService:
                     "build.recipe_unresolved", "only a resolved recipe can be checked"
                 )
             document = copy.deepcopy(revision.document)
+            try:
+                resolve_recipe_entities(session, document)
+            except RecipeRuntimeSpecError as error:
+                raise RecipeBuildError(
+                    "build.dependencies_stale",
+                    "exact recipe dependencies are unavailable",
+                ) from error
             build = document.get("build")
             context = build.get("context") if isinstance(build, dict) else None
             source_sha256 = context.get("sha256") if isinstance(context, dict) else None
@@ -131,6 +139,13 @@ class RecipeBuildService:
             assert node.agent_sha256 is not None
             builder_agent_sha256 = node.agent_sha256
             document = copy.deepcopy(revision.document)
+            try:
+                resolve_recipe_entities(session, document)
+            except RecipeRuntimeSpecError as error:
+                raise RecipeBuildError(
+                    "build.dependencies_stale",
+                    "exact recipe dependencies are unavailable",
+                ) from error
             build = document.get("build")
             context = build.get("context") if isinstance(build, dict) else None
             source_sha256 = context.get("sha256") if isinstance(context, dict) else None

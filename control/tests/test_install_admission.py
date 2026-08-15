@@ -2,7 +2,9 @@ import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
 from sqlalchemy import create_engine, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from test_catalog_service import _seed_recipe_dependencies
 from vonk_control.artifact_sizes import ArtifactSize, StaticArtifactSizeResolver
@@ -17,6 +19,7 @@ from vonk_control.inventory_repository import (
 from vonk_control.models import (
     AgentNode,
     Base,
+    ClusterMappingNode,
     NodeArtifact,
     RecipeBuild,
     RecipeInstallation,
@@ -199,3 +202,26 @@ def test_stale_and_read_only_inventory_are_blocking(tmp_path) -> None:
         item.code == "install.artifact_store_read_only"
         for item in blocked.nodes[0].blockers
     )
+
+
+def test_database_rejects_mutable_built_image_identity(tmp_path) -> None:
+    sessions, _now, _node, _mapping, build, _sizes = setup(tmp_path, free=200)
+    with pytest.raises(IntegrityError), sessions.begin() as session:
+        row = session.get(RecipeBuild, build)
+        assert row is not None
+        row.image_digest = "latest"
+
+
+def test_install_rejects_mapping_with_wrong_endpoint_owner(tmp_path) -> None:
+    sessions, now, _node, mapping, build, sizes = setup(tmp_path, free=200)
+    with sessions.begin() as session:
+        node = session.scalar(
+            select(ClusterMappingNode).where(ClusterMappingNode.mapping_id == mapping)
+        )
+        assert node is not None
+        node.endpoint_owner = False
+
+    with pytest.raises(ValueError, match="mapping topology"):
+        InstallAdmissionService(
+            sessions, sizes=sizes, inventory_max_age=300, disk_floor_bytes=10
+        ).plan_install(mapping, build, now=now)

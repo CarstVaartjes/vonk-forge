@@ -129,7 +129,8 @@ def setup_services(tmp_path: Path, *, nodes: int = 1, engine=None):
                     node_id=node_id,
                     state="active",
                     architecture="linux-arm64",
-                    capabilities=["runtime.vonk.v1", "recipe.operations.v1"],
+                    capabilities=["runtime.vonk.v1", "recipe.operations.v1"]
+                    + (["fabric.connected.mbps.1000"] if nodes > 1 else []),
                 )
             )
             session.flush()

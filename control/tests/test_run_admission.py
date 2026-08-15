@@ -13,6 +13,9 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
+from test_catalog_service import _seed_recipe_dependencies
+from vonk_control.auth import TokenCodec
+from vonk_control.catalog_service import CatalogService
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.inventory_repository import (
     InventoryRepository,
@@ -56,13 +59,17 @@ def setup(
             "system_reserve_bytes": 0,
         }
     )
+    catalog = CatalogService(
+        sessions, clock=lambda: now, cursors=TokenCodec(b"c" * 32).cursor_codec()
+    )
+    _seed_recipe_dependencies(catalog, document)
     with sessions.begin() as session:
         session.add(
             AgentNode(
                 node_id=node,
                 state="active",
                 architecture="linux-arm64",
-                capabilities=list(capabilities),
+                capabilities=["runtime.vonk.v1"],
             )
         )
         recipe = LocalRecipe(

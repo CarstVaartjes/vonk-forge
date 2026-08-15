@@ -33,9 +33,9 @@ def multinode():
 
 def placements():
     return (
-        Placement("spk_" + "1" * 32, 1, "worker"),
-        Placement("spk_" + "2" * 32, 0, "entrypoint"),
-        Placement("spk_" + "3" * 32, 2, "worker"),
+        Placement("spk_" + "1" * 32, 1, "worker", False),
+        Placement("spk_" + "2" * 32, 0, "entrypoint", True),
+        Placement("spk_" + "3" * 32, 2, "worker", False),
     )
 
 
@@ -103,3 +103,16 @@ def test_missing_runtime_or_fabric_capability_is_blocking() -> None:
             },
         )
     assert caught.value.code == "topology.fabric_insufficient"
+
+
+def test_role_identity_is_bound_to_each_rank() -> None:
+    values = (
+        Placement("spk_" + "1" * 32, 0, "worker"),
+        Placement("spk_" + "2" * 32, 1, "worker"),
+        Placement("spk_" + "3" * 32, 2, "entrypoint"),
+    )
+
+    with pytest.raises(TopologyError) as caught:
+        validate_topology(multinode(), values, capabilities(values))
+
+    assert caught.value.code == "topology.role_mismatch"

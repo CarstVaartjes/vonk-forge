@@ -77,7 +77,11 @@ from .pki import IssuedCertificate
 from .presence import AgentPresenceService, ManagementAddressPolicy, PresenceError
 from .recipe_contract import recipe_content_sha256, validate_recipe
 from .recipe_operations import RecipeRunObservation, record_recipe_run_observations
-from .recipe_runtime_specs import RecipeRuntimeSpecError, compile_runtime_spec
+from .recipe_runtime_specs import (
+    RecipeRuntimeSpecError,
+    compile_runtime_spec,
+    resolve_recipe_entities,
+)
 from .source_bundles import SourceBundleError, SourceBundleStore
 
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
@@ -1519,6 +1523,13 @@ def install_agent_routes(
                 )
             document = revision.document
             parameters = mapping.parameters
+            try:
+                resolved_entities = resolve_recipe_entities(session, document)
+            except RecipeRuntimeSpecError:
+                raise HTTPException(
+                    status_code=409,
+                    detail="recipe specification dependencies are stale",
+                ) from None
         validate_recipe(document)
         if recipe_content_sha256(document) != revision.content_sha256:
             raise HTTPException(
@@ -1527,8 +1538,10 @@ def install_agent_routes(
         try:
             spec = compile_runtime_spec(
                 document,
+                resolved_entities=resolved_entities,
                 parameters=parameters,
                 role=placement.role,
+                rank=placement.rank,
                 recipe_build_id=build.id,
                 image_digest=build.image_digest,
             )

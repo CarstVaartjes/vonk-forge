@@ -2,8 +2,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
-from vonk_control.recipe_runtime_specs import compile_runtime_spec
+import pytest
+from vonk_control.recipe_runtime_specs import (
+    RecipeRuntimeSpecError,
+    compile_runtime_spec,
+)
 
 
 def test_runtime_spec_binds_built_image_role_and_mapping_parameters() -> None:
@@ -39,12 +44,25 @@ def test_runtime_spec_binds_built_image_role_and_mapping_parameters() -> None:
         {"name": "mapped-value", "parameter": parameter_name}
     )
 
+    resolved_entities = {
+        "model_version": SimpleNamespace(
+            content_sha256=document["model"]["content_sha256"]
+        ),
+        "harness": SimpleNamespace(
+            content_sha256=document["execution"]["harness"]["content_sha256"]
+        ),
+        "runtime_distribution": SimpleNamespace(
+            content_sha256=document["runtime"]["distribution"]["content_sha256"]
+        ),
+        "patch_bundle": None,
+    }
+    arguments = {item["name"]: item["default"] for item in document["parameters"]}
     spec = compile_runtime_spec(
         document,
-        parameters={
-            **{item["name"]: item["default"] for item in document["parameters"]},
-        },
+        resolved_entities=resolved_entities,
+        parameters=arguments,
         role="worker",
+        rank=1,
         recipe_build_id="00000000-0000-4000-8000-000000000001",
         image_digest="sha256:" + "d" * 64,
     )
@@ -62,3 +80,29 @@ def test_runtime_spec_binds_built_image_role_and_mapping_parameters() -> None:
     assert spec["interfaces"] == document["interfaces"]
     assert spec["security"] == document["runtime"]["security"]
     assert spec["lifecycle"] == document["runtime"]["lifecycle"]
+    assert spec["identity"] == {
+        "recipe_revision_sha256": "2d77a8438dceee605821a3d2c89424ce883f65523251f6560e1a00fd4919a608",
+        "model_version_sha256": document["model"]["content_sha256"],
+        "harness_sha256": document["execution"]["harness"]["content_sha256"],
+        "runtime_distribution_sha256": document["runtime"]["distribution"][
+            "content_sha256"
+        ],
+        "patch_bundle_sha256": None,
+    }
+    assert spec["topology"] == {
+        "name": "pair",
+        "node_count": 2,
+        "rank": 1,
+        "role": "worker",
+    }
+
+    with pytest.raises(RecipeRuntimeSpecError, match="role"):
+        compile_runtime_spec(
+            document,
+            resolved_entities=resolved_entities,
+            parameters=arguments,
+            role="entrypoint",
+            rank=1,
+            recipe_build_id="00000000-0000-4000-8000-000000000001",
+            image_digest="sha256:" + "d" * 64,
+        )

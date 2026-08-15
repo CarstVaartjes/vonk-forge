@@ -24,6 +24,8 @@ from .models import (
     ResourceReservation,
 )
 from .recipe_contract import recipe_topology
+from .recipe_runtime_specs import RecipeRuntimeSpecError, resolve_recipe_entities
+from .topology import Placement, TopologyError, validate_topology
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,7 +121,36 @@ class InstallAdmissionService:
                     .order_by(ClusterMappingNode.rank)
                 )
             )
+            nodes = tuple(
+                session.scalars(
+                    select(AgentNode).where(
+                        AgentNode.node_id.in_(
+                            [mapping_node.node_id for mapping_node in mapping_nodes]
+                        )
+                    )
+                )
+            )
             document = revision.document
+            try:
+                resolve_recipe_entities(session, document)
+            except RecipeRuntimeSpecError as error:
+                raise ValueError("exact recipe dependencies are unavailable") from error
+            try:
+                validate_topology(
+                    document,
+                    tuple(
+                        Placement(
+                            mapping_node.node_id,
+                            mapping_node.rank,
+                            mapping_node.role,
+                            mapping_node.endpoint_owner,
+                        )
+                        for mapping_node in mapping_nodes
+                    ),
+                    {node.node_id: tuple(node.capabilities) for node in nodes},
+                )
+            except TopologyError as error:
+                raise ValueError("mapping topology is invalid") from error
             recipe_digest = revision.content_sha256
             mapping_generation = mapping.generation
             image_digest = build.image_digest
