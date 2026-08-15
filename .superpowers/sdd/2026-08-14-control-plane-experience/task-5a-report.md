@@ -217,3 +217,131 @@ git diff --check d89dd815e003bfaa019815e1ba08164b15488f65^ d89dd815e003bfaa01981
   session-factory consumers.
 - The twelve pytest cleanup warnings are pre-existing macOS temporary-directory
   cleanup warnings and are unrelated to Task 5A behavior.
+
+## Fix Round 1 (Task 5A)
+
+### Status and commits
+
+Fix Round 1 was completed from exact base
+`860a5162271a423d05c2fb3e4a96f0dd9df19e9e` on
+`work/control-plane-frontend-ux`.
+
+- Source/tests commit: `adffe0321be89d85e91ffae9d63f703000fd13e8`
+  (`fix: harden fleet event recording`).
+- Report commit: committed separately after this section was written; its
+  immutable hash is returned in the final handoff because a commit cannot
+  contain its own hash.
+
+Both commits are local. Nothing was pushed and no pull request was opened. The
+round did not touch frontend, Rust, MIA/runtime/readiness, or live systems.
+
+### Exact changed files
+
+The source/tests commit contains exactly these eight files:
+
+- `control/src/vonk_control/jobs.py` — preserves the conditional resume winner
+  update while also applying the winning transition to the loaded `Job`, so
+  SQLAlchemy attribute history records the real queued event in the same
+  transaction.
+- `control/src/vonk_control/operation_api.py` — applies the same event-producing
+  behavior to the durable operation projection's real resume path while
+  preserving its `KeyError`/`ValueError` contract.
+- `control/src/vonk_control/fleet_events.py` — uses one atomic SQLite
+  `UPDATE ... RETURNING` statement to increment and return the cursor; the
+  PostgreSQL row-lock allocation path remains unchanged.
+- `control/src/vonk_control/models.py` — compiles the payload check as SQLite
+  BLOB byte length or PostgreSQL-compatible `octet_length(TEXT)`.
+- `control/migrations/versions/0024_fleet_stream_events.py` — creates the same
+  dialect-aware UTF-8 byte constraint during migration.
+- `control/tests/test_fleet_events.py` — proves both real resume event paths,
+  multibyte rejection, PostgreSQL constraint compilation, and concurrent
+  SQLite allocation.
+- `control/tests/test_admission_migration.py` — proves migrated SQLite rejects a
+  payload whose character count is below 8,192 but whose UTF-8 representation
+  exceeds 8,192 bytes, and keeps migration/model constraint parity
+  dialect-aware.
+- `control/tests/test_fleet_events_postgres.py` — replaces a timing-only
+  non-allocation assertion with a database-observed lock proof using backend
+  PIDs, `pg_stat_activity`, and `pg_blocking_pids`.
+
+### Behavior and concurrency review
+
+Both resume implementations first load and validate a waiting job, then retain
+the existing guarded `UPDATE ... WHERE state = 'waiting-for-operator'` as the
+single-winner gate. Only a winner mutates the loaded ORM object. Commit then
+flushes real `Job.state` attribute history, allowing the installed production
+recorder to append the queued event atomically with the state transition. The
+guarded SQL update holds its row lock until commit; the later ORM flush is a
+second update but cannot lose the winner guarantee.
+
+SQLite does not honor `SELECT ... FOR UPDATE`. Its allocation path now performs
+the increment and read as one atomic `UPDATE ... RETURNING`, so two connections
+cannot read the same previous cursor value. The portable concurrency test holds
+writer A open until writer B has entered that update, then proves committed IDs
+and rows are exactly 1 and 2 and the cursor is 2.
+
+The payload constraint now measures encoded bytes rather than characters:
+SQLite compiles `length(CAST(payload AS BLOB))`; PostgreSQL compiles
+`octet_length(CAST(payload AS TEXT))`. Both the metadata-created and
+Alembic-created SQLite schemas reject a multibyte JSON value that is fewer than
+8,192 characters but greater than 8,192 UTF-8 bytes.
+
+The PostgreSQL concurrency test now records each writer's backend PID and does
+not release writer A until an independent connection observes writer B blocked
+by writer A with `wait_event_type = 'Lock'`. It then retains the exact ID,
+persisted-row, and cursor assertions.
+
+### TDD RED/GREEN evidence
+
+The following evidence was recorded by the Fix Round 1 implementer before the
+final review:
+
+| Phase | Observed result |
+|---|---|
+| Baseline | `26 passed, 1 skipped`; the skip required Docker. |
+| RED — real resume emission | Two new tests failed because each real resume path persisted only the initial `waiting-for-operator` event and no queued event. |
+| GREEN — real resume emission | Both new tests passed after exposing the winning ORM transition; both existing concurrent-resume winner tests also passed. |
+| RED — UTF-8 database bound | The PostgreSQL metadata compile test produced `length(CAST(payload AS TEXT))`, but required `octet_length(CAST(payload AS TEXT))`. |
+| GREEN — UTF-8 database bound | Dialect-aware model and migration constraints passed the PostgreSQL compile and SQLite multibyte rejection/parity cases. |
+| Focused implementation run | `64 passed, 1 skipped`, as recorded by the implementer. |
+
+The SQLite atomic-allocation and stronger PostgreSQL lock-proof specifications
+were added during the same test-first round. Their standalone RED output was
+not retained in the handoff, so no exact failure text is reconstructed here.
+The PostgreSQL proof was collected but could not execute without Docker.
+
+### Final verification
+
+| Command/scope | Result |
+|---|---|
+| Focused Fleet events/PostgreSQL collection, jobs, operation API, and admission migration | `63 passed, 1 skipped` (`64 collected`) in 3.45s. The skip was the Docker-backed PostgreSQL Fleet ordering test. |
+| All `test_*migration*.py` plus recipe deployment authority | `52 passed, 2 skipped` in 8.42s. Both skips were Docker-backed PostgreSQL migration tests. |
+| Broader scoped Fleet, telemetry, recipe operations/routes, jobs/agent jobs, operation API, package consumers, migrations, and deployment authority | `265 passed, 4 skipped` in 21.25s. |
+| Existing `test_concurrent_operator_resume_has_one_winner` and `test_durable_resume_has_one_atomic_winner`, repeated together 10 times | Every repetition passed: `2 passed` each, 20 test executions total. |
+| Ruff 0.16.1 over all eight changed source/test files | `All checks passed!` |
+| `python -m compileall -q` over all eight changed Python files | Exit 0. |
+| `git diff --check` before the source/tests commit | Exit 0, no whitespace errors. |
+
+The broader scoped command was:
+
+```bash
+control/.venv/bin/pytest control/tests/test_fleet_events.py control/tests/test_fleet_events_postgres.py control/tests/test_telemetry.py control/tests/test_recipe_operations.py control/tests/test_recipe_routes.py control/tests/test_jobs.py control/tests/test_agent_jobs.py control/tests/test_operation_api.py control/tests/test_package_validation_runner.py control/tests/test_package_services.py control/tests/test_package_action_plans.py control/tests/test_*migration*.py control/tests/test_recipe_deployment_authority.py -q -rs
+```
+
+Its four skips were the PostgreSQL Fleet ordering test, PostgreSQL recipe
+concurrency test, and two PostgreSQL migration cases. Docker is not installed
+on this host. The same twelve pre-existing macOS pytest temporary-directory
+cleanup warnings appeared and are unrelated to the round.
+
+### Remaining coverage concerns
+
+- The live PostgreSQL lock-wait proof and the PostgreSQL execution of the
+  `octet_length` check remain environment-incomplete until Docker-capable Linux
+  CI runs them. Local coverage proves PostgreSQL SQL compilation only.
+- SQLite proves its own atomic allocator and transactional results but cannot
+  substitute for PostgreSQL row-lock scheduling semantics.
+- Successful real resume paths prove queued event emission, and the existing
+  concurrency tests prove a single resume winner. There is not yet one combined
+  contention test that also asserts exactly one queued outbox event.
+- The broader scoped suite was run instead of the entire controller repository;
+  it covers every changed source seam and all migration tests in scope.
