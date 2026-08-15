@@ -88,7 +88,7 @@
       "kind": "runtime-distribution",
       "publisher": "vonk",
       "slug": "ds4-smoke-linux-arm64",
-      "content_sha256": "735ff5568f506f6a30f1fa872fb93567743c0d3dcce90c759ec50e6e86990f30"
+      "content_sha256": "9f8159c9aa95a6bbbb9e30c7d508c053ccd64075a7d04749c4e40214fd23c11a"
     },
     "entrypoint": [
       "/opt/vonk/model-smoke"

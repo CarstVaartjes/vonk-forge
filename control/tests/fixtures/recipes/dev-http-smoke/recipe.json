@@ -71,7 +71,7 @@
       "kind": "runtime-distribution",
       "publisher": "vonk",
       "slug": "python-linux-arm64",
-      "content_sha256": "04fa40cf4b99d4863866cdcdbfbae1b9236bc4f6e98fdfdae718c2042c6ebfda"
+      "content_sha256": "eb74e141c3e164503d01354448f255662ac50e8b5ac726e92b3382120e95cb15"
     },
     "entrypoint": [
       "python",

@@ -16,6 +16,17 @@ class HarnessMount:
 
 
 @dataclass(frozen=True, slots=True)
+class HarnessBinding:
+    """Exact resolved identities bound after a compiler produces a projection."""
+
+    harness_content_sha256: str
+    distribution_content_sha256: str
+    topology_node_count: int
+    role: str
+    rank: int
+
+
+@dataclass(frozen=True, slots=True)
 class HarnessProjection:
     """A shell-free, security-complete projection for one mapped rank."""
 
@@ -30,6 +41,7 @@ class HarnessProjection:
     capabilities: tuple[str, ...]
     model_mounts: tuple[HarnessMount, ...]
     output_mount: HarnessMount
+    binding: HarnessBinding | None = None
 
 
 class HarnessCompiler(Protocol):

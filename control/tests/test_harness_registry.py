@@ -1,17 +1,20 @@
 from __future__ import annotations
 
+import hashlib
 import io
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from vonk_control.catalog_contract import catalog_content_sha256
 from vonk_control.harnesses import BUILTIN_HARNESS_SLUGS, HarnessCompileError
 from vonk_control.harnesses.common import SyntheticHarnessCompiler, validate_projection
 from vonk_control.harnesses.registry import (
     HarnessRegistry,
     SourceBundleAuthority,
     SourceBundleReceiptVerifier,
+    TrustedBuiltinComposition,
 )
 from vonk_control.package_helper_authority import PackageObjectReceiptIssuer
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
@@ -71,10 +74,14 @@ def distribution_document(harness_slug: str = "vllm") -> dict[str, object]:
 def compile_harness(registry: HarnessRegistry, document: dict[str, object]):
     identity = document["identity"]
     assert isinstance(identity, dict)
+    distribution = distribution_document(str(identity["slug"]))
+    implements_harness = distribution["implements_harness"]
+    assert isinstance(implements_harness, dict)
+    implements_harness["content_sha256"] = catalog_content_sha256(document)
     return registry.compile(
         document,
         recipe={"runtime": {"entrypoint": ["serve", "--model", "/models"]}},
-        distribution=distribution_document(str(identity["slug"])),
+        distribution=distribution,
         patch=None,
         parameters={},
         topology={"node_count": 1},
@@ -146,92 +153,246 @@ def signed_source_authority(tmp_path: Path):
     verifier = SourceBundleReceiptVerifier(issuer.public_key)
     authority = SourceBundleAuthority(store, verifier)
     receipt = issuer.issue_object_receipt(
-        object_digest=bundle.sha256, size=len(bundle.archive)
+        object_digest=hashlib.sha256(bundle.archive).hexdigest(),
+        size=len(bundle.archive),
     )
     return authority, issuer, receipt, stored, bundle
 
 
 def test_reserved_builtin_slug_cannot_be_taken_over_by_custom_registration() -> None:
     with pytest.raises(HarnessCompileError, match="reserved built-in"):
-        HarnessRegistry().register(SyntheticHarnessCompiler("vllm"))
+        HarnessRegistry().register(
+            SyntheticHarnessCompiler("vllm"),
+            slug="vllm",
+            source_bundle={},
+        )
+
+
+def test_mount_validation_rejects_noncanonical_root_and_cross_boundary_paths() -> None:
+    projection = compile_harness(
+        HarnessRegistry.with_builtins(), harness_document("vllm")
+    )
+
+    for changed in (
+        replace(
+            projection,
+            model_mounts=(replace(projection.model_mounts[0], source="/"),),
+        ),
+        replace(projection, output_mount=replace(projection.output_mount, source="/")),
+        replace(projection, output_mount=replace(projection.output_mount, target="/")),
+        replace(
+            projection,
+            model_mounts=(replace(projection.model_mounts[0], target="/models/"),),
+        ),
+        replace(
+            projection,
+            output_mount=replace(projection.output_mount, source="/run//outputs"),
+        ),
+        replace(
+            projection,
+            output_mount=replace(
+                projection.output_mount, source="/run/vonk/models/out"
+            ),
+        ),
+        replace(
+            projection,
+            output_mount=replace(
+                projection.output_mount, target="/run/vonk/models/out"
+            ),
+        ),
+    ):
+        with pytest.raises(HarnessCompileError):
+            validate_projection(changed)
+
+
+class ConcreteBuiltinStub:
+    contract_version = 1
+
+    def __init__(self, slug: str) -> None:
+        self.slug = slug
+
+    def compile(self, *args, **kwargs):
+        return SyntheticHarnessCompiler(self.slug).compile(*args, **kwargs)
+
+
+def test_trusted_builtin_composition_accepts_concrete_compilers_for_every_slug() -> (
+    None
+):
+    registry = HarnessRegistry.from_trusted_builtins(
+        TrustedBuiltinComposition(
+            tuple(ConcreteBuiltinStub(slug) for slug in BUILTIN_HARNESS_SLUGS)
+        )
+    )
+
+    for slug in BUILTIN_HARNESS_SLUGS:
+        assert compile_harness(registry, harness_document(slug)).slug == slug
+
+
+@pytest.mark.parametrize(
+    "compilers",
+    [
+        tuple(ConcreteBuiltinStub("wrong-slug") for _ in BUILTIN_HARNESS_SLUGS),
+        tuple(ConcreteBuiltinStub("vllm") for _ in BUILTIN_HARNESS_SLUGS),
+    ],
+)
+def test_trusted_builtin_composition_rejects_wrong_or_duplicate_slugs(
+    compilers,
+) -> None:
+    with pytest.raises(HarnessCompileError):
+        HarnessRegistry.from_trusted_builtins(TrustedBuiltinComposition(compilers))
+
+
+def test_trusted_builtin_composition_rejects_wrong_contract_version() -> None:
+    compiler = ConcreteBuiltinStub("vllm")
+    compiler.contract_version = 2
+    compilers = (compiler,) + tuple(
+        ConcreteBuiltinStub(slug) for slug in BUILTIN_HARNESS_SLUGS[1:]
+    )
+
+    with pytest.raises(HarnessCompileError, match="identity"):
+        HarnessRegistry.from_trusted_builtins(TrustedBuiltinComposition(compilers))
+
+
+class SourceLoader:
+    def __init__(self, compiler: object) -> None:
+        self.compiler = compiler
+        self.calls: list[tuple[bytes, object]] = []
+
+    def load(self, archive: bytes, manifest: object):
+        self.calls.append((archive, manifest))
+        return self.compiler
+
+
+def _source_identity(bundle) -> dict[str, object]:
+    return {
+        "sha256": bundle.sha256,
+        "expected_bytes": len(bundle.archive),
+        "media_type": "application/vnd.vonk-forge.source-bundle.v1+tar",
+    }
 
 
 def test_custom_adapter_requires_a_real_signed_source_bundle(
     signed_source_authority,
 ) -> None:
-    authority, issuer, receipt, _stored, bundle = signed_source_authority
+    authority, _issuer, receipt, _stored, bundle = signed_source_authority
     registry = HarnessRegistry(source_bundle_authority=authority)
-    compiler = SyntheticHarnessCompiler(
-        "custom-adapter",
-        source_bundle_digest=bundle.sha256,
-        source_bundle_signer=issuer.key_id,
-    )
     tampered = replace(receipt, signature=replace(receipt.signature, value="0" * 128))
 
     with pytest.raises(HarnessCompileError, match="source bundle receipt"):
         registry.register(
-            compiler,
-            source_bundle={
-                "sha256": bundle.sha256,
-                "expected_bytes": len(bundle.archive),
-                "media_type": "application/vnd.vonk-forge.source-bundle.v1+tar",
-            },
+            SourceLoader(SyntheticHarnessCompiler("custom-adapter")),
+            slug="custom-adapter",
+            source_bundle=_source_identity(bundle),
             receipt=tampered,
         )
 
 
-def test_custom_adapter_rejects_wrong_signer_and_compiler_binding(
+def test_custom_adapter_rejects_wrong_signer_and_loader_mismatch(
     signed_source_authority,
 ) -> None:
-    authority, issuer, _receipt, _stored, bundle = signed_source_authority
+    authority, _issuer, receipt, _stored, bundle = signed_source_authority
     other = PackageObjectReceiptIssuer(Ed25519PrivateKey.generate())
     wrong_signer_receipt = other.issue_object_receipt(
-        object_digest=bundle.sha256, size=len(bundle.archive)
+        object_digest=hashlib.sha256(bundle.archive).hexdigest(),
+        size=len(bundle.archive),
     )
     registry = HarnessRegistry(source_bundle_authority=authority)
-    compiler = SyntheticHarnessCompiler(
-        "custom-adapter",
-        source_bundle_digest="f" * 64,
-        source_bundle_signer=issuer.key_id,
-    )
-    identity = {
-        "sha256": bundle.sha256,
-        "expected_bytes": len(bundle.archive),
-        "media_type": "application/vnd.vonk-forge.source-bundle.v1+tar",
-    }
+    identity = _source_identity(bundle)
     with pytest.raises(HarnessCompileError, match="source bundle receipt"):
         registry.register(
-            compiler, source_bundle=identity, receipt=wrong_signer_receipt
+            SourceLoader(SyntheticHarnessCompiler("custom-adapter")),
+            slug="custom-adapter",
+            source_bundle=identity,
+            receipt=wrong_signer_receipt,
         )
 
-    receipt = issuer.issue_object_receipt(
-        object_digest=bundle.sha256, size=len(bundle.archive)
-    )
-    with pytest.raises(HarnessCompileError, match="compiler source bundle identity"):
-        registry.register(compiler, source_bundle=identity, receipt=receipt)
+    with pytest.raises(HarnessCompileError, match="source identity"):
+        registry.register(
+            SourceLoader(SyntheticHarnessCompiler("unrelated-adapter")),
+            slug="custom-adapter",
+            source_bundle=identity,
+            receipt=receipt,
+        )
 
 
 def test_custom_adapter_rechecks_verified_bytes_at_compile_time(
     signed_source_authority,
 ) -> None:
-    authority, issuer, receipt, stored, bundle = signed_source_authority
+    authority, _issuer, receipt, stored, bundle = signed_source_authority
     registry = HarnessRegistry(source_bundle_authority=authority)
-    compiler = SyntheticHarnessCompiler(
-        "custom-adapter",
-        source_bundle_digest=bundle.sha256,
-        source_bundle_signer=issuer.key_id,
+    identity = _source_identity(bundle)
+    registry.register(
+        SourceLoader(SyntheticHarnessCompiler("custom-adapter")),
+        slug="custom-adapter",
+        source_bundle=identity,
+        receipt=receipt,
     )
-    identity = {
-        "sha256": bundle.sha256,
-        "expected_bytes": len(bundle.archive),
-        "media_type": "application/vnd.vonk-forge.source-bundle.v1+tar",
-    }
-    registry.register(compiler, source_bundle=identity, receipt=receipt)
     stored.path.write_bytes(b"changed")
 
     with pytest.raises(HarnessCompileError, match="source bundle verification"):
         compile_harness(
             registry, harness_document("custom-adapter", source_bundle=identity)
+        )
+
+
+def test_custom_adapter_rejects_changed_raw_archive_with_same_manifest_and_length(
+    signed_source_authority,
+) -> None:
+    authority, _issuer, receipt, stored, bundle = signed_source_authority
+    registry = HarnessRegistry(source_bundle_authority=authority)
+    identity = _source_identity(bundle)
+    registry.register(
+        SourceLoader(SyntheticHarnessCompiler("custom-adapter")),
+        slug="custom-adapter",
+        source_bundle=identity,
+        receipt=receipt,
+    )
+    changed = bytearray(bundle.archive)
+    changed[-1] = 1
+    stored.path.write_bytes(changed)
+
+    with pytest.raises(HarnessCompileError, match="receipt"):
+        compile_harness(
+            registry, harness_document("custom-adapter", source_bundle=identity)
+        )
+
+
+def test_custom_adapter_reloads_loader_and_rejects_post_registration_mutation(
+    signed_source_authority,
+) -> None:
+    authority, _issuer, receipt, _stored, bundle = signed_source_authority
+    registry = HarnessRegistry(source_bundle_authority=authority)
+    compiler = SyntheticHarnessCompiler("custom-adapter")
+    loader = SourceLoader(compiler)
+    identity = _source_identity(bundle)
+    registry.register(
+        loader, slug="custom-adapter", source_bundle=identity, receipt=receipt
+    )
+    compiler.slug = "mutated-adapter"
+
+    with pytest.raises(HarnessCompileError, match="source identity"):
+        compile_harness(
+            registry, harness_document("custom-adapter", source_bundle=identity)
+        )
+
+
+def test_custom_adapter_rejects_duplicate_registration(signed_source_authority) -> None:
+    authority, _issuer, receipt, _stored, bundle = signed_source_authority
+    registry = HarnessRegistry(source_bundle_authority=authority)
+    identity = _source_identity(bundle)
+    registry.register(
+        SourceLoader(SyntheticHarnessCompiler("custom-adapter")),
+        slug="custom-adapter",
+        source_bundle=identity,
+        receipt=receipt,
+    )
+
+    with pytest.raises(HarnessCompileError, match="already registered"):
+        registry.register(
+            SourceLoader(SyntheticHarnessCompiler("custom-adapter")),
+            slug="custom-adapter",
+            source_bundle=identity,
+            receipt=receipt,
         )
 
 
@@ -269,6 +430,15 @@ def test_custom_adapter_rechecks_verified_bytes_at_compile_time(
                 projection,
                 model_mounts=(
                     replace(projection.model_mounts[0], source="/var/run/docker.sock"),
+                ),
+            ),
+            "socket",
+        ),
+        (
+            lambda projection: replace(
+                projection,
+                output_mount=replace(
+                    projection.output_mount, target="/var/run/podman.sock"
                 ),
             ),
             "socket",

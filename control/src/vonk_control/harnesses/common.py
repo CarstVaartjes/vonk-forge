@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
-from pathlib import PurePosixPath
 
 from .contracts import HarnessMount, HarnessProjection
 
@@ -59,21 +58,45 @@ def validate_projection(projection: HarnessProjection) -> None:
         raise HarnessCompileError("harness model mounts must be read-only")
     if projection.output_mount.read_only or not projection.output_mount.isolated:
         raise HarnessCompileError("harness outputs must be isolated and writable")
-    for mount in (*projection.model_mounts, projection.output_mount):
+    mounts = (*projection.model_mounts, projection.output_mount)
+    for mount in mounts:
         _mount_path(mount.source)
         _mount_path(mount.target)
-    for mount in projection.model_mounts:
-        if _overlaps(mount.target, projection.output_mount.target):
-            raise HarnessCompileError("harness model and output mounts overlap")
+    _disjoint_mount_paths(tuple(mount.source for mount in mounts))
+    _disjoint_mount_paths(tuple(mount.target for mount in mounts))
+    for source in (mount.source for mount in mounts):
+        for target in (mount.target for mount in mounts):
+            if _overlaps(source, target):
+                raise HarnessCompileError("harness mount source and target overlap")
+    binding = projection.binding
+    if (
+        binding is None
+        or not isinstance(binding.harness_content_sha256, str)
+        or not isinstance(binding.distribution_content_sha256, str)
+        or not re.fullmatch(r"[a-f0-9]{64}", binding.harness_content_sha256)
+        or not re.fullmatch(r"[a-f0-9]{64}", binding.distribution_content_sha256)
+        or not isinstance(binding.topology_node_count, int)
+        or isinstance(binding.topology_node_count, bool)
+        or binding.topology_node_count < 1
+        or not isinstance(binding.role, str)
+        or not binding.role
+        or not isinstance(binding.rank, int)
+        or isinstance(binding.rank, bool)
+        or not 0 <= binding.rank < binding.topology_node_count
+    ):
+        raise HarnessCompileError("harness projection binding is invalid")
 
 
 def _mount_path(value: str) -> None:
-    if not isinstance(value, str) or not value.startswith("/"):
+    if not isinstance(value, str) or not value.startswith("/") or value == "/":
         raise HarnessCompileError("harness mount paths must be absolute")
-    if value.startswith("//") or "\\" in value:
-        raise HarnessCompileError("harness mount path is escaping")
-    path = PurePosixPath(value)
-    if any(part in {".", ".."} for part in path.parts):
+    if (
+        "//" in value
+        or value.endswith(("/", "/.", "/.."))
+        or "\\" in value
+        or "/./" in value
+        or "/../" in value
+    ):
         raise HarnessCompileError("harness mount path is escaping")
     if any(name in value.lower() for name in _SOCKET_NAMES):
         raise HarnessCompileError(
@@ -83,6 +106,12 @@ def _mount_path(value: str) -> None:
 
 def _overlaps(left: str, right: str) -> bool:
     return left == right or left.startswith(right + "/") or right.startswith(left + "/")
+
+
+def _disjoint_mount_paths(paths: tuple[str, ...]) -> None:
+    for index, path in enumerate(paths):
+        if any(_overlaps(path, other) for other in paths[index + 1 :]):
+            raise HarnessCompileError("harness mounts overlap")
 
 
 class SyntheticHarnessCompiler:

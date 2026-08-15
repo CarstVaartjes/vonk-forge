@@ -32,7 +32,7 @@
       "kind": "patch-bundle",
       "publisher": "vonk",
       "slug": "mia-deepseek-v4-flash-patches",
-      "content_sha256": "9d868fae740f9458b6401fc6608b59ae6b568db92d5aea3e137948a479bd885a"
+      "content_sha256": "15fc6c67d0f9b9f3d7caf8cdfa13a66b01db0010296cddafc0df0643022754da"
     }
   },
   "build": {
@@ -79,7 +79,7 @@
       "kind": "runtime-distribution",
       "publisher": "vonk",
       "slug": "mia-dsv4-flash-linux-arm64",
-      "content_sha256": "742f9b4a6696f9b857dbc26ce1ffac145c36ba05e65541c614d234010ef70f65"
+      "content_sha256": "60500d39881cbdb5a07b141a0e54217b9b78f3e4d12aeca7d9dbe1261c94e3e9"
     },
     "entrypoint": [
       "/opt/vonk/mia-deepseek-v4-flash"

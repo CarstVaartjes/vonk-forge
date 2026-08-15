@@ -1,13 +1,14 @@
-"""Deterministic observed lifecycle conformance for harness registrations."""
+"""Deterministic observed lifecycle conformance for compiled harness projections."""
 
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from jsonschema import Draft202012Validator
 
+from .catalog_contract import catalog_content_sha256
 from .harnesses import HarnessProjection, HarnessRegistry
 from .harnesses.common import HarnessCompileError
 from .schema_resources import read_runtime_schema
@@ -30,15 +31,71 @@ class LifecycleRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class LifecycleObservation:
+    operation: str
+    result: Mapping[str, object]
+
+
+@dataclass(frozen=True, slots=True)
 class HarnessEvidence:
-    phases: tuple[str, ...]
-    offline_runtime: bool
-    security: dict[str, object]
-    interrupted_start_recovered: bool
-    interrupted_stop_recovered: bool
-    stop_bounded: bool
-    recovery_phases: tuple[str, ...]
+    observations: tuple[LifecycleObservation, ...]
     document: dict[str, object]
+
+    @property
+    def phases(self) -> tuple[str, ...]:
+        return tuple(observation.operation for observation in self.observations)
+
+    @property
+    def offline_runtime(self) -> bool:
+        return _observation(self.observations, "invoke").get("offline") is True
+
+    @property
+    def security(self) -> dict[str, object]:
+        prepared = _observation(self.observations, "prepare")
+        security = prepared.get("security")
+        return dict(security) if isinstance(security, Mapping) else {}
+
+    @property
+    def interrupted_start_recovered(self) -> bool:
+        return any(
+            observation.operation == "start"
+            and observation.result.get("interrupted") is True
+            for observation in self.observations
+        ) and any(
+            observation.operation == "start"
+            and observation.result.get("state") == "running"
+            for observation in self.observations
+        )
+
+    @property
+    def interrupted_stop_recovered(self) -> bool:
+        return any(
+            observation.operation == "stop"
+            and observation.result.get("interrupted") is True
+            for observation in self.observations
+        ) and any(
+            observation.operation == "stop"
+            and observation.result.get("state") == "stopped"
+            for observation in self.observations
+        )
+
+    @property
+    def stop_bounded(self) -> bool:
+        return any(
+            observation.operation == "stop"
+            and observation.result.get("state") == "stopped"
+            and observation.result.get("within_deadline") is True
+            for observation in self.observations
+        )
+
+    @property
+    def recovery_phases(self) -> tuple[str, ...]:
+        return tuple(
+            observation.operation
+            for observation in self.observations
+            if observation.result.get("interrupted") is True
+            or observation.operation == "inspect"
+        )
 
 
 class DeterministicClock:
@@ -58,26 +115,26 @@ class DeterministicClock:
         self._now += seconds
 
 
-class SyntheticLifecycleDriver:
-    """A deterministic executor double whose results are the conformance evidence."""
+class _ProjectionLifecycleExecutor:
+    """The only synthetic executor; it is built from the compiled projection."""
 
     def __init__(self, request: LifecycleRequest, *, clock: DeterministicClock) -> None:
-        self.request = request
-        self.clock = clock
-        self.calls: list[str] = []
+        binding = request.projection.binding
+        if binding is None:
+            raise HarnessConformanceError("compiled projection lacks exact identities")
+        self._request = request
+        self._clock = clock
         self._state = "stopped"
         self._start_interrupted = False
         self._stop_interrupted = False
 
     def inspect(self) -> Mapping[str, object]:
-        self.calls.append("inspect")
         return {"state": self._state}
 
     def prepare(self) -> Mapping[str, object]:
-        self.calls.append("prepare")
         self._require("stopped")
+        projection = self._request.projection
         self._state = "prepared"
-        projection = self.request.projection
         return {
             "security": {
                 "architecture": projection.architecture,
@@ -87,21 +144,18 @@ class SyntheticLifecycleDriver:
                 "model_mounts_read_only": all(
                     mount.read_only for mount in projection.model_mounts
                 ),
+                "mount_paths_isolated": _mount_paths_are_isolated(projection),
                 "network_mode": projection.network_mode,
                 "no_new_privileges": projection.no_new_privileges,
-                "numeric_non_root_uid": projection.user != "0"
-                and projection.user != "0:0",
-                "outputs_isolated": projection.output_mount.isolated,
+                "numeric_non_root_uid": projection.user not in {"0", "0:0"},
             }
         }
 
     def verify(self) -> Mapping[str, object]:
-        self.calls.append("verify")
         self._require("prepared")
-        return {"verified": True}
+        return {"state": self._state, "verified": True}
 
     def start(self) -> Mapping[str, object]:
-        self.calls.append("start")
         self._require("prepared")
         if not self._start_interrupted:
             self._start_interrupted = True
@@ -110,36 +164,51 @@ class SyntheticLifecycleDriver:
         return {"state": self._state}
 
     def ready(self) -> Mapping[str, object]:
-        self.calls.append("ready")
         self._require("running")
-        return {"ready": True}
+        return {"ready": True, "state": self._state}
 
     def invoke(self) -> Mapping[str, object]:
-        self.calls.append("invoke")
         self._require("running")
-        return {"offline": self.request.projection.network_mode == "none"}
+        return {
+            "offline": self._request.projection.network_mode == "none",
+            "state": self._state,
+        }
 
     def stop(self, deadline: float) -> Mapping[str, object]:
-        self.calls.append("stop")
         self._require("running")
         if not self._stop_interrupted:
             self._stop_interrupted = True
             raise LifecycleInterrupted("synthetic stop interrupted")
-        self.clock.advance(1)
-        if self.clock() > deadline:
+        self._clock.advance(1)
+        if self._clock() > deadline:
             raise HarnessConformanceError("synthetic stop exceeded its deadline")
         self._state = "stopped"
-        return {"state": self._state, "stopped_at": self.clock()}
+        return {
+            "state": self._state,
+            "stopped_at": self._clock(),
+            "within_deadline": self._clock() <= deadline,
+        }
 
     def verify_stopped(self) -> Mapping[str, object]:
-        self.calls.append("verify-stopped")
         self._require("stopped")
+        projection = self._request.projection
+        binding = projection.binding
+        assert binding is not None
         return {
             "evidence": {
                 "schema_version": 1,
-                "recipe": self.request.recipe,
-                "execution_harness": self.request.execution_harness,
-                "runtime_distribution": self.request.runtime_distribution,
+                "recipe": self._request.recipe,
+                "execution_harness": self._request.execution_harness,
+                "runtime_distribution": self._request.runtime_distribution,
+                "projection": {
+                    "image": projection.image,
+                    "harness_contract_version": projection.contract_version,
+                    "topology": {
+                        "node_count": binding.topology_node_count,
+                        "role": binding.role,
+                        "rank": binding.rank,
+                    },
+                },
                 "outcome": "passed",
                 "artifacts": [{"name": "conformance.json", "sha256": "e" * 64}],
             }
@@ -151,17 +220,13 @@ class SyntheticLifecycleDriver:
 
 
 def run_synthetic_conformance(
-    slug: str,
-    *,
-    driver_factory: Callable[
-        [LifecycleRequest, DeterministicClock], SyntheticLifecycleDriver
-    ]
-    | None = None,
+    slug: str, *, registry: HarnessRegistry | None = None
 ) -> HarnessEvidence:
-    """Exercise a lifecycle driver and derive all conformance evidence from it."""
+    """Compile first, then construct the lifecycle executor from that projection only."""
     harness, distribution = _documents(slug)
+    active_registry = registry or HarnessRegistry.with_builtins()
     try:
-        projection = HarnessRegistry.with_builtins().compile(
+        projection = active_registry.compile(
             harness,
             recipe={"runtime": {"entrypoint": ["synthetic-runner", "--offline"]}},
             distribution=distribution,
@@ -184,37 +249,26 @@ def run_synthetic_conformance(
             "kind": "execution-harness",
             "publisher": "vonk-forge",
             "slug": slug,
-            "content_sha256": "c" * 64,
+            "content_sha256": projection.binding.harness_content_sha256
+            if projection.binding is not None
+            else "0" * 64,
         },
         runtime_distribution={
             "kind": "runtime-distribution",
             "publisher": "vonk-forge",
             "slug": "synthetic-arm64",
-            "content_sha256": "d" * 64,
+            "content_sha256": projection.binding.distribution_content_sha256
+            if projection.binding is not None
+            else "0" * 64,
         },
     )
-    clock = DeterministicClock()
-    driver = (
-        driver_factory
-        or (lambda value, current: SyntheticLifecycleDriver(value, clock=current))
-    )(request, clock)
-    _require_state(driver.inspect(), "stopped", "initial inspection")
-    prepared = _require_mapping(driver.prepare(), "prepare")
-    if _require_mapping(driver.verify(), "verify").get("verified") is not True:
-        raise HarnessConformanceError("verify evidence is invalid")
-    start_recovery = _recover_start(driver)
-    if _require_mapping(driver.ready(), "ready").get("ready") is not True:
-        raise HarnessConformanceError("ready evidence is invalid")
-    invocation = _require_mapping(driver.invoke(), "invoke")
-    if invocation.get("offline") is not True:
-        raise HarnessConformanceError("offline invocation evidence is invalid")
-    _require_state(driver.inspect(), "running", "running inspection")
-    stop_deadline = clock() + 30
-    stop_recovery = _recover_stop(driver, stop_deadline)
-    if clock() > stop_deadline:
-        raise HarnessConformanceError("bounded stop deadline elapsed")
-    terminal = _require_mapping(driver.verify_stopped(), "verify-stopped")
-    document = terminal.get("evidence")
+    return _run_projection_conformance(request, clock=DeterministicClock())
+
+
+def validate_terminal_evidence(
+    document: Mapping[str, object], request: LifecycleRequest
+) -> dict[str, object]:
+    """Validate schema and exact terminal identities for observed executor evidence."""
     if not isinstance(document, dict):
         raise HarnessConformanceError("lifecycle evidence is invalid")
     try:
@@ -222,74 +276,134 @@ def run_synthetic_conformance(
         Draft202012Validator(schema).validate(document)
     except Exception as error:
         raise HarnessConformanceError("lifecycle evidence is invalid") from error
-    security = _validated_security(prepared, projection)
-    return HarnessEvidence(
-        phases=tuple(driver.calls),
-        offline_runtime=True,
-        security=security,
-        interrupted_start_recovered=start_recovery,
-        interrupted_stop_recovered=stop_recovery,
-        stop_bounded=True,
-        recovery_phases=(
-            "start-interrupted",
-            "inspect-idempotent",
-            "start-recovered",
-            "stop-interrupted",
-            "inspect-idempotent",
-            "stop-recovered",
-        ),
-        document=document,
-    )
+    projection = request.projection
+    binding = projection.binding
+    if binding is None:
+        raise HarnessConformanceError("compiled projection lacks exact identities")
+    if (
+        document.get("recipe") != request.recipe
+        or document.get("execution_harness") != request.execution_harness
+        or document.get("runtime_distribution") != request.runtime_distribution
+    ):
+        raise HarnessConformanceError("lifecycle evidence identities are invalid")
+    evidence_projection = document.get("projection")
+    if not isinstance(evidence_projection, Mapping) or evidence_projection != {
+        "image": projection.image,
+        "harness_contract_version": projection.contract_version,
+        "topology": {
+            "node_count": binding.topology_node_count,
+            "role": binding.role,
+            "rank": binding.rank,
+        },
+    }:
+        raise HarnessConformanceError(
+            "lifecycle evidence projection identity is invalid"
+        )
+    return document
 
 
-def _recover_start(driver: SyntheticLifecycleDriver) -> bool:
+def _run_projection_conformance(
+    request: LifecycleRequest, *, clock: DeterministicClock
+) -> HarnessEvidence:
+    executor = _ProjectionLifecycleExecutor(request, clock=clock)
+    observations: list[LifecycleObservation] = []
+    _observe_state(observations, "inspect", executor.inspect(), "stopped")
+    prepared = _observe(observations, "prepare", executor.prepare())
+    _validated_security(prepared, request.projection)
+    verified = _observe(observations, "verify", executor.verify())
+    if verified.get("verified") is not True:
+        raise HarnessConformanceError("verify evidence is invalid")
+    _recover_start(executor, observations)
+    ready = _observe(observations, "ready", executor.ready())
+    if ready.get("ready") is not True:
+        raise HarnessConformanceError("ready evidence is invalid")
+    invocation = _observe(observations, "invoke", executor.invoke())
+    if invocation.get("offline") is not True:
+        raise HarnessConformanceError("offline invocation evidence is invalid")
+    _observe_state(observations, "inspect", executor.inspect(), "running")
+    deadline = clock() + 30
+    stopped = _recover_stop(executor, observations, deadline)
+    if stopped.get("within_deadline") is not True or clock() > deadline:
+        raise HarnessConformanceError("bounded stop deadline elapsed")
+    terminal = _observe(observations, "verify-stopped", executor.verify_stopped())
+    document = terminal.get("evidence")
+    validated_document = validate_terminal_evidence(document, request)
+    return HarnessEvidence(tuple(observations), validated_document)
+
+
+def _observe(
+    observations: list[LifecycleObservation], operation: str, value: object
+) -> Mapping[str, object]:
+    if not isinstance(value, Mapping):
+        raise HarnessConformanceError(f"{operation} result is invalid")
+    result = dict(value)
+    observations.append(LifecycleObservation(operation, result))
+    return result
+
+
+def _observe_state(
+    observations: list[LifecycleObservation],
+    operation: str,
+    value: object,
+    expected: str,
+) -> Mapping[str, object]:
+    result = _observe(observations, operation, value)
+    if result.get("state") != expected:
+        raise HarnessConformanceError(f"{operation} state is invalid")
+    return result
+
+
+def _recover_start(
+    executor: _ProjectionLifecycleExecutor, observations: list[LifecycleObservation]
+) -> None:
     try:
-        driver.start()
+        _observe(observations, "start", executor.start())
     except LifecycleInterrupted:
-        first = _require_mapping(driver.inspect(), "start recovery inspection")
-        second = _require_mapping(driver.inspect(), "start recovery inspection")
+        observations.append(LifecycleObservation("start", {"interrupted": True}))
+        first = _observe(observations, "inspect", executor.inspect())
+        second = _observe(observations, "inspect", executor.inspect())
         if first != second:
             raise HarnessConformanceError(
                 "inspect is not idempotent during start recovery"
             )
-        _require_state(driver.start(), "running", "start recovery")
-        return True
+        _observe_state(observations, "start", executor.start(), "running")
+        return
     raise HarnessConformanceError("start interruption was not observed")
 
 
-def _recover_stop(driver: SyntheticLifecycleDriver, deadline: float) -> bool:
+def _recover_stop(
+    executor: _ProjectionLifecycleExecutor,
+    observations: list[LifecycleObservation],
+    deadline: float,
+) -> Mapping[str, object]:
     try:
-        driver.stop(deadline)
+        _observe(observations, "stop", executor.stop(deadline))
     except LifecycleInterrupted:
-        first = _require_mapping(driver.inspect(), "stop recovery inspection")
-        second = _require_mapping(driver.inspect(), "stop recovery inspection")
+        observations.append(LifecycleObservation("stop", {"interrupted": True}))
+        first = _observe(observations, "inspect", executor.inspect())
+        second = _observe(observations, "inspect", executor.inspect())
         if first != second:
             raise HarnessConformanceError(
                 "inspect is not idempotent during stop recovery"
             )
-        _require_state(driver.stop(deadline), "stopped", "stop recovery")
-        return True
+        return _observe_state(observations, "stop", executor.stop(deadline), "stopped")
     raise HarnessConformanceError("stop interruption was not observed")
 
 
-def _require_mapping(value: object, label: str) -> Mapping[str, object]:
-    if not isinstance(value, Mapping):
-        raise HarnessConformanceError(f"{label} result is invalid")
-    return value
-
-
-def _require_state(value: object, expected: str, label: str) -> Mapping[str, object]:
-    observed = _require_mapping(value, label)
-    if observed.get("state") != expected:
-        raise HarnessConformanceError(f"{label} state is invalid")
-    return observed
+def _observation(
+    observations: tuple[LifecycleObservation, ...], operation: str
+) -> Mapping[str, object]:
+    for observation in observations:
+        if observation.operation == operation:
+            return observation.result
+    return {}
 
 
 def _validated_security(
     prepared: Mapping[str, object], projection: HarnessProjection
-) -> dict[str, object]:
+) -> None:
     security = prepared.get("security")
-    if not isinstance(security, dict) or security != {
+    expected = {
         "architecture": projection.architecture,
         "capabilities": list(projection.capabilities),
         "docker_socket": _has_container_runtime_socket(projection),
@@ -297,15 +411,13 @@ def _validated_security(
         "model_mounts_read_only": all(
             mount.read_only for mount in projection.model_mounts
         ),
+        "mount_paths_isolated": _mount_paths_are_isolated(projection),
         "network_mode": projection.network_mode,
         "no_new_privileges": projection.no_new_privileges,
-        "numeric_non_root_uid": projection.user != "0" and projection.user != "0:0",
-        "outputs_isolated": projection.output_mount.isolated,
-    }:
+        "numeric_non_root_uid": projection.user not in {"0", "0:0"},
+    }
+    if not isinstance(security, Mapping) or dict(security) != expected:
         raise HarnessConformanceError("lifecycle security evidence is invalid")
-    if security["docker_socket"] is not False:
-        raise HarnessConformanceError("lifecycle security evidence exposes a socket")
-    return security
 
 
 def _has_container_runtime_socket(projection: HarnessProjection) -> bool:
@@ -322,48 +434,53 @@ def _has_container_runtime_socket(projection: HarnessProjection) -> bool:
     )
 
 
+def _mount_paths_are_isolated(projection: HarnessProjection) -> bool:
+    mounts = (*projection.model_mounts, projection.output_mount)
+    paths = tuple(path for mount in mounts for path in (mount.source, mount.target))
+    return len(paths) == len(set(paths)) and all(path != "/" for path in paths)
+
+
 def _documents(slug: str) -> tuple[dict[str, object], dict[str, object]]:
-    return (
-        {
-            "schema_version": 1,
+    harness = {
+        "schema_version": 1,
+        "kind": "execution-harness",
+        "identity": {"publisher": "vonk-forge", "slug": slug},
+        "metadata": {
+            "title": f"{slug} synthetic harness",
+            "description": "Synthetic lifecycle harness for conformance.",
+            "tags": ["synthetic"],
+        },
+        "runtime_interface": "vonk.runtime.v1",
+        "adapters": ["openai"],
+        "source_bundle": {
+            "sha256": "a" * 64,
+            "expected_bytes": 2048,
+            "media_type": "application/vnd.vonk-forge.source-bundle.v1+tar",
+        },
+    }
+    distribution = {
+        "schema_version": 1,
+        "kind": "runtime-distribution",
+        "identity": {"publisher": "vonk-forge", "slug": "synthetic-arm64"},
+        "metadata": {
+            "title": "Synthetic ARM64 runtime",
+            "description": "Offline digest-pinned runtime for conformance.",
+            "tags": ["synthetic"],
+        },
+        "implements_harness": {
             "kind": "execution-harness",
-            "identity": {"publisher": "vonk-forge", "slug": slug},
-            "metadata": {
-                "title": f"{slug} synthetic harness",
-                "description": "Synthetic lifecycle harness for conformance.",
-                "tags": ["synthetic"],
-            },
-            "runtime_interface": "vonk.runtime.v1",
-            "adapters": ["openai"],
-            "source_bundle": {
-                "sha256": "a" * 64,
-                "expected_bytes": 2048,
-                "media_type": "application/vnd.vonk-forge.source-bundle.v1+tar",
-            },
+            "publisher": "vonk-forge",
+            "slug": slug,
+            "content_sha256": catalog_content_sha256(harness),
         },
-        {
-            "schema_version": 1,
-            "kind": "runtime-distribution",
-            "identity": {"publisher": "vonk-forge", "slug": "synthetic-arm64"},
-            "metadata": {
-                "title": "Synthetic ARM64 runtime",
-                "description": "Offline digest-pinned runtime for conformance.",
-                "tags": ["synthetic"],
-            },
-            "implements_harness": {
-                "kind": "execution-harness",
-                "publisher": "vonk-forge",
-                "slug": slug,
-                "content_sha256": "c" * 64,
-            },
-            "platform": "linux/arm64",
-            "image": "registry.example/vonk/synthetic@sha256:" + "f" * 64,
-            "security": {
-                "network_mode": "none",
-                "user": "10001:10001",
-                "no_new_privileges": True,
-                "capabilities": [],
-            },
-            "sha256": "d" * 64,
+        "platform": "linux/arm64",
+        "image": "registry.example/vonk/synthetic@sha256:" + "f" * 64,
+        "security": {
+            "network_mode": "none",
+            "user": "10001:10001",
+            "no_new_privileges": True,
+            "capabilities": [],
         },
-    )
+        "sha256": "d" * 64,
+    }
+    return harness, distribution

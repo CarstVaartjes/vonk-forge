@@ -28,6 +28,11 @@ def evidence_document() -> dict[str, object]:
             "slug": "python-312-cuda",
             "content_sha256": "c" * 64,
         },
+        "projection": {
+            "image": "registry.example/vonk/runtime@sha256:" + "f" * 64,
+            "harness_contract_version": 1,
+            "topology": {"node_count": 1, "role": "entrypoint", "rank": 0},
+        },
         "patch_bundle": {
             "kind": "patch-bundle",
             "publisher": "vonk-forge",
@@ -58,9 +63,7 @@ def test_harness_evidence_accepts_exact_immutable_identities() -> None:
         ("patch_bundle", "model-version"),
     ],
 )
-def test_harness_evidence_rejects_wrong_purpose_kinds(
-    field: str, kind: str
-) -> None:
+def test_harness_evidence_rejects_wrong_purpose_kinds(field: str, kind: str) -> None:
     document = copy.deepcopy(evidence_document())
     document[field]["kind"] = kind
 

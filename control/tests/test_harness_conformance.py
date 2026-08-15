@@ -1,27 +1,26 @@
 from __future__ import annotations
 
+import copy
+from dataclasses import replace
+
 import pytest
+from vonk_control.catalog_contract import catalog_content_sha256
 from vonk_control.harness_conformance import (
     HarnessConformanceError,
-    SyntheticLifecycleDriver,
+    LifecycleRequest,
+    _documents,
     run_synthetic_conformance,
+    validate_terminal_evidence,
 )
-from vonk_control.harnesses import BUILTIN_HARNESS_SLUGS
+from vonk_control.harnesses import BUILTIN_HARNESS_SLUGS, HarnessRegistry
+from vonk_control.harnesses.common import SyntheticHarnessCompiler
+from vonk_control.harnesses.registry import TrustedBuiltinComposition
 
 
 @pytest.mark.parametrize("slug", BUILTIN_HARNESS_SLUGS)
 def test_harness_completes_observed_synthetic_lifecycle(slug: str) -> None:
-    driver: SyntheticLifecycleDriver | None = None
+    evidence = run_synthetic_conformance(slug)
 
-    def factory(request, clock):
-        nonlocal driver
-        driver = SyntheticLifecycleDriver(request, clock=clock)
-        return driver
-
-    evidence = run_synthetic_conformance(slug, driver_factory=factory)
-
-    assert driver is not None
-    assert tuple(driver.calls) == evidence.phases
     assert evidence.phases == (
         "inspect",
         "prepare",
@@ -47,102 +46,76 @@ def test_harness_completes_observed_synthetic_lifecycle(slug: str) -> None:
     assert evidence.document["schema_version"] == 1
 
 
-class NonIdempotentInspectDriver(SyntheticLifecycleDriver):
-    def inspect(self):
-        observed = dict(super().inspect())
-        observed["nonce"] = len(self.calls)
-        return observed
+def test_conformance_rejects_an_unrelated_driver_injection() -> None:
+    with pytest.raises(TypeError):
+        run_synthetic_conformance("vllm", driver_factory=object())
 
 
-class OnlineInvocationDriver(SyntheticLifecycleDriver):
-    def invoke(self):
-        observed = dict(super().invoke())
-        observed["offline"] = False
-        return observed
+class BrokenConcreteProjectionCompiler:
+    contract_version = 1
+
+    def __init__(self, slug: str) -> None:
+        self.slug = slug
+
+    def compile(self, *args, **kwargs):
+        projection = SyntheticHarnessCompiler(self.slug).compile(*args, **kwargs)
+        return replace(projection, image="registry.example/vonk/mutable:latest")
 
 
-class SlowStopDriver(SyntheticLifecycleDriver):
-    def stop(self, deadline: float):
-        observed = super().stop(deadline)
-        self.clock.advance(31)
-        return observed
+def test_conformance_fails_for_a_broken_concrete_builtin_projection() -> None:
+    compilers = tuple(
+        BrokenConcreteProjectionCompiler(slug)
+        if slug == "vllm"
+        else SyntheticHarnessCompiler(slug)
+        for slug in BUILTIN_HARNESS_SLUGS
+    )
+    registry = HarnessRegistry.from_trusted_builtins(
+        TrustedBuiltinComposition(compilers)
+    )
+
+    with pytest.raises(HarnessConformanceError, match="digest-pinned"):
+        run_synthetic_conformance("vllm", registry=registry)
 
 
-class InvalidEvidenceDriver(SyntheticLifecycleDriver):
-    def verify_stopped(self):
-        observed = dict(super().verify_stopped())
-        document = dict(observed["evidence"])
-        document["schema_version"] = 2
-        observed["evidence"] = document
-        return observed
+def test_conformance_rejects_schema_valid_terminal_evidence_with_wrong_identity() -> (
+    None
+):
+    harness, distribution = _documents("vllm")
+    projection = HarnessRegistry.with_builtins().compile(
+        harness,
+        recipe={"runtime": {"entrypoint": ["synthetic-runner", "--offline"]}},
+        distribution=distribution,
+        patch=None,
+        parameters={},
+        topology={"node_count": 1},
+        role="entrypoint",
+        rank=0,
+    )
+    request = LifecycleRequest(
+        projection=projection,
+        recipe={
+            "publisher": "vonk-forge",
+            "slug": "synthetic-harness",
+            "content_sha256": "b" * 64,
+        },
+        execution_harness={
+            "kind": "execution-harness",
+            "publisher": "vonk-forge",
+            "slug": "vllm",
+            "content_sha256": catalog_content_sha256(harness),
+        },
+        runtime_distribution={
+            "kind": "runtime-distribution",
+            "publisher": "vonk-forge",
+            "slug": "synthetic-arm64",
+            "content_sha256": catalog_content_sha256(distribution),
+        },
+    )
+    document = copy.deepcopy(run_synthetic_conformance("vllm").document)
+    document["projection"]["image"] = "registry.example/vonk/other@sha256:" + "0" * 64
 
-
-class SocketExposureDriver(SyntheticLifecycleDriver):
-    def prepare(self):
-        observed = dict(super().prepare())
-        security = dict(observed["security"])
-        security["docker_socket"] = True
-        observed["security"] = security
-        return observed
-
-
-class UnverifiedDriver(SyntheticLifecycleDriver):
-    def verify(self):
-        observed = dict(super().verify())
-        observed["verified"] = False
-        return observed
-
-
-class UnreadyDriver(SyntheticLifecycleDriver):
-    def ready(self):
-        observed = dict(super().ready())
-        observed["ready"] = False
-        return observed
-
-
-class WrongStartResultDriver(SyntheticLifecycleDriver):
-    def start(self):
-        observed = dict(super().start())
-        observed["state"] = "prepared"
-        return observed
-
-
-class WrongStopResultDriver(SyntheticLifecycleDriver):
-    def stop(self, deadline: float):
-        observed = dict(super().stop(deadline))
-        observed["state"] = "running"
-        return observed
-
-
-@pytest.mark.parametrize(
-    ("factory", "message"),
-    [
-        (
-            lambda request, clock: NonIdempotentInspectDriver(request, clock=clock),
-            "idempotent",
-        ),
-        (
-            lambda request, clock: OnlineInvocationDriver(request, clock=clock),
-            "offline",
-        ),
-        (lambda request, clock: SlowStopDriver(request, clock=clock), "deadline"),
-        (
-            lambda request, clock: InvalidEvidenceDriver(request, clock=clock),
-            "evidence",
-        ),
-        (
-            lambda request, clock: SocketExposureDriver(request, clock=clock),
-            "security",
-        ),
-        (lambda request, clock: UnverifiedDriver(request, clock=clock), "verify"),
-        (lambda request, clock: UnreadyDriver(request, clock=clock), "ready"),
-        (lambda request, clock: WrongStartResultDriver(request, clock=clock), "start"),
-        (lambda request, clock: WrongStopResultDriver(request, clock=clock), "stop"),
-    ],
-)
-def test_conformance_rejects_broken_lifecycle_drivers(factory, message: str) -> None:
-    with pytest.raises(HarnessConformanceError, match=message):
-        run_synthetic_conformance("vllm", driver_factory=factory)
+    with pytest.raises(HarnessConformanceError, match="projection identity"):
+        validate_terminal_evidence(document, request)
 
 
 def test_conformance_fails_closed_for_unknown_harness() -> None:
