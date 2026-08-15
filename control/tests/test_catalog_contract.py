@@ -61,3 +61,39 @@ def test_catalog_canonicalization_is_stable() -> None:
     assert catalog_content_sha256(document) == (
         "ca6da02fba3343778761e7785f2b55f7fb17b36ce16eee3492dc392fa7c9deaa"
     )
+
+
+def test_model_requires_a_model_group_reference() -> None:
+    document = {
+        "schema_version": 1,
+        "kind": "model",
+        "identity": {"publisher": "vonk-forge", "slug": "synthetic-tiny"},
+        "metadata": {
+            "title": "Synthetic Tiny",
+            "description": "A model contract fixture.",
+            "tags": ["synthetic"],
+        },
+        "model_group": {
+            "kind": "model-group",
+            "publisher": "vonk-forge",
+            "slug": "synthetic",
+            "content_sha256": "a" * 64,
+        },
+        "architecture": "synthetic",
+    }
+
+    validate_catalog_document(document)
+
+    document["model_group"]["kind"] = "model"
+    with pytest.raises(CatalogContractError):
+        validate_catalog_document(document)
+
+
+def test_model_version_requires_a_model_reference() -> None:
+    document = json.loads(MODEL_VERSION_FIXTURE.read_text())
+
+    validate_catalog_document(document)
+
+    document["model"]["kind"] = "model-group"
+    with pytest.raises(CatalogContractError):
+        validate_catalog_document(document)

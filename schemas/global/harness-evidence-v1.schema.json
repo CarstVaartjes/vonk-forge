@@ -7,15 +7,20 @@
   "required": ["schema_version", "recipe", "execution_harness", "runtime_distribution", "outcome", "artifacts"],
   "properties": {
     "schema_version": {"const": 1},
-    "recipe": {"$ref": "#/$defs/reference"},
-    "execution_harness": {"$ref": "#/$defs/reference"},
-    "runtime_distribution": {"$ref": "#/$defs/reference"},
+    "recipe": {"$ref": "#/$defs/recipeIdentity"},
+    "execution_harness": {"$ref": "#/$defs/executionHarnessReference"},
+    "runtime_distribution": {"$ref": "#/$defs/runtimeDistributionReference"},
+    "patch_bundle": {"$ref": "#/$defs/patchBundleReference"},
     "outcome": {"enum": ["passed", "failed"]},
     "artifacts": {"type": "array", "maxItems": 64, "items": {"type": "object", "additionalProperties": false, "required": ["name", "sha256"], "properties": {"name": {"type": "string", "minLength": 1, "maxLength": 256}, "sha256": {"$ref": "#/$defs/sha256"}}}}
   },
   "$defs": {
     "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
     "slug": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,62}$"},
-    "reference": {"type": "object", "additionalProperties": false, "required": ["kind", "publisher", "slug", "content_sha256"], "properties": {"kind": {"enum": ["model-group", "model", "model-version", "execution-harness", "runtime-distribution", "patch-bundle"]}, "publisher": {"$ref": "#/$defs/slug"}, "slug": {"$ref": "#/$defs/slug"}, "content_sha256": {"$ref": "#/$defs/sha256"}}}
+    "recipeIdentity": {"type": "object", "additionalProperties": false, "required": ["publisher", "slug", "content_sha256"], "properties": {"publisher": {"$ref": "#/$defs/slug"}, "slug": {"$ref": "#/$defs/slug"}, "content_sha256": {"$ref": "#/$defs/sha256"}}},
+    "reference": {"type": "object", "additionalProperties": false, "required": ["kind", "publisher", "slug", "content_sha256"], "properties": {"kind": {"enum": ["model-group", "model", "model-version", "execution-harness", "runtime-distribution", "patch-bundle"]}, "publisher": {"$ref": "#/$defs/slug"}, "slug": {"$ref": "#/$defs/slug"}, "content_sha256": {"$ref": "#/$defs/sha256"}}},
+    "executionHarnessReference": {"allOf": [{"$ref": "#/$defs/reference"}, {"properties": {"kind": {"const": "execution-harness"}}}]},
+    "runtimeDistributionReference": {"allOf": [{"$ref": "#/$defs/reference"}, {"properties": {"kind": {"const": "runtime-distribution"}}}]},
+    "patchBundleReference": {"allOf": [{"$ref": "#/$defs/reference"}, {"properties": {"kind": {"const": "patch-bundle"}}}]}
   }
 }
