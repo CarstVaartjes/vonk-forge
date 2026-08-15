@@ -1,0 +1,477 @@
+#!/usr/bin/env python3
+"""Publish a development Compose project on a remote NAS Linux filesystem."""
+
+from __future__ import annotations
+
+import argparse
+import importlib.machinery
+import importlib.util
+import io
+import ipaddress
+import os
+import re
+import shlex
+import shutil
+import stat
+import subprocess
+import sys
+import tarfile
+from collections.abc import Callable
+from pathlib import Path, PurePosixPath
+from types import ModuleType
+
+_PROJECT_SCRIPT = Path(__file__).with_name("dev-runtime-project")
+_SECRETS_SCRIPT = Path(__file__).with_name("dev-runtime-secrets.py")
+_MAX_TOOL_BYTES = 2 * 1024 * 1024
+_MAX_REMOTE_OUTPUT_BYTES = 16 * 1024
+_SSH_TARGET = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:@-]{0,254}")
+_DEVELOPMENT_API_IMAGE = re.compile(
+    r"ghcr\.io/carstvaartjes/vonk-forge-api:"
+    r"(?:dev|dev-sha-[0-9a-f]{40}@sha256:[0-9a-f]{64})"
+)
+
+
+class RemotePublicationError(RuntimeError):
+    """The remote project publication could not be performed safely."""
+
+
+def _project_module() -> ModuleType:
+    loader = importlib.machinery.SourceFileLoader(
+        "vonk_dev_runtime_project_remote_dependency", str(_PROJECT_SCRIPT)
+    )
+    specification = importlib.util.spec_from_loader(loader.name, loader)
+    if specification is None or specification.loader is None:
+        raise RemotePublicationError("local project publisher cannot be loaded")
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module
+
+
+def _validate_ssh_target(value: str) -> str:
+    if _SSH_TARGET.fullmatch(value) is None or value.startswith("-"):
+        raise RemotePublicationError("SSH target is invalid")
+    return value
+
+
+def _validate_remote_destination(value: str) -> PurePosixPath:
+    if any(ord(character) < 0x20 for character in value) or "," in value:
+        raise RemotePublicationError("remote destination is invalid")
+    destination = PurePosixPath(value)
+    if (
+        not destination.is_absolute()
+        or value != str(destination)
+        or destination == PurePosixPath("/")
+        or destination.parent == PurePosixPath("/")
+        or ".." in destination.parts
+    ):
+        raise RemotePublicationError("remote destination is invalid")
+    return destination
+
+
+def _validate_identity_file(path: Path | None) -> Path | None:
+    if path is None:
+        return None
+    if not path.is_absolute():
+        raise RemotePublicationError("SSH identity file must be absolute")
+    try:
+        listed = path.lstat()
+    except OSError as error:
+        raise RemotePublicationError("SSH identity file is unavailable") from error
+    if (
+        not stat.S_ISREG(listed.st_mode)
+        or listed.st_uid != os.geteuid()
+        or listed.st_nlink != 1
+        or stat.S_IMODE(listed.st_mode) not in {0o400, 0o600}
+    ):
+        raise RemotePublicationError("SSH identity file is unsafe")
+    return path
+
+
+def _ssh_program() -> str:
+    linux_client = Path("/usr/bin/ssh")
+    if linux_client.is_file() and os.access(linux_client, os.X_OK):
+        return str(linux_client)
+    resolved = shutil.which("ssh")
+    if resolved is None:
+        raise RemotePublicationError("OpenSSH client is unavailable")
+    return resolved
+
+
+def _read_tool(path: Path) -> bytes:
+    try:
+        metadata = path.lstat()
+        content = path.read_bytes()
+        after = path.lstat()
+    except OSError as error:
+        raise RemotePublicationError("publication tooling cannot be read") from error
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_uid != os.geteuid()
+        or metadata.st_nlink != 1
+        or (
+            metadata.st_dev,
+            metadata.st_ino,
+            metadata.st_size,
+            metadata.st_mtime_ns,
+            metadata.st_ctime_ns,
+        )
+        != (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+            after.st_ctime_ns,
+        )
+        or not 0 < len(content) <= _MAX_TOOL_BYTES
+    ):
+        raise RemotePublicationError("publication tooling is unsafe")
+    return content
+
+
+def _snapshot_sources(
+    *,
+    source_compose: Path,
+    secrets_dir: Path,
+    nas_address: str,
+    management_cidrs: str,
+    direct_fabric_cidrs: str,
+    enroll_hostname: str,
+    agent_hostname: str,
+    registry_hostname: str,
+) -> tuple[bytes, dict[str, bytes]]:
+    project = _project_module()
+    try:
+        runtime = project._runtime_module()
+    except (ImportError, OSError, project.ProjectPublicationError) as error:
+        raise RemotePublicationError(
+            "local project validator cannot be loaded"
+        ) from error
+    try:
+        ipaddress.ip_address(nas_address)
+        enroll = project._validate_hostname(enroll_hostname)
+        agent = project._validate_hostname(agent_hostname)
+        registry = project._validate_hostname(registry_hostname)
+        cidrs = project._validate_cidrs(management_cidrs)
+        fabric_cidrs = project._validate_direct_fabric_cidrs(
+            direct_fabric_cidrs, management_cidrs=cidrs
+        )
+        source_directory = project._open_locked_source_directory(secrets_dir)
+        try:
+            source_names = set(os.listdir(source_directory))
+            if source_names != runtime.RUNTIME_SECRET_NAMES:
+                raise RemotePublicationError(
+                    "source secret bundle contains unexpected entries"
+                )
+            source_bundle = {
+                name: project._read_regular_at(
+                    source_directory, name, maximum=64 * 1024
+                )
+                for name in runtime.RUNTIME_SECRET_NAMES
+            }
+            runtime._validate_bundle(
+                source_bundle,
+                management_cidrs=cidrs,
+                enroll_hostname=enroll,
+                agent_hostname=agent,
+                registry_hostname=registry,
+            )
+        finally:
+            project._release_source_directory(source_directory)
+        compose = project._read_regular(source_compose, private=False)
+        project._render_compose(
+            compose,
+            enroll=enroll,
+            agent=agent,
+            direct_fabric_cidrs=fabric_cidrs,
+        )
+        return compose, source_bundle
+    except RemotePublicationError:
+        raise
+    except (ValueError, OSError, project.ProjectPublicationError) as error:
+        raise RemotePublicationError("local publication inputs are invalid") from error
+    except runtime.RuntimeSecretError as error:
+        raise RemotePublicationError(
+            "source secret bundle does not match project inputs"
+        ) from error
+
+
+def _publisher_image(compose: bytes) -> str:
+    try:
+        lines = compose.decode("utf-8").splitlines()
+    except UnicodeDecodeError as error:
+        raise RemotePublicationError("source Compose file is not UTF-8") from error
+    prefix = "x-api-image: &api-image "
+    matches = [line.removeprefix(prefix) for line in lines if line.startswith(prefix)]
+    if len(matches) != 1 or _DEVELOPMENT_API_IMAGE.fullmatch(matches[0]) is None:
+        raise RemotePublicationError("development publisher image is not accepted")
+    return matches[0]
+
+
+def _tar_info(name: str, *, size: int = 0, directory: bool = False) -> tarfile.TarInfo:
+    member = tarfile.TarInfo(name)
+    member.type = tarfile.DIRTYPE if directory else tarfile.REGTYPE
+    member.mode = 0o700 if directory else 0o600
+    member.size = 0 if directory else size
+    member.uid = 0
+    member.gid = 0
+    member.uname = ""
+    member.gname = ""
+    member.mtime = 0
+    return member
+
+
+def _archive_bytes(compose: bytes, source_bundle: dict[str, bytes]) -> bytes:
+    files = {
+        "dev-runtime-project": _read_tool(_PROJECT_SCRIPT),
+        "dev-runtime-secrets.py": _read_tool(_SECRETS_SCRIPT),
+        "docker-compose.dev.yml": compose,
+    }
+    archive = io.BytesIO()
+    with tarfile.open(fileobj=archive, mode="w:") as packaged:
+        packaged.addfile(_tar_info("secrets", directory=True))
+        for name, content in sorted(files.items()):
+            packaged.addfile(_tar_info(name, size=len(content)), io.BytesIO(content))
+        for name, content in sorted(source_bundle.items()):
+            packaged.addfile(
+                _tar_info(f"secrets/{name}", size=len(content)), io.BytesIO(content)
+            )
+    return archive.getvalue()
+
+
+_REMOTE_SCRIPT = r"""
+set -euo pipefail
+
+case "$docker_mode" in
+  direct) docker=(docker) ;;
+  sudo) docker=(sudo -n docker) ;;
+  *) printf '%s\n' 'remote Docker mode is invalid' >&2; exit 2 ;;
+esac
+
+remote_stage=$(mktemp -d /dev/shm/vonk-runtime-project.XXXXXX)
+cleanup_remote() {
+  if test -d "$remote_stage"; then
+    find "$remote_stage" -depth -delete
+  fi
+}
+trap cleanup_remote EXIT
+trap 'exit 130' HUP INT TERM
+chmod 700 "$remote_stage"
+tar --extract --file - --directory "$remote_stage" \
+  --no-same-owner --no-same-permissions
+
+test -f "$remote_stage/dev-runtime-project"
+test ! -L "$remote_stage/dev-runtime-project"
+test -f "$remote_stage/dev-runtime-secrets.py"
+test ! -L "$remote_stage/dev-runtime-secrets.py"
+test -f "$remote_stage/docker-compose.dev.yml"
+test ! -L "$remote_stage/docker-compose.dev.yml"
+test -d "$remote_stage/secrets"
+test ! -L "$remote_stage/secrets"
+chmod 700 "$remote_stage/secrets"
+chmod 600 \
+  "$remote_stage/dev-runtime-project" \
+  "$remote_stage/dev-runtime-secrets.py" \
+  "$remote_stage/docker-compose.dev.yml"
+find "$remote_stage/secrets" -mindepth 1 -maxdepth 1 -type f \
+  -exec chmod 600 {} +
+
+destination_parent=$(dirname -- "$destination")
+destination_name=$(basename -- "$destination")
+test -d "$destination_parent"
+test ! -L "$destination_parent"
+
+"${docker[@]}" pull --quiet "$publisher_image" >/dev/null
+published=$("${docker[@]}" run --rm \
+  --network none \
+  --read-only \
+  --cap-drop ALL \
+  --security-opt no-new-privileges \
+  --user "$(id -u):$(id -g)" \
+  --env PYTHONDONTWRITEBYTECODE=1 \
+  --mount "type=bind,src=$remote_stage,dst=/stage,readonly" \
+  --mount "type=bind,src=$destination_parent,dst=/publish" \
+  --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777 \
+  --entrypoint python \
+  "$publisher_image" \
+  /stage/dev-runtime-project \
+  --source-compose /stage/docker-compose.dev.yml \
+  --secrets-dir /stage/secrets \
+  --destination "/publish/$destination_name" \
+  --nas-address "$nas_address" \
+  --management-cidrs "$management_cidrs" \
+  --direct-fabric-cidrs "$direct_fabric_cidrs" \
+  --enroll-hostname "$enroll_hostname" \
+  --agent-hostname "$agent_hostname" \
+  --registry-hostname "$registry_hostname")
+test "$published" = "/publish/$destination_name"
+printf '%s\n' "$published"
+""".strip()
+
+
+def _remote_command(
+    *,
+    destination: PurePosixPath,
+    docker_mode: str,
+    publisher_image: str,
+    nas_address: str,
+    management_cidrs: str,
+    direct_fabric_cidrs: str,
+    enroll_hostname: str,
+    agent_hostname: str,
+    registry_hostname: str,
+) -> str:
+    environment = {
+        "destination": str(destination),
+        "docker_mode": docker_mode,
+        "publisher_image": publisher_image,
+        "nas_address": nas_address,
+        "management_cidrs": management_cidrs,
+        "direct_fabric_cidrs": direct_fabric_cidrs,
+        "enroll_hostname": enroll_hostname,
+        "agent_hostname": agent_hostname,
+        "registry_hostname": registry_hostname,
+    }
+    command = ["env", *(f"{name}={value}" for name, value in environment.items())]
+    command.extend(("bash", "-c", _REMOTE_SCRIPT))
+    return shlex.join(command)
+
+
+def _redacted_output(output: bytes, source_bundle: dict[str, bytes]) -> str:
+    bounded = output[-_MAX_REMOTE_OUTPUT_BYTES:]
+    for value in source_bundle.values():
+        for candidate in (value, value.strip()):
+            if candidate:
+                bounded = bounded.replace(candidate, b"[redacted]")
+    return bounded.decode("utf-8", errors="replace").strip()
+
+
+def publish_remote(
+    *,
+    source_compose: Path,
+    secrets_dir: Path,
+    ssh_target: str,
+    identity_file: Path | None,
+    remote_destination: str,
+    docker_mode: str,
+    nas_address: str,
+    management_cidrs: str,
+    direct_fabric_cidrs: str,
+    enroll_hostname: str,
+    agent_hostname: str,
+    registry_hostname: str,
+    runner: Callable[..., subprocess.CompletedProcess[bytes]] = subprocess.run,
+) -> str:
+    target = _validate_ssh_target(ssh_target)
+    destination = _validate_remote_destination(remote_destination)
+    identity = _validate_identity_file(identity_file)
+    if docker_mode not in {"direct", "sudo"}:
+        raise RemotePublicationError("remote Docker mode is invalid")
+    compose, source_bundle = _snapshot_sources(
+        source_compose=source_compose,
+        secrets_dir=secrets_dir,
+        nas_address=nas_address,
+        management_cidrs=management_cidrs,
+        direct_fabric_cidrs=direct_fabric_cidrs,
+        enroll_hostname=enroll_hostname,
+        agent_hostname=agent_hostname,
+        registry_hostname=registry_hostname,
+    )
+    image = _publisher_image(compose)
+    archive = _archive_bytes(compose, source_bundle)
+    command = [
+        _ssh_program(),
+        "-T",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ClearAllForwardings=yes",
+        "-o",
+        "RequestTTY=no",
+        "-o",
+        "StrictHostKeyChecking=yes",
+    ]
+    if identity is not None:
+        command.extend(("-o", "IdentitiesOnly=yes", "-i", str(identity)))
+    command.extend(
+        (
+            "--",
+            target,
+            _remote_command(
+                destination=destination,
+                docker_mode=docker_mode,
+                publisher_image=image,
+                nas_address=nas_address,
+                management_cidrs=management_cidrs,
+                direct_fabric_cidrs=direct_fabric_cidrs,
+                enroll_hostname=enroll_hostname,
+                agent_hostname=agent_hostname,
+                registry_hostname=registry_hostname,
+            ),
+        )
+    )
+    try:
+        completed = runner(
+            command,
+            input=archive,
+            capture_output=True,
+            check=False,
+        )
+    except OSError as error:
+        raise RemotePublicationError("SSH transport could not be started") from error
+    expected = f"/publish/{destination.name}"
+    if completed.returncode != 0:
+        detail = _redacted_output(completed.stderr, source_bundle)
+        suffix = f": {detail}" if detail else ""
+        raise RemotePublicationError(f"remote project publication failed{suffix}")
+    if (
+        completed.stderr
+        or completed.stdout.decode("utf-8", errors="replace").strip() != expected
+    ):
+        raise RemotePublicationError("remote project publication result is invalid")
+    return f"{target}:{destination}"
+
+
+def _arguments(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--source-compose", type=Path, required=True)
+    parser.add_argument("--secrets-dir", type=Path, required=True)
+    parser.add_argument("--ssh-target", required=True)
+    parser.add_argument("--identity-file", type=Path)
+    parser.add_argument("--remote-destination", required=True)
+    parser.add_argument("--docker-mode", choices=("sudo", "direct"), default="sudo")
+    parser.add_argument("--nas-address", required=True)
+    parser.add_argument("--management-cidrs", required=True)
+    parser.add_argument("--direct-fabric-cidrs", required=True)
+    parser.add_argument("--enroll-hostname", required=True)
+    parser.add_argument("--agent-hostname", required=True)
+    parser.add_argument("--registry-hostname", required=True)
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    os.umask(0o077)
+    arguments = _arguments(argv)
+    try:
+        destination = publish_remote(
+            source_compose=arguments.source_compose,
+            secrets_dir=arguments.secrets_dir,
+            ssh_target=arguments.ssh_target,
+            identity_file=arguments.identity_file,
+            remote_destination=arguments.remote_destination,
+            docker_mode=arguments.docker_mode,
+            nas_address=arguments.nas_address,
+            management_cidrs=arguments.management_cidrs,
+            direct_fabric_cidrs=arguments.direct_fabric_cidrs,
+            enroll_hostname=arguments.enroll_hostname,
+            agent_hostname=arguments.agent_hostname,
+            registry_hostname=arguments.registry_hostname,
+        )
+        print(destination)
+        return 0
+    except RemotePublicationError as error:
+        print(str(error), file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

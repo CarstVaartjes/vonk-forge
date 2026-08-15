@@ -282,6 +282,27 @@ def test_fresh_install_is_the_concise_operator_entry_point() -> None:
     )
 
 
+def test_nas_runbooks_recommend_remote_publication_for_windows_and_wsl() -> None:
+    full = _normalized_text(RUNBOOK)
+    fresh = _normalized_text(FRESH_INSTALL)
+
+    for text in (full, fresh):
+        assert "scripts/dev-runtime-project-remote" in text
+        assert "NAS's real Linux filesystem" in text
+        assert "`docker-compose.yml` plus `secrets/`" in text
+        assert "`sudo -n`" in text
+        assert "strict SSH host-key" in text
+        assert "RAM-only" in text
+        assert "9p" in text
+        assert "DrvFs" in text
+        assert "CIFS" in text
+        assert "do not weaken" in text
+
+    assert "recommended Windows/WSL path" in fresh
+    assert "does not clone this repository onto the NAS" in fresh
+    assert "SMB client is only a read-only operator view" in full
+
+
 def test_readme_and_documentation_index_lead_to_fresh_install() -> None:
     assert (
         "docs/runbooks/fresh-development-install.md" in (ROOT / "README.md").read_text()

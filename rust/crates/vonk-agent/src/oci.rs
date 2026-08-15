@@ -706,6 +706,22 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         Ok(value)
     }
 
+    pub fn recipe_digest_if_present(
+        &self,
+        installation_id: &str,
+    ) -> Result<Option<String>, OciError> {
+        let installation = managed_path(self.data_root, "installations", installation_id)?;
+        let metadata = match fs::symlink_metadata(&installation) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+        if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+            return Err(OciError::Artifact);
+        }
+        self.recipe_digest(installation_id).map(Some)
+    }
+
     pub fn installed_bytes(&self, installation_id: &str) -> Result<u64, OciError> {
         let installation = managed_path(self.data_root, "installations", installation_id)?;
         let mut files = BTreeMap::new();

@@ -11,6 +11,7 @@ AGENT_PKI = ROOT / "docs/runbooks/agent-pki.md"
 DEV_NAS = ROOT / "docs/runbooks/development-nas-installation.md"
 COMPOSE_README = ROOT / "deploy/compose/README.md"
 ARCHITECTURE = ROOT / "docs/architecture-overview.md"
+ARCHITECTURE_HTML = ROOT / "docs/vonk-forge-architecture.html"
 SUPPLY_CHAIN = ROOT / "docs/runbooks/supply-chain.md"
 DEV_WORKLOADS = ROOT / "docs/runbooks/development-agent-workloads.md"
 MIA_TWO_SPARK = ROOT / "docs/runbooks/mia-deepseek-v4-flash.md"
@@ -82,6 +83,48 @@ def test_readme_describes_the_spark_native_runtime_boundary() -> None:
     assert "Spark-managed Docker/NVIDIA runtime" in text
     assert "for isolated recipe builds only" in text
     assert "Docker is only required on the NAS" not in text
+
+
+def test_architecture_explains_one_two_and_many_node_shapes() -> None:
+    markdown = _normalized_text(ARCHITECTURE)
+    html = _normalized_text(ARCHITECTURE_HTML)
+
+    for text in (markdown, html):
+        for required in (
+            "One Spark",
+            "Two Sparks",
+            "Many Sparks",
+            "Tailscale → Caddy → LiteLLM",
+            "spk_…",
+            "mia-deepseek-v4-flash",
+            "agents.vonk-forge.lan:8443",
+        ):
+            assert required in text
+        assert "stable" in text
+        assert "IP address is not identity" in text
+        assert "no fixed fleet size" in text
+
+    assert "single-node runtime" in markdown
+    assert "tensor-parallel gang" in markdown
+    assert "independent workloads and gangs" in markdown
+    assert "GPU nodes never receive Tailscale OAuth" in html
+    assert "LiteLLM never discovers containers" in html
+    assert "agents.vonk.lan" not in html
+
+
+def test_mia_runbook_distinguishes_image_receipts_from_model_loading() -> None:
+    text = _normalized_text(MIA_TWO_SPARK)
+
+    for required in (
+        "18,908,041,728-byte runtime image",
+        "155.43 GiB model checkpoint",
+        "does not redownload",
+        "new signed import receipt",
+        "full digest verification",
+        "not a release SLA",
+        "146 seconds",
+    ):
+        assert required in text
 
 
 def test_active_agent_install_examples_keep_pairing_and_controller_inputs_together() -> None:
