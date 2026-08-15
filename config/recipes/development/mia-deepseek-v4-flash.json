@@ -15,12 +15,20 @@
       "multinode"
     ]
   },
-  "workload": {
-    "family": "mia-deepseek-v4-flash",
-    "capabilities": [
-      "openai.chat",
-      "openai.tools"
-    ]
+  "model": {
+    "kind": "model-version",
+    "publisher": "vonk",
+    "slug": "deepseek-v4-flash-version",
+    "content_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "execution": {
+    "harness": {
+      "kind": "execution-harness",
+      "publisher": "vonk",
+      "slug": "mia-deepseek-v4-flash",
+      "content_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    "patch_bundle": null
   },
   "build": {
     "context": {
@@ -62,22 +70,17 @@
     }
   ],
   "runtime": {
-    "interface": "vonk.runtime.v1",
-    "adapter": "mia_dsv4_flash",
-    "adapter_version": 1,
+    "distribution": {
+      "kind": "runtime-distribution",
+      "publisher": "vonk",
+      "slug": "mia-dsv4-flash-linux-arm64",
+      "content_sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+    },
     "entrypoint": [
       "/opt/vonk/mia-deepseek-v4-flash"
     ],
     "arguments": [],
     "environment": [],
-    "endpoint": {
-      "protocol": "openai",
-      "port": 8888,
-      "model_aliases": [
-        "deepseek-v4-flash-dspark"
-      ],
-      "health_path": "/v1/models"
-    },
     "security": {
       "devices": [
         "nvidia.com/gpu=all"
@@ -105,12 +108,10 @@
       "stop_timeout_seconds": 30
     }
   },
-  "deployment_profiles": [
-    {
+  "topology": {
       "name": "pair",
-      "description": "Two DGX Sparks run one DeepSeek V4 Flash service with tensor parallel size two over their direct RoCEv2 fabric.",
       "node_count": 2,
-      "strategy": "tensor_parallel",
+      "mode": "tensor_parallel",
       "parallelism": {
         "tensor": 2,
         "pipeline": 1,
@@ -173,18 +174,32 @@
         "connectivity": "connected",
         "minimum_bandwidth_mbps": 200000
       },
-      "parameter_overrides": {},
-      "measurement": "measured"
+      "start_order": ["worker", "entrypoint"],
+      "stop_order": ["entrypoint", "worker"]
+  },
+  "interfaces": [
+    {
+      "adapter": "openai",
+      "port": 8888,
+      "model_aliases": [
+        "deepseek-v4-flash-dspark"
+      ],
+      "health_path": "/v1/models"
     }
   ],
   "validation": {
-    "checks": [
-      "container.started",
-      "fabric.rocev2.detected",
-      "endpoint.healthy",
-      "inference.completed",
-      "route.withdrawn_on_rank_failure",
-      "route.republished_after_recovery"
+    "validators": [
+      {
+        "interface": "openai",
+        "checks": [
+          "container.started",
+          "fabric.rocev2.detected",
+          "endpoint.healthy",
+          "inference.completed",
+          "route.withdrawn_on_rank_failure",
+          "route.republished_after_recovery"
+        ]
+      }
     ],
     "benchmarks": []
   },

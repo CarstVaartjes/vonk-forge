@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-import base64
 import copy
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
+from .auth import CursorCodec
 from .catalog_contract import (
     CatalogContractError,
     CatalogKind,
@@ -47,10 +47,12 @@ class CatalogEntityService:
         sessions: Session | sessionmaker[Session],
         *,
         clock: Callable[[], datetime],
+        cursors: CursorCodec,
     ) -> None:
         self._session = sessions if isinstance(sessions, Session) else None
         self._sessions = None if self._session is not None else sessions
         self._clock = clock
+        self._cursors = cursors
 
     @contextmanager
     def _read(self) -> Iterator[Session]:
@@ -272,6 +274,27 @@ class CatalogEntityService:
             raise CatalogValidationError(
                 "catalog.kind", "catalog entity kind is invalid"
             ) from error
+        context = {"kind": normalized_kind, "publisher": publisher}
+        boundary: tuple[datetime, str] | None = None
+        if cursor is not None:
+            try:
+                decoded = self._cursors.decode(
+                    cursor,
+                    resource="catalog-entities",
+                    order="created-at-desc/id-desc/v1",
+                    context=context,
+                )
+                if (
+                    not isinstance(decoded, list)
+                    or len(decoded) != 2
+                    or not all(isinstance(item, str) for item in decoded)
+                ):
+                    raise ValueError
+                boundary = (datetime.fromisoformat(decoded[0]), decoded[1])
+            except (UnicodeError, ValueError, TypeError):
+                raise CatalogValidationError(
+                    "catalog.cursor", "catalog cursor is invalid"
+                ) from None
         latest_numbers = (
             select(
                 CatalogEntityRevision.entity_id,
@@ -294,31 +317,34 @@ class CatalogEntityService:
                         == CatalogEntityRevision.revision_number,
                     ),
                 )
-                .order_by(CatalogEntity.updated_at.desc(), CatalogEntity.id.desc())
+                .order_by(CatalogEntity.created_at.desc(), CatalogEntity.id.desc())
             )
             if normalized_kind is not None:
                 statement = statement.where(CatalogEntity.kind == normalized_kind)
             if publisher is not None:
                 statement = statement.where(CatalogEntity.publisher == publisher)
-            if cursor is not None:
-                boundary_id = _decode_cursor(cursor)
-                boundary = session.get(CatalogEntity, boundary_id)
-                if boundary is None:
-                    raise CatalogValidationError(
-                        "catalog.cursor", "catalog cursor is invalid"
-                    )
+            if boundary is not None:
+                created_at, entity_id = boundary
                 statement = statement.where(
                     or_(
-                        CatalogEntity.updated_at < boundary.updated_at,
+                        CatalogEntity.created_at < created_at,
                         and_(
-                            CatalogEntity.updated_at == boundary.updated_at,
-                            CatalogEntity.id < boundary.id,
+                            CatalogEntity.created_at == created_at,
+                            CatalogEntity.id < entity_id,
                         ),
                     )
                 )
             rows = list(session.scalars(statement.limit(limit + 1)).all())
         page = rows[:limit]
-        next_cursor = _encode_cursor(page[-1].entity_id) if len(rows) > limit else None
+        next_cursor = None
+        if len(rows) > limit and page:
+            entity = page[-1].entity
+            next_cursor = self._cursors.encode(
+                resource="catalog-entities",
+                order="created-at-desc/id-desc/v1",
+                context=context,
+                boundary=[_aware(entity.created_at).isoformat(), entity.id],
+            )
         return page, next_cursor
 
     def get_entity(self, entity_id: str) -> CatalogEntityRevision:
@@ -469,25 +495,8 @@ def _actor(value: str) -> str:
     return normalized
 
 
-def _encode_cursor(entity_id: str) -> str:
-    encoded = base64.urlsafe_b64encode(entity_id.encode("ascii")).decode("ascii")
-    return f"v1.{encoded.rstrip('=')}"
-
-
-def _decode_cursor(cursor: str) -> str:
-    try:
-        if not cursor.startswith("v1.") or len(cursor) > 128:
-            raise ValueError
-        payload = cursor[3:]
-        padding = "=" * (-len(payload) % 4)
-        entity_id = base64.urlsafe_b64decode(payload + padding).decode("ascii")
-        if _encode_cursor(entity_id) != cursor or len(entity_id) != 36:
-            raise ValueError
-        return entity_id
-    except (UnicodeDecodeError, ValueError) as error:
-        raise CatalogValidationError(
-            "catalog.cursor", "catalog cursor is invalid"
-        ) from error
+def _aware(value: datetime) -> datetime:
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
 
 __all__ = [

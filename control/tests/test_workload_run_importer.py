@@ -43,6 +43,8 @@ def test_container_and_mods_become_a_source_bundle() -> None:
         "hosts": [],
     }
     assert result.draft_document["build"]["context"]["sha256"] == result.bundle.sha256
+    assert result.draft_document["topology"]["name"] == "nodes_2"
+    assert "deployment" + "_profiles" not in result.draft_document
     validate_recipe(result.draft_document)
 
 
@@ -76,3 +78,22 @@ def test_redacted_source_never_contains_secret_values() -> None:
 
     assert result.redacted_source["credentials"]["password"] == "<redacted>"
     assert "never-store-me" not in str(result.redacted_source)
+
+
+def test_runtime_names_are_normalized_into_valid_exact_catalog_slugs() -> None:
+    source = parse_workload_run_yaml(
+        b"model: bartowski/Qwen-GGUF\n"
+        b"model_revision: 0123456789abcdef0123456789abcdef01234567\n"
+        b"runtime: llama.cpp\n"
+        b"min_nodes: 1\nmax_nodes: 1\n"
+        b"command: llama-server --model /models/qwen.gguf --port 8000\n"
+    )
+
+    result = import_workload_run(source)
+
+    assert result.draft_document["execution"]["harness"]["slug"] == "llama-cpp-openai"
+    assert (
+        result.draft_document["runtime"]["distribution"]["slug"]
+        == "llama-cpp-linux-arm64"
+    )
+    validate_recipe(result.draft_document)

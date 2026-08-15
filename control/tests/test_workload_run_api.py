@@ -8,9 +8,11 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+from test_catalog_service import _seed_recipe_dependencies
 from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
+from vonk_control.catalog_service import CatalogService
 from vonk_control.model_resolution import ModelFile, SnapshotEnvelope
 from vonk_control.models import Base, LocalRecipe, RecipeImport
 from vonk_control.registry_resolution import ManifestEnvelope
@@ -55,7 +57,9 @@ def setup(tmp_path):
 
 def test_preview_does_not_persist_recipe(tmp_path: Path) -> None:
     client, headers, sessions = setup(tmp_path)
-    source = (Path(__file__).parent / "fixtures/workload_run/minimal-vllm.yaml").read_text()
+    source = (
+        Path(__file__).parent / "fixtures/workload_run/minimal-vllm.yaml"
+    ).read_text()
     response = client.post(
         "/api/v1/catalog/imports/workload_run/preview",
         headers=headers,
@@ -78,7 +82,9 @@ def test_preview_does_not_persist_recipe(tmp_path: Path) -> None:
 
 def test_apply_is_idempotent_and_persists_only_redacted_source(tmp_path: Path) -> None:
     client, headers, sessions = setup(tmp_path)
-    source = (Path(__file__).parent / "fixtures/workload_run/minimal-vllm.yaml").read_text()
+    source = (
+        Path(__file__).parent / "fixtures/workload_run/minimal-vllm.yaml"
+    ).read_text()
     preview = client.post(
         "/api/v1/catalog/imports/workload_run/preview",
         headers=headers,
@@ -89,8 +95,12 @@ def test_apply_is_idempotent_and_persists_only_redacted_source(tmp_path: Path) -
         "source_sha256": preview["source_sha256"],
         "report_digest": preview["report_digest"],
     }
-    first = client.post("/api/v1/catalog/imports/workload_run", headers=headers, json=body)
-    second = client.post("/api/v1/catalog/imports/workload_run", headers=headers, json=body)
+    first = client.post(
+        "/api/v1/catalog/imports/workload_run", headers=headers, json=body
+    )
+    second = client.post(
+        "/api/v1/catalog/imports/workload_run", headers=headers, json=body
+    )
 
     assert first.status_code == second.status_code == 201
     assert first.json()["recipe_id"] == second.json()["recipe_id"]
@@ -102,7 +112,9 @@ def test_apply_is_idempotent_and_persists_only_redacted_source(tmp_path: Path) -
 
 def test_apply_rejects_stale_preview_and_operator(tmp_path: Path) -> None:
     client, headers, _sessions = setup(tmp_path)
-    source = (Path(__file__).parent / "fixtures/workload_run/minimal-vllm.yaml").read_text()
+    source = (
+        Path(__file__).parent / "fixtures/workload_run/minimal-vllm.yaml"
+    ).read_text()
     stale = client.post(
         "/api/v1/catalog/imports/workload_run",
         headers=headers,
@@ -120,14 +132,29 @@ def test_workflow_resolves_with_verified_metadata_and_overlays(tmp_path: Path) -
     engine = create_engine(f"sqlite:///{tmp_path / 'resolve.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
+    clock = lambda: datetime(2026, 8, 7, tzinfo=UTC)
+    catalog = CatalogService(
+        sessions,
+        clock=clock,
+        cursors=TokenCodec(b"c" * 32).cursor_codec(),
+    )
+    exact = json.loads(
+        (Path(__file__).parent / "fixtures/global/recipe-v1-minimal.json").read_text()
+    )
+    _seed_recipe_dependencies(catalog, exact)
     workflow = WorkloadRunWorkflow(
         sessions,
-        clock=lambda: datetime(2026, 8, 7, tzinfo=UTC),
+        clock=clock,
         bundles=SourceBundleStore(tmp_path / "bundles"),
         registry=_Registry(),
         models=_Models(),
+        recipe_resolver=lambda document, actor: catalog.resolve_recipe_revision(
+            document, actor=actor
+        ),
     )
-    raw = (Path(__file__).parent / "fixtures/workload_run/minimal-vllm.yaml").read_bytes()
+    raw = (
+        Path(__file__).parent / "fixtures/workload_run/minimal-vllm.yaml"
+    ).read_bytes()
     preview = workflow.preview(raw)
     applied = workflow.apply(
         raw,
@@ -149,25 +176,29 @@ def test_workflow_resolves_with_verified_metadata_and_overlays(tmp_path: Path) -
             "artifact_sizes": {
                 "weights": {"download_bytes": 100, "installed_bytes": 150}
             },
-            "profile_resources": {
-                "solo": {
-                    "entrypoint": {
-                        "disk": {
-                            "image_bytes": 50,
-                            "artifact_bytes": 150,
-                            "staging_bytes": 50,
-                            "cache_bytes": 10,
-                            "rollback_bytes": 50,
-                            "safety_margin_bytes": 20,
-                        },
-                        "memory": {
-                            "kind": "unified",
-                            "startup_peak_bytes": 225,
-                            "steady_state_bytes": 200,
-                            "runtime_growth_bytes": 25,
-                            "system_reserve_bytes": 25,
-                        },
-                    }
+            "catalog_references": {
+                "model": exact["model"],
+                "execution_harness": exact["execution"]["harness"],
+                "runtime_distribution": exact["runtime"]["distribution"],
+                "patch_bundle": exact["execution"]["patch_bundle"],
+            },
+            "topology_resources": {
+                "entrypoint": {
+                    "disk": {
+                        "image_bytes": 50,
+                        "artifact_bytes": 150,
+                        "staging_bytes": 50,
+                        "cache_bytes": 10,
+                        "rollback_bytes": 50,
+                        "safety_margin_bytes": 20,
+                    },
+                    "memory": {
+                        "kind": "unified",
+                        "startup_peak_bytes": 225,
+                        "steady_state_bytes": 200,
+                        "runtime_growth_bytes": 25,
+                        "system_reserve_bytes": 25,
+                    },
                 }
             },
             "security_acknowledged": True,

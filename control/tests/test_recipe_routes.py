@@ -89,11 +89,12 @@ def setup(
             lifecycle="resolved",
             schema_version=1,
             document={
-                "runtime": {
-                    "endpoint": {
+                "interfaces": [
+                    {
+                        "adapter": "openai",
                         "model_aliases": list(runtime_model_aliases),
                     }
-                }
+                ]
             },
             content_sha256="a" * 64,
             created_by="admin",
@@ -103,7 +104,7 @@ def setup(
         session.flush()
         mapping = ClusterMapping(
             recipe_revision_id=revision.id,
-            profile_name=f"{ranks}-node",
+            topology_name=f"{ranks}-node",
             generation=1,
             node_count=ranks,
             state="ready",
@@ -317,9 +318,7 @@ def test_public_alias_routes_to_primary_runtime_model_alias(tmp_path: Path) -> N
 def test_missing_runtime_model_authority_blocks_route_publication(
     tmp_path: Path,
 ) -> None:
-    service, _publisher, applied, run_id = setup(
-        tmp_path, runtime_model_aliases=()
-    )
+    service, _publisher, applied, run_id = setup(tmp_path, runtime_model_aliases=())
 
     with pytest.raises(RecipeRouteError, match="model authority"):
         service.publish_run(run_id)

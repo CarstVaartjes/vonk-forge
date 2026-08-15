@@ -17,6 +17,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
+from .auth import CursorCodec
 from .catalog_contract import (
     CatalogContractError,
     CatalogKind,
@@ -119,6 +120,7 @@ class CatalogService:
         sessions: sessionmaker[Session],
         *,
         clock: Callable[[], datetime],
+        cursors: CursorCodec,
         repository: CatalogRepository | None = None,
         source_bundles: SourceBundleStore | None = None,
     ) -> None:
@@ -126,7 +128,8 @@ class CatalogService:
         self._clock = clock
         self._repository = repository or CatalogRepository()
         self._source_bundles = source_bundles
-        self.entities = CatalogEntityService(sessions, clock=clock)
+        self._cursors = cursors
+        self.entities = CatalogEntityService(sessions, clock=clock, cursors=cursors)
 
     def store_source_bundle(
         self, expected_sha256: str, payload: BinaryIO, actor: str
@@ -425,7 +428,9 @@ class CatalogService:
         actor: str,
     ) -> str:
         _actor(actor)
-        entity_service = CatalogEntityService(session, clock=self._clock)
+        entity_service = CatalogEntityService(
+            session, clock=self._clock, cursors=self._cursors
+        )
         references = recipe_references(document)
         model_version_ref, harness_ref, distribution_ref = references[:3]
         patch_ref = references[3] if len(references) == 4 else None
@@ -660,7 +665,7 @@ class CatalogService:
                 topology = recipe_topology(revision.document)
             except RecipeContractError as error:
                 raise CatalogValidationError(
-                    "catalog.test_report_profile_mismatch",
+                    "catalog.test_report_topology_mismatch",
                     "test report topology is not declared by this recipe",
                 ) from error
             by_name = {
@@ -683,7 +688,7 @@ class CatalogService:
                 or clean.get("node_count") != topology["node_count"]
             ):
                 raise CatalogValidationError(
-                    "catalog.test_report_profile_mismatch",
+                    "catalog.test_report_topology_mismatch",
                     "test report does not match the recipe topology",
                 )
             if any(by_name.get(name) is not True for name in _REQUIRED_TEST_CHECKS):

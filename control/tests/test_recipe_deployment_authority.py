@@ -9,6 +9,7 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker
+from vonk_control.auth import TokenCodec
 from vonk_control.catalog_service import CatalogService, RecipeDraftInput
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.models import AgentNode, Base, ClusterMapping
@@ -76,7 +77,9 @@ def test_resolved_recipe_maps_without_git_remote(tmp_path: Path) -> None:
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     clock = lambda: datetime(2026, 8, 7, 12, 0, tzinfo=UTC)
-    catalog = CatalogService(sessions, clock=clock)
+    catalog = CatalogService(
+        sessions, clock=clock, cursors=TokenCodec(b"c" * 32).cursor_codec()
+    )
     node_id = "spk_" + "1" * 32
     with sessions.begin() as session:
         session.add(

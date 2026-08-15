@@ -18,6 +18,7 @@ from test_catalog_entities import (
     patch_bundle,
     runtime_distribution,
 )
+from vonk_control.auth import TokenCodec
 from vonk_control.catalog_service import (
     CatalogConflict,
     CatalogService,
@@ -44,6 +45,7 @@ def service(tmp_path: Path) -> CatalogService:
     return CatalogService(
         sessions,
         clock=lambda: datetime(2026, 8, 7, tzinfo=UTC),
+        cursors=TokenCodec(b"c" * 32).cursor_codec(),
         source_bundles=SourceBundleStore(tmp_path / "source-bundles"),
     )
 

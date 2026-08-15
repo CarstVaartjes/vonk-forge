@@ -27,8 +27,15 @@ def compile_runtime_spec(
     if _OCI_DIGEST.fullmatch(image_digest) is None:
         raise RecipeRuntimeSpecError("built image digest is invalid")
     runtime = document["runtime"]
+    execution = document["execution"]
+    interfaces = document["interfaces"]
     artifacts = document["artifacts"]
-    if not isinstance(runtime, Mapping) or not isinstance(artifacts, list):
+    if (
+        not isinstance(runtime, Mapping)
+        or not isinstance(execution, Mapping)
+        or not isinstance(interfaces, list)
+        or not isinstance(artifacts, list)
+    ):
         raise RecipeRuntimeSpecError("recipe runtime is invalid")
     arguments: list[dict[str, object]] = []
     for raw in runtime["arguments"]:
@@ -52,9 +59,8 @@ def compile_runtime_spec(
     if not role_artifacts:
         raise RecipeRuntimeSpecError("mapped role has no runtime artifacts")
     compiled_runtime = {
-        "interface": runtime["interface"],
-        "adapter": runtime["adapter"],
-        "adapter_version": runtime["adapter_version"],
+        "execution_harness": copy.deepcopy(execution["harness"]),
+        "distribution": copy.deepcopy(runtime["distribution"]),
         "image": (f"localhost/vonk/recipe-build-{recipe_build_id}@{image_digest}"),
         "architecture": "linux/arm64",
         "entrypoint": copy.deepcopy(runtime["entrypoint"]),
@@ -64,7 +70,7 @@ def compile_runtime_spec(
     return {
         "runtime": compiled_runtime,
         "artifacts": role_artifacts,
-        "endpoint": copy.deepcopy(runtime["endpoint"]),
+        "interfaces": copy.deepcopy(interfaces),
         "security": copy.deepcopy(runtime["security"]),
         "lifecycle": copy.deepcopy(runtime["lifecycle"]),
     }

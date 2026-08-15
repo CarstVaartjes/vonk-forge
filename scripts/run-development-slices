@@ -584,11 +584,11 @@ class Runner:
         if args.phase == "model-multinode":
             if args.failure_node not in targets or args.failure_node == targets[0]:
                 raise SliceError("multi-node failure rank is invalid")
-            self.profile = "pair"
+            self.topology_name = "pair"
         else:
             if args.failure_node is not None:
                 raise SliceError("failure rank is only valid for multi-node acceptance")
-            self.profile = "solo"
+            self.topology_name = "solo"
         self.targets = targets
         self.source_context = args.source_context or (
             self.recipe_path.parent / "context"
@@ -621,7 +621,7 @@ class Runner:
             "builder_node": args.builder_node,
             "target_nodes": targets,
             "recipe_slug": self.slug,
-            "profile": self.profile,
+            "topology_name": self.topology_name,
         }
         if args.failure_node is not None:
             expected_inputs["failure_node"] = args.failure_node
@@ -987,7 +987,6 @@ class Runner:
     def image_distributed(self) -> None:
         mapping_request = {
             "recipe_revision_id": self.outputs["recipe_revision_id"],
-            "profile_name": self.profile,
             "node_ids": self.targets,
             "parameters": {},
         }

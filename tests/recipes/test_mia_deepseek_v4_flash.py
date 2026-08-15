@@ -114,25 +114,23 @@ def test_recipe_tracks_the_latest_reviewed_official_mia_release() -> None:
 
 def test_recipe_is_an_exact_two_spark_tensor_parallel_deployment() -> None:
     recipe = _document("mia-deepseek-v4-flash.json")
-    profile = recipe["deployment_profiles"]
-    assert len(profile) == 1
-    profile = profile[0]
+    topology = recipe["topology"]
 
-    assert profile["name"] == "pair"
-    assert profile["node_count"] == 2
-    assert profile["strategy"] == "tensor_parallel"
-    assert profile["parallelism"] == {
+    assert topology["name"] == "pair"
+    assert topology["node_count"] == 2
+    assert topology["mode"] == "tensor_parallel"
+    assert topology["parallelism"] == {
         "tensor": 2,
         "pipeline": 1,
         "data": 1,
         "backend": "mp",
     }
-    assert profile["fabric"] == {
+    assert topology["fabric"] == {
         "connectivity": "connected",
         "minimum_bandwidth_mbps": 200000,
     }
-    assert sum(role["count"] for role in profile["roles"]) == 2
-    assert recipe["runtime"]["endpoint"]["port"] == 8888
+    assert sum(role["count"] for role in topology["roles"]) == 2
+    assert recipe["interfaces"][0]["port"] == 8888
     assert recipe["runtime"]["security"] == {
         "devices": ["nvidia.com/gpu=all"],
         "capabilities": [],
@@ -160,12 +158,15 @@ def test_memory_envelope_fits_a_128_gb_spark_with_host_reserve() -> None:
     global_agent_floor = 4_000_000_000
     container_limits = set()
     qualified_floors = set()
-    for role in recipe["deployment_profiles"][0]["roles"]:
+    for role in recipe["topology"]["roles"]:
         memory = role["resources"]["memory"]
-        container = max(
-            memory["startup_peak_bytes"],
-            memory["steady_state_bytes"] + memory["runtime_growth_bytes"],
-        ) + memory["system_reserve_bytes"]
+        container = (
+            max(
+                memory["startup_peak_bytes"],
+                memory["steady_state_bytes"] + memory["runtime_growth_bytes"],
+            )
+            + memory["system_reserve_bytes"]
+        )
         container_limits.add(container)
         qualified_floors.add(container + global_agent_floor)
 
@@ -177,7 +178,7 @@ def test_disk_floor_covers_cold_install_staging_rollback_and_margin() -> None:
     recipe = _document("mia-deepseek-v4-flash.json")
     topology = _document("mia-deepseek-v4-flash-multinode.json")
     required = set()
-    for role in recipe["deployment_profiles"][0]["roles"]:
+    for role in recipe["topology"]["roles"]:
         disk = role["resources"]["disk"]
         required.add(
             disk["image_bytes"]
@@ -191,7 +192,9 @@ def test_disk_floor_covers_cold_install_staging_rollback_and_margin() -> None:
     assert required == {topology["minimum_disk_available_bytes"]}
 
 
-def test_source_context_is_immutable_offline_and_contains_exact_upstream_hotfixes() -> None:
+def test_source_context_is_immutable_offline_and_contains_exact_upstream_hotfixes() -> (
+    None
+):
     recipe = _document("mia-deepseek-v4-flash.json")
     source = _document("mia-deepseek-v4-flash-source.json")
     dockerfile = (CONTEXT / "Dockerfile").read_text(encoding="utf-8")
@@ -280,7 +283,7 @@ def test_source_context_is_immutable_offline_and_contains_exact_upstream_hotfixe
     assert "--nnodes 2" in launcher
     assert "VONK_RANK" in launcher and "--headless" in launcher
     assert "worker-readiness-proxy.py" in launcher
-    assert 'if [[ ${VONK_RANK} == 1 ]]; then' in launcher
+    assert "if [[ ${VONK_RANK} == 1 ]]; then" in launcher
     assert 'wait -n "${vllm_pid}" "${proxy_pid}"' in launcher
     assert "NCCL_IB_GID_INDEX" in launcher
     assert "ip -o -4 address show" not in launcher

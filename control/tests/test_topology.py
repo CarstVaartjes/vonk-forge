@@ -6,9 +6,29 @@ from vonk_control.topology import Placement, TopologyError, validate_topology
 
 
 def multinode():
-    return json.loads(
-        (Path(__file__).parent / "fixtures/global/recipe-v1-multinode.json").read_text()
+    document = json.loads(
+        (Path(__file__).parent / "fixtures/global/recipe-v1-minimal.json").read_text()
     )
+    document["artifacts"][0]["roles"] = ["entrypoint", "worker"]
+    document["topology"] = {
+        "name": "triple-tp3",
+        "mode": "tensor_parallel",
+        "node_count": 3,
+        "roles": [
+            document["topology"]["roles"][0],
+            {
+                **document["topology"]["roles"][0],
+                "name": "worker",
+                "count": 2,
+                "endpoint_owner": False,
+            },
+        ],
+        "parallelism": {"tensor": 3, "pipeline": 1, "data": 1, "backend": "tcp"},
+        "fabric": {"connectivity": "full_mesh", "minimum_bandwidth_mbps": 10000},
+        "start_order": ["worker", "entrypoint"],
+        "stop_order": ["entrypoint", "worker"],
+    }
+    return document
 
 
 def placements():
@@ -29,7 +49,7 @@ def capabilities(values):
 def test_three_node_topology_has_deterministic_ranks() -> None:
     values = placements()
 
-    result = validate_topology(multinode(), "triple-tp3", values, capabilities(values))
+    result = validate_topology(multinode(), values, capabilities(values))
 
     assert [item.rank for item in result] == [0, 1, 2]
     assert result[0].role == "entrypoint"
@@ -57,7 +77,7 @@ def test_three_node_topology_has_deterministic_ranks() -> None:
 )
 def test_invalid_rank_node_and_role_shapes_are_blocked(values) -> None:
     with pytest.raises(TopologyError):
-        validate_topology(multinode(), "triple-tp3", values, capabilities(values))
+        validate_topology(multinode(), values, capabilities(values))
 
 
 def test_missing_runtime_or_fabric_capability_is_blocking() -> None:
@@ -65,7 +85,6 @@ def test_missing_runtime_or_fabric_capability_is_blocking() -> None:
     with pytest.raises(TopologyError) as caught:
         validate_topology(
             multinode(),
-            "triple-tp3",
             values,
             {
                 item.node_id: ("runtime.sglang.v1", "fabric.full_mesh.mbps.10000")
@@ -77,7 +96,6 @@ def test_missing_runtime_or_fabric_capability_is_blocking() -> None:
     with pytest.raises(TopologyError) as caught:
         validate_topology(
             multinode(),
-            "triple-tp3",
             values,
             {
                 item.node_id: ("runtime.vonk.v1", "fabric.connected.mbps.10000")

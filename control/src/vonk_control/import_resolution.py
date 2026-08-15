@@ -102,95 +102,103 @@ def resolve_import(
         raise ImportResolutionError(
             "import.security_required", "security overlay acknowledgement is required"
         )
-    profile_resources = overlays.get("profile_resources")
-    if not isinstance(profile_resources, Mapping):
+    catalog_references = overlays.get("catalog_references")
+    if not isinstance(catalog_references, Mapping):
         raise ImportResolutionError(
-            "import.profile_resources_required", "profile resource overlay is required"
+            "import.catalog_references_required",
+            "exact catalog reference overlay is required",
         )
-    profiles = document.get("deployment_profiles")
-    if not isinstance(profiles, list):
+    model_reference = catalog_references.get("model")
+    harness_reference = catalog_references.get("execution_harness")
+    distribution_reference = catalog_references.get("runtime_distribution")
+    patch_reference = catalog_references.get("patch_bundle")
+    if (
+        not isinstance(model_reference, Mapping)
+        or not isinstance(harness_reference, Mapping)
+        or not isinstance(distribution_reference, Mapping)
+        or (patch_reference is not None and not isinstance(patch_reference, Mapping))
+    ):
         raise ImportResolutionError(
-            "import.profiles_invalid", "deployment profiles are invalid"
+            "import.catalog_references_required",
+            "model, harness, distribution, and nullable patch references are required",
         )
-    supplied_fabric = overlays.get("profile_fabric")
-    for profile_value in profiles:
-        profile = _mapping(profile_value)
-        supplied_profile = profile_resources.get(str(profile["name"]))
-        if not isinstance(supplied_profile, Mapping):
+    document["model"] = copy.deepcopy(dict(model_reference))
+    execution = _mapping(document["execution"])
+    execution["harness"] = copy.deepcopy(dict(harness_reference))
+    execution["patch_bundle"] = (
+        None if patch_reference is None else copy.deepcopy(dict(patch_reference))
+    )
+    runtime = _mapping(document["runtime"])
+    runtime["distribution"] = copy.deepcopy(dict(distribution_reference))
+    topology_resources = overlays.get("topology_resources")
+    if not isinstance(topology_resources, Mapping):
+        raise ImportResolutionError(
+            "import.topology_resources_required",
+            "topology resource overlay is required",
+        )
+    topology = document.get("topology")
+    if not isinstance(topology, dict):
+        raise ImportResolutionError("import.topology_invalid", "topology is invalid")
+    roles = topology.get("roles")
+    if not isinstance(roles, list):
+        raise ImportResolutionError(
+            "import.topology_invalid", "topology roles are invalid"
+        )
+    for role_value in roles:
+        role = _mapping(role_value)
+        supplied_role = topology_resources.get(str(role["name"]))
+        if not isinstance(supplied_role, Mapping):
             raise ImportResolutionError(
-                "import.profile_resources_required",
-                f"resources for profile {profile['name']} are required",
+                "import.topology_resources_required",
+                f"resources for role {role['name']} are required",
             )
-        roles = profile.get("roles")
-        if not isinstance(roles, list):
+        disk = supplied_role.get("disk")
+        memory = supplied_role.get("memory")
+        if not isinstance(disk, Mapping) or not isinstance(memory, Mapping):
             raise ImportResolutionError(
-                "import.profiles_invalid", "deployment profile roles are invalid"
+                "import.topology_resources_invalid",
+                "role disk and memory resources are required",
             )
-        for role_value in roles:
-            role = _mapping(role_value)
-            supplied_role = supplied_profile.get(str(role["name"]))
-            if not isinstance(supplied_role, Mapping):
-                raise ImportResolutionError(
-                    "import.profile_resources_required",
-                    f"resources for role {role['name']} are required",
-                )
-            disk = supplied_role.get("disk")
-            memory = supplied_role.get("memory")
-            if not isinstance(disk, Mapping) or not isinstance(memory, Mapping):
-                raise ImportResolutionError(
-                    "import.profile_resources_invalid",
-                    "role disk and memory resources are required",
-                )
-            normalized_disk = {
-                key: _nonnegative_int(disk, key, "disk")
-                for key in (
-                    "image_bytes",
-                    "artifact_bytes",
-                    "staging_bytes",
-                    "cache_bytes",
-                    "rollback_bytes",
-                    "safety_margin_bytes",
-                )
-            }
-            if normalized_disk["artifact_bytes"] < int(artifact["installed_bytes"]):
-                raise ImportResolutionError(
-                    "import.profile_resources_invalid",
-                    "role artifact bytes are smaller than installed artifacts",
-                )
-            kind = memory.get("kind")
-            if kind not in {"unified", "host", "accelerator"}:
-                raise ImportResolutionError(
-                    "import.profile_resources_invalid", "role memory kind is invalid"
-                )
-            normalized_memory: dict[str, object] = {
-                "kind": kind,
-                "startup_peak_bytes": _positive_int(
-                    memory, "startup_peak_bytes", "memory"
-                ),
-                "steady_state_bytes": _positive_int(
-                    memory, "steady_state_bytes", "memory"
-                ),
-                "runtime_growth_bytes": _nonnegative_int(
-                    memory, "runtime_growth_bytes", "memory"
-                ),
-                "system_reserve_bytes": _nonnegative_int(
-                    memory, "system_reserve_bytes", "memory"
-                ),
-            }
-            role["resources"] = {"disk": normalized_disk, "memory": normalized_memory}
-        profile["measurement"] = "derived"
-        if int(profile["node_count"]) > 1:
-            fabric = (
-                supplied_fabric.get(str(profile["name"]))
-                if isinstance(supplied_fabric, Mapping)
-                else None
+        normalized_disk = {
+            key: _nonnegative_int(disk, key, "disk")
+            for key in (
+                "image_bytes",
+                "artifact_bytes",
+                "staging_bytes",
+                "cache_bytes",
+                "rollback_bytes",
+                "safety_margin_bytes",
             )
-            if not isinstance(fabric, Mapping):
-                raise ImportResolutionError(
-                    "import.topology_required",
-                    f"fabric for profile {profile['name']} is required",
-                )
-            profile["fabric"] = copy.deepcopy(dict(fabric))
+        }
+        if normalized_disk["artifact_bytes"] < int(artifact["installed_bytes"]):
+            raise ImportResolutionError(
+                "import.topology_resources_invalid",
+                "role artifact bytes are smaller than installed artifacts",
+            )
+        kind = memory.get("kind")
+        if kind not in {"unified", "host", "accelerator"}:
+            raise ImportResolutionError(
+                "import.topology_resources_invalid", "role memory kind is invalid"
+            )
+        normalized_memory: dict[str, object] = {
+            "kind": kind,
+            "startup_peak_bytes": _positive_int(memory, "startup_peak_bytes", "memory"),
+            "steady_state_bytes": _positive_int(memory, "steady_state_bytes", "memory"),
+            "runtime_growth_bytes": _nonnegative_int(
+                memory, "runtime_growth_bytes", "memory"
+            ),
+            "system_reserve_bytes": _nonnegative_int(
+                memory, "system_reserve_bytes", "memory"
+            ),
+        }
+        role["resources"] = {"disk": normalized_disk, "memory": normalized_memory}
+    if int(topology["node_count"]) > 1:
+        fabric = overlays.get("topology_fabric")
+        if not isinstance(fabric, Mapping):
+            raise ImportResolutionError(
+                "import.topology_required", "topology fabric is required"
+            )
+        topology["fabric"] = copy.deepcopy(dict(fabric))
     resolved_items: list[ImportReportItem] = []
     for item in imported.report:
         handled = (

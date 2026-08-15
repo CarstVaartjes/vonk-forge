@@ -23,6 +23,7 @@ from .models import (
     RecipeSourceBundle,
     ResourceReservation,
 )
+from .recipe_contract import RecipeContractError, recipe_topology
 from .source_bundles import SourceBundleError, SourceBundleStore
 from .source_policy import (
     SourcePolicyError,
@@ -123,7 +124,9 @@ class RecipeBuildService:
                 )
             node = session.get(AgentNode, builder_node_id)
             if node is None:
-                raise RecipeBuildError("build.node_unknown", "builder GPU node is unknown")
+                raise RecipeBuildError(
+                    "build.node_unknown", "builder GPU node is unknown"
+                )
             _validate_builder(node)
             assert node.agent_sha256 is not None
             builder_agent_sha256 = node.agent_sha256
@@ -180,7 +183,7 @@ class RecipeBuildService:
         # The rootless builder retains its source/staging data while exporting
         # the OCI layout.  Reserve the concurrent peak, not just the inputs.
         # The OCI export is the build output. Bind it to the largest declared
-        # per-node image envelope across the selected recipe's profiles;
+        # per-node image envelope across the selected recipe topology;
         # CUDA/vLLM images routinely exceed 64 MiB.
         output_bytes = _declared_image_bytes(document)
         required_disk = temporary_bytes + len(bundle.archive) + output_bytes
@@ -530,27 +533,25 @@ def _ensure_supported_build_network(build: object) -> None:
 
 
 def _declared_image_bytes(document: dict[str, object]) -> int:
-    profiles = document.get("deployment_profiles")
     values: list[int] = []
-    if isinstance(profiles, list):
-        for profile in profiles:
-            if not isinstance(profile, dict):
+    try:
+        topology = recipe_topology(document)
+    except RecipeContractError:
+        topology = {}
+    roles = topology.get("roles")
+    if isinstance(roles, list):
+        for role in roles:
+            if not isinstance(role, dict):
                 continue
-            roles = profile.get("roles")
-            if not isinstance(roles, list):
-                continue
-            for role in roles:
-                if not isinstance(role, dict):
-                    continue
-                resources = role.get("resources")
-                disk = resources.get("disk") if isinstance(resources, dict) else None
-                image_bytes = disk.get("image_bytes") if isinstance(disk, dict) else None
-                if isinstance(image_bytes, int) and not isinstance(image_bytes, bool):
-                    values.append(image_bytes)
+            resources = role.get("resources")
+            disk = resources.get("disk") if isinstance(resources, dict) else None
+            image_bytes = disk.get("image_bytes") if isinstance(disk, dict) else None
+            if isinstance(image_bytes, int) and not isinstance(image_bytes, bool):
+                values.append(image_bytes)
     if not values or min(values) < 1 or max(values) > 16 * 1024**4:
         raise RecipeBuildError(
             "build.image_size_invalid",
-            "recipe profiles must declare a positive per-node image size",
+            "recipe topology must declare a positive per-node image size",
         )
     return max(values)
 

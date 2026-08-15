@@ -466,8 +466,7 @@ def test_builder_uploads_digest_verified_docker_archive_without_a_registry(
 
     rejected = client.put(
         f"/agent/v1/recipe-builds/{build_id}/image",
-        headers=headers
-        | {"content-type": "application/vnd.oci.image.layout.v1.tar"},
+        headers=headers | {"content-type": "application/vnd.oci.image.layout.v1.tar"},
         content=payload,
     )
     assert rejected.status_code == 415
@@ -1612,7 +1611,7 @@ def test_agent_reads_only_its_installation_bound_built_recipe_spec(
             ClusterMapping(
                 id=mapping_id,
                 recipe_revision_id=revision_id,
-                profile_name=document["deployment_profiles"][0]["name"],
+                topology_name=document["topology"]["name"],
                 generation=1,
                 node_count=1,
                 state="ready",
@@ -1689,11 +1688,19 @@ def test_agent_reads_only_its_installation_bound_built_recipe_spec(
     assert response.content == canonical_message(response.json())
     assert set(response.json()) == {
         "artifacts",
-        "endpoint",
+        "interfaces",
         "runtime",
         "security",
         "lifecycle",
     }
+    assert (
+        response.json()["runtime"]["execution_harness"]
+        == document["execution"]["harness"]
+    )
+    assert (
+        response.json()["runtime"]["distribution"]
+        == document["runtime"]["distribution"]
+    )
     assert response.json()["runtime"]["image"].endswith("@" + image_digest)
     assert (
         client.get(

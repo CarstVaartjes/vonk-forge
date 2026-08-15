@@ -214,7 +214,7 @@ class CatalogEntityRevisionResponse(StrictModel):
 
 class CatalogEntityListResponse(StrictModel):
     entities: list[CatalogEntityRevisionResponse] = Field(max_length=100)
-    next_cursor: str | None = Field(default=None, max_length=128)
+    next_cursor: str | None = Field(default=None, max_length=512)
 
 
 def _catalog_problem(
@@ -302,12 +302,12 @@ def _entity_revision(value: CatalogEntityRevision) -> dict[str, object]:
     }
 
 
-def _bounded(document: Mapping[str, object]) -> None:
+def _bounded(
+    document: Mapping[str, object], *, subject: str = "recipe document"
+) -> None:
     encoded = json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
     if len(encoded) > _MAX_DOCUMENT_BYTES:
-        raise CatalogError(
-            "catalog.document_too_large", "recipe document exceeds 256 KiB"
-        )
+        raise CatalogError("catalog.document_too_large", f"{subject} exceeds 256 KiB")
 
 
 def install_catalog_routes(
@@ -368,7 +368,7 @@ def install_catalog_routes(
         kind: str | None = Query(default=None, max_length=32),
         publisher: str | None = Query(default=None, pattern=_SLUG),
         limit: int = Query(default=20, ge=1, le=100),
-        cursor: str | None = Query(default=None, max_length=128),
+        cursor: str | None = Query(default=None, max_length=512),
         _actor: Actor = authenticated,
     ):
         try:
@@ -410,7 +410,7 @@ def install_catalog_routes(
         if denial := entity_administrator(request, actor):
             return denial
         try:
-            _bounded(body.document)
+            _bounded(body.document, subject="catalog entity document")
             result = catalog().entities.create_draft(body.document, actor=actor.subject)
         except CatalogError as error:
             return _problem(request, error)
@@ -462,7 +462,7 @@ def install_catalog_routes(
         if denial := entity_administrator(request, actor):
             return denial
         try:
-            _bounded(body.document)
+            _bounded(body.document, subject="catalog entity document")
             result = catalog().entities.revise(
                 entity_id,
                 body.document,

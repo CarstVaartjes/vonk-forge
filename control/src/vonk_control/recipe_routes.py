@@ -661,15 +661,24 @@ def _primary_model_alias(session: Session, run: RecipeRun) -> str:
         if installation is not None
         else None
     )
-    runtime = revision.document.get("runtime") if revision is not None else None
-    endpoint = runtime.get("endpoint") if isinstance(runtime, Mapping) else None
+    interfaces = revision.document.get("interfaces") if revision is not None else None
+    interface = (
+        next(
+            (
+                value
+                for value in interfaces
+                if isinstance(value, Mapping) and value.get("adapter") == "openai"
+            ),
+            None,
+        )
+        if isinstance(interfaces, list)
+        else None
+    )
     model_aliases = (
-        endpoint.get("model_aliases") if isinstance(endpoint, Mapping) else None
+        interface.get("model_aliases") if isinstance(interface, Mapping) else None
     )
     primary = (
-        model_aliases[0]
-        if isinstance(model_aliases, list) and model_aliases
-        else None
+        model_aliases[0] if isinstance(model_aliases, list) and model_aliases else None
     )
     if not isinstance(primary, str) or _UPSTREAM_MODEL.fullmatch(primary) is None:
         raise RecipeRouteError(

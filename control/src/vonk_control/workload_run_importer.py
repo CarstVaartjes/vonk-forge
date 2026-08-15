@@ -171,9 +171,9 @@ def _classify(
     elif top in {"min_nodes", "max_nodes"}:
         disposition, destination, reason, detail, blocking = (
             ImportDisposition.TRANSFORMED,
-            f"/deployment_profiles/@from-{top}",
-            "profiles.node_bound",
-            "The declared bound is converted into exact deployment profiles.",
+            f"/topology/@from-{top}",
+            "topology.node_bound",
+            "The declared bound is converted into one exact topology.",
             False,
         )
     elif top == "metadata":
@@ -267,7 +267,7 @@ def _draft(
     slug = slug[:63].rstrip("-")
     minimum = source.min_nodes or 1
     maximum = source.max_nodes or minimum
-    counts = range(minimum, min(maximum, minimum + 63) + 1)
+    node_count = min(maximum, minimum + 63)
     family = projection.family if projection is not None else source.runtime
     adapter = re.sub(r"[^a-z0-9_]+", "_", family.lower()).strip("_") or "custom"
     entrypoints = {
@@ -281,10 +281,14 @@ def _draft(
         "metadata": {
             "title": source.metadata.title or source.model.rsplit("/", 1)[-1],
             "description": source.metadata.description
-            or f"Imported WorkloadRun profile for {source.model}.",
+            or f"Imported WorkloadRun recipe for {source.model}.",
             "tags": list(source.metadata.tags),
         },
-        "workload": {"family": slug, "capabilities": ["openai.chat"]},
+        "model": _catalog_reference("model-version", f"{slug}-version"),
+        "execution": {
+            "harness": _catalog_reference("execution-harness", f"{adapter}-openai"),
+            "patch_bundle": None,
+        },
         "build": {
             "context": {
                 "sha256": bundle.sha256,
@@ -312,13 +316,13 @@ def _draft(
                 "download_bytes": 1,
                 "installed_bytes": 1,
                 "mount": {"target": "/models", "read_only": True},
-                "roles": ["entrypoint", *(["worker"] if maximum > 1 else [])],
+                "roles": ["entrypoint", *(["worker"] if node_count > 1 else [])],
             }
         ],
         "runtime": {
-            "interface": "vonk.runtime.v1",
-            "adapter": adapter,
-            "adapter_version": 1,
+            "distribution": _catalog_reference(
+                "runtime-distribution", f"{adapter}-linux-arm64"
+            ),
             "entrypoint": entrypoints.get(adapter, [adapter]),
             "arguments": projection.recipe_arguments()
             if projection is not None
@@ -329,16 +333,6 @@ def _draft(
                     (projection.environment if projection is not None else {}).items()
                 )
             ],
-            "endpoint": {
-                "protocol": "openai",
-                "port": int(projection.endpoint["port"])
-                if projection is not None
-                else 8000,
-                "model_aliases": [slug],
-                "health_path": str(projection.endpoint["health_path"])
-                if projection is not None
-                else "/v1/models",
-            },
             "security": {
                 "devices": ["nvidia.com/gpu=all"],
                 "capabilities": [],
@@ -352,30 +346,65 @@ def _draft(
             },
             "lifecycle": {"pre_start": [], "post_stop": [], "stop_timeout_seconds": 30},
         },
-        "deployment_profiles": [_profile(count) for count in counts],
+        "topology": _topology(node_count),
+        "interfaces": [
+            {
+                "adapter": "openai",
+                "port": int(projection.endpoint["port"])
+                if projection is not None
+                else 8000,
+                "model_aliases": [slug],
+                "health_path": str(projection.endpoint["health_path"])
+                if projection is not None
+                else "/v1/models",
+            }
+        ],
         "validation": {
-            "checks": ["container.started", "endpoint.healthy", "inference.completed"],
+            "validators": [
+                {
+                    "interface": "openai",
+                    "checks": [
+                        "container.started",
+                        "endpoint.healthy",
+                        "inference.completed",
+                    ],
+                }
+            ],
             "benchmarks": [],
         },
         "provenance": {
             "source_kind": "workload_run",
             "source_reference": None,
-            "attribution": [
-                f"Imported from WorkloadRun profile sha256:{source.source_sha256}"
-            ],
+            "attribution": [f"Imported from WorkloadRun sha256:{source.source_sha256}"],
         },
     }
 
 
-def _profile(node_count: int) -> dict[str, object]:
+def _catalog_reference(kind: str, slug: str) -> dict[str, object]:
+    normalized_slug = re.sub(r"[^a-z0-9-]+", "-", slug.lower()).strip("-")
+    normalized_slug = normalized_slug[:63].rstrip("-")
+    if len(normalized_slug) < 2:
+        normalized_slug = f"id-{normalized_slug or 'unknown'}"
+    digest = hashlib.sha256(
+        f"workload-run:{kind}:{normalized_slug}".encode()
+    ).hexdigest()
+    return {
+        "kind": kind,
+        "publisher": "workload-run",
+        "slug": normalized_slug,
+        "content_sha256": digest,
+    }
+
+
+def _topology(node_count: int) -> dict[str, object]:
     roles = [_role("entrypoint", 1, True)]
     if node_count > 1:
         roles.append(_role("worker", node_count - 1, False))
+    role_names = [str(role["name"]) for role in roles]
     return {
         "name": "solo" if node_count == 1 else f"nodes_{node_count}",
-        "description": f"Exact {node_count}-node profile imported from WorkloadRun.",
+        "mode": "single" if node_count == 1 else "tensor_parallel",
         "node_count": node_count,
-        "strategy": "single" if node_count == 1 else "tensor_parallel",
         "parallelism": {
             "tensor": node_count,
             "pipeline": 1,
@@ -387,8 +416,8 @@ def _profile(node_count: int) -> dict[str, object]:
             "connectivity": "none" if node_count == 1 else "connected",
             "minimum_bandwidth_mbps": 0 if node_count == 1 else 1,
         },
-        "parameter_overrides": {},
-        "measurement": "declared",
+        "start_order": list(reversed(role_names)),
+        "stop_order": role_names,
     }
 
 

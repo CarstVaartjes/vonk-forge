@@ -2222,6 +2222,12 @@ def production_app() -> FastAPI:
                 pass
 
     global_catalog = GlobalCatalogClient(settings.global_catalog_url)
+    catalog_service = CatalogService(
+        sessions,
+        clock=clock,
+        cursors=cursor_codec,
+        source_bundles=SourceBundleStore(settings.state_path / "source-bundles"),
+    )
     app = create_app(
         jobs=job_service,
         tokens=token_codec,
@@ -2254,16 +2260,15 @@ def production_app() -> FastAPI:
         ),
         updates=update_admin,
         packages=PackageApiServices.from_object(package_services),
-        catalog=CatalogService(
-            sessions,
-            clock=clock,
-            source_bundles=SourceBundleStore(settings.state_path / "source-bundles"),
-        ),
+        catalog=catalog_service,
         global_catalog=global_catalog,
         workload_run=WorkloadRunWorkflow(
             sessions,
             clock=clock,
             bundles=SourceBundleStore(settings.state_path / "source-bundles"),
+            recipe_resolver=lambda document, actor: (
+                catalog_service.resolve_recipe_revision(document, actor=actor)
+            ),
         ),
         browser_auth=BrowserAuthService(
             sessions,

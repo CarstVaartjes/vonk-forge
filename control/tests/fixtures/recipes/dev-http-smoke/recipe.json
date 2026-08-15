@@ -13,11 +13,20 @@
       "smoke"
     ]
   },
-  "workload": {
-    "family": "dev-http-smoke",
-    "capabilities": [
-      "openai.chat"
-    ]
+  "model": {
+    "kind": "model-version",
+    "publisher": "vonk",
+    "slug": "dev-http-smoke-version",
+    "content_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "execution": {
+    "harness": {
+      "kind": "execution-harness",
+      "publisher": "vonk",
+      "slug": "dev-http-smoke",
+      "content_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    "patch_bundle": null
   },
   "build": {
     "context": {
@@ -58,23 +67,18 @@
     }
   ],
   "runtime": {
-    "interface": "vonk.runtime.v1",
-    "adapter": "dev_http_smoke",
-    "adapter_version": 1,
+    "distribution": {
+      "kind": "runtime-distribution",
+      "publisher": "vonk",
+      "slug": "python-linux-arm64",
+      "content_sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+    },
     "entrypoint": [
       "python",
       "/app/server.py"
     ],
     "arguments": [],
     "environment": [],
-    "endpoint": {
-      "protocol": "openai",
-      "port": 8000,
-      "model_aliases": [
-        "dev-http-smoke"
-      ],
-      "health_path": "/health"
-    },
     "security": {
       "devices": [],
       "capabilities": [],
@@ -100,12 +104,10 @@
       "stop_timeout_seconds": 10
     }
   },
-  "deployment_profiles": [
-    {
+  "topology": {
       "name": "solo",
-      "description": "Single-node deterministic development smoke profile.",
+      "mode": "single",
       "node_count": 1,
-      "strategy": "single",
       "parallelism": {
         "tensor": 1,
         "pipeline": 1,
@@ -143,15 +145,29 @@
         "connectivity": "none",
         "minimum_bandwidth_mbps": 0
       },
-      "parameter_overrides": {},
-      "measurement": "measured"
+      "start_order": ["entrypoint"],
+      "stop_order": ["entrypoint"]
+  },
+  "interfaces": [
+    {
+      "adapter": "openai",
+      "port": 8000,
+      "model_aliases": [
+        "dev-http-smoke"
+      ],
+      "health_path": "/health"
     }
   ],
   "validation": {
-    "checks": [
-      "container.started",
-      "endpoint.healthy",
-      "inference.completed"
+    "validators": [
+      {
+        "interface": "openai",
+        "checks": [
+          "container.started",
+          "endpoint.healthy",
+          "inference.completed"
+        ]
+      }
     ],
     "benchmarks": []
   },

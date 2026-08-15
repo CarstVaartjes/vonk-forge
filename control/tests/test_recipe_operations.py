@@ -16,8 +16,10 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
+from test_catalog_service import _seed_recipe_dependencies
 from vonk_agent_protocol import canonical_message
 from vonk_control.artifact_sizes import ArtifactSize, StaticArtifactSizeResolver
+from vonk_control.auth import TokenCodec
 from vonk_control.catalog_service import CatalogService, RecipeDraftInput
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.install_admission import InstallAdmissionService
@@ -98,7 +100,7 @@ def start_evidence(payload: dict[str, object]) -> dict[str, object]:
         "recipe_content_sha256": payload["recipe_content_sha256"],
         "image_digest": str(payload["image_digest"]).removeprefix("sha256:"),
         "artifact_set_digest": "b" * 64,
-        "model_identity": "Qwen/Qwen3-30B-A3B-Instruct-2507@0123456789abcdef0123456789abcdef01234567",
+        "model_identity": "vonk-forge/synthetic-tiny@0123456789abcdef0123456789abcdef01234567",
         "rank": payload["rank"],
         "world_size": payload["world_size"],
         "endpoint": f"http://{payload['endpoint_address']}:{payload['port']}",
@@ -174,7 +176,8 @@ def setup_services(tmp_path: Path, *, nodes: int = 1, engine=None):
     document = json.loads(
         (Path(__file__).parent / "fixtures/global/recipe-v1-minimal.json").read_text()
     )
-    role = document["deployment_profiles"][0]["roles"][0]
+    document["identity"]["slug"] = "qwen3-vllm"
+    role = document["topology"]["roles"][0]
     role["resources"] = {
         "disk": {
             "image_bytes": 30,
@@ -195,29 +198,31 @@ def setup_services(tmp_path: Path, *, nodes: int = 1, engine=None):
     if nodes > 1:
         worker = json.loads(json.dumps(role))
         worker.update({"name": "worker", "count": nodes - 1, "endpoint_owner": False})
-        document["deployment_profiles"] = [
-            {
-                **document["deployment_profiles"][0],
-                "name": f"nodes_{nodes}",
-                "node_count": nodes,
-                "strategy": "tensor_parallel",
-                "parallelism": {
-                    "tensor": nodes,
-                    "pipeline": 1,
-                    "data": 1,
-                    "backend": "tcp",
-                },
-                "roles": [role, worker],
-                "fabric": {"connectivity": "connected", "minimum_bandwidth_mbps": 1},
-            }
-        ]
+        document["topology"] = {
+            **document["topology"],
+            "name": f"nodes_{nodes}",
+            "mode": "tensor_parallel",
+            "node_count": nodes,
+            "parallelism": {
+                "tensor": nodes,
+                "pipeline": 1,
+                "data": 1,
+                "backend": "tcp",
+            },
+            "roles": [role, worker],
+            "fabric": {"connectivity": "connected", "minimum_bandwidth_mbps": 1},
+            "start_order": ["worker", "entrypoint"],
+            "stop_order": ["entrypoint", "worker"],
+        }
         document["artifacts"][0]["roles"] = ["entrypoint", "worker"]
-    catalog = CatalogService(sessions, clock=lambda: NOW)
+    catalog = CatalogService(
+        sessions, clock=lambda: NOW, cursors=TokenCodec(b"c" * 32).cursor_codec()
+    )
+    _seed_recipe_dependencies(catalog, document)
     draft = catalog.create_recipe("admin", RecipeDraftInput("qwen3-vllm", document))
     revision = catalog.resolve(draft.recipe_id, 1, "admin")
-    profile_name = "solo" if nodes == 1 else f"nodes_{nodes}"
     mappings = ClusterMappingService(sessions)
-    mapping_plan = mappings.plan(revision.id, profile_name, node_ids, parameters={})
+    mapping_plan = mappings.plan(revision.id, node_ids, parameters={})
     mapping_id = mappings.materialize(mapping_plan, actor="admin", now=NOW)
     with sessions.begin() as session:
         build = RecipeBuild(
@@ -254,8 +259,7 @@ def setup_services(tmp_path: Path, *, nodes: int = 1, engine=None):
     sizes = StaticArtifactSizeResolver(
         (
             ArtifactSize(
-                "Qwen/Qwen3-30B-A3B-Instruct-2507@"
-                "0123456789abcdef0123456789abcdef01234567",
+                "vonk-forge/synthetic-tiny@0123456789abcdef0123456789abcdef01234567",
                 "2" * 64,
                 70,
             ),

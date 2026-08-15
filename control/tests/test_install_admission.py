@@ -4,7 +4,9 @@ from pathlib import Path
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+from test_catalog_service import _seed_recipe_dependencies
 from vonk_control.artifact_sizes import ArtifactSize, StaticArtifactSizeResolver
+from vonk_control.auth import TokenCodec
 from vonk_control.catalog_service import CatalogService, RecipeDraftInput
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.install_admission import InstallAdmissionService
@@ -21,9 +23,7 @@ from vonk_control.models import (
     ResourceReservation,
 )
 
-MODEL_SOURCE = (
-    "Qwen/Qwen3-30B-A3B-Instruct-2507@0123456789abcdef0123456789abcdef01234567"
-)
+MODEL_SOURCE = "vonk-forge/synthetic-tiny@0123456789abcdef0123456789abcdef01234567"
 
 
 def setup(tmp_path, *, free=200, read_only=False, observed_age=0):
@@ -60,7 +60,8 @@ def setup(tmp_path, *, free=200, read_only=False, observed_age=0):
     document = json.loads(
         (Path(__file__).parent / "fixtures/global/recipe-v1-minimal.json").read_text()
     )
-    disk = document["deployment_profiles"][0]["roles"][0]["resources"]["disk"]
+    document["identity"]["slug"] = "qwen3-vllm"
+    disk = document["topology"]["roles"][0]["resources"]["disk"]
     disk.update(
         {
             "image_bytes": 30,
@@ -71,11 +72,14 @@ def setup(tmp_path, *, free=200, read_only=False, observed_age=0):
             "safety_margin_bytes": 10,
         }
     )
-    catalog = CatalogService(sessions, clock=lambda: now)
+    catalog = CatalogService(
+        sessions, clock=lambda: now, cursors=TokenCodec(b"c" * 32).cursor_codec()
+    )
+    _seed_recipe_dependencies(catalog, document)
     draft = catalog.create_recipe("admin", RecipeDraftInput("qwen3-vllm", document))
     resolved = catalog.resolve(draft.recipe_id, 1, "admin")
     mappings = ClusterMappingService(sessions)
-    mapping_plan = mappings.plan(resolved.id, "solo", (node_id,), parameters={})
+    mapping_plan = mappings.plan(resolved.id, (node_id,), parameters={})
     mapping_id = mappings.materialize(mapping_plan, actor="admin", now=now)
     with sessions.begin() as session:
         build = RecipeBuild(

@@ -53,7 +53,9 @@ ARTIFACTS = [
 ]
 
 
-def _inputs(tmp_path: Path) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
+def _inputs(
+    tmp_path: Path,
+) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
     source = {
         "schema_version": 1,
         "repository": "https://github.com/Entrpi/ds4",
@@ -88,7 +90,9 @@ def _inputs(tmp_path: Path) -> tuple[dict[str, object], dict[str, object], dict[
     return source, artifacts, topology
 
 
-def _node(node_id: str, hostname: str, management: str, fabric: str) -> dict[str, object]:
+def _node(
+    node_id: str, hostname: str, management: str, fabric: str
+) -> dict[str, object]:
     return {
         "node_id": node_id,
         "hostname": hostname,
@@ -150,18 +154,16 @@ def test_checked_recipe_memory_envelope_matches_healthy_spark_qualification() ->
     )
     global_memory_floor = 4_000_000_000
     required = set()
-    for profile in recipe["deployment_profiles"]:
-        for role in profile["roles"]:
-            memory = role["resources"]["memory"]
-            required.add(
-                max(
-                    memory["startup_peak_bytes"],
-                    memory["steady_state_bytes"]
-                    + memory["runtime_growth_bytes"],
-                )
-                + memory["system_reserve_bytes"]
-                + global_memory_floor
+    for role in recipe["topology"]["roles"]:
+        memory = role["resources"]["memory"]
+        required.add(
+            max(
+                memory["startup_peak_bytes"],
+                memory["steady_state_bytes"] + memory["runtime_growth_bytes"],
             )
+            + memory["system_reserve_bytes"]
+            + global_memory_floor
+        )
 
     assert required == {topology["minimum_memory_available_bytes"]}
 
@@ -304,9 +306,10 @@ def test_qualifier_emits_canonical_identity_bound_output(tmp_path: Path) -> None
     output = tmp_path / "qualification.json"
     raw = output.read_bytes()
     document = json.loads(raw)
-    assert raw == (
-        json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n"
-    ).encode()
+    assert (
+        raw
+        == (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    )
     assert document["status"] == "qualified"
     assert document["runtime_image"] == IMAGE
     assert document["single_node"] == NODE_1
@@ -318,7 +321,10 @@ def test_qualifier_emits_canonical_identity_bound_output(tmp_path: Path) -> None
 @pytest.mark.parametrize(
     ("mutation", "reason"),
     [
-        (lambda value: value["nodes"][0].update(architecture="x86_64"), "node.architecture"),
+        (
+            lambda value: value["nodes"][0].update(architecture="x86_64"),
+            "node.architecture",
+        ),
         (
             lambda value: value["runtime_image"].update(platforms=["linux/amd64"]),
             "image.arm64_manifest",
@@ -340,11 +346,15 @@ def test_qualifier_emits_canonical_identity_bound_output(tmp_path: Path) -> None
             "artifact.identity",
         ),
         (
-            lambda value: value["nodes"][0].update(memory_available_bytes=119_999_999_999),
+            lambda value: value["nodes"][0].update(
+                memory_available_bytes=119_999_999_999
+            ),
             "node.memory",
         ),
         (
-            lambda value: value["nodes"][0].update(disk_available_bytes=119_999_999_999),
+            lambda value: value["nodes"][0].update(
+                disk_available_bytes=119_999_999_999
+            ),
             "node.disk",
         ),
         (
@@ -352,11 +362,15 @@ def test_qualifier_emits_canonical_identity_bound_output(tmp_path: Path) -> None
             "node.fabric",
         ),
         (
-            lambda value: value["nodes"][0].update(fabric=[{
-                "address": "192.168.1.99/24",
-                "bandwidth_mbps": 200_000,
-                "state": "active",
-            }]),
+            lambda value: value["nodes"][0].update(
+                fabric=[
+                    {
+                        "address": "192.168.1.99/24",
+                        "bandwidth_mbps": 200_000,
+                        "state": "active",
+                    }
+                ]
+            ),
             "node.fabric_overlap",
         ),
         (
@@ -418,9 +432,7 @@ def test_qualifier_rejects_mutable_source_or_image_refs(
     source, artifacts, topology = _inputs(tmp_path)
     source[field] = value
 
-    completed = _run(
-        tmp_path, source=source, artifacts=artifacts, topology=topology
-    )
+    completed = _run(tmp_path, source=source, artifacts=artifacts, topology=topology)
 
     assert completed.returncode == 2
     assert completed.stderr.strip() == f"qualification refused: {reason}"
@@ -430,9 +442,7 @@ def test_qualifier_rejects_mutable_model_revision(tmp_path: Path) -> None:
     source, artifacts, topology = _inputs(tmp_path)
     artifacts["artifacts"][0]["revision"] = "main"
 
-    completed = _run(
-        tmp_path, source=source, artifacts=artifacts, topology=topology
-    )
+    completed = _run(tmp_path, source=source, artifacts=artifacts, topology=topology)
 
     assert completed.returncode == 2
     assert completed.stderr.strip() == "qualification refused: artifact.revision"
@@ -689,20 +699,22 @@ def test_model_recipe_source_bundle_ships_the_fabric_gate() -> None:
     bundle = generate_source_bundle(files)
 
     assert "fabric-rendezvous /opt/vonk/" in dockerfile
-    assert (
-        "busybox=${VONK_BUSYBOX:-/opt/vonk/busybox}"
-        in FABRIC_RENDEZVOUS.read_text(encoding="utf-8")
+    assert "busybox=${VONK_BUSYBOX:-/opt/vonk/busybox}" in FABRIC_RENDEZVOUS.read_text(
+        encoding="utf-8"
     )
     assert recipe["build"]["context"] == {
         "sha256": bundle.sha256,
         "expected_bytes": len(bundle.archive),
         "media_type": "application/vnd.vonk-forge.source-bundle.v1+tar",
     }
-    assert recipe["validation"]["checks"] == [
-        "container.started",
-        "fabric.rendezvous.completed",
-        "endpoint.healthy",
-        "inference.completed",
-        "route.withdrawn_on_rank_failure",
-        "route.republished_after_recovery",
-    ]
+    assert recipe["validation"]["validators"][0] == {
+        "interface": "openai",
+        "checks": [
+            "container.started",
+            "fabric.rendezvous.completed",
+            "endpoint.healthy",
+            "inference.completed",
+            "route.withdrawn_on_rank_failure",
+            "route.republished_after_recovery",
+        ],
+    }

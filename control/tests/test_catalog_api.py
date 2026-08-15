@@ -101,13 +101,14 @@ def api(tmp_path: Path, recipe_document):
     )
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
+    codec = TokenCodec(b"c" * 32)
     service = CatalogService(
         sessions,
         clock=lambda: datetime(2026, 8, 7, 12, 0, tzinfo=UTC),
+        cursors=codec.cursor_codec(),
         source_bundles=SourceBundleStore(tmp_path / "source-bundles"),
     )
     _seed_recipe_dependencies(service, recipe_document)
-    codec = TokenCodec(b"c" * 32)
     audits = MemoryAuditStore()
     app = _catalog_app(codec, audits, service)
 
@@ -126,9 +127,11 @@ def bridge_api(tmp_path: Path, recipe_document):
     )
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
+    codec = TokenCodec(b"b" * 32)
     service = CatalogService(
         sessions,
         clock=lambda: datetime(2026, 8, 7, 12, 0, tzinfo=UTC),
+        cursors=codec.cursor_codec(),
         source_bundles=SourceBundleStore(tmp_path / "source-bundles"),
     )
     bundle = generate_source_bundle({"Dockerfile": b"FROM scratch\nUSER 65532:65532\n"})
@@ -157,7 +160,6 @@ def bridge_api(tmp_path: Path, recipe_document):
             assert sha256 == bundle.sha256
             return bundle.archive
 
-    codec = TokenCodec(b"b" * 32)
     audits = MemoryAuditStore()
     app = _catalog_app(codec, audits, service, Global())
 
@@ -517,6 +519,22 @@ def test_catalog_entity_revision_preserves_identity_and_rejects_secrets(api) -> 
         "request_id": "00000000-0000-4000-8000-000000000001",
     }
     assert "never-reflect-me" not in rejected.text
+
+
+def test_oversized_entity_uses_entity_specific_problem_wording(api) -> None:
+    client, headers, _audits = api
+    document = _api_model_group()
+    document["metadata"]["description"] = "x" * (256 * 1024)
+
+    rejected = client.post(
+        "/api/v1/catalog/entities",
+        headers=headers("administrator"),
+        json={"document": document},
+    )
+
+    assert rejected.status_code == 422
+    assert rejected.json()["code"] == "catalog.document_too_large"
+    assert rejected.json()["detail"] == "catalog entity document exceeds 256 KiB"
 
 
 def test_administrator_uploads_a_digest_verified_source_bundle(api) -> None:

@@ -135,16 +135,25 @@ class RunAdmissionService:
             topology_reason = AdmissionReason(error.code, str(error))
         topology = recipe_topology(revision.document)
         topology_roles = topology.get("roles")
-        runtime = revision.document.get("runtime")
-        if not isinstance(topology_roles, list) or not isinstance(runtime, dict):
+        interfaces = revision.document.get("interfaces")
+        if not isinstance(topology_roles, list) or not isinstance(interfaces, list):
             raise TypeError("recipe runtime topology is invalid")
         role_by_name = {
             str(role["name"]): role for role in topology_roles if isinstance(role, dict)
         }
-        endpoint = runtime.get("endpoint")
-        if not isinstance(endpoint, dict):
-            raise TypeError("recipe endpoint is invalid")
-        port = int(endpoint["port"])
+        interface = next(
+            (
+                value
+                for value in interfaces
+                if isinstance(value, dict) and value.get("adapter") == "openai"
+            ),
+            None,
+        )
+        if not isinstance(interface, dict) or not isinstance(
+            interface.get("port"), int
+        ):
+            raise TypeError("recipe OpenAI interface is invalid")
+        port = int(interface["port"])
         multi_node = len(ordered) > 1
         endpoint_owner = next(
             (item for item in mapping_nodes if item.endpoint_owner), None
@@ -185,7 +194,7 @@ class RunAdmissionService:
             resources = role.get("resources") if isinstance(role, dict) else None
             memory = resources.get("memory") if isinstance(resources, dict) else None
             if not isinstance(memory, dict):
-                raise TypeError("profile role memory is invalid")
+                raise TypeError("topology role memory is invalid")
             required = max(
                 int(memory["startup_peak_bytes"]),
                 int(memory["steady_state_bytes"]) + int(memory["runtime_growth_bytes"]),

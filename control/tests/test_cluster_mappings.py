@@ -6,6 +6,8 @@ from pathlib import Path
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+from test_catalog_service import _seed_recipe_dependencies
+from vonk_control.auth import TokenCodec
 from vonk_control.catalog_service import CatalogService, RecipeDraftInput
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.models import AgentNode, Base, ClusterMapping, ClusterMappingNode
@@ -28,8 +30,29 @@ def setup(tmp_path: Path):
             for node_id in node_ids
         )
     document = json.loads(
-        (Path(__file__).parent / "fixtures/global/recipe-v1-multinode.json").read_text()
+        (Path(__file__).parent / "fixtures/global/recipe-v1-minimal.json").read_text()
     )
+    document["identity"]["slug"] = "glm-5-2-triple"
+    document["artifacts"][0]["roles"] = ["entrypoint", "worker"]
+    entrypoint = document["topology"]["roles"][0]
+    document["topology"] = {
+        "name": "triple-tp3",
+        "mode": "tensor_parallel",
+        "node_count": 3,
+        "roles": [
+            entrypoint,
+            {
+                **entrypoint,
+                "name": "worker",
+                "count": 2,
+                "endpoint_owner": False,
+            },
+        ],
+        "parallelism": {"tensor": 3, "pipeline": 1, "data": 1, "backend": "tcp"},
+        "fabric": {"connectivity": "full_mesh", "minimum_bandwidth_mbps": 10000},
+        "start_order": ["worker", "entrypoint"],
+        "stop_order": ["entrypoint", "worker"],
+    }
     document["parameters"] = [
         {
             "name": "max_model_len",
@@ -41,7 +64,10 @@ def setup(tmp_path: Path):
             "change_effect": "restart",
         }
     ]
-    catalog = CatalogService(sessions, clock=lambda: now)
+    catalog = CatalogService(
+        sessions, clock=lambda: now, cursors=TokenCodec(b"c" * 32).cursor_codec()
+    )
+    _seed_recipe_dependencies(catalog, document)
     draft = catalog.create_recipe(
         "admin", RecipeDraftInput(slug="glm-5-2-triple", document=document)
     )
@@ -49,13 +75,12 @@ def setup(tmp_path: Path):
     return sessions, now, node_ids, revision
 
 
-def test_three_node_profile_maps_deterministic_ranks(tmp_path: Path) -> None:
+def test_three_node_topology_maps_deterministic_ranks(tmp_path: Path) -> None:
     sessions, now, node_ids, revision = setup(tmp_path)
     service = ClusterMappingService(sessions)
 
     plan = service.plan(
         revision.id,
-        "triple-tp3",
         tuple(reversed(node_ids)),
         parameters={},
     )
@@ -76,7 +101,7 @@ def test_three_node_profile_maps_deterministic_ranks(tmp_path: Path) -> None:
                 .order_by(ClusterMappingNode.rank)
             )
         )
-        assert mapping is not None and mapping.profile_name == "triple-tp3"
+        assert mapping is not None and mapping.topology_name == "triple-tp3"
         assert mapping.generation == 1
         assert [node.node_id for node in nodes] == sorted(node_ids)
 
@@ -86,7 +111,6 @@ def test_mapping_plan_binds_effective_parameters(tmp_path: Path) -> None:
 
     plan = ClusterMappingService(sessions).plan(
         revision.id,
-        "triple-tp3",
         node_ids,
         parameters={"max_model_len": 65536},
     )

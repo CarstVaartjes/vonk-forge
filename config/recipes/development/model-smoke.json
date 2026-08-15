@@ -6,18 +6,27 @@
   },
   "metadata": {
     "title": "Development DeepSeek model smoke",
-    "description": "Digest-pinned DS4 and DeepSeek smoke profile for one Spark or a two-rank replicated development gang with a pre-launch TCP fabric exchange.",
+    "description": "Digest-pinned DS4 and DeepSeek smoke recipe for a two-rank replicated development gang with a pre-launch TCP fabric exchange.",
     "tags": [
       "deepseek",
       "development",
       "smoke"
     ]
   },
-  "workload": {
-    "family": "development-deepseek-smoke",
-    "capabilities": [
-      "openai.chat"
-    ]
+  "model": {
+    "kind": "model-version",
+    "publisher": "vonk",
+    "slug": "development-deepseek-version",
+    "content_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "execution": {
+    "harness": {
+      "kind": "execution-harness",
+      "publisher": "vonk",
+      "slug": "development-deepseek-smoke",
+      "content_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    "patch_bundle": null
   },
   "build": {
     "context": {
@@ -75,22 +84,17 @@
     }
   ],
   "runtime": {
-    "interface": "vonk.runtime.v1",
-    "adapter": "ds4_smoke",
-    "adapter_version": 1,
+    "distribution": {
+      "kind": "runtime-distribution",
+      "publisher": "vonk",
+      "slug": "ds4-smoke-linux-arm64",
+      "content_sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+    },
     "entrypoint": [
       "/opt/vonk/model-smoke"
     ],
     "arguments": [],
     "environment": [],
-    "endpoint": {
-      "protocol": "openai",
-      "port": 8000,
-      "model_aliases": [
-        "development-deepseek-smoke"
-      ],
-      "health_path": "/v1/models"
-    },
     "security": {
       "devices": [
         "nvidia.com/gpu=all"
@@ -118,58 +122,10 @@
       "stop_timeout_seconds": 120
     }
   },
-  "deployment_profiles": [
-    {
-      "name": "solo",
-      "description": "One-node DS4 smoke using the exact qualified runtime and model artifacts.",
-      "node_count": 1,
-      "strategy": "single",
-      "parallelism": {
-        "tensor": 1,
-        "pipeline": 1,
-        "data": 1,
-        "backend": "local"
-      },
-      "roles": [
-        {
-          "name": "entrypoint",
-          "count": 1,
-          "endpoint_owner": true,
-          "artifacts": [
-            "base",
-            "drafter"
-          ],
-          "resources": {
-            "disk": {
-              "image_bytes": 8589934592,
-              "artifact_bytes": 93691352992,
-              "staging_bytes": 93691352992,
-              "cache_bytes": 4294967296,
-              "rollback_bytes": 0,
-              "safety_margin_bytes": 107374182400
-            },
-            "memory": {
-              "kind": "unified",
-              "startup_peak_bytes": 120000000000,
-              "steady_state_bytes": 119000000000,
-              "runtime_growth_bytes": 0,
-              "system_reserve_bytes": 0
-            }
-          }
-        }
-      ],
-      "fabric": {
-        "connectivity": "none",
-        "minimum_bandwidth_mbps": 0
-      },
-      "parameter_overrides": {},
-      "measurement": "measured"
-    },
-    {
+  "topology": {
       "name": "pair",
-      "description": "Two independent DS4 replicas gated by a real TCP rank rendezvous, with one routed entrypoint and exact artifacts on both nodes; DS4 inference itself is not distributed.",
       "node_count": 2,
-      "strategy": "data_parallel",
+      "mode": "data_parallel",
       "parallelism": {
         "tensor": 1,
         "pipeline": 1,
@@ -234,18 +190,32 @@
         "connectivity": "connected",
         "minimum_bandwidth_mbps": 200000
       },
-      "parameter_overrides": {},
-      "measurement": "measured"
+      "start_order": ["worker", "entrypoint"],
+      "stop_order": ["entrypoint", "worker"]
+  },
+  "interfaces": [
+    {
+      "adapter": "openai",
+      "port": 8000,
+      "model_aliases": [
+        "development-deepseek-smoke"
+      ],
+      "health_path": "/v1/models"
     }
   ],
   "validation": {
-    "checks": [
-      "container.started",
-      "fabric.rendezvous.completed",
-      "endpoint.healthy",
-      "inference.completed",
-      "route.withdrawn_on_rank_failure",
-      "route.republished_after_recovery"
+    "validators": [
+      {
+        "interface": "openai",
+        "checks": [
+          "container.started",
+          "fabric.rendezvous.completed",
+          "endpoint.healthy",
+          "inference.completed",
+          "route.withdrawn_on_rank_failure",
+          "route.republished_after_recovery"
+        ]
+      }
     ],
     "benchmarks": []
   },

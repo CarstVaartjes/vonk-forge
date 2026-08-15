@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import copy
 from datetime import UTC, datetime
 
@@ -8,6 +9,7 @@ from sqlalchemy import create_engine, delete, event
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from vonk_control.auth import TokenCodec
 from vonk_control.catalog_contract import catalog_content_sha256
 from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.catalog_service import CatalogConflict, CatalogValidationError
@@ -125,7 +127,9 @@ def session() -> Session:
 @pytest.fixture
 def service(session: Session) -> CatalogEntityService:
     return CatalogEntityService(
-        session, clock=lambda: datetime(2026, 8, 15, 12, 0, tzinfo=UTC)
+        session,
+        clock=lambda: datetime(2026, 8, 15, 12, 0, tzinfo=UTC),
+        cursors=TokenCodec(b"c" * 32).cursor_codec(),
     )
 
 
@@ -259,11 +263,66 @@ def test_list_entities_pages_more_than_one_hundred_with_an_opaque_cursor(
     assert len(first) == 100
     assert cursor is not None and cursor.startswith("v1.")
     assert all(value.entity_id not in cursor for value in first)
+    encoded_body = cursor.split(".")[1]
+    decoded_body = base64.urlsafe_b64decode(
+        encoded_body + "=" * (-len(encoded_body) % 4)
+    )
+    assert decoded_body != first[-1].entity_id.encode("ascii")
     assert len(second) == 1
     assert final_cursor is None
     assert {value.entity_id for value in first}.isdisjoint(
         value.entity_id for value in second
     )
+
+
+def test_entity_cursor_is_bound_to_filters_and_rejects_tampering(
+    service: CatalogEntityService,
+) -> None:
+    for index in range(3):
+        document = model_group()
+        document["identity"]["slug"] = f"cursor-context-{index}"
+        document["metadata"]["title"] = f"Cursor Context {index}"
+        document["family"] = f"cursor-context-{index}"
+        service.create_draft(document, actor="admin")
+    _first, cursor = service.list_entities(kind="model-group", limit=1)
+    assert cursor is not None
+
+    for invalid in (
+        cursor[:-1] + ("A" if cursor[-1] != "A" else "B"),
+        cursor,
+    ):
+        with pytest.raises(CatalogValidationError) as caught:
+            service.list_entities(
+                kind="model-group",
+                publisher="vonk-forge" if invalid == cursor else None,
+                limit=1,
+                cursor=invalid,
+            )
+        assert caught.value.code == "catalog.cursor"
+
+
+def test_entity_pagination_uses_immutable_boundary_when_rows_are_revised(
+    session: Session, service: CatalogEntityService
+) -> None:
+    for index in range(4):
+        document = model_group()
+        document["identity"]["slug"] = f"cursor-mutation-{index}"
+        document["metadata"]["title"] = f"Cursor Mutation {index}"
+        document["family"] = f"cursor-mutation-{index}"
+        service.create_draft(document, actor="admin")
+    first, cursor = service.list_entities(kind="model-group", limit=2)
+    assert cursor is not None
+    boundary = session.get(CatalogEntity, first[-1].entity_id)
+    assert boundary is not None
+    boundary.updated_at = datetime(2027, 1, 1, tzinfo=UTC)
+    session.flush()
+
+    second, final_cursor = service.list_entities(
+        kind="model-group", limit=2, cursor=cursor
+    )
+
+    assert final_cursor is None
+    assert len({value.entity_id for value in (*first, *second)}) == 4
 
 
 def test_harness_resolution_keeps_source_bundle_separate_from_catalog_entities(
@@ -308,7 +367,9 @@ def test_database_foreign_key_restricts_bulk_parent_deletion() -> None:
     Base.metadata.create_all(engine)
     with Session(engine, expire_on_commit=False) as session:
         local_service = CatalogEntityService(
-            session, clock=lambda: datetime(2026, 8, 15, 12, 0, tzinfo=UTC)
+            session,
+            clock=lambda: datetime(2026, 8, 15, 12, 0, tzinfo=UTC),
+            cursors=TokenCodec(b"d" * 32).cursor_codec(),
         )
         draft = local_service.create_draft(model_group(), actor="admin")
         session.commit()
@@ -367,7 +428,13 @@ def test_resolution_integrity_race_has_a_stable_conflict_code(
 def test_entity_cursor_and_limit_validation_have_stable_codes(
     service: CatalogEntityService,
 ) -> None:
-    for invalid_cursor in ("v1.not-a-valid-cursor", "v1._"):
+    signed_malformed = service._cursors.encode(
+        resource="catalog-entities",
+        order="created-at-desc/id-desc/v1",
+        context={"kind": None, "publisher": None},
+        boundary=["not-a-date", "not-an-id"],
+    )
+    for invalid_cursor in ("v1.not-a-valid-cursor", "v1._", signed_malformed):
         with pytest.raises(CatalogValidationError) as cursor_error:
             service.list_entities(cursor=invalid_cursor)
         assert cursor_error.value.code == "catalog.cursor"

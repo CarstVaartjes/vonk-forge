@@ -47,7 +47,7 @@ def setup(
     document = json.loads(
         (Path(__file__).parent / "fixtures/global/recipe-v1-minimal.json").read_text()
     )
-    memory = document["deployment_profiles"][0]["roles"][0]["resources"]["memory"]
+    memory = document["topology"]["roles"][0]["resources"]["memory"]
     memory.update(
         {
             "startup_peak_bytes": 225,
@@ -90,7 +90,7 @@ def setup(
         session.flush()
         revision_id = revision.id
     mappings = ClusterMappingService(sessions)
-    mapping_plan = mappings.plan(revision_id, "solo", (node,), parameters={})
+    mapping_plan = mappings.plan(revision_id, (node,), parameters={})
     mapping_id = mappings.materialize(mapping_plan, actor="admin", now=now)
     with sessions.begin() as session:
         build = RecipeBuild(

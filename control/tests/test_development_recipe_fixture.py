@@ -26,7 +26,7 @@ EXPECTED_SOURCE_SHA256 = (
     "3bcb427bb551833bfece49d1724935d7ddf5e93bd802aa74a3e806023da39caf"
 )
 EXPECTED_RECIPE_SHA256 = (
-    "585b83a971181a32e3605463ce7f7f3eb5c94ac4658b207da1d4ef7de378a947"
+    "3461feb536bf5e3160e19e861160e59023e3f53382ca757bdc06925e7cd303f2"
 )
 EXPECTED_ARTIFACT_SOURCE = (
     "https://raw.githubusercontent.com/CarstVaartjes/vonk-forge/"
@@ -231,8 +231,8 @@ def test_dev_http_smoke_bundle_policy_is_exact_and_bounded() -> None:
 def test_dev_http_smoke_limits_cover_measured_python_slim_build_and_export() -> None:
     recipe = fixture_recipe()
     build_resources = recipe["build"]["resources"]
-    profile = recipe["deployment_profiles"][0]
-    disk = profile["roles"][0]["resources"]["disk"]
+    topology = recipe["topology"]
+    disk = topology["roles"][0]["resources"]["disk"]
 
     assert BUILD_OUTPUT_LIMIT_BYTES >= MEASURED_DOCKER_ARCHIVE_BYTES + 64 * 1024 * 1024
     assert BUILD_TRANSIENT_LIMIT_BYTES >= (
@@ -243,7 +243,7 @@ def test_dev_http_smoke_limits_cover_measured_python_slim_build_and_export() -> 
     assert disk["image_bytes"] == BUILD_OUTPUT_LIMIT_BYTES
     assert disk["staging_bytes"] == BUILD_TRANSIENT_LIMIT_BYTES
     assert disk["safety_margin_bytes"] == BUILD_TRANSIENT_LIMIT_BYTES
-    assert profile["measurement"] == "measured"
+    assert topology["name"] == "solo"
 
 
 def test_dev_http_smoke_server_matches_expected_health_and_inference() -> None:
@@ -255,7 +255,7 @@ def test_dev_http_smoke_server_matches_expected_health_and_inference() -> None:
             "127.0.0.2",
             port,
             "GET",
-            str(recipe["runtime"]["endpoint"]["health_path"]),
+            str(recipe["interfaces"][0]["health_path"]),
         )
         assert status == 200
         assert health == expected["health"]
@@ -337,7 +337,7 @@ def test_dev_http_smoke_build_import_and_host_published_port_with_rootless_podma
         pytest.skip(ROOTLESS_PODMAN_PHYSICAL_GATE)
 
     recipe = fixture_recipe()
-    disk = recipe["deployment_profiles"][0]["roles"][0]["resources"]["disk"]
+    disk = recipe["topology"]["roles"][0]["resources"]["disk"]
     host_port = _unused_port()
     identity = f"{os.getpid()}-{host_port}"
     image = f"localhost/vonk/dev-http-smoke-acceptance:{identity}"
