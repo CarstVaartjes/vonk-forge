@@ -4,12 +4,14 @@ import copy
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, delete, event
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from vonk_control.catalog_contract import catalog_content_sha256
 from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.catalog_service import CatalogConflict, CatalogValidationError
-from vonk_control.models import Base
+from vonk_control.models import Base, CatalogEntity, CatalogEntityRevision
 
 
 def _base(kind: str, slug: str, title: str) -> dict[str, object]:
@@ -65,24 +67,36 @@ def model_version(model_digest: str) -> dict[str, object]:
     }
 
 
-def runtime_distribution(slug: str = "python-312-cuda") -> dict[str, object]:
+def runtime_distribution(
+    harness_digest: str,
+    *,
+    slug: str = "python-312-cuda",
+    harness_slug: str = "vllm-openai",
+) -> dict[str, object]:
     return {
         **_base("runtime-distribution", slug, slug.replace("-", " ").title()),
+        "implements_harness": {
+            "kind": "execution-harness",
+            "publisher": "vonk-forge",
+            "slug": harness_slug,
+            "content_sha256": harness_digest,
+        },
         "platform": "linux/arm64",
         "sha256": "d" * 64,
     }
 
 
-def execution_harness(distribution_digest: str) -> dict[str, object]:
+def execution_harness(
+    slug: str = "vllm-openai", *, source_sha256: str = "b" * 64
+) -> dict[str, object]:
     return {
-        **_base("execution-harness", "vllm-openai", "vLLM OpenAI"),
+        **_base("execution-harness", slug, slug.replace("-", " ").title()),
         "runtime_interface": "vonk.runtime.v1",
         "adapters": ["openai"],
         "source_bundle": {
-            "kind": "runtime-distribution",
-            "publisher": "vonk-forge",
-            "slug": "python-312-cuda",
-            "content_sha256": distribution_digest,
+            "sha256": source_sha256,
+            "expected_bytes": 2048,
+            "media_type": "application/vnd.vonk-forge.source-bundle.v1+tar",
         },
     }
 
@@ -191,7 +205,8 @@ def test_model_version_resolution_requires_exact_model_and_group_lineage(
 def test_patch_resolution_requires_its_exact_distribution(
     service: CatalogEntityService,
 ) -> None:
-    distribution = _resolve(service, runtime_distribution())
+    harness = _resolve(service, execution_harness())
+    distribution = _resolve(service, runtime_distribution(harness.content_sha256))
     document = patch_bundle("different-distribution", distribution.content_sha256)
     draft = service.create_draft(document, actor="admin")
 
@@ -216,9 +231,147 @@ def test_list_entities_returns_latest_revision_and_can_filter_kind(
     service: CatalogEntityService,
 ) -> None:
     group = _resolve(service, model_group())
-    _resolve(service, runtime_distribution())
+    _resolve(service, execution_harness())
 
-    values = service.list_entities(kind="model-group")
+    values, next_cursor = service.list_entities(kind="model-group")
 
     assert [value.id for value in values] == [group.id]
+    assert next_cursor is None
     assert values[0].content_sha256 == catalog_content_sha256(group.document)
+
+
+def test_list_entities_pages_more_than_one_hundred_with_an_opaque_cursor(
+    service: CatalogEntityService,
+) -> None:
+    for index in range(101):
+        document = model_group()
+        slug = f"catalog-page-{index:03d}"
+        document["identity"]["slug"] = slug
+        document["metadata"]["title"] = f"Catalog Page {index:03d}"
+        document["family"] = slug
+        service.create_draft(document, actor="admin")
+
+    first, cursor = service.list_entities(kind="model-group", limit=100)
+    second, final_cursor = service.list_entities(
+        kind="model-group", limit=100, cursor=cursor
+    )
+
+    assert len(first) == 100
+    assert cursor is not None and cursor.startswith("v1.")
+    assert all(value.entity_id not in cursor for value in first)
+    assert len(second) == 1
+    assert final_cursor is None
+    assert {value.entity_id for value in first}.isdisjoint(
+        value.entity_id for value in second
+    )
+
+
+def test_harness_resolution_keeps_source_bundle_separate_from_catalog_entities(
+    service: CatalogEntityService,
+) -> None:
+    resolved = _resolve(service, execution_harness(source_sha256="a" * 64))
+
+    assert resolved.document["source_bundle"] == {
+        "sha256": "a" * 64,
+        "expected_bytes": 2048,
+        "media_type": "application/vnd.vonk-forge.source-bundle.v1+tar",
+    }
+
+
+def test_distribution_resolution_requires_its_exact_implemented_harness(
+    service: CatalogEntityService,
+) -> None:
+    document = runtime_distribution("f" * 64)
+    draft = service.create_draft(document, actor="admin")
+
+    with pytest.raises(CatalogConflict, match="exact execution-harness"):
+        service.resolve(draft.id, actor="admin")
+
+
+def test_entity_parent_cannot_be_deleted_while_revisions_exist(
+    session: Session, service: CatalogEntityService
+) -> None:
+    resolved = _resolve(service, model_group())
+
+    session.delete(resolved.entity)
+    with pytest.raises(ValueError, match="revisions cannot be deleted"):
+        session.commit()
+
+
+def test_database_foreign_key_restricts_bulk_parent_deletion() -> None:
+    engine = create_engine("sqlite:///:memory:")
+
+    @event.listens_for(engine, "connect")
+    def _foreign_keys(dbapi_connection, _record) -> None:
+        dbapi_connection.execute("PRAGMA foreign_keys=ON")
+
+    Base.metadata.create_all(engine)
+    with Session(engine, expire_on_commit=False) as session:
+        local_service = CatalogEntityService(
+            session, clock=lambda: datetime(2026, 8, 15, 12, 0, tzinfo=UTC)
+        )
+        draft = local_service.create_draft(model_group(), actor="admin")
+        session.commit()
+
+        with pytest.raises(IntegrityError):
+            session.execute(
+                delete(CatalogEntity).where(CatalogEntity.id == draft.entity_id)
+            )
+
+
+def test_resolve_locks_parent_and_checks_expected_revision_in_service(
+    service: CatalogEntityService,
+) -> None:
+    draft = service.create_draft(model_group(), actor="admin")
+    changed = copy.deepcopy(draft.document)
+    changed["metadata"]["title"] = "Synthetic Updated"
+    service.revise(
+        draft.entity_id,
+        changed,
+        actor="admin",
+        expected_revision=draft.revision_number,
+    )
+
+    with pytest.raises(CatalogConflict) as caught:
+        service.resolve(
+            draft.entity_id,
+            actor="admin",
+            expected_revision=draft.revision_number,
+        )
+
+    assert caught.value.code == "catalog.stale_entity_revision"
+    statement = service._entity_statement(draft.entity_id, for_update=True)
+    compiled = str(statement.compile(dialect=postgresql.dialect()))
+    assert compiled.endswith("FOR UPDATE")
+
+
+def test_resolution_integrity_race_has_a_stable_conflict_code(
+    service: CatalogEntityService,
+) -> None:
+    draft = service.create_draft(model_group(), actor="admin")
+
+    def _raise_integrity_error(_mapper, _connection, target) -> None:
+        if target.lifecycle == "resolved":
+            raise IntegrityError("INSERT", {}, RuntimeError("simulated race"))
+
+    event.listen(CatalogEntityRevision, "before_insert", _raise_integrity_error)
+    try:
+        with pytest.raises(CatalogConflict) as caught:
+            service.resolve(draft.entity_id, actor="admin", expected_revision=1)
+    finally:
+        event.remove(CatalogEntityRevision, "before_insert", _raise_integrity_error)
+
+    assert caught.value.code == "catalog.entity_resolution_conflict"
+
+
+def test_entity_cursor_and_limit_validation_have_stable_codes(
+    service: CatalogEntityService,
+) -> None:
+    for invalid_cursor in ("v1.not-a-valid-cursor", "v1._"):
+        with pytest.raises(CatalogValidationError) as cursor_error:
+            service.list_entities(cursor=invalid_cursor)
+        assert cursor_error.value.code == "catalog.cursor"
+    with pytest.raises(CatalogValidationError) as limit_error:
+        service.list_entities(limit=101)
+
+    assert limit_error.value.code == "catalog.limit"

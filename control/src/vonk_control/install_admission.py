@@ -23,7 +23,7 @@ from .models import (
     RecipeInstallation,
     ResourceReservation,
 )
-from .recipe_contract import deployment_profile
+from .recipe_contract import recipe_topology
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,13 +122,12 @@ class InstallAdmissionService:
             document = revision.document
             recipe_digest = revision.content_sha256
             mapping_generation = mapping.generation
-            profile_name = mapping.profile_name
             image_digest = build.image_digest
             image_bytes = build.image_bytes
-        profile = deployment_profile(document, profile_name)
-        roles = profile.get("roles")
+        topology = recipe_topology(document)
+        roles = topology.get("roles")
         if not isinstance(roles, list):
-            raise TypeError("recipe profile roles are invalid")
+            raise TypeError("recipe topology roles are invalid")
         role_by_name = {
             str(role["name"]): role for role in roles if isinstance(role, dict)
         }
@@ -151,7 +150,7 @@ class InstallAdmissionService:
             warnings: list[AdmissionReason] = []
             role = role_by_name.get(mapping_node.role)
             if role is None or not isinstance(role.get("resources"), dict):
-                raise TypeError("mapping role is absent from deployment profile")
+                raise TypeError("mapping role is absent from recipe topology")
             resources = role["resources"]
             disk = resources.get("disk")
             artifact_ids = role.get("artifacts")

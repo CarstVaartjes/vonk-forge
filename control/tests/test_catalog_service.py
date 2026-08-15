@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import inspect
 import io
 import json
 from datetime import UTC, datetime
@@ -58,15 +59,17 @@ def _seed_recipe_dependencies(
     group = _resolve_entity(service, model_group())
     model_revision = _resolve_entity(service, model(group.content_sha256))
     version = _resolve_entity(service, model_version(model_revision.content_sha256))
-    distribution = _resolve_entity(service, runtime_distribution())
-    harness = _resolve_entity(service, execution_harness(distribution.content_sha256))
+    harness = _resolve_entity(service, execution_harness())
+    distribution = _resolve_entity(
+        service, runtime_distribution(harness.content_sha256)
+    )
     recipe_document["model"] = {
         "kind": "model-version",
         "publisher": "vonk-forge",
         "slug": "synthetic-tiny-fp16",
         "content_sha256": version.content_sha256,
     }
-    recipe_document["execution"] = {
+    recipe_document["execution"]["harness"] = {
         "kind": "execution-harness",
         "publisher": "vonk-forge",
         "slug": "vllm-openai",
@@ -276,7 +279,15 @@ def test_recipe_resolution_rejects_a_distribution_not_bound_to_the_harness(
     service: CatalogService, recipe_document: dict[str, object]
 ) -> None:
     _seed_recipe_dependencies(service, recipe_document)
-    other = _resolve_entity(service, runtime_distribution("other-distribution"))
+    other_harness = _resolve_entity(service, execution_harness("other-harness"))
+    other = _resolve_entity(
+        service,
+        runtime_distribution(
+            other_harness.content_sha256,
+            slug="other-distribution",
+            harness_slug="other-harness",
+        ),
+    )
     recipe_document["runtime"]["distribution"] = {
         "kind": "runtime-distribution",
         "publisher": "vonk-forge",
@@ -284,7 +295,7 @@ def test_recipe_resolution_rejects_a_distribution_not_bound_to_the_harness(
         "content_sha256": other.content_sha256,
     }
 
-    with pytest.raises(CatalogConflict, match="does not support the exact harness"):
+    with pytest.raises(CatalogConflict, match="does not implement the exact harness"):
         service.resolve_recipe_revision(recipe_document, actor="admin")
 
 
@@ -292,12 +303,18 @@ def test_recipe_resolution_rejects_patch_for_another_distribution(
     service: CatalogService, recipe_document: dict[str, object]
 ) -> None:
     _seed_recipe_dependencies(service, recipe_document)
-    other = _resolve_entity(service, runtime_distribution("other-distribution"))
+    recipe_harness = recipe_document["execution"]["harness"]
+    other = _resolve_entity(
+        service,
+        runtime_distribution(
+            recipe_harness["content_sha256"], slug="other-distribution"
+        ),
+    )
     patch = _resolve_entity(
         service,
         patch_bundle("other-distribution", other.content_sha256),
     )
-    reference = {
+    recipe_document["execution"]["patch_bundle"] = {
         "kind": "patch-bundle",
         "publisher": "vonk-forge",
         "slug": "vllm-fix",
@@ -305,9 +322,42 @@ def test_recipe_resolution_rejects_patch_for_another_distribution(
     }
 
     with pytest.raises(CatalogConflict, match="exact distribution"):
-        service.resolve_recipe_revision(
-            recipe_document, actor="admin", patch_reference=reference
-        )
+        service.resolve_recipe_revision(recipe_document, actor="admin")
+
+
+def test_persisted_recipe_resolution_resolves_patch_from_the_document(
+    service: CatalogService, recipe_document: dict[str, object]
+) -> None:
+    _seed_recipe_dependencies(service, recipe_document)
+    distribution = recipe_document["runtime"]["distribution"]
+    patch = _resolve_entity(
+        service,
+        patch_bundle(distribution["slug"], distribution["content_sha256"]),
+    )
+    recipe_document["execution"]["patch_bundle"] = {
+        "kind": "patch-bundle",
+        "publisher": "vonk-forge",
+        "slug": "vllm-fix",
+        "content_sha256": patch.content_sha256,
+    }
+    draft = service.create_recipe(
+        "admin",
+        RecipeDraftInput(slug="synthetic-tiny-openai", document=recipe_document),
+    )
+
+    resolved = service.resolve(draft.recipe_id, draft.revision_number, "admin")
+
+    assert resolved.document["execution"]["patch_bundle"]["content_sha256"] == (
+        patch.content_sha256
+    )
+    assert resolved.content_sha256 == recipe_content_sha256(resolved.document)
+
+
+def test_recipe_resolution_has_no_out_of_band_patch_argument() -> None:
+    assert (
+        "patch_reference"
+        not in inspect.signature(CatalogService.resolve_recipe_revision).parameters
+    )
 
 
 def test_recipe_resolution_returns_the_canonical_digest(
@@ -340,3 +390,39 @@ def test_global_import_rejects_an_unresolved_exact_dependency(
 
     with pytest.raises(CatalogConflict, match="exact model-version"):
         service.import_global("admin", remote)
+
+
+def test_global_import_resolves_patch_from_recipe_document(
+    service: CatalogService, recipe_document: dict[str, object]
+) -> None:
+    _seed_recipe_dependencies(service, recipe_document)
+    distribution = recipe_document["runtime"]["distribution"]
+    patch = _resolve_entity(
+        service,
+        patch_bundle(distribution["slug"], distribution["content_sha256"]),
+    )
+    recipe_document["execution"]["patch_bundle"] = {
+        "kind": "patch-bundle",
+        "publisher": "vonk-forge",
+        "slug": "vllm-fix",
+        "content_sha256": patch.content_sha256,
+    }
+    digest = recipe_content_sha256(recipe_document)
+    remote = GlobalRecipeRevision(
+        publisher="vonk-forge",
+        slug="synthetic-tiny-openai",
+        recipe_id="00000000-0000-4000-8000-000000000001",
+        revision_number=1,
+        revision_id="10000000-0000-4000-8000-000000000001",
+        content_sha256=digest,
+        published_at="2026-08-15T10:00:00+00:00",
+        document=recipe_document,
+    )
+
+    imported = service.import_global("admin", remote)
+
+    assert imported.content_sha256 == digest
+    assert (
+        imported.document["execution"]["patch_bundle"]
+        == (recipe_document["execution"]["patch_bundle"])
+    )

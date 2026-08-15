@@ -97,3 +97,63 @@ def test_model_version_requires_a_model_reference() -> None:
     document["model"]["kind"] = "model-group"
     with pytest.raises(CatalogContractError):
         validate_catalog_document(document)
+
+
+def test_harness_source_bundle_is_an_exact_build_input_not_a_catalog_reference() -> (
+    None
+):
+    document = {
+        "schema_version": 1,
+        "kind": "execution-harness",
+        "identity": {"publisher": "vonk-forge", "slug": "vllm-openai"},
+        "metadata": {
+            "title": "vLLM OpenAI",
+            "description": "Harness contract fixture.",
+            "tags": ["synthetic"],
+        },
+        "runtime_interface": "vonk.runtime.v1",
+        "adapters": ["openai"],
+        "source_bundle": {
+            "sha256": "b" * 64,
+            "expected_bytes": 2048,
+            "media_type": "application/vnd.vonk-forge.source-bundle.v1+tar",
+        },
+    }
+
+    validate_catalog_document(document)
+
+    document["source_bundle"] = {
+        "kind": "runtime-distribution",
+        "publisher": "vonk-forge",
+        "slug": "python-312-cuda",
+        "content_sha256": "d" * 64,
+    }
+    with pytest.raises(CatalogContractError):
+        validate_catalog_document(document)
+
+
+def test_runtime_distribution_requires_one_exact_implemented_harness() -> None:
+    document = {
+        "schema_version": 1,
+        "kind": "runtime-distribution",
+        "identity": {"publisher": "vonk-forge", "slug": "python-312-cuda"},
+        "metadata": {
+            "title": "Python CUDA",
+            "description": "Runtime distribution fixture.",
+            "tags": ["synthetic"],
+        },
+        "implements_harness": {
+            "kind": "execution-harness",
+            "publisher": "vonk-forge",
+            "slug": "vllm-openai",
+            "content_sha256": "b" * 64,
+        },
+        "platform": "linux/arm64",
+        "sha256": "d" * 64,
+    }
+
+    validate_catalog_document(document)
+
+    document.pop("implements_harness")
+    with pytest.raises(CatalogContractError):
+        validate_catalog_document(document)

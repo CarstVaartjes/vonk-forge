@@ -214,17 +214,29 @@ class CatalogEntityRevisionResponse(StrictModel):
 
 class CatalogEntityListResponse(StrictModel):
     entities: list[CatalogEntityRevisionResponse] = Field(max_length=100)
+    next_cursor: str | None = Field(default=None, max_length=128)
+
+
+def _catalog_problem(
+    request: Request, *, status_code: int, code: str, detail: str
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "code": code[:128],
+            "detail": detail[:256],
+            "request_id": request.state.request_id,
+        },
+    )
 
 
 def _problem(request: Request, error: CatalogError) -> JSONResponse:
     status_code = 409 if isinstance(error, CatalogConflict) else 422
-    return JSONResponse(
+    return _catalog_problem(
+        request,
         status_code=status_code,
-        content={
-            "code": error.code[:128],
-            "detail": error.detail[:256],
-            "request_id": request.state.request_id,
-        },
+        code=error.code,
+        detail=error.detail,
     )
 
 
@@ -320,6 +332,24 @@ def install_catalog_routes(
         if actor.role != "administrator":
             raise HTTPException(status_code=403, detail="insufficient role")
 
+    def entity_administrator(request: Request, actor: Actor) -> JSONResponse | None:
+        if actor.role == "administrator":
+            return None
+        return _catalog_problem(
+            request,
+            status_code=403,
+            code="catalog.entity_forbidden",
+            detail="administrator role is required for catalog entity authoring",
+        )
+
+    def entity_not_found(request: Request) -> JSONResponse:
+        return _catalog_problem(
+            request,
+            status_code=404,
+            code="catalog.entity_not_found",
+            detail="catalog entity or revision was not found",
+        )
+
     def remote(uri: str) -> GlobalRecipeRevision:
         if global_catalog is None:
             raise GlobalCatalogError(
@@ -337,10 +367,17 @@ def install_catalog_routes(
         request: Request,
         kind: str | None = Query(default=None, max_length=32),
         publisher: str | None = Query(default=None, pattern=_SLUG),
+        limit: int = Query(default=20, ge=1, le=100),
+        cursor: str | None = Query(default=None, max_length=128),
         _actor: Actor = authenticated,
     ):
         try:
-            values = catalog().entities.list_entities(kind=kind, publisher=publisher)
+            values, next_cursor = catalog().entities.list_entities(
+                kind=kind,
+                publisher=publisher,
+                limit=limit,
+                cursor=cursor,
+            )
         except (CatalogError, ValueError) as error:
             problem = (
                 error
@@ -348,7 +385,10 @@ def install_catalog_routes(
                 else CatalogValidationError("catalog.kind", "catalog kind is invalid")
             )
             return _problem(request, problem)
-        return {"entities": [_entity_revision(value) for value in values]}
+        return {
+            "entities": [_entity_revision(value) for value in values],
+            "next_cursor": next_cursor,
+        }
 
     @app.post(
         "/api/v1/catalog/entities",
@@ -367,7 +407,8 @@ def install_catalog_routes(
         request: Request,
         actor: Actor = authenticated,
     ):
-        administrator(actor)
+        if denial := entity_administrator(request, actor):
+            return denial
         try:
             _bounded(body.document)
             result = catalog().entities.create_draft(body.document, actor=actor.subject)
@@ -391,15 +432,14 @@ def install_catalog_routes(
         operation_id="getCatalogEntity",
     )
     def get_entity(
+        request: Request,
         entity_id: str = Path(pattern=_UUID),
         _actor: Actor = authenticated,
     ):
         try:
             return _entity_revision(catalog().entities.get_entity(entity_id))
         except KeyError:
-            raise HTTPException(
-                status_code=404, detail="catalog entity not found"
-            ) from None
+            return entity_not_found(request)
 
     @app.put(
         "/api/v1/catalog/entities/{entity_id}/draft",
@@ -419,7 +459,8 @@ def install_catalog_routes(
         entity_id: str = Path(pattern=_UUID),
         actor: Actor = authenticated,
     ):
-        administrator(actor)
+        if denial := entity_administrator(request, actor):
+            return denial
         try:
             _bounded(body.document)
             result = catalog().entities.revise(
@@ -429,9 +470,7 @@ def install_catalog_routes(
                 expected_revision=body.expected_revision,
             )
         except KeyError:
-            raise HTTPException(
-                status_code=404, detail="catalog entity not found"
-            ) from None
+            return entity_not_found(request)
         except CatalogError as error:
             return _problem(request, error)
         audits.append(
@@ -463,18 +502,16 @@ def install_catalog_routes(
         entity_id: str = Path(pattern=_UUID),
         actor: Actor = authenticated,
     ):
-        administrator(actor)
+        if denial := entity_administrator(request, actor):
+            return denial
         try:
-            latest = catalog().entities.get_entity(entity_id)
-            if latest.revision_number != body.expected_revision:
-                raise CatalogConflict(
-                    "catalog.stale_entity_revision", "catalog entity revision changed"
-                )
-            result = catalog().entities.resolve(latest.id, actor=actor.subject)
+            result = catalog().entities.resolve(
+                entity_id,
+                actor=actor.subject,
+                expected_revision=body.expected_revision,
+            )
         except KeyError:
-            raise HTTPException(
-                status_code=404, detail="catalog entity not found"
-            ) from None
+            return entity_not_found(request)
         except CatalogError as error:
             return _problem(request, error)
         audits.append(

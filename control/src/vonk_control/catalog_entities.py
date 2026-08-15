@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import base64
 import copy
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from datetime import datetime
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -164,45 +165,75 @@ class CatalogEntityService:
             session.flush()
             return revision
 
-    def resolve(self, revision_id: str, *, actor: str) -> CatalogEntityRevision:
+    def resolve(
+        self,
+        entity_or_revision_id: str,
+        *,
+        actor: str,
+        expected_revision: int | None = None,
+    ) -> CatalogEntityRevision:
         actor = _actor(actor)
-        with self._write() as session:
-            source = session.get(CatalogEntityRevision, revision_id)
-            if source is None:
-                raise KeyError(revision_id)
-            if source.lifecycle == "resolved":
-                return source
-            clean = self._validated_document(source.document)
-            digest = catalog_content_sha256(clean)
-            existing = session.scalar(
-                select(CatalogEntityRevision).where(
-                    CatalogEntityRevision.entity_id == source.entity_id,
-                    CatalogEntityRevision.content_sha256 == digest,
-                    CatalogEntityRevision.lifecycle == "resolved",
+        try:
+            with self._write() as session:
+                entity = self._entity(session, entity_or_revision_id, for_update=True)
+                latest = self._latest(session, entity.id)
+                if latest is None:
+                    raise KeyError(entity_or_revision_id)
+                if entity.id == entity_or_revision_id:
+                    source = latest
+                else:
+                    source = session.get(CatalogEntityRevision, entity_or_revision_id)
+                    if source is None or source.entity_id != entity.id:
+                        raise KeyError(entity_or_revision_id)
+                accepted_revisions = {latest.revision_number}
+                if latest.lifecycle == "resolved":
+                    accepted_revisions.add(latest.revision_number - 1)
+                if (
+                    expected_revision is not None
+                    and expected_revision not in accepted_revisions
+                ):
+                    raise CatalogConflict(
+                        "catalog.stale_entity_revision",
+                        "catalog entity revision changed",
+                    )
+                if source.lifecycle == "resolved":
+                    return source
+                clean = self._validated_document(source.document)
+                digest = catalog_content_sha256(clean)
+                existing = session.scalar(
+                    select(CatalogEntityRevision).where(
+                        CatalogEntityRevision.entity_id == source.entity_id,
+                        CatalogEntityRevision.content_sha256 == digest,
+                        CatalogEntityRevision.lifecycle == "resolved",
+                    )
                 )
-            )
-            if existing is not None:
-                return existing
-            latest = self._latest(session, source.entity_id)
-            if latest is None or latest.id != source.id:
-                raise CatalogConflict(
-                    "catalog.stale_entity_revision", "catalog entity revision changed"
+                if existing is not None:
+                    return existing
+                if latest.id != source.id:
+                    raise CatalogConflict(
+                        "catalog.stale_entity_revision",
+                        "catalog entity revision changed",
+                    )
+                self._validate_lineage(session, clean)
+                revision = CatalogEntityRevision(
+                    entity_id=source.entity_id,
+                    revision_number=latest.revision_number + 1,
+                    lifecycle="resolved",
+                    schema_version=int(clean["schema_version"]),
+                    document=clean,
+                    content_sha256=digest,
+                    created_by=actor,
+                    created_at=self._clock(),
+                    entity=entity,
                 )
-            self._validate_lineage(session, clean)
-            revision = CatalogEntityRevision(
-                entity_id=source.entity_id,
-                revision_number=source.revision_number + 1,
-                lifecycle="resolved",
-                schema_version=int(clean["schema_version"]),
-                document=clean,
-                content_sha256=digest,
-                created_by=actor,
-                created_at=self._clock(),
-                entity=source.entity,
-            )
-            session.add(revision)
-            session.flush()
-            return revision
+                session.add(revision)
+                session.flush()
+                return revision
+        except IntegrityError as error:
+            raise CatalogConflict(
+                "catalog.entity_resolution_conflict",
+                "catalog entity resolution conflicted with another writer",
+            ) from error
 
     def lookup_exact(
         self,
@@ -226,8 +257,21 @@ class CatalogEntityService:
         *,
         kind: CatalogKind | str | None = None,
         publisher: str | None = None,
-    ) -> list[CatalogEntityRevision]:
-        normalized_kind = CatalogKind(kind).value if kind is not None else None
+        limit: int = 20,
+        cursor: str | None = None,
+    ) -> tuple[list[CatalogEntityRevision], str | None]:
+        if (
+            not isinstance(limit, int)
+            or isinstance(limit, bool)
+            or not 1 <= limit <= 100
+        ):
+            raise CatalogValidationError("catalog.limit", "catalog limit is invalid")
+        try:
+            normalized_kind = CatalogKind(kind).value if kind is not None else None
+        except ValueError as error:
+            raise CatalogValidationError(
+                "catalog.kind", "catalog entity kind is invalid"
+            ) from error
         latest_numbers = (
             select(
                 CatalogEntityRevision.entity_id,
@@ -256,7 +300,26 @@ class CatalogEntityService:
                 statement = statement.where(CatalogEntity.kind == normalized_kind)
             if publisher is not None:
                 statement = statement.where(CatalogEntity.publisher == publisher)
-            return list(session.scalars(statement).all())
+            if cursor is not None:
+                boundary_id = _decode_cursor(cursor)
+                boundary = session.get(CatalogEntity, boundary_id)
+                if boundary is None:
+                    raise CatalogValidationError(
+                        "catalog.cursor", "catalog cursor is invalid"
+                    )
+                statement = statement.where(
+                    or_(
+                        CatalogEntity.updated_at < boundary.updated_at,
+                        and_(
+                            CatalogEntity.updated_at == boundary.updated_at,
+                            CatalogEntity.id < boundary.id,
+                        ),
+                    )
+                )
+            rows = list(session.scalars(statement.limit(limit + 1)).all())
+        page = rows[:limit]
+        next_cursor = _encode_cursor(page[-1].entity_id) if len(rows) > limit else None
+        return page, next_cursor
 
     def get_entity(self, entity_id: str) -> CatalogEntityRevision:
         with self._read() as session:
@@ -269,18 +332,26 @@ class CatalogEntityService:
     def _entity(
         self, session: Session, entity_or_revision_id: str, *, for_update: bool = False
     ) -> CatalogEntity:
-        statement = select(CatalogEntity).where(
-            CatalogEntity.id == entity_or_revision_id
-        )
-        if for_update:
-            statement = statement.with_for_update()
+        statement = self._entity_statement(entity_or_revision_id, for_update=for_update)
         entity = session.scalar(statement)
         if entity is not None:
             return entity
         revision = session.get(CatalogEntityRevision, entity_or_revision_id)
         if revision is None:
             raise KeyError(entity_or_revision_id)
+        if for_update:
+            locked = session.scalar(
+                self._entity_statement(revision.entity_id, for_update=True)
+            )
+            if locked is None:
+                raise KeyError(entity_or_revision_id)
+            return locked
         return revision.entity
+
+    @staticmethod
+    def _entity_statement(entity_id: str, *, for_update: bool):
+        statement = select(CatalogEntity).where(CatalogEntity.id == entity_id)
+        return statement.with_for_update() if for_update else statement
 
     def _latest(self, session: Session, entity_id: str) -> CatalogEntityRevision | None:
         return session.scalar(
@@ -329,8 +400,13 @@ class CatalogEntityService:
                 "model_group",
                 CatalogKind.MODEL_GROUP,
             )
-        elif kind is CatalogKind.EXECUTION_HARNESS:
-            self._lookup_document_reference(session, document, "source_bundle")
+        elif kind is CatalogKind.RUNTIME_DISTRIBUTION:
+            self._lookup_document_reference(
+                session,
+                document,
+                "implements_harness",
+                CatalogKind.EXECUTION_HARNESS,
+            )
         elif kind is CatalogKind.PATCH_BUNDLE:
             self._lookup_document_reference(
                 session, document, "applies_to", CatalogKind.RUNTIME_DISTRIBUTION
@@ -391,6 +467,27 @@ def _actor(value: str) -> str:
     if not normalized or len(normalized) > 200:
         raise CatalogValidationError("catalog.actor", "catalog actor is invalid")
     return normalized
+
+
+def _encode_cursor(entity_id: str) -> str:
+    encoded = base64.urlsafe_b64encode(entity_id.encode("ascii")).decode("ascii")
+    return f"v1.{encoded.rstrip('=')}"
+
+
+def _decode_cursor(cursor: str) -> str:
+    try:
+        if not cursor.startswith("v1.") or len(cursor) > 128:
+            raise ValueError
+        payload = cursor[3:]
+        padding = "=" * (-len(payload) % 4)
+        entity_id = base64.urlsafe_b64decode(payload + padding).decode("ascii")
+        if _encode_cursor(entity_id) != cursor or len(entity_id) != 36:
+            raise ValueError
+        return entity_id
+    except (UnicodeDecodeError, ValueError) as error:
+        raise CatalogValidationError(
+            "catalog.cursor", "catalog cursor is invalid"
+        ) from error
 
 
 __all__ = [

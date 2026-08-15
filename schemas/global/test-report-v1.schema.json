@@ -3,14 +3,14 @@
   "$id": "https://api.vonkforge.ai/schemas/test-report/v1.schema.json",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "recipe_sha256", "source_bundle_sha256", "build_input_sha256", "image_digest", "deployment_profile", "node_count", "runtime", "checks", "started_at", "finished_at"],
+  "required": ["schema_version", "recipe_sha256", "source_bundle_sha256", "build_input_sha256", "image_digest", "topology_name", "node_count", "runtime", "checks", "started_at", "finished_at"],
   "properties": {
     "schema_version": {"const": 1},
     "recipe_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
     "source_bundle_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
     "build_input_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
     "image_digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
-    "deployment_profile": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
+    "topology_name": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"},
     "node_count": {"type": "integer", "minimum": 1},
     "runtime": {
       "type": "object",

@@ -67,7 +67,7 @@ class MappingNodePlanResponse(StrictModel):
 class MappingPlanResponse(StrictModel):
     recipe_revision_id: str
     recipe_content_sha256: str
-    profile_name: str
+    topology_name: str
     generation: int
     parameters: dict[str, object]
     nodes: list[MappingNodePlanResponse]
@@ -199,7 +199,6 @@ class InstallPreviewRequest(StrictModel):
 
 class MappingPreviewRequest(StrictModel):
     recipe_revision_id: str = Field(pattern=_UUID)
-    profile_name: str = Field(pattern=r"^[a-z][a-z0-9_.-]{0,63}$")
     node_ids: list[str] = Field(min_length=1, max_length=1024)
     parameters: dict[str, object] = Field(default_factory=dict, max_length=128)
 
@@ -302,7 +301,6 @@ def install_recipe_operation_routes(
             return asdict(
                 recipes().preview_mapping(
                     body.recipe_revision_id,
-                    body.profile_name,
                     tuple(body.node_ids),
                     parameters=body.parameters,
                 )
@@ -323,7 +321,6 @@ def install_recipe_operation_routes(
         try:
             plan = recipes().preview_mapping(
                 body.recipe_revision_id,
-                body.profile_name,
                 tuple(body.node_ids),
                 parameters=body.parameters,
             )

@@ -131,16 +131,13 @@ class RecipeOperationService:
     def preview_mapping(
         self,
         recipe_revision_id: str,
-        profile_name: str,
         node_ids: tuple[str, ...],
         *,
         parameters: Mapping[str, object],
     ) -> ClusterMappingPlan:
         if self._mappings is None:
             raise RecipeOperationConflict("cluster mapping service is unavailable")
-        return self._mappings.plan(
-            recipe_revision_id, profile_name, node_ids, parameters=parameters
-        )
+        return self._mappings.plan(recipe_revision_id, node_ids, parameters=parameters)
 
     def create_mapping(self, plan: ClusterMappingPlan, *, actor: str) -> str:
         if self._mappings is None:

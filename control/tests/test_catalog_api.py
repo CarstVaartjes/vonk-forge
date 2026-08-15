@@ -353,6 +353,11 @@ def test_administrator_authors_and_resolves_a_catalog_entity(api) -> None:
         json={"document": _api_model_group()},
     )
     assert denied.status_code == 403
+    assert denied.json() == {
+        "code": "catalog.entity_forbidden",
+        "detail": "administrator role is required for catalog entity authoring",
+        "request_id": "00000000-0000-4000-8000-000000000001",
+    }
 
     created = client.post(
         "/api/v1/catalog/entities",
@@ -384,6 +389,103 @@ def test_administrator_authors_and_resolves_a_catalog_entity(api) -> None:
     assert any(event.action == "catalog.entity.resolve" for event in audits.list())
 
 
+def test_entity_not_found_responses_match_the_documented_problem(api) -> None:
+    client, headers, _audits = api
+    missing = "10000000-0000-4000-8000-000000000099"
+    request_id = "30000000-0000-4000-8000-000000000003"
+    expected = {
+        "code": "catalog.entity_not_found",
+        "detail": "catalog entity or revision was not found",
+        "request_id": request_id,
+    }
+
+    responses = [
+        client.get(
+            f"/api/v1/catalog/entities/{missing}",
+            headers={**headers("viewer"), "x-request-id": request_id},
+        ),
+        client.put(
+            f"/api/v1/catalog/entities/{missing}/draft",
+            headers={**headers("administrator"), "x-request-id": request_id},
+            json={"expected_revision": 1, "document": _api_model_group()},
+        ),
+        client.post(
+            f"/api/v1/catalog/entities/{missing}/resolve",
+            headers={**headers("administrator"), "x-request-id": request_id},
+            json={"expected_revision": 1},
+        ),
+    ]
+
+    assert [(response.status_code, response.json()) for response in responses] == [
+        (404, expected),
+        (404, expected),
+        (404, expected),
+    ]
+
+
+def test_entity_stale_revision_returns_full_conflict_problem(api) -> None:
+    client, headers, _audits = api
+    created = client.post(
+        "/api/v1/catalog/entities",
+        headers=headers("administrator"),
+        json={"document": _api_model_group()},
+    ).json()
+    changed = _api_model_group()
+    changed["metadata"]["title"] = "Synthetic Updated"
+    client.put(
+        f"/api/v1/catalog/entities/{created['entity_id']}/draft",
+        headers=headers("administrator"),
+        json={"expected_revision": 1, "document": changed},
+    )
+
+    stale = client.post(
+        f"/api/v1/catalog/entities/{created['entity_id']}/resolve",
+        headers=headers("administrator"),
+        json={"expected_revision": 1},
+    )
+
+    assert stale.status_code == 409
+    assert stale.json() == {
+        "code": "catalog.stale_entity_revision",
+        "detail": "catalog entity revision changed",
+        "request_id": "00000000-0000-4000-8000-000000000001",
+    }
+
+
+def test_entity_list_pages_one_hundred_and_one_rows(api) -> None:
+    client, headers, _audits = api
+    for index in range(100):
+        document = _api_model_group()
+        slug = f"api-page-{index:03d}"
+        document["identity"]["slug"] = slug
+        document["metadata"]["title"] = f"API Page {index:03d}"
+        document["family"] = slug
+        response = client.post(
+            "/api/v1/catalog/entities",
+            headers=headers("administrator"),
+            json={"document": document},
+        )
+        assert response.status_code == 201
+
+    first = client.get(
+        "/api/v1/catalog/entities",
+        params={"kind": "model-group", "limit": 100},
+        headers=headers("viewer"),
+    )
+    cursor = first.json()["next_cursor"]
+    second = client.get(
+        "/api/v1/catalog/entities",
+        params={"kind": "model-group", "limit": 100, "cursor": cursor},
+        headers=headers("viewer"),
+    )
+
+    assert first.status_code == second.status_code == 200
+    assert len(first.json()["entities"]) == 100
+    assert cursor.startswith("v1.")
+    assert len(second.json()["entities"]) == 1
+    assert second.json()["next_cursor"] is None
+
+
 def test_catalog_entity_revision_preserves_identity_and_rejects_secrets(api) -> None:
     client, headers, _audits = api
     created = client.post(
@@ -409,7 +511,11 @@ def test_catalog_entity_revision_preserves_identity_and_rejects_secrets(api) -> 
         json={"document": secret},
     )
     assert rejected.status_code == 422
-    assert rejected.json()["code"] == "catalog.sensitive_field"
+    assert rejected.json() == {
+        "code": "catalog.sensitive_field",
+        "detail": "sensitive field is forbidden at $.metadata.credential",
+        "request_id": "00000000-0000-4000-8000-000000000001",
+    }
     assert "never-reflect-me" not in rejected.text
 
 
@@ -519,7 +625,7 @@ def test_publication_report_and_export_are_local_json_only(
         "source_bundle_sha256": local_document["build"]["context"]["sha256"],
         "build_input_sha256": "b" * 64,
         "image_digest": "sha256:" + "c" * 64,
-        "deployment_profile": "solo",
+        "topology_name": "solo",
         "node_count": 1,
         "runtime": {
             "agent_version": "1.0.0",

@@ -24,7 +24,7 @@ from .models import (
     ResourceReservation,
     RunNode,
 )
-from .recipe_contract import deployment_profile
+from .recipe_contract import recipe_topology
 from .topology import Placement, TopologyError, validate_topology
 
 
@@ -129,19 +129,17 @@ class RunAdmissionService:
                 pass
         topology_reason: AdmissionReason | None = None
         try:
-            ordered = validate_topology(
-                revision.document, mapping.profile_name, placements, capabilities
-            )
+            ordered = validate_topology(revision.document, placements, capabilities)
         except TopologyError as error:
             ordered = tuple(sorted(placements, key=lambda item: item.rank))
             topology_reason = AdmissionReason(error.code, str(error))
-        profile = deployment_profile(revision.document, mapping.profile_name)
-        profile_roles = profile.get("roles")
+        topology = recipe_topology(revision.document)
+        topology_roles = topology.get("roles")
         runtime = revision.document.get("runtime")
-        if not isinstance(profile_roles, list) or not isinstance(runtime, dict):
-            raise TypeError("recipe runtime profile is invalid")
+        if not isinstance(topology_roles, list) or not isinstance(runtime, dict):
+            raise TypeError("recipe runtime topology is invalid")
         role_by_name = {
-            str(role["name"]): role for role in profile_roles if isinstance(role, dict)
+            str(role["name"]): role for role in topology_roles if isinstance(role, dict)
         }
         endpoint = runtime.get("endpoint")
         if not isinstance(endpoint, dict):

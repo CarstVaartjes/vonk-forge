@@ -26,6 +26,7 @@ from sqlalchemy import (
     UniqueConstraint,
     event,
     inspect,
+    select,
     text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship
@@ -1789,7 +1790,7 @@ class CatalogEntityRevision(Base):
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )
     entity_id: Mapped[str] = mapped_column(
-        ForeignKey("catalog_entities.id", ondelete="CASCADE"),
+        ForeignKey("catalog_entities.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     )
@@ -1803,6 +1804,19 @@ class CatalogEntityRevision(Base):
         DateTime(timezone=True), nullable=False
     )
     entity: Mapped[CatalogEntity] = relationship(lazy="joined")
+
+
+@event.listens_for(CatalogEntity, "before_delete")
+def _catalog_entity_with_revisions_cannot_be_deleted(
+    _mapper, connection, target: CatalogEntity
+) -> None:
+    revision_id = connection.scalar(
+        select(CatalogEntityRevision.id)
+        .where(CatalogEntityRevision.entity_id == target.id)
+        .limit(1)
+    )
+    if revision_id is not None:
+        raise ValueError("catalog entities with revisions cannot be deleted")
 
 
 @event.listens_for(CatalogEntityRevision, "before_update")
@@ -2111,7 +2125,7 @@ class ClusterMapping(Base):
         nullable=False,
         index=True,
     )
-    profile_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    topology_name: Mapped[str] = mapped_column(String(64), nullable=False)
     generation: Mapped[int] = mapped_column(Integer, nullable=False)
     node_count: Mapped[int] = mapped_column(Integer, nullable=False)
     state: Mapped[str] = mapped_column(String(24), nullable=False, index=True)

@@ -36,9 +36,42 @@ def test_recipe_has_one_topology_and_exact_bindings() -> None:
     }
 
 
-def test_prototype_multi_profile_shape_is_rejected() -> None:
+def test_recipe_patch_bundle_is_nullable_and_part_of_exact_references() -> None:
     document = recipe_document()
-    document["deployment_profiles"] = []
+    document["execution"]["patch_bundle"] = {
+        "kind": "patch-bundle",
+        "publisher": "vonk-forge",
+        "slug": "vllm-fix",
+        "content_sha256": "e" * 64,
+    }
+
+    validate_recipe(document)
+
+    references = recipe_references(document)
+    assert [reference.kind for reference in references] == [
+        CatalogKind.MODEL_VERSION,
+        CatalogKind.EXECUTION_HARNESS,
+        CatalogKind.RUNTIME_DISTRIBUTION,
+        CatalogKind.PATCH_BUNDLE,
+    ]
+
+
+def test_recipe_digest_changes_with_patch_identity() -> None:
+    unpatched = recipe_document()
+    patched = recipe_document()
+    patched["execution"]["patch_bundle"] = {
+        "kind": "patch-bundle",
+        "publisher": "vonk-forge",
+        "slug": "vllm-fix",
+        "content_sha256": "e" * 64,
+    }
+
+    assert recipe_content_sha256(unpatched) != recipe_content_sha256(patched)
+
+
+def test_unknown_root_shape_is_rejected() -> None:
+    document = recipe_document()
+    document["unexpected_root"] = []
 
     with pytest.raises(RecipeContractError, match="additionalProperties"):
         validate_recipe(document)

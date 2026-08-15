@@ -382,9 +382,7 @@ class CatalogService:
                         "import report must be resolved before this recipe can run",
                     )
             clean = self._validated_document(latest.document, slug=recipe.slug)
-            digest = self._resolve_recipe_revision(
-                session, clean, actor=actor, patch_reference=None
-            )
+            digest = self._resolve_recipe_revision(session, clean, actor=actor)
             revision = LocalRecipeRevision(
                 recipe_id=recipe.id,
                 revision_number=self._repository.next_revision_number(
@@ -406,7 +404,6 @@ class CatalogService:
         document: Mapping[str, object],
         *,
         actor: str,
-        patch_reference: Mapping[str, object] | CatalogReference | None = None,
     ) -> str:
         """Validate every exact entity binding before returning the recipe digest."""
 
@@ -418,9 +415,7 @@ class CatalogService:
                 error.code, f"{error.path}: {error.detail}"
             ) from error
         with self._sessions() as session:
-            return self._resolve_recipe_revision(
-                session, clean, actor=actor, patch_reference=patch_reference
-            )
+            return self._resolve_recipe_revision(session, clean, actor=actor)
 
     def _resolve_recipe_revision(
         self,
@@ -428,11 +423,12 @@ class CatalogService:
         document: Mapping[str, object],
         *,
         actor: str,
-        patch_reference: Mapping[str, object] | CatalogReference | None,
     ) -> str:
         _actor(actor)
         entity_service = CatalogEntityService(session, clock=self._clock)
-        model_version_ref, harness_ref, distribution_ref = recipe_references(document)
+        references = recipe_references(document)
+        model_version_ref, harness_ref, distribution_ref = references[:3]
+        patch_ref = references[3] if len(references) == 4 else None
         model_version = entity_service.lookup_exact(
             *model_version_ref.portable_identity
         )
@@ -444,26 +440,19 @@ class CatalogService:
             model.document, "model_group", CatalogKind.MODEL_GROUP
         )
         entity_service.lookup_exact(*group_ref.portable_identity)
-        harness = entity_service.lookup_exact(*harness_ref.portable_identity)
-        entity_service.lookup_exact(*distribution_ref.portable_identity)
-        supported_distribution = _catalog_reference(
-            harness.document, "source_bundle", CatalogKind.RUNTIME_DISTRIBUTION
+        entity_service.lookup_exact(*harness_ref.portable_identity)
+        distribution = entity_service.lookup_exact(*distribution_ref.portable_identity)
+        implemented_harness = _catalog_reference(
+            distribution.document,
+            "implements_harness",
+            CatalogKind.EXECUTION_HARNESS,
         )
-        if supported_distribution != distribution_ref:
+        if implemented_harness != harness_ref:
             raise CatalogConflict(
                 "catalog.harness_distribution_mismatch",
-                "runtime distribution does not support the exact harness",
+                "runtime distribution does not implement the exact harness",
             )
-        if patch_reference is not None:
-            if isinstance(patch_reference, CatalogReference):
-                patch_ref = patch_reference
-            else:
-                try:
-                    patch_ref = parse_catalog_reference(
-                        patch_reference, expected_kind=CatalogKind.PATCH_BUNDLE
-                    )
-                except CatalogContractError as error:
-                    raise CatalogValidationError(error.code, error.detail) from error
+        if patch_ref is not None:
             patch = entity_service.lookup_exact(*patch_ref.portable_identity)
             applies_to = _catalog_reference(
                 patch.document, "applies_to", CatalogKind.RUNTIME_DISTRIBUTION
@@ -520,9 +509,7 @@ class CatalogService:
                 "global.identity_mismatch", "global recipe identity is inconsistent"
             )
         with self._sessions.begin() as session:
-            self._resolve_recipe_revision(
-                session, clean, actor=actor, patch_reference=None
-            )
+            self._resolve_recipe_revision(session, clean, actor=actor)
             imported = session.scalar(
                 select(RecipeImport).where(
                     RecipeImport.source_kind == "global",
@@ -692,7 +679,7 @@ class CatalogService:
                     "test report does not match this recipe source bundle",
                 )
             if (
-                clean.get("deployment_profile") != topology["name"]
+                clean.get("topology_name") != topology["name"]
                 or clean.get("node_count") != topology["node_count"]
             ):
                 raise CatalogValidationError(
@@ -896,6 +883,7 @@ def _summary(recipe: LocalRecipe, revision: LocalRecipeRevision) -> RecipeSummar
 def _document_summary(document: Mapping[str, object]) -> dict[str, Any]:
     runtime = _mapping(document["runtime"])
     execution = _mapping(document["execution"])
+    harness = _mapping(execution["harness"])
     distribution = _mapping(runtime["distribution"])
     build = _mapping(document["build"])
     context = _mapping(build["context"])
@@ -925,7 +913,7 @@ def _document_summary(document: Mapping[str, object]) -> dict[str, Any]:
             + int(memory["system_reserve_bytes"])
         )
     return {
-        "execution_harness": str(execution["slug"]),
+        "execution_harness": str(harness["slug"]),
         "runtime_distribution": str(distribution["slug"]),
         "source_bundle_sha256": str(context["sha256"]),
         "artifact_count": len(artifacts),
