@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, event, select, update
+from sqlalchemy import create_engine, event, select, text, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
@@ -503,6 +503,30 @@ def postgres_engine():
     finally:
         engine.dispose()
         subprocess.run(["docker", "stop", name], check=False, capture_output=True)
+
+
+def _postgres_backend_pid(connection) -> int:
+    return int(connection.connection.driver_connection.info.backend_pid)
+
+
+def _wait_for_postgres_block(engine, *, blocked_pid: int, blocker_pid: int) -> None:
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        with engine.connect() as connection:
+            row = connection.execute(
+                text(
+                    """
+                    SELECT pg_blocking_pids(pid), wait_event_type
+                    FROM pg_stat_activity
+                    WHERE pid = :pid
+                    """
+                ),
+                {"pid": blocked_pid},
+            ).one()
+        if blocker_pid in row[0] and row[1] == "Lock":
+            return
+        time.sleep(0.05)
+    pytest.fail("recipe operation never became database-lock blocked")
 
 
 def test_install_is_digest_bound_idempotent_and_gang_complete(tmp_path: Path) -> None:
@@ -1656,6 +1680,95 @@ def test_uninstall_queue_rollback_and_request_key_are_owner_bound(
     assert operation.owner_id == first.owner_id
 
 
+@pytest.mark.parametrize(
+    ("uninstall_state", "blocked"),
+    (("queued", True), ("running", True), ("failed", False), ("succeeded", False)),
+)
+def test_start_fences_only_active_uninstall_operations_after_installation_lock(
+    tmp_path: Path, uninstall_state: str, blocked: bool
+) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="9" * 35 + "e"
+    )
+    run_plan = service.preview_run(installation.owner_id)
+    uninstall_plan = service.preview_uninstall(installation.owner_id)
+    uninstall = service.uninstall(
+        installation.owner_id,
+        plan_digest=uninstall_plan.plan_digest,
+        actor="admin",
+        request_id="9" * 35 + "f",
+    )
+    with sessions.begin() as session:
+        job = session.get(Job, uninstall.id)
+        assert job is not None
+        job.state = uninstall_state
+
+    if blocked:
+        with pytest.raises(RecipeOperationConflict, match="not runnable"):
+            service.start(
+                run_plan,
+                plan_digest=run_plan.plan_digest,
+                alias="fenced",
+                actor="admin",
+                request_id="9" * 35 + "0",
+            )
+    else:
+        started = service.start(
+            run_plan,
+            plan_digest=run_plan.plan_digest,
+            alias="allowed",
+            actor="admin",
+            request_id="9" * 35 + "0",
+        )
+        assert started.kind == "recipe.start"
+
+    with sessions() as session:
+        start_jobs = tuple(
+            session.scalars(select(Job).where(Job.kind == "recipe.start"))
+        )
+        runs = tuple(session.scalars(select(RecipeRun)))
+    assert len(start_jobs) == len(runs) == (0 if blocked else 1)
+
+
+def test_different_uninstall_request_remains_blocked_by_active_operation(
+    tmp_path: Path,
+) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="a" * 35 + "0"
+    )
+    plan = service.preview_uninstall(installation.owner_id)
+    first = service.uninstall(
+        installation.owner_id,
+        plan_digest=plan.plan_digest,
+        actor="admin",
+        request_id="a" * 35 + "1",
+    )
+
+    with pytest.raises(RecipeOperationConflict, match="stale or blocked"):
+        service.uninstall(
+            installation.owner_id,
+            plan_digest=plan.plan_digest,
+            actor="admin",
+            request_id="a" * 35 + "2",
+        )
+
+    with sessions() as session:
+        parents = tuple(
+            session.scalars(select(Job).where(Job.kind == "recipe.uninstall"))
+        )
+        children = tuple(
+            session.scalars(
+                select(AgentOperation).where(AgentOperation.parent_job_id == first.id)
+            )
+        )
+    assert [parent.id for parent in parents] == [first.id]
+    assert {child.node_id for child in children} == set(nodes)
+
+
 def test_run_status_projects_exact_rank_health_without_agent_secrets(
     tmp_path: Path,
 ) -> None:
@@ -2110,6 +2223,194 @@ def test_postgres_duplicate_stop_request_returns_same_operation(
             )
             == 1
         )
+
+
+def test_postgres_duplicate_uninstall_rechecks_replay_after_installation_lock(
+    tmp_path: Path, postgres_engine
+) -> None:
+    Base.metadata.drop_all(postgres_engine)
+    sessions, service, queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2, engine=postgres_engine
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="f" * 35 + "2"
+    )
+    plan = service.preview_uninstall(installation.owner_id)
+    request_key = "f" * 35 + "3"
+    available_before = queue.available
+    role = threading.local()
+    backend_pids: dict[str, int] = {}
+    first_locked = threading.Event()
+    second_lock_started = threading.Event()
+    release_first = threading.Event()
+
+    def before_lock(connection, _cursor, statement, _parameters, _context, _many):
+        if (
+            getattr(role, "value", None) == "second"
+            and "FROM recipe_installations" in statement
+            and "FOR UPDATE" in statement
+        ):
+            backend_pids["second"] = _postgres_backend_pid(connection)
+            second_lock_started.set()
+
+    def after_lock(connection, _cursor, statement, _parameters, _context, _many):
+        if (
+            getattr(role, "value", None) == "first"
+            and "FROM recipe_installations" in statement
+            and "FOR UPDATE" in statement
+        ):
+            backend_pids["first"] = _postgres_backend_pid(connection)
+            first_locked.set()
+            assert release_first.wait(timeout=10)
+
+    def uninstall(label: str):
+        role.value = label
+        return service.uninstall(
+            installation.owner_id,
+            plan_digest=plan.plan_digest,
+            actor="admin",
+            request_id=request_key,
+        )
+
+    event.listen(postgres_engine, "before_cursor_execute", before_lock)
+    event.listen(postgres_engine, "after_cursor_execute", after_lock)
+    pool = ThreadPoolExecutor(max_workers=2)
+    try:
+        first = pool.submit(uninstall, "first")
+        assert first_locked.wait(timeout=10)
+        second = pool.submit(uninstall, "second")
+        assert second_lock_started.wait(timeout=10)
+        _wait_for_postgres_block(
+            postgres_engine,
+            blocked_pid=backend_pids["second"],
+            blocker_pid=backend_pids["first"],
+        )
+        release_first.set()
+        first_view = first.result(timeout=10)
+        second_view = second.result(timeout=10)
+    finally:
+        release_first.set()
+        pool.shutdown(wait=True)
+        event.remove(postgres_engine, "before_cursor_execute", before_lock)
+        event.remove(postgres_engine, "after_cursor_execute", after_lock)
+
+    assert second_view == first_view
+    assert queue.available == available_before + 1
+    with sessions() as session:
+        parents = tuple(
+            session.scalars(select(Job).where(Job.kind == "recipe.uninstall"))
+        )
+        children = tuple(
+            session.scalars(
+                select(AgentOperation).where(
+                    AgentOperation.parent_job_id == first_view.id
+                )
+            )
+        )
+    assert [parent.id for parent in parents] == [first_view.id]
+    assert {child.node_id for child in children} == set(nodes)
+
+
+def test_postgres_start_waiting_on_accepted_uninstall_is_rejected(
+    tmp_path: Path, postgres_engine
+) -> None:
+    Base.metadata.drop_all(postgres_engine)
+    sessions, service, queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2, engine=postgres_engine
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="f" * 35 + "4"
+    )
+    run_plan = service.preview_run(installation.owner_id)
+    uninstall_plan = service.preview_uninstall(installation.owner_id)
+    available_before = queue.available
+    role = threading.local()
+    backend_pids: dict[str, int] = {}
+    uninstall_locked = threading.Event()
+    start_lock_started = threading.Event()
+    release_uninstall = threading.Event()
+
+    def before_lock(connection, _cursor, statement, _parameters, _context, _many):
+        if (
+            getattr(role, "value", None) == "start"
+            and "FROM recipe_installations" in statement
+            and "FOR UPDATE" in statement
+        ):
+            backend_pids["start"] = _postgres_backend_pid(connection)
+            start_lock_started.set()
+
+    def after_lock(connection, _cursor, statement, _parameters, _context, _many):
+        if (
+            getattr(role, "value", None) == "uninstall"
+            and "FROM recipe_installations" in statement
+            and "FOR UPDATE" in statement
+        ):
+            backend_pids["uninstall"] = _postgres_backend_pid(connection)
+            uninstall_locked.set()
+            assert release_uninstall.wait(timeout=10)
+
+    def uninstall():
+        role.value = "uninstall"
+        return service.uninstall(
+            installation.owner_id,
+            plan_digest=uninstall_plan.plan_digest,
+            actor="admin",
+            request_id="f" * 35 + "5",
+        )
+
+    def start():
+        role.value = "start"
+        try:
+            return service.start(
+                run_plan,
+                plan_digest=run_plan.plan_digest,
+                alias="must-not-start",
+                actor="admin",
+                request_id="f" * 35 + "6",
+            )
+        except RecipeOperationConflict as error:
+            return error
+
+    event.listen(postgres_engine, "before_cursor_execute", before_lock)
+    event.listen(postgres_engine, "after_cursor_execute", after_lock)
+    pool = ThreadPoolExecutor(max_workers=2)
+    try:
+        uninstall_future = pool.submit(uninstall)
+        assert uninstall_locked.wait(timeout=10)
+        start_future = pool.submit(start)
+        assert start_lock_started.wait(timeout=10)
+        _wait_for_postgres_block(
+            postgres_engine,
+            blocked_pid=backend_pids["start"],
+            blocker_pid=backend_pids["uninstall"],
+        )
+        release_uninstall.set()
+        uninstall_view = uninstall_future.result(timeout=10)
+        start_result = start_future.result(timeout=10)
+    finally:
+        release_uninstall.set()
+        pool.shutdown(wait=True)
+        event.remove(postgres_engine, "before_cursor_execute", before_lock)
+        event.remove(postgres_engine, "after_cursor_execute", after_lock)
+
+    assert isinstance(start_result, RecipeOperationConflict)
+    assert "not runnable" in str(start_result)
+    assert queue.available == available_before + 1
+    with sessions() as session:
+        start_jobs = tuple(
+            session.scalars(select(Job).where(Job.kind == "recipe.start"))
+        )
+        runs = tuple(session.scalars(select(RecipeRun)))
+        uninstall_children = tuple(
+            session.scalars(
+                select(AgentOperation).where(
+                    AgentOperation.parent_job_id == uninstall_view.id
+                )
+            )
+        )
+    assert start_jobs == ()
+    assert runs == ()
+    assert {child.node_id for child in uninstall_children} == set(nodes)
 
 
 def test_changed_plan_or_reused_request_key_is_rejected(tmp_path: Path) -> None:

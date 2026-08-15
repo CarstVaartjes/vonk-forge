@@ -515,6 +515,18 @@ class RecipeOperationService:
             )
             if installation_fence is None or installation_fence.state != "installed":
                 raise RecipeOperationConflict("recipe installation is not runnable")
+            active_uninstall = session.scalar(
+                select(Job.id)
+                .where(
+                    Job.kind == "recipe.uninstall",
+                    Job.state.in_({"queued", "running"}),
+                    Job.payload["owner_kind"].as_string() == "installation",
+                    Job.payload["owner_id"].as_string() == plan.installation_id,
+                )
+                .limit(1)
+            )
+            if active_uninstall is not None:
+                raise RecipeOperationConflict("recipe installation is not runnable")
             try:
                 run_id = self._run_admission.accept_run_in_session(
                     session, plan, alias=alias, actor=actor, now=now
@@ -701,6 +713,13 @@ class RecipeOperationService:
         now = self._clock()
         try:
             with self._sessions.begin() as session:
+                installation_fence = session.scalar(
+                    select(RecipeInstallation)
+                    .where(RecipeInstallation.id == installation_id)
+                    .with_for_update(of=RecipeInstallation)
+                )
+                if installation_fence is None:
+                    raise RecipeOperationConflict("recipe installation does not exist")
                 existing = self._idempotent_in_session(
                     session,
                     request_id,
