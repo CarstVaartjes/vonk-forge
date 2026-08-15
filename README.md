@@ -200,6 +200,8 @@ reconciled by the repository-less worker.
 - [Source-first recipe containers and local builds](deploy/compose/README.md#recipe-containers-are-source-first)
 - [Agent development/stable package release and APT installation](docs/operations/agent-package-release.md)
 - [Control-plane bootstrap](docs/runbooks/control-plane-bootstrap.md)
+- [Control-plane operations](docs/runbooks/control-plane-operations.md)
+- [Control-plane telemetry](docs/runbooks/control-plane-telemetry.md)
 - [`vonkctl` runbook](docs/runbooks/vonkctl.md)
 - [Inventory runbook](docs/runbooks/inventory.md)
 - [Generic fleet migration](docs/runbooks/fleet-migration.md) — generated node
