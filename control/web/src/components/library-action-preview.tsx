@@ -2,11 +2,14 @@ import type {
   LibraryInstallPlan,
   LibraryLoadPlan,
   LibraryMappingPlan,
+  LibrarySnapshot,
   LibraryStopPlan,
   LibraryUninstallPlan,
 } from "../api/types";
 import {formatBytes} from "../lib/fleet";
 import {LibraryPlanReasons} from "./library-plan-reasons";
+import {LibraryReasons} from "./library-reasons";
+import type {LibraryPlacementGroup} from "./library-action-types";
 
 export type LibraryActionPlan = LibraryMappingPlan | LibraryInstallPlan | LibraryLoadPlan | LibraryStopPlan | LibraryUninstallPlan;
 
@@ -17,21 +20,51 @@ function reasonSets(nodes: Array<{blockers: {code: string; detail: string}[]; wa
   };
 }
 
-export function MappingPreview({plan}: {plan: LibraryMappingPlan}) {
+function inventoryFreshness(observedAt: string | null, generatedAt: string, policy: LibrarySnapshot["freshness_policy"]): string {
+  if (!observedAt) return "Inventory unavailable · observation not reported";
+  const observed = Date.parse(observedAt);
+  const generated = Date.parse(generatedAt);
+  if (!Number.isFinite(observed) || !Number.isFinite(generated)) return "Inventory unavailable · invalid observation time";
+  const age = Math.max(0, Math.round((generated - observed) / 1000));
+  return `Inventory ${age < policy.inventory_fresh_seconds ? "fresh" : "stale"} · ${age}s`;
+}
+
+export function MappingPreview({evidence, plan, policy}: {
+  evidence?: LibraryPlacementGroup;
+  plan: LibraryMappingPlan;
+  policy: LibrarySnapshot["freshness_policy"];
+}) {
   return <div className="action-preview">
     <p><strong>{plan.profile_name}</strong> · generation {plan.generation}</p>
-    <ol>{plan.nodes.map(node => <li key={node.node_id}>Rank {node.rank} · {node.role}{node.endpoint_owner ? " · endpoint owner" : ""} · {node.node_id}</li>)}</ol>
+    <ol className="action-node-plans">{plan.nodes.map(node => {
+      const authority = evidence?.nodes.find(candidate => candidate.node_id === node.node_id && candidate.rank === node.rank);
+      return <li key={node.node_id}>
+        <strong>Rank {node.rank} · {node.role}{node.endpoint_owner ? " · endpoint owner" : ""} · {node.node_id}</strong>
+        {authority ? <>
+          <span>{formatBytes(authority.disk_required_bytes)} disk required · {formatBytes(authority.disk_reserved_bytes)} reserved · {formatBytes(authority.disk_free_after_bytes)} after</span>
+          <span>{formatBytes(authority.artifact_reuse_bytes)} exact artifacts reused</span>
+          <span>Inventory {authority.inventory_age_seconds < policy.inventory_fresh_seconds ? "fresh" : "stale"} · {authority.inventory_age_seconds}s</span>
+        </> : <span>Placement capacity evidence unavailable for this node.</span>}
+      </li>;
+    })}</ol>
+    {evidence && <LibraryReasons reasons={evidence.reasons}/>}
   </div>;
 }
 
-export function InstallPreview({plan}: {plan: LibraryInstallPlan}) {
+export function InstallPreview({generatedAt, plan, policy}: {
+  generatedAt: string;
+  plan: LibraryInstallPlan;
+  policy: LibrarySnapshot["freshness_policy"];
+}) {
   const reasons = reasonSets(plan.nodes);
   return <div className="action-preview">
     <p>Exact mapping <strong>{plan.mapping_id}</strong> · generation {plan.mapping_generation}</p>
     <ol className="action-node-plans">{plan.nodes.map(node => <li key={node.node_id}>
       <strong>Rank {node.rank} · {node.role} · {node.node_id}</strong>
       <span>{formatBytes(node.required_bytes)} disk required · {formatBytes(node.required_download_bytes)} download · {formatBytes(node.reused_bytes)} reused</span>
-      <span>{formatBytes(node.active_reserved_bytes)} reserved · {node.free_bytes == null ? "Disk inventory unavailable" : `${formatBytes(node.free_bytes)} free`}{node.free_after_bytes == null ? "" : ` · ${formatBytes(node.free_after_bytes)} after`} · inventory {node.inventory_observed_at ?? "not reported"}</span>
+      <span>{formatBytes(node.active_reserved_bytes)} reserved · {node.free_bytes == null ? "Disk inventory unavailable" : `${formatBytes(node.free_bytes)} free`}{node.free_after_bytes == null ? "" : ` · ${formatBytes(node.free_after_bytes)} after`}</span>
+      <span>{inventoryFreshness(node.inventory_observed_at, generatedAt, policy)}</span>
+      <span>Observed {node.inventory_observed_at ?? "not reported"}</span>
     </li>)}</ol>
     <LibraryPlanReasons heading="Install blockers" reasons={reasons.blockers}/>
     <LibraryPlanReasons heading="Install warnings" reasons={reasons.warnings}/>
@@ -43,6 +76,7 @@ export function LoadPreview({plan}: {plan: LibraryLoadPlan}) {
   const coexistence = reasons.warnings.filter(reason => reason.code.toLowerCase().includes("coexist"));
   return <div className="action-preview">
     <p className="authority-copy">Existing recipes remain loaded. Forge will not unload anything automatically.</p>
+    <p>Endpoint alias {plan.alias}</p>
     <p>Selected installation <strong>{plan.installation_id}</strong> · mapping generation {plan.mapping_generation}</p>
     <ol className="action-node-plans">{plan.nodes.map(node => <li key={node.node_id}>
       <strong>Rank {node.rank} · {node.role}{node.endpoint_owner ? " · endpoint owner" : ""}</strong>

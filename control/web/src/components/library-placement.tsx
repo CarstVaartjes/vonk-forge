@@ -3,7 +3,7 @@ import type {MouseEvent} from "react";
 import type {LibraryRecipeDetail, LibrarySnapshot} from "../api/types";
 import {formatBytes} from "../lib/fleet";
 import {actionName} from "./library-action-types";
-import type {LibraryActionTarget} from "./library-action-types";
+import type {LibraryActionTarget, LibraryPlacementGroup} from "./library-action-types";
 import {LibraryReasons} from "./library-reasons";
 
 type Placement = LibraryRecipeDetail["placement"][number];
@@ -56,7 +56,7 @@ function RejectedEvidence({group, policy}: {group: Group; policy: FreshnessPolic
 export function LibraryPlacement({actionsDisabled = false, detail, onReview, policy}: {
   actionsDisabled?: boolean;
   detail: LibraryRecipeDetail;
-  onReview?(target: LibraryActionTarget, trigger: HTMLButtonElement): void;
+  onReview?(target: LibraryActionTarget, trigger: HTMLButtonElement, evidence?: LibraryPlacementGroup): void;
   policy: FreshnessPolicy;
 }) {
   const [selectedGroup, setSelectedGroup] = useState("");
@@ -77,19 +77,19 @@ export function LibraryPlacement({actionsDisabled = false, detail, onReview, pol
           <button type="button" className="placement-selector" aria-pressed={selected} onClick={() => setSelectedGroup(key)} aria-label={`Select complete group ${group.node_ids.join(" and ")}`}>
             <span>{group.node_ids.join(" + ")}</span><small>{group.nodes.length} ranks · complete group</small>
           </button>
-          <GroupEvidence group={group} policy={policy} selected={selected}/>
-          {selected && group.preview_targets.length > 0 && <div className="placement-actions" aria-label="Selected group actions">
+          {selected && group.preview_targets.length > 0 && <div className="placement-actions" role="region" aria-label="Selected group actions">
             {group.preview_targets.map((target, index) => <button
               type="button"
               className="button"
               disabled={actionsDisabled}
               key={`${target.kind}:${index}`}
-              onClick={(event: MouseEvent<HTMLButtonElement>) => onReview?.(target, event.currentTarget)}
+              onClick={(event: MouseEvent<HTMLButtonElement>) => onReview?.(target, event.currentTarget, group)}
             >Review {actionName(target)}</button>)}
           </div>}
+          <GroupEvidence group={group} policy={policy} selected={selected}/>
         </article>;
       })}</div>
-      {(profile.rejected_groups.length > 0 || profile.rejected_nodes.length > 0) && <details className="placement-rejections" open>
+      {(profile.rejected_groups.length > 0 || profile.rejected_nodes.length > 0) && <details className="placement-rejections">
         <summary>Unavailable placement evidence</summary>
         {profile.rejected_groups.map(group => <RejectedEvidence key={groupKey(profile.profile_name, group)} group={group} policy={policy}/>)}
         {profile.rejected_nodes.map(node => <div key={node.node_id} className="rejected-node"><strong>{node.node_id}</strong><LibraryReasons reasons={node.reasons}/></div>)}

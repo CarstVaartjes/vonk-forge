@@ -71,23 +71,25 @@ it("uses distinct digest-bound Library action operations", async () => {
     }), {status: request.method === "GET" ? 200 : request.url.includes("preview") ? 200 : 202});
   });
   const api = new ApiClient();
+  const controller = new AbortController();
 
   await api.librarySnapshot("cursor-1");
   await api.libraryRecipe("recipe/one");
-  await api.previewLibraryMapping({recipe_revision_id: "revision-1", profile_name: "pair", node_ids: ["node-a", "node-b"], parameters: {tensor: 2}});
-  await api.applyLibraryMapping({recipe_revision_id: "revision-1", profile_name: "pair", node_ids: ["node-a", "node-b"], parameters: {tensor: 2}, placement_digest: "map-plan"});
+  await api.previewLibraryMapping({recipe_revision_id: "revision-1", profile_name: "pair", node_ids: ["node-a", "node-b"], parameters: {tensor: 2}}, controller.signal);
+  await api.applyLibraryMapping({recipe_revision_id: "revision-1", profile_name: "pair", node_ids: ["node-a", "node-b"], parameters: {tensor: 2}, placement_digest: "map-plan", request_key: "00000000-0000-4000-8000-000000000001"});
   await api.previewLibraryInstall({recipe_build_id: "build-1", mapping_id: "mapping-1"});
-  await api.applyLibraryInstall({recipe_build_id: "build-1", mapping_id: "mapping-1", plan_digest: "install-plan"});
+  await api.applyLibraryInstall({recipe_build_id: "build-1", mapping_id: "mapping-1", plan_digest: "install-plan", request_key: "00000000-0000-4000-8000-000000000001"});
   await api.previewLibraryLoad({installation_id: "installation-1", alias: "chat"});
-  await api.applyLibraryLoad({installation_id: "installation-1", alias: "chat", plan_digest: "load-plan"});
+  await api.applyLibraryLoad({installation_id: "installation-1", alias: "chat", plan_digest: "load-plan", request_key: "00000000-0000-4000-8000-000000000001"});
   await api.previewLibraryStop("run-1");
-  await api.applyLibraryStop("run-1", "stop-plan");
+  await api.applyLibraryStop("run-1", {plan_digest: "stop-plan", request_key: "00000000-0000-4000-8000-000000000001"});
   await api.previewLibraryUninstall("installation-1");
-  await api.applyLibraryUninstall("installation-1", "remove-plan");
-  await api.libraryOperation("operation-1");
+  await api.applyLibraryUninstall("installation-1", {plan_digest: "remove-plan", request_key: "00000000-0000-4000-8000-000000000001"});
+  await api.libraryOperation("operation-1", controller.signal);
   await api.retryLibraryOperation("operation-1");
   await api.libraryRunStatus("run-1");
-  await api.libraryJobProgress("job-1");
+  await api.libraryJobProgress("job-1", controller.signal);
+  controller.abort();
 
   expect(requests.map(request => [request.method, new URL(request.url).pathname])).toEqual([
     ["GET", "/api/v1/library"],
@@ -114,6 +116,9 @@ it("uses distinct digest-bound Library action operations", async () => {
   expect(await requests[7].clone().json()).toEqual({installation_id: "installation-1", alias: "chat", plan_digest: "load-plan", request_key: "00000000-0000-4000-8000-000000000001"});
   expect(await requests[9].clone().json()).toEqual({plan_digest: "stop-plan", request_key: "00000000-0000-4000-8000-000000000001"});
   expect(await requests[11].clone().json()).toEqual({plan_digest: "remove-plan", request_key: "00000000-0000-4000-8000-000000000001"});
+  expect(requests[2].signal.aborted).toBe(true);
+  expect(requests[12].signal.aborted).toBe(true);
+  expect(requests[15].signal.aborted).toBe(true);
 });
 
 it("requests bounded node telemetry history through the generated operation", async () => {

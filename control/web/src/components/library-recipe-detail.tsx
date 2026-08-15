@@ -6,7 +6,7 @@ import {StatusPill} from "./status-pill";
 import {LibraryPlacement} from "./library-placement";
 import {LibraryReasons} from "./library-reasons";
 import {LibraryActionDialog} from "./library-action-dialog";
-import type {LibraryActionName, LibraryActionTarget} from "./library-action-types";
+import type {LibraryActionName, LibraryActionReview, LibraryActionTarget, LibraryPlacementGroup} from "./library-action-types";
 import {LibraryOperationProgress, operationSettled} from "./library-operation-progress";
 
 type Profile = LibraryRecipeDetail["profiles"][number];
@@ -42,7 +42,7 @@ export function LibraryRecipeAuthority({api, detail, onRefresh, policy}: {
   onRefresh(): Promise<void>;
   policy: LibrarySnapshot["freshness_policy"];
 }) {
-  const [review, setReview] = useState<LibraryActionTarget>();
+  const [review, setReview] = useState<LibraryActionReview>();
   const [operation, setOperation] = useState<LibraryOperation>();
   const [operationName, setOperationName] = useState<LibraryActionName>("Load");
   const trigger = useRef<HTMLButtonElement | null>(null);
@@ -54,9 +54,9 @@ export function LibraryRecipeAuthority({api, detail, onRefresh, policy}: {
     const returnTo = trigger.current;
     queueMicrotask(() => returnTo?.focus());
   }, []);
-  const openReview = useCallback((target: LibraryActionTarget, returnTo: HTMLButtonElement) => {
+  const openReview = useCallback((target: LibraryActionTarget, returnTo: HTMLButtonElement, evidence?: LibraryPlacementGroup) => {
     trigger.current = returnTo;
-    setReview(target);
+    setReview({evidence, target});
   }, []);
   const onApplied = useCallback((next: LibraryOperation, name: LibraryActionName) => {
     setOperationName(name);
@@ -68,6 +68,24 @@ export function LibraryRecipeAuthority({api, detail, onRefresh, policy}: {
       <div><p className="fleet-kicker">{detail.recipe.source_kind} recipe</p><strong className="recipe-authority-title">{detail.recipe.title}</strong><p>{detail.recipe.description}</p></div>
       <StatusPill tone={revision?.lifecycle === "resolved" ? "healthy" : "warning"}>{revision ? `${revision.lifecycle === "resolved" ? "Immutable" : revision.lifecycle} revision ${revision.revision_number}` : "No valid revision"}</StatusPill>
     </header>
+    <section className="library-section library-primary-control" aria-label="Recent operation state">
+      <div className="section-heading"><div><p className="fleet-kicker">Current authority</p><h4>Recent operation state</h4></div></div>
+      <div className="operation-summary">
+        {detail.operational_state.builds.map(build => <StatusPill key={build.recipe_build_id} tone={operationTone(build.state)}>{operationLabel("build", build.state)}</StatusPill>)}
+        {detail.operational_state.mappings.map(mapping => <StatusPill key={mapping.mapping_id} tone={operationTone(mapping.state)}>{operationLabel("mapping", mapping.state)}</StatusPill>)}
+        {detail.operational_state.installations.map(installation => <div className="operation-item" key={installation.installation_id}>
+          <StatusPill tone={operationTone(installation.state)}>{operationLabel("installation", installation.state)}</StatusPill>
+          {installation.state !== "uninstalled" && <button type="button" disabled={actionBlocked} onClick={event => openReview({kind: "uninstall", installationId: installation.installation_id}, event.currentTarget)}>Review Remove installation {installation.installation_id}</button>}
+        </div>)}
+        {detail.operational_state.runs.map(run => <div className="operation-item" key={run.run_id}>
+          <StatusPill tone={operationTone(run.state)}>{operationLabel("run", run.state)}</StatusPill>
+          {!['stopped'].includes(run.state) && <button type="button" disabled={actionBlocked} onClick={event => openReview({kind: "stop", runId: run.run_id}, event.currentTarget)}>Review Stop run {run.run_id}</button>}
+        </div>)}
+        {Object.values(detail.operational_state).every(items => items.length === 0) && <p>No operation history for this revision.</p>}
+      </div>
+    </section>
+    {operation && <LibraryOperationProgress api={api} name={operationName} onChange={setOperation} onRefresh={onRefresh} operation={operation}/>}
+    <LibraryPlacement actionsDisabled={actionBlocked} detail={detail} onReview={openReview} policy={policy}/>
     {visual && <>
       <section className="library-section recipe-essentials" aria-label="Model and runtime">
         <div><span>Model family</span><strong>{visual.workload.family}</strong></div>
@@ -89,30 +107,12 @@ export function LibraryRecipeAuthority({api, detail, onRefresh, policy}: {
         <div><h4>Validation</h4><p>{visual.validation.checks.join(" · ")}</p><p>{visual.validation.benchmark_count} benchmarks</p></div>
       </section>
     </>}
-    <section className="library-section" aria-label="Recent operation state">
-      <div className="section-heading"><h4>Recent operation state</h4></div>
-      <div className="operation-summary">
-        {detail.operational_state.builds.map(build => <StatusPill key={build.recipe_build_id} tone={operationTone(build.state)}>{operationLabel("build", build.state)}</StatusPill>)}
-        {detail.operational_state.mappings.map(mapping => <StatusPill key={mapping.mapping_id} tone={operationTone(mapping.state)}>{operationLabel("mapping", mapping.state)}</StatusPill>)}
-        {detail.operational_state.installations.map(installation => <div className="operation-item" key={installation.installation_id}>
-          <StatusPill tone={operationTone(installation.state)}>{operationLabel("installation", installation.state)}</StatusPill>
-          {installation.state !== "uninstalled" && <button type="button" disabled={actionBlocked} onClick={event => openReview({kind: "uninstall", installationId: installation.installation_id}, event.currentTarget)}>Review Remove installation {installation.installation_id}</button>}
-        </div>)}
-        {detail.operational_state.runs.map(run => <div className="operation-item" key={run.run_id}>
-          <StatusPill tone={operationTone(run.state)}>{operationLabel("run", run.state)}</StatusPill>
-          {!['stopped'].includes(run.state) && <button type="button" disabled={actionBlocked} onClick={event => openReview({kind: "stop", runId: run.run_id}, event.currentTarget)}>Review Stop run {run.run_id}</button>}
-        </div>)}
-        {Object.values(detail.operational_state).every(items => items.length === 0) && <p>No operation history for this revision.</p>}
-      </div>
-    </section>
-    {operation && <LibraryOperationProgress api={api} name={operationName} onChange={setOperation} onRefresh={onRefresh} operation={operation}/>}
     <LibraryReasons reasons={detail.reasons}/>
-    <LibraryPlacement actionsDisabled={actionBlocked} detail={detail} onReview={openReview} policy={policy}/>
     <nav className="advanced-workflows" aria-label="Advanced recipe workflows">
       <a href={`/catalog/${encodeURIComponent(detail.recipe.recipe_id)}/source`}>Source and build</a>
       <a href={`/catalog/${encodeURIComponent(detail.recipe.recipe_id)}/map`}>Cluster mapping</a>
       <a href={`/catalog/${encodeURIComponent(detail.recipe.recipe_id)}`}>Raw editor</a>
     </nav>
-    {review && <LibraryActionDialog alias={alias} api={api} onApplied={onApplied} onClose={closeReview} onRefresh={onRefresh} target={review}/>}
+    {review && <LibraryActionDialog alias={alias} api={api} evidence={review.evidence} generatedAt={detail.generated_at} onApplied={onApplied} onClose={closeReview} onRefresh={onRefresh} policy={policy} target={review.target}/>}
   </div>;
 }

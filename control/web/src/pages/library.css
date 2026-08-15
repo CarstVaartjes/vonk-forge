@@ -1,0 +1,107 @@
+.library-page {
+  min-width: 0;
+}
+
+.library-browser {
+  align-items: start;
+  display: grid;
+  gap: 1rem;
+}
+
+.library-pane {
+  background: var(--surface, #fff);
+  border: 1px solid var(--border, #d8dee8);
+  border-radius: 0.8rem;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.library-pane-heading,
+.library-row,
+.library-back,
+.library-placeholder {
+  padding-inline: 1rem;
+}
+
+.library-pane-heading {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  padding-block: 1rem 0.75rem;
+}
+
+.library-pane-heading > div {
+  align-items: center;
+  display: flex;
+  gap: 0.6rem;
+}
+
+.library-pane-heading h3,
+.library-step {
+  margin: 0;
+}
+
+.library-step {
+  align-items: center;
+  background: var(--ink, #172033);
+  border-radius: 50%;
+  color: #fff;
+  display: inline-flex;
+  font-size: 0.75rem;
+  height: 1.6rem;
+  justify-content: center;
+  width: 1.6rem;
+}
+
+.library-list,
+.library-row {
+  display: grid;
+}
+
+.library-row {
+  border-top: 1px solid var(--border, #d8dee8);
+  gap: 0.25rem;
+  padding-block: 0.85rem;
+  text-decoration: none;
+}
+
+.library-row[aria-current="page"] {
+  background: var(--surface-raised, #f2f6fb);
+  box-shadow: inset 3px 0 0 var(--accent, #315cf4);
+}
+
+.library-primary-control,
+.placement-section {
+  border-color: var(--accent, #315cf4);
+}
+
+.placement-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.75rem;
+}
+
+.placement-rejections:not([open]) > :not(summary) {
+  display: none;
+}
+
+.library-pagination {
+  align-items: center;
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  padding-block: 1rem;
+}
+
+@media (min-width: 900px) {
+  .library-browser {
+    grid-template-columns: minmax(12rem, 0.72fr) minmax(15rem, 0.9fr) minmax(28rem, 2fr);
+  }
+
+  .library-models,
+  .library-recipes {
+    position: sticky;
+    top: 1rem;
+  }
+}

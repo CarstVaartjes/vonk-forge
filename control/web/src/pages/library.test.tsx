@@ -2,7 +2,7 @@ import {act, render, screen, waitFor, within} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type {ControlApi} from "../api/types";
 import {App} from "../app";
-import {fullLibraryDetail, librarySnapshot, minimalLibraryDetail} from "../test-fixtures/library";
+import {codeRecipe, fullLibraryDetail, librarySnapshot, minimalLibraryDetail, unlinkedRecipe} from "../test-fixtures/library";
 
 afterEach(() => {
   history.replaceState(null, "", "/");
@@ -65,6 +65,50 @@ test("shows visual recipe truth and selects only one complete placement group on
   expect(within(groups).getByText("Admission inventory is stale for this complete group.")).toBeInTheDocument();
   expect(within(groups).getByText("Live capacity evidence is stale for this complete group.")).toBeInTheDocument();
   expect(within(groups).getByText("Admission inventory has not been reported.")).toBeInTheDocument();
+
+  const placementPosition = detail.compareDocumentPosition(groups);
+  const topologyPosition = groups.compareDocumentPosition(topology);
+  expect(placementPosition & Node.DOCUMENT_POSITION_CONTAINED_BY).toBeTruthy();
+  expect(topologyPosition & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  const unavailable = within(groups).getByText("Unavailable placement evidence").closest("details");
+  expect(unavailable).not.toHaveAttribute("open");
+  const actions = within(selected).getByRole("region", {name: "Selected group actions"});
+  const evidence = selected.querySelector(".placement-evidence")!;
+  expect(actions.compareDocumentPosition(evidence) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+test("loads and merges cursor pages without splitting model or unlinked recipe groups", async () => {
+  // Break caught: a many-recipe Library silently stops at the first page or
+  // creates duplicate model groups instead of preserving family membership.
+  history.replaceState(null, "", "/library/models/qwen%2F3");
+  const firstPage = {
+    ...librarySnapshot,
+    models: [{...librarySnapshot.models[0], recipes: [librarySnapshot.models[0].recipes[0]]}],
+    unlinked_recipes: [],
+    next_cursor: "page-2",
+  };
+  const secondPage = {
+    ...librarySnapshot,
+    models: [{...librarySnapshot.models[0], recipes: [codeRecipe]}],
+    unlinked_recipes: [unlinkedRecipe],
+    next_cursor: null,
+  };
+  const librarySnapshotRequest = vi.fn(async (cursor?: string) => cursor === "page-2" ? secondPage : firstPage);
+  const api = {librarySnapshot: librarySnapshotRequest} as unknown as ControlApi;
+  const user = userEvent.setup();
+  render(<App api={api}/>);
+
+  const models = await screen.findByRole("region", {name: "Models"});
+  expect(within(models).getByText("1 recipe")).toBeVisible();
+  await user.click(screen.getByRole("button", {name: "Load more Library recipes"}));
+
+  await waitFor(() => expect(librarySnapshotRequest).toHaveBeenCalledWith("page-2", expect.any(AbortSignal)));
+  expect(within(models).getByText("2 recipes")).toBeVisible();
+  const recipes = screen.getByRole("region", {name: "Recipes for Qwen 3"});
+  expect(within(recipes).getByRole("link", {name: /Qwen Chat/})).toBeVisible();
+  expect(within(recipes).getByRole("link", {name: /Qwen Code/})).toBeVisible();
+  expect(within(models).getByRole("link", {name: /Unlinked/})).toBeVisible();
+  expect(screen.queryByRole("button", {name: "Load more Library recipes"})).not.toBeInTheDocument();
 });
 
 test("changes URL selection only on activation and preserves drill-down history", async () => {

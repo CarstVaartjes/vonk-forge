@@ -107,14 +107,16 @@ export type LibraryRecipeSummary = components["schemas"]["LibraryRecipeSummary"]
 export type LibraryModel = components["schemas"]["LibraryModel"];
 export type LibraryMappingPreviewInput = components["schemas"]["MappingPreviewRequest"];
 export type LibraryMappingPlan = components["schemas"]["MappingPlanResponse"];
-export type LibraryMappingApplyInput = Omit<components["schemas"]["MappingRequest"], "request_key">;
+export type LibraryMappingApplyInput = components["schemas"]["MappingRequest"];
 export type LibraryMappingResult = components["schemas"]["MappingResponse"];
 export type LibraryInstallPreviewInput = components["schemas"]["InstallPreviewRequest"];
 export type LibraryInstallPlan = components["schemas"]["InstallPlanResponse"];
-export type LibraryInstallApplyInput = Omit<components["schemas"]["InstallRequest"], "request_key">;
+export type LibraryInstallApplyInput = components["schemas"]["InstallRequest"];
 export type LibraryLoadPreviewInput = components["schemas"]["RunPreviewRequest"];
 export type LibraryLoadPlan = components["schemas"]["RunPlanResponse"];
-export type LibraryLoadApplyInput = Omit<components["schemas"]["RunRequest"], "request_key">;
+export type LibraryLoadApplyInput = components["schemas"]["RunRequest"];
+export type LibraryStopApplyInput = components["schemas"]["StopRequest"];
+export type LibraryUninstallApplyInput = components["schemas"]["UninstallRequest"];
 export type LibraryStopPlan = components["schemas"]["StopPlanResponse"];
 export type LibraryUninstallPlan = components["schemas"]["UninstallPlanResponse"];
 export type LibraryOperation = components["schemas"]["OperationResponse"];
@@ -152,20 +154,20 @@ export interface WorkloadRunApi {
 export interface LibraryApi {
   librarySnapshot(cursor?: string, signal?: AbortSignal): Promise<LibrarySnapshot>;
   libraryRecipe(recipeId: string, signal?: AbortSignal): Promise<LibraryRecipeDetail>;
-  previewLibraryMapping(input: LibraryMappingPreviewInput): Promise<LibraryMappingPlan>;
-  applyLibraryMapping(input: LibraryMappingApplyInput): Promise<LibraryMappingResult>;
-  previewLibraryInstall(input: LibraryInstallPreviewInput): Promise<LibraryInstallPlan>;
-  applyLibraryInstall(input: LibraryInstallApplyInput): Promise<LibraryOperation>;
-  previewLibraryLoad(input: LibraryLoadPreviewInput): Promise<LibraryLoadPlan>;
-  applyLibraryLoad(input: LibraryLoadApplyInput): Promise<LibraryOperation>;
-  previewLibraryStop(runId: string): Promise<LibraryStopPlan>;
-  applyLibraryStop(runId: string, planDigest: string): Promise<LibraryOperation>;
-  previewLibraryUninstall(installationId: string): Promise<LibraryUninstallPlan>;
-  applyLibraryUninstall(installationId: string, planDigest: string): Promise<LibraryOperation>;
-  libraryOperation(operationId: string): Promise<LibraryOperation>;
-  retryLibraryOperation(operationId: string): Promise<LibraryOperation>;
-  libraryRunStatus(runId: string): Promise<LibraryRunStatus>;
-  libraryJobProgress(jobId: string): Promise<JobDetail>;
+  previewLibraryMapping(input: LibraryMappingPreviewInput, signal?: AbortSignal): Promise<LibraryMappingPlan>;
+  applyLibraryMapping(input: LibraryMappingApplyInput, signal?: AbortSignal): Promise<LibraryMappingResult>;
+  previewLibraryInstall(input: LibraryInstallPreviewInput, signal?: AbortSignal): Promise<LibraryInstallPlan>;
+  applyLibraryInstall(input: LibraryInstallApplyInput, signal?: AbortSignal): Promise<LibraryOperation>;
+  previewLibraryLoad(input: LibraryLoadPreviewInput, signal?: AbortSignal): Promise<LibraryLoadPlan>;
+  applyLibraryLoad(input: LibraryLoadApplyInput, signal?: AbortSignal): Promise<LibraryOperation>;
+  previewLibraryStop(runId: string, signal?: AbortSignal): Promise<LibraryStopPlan>;
+  applyLibraryStop(runId: string, input: LibraryStopApplyInput, signal?: AbortSignal): Promise<LibraryOperation>;
+  previewLibraryUninstall(installationId: string, signal?: AbortSignal): Promise<LibraryUninstallPlan>;
+  applyLibraryUninstall(installationId: string, input: LibraryUninstallApplyInput, signal?: AbortSignal): Promise<LibraryOperation>;
+  libraryOperation(operationId: string, signal?: AbortSignal): Promise<LibraryOperation>;
+  retryLibraryOperation(operationId: string, signal?: AbortSignal): Promise<LibraryOperation>;
+  libraryRunStatus(runId: string, signal?: AbortSignal): Promise<LibraryRunStatus>;
+  libraryJobProgress(jobId: string, signal?: AbortSignal): Promise<JobDetail>;
 }
 export interface ControlApi extends LibraryApi {
   visualFleet(signal?: AbortSignal): Promise<VisualFleetSnapshot>;

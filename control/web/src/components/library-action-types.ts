@@ -1,6 +1,7 @@
 import type {LibraryRecipeDetail} from "../api/types";
 
 type PlacementTarget = LibraryRecipeDetail["placement"][number]["recommendations"][number]["preview_targets"][number];
+export type LibraryPlacementGroup = LibraryRecipeDetail["placement"][number]["recommendations"][number];
 
 export type LibraryActionTarget =
   | PlacementTarget
@@ -8,6 +9,11 @@ export type LibraryActionTarget =
   | {kind: "uninstall"; installationId: string};
 
 export type LibraryActionName = "Mapping" | "Install" | "Load" | "Stop" | "Remove";
+
+export type LibraryActionReview = {
+  evidence?: LibraryPlacementGroup;
+  target: LibraryActionTarget;
+};
 
 export function actionName(target: LibraryActionTarget): LibraryActionName {
   if (target.kind === "mapping") return "Mapping";

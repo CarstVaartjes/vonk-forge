@@ -8,6 +8,7 @@ import type {
   LibraryOperation,
   LibraryStopPlan,
   LibraryUninstallPlan,
+  LibrarySnapshot,
 } from "../api/types";
 import {
   InstallPreview,
@@ -19,17 +20,18 @@ import {
 import type {LibraryActionPlan} from "./library-action-preview";
 import {actionName} from "./library-action-types";
 import type {LibraryActionName, LibraryActionTarget} from "./library-action-types";
+import type {LibraryPlacementGroup} from "./library-action-types";
 
 function message(value: unknown): string {
   return (value instanceof Error ? value.message : "The control authority request failed.").slice(0, 256);
 }
 
-function preview(api: LibraryApi, target: LibraryActionTarget, alias: string): Promise<LibraryActionPlan> {
-  if (target.kind === "mapping") return api.previewLibraryMapping(target.input);
-  if (target.kind === "install") return api.previewLibraryInstall(target.input);
-  if (target.kind === "run") return api.previewLibraryLoad({...target.input, alias});
-  if (target.kind === "stop") return api.previewLibraryStop(target.runId);
-  return api.previewLibraryUninstall(target.installationId);
+function preview(api: LibraryApi, target: LibraryActionTarget, alias: string, signal: AbortSignal): Promise<LibraryActionPlan> {
+  if (target.kind === "mapping") return api.previewLibraryMapping(target.input, signal);
+  if (target.kind === "install") return api.previewLibraryInstall(target.input, signal);
+  if (target.kind === "run") return api.previewLibraryLoad({...target.input, alias}, signal);
+  if (target.kind === "stop") return api.previewLibraryStop(target.runId, signal);
+  return api.previewLibraryUninstall(target.installationId, signal);
 }
 
 function allowed(plan: LibraryActionPlan): boolean {
@@ -44,38 +46,47 @@ function applyLabel(target: LibraryActionTarget): string {
   return "Remove selected installation";
 }
 
-function Plan({plan, target}: {plan: LibraryActionPlan; target: LibraryActionTarget}) {
-  if (target.kind === "mapping") return <MappingPreview plan={plan as LibraryMappingPlan}/>;
-  if (target.kind === "install") return <InstallPreview plan={plan as LibraryInstallPlan}/>;
+function Plan({evidence, generatedAt, plan, policy, target}: {
+  evidence?: LibraryPlacementGroup;
+  generatedAt: string;
+  plan: LibraryActionPlan;
+  policy: LibrarySnapshot["freshness_policy"];
+  target: LibraryActionTarget;
+}) {
+  if (target.kind === "mapping") return <MappingPreview evidence={evidence} plan={plan as LibraryMappingPlan} policy={policy}/>;
+  if (target.kind === "install") return <InstallPreview generatedAt={generatedAt} plan={plan as LibraryInstallPlan} policy={policy}/>;
   if (target.kind === "run") return <LoadPreview plan={plan as LibraryLoadPlan}/>;
   if (target.kind === "stop") return <StopPreview plan={plan as LibraryStopPlan}/>;
   return <UninstallPreview plan={plan as LibraryUninstallPlan}/>;
 }
 
-async function apply(api: LibraryApi, target: LibraryActionTarget, plan: LibraryActionPlan): Promise<LibraryOperation | null> {
+async function apply(api: LibraryApi, target: LibraryActionTarget, plan: LibraryActionPlan, requestKey: string, signal: AbortSignal): Promise<LibraryOperation | null> {
   if (target.kind === "mapping") {
     const mapping = plan as LibraryMappingPlan;
-    await api.applyLibraryMapping({...target.input, placement_digest: mapping.placement_digest});
+    await api.applyLibraryMapping({...target.input, placement_digest: mapping.placement_digest, request_key: requestKey}, signal);
     return null;
   }
   if (target.kind === "install") {
     const install = plan as LibraryInstallPlan;
-    return api.applyLibraryInstall({...target.input, plan_digest: install.plan_digest});
+    return api.applyLibraryInstall({...target.input, plan_digest: install.plan_digest, request_key: requestKey}, signal);
   }
   if (target.kind === "run") {
     const load = plan as LibraryLoadPlan;
-    return api.applyLibraryLoad({...target.input, alias: load.alias, plan_digest: load.plan_digest});
+    return api.applyLibraryLoad({...target.input, alias: load.alias, plan_digest: load.plan_digest, request_key: requestKey}, signal);
   }
-  if (target.kind === "stop") return api.applyLibraryStop(target.runId, (plan as LibraryStopPlan).plan_digest);
-  return api.applyLibraryUninstall(target.installationId, (plan as LibraryUninstallPlan).plan_digest);
+  if (target.kind === "stop") return api.applyLibraryStop(target.runId, {plan_digest: (plan as LibraryStopPlan).plan_digest, request_key: requestKey}, signal);
+  return api.applyLibraryUninstall(target.installationId, {plan_digest: (plan as LibraryUninstallPlan).plan_digest, request_key: requestKey}, signal);
 }
 
-export function LibraryActionDialog({alias, api, onApplied, onClose, onRefresh, target}: {
+export function LibraryActionDialog({alias, api, evidence, generatedAt, onApplied, onClose, onRefresh, policy, target}: {
   alias: string;
   api: LibraryApi;
+  evidence?: LibraryPlacementGroup;
+  generatedAt: string;
   onApplied(operation: LibraryOperation, name: LibraryActionName): void;
   onClose(): void;
   onRefresh(): Promise<void>;
+  policy: LibrarySnapshot["freshness_policy"];
   target: LibraryActionTarget;
 }) {
   const [plan, setPlan] = useState<LibraryActionPlan>();
@@ -87,21 +98,33 @@ export function LibraryActionDialog({alias, api, onApplied, onClose, onRefresh, 
   const [previewAttempt, setPreviewAttempt] = useState(0);
   const dialog = useRef<HTMLDivElement>(null);
   const close = useRef<HTMLButtonElement>(null);
+  const applyController = useRef<AbortController | undefined>(undefined);
+  const mounted = useRef(false);
+  const requestKey = useRef("");
   const titleId = useId();
   const name = actionName(target);
 
   useEffect(() => {
-    let active = true;
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      applyController.current?.abort();
+    };
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    requestKey.current = crypto.randomUUID();
     setLoading(true);
     setPreviewError("");
     setApplyError("");
     setStale(false);
     setPlan(undefined);
-    void preview(api, target, alias)
-      .then(value => { if (active) setPlan(value); })
-      .catch(value => { if (active) setPreviewError(message(value)); })
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
+    void preview(api, target, alias, controller.signal)
+      .then(value => { if (!controller.signal.aborted) setPlan(value); })
+      .catch(value => { if (!controller.signal.aborted) setPreviewError(message(value)); })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
   }, [alias, api, previewAttempt, target]);
 
   useEffect(() => {
@@ -124,20 +147,28 @@ export function LibraryActionDialog({alias, api, onApplied, onClose, onRefresh, 
   }
 
   async function applyPlan() {
-    if (!plan || !allowed(plan)) return;
+    if (!plan || !allowed(plan) || applying || !requestKey.current) return;
+    const controller = new AbortController();
+    applyController.current?.abort();
+    applyController.current = controller;
     setApplying(true);
     setApplyError("");
     try {
-      const operation = await apply(api, target, plan);
+      const operation = await apply(api, target, plan, requestKey.current, controller.signal);
+      if (!mounted.current || controller.signal.aborted) return;
+      await onRefresh();
+      if (!mounted.current || controller.signal.aborted) return;
       if (operation) onApplied(operation, name);
       setApplying(false);
       onClose();
-      void onRefresh();
     } catch (value) {
+      if (!mounted.current || controller.signal.aborted) return;
       const detail = message(value);
       setApplyError(detail);
       if (/stale|digest.*(?:changed|mismatch|invalid)/i.test(detail)) setStale(true);
       setApplying(false);
+    } finally {
+      if (applyController.current === controller) applyController.current = undefined;
     }
   }
 
@@ -147,7 +178,7 @@ export function LibraryActionDialog({alias, api, onApplied, onClose, onRefresh, 
       <div className="library-action-dialog-body">
         {loading && <p role="status">Loading {name} preview…</p>}
         {previewError && <div className="fleet-error" role="alert"><p>{previewError}</p><button type="button" onClick={() => setPreviewAttempt(value => value + 1)}>Retry preview</button></div>}
-        {plan && <Plan plan={plan} target={target}/>}
+        {plan && <Plan evidence={evidence} generatedAt={generatedAt} plan={plan} policy={policy} target={target}/>}
         {applyError && <div className="fleet-error" role="alert"><p>{applyError}</p><p>The reviewed authority remains open. Review again if the underlying state changed.</p>{stale && <button type="button" onClick={() => setPreviewAttempt(value => value + 1)}>Review fresh preview</button>}</div>}
       </div>
       <footer>

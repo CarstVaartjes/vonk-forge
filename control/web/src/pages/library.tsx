@@ -4,6 +4,30 @@ import type {LibraryApi, LibrarySnapshot} from "../api/types";
 import type {LibraryRecipeDetail} from "../api/types";
 import {LibraryBrowser} from "../components/library-browser";
 import {libraryRoute} from "../lib/library-route";
+import "./library.css";
+
+function mergeSnapshot(current: LibrarySnapshot, next: LibrarySnapshot): LibrarySnapshot {
+  const models = new Map(current.models.map(model => [model.family, {...model, recipes: [...model.recipes]}]));
+  for (const model of next.models) {
+    const existing = models.get(model.family);
+    if (!existing) {
+      models.set(model.family, {...model, recipes: [...model.recipes]});
+      continue;
+    }
+    const recipeIds = new Set(existing.recipes.map(recipe => recipe.recipe_id));
+    models.set(model.family, {
+      ...existing,
+      recipes: existing.recipes.concat(model.recipes.filter(recipe => !recipeIds.has(recipe.recipe_id))),
+    });
+  }
+  const unlinkedIds = new Set(current.unlinked_recipes.map(recipe => recipe.recipe_id));
+  return {
+    ...current,
+    models: [...models.values()],
+    next_cursor: next.next_cursor,
+    unlinked_recipes: current.unlinked_recipes.concat(next.unlinked_recipes.filter(recipe => !unlinkedIds.has(recipe.recipe_id))),
+  };
+}
 
 export function LibraryPage({api, path, onNavigate}: {
   api: LibraryApi;
@@ -15,18 +39,42 @@ export function LibraryPage({api, path, onNavigate}: {
   const [detail, setDetail] = useState<LibraryRecipeDetail>();
   const [detailError, setDetailError] = useState("");
   const [detailLoading, setDetailLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [paginationError, setPaginationError] = useState("");
+  const loadMoreController = useRef<AbortController | undefined>(undefined);
   const heading = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {
     const controller = new AbortController();
     setError("");
     void api.librarySnapshot(undefined, controller.signal)
-      .then(setSnapshot)
+      .then(value => { if (!controller.signal.aborted) setSnapshot(value); })
       .catch(value => {
         if (!controller.signal.aborted) setError(value instanceof Error ? value.message.slice(0, 256) : "Unable to load Library");
       });
     return () => controller.abort();
   }, [api]);
+
+  useEffect(() => () => loadMoreController.current?.abort(), []);
+
+  async function loadMore() {
+    const cursor = snapshot?.next_cursor;
+    if (!cursor || loadingMore) return;
+    const controller = new AbortController();
+    loadMoreController.current?.abort();
+    loadMoreController.current = controller;
+    setLoadingMore(true);
+    setPaginationError("");
+    try {
+      const next = await api.librarySnapshot(cursor, controller.signal);
+      if (!controller.signal.aborted) setSnapshot(current => current ? mergeSnapshot(current, next) : next);
+    } catch (value) {
+      if (!controller.signal.aborted) setPaginationError(value instanceof Error ? value.message.slice(0, 256) : "Unable to load more Library recipes");
+    } finally {
+      if (!controller.signal.aborted) setLoadingMore(false);
+      if (loadMoreController.current === controller) loadMoreController.current = undefined;
+    }
+  }
 
   const route = libraryRoute(path);
   const recipeId = route.kind === "recipe" ? route.recipeId : undefined;
@@ -84,5 +132,9 @@ export function LibraryPage({api, path, onNavigate}: {
       route={route}
       snapshot={snapshot}
     />}
+    {snapshot?.next_cursor && <div className="library-pagination">
+      <button type="button" className="button secondary" disabled={loadingMore} onClick={() => void loadMore()}>{loadingMore ? "Loading more recipes…" : "Load more Library recipes"}</button>
+      {paginationError && <p role="alert">{paginationError}</p>}
+    </div>}
   </div>;
 }

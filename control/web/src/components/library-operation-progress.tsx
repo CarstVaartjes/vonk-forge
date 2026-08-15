@@ -1,4 +1,4 @@
-import {useEffect, useState} from "react";
+import {useEffect, useRef, useState} from "react";
 import type {JobDetail, LibraryApi, LibraryOperation} from "../api/types";
 import type {LibraryActionName} from "./library-action-types";
 
@@ -29,50 +29,72 @@ export function LibraryOperationProgress({api, name, onChange, onRefresh, operat
   const [error, setError] = useState("");
   const [pollAttempt, setPollAttempt] = useState(0);
   const [retrying, setRetrying] = useState(false);
+  const mounted = useRef(false);
+  const retryController = useRef<AbortController | undefined>(undefined);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      retryController.current?.abort();
+    };
+  }, []);
 
   useEffect(() => {
     if (operationSettled(operation.state)) return;
-    let active = true;
+    const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const poll = async () => {
       try {
-        const next = await api.libraryOperation(operation.id);
-        if (!active) return;
+        const next = await api.libraryOperation(operation.id, controller.signal);
+        if (controller.signal.aborted) return;
         setError("");
-        onChange(next);
         const authoritativeJobId = jobId(next);
         if (authoritativeJobId) {
           try {
-            const progress = await api.libraryJobProgress(authoritativeJobId);
-            if (active) setJob(progress);
+            const progress = await api.libraryJobProgress(authoritativeJobId, controller.signal);
+            if (!controller.signal.aborted) setJob(progress);
           } catch (value) {
-            if (active) setError(errorMessage(value));
+            if (!controller.signal.aborted) setError(errorMessage(value));
           }
         }
-        if (active && !operationSettled(next.state)) timer = setTimeout(poll, 1000);
-        if (active && operationSettled(next.state)) await onRefresh();
+        if (controller.signal.aborted) return;
+        if (operationSettled(next.state)) {
+          await onRefresh();
+          if (controller.signal.aborted) return;
+          onChange(next);
+          return;
+        }
+        onChange(next);
+        if (!controller.signal.aborted) timer = setTimeout(poll, 1000);
       } catch (value) {
-        if (active) setError(errorMessage(value));
+        if (!controller.signal.aborted) setError(errorMessage(value));
       }
     };
     void poll();
     return () => {
-      active = false;
+      controller.abort();
       if (timer !== undefined) clearTimeout(timer);
     };
   }, [api, onChange, onRefresh, operation.id, operation.state, pollAttempt]);
 
   async function retry() {
+    const controller = new AbortController();
+    retryController.current?.abort();
+    retryController.current = controller;
     setRetrying(true);
     setError("");
     try {
-      const next = await api.retryLibraryOperation(operation.id);
+      const next = await api.retryLibraryOperation(operation.id, controller.signal);
+      if (!mounted.current || controller.signal.aborted) return;
       setJob(undefined);
       onChange(next);
     } catch (value) {
+      if (!mounted.current || controller.signal.aborted) return;
       setError(errorMessage(value));
     } finally {
-      setRetrying(false);
+      if (mounted.current && !controller.signal.aborted) setRetrying(false);
+      if (retryController.current === controller) retryController.current = undefined;
     }
   }
 
