@@ -141,3 +141,99 @@ were added.
 Concern: the complete control suite is blocked by the pre-existing/unrelated
 native crash in `test_library_projection`; this task leaves Fleet/library/UI
 semantics unchanged and does not modify that subsystem.
+
+## Review fix round 1/5
+
+### Changes
+
+- Made `CatalogEntityRevision.schema_version` v1-only in both SQLAlchemy
+  metadata and migration 0027: `schema_version = 1`.
+- Added a cross-dialect pre-DDL fresh-state fence to 0027.  It rejects rows in
+  the prototype mapping, recipe/catalog, installation, run, route-publication,
+  and rollout tables before creating any v1 table or changing
+  `cluster_mappings`.  The legacy `route_publication_owner` singleton is
+  intentionally excluded because revision 0026 creates one even for an
+  otherwise empty database.
+- Changed built-in seeding to inspect the latest immutable revision for the
+  existing identity.  If that latest revision is not the canonical digest, it
+  uses `CatalogEntityService.revise()` and `resolve()` inside a savepoint.
+  A concurrent `CatalogConflict` is accepted only when a recheck proves the
+  latest revision is now the exact canonical resolved digest.
+- Removed the per-entity content-digest uniqueness constraint.  Immutable
+  history can now record a new, later resolved revision when a canonical
+  document is re-authoritatively promoted after a valid intervening revision;
+  lookup/replay returns the newest exact revision.
+
+### RED evidence
+
+Before the corrections, the review tests were added and run with:
+
+```text
+$ uv run --project control --frozen python -m pytest \
+  control/tests/test_execution_harness_catalog_migration.py::test_model_metadata_rejects_non_v1_catalog_revision_schema_version \
+  control/tests/test_execution_harness_catalog_migration.py::test_fresh_migrated_database_rejects_non_v1_catalog_revision_schema_version \
+  control/tests/test_execution_harness_catalog_migration.py::test_sqlite_fence_rejects_nonempty_prototype_mappings_before_v1_ddl \
+  control/tests/test_execution_harness_catalog_migration.py::test_postgresql_fence_rejects_nonempty_prototype_recipe_state \
+  control/tests/test_catalog_seeds.py::test_builtin_harness_seed_revises_an_existing_identity_to_the_canonical_digest -q
+FFFFF                                                                    [100%]
+5 failed in 4.79s
+```
+
+The failures established the required gaps: model and migrated databases
+accepted `schema_version=2`; a populated SQLite mapping reached the failing
+batch rebuild instead of a clear fence; PostgreSQL accepted a populated
+`local_recipes` table; and a changed built-in identity was skipped rather than
+revised.  A subsequent seed-only RED run exposed the retained historical
+canonical digest case (`assert 2 > 4`): a new current resolved revision needed
+to be allowed without mutating or deleting immutable history.
+
+### GREEN evidence
+
+```text
+$ uv run --project control --frozen python -m pytest \
+  control/tests/test_execution_harness_catalog_migration.py::test_model_metadata_rejects_non_v1_catalog_revision_schema_version \
+  control/tests/test_execution_harness_catalog_migration.py::test_fresh_migrated_database_rejects_non_v1_catalog_revision_schema_version \
+  control/tests/test_execution_harness_catalog_migration.py::test_sqlite_fence_rejects_nonempty_prototype_mappings_before_v1_ddl \
+  control/tests/test_execution_harness_catalog_migration.py::test_postgresql_fence_rejects_nonempty_prototype_recipe_state \
+  control/tests/test_catalog_seeds.py::test_builtin_harness_seed_revises_an_existing_identity_to_the_canonical_digest -q
+.....                                                                    [100%]
+5 passed in 3.54s
+
+$ uv run --project control --frozen python -m pytest \
+  control/tests/test_execution_harness_catalog_migration.py \
+  control/tests/test_catalog_seeds.py -q
+..........                                                               [100%]
+10 passed in 6.48s
+
+$ uv run --project control --frozen python -m pytest \
+  control/tests/test_execution_harness_catalog_migration.py \
+  control/tests/test_catalog_seeds.py \
+  control/tests/test_catalog_entities.py \
+  control/tests/test_admission_migration.py \
+  control/tests/test_wheel_runtime_assets.py -q
+....................................                                     [100%]
+36 passed in 11.52s
+
+$ uvx ruff@0.16.1 check control/src/vonk_control/models.py \
+  control/src/vonk_control/catalog_entities.py \
+  control/src/vonk_control/catalog_seeds.py \
+  control/migrations/versions/0027_execution_harness_catalog.py \
+  control/tests/test_execution_harness_catalog_migration.py \
+  control/tests/test_catalog_seeds.py
+All checks passed!
+```
+
+SQLite coverage rejects version 2 in both model-created and fresh-migrated
+schemas, then verifies the mapping fence stops before v1 DDL.  Disposable
+PostgreSQL coverage verifies both normal fresh-head metadata parity and the
+same fence against nonempty prototype recipe state.  Seed coverage verifies
+initial creation, exact rerun idempotence, and canonical re-promotion on the
+same immutable entity identity.
+
+### Review self-check
+
+No Library projection files were changed and the known native
+16,384-object library test crash was not investigated or modified.  The 0027
+fence does not delete, translate, preserve, or otherwise convert any row: it
+raises before v1 DDL.  The supported production boundary remains an empty
+pre-production database.

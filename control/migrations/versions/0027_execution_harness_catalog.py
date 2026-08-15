@@ -9,6 +9,27 @@ branch_labels = None
 depends_on = None
 
 
+_PROTOTYPE_RECIPE_DOMAIN_TABLES = (
+    "cluster_mapping_nodes",
+    "run_nodes",
+    "installation_nodes",
+    "recipe_runs",
+    "recipe_installations",
+    "route_publications",
+    "cluster_mappings",
+    "recipe_builds",
+    "recipe_test_reports",
+    "recipe_global_links",
+    "recipe_import_items",
+    "recipe_imports",
+    "local_recipe_revisions",
+    "local_recipes",
+    "recipe_source_bundles",
+    "package_rollout_nodes",
+    "package_rollouts",
+)
+
+
 def _lower_hex(column: str, length: int) -> str:
     remainder = column
     for character in "0123456789abcdef":
@@ -23,7 +44,18 @@ def _nullable_lower_hex(column: str, length: int) -> str:
     return f"{column} IS NULL OR ({_lower_hex(column, length)})"
 
 
+def _require_empty_prototype_recipe_domain() -> None:
+    bind = op.get_bind()
+    for table_name in _PROTOTYPE_RECIPE_DOMAIN_TABLES:
+        if bind.execute(sa.text(f"SELECT 1 FROM {table_name} LIMIT 1")).scalar():
+            raise RuntimeError(
+                "0027_execution_harness_catalog requires a fresh pre-production "
+                f"database; prototype recipe-domain rows exist in {table_name}"
+            )
+
+
 def upgrade() -> None:
+    _require_empty_prototype_recipe_domain()
     op.create_table(
         "catalog_entities",
         sa.Column("id", sa.String(36), primary_key=True),
@@ -80,14 +112,11 @@ def upgrade() -> None:
         sa.UniqueConstraint(
             "entity_id", "revision_number", name="uq_catalog_entity_revision_number"
         ),
-        sa.UniqueConstraint(
-            "entity_id", "content_sha256", name="uq_catalog_entity_revision_content"
-        ),
         sa.CheckConstraint(
             "revision_number >= 1", name="ck_catalog_entity_revisions_number"
         ),
         sa.CheckConstraint(
-            "schema_version >= 1", name="ck_catalog_entity_revisions_schema"
+            "schema_version = 1", name="ck_catalog_entity_revisions_schema"
         ),
         sa.CheckConstraint(
             "lifecycle IN ('draft','blocked','resolved','deprecated')",

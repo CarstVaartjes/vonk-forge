@@ -1795,14 +1795,11 @@ class CatalogEntityRevision(Base):
         UniqueConstraint(
             "entity_id", "revision_number", name="uq_catalog_entity_revision_number"
         ),
-        UniqueConstraint(
-            "entity_id", "content_sha256", name="uq_catalog_entity_revision_content"
-        ),
         CheckConstraint(
             "revision_number >= 1", name="ck_catalog_entity_revisions_number"
         ),
         CheckConstraint(
-            "schema_version >= 1", name="ck_catalog_entity_revisions_schema"
+            "schema_version = 1", name="ck_catalog_entity_revisions_schema"
         ),
         CheckConstraint(
             "lifecycle IN ('draft','blocked','resolved','deprecated')",

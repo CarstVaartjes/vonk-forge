@@ -207,9 +207,9 @@ class CatalogEntityService:
                         CatalogEntityRevision.entity_id == source.entity_id,
                         CatalogEntityRevision.content_sha256 == digest,
                         CatalogEntityRevision.lifecycle == "resolved",
-                    )
+                    ).order_by(CatalogEntityRevision.revision_number.desc())
                 )
-                if existing is not None:
+                if existing is not None and latest.id != source.id:
                     return existing
                 if latest.id != source.id:
                     raise CatalogConflict(
@@ -400,6 +400,7 @@ class CatalogEntityService:
                 CatalogEntityRevision.content_sha256 == reference.content_sha256,
                 CatalogEntityRevision.lifecycle == "resolved",
             )
+            .order_by(CatalogEntityRevision.revision_number.desc())
         )
         if revision is None:
             raise CatalogConflict(

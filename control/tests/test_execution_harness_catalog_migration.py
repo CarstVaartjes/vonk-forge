@@ -2,6 +2,7 @@ import shutil
 import subprocess
 import time
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -19,7 +20,8 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.engine import Engine
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.orm import Session
 from vonk_control.models import (
     Base,
     CatalogEntity,
@@ -44,7 +46,7 @@ def connection(tmp_path: Path) -> Iterator[Connection]:
         yield value
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def postgres_engine() -> Iterator[Engine]:
     if shutil.which("docker") is None:
         pytest.skip("Docker is required for PostgreSQL migration tests")
@@ -95,6 +97,10 @@ def postgres_engine() -> Iterator[Engine]:
 
 def upgrade_fresh_database_to_head(connection: Connection) -> None:
     command.upgrade(migration_config(str(connection.engine.url)), "head")
+
+
+def upgrade_database_to(connection: Connection, revision: str) -> None:
+    command.upgrade(migration_config(str(connection.engine.url)), revision)
 
 
 def scalar(connection: Connection, statement: str) -> object:
@@ -167,6 +173,126 @@ def test_fresh_database_catalog_and_topology_match_model_metadata(
         }
 
 
+def test_model_metadata_rejects_non_v1_catalog_revision_schema_version() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    now = datetime(2026, 8, 15, tzinfo=UTC)
+    with Session(engine) as session:
+        entity = CatalogEntity(
+            id="catalog-entity",
+            kind="execution-harness",
+            publisher="vonk-forge",
+            slug="schema-version-test",
+            title="Schema version test",
+            created_by="test",
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(entity)
+        session.flush()
+        session.add(
+            CatalogEntityRevision(
+                id="catalog-revision",
+                entity_id=entity.id,
+                revision_number=1,
+                lifecycle="draft",
+                schema_version=2,
+                document={},
+                content_sha256=None,
+                created_by="test",
+                created_at=now,
+            )
+        )
+
+        with pytest.raises(IntegrityError):
+            session.flush()
+
+
+def test_fresh_migrated_database_rejects_non_v1_catalog_revision_schema_version(
+    connection: Connection,
+) -> None:
+    upgrade_fresh_database_to_head(connection)
+    now = "2026-08-15 00:00:00"
+    connection.execute(
+        text(
+            "INSERT INTO catalog_entities "
+            "(id, kind, publisher, slug, title, created_by, created_at, updated_at) "
+            "VALUES (:id, :kind, :publisher, :slug, :title, :created_by, "
+            ":created_at, :updated_at)"
+        ),
+        {
+            "id": "catalog-entity",
+            "kind": "execution-harness",
+            "publisher": "vonk-forge",
+            "slug": "migrated-schema-version-test",
+            "title": "Migrated schema version test",
+            "created_by": "test",
+            "created_at": now,
+            "updated_at": now,
+        },
+    )
+
+    with pytest.raises(IntegrityError):
+        connection.execute(
+            text(
+                "INSERT INTO catalog_entity_revisions "
+                "(id, entity_id, revision_number, lifecycle, schema_version, document, "
+                "content_sha256, created_by, created_at) "
+                "VALUES (:id, :entity_id, :revision_number, :lifecycle, "
+                ":schema_version, :document, :content_sha256, :created_by, :created_at)"
+            ),
+            {
+                "id": "catalog-revision",
+                "entity_id": "catalog-entity",
+                "revision_number": 1,
+                "lifecycle": "draft",
+                "schema_version": 2,
+                "document": "{}",
+                "content_sha256": None,
+                "created_by": "test",
+                "created_at": now,
+            },
+        )
+
+
+def test_sqlite_fence_rejects_nonempty_prototype_mappings_before_v1_ddl(
+    connection: Connection,
+) -> None:
+    upgrade_database_to(connection, "0026_telemetry_maintenance_state")
+    connection.execute(
+        text(
+            "INSERT INTO cluster_mappings "
+            "(id, recipe_revision_id, profile_name, generation, node_count, state, "
+            "parameters, placement_digest, endpoint_owner_node_id, created_by, "
+            "created_at, updated_at) "
+            "VALUES (:id, :recipe_revision_id, :profile_name, :generation, "
+            ":node_count, :state, :parameters, :placement_digest, "
+            ":endpoint_owner_node_id, :created_by, :created_at, :updated_at)"
+        ),
+        {
+            "id": "mapping",
+            "recipe_revision_id": "prototype-recipe-revision",
+            "profile_name": "prototype-profile",
+            "generation": 1,
+            "node_count": 1,
+            "state": "planned",
+            "parameters": "{}",
+            "placement_digest": "a" * 64,
+            "endpoint_owner_node_id": "prototype-node",
+            "created_by": "test",
+            "created_at": "2026-08-15 00:00:00",
+            "updated_at": "2026-08-15 00:00:00",
+        },
+    )
+    connection.commit()
+
+    with pytest.raises(RuntimeError, match="cluster_mappings"):
+        upgrade_fresh_database_to_head(connection)
+
+    assert not table_exists(connection, "catalog_entities")
+    assert column_exists(connection, "cluster_mappings", "profile_name")
+
+
 def test_fresh_postgresql_database_reaches_the_v1_catalog_head(
     postgres_engine: Engine,
 ) -> None:
@@ -184,6 +310,31 @@ def test_fresh_postgresql_database_reaches_the_v1_catalog_head(
             compare_metadata(MigrationContext.configure(connection), Base.metadata)
             == []
         )
+
+
+def test_postgresql_fence_rejects_nonempty_prototype_recipe_state(
+    postgres_engine: Engine,
+) -> None:
+    url = postgres_engine.url.render_as_string(hide_password=False)
+    command.upgrade(migration_config(url), "0026_telemetry_maintenance_state")
+    with postgres_engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO local_recipes "
+                "(id, slug, title, description, source_kind, created_by, created_at, "
+                "updated_at) "
+                "VALUES ('prototype-recipe', 'prototype-recipe', 'Prototype recipe', "
+                "'discarded state', 'local', 'test', '2026-08-15 00:00:00', "
+                "'2026-08-15 00:00:00')"
+            )
+        )
+
+    with pytest.raises(RuntimeError, match="local_recipes"):
+        command.upgrade(migration_config(url), "head")
+
+    with postgres_engine.connect() as connection:
+        assert not table_exists(connection, "catalog_entities")
+        assert column_exists(connection, "cluster_mappings", "profile_name")
 
 
 def _check_constraints(inspector: object, model_table: Table) -> dict[str, str]:
