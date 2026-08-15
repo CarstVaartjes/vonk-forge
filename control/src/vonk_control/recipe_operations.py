@@ -357,6 +357,36 @@ class RecipeOperationService:
     def preview_run(self, installation_id: str, alias: str) -> RunPlan:
         return self._run_admission.plan_run(installation_id, alias, now=self._clock())
 
+    def replay_start(
+        self,
+        installation_id: str,
+        alias: str,
+        *,
+        plan_digest: str,
+        request_id: str,
+    ) -> RecipeOperationView | None:
+        with self._sessions() as session:
+            existing = session.scalar(select(Job).where(Job.request_id == request_id))
+            if (
+                existing is None
+                or existing.kind != "recipe.start"
+                or existing.payload.get("owner_kind") != "run"
+                or existing.payload.get("plan_digest") != plan_digest
+            ):
+                return None
+            owner_id = existing.payload.get("owner_id")
+            if not isinstance(owner_id, str):
+                return None
+            run = session.get(RecipeRun, owner_id)
+            if (
+                run is None
+                or run.installation_id != installation_id
+                or run.alias != alias
+                or run.plan_digest != plan_digest
+            ):
+                return None
+            return self._view(existing)
+
     def run_status(self, run_id: str) -> RecipeRunStatus:
         now = _aware(self._clock())
         with self._sessions() as session:

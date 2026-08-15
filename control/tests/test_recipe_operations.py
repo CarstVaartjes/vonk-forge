@@ -675,10 +675,14 @@ def test_start_rejects_alias_mismatched_digest_before_side_effects_and_replays_e
         actor="admin",
         request_id="0" * 35 + "3",
     )
-    replayed = service.start(
-        qwen,
+    post_admission = service.preview_run(installation.owner_id, "qwen")
+    assert post_admission.allowed is False
+    assert post_admission.plan_digest != qwen.plan_digest
+
+    replayed = service.replay_start(
+        installation.owner_id,
+        "qwen",
         plan_digest=qwen.plan_digest,
-        actor="admin",
         request_id="0" * 35 + "3",
     )
 
@@ -693,6 +697,43 @@ def test_start_rejects_alias_mismatched_digest_before_side_effects_and_replays_e
         assert run is not None and job is not None and child is not None
         assert run.alias == qwen.alias == run.plan["alias"] == child.payload["alias"]
         assert job.payload["plan_digest"] == qwen.plan_digest == started.plan_digest
+
+    assert (
+        service.replay_start(
+            installation.owner_id,
+            "qwen-alt",
+            plan_digest=qwen.plan_digest,
+            request_id="0" * 35 + "3",
+        )
+        is None
+    )
+    mismatched = service.preview_run(installation.owner_id, "qwen-alt")
+    with pytest.raises(RecipeOperationConflict, match="does not match preview"):
+        service.start(
+            mismatched,
+            plan_digest=qwen.plan_digest,
+            actor="admin",
+            request_id="0" * 35 + "3",
+        )
+
+    with sessions() as session:
+        runs = tuple(session.scalars(select(RecipeRun)))
+        reservations = tuple(
+            session.scalars(
+                select(ResourceReservation).where(
+                    ResourceReservation.owner_kind == "run"
+                )
+            )
+        )
+        jobs = tuple(session.scalars(select(Job).where(Job.kind == "recipe.start")))
+        operations = tuple(
+            session.scalars(
+                select(AgentOperation).where(AgentOperation.kind == "recipe.start")
+            )
+        )
+    assert len(runs) == len(jobs) == len(operations) == 1
+    assert len(reservations) == 2
+    assert queue.available == 2
 
 
 def test_stop_state_and_queue_creation_roll_back_together(tmp_path: Path) -> None:

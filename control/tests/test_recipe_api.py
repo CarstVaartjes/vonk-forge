@@ -148,6 +148,7 @@ class Recipes:
             plan_digest="5" * 64,
         )
         self.calls: list[tuple[str, object]] = []
+        self.started_run: tuple[RecipeOperationView, str, str, str] | None = None
         self.mapping_plan = ClusterMappingPlan(
             recipe_revision_id=REVISION,
             recipe_content_sha256="a" * 64,
@@ -227,11 +228,39 @@ class Recipes:
         self.calls.append(("preview_run", (installation, alias)))
         return self.run_plan
 
+    def replay_start(self, installation, alias, plan_digest, request_id):
+        self.calls.append(
+            (
+                "replay_start",
+                (installation, alias, plan_digest, request_id),
+            )
+        )
+        if self.started_run is None:
+            return None
+        operation, expected_installation, expected_alias, expected_request_id = (
+            self.started_run
+        )
+        if (
+            installation == expected_installation
+            and alias == expected_alias
+            and plan_digest == operation.plan_digest
+            and request_id == expected_request_id
+        ):
+            return operation
+        return None
+
     def start(self, plan, **kwargs):
         self.calls.append(("start", kwargs))
-        return RecipeOperationView(
+        operation = RecipeOperationView(
             OPERATION, "recipe.start", RUN, "running", plan.plan_digest, (NODE,), None
         )
+        self.started_run = (
+            operation,
+            plan.installation_id,
+            plan.alias,
+            kwargs["request_id"],
+        )
+        return operation
 
     def stop(self, run_id, **kwargs):
         self.calls.append(("stop", (run_id, kwargs)))
@@ -530,6 +559,29 @@ def test_start_progress_stop_retry_and_uninstall_routes_are_stable() -> None:
         paths["/api/v1/recipes/uninstall-plans/preview"]["post"]["operationId"]
         == "previewRecipeUninstall"
     )
+
+
+def test_identical_start_api_replay_returns_original_without_repreview_or_audit() -> None:
+    client, headers, recipes, audits = setup()
+    body = {
+        "installation_id": INSTALLATION,
+        "alias": "qwen",
+        "plan_digest": "c" * 64,
+        "request_key": "10000000-0000-4000-8000-000000000009",
+    }
+
+    first = client.post("/api/v1/recipes/runs", headers=headers(), json=body)
+    replayed = client.post("/api/v1/recipes/runs", headers=headers(), json=body)
+
+    assert first.status_code == replayed.status_code == 202
+    assert replayed.json() == first.json()
+    assert [name for name, _details in recipes.calls] == [
+        "replay_start",
+        "preview_run",
+        "start",
+        "replay_start",
+    ]
+    assert [event.action for event in audits.list()] == ["recipe.start"]
 
 
 def test_stop_and_uninstall_contracts_are_admin_only_strict_and_digest_bound() -> None:
