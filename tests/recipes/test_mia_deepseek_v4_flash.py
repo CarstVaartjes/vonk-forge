@@ -1,29 +1,45 @@
 from __future__ import annotations
 
-import hashlib
-import io
+import copy
 import json
-import runpy
-import tarfile
-import threading
-import urllib.error
-import urllib.request
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "control/src"))
+
+from vonk_control.catalog_contract import (
+    catalog_content_sha256,
+    validate_catalog_document,
+)
+from vonk_control.harnesses import HarnessRegistry
+from vonk_control.harnesses.common import HarnessCompileError
+from vonk_control.harnesses.vllm import VllmHarnessCompiler
+from vonk_control.recipe_contract import validate_recipe
+from vonk_control.recipe_runtime_specs import compile_runtime_spec
 from vonk_control.source_bundles import generate_source_bundle
 from vonk_control.source_policy import enforce_build_source_policy
 
-ROOT = Path(__file__).resolve().parents[2]
-RECIPE_ROOT = ROOT / "config/recipes/development"
-CONTEXT = RECIPE_ROOT / "mia-deepseek-v4-flash-context"
-UPSTREAM_COMMIT = "f752cd04ab30f2cf42077dd8811a5e1e682d63e7"
-MODEL_REVISION = "9e165c30e2704aec5d9d593cce3eebd58bbef1cb"
-RUNTIME_IMAGE = (
+KIND_ROOT = {
+    "model-group": "model-groups",
+    "model": "models",
+    "model-version": "model-versions",
+    "execution-harness": "execution-harnesses",
+    "runtime-distribution": "runtime-distributions",
+    "patch-bundle": "patch-bundles",
+}
+MIA_COMMIT = "f752cd04ab30f2cf42077dd8811a5e1e682d63e7"
+MODEL_REVISION = "62af8fffb2f7030cac4de2f0169f5b8d1101b646"
+ANEMLL_COMMIT = "47503f8e38dadd4dededca798150db2619594fce"
+IMAGE = (
     "ghcr.io/anemll/dspark-vllm-gx10"
     "@sha256:a83948492cf13df455170fb42885f5ef4db54fefe0feff0f841ecbff464ac9d8"
 )
 PATCH_SHA256 = {
+    "apply-reasoning-default.py": "f42787340f6c115ead869cdf5076efc45c4e3f54a4c1c04cbcd2de8828aa1947",
     "hotfix-encoding-dsv4-issue21.py": "1a74f6c4ec6a2b7cd2ff01f19b52fbf4ced980a22f08b9d75a6aae1bff0d0548",
     "hotfix-dsv4-issue31-v2-thinking-budget-gpu.py": "7e6ee3e6852dc4003a5d9e7f1c62e316010858722ff3644467e1f4db57d2d909",
     "hotfix-dsv4-issue55-tool-truncation.py": "53f26da9039eb6d99baa6c141c6ed916b292d406da292a5e762012c5ef423dec",
@@ -42,347 +58,279 @@ PATCH_SHA256 = {
 }
 
 
-def _document(name: str) -> dict[str, object]:
-    return json.loads((RECIPE_ROOT / name).read_text(encoding="utf-8"))
+def _load(path: Path) -> dict[str, object]:
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _canonical_bundle_identity() -> tuple[str, int]:
-    files = {
-        path.relative_to(CONTEXT).as_posix(): path.read_bytes()
-        for path in sorted(CONTEXT.rglob("*"))
-        if path.is_file()
-    }
-    stream = io.BytesIO()
-    manifest_files: list[dict[str, object]] = []
-    with tarfile.open(fileobj=stream, mode="w", format=tarfile.PAX_FORMAT) as archive:
-        for name in sorted(files, key=lambda item: item.encode("utf-8")):
-            content = files[name]
-            member = tarfile.TarInfo(name)
-            member.size = len(content)
-            member.mode = 0o644
-            member.uid = member.gid = 0
-            member.uname = member.gname = ""
-            member.mtime = 0
-            archive.addfile(member, io.BytesIO(content))
-            manifest_files.append(
-                {
-                    "path": name,
-                    "mode": 0o644,
-                    "size": len(content),
-                    "sha256": hashlib.sha256(content).hexdigest(),
-                }
-            )
-    canonical = json.dumps(
-        {
-            "schema_version": 1,
-            "files": manifest_files,
-            "total_bytes": sum(len(content) for content in files.values()),
-        },
-        ensure_ascii=False,
-        allow_nan=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode()
-    return hashlib.sha256(canonical).hexdigest(), len(stream.getvalue())
+def _recipe() -> dict[str, object]:
+    return _load(ROOT / "config/recipes/deepseek-v4-flash-0731-mia-dual.json")
 
 
-def test_recipe_tracks_the_latest_reviewed_official_mia_release() -> None:
-    recipe = _document("mia-deepseek-v4-flash.json")
-    source = _document("mia-deepseek-v4-flash-source.json")
-    artifacts = _document("mia-deepseek-v4-flash-artifacts.json")
-
-    assert source == {
-        "schema_version": 1,
-        "repository": "https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark",
-        "commit": UPSTREAM_COMMIT,
-        "runtime_image": RUNTIME_IMAGE,
-        "runtime_interface_label": "v1",
-        "runtime_user": "10001:10001",
-        "license_id": "mia-mit",
-    }
-    assert recipe["provenance"]["source_reference"].endswith(UPSTREAM_COMMIT)
-    assert artifacts["artifacts"] == [
-        {
-            "id": "model",
-            "kind": "huggingface.snapshot",
-            "repository": "deepseek-ai/DeepSeek-V4-Flash-0731",
-            "revision": MODEL_REVISION,
-            "bytes": 166898660330,
-        }
-    ]
-
-
-def test_recipe_is_an_exact_two_spark_tensor_parallel_deployment() -> None:
-    recipe = _document("mia-deepseek-v4-flash.json")
-    topology = recipe["topology"]
-
-    assert topology["name"] == "pair"
-    assert topology["node_count"] == 2
-    assert topology["mode"] == "tensor_parallel"
-    assert topology["parallelism"] == {
-        "tensor": 2,
-        "pipeline": 1,
-        "data": 1,
-        "backend": "mp",
-    }
-    assert topology["fabric"] == {
-        "connectivity": "connected",
-        "minimum_bandwidth_mbps": 200000,
-    }
-    assert sum(role["count"] for role in topology["roles"]) == 2
-    assert recipe["interfaces"][0]["port"] == 8888
-    assert recipe["runtime"]["security"] == {
-        "devices": ["nvidia.com/gpu=all"],
-        "capabilities": [],
-        "host_network": True,
-        "privileged": False,
-        "user": "10001:10001",
-        "mounts": [
-            {
-                "source": "model",
-                "target": "/models",
-                "read_only": True,
-            },
-            {
-                "source": "state",
-                "target": "/state",
-                "read_only": False,
-            },
-        ],
-    }
-
-
-def test_memory_envelope_fits_a_128_gb_spark_with_host_reserve() -> None:
-    recipe = _document("mia-deepseek-v4-flash.json")
-    topology = _document("mia-deepseek-v4-flash-multinode.json")
-    global_agent_floor = 4_000_000_000
-    container_limits = set()
-    qualified_floors = set()
-    for role in recipe["topology"]["roles"]:
-        memory = role["resources"]["memory"]
-        container = (
-            max(
-                memory["startup_peak_bytes"],
-                memory["steady_state_bytes"] + memory["runtime_growth_bytes"],
-            )
-            + memory["system_reserve_bytes"]
-        )
-        container_limits.add(container)
-        qualified_floors.add(container + global_agent_floor)
-
-    assert container_limits == {120_000_000_000}
-    assert qualified_floors == {topology["minimum_memory_available_bytes"]}
-
-
-def test_disk_floor_covers_cold_install_staging_rollback_and_margin() -> None:
-    recipe = _document("mia-deepseek-v4-flash.json")
-    topology = _document("mia-deepseek-v4-flash-multinode.json")
-    required = set()
-    for role in recipe["topology"]["roles"]:
-        disk = role["resources"]["disk"]
-        required.add(
-            disk["image_bytes"]
-            + recipe["artifacts"][0]["download_bytes"]
-            + disk["staging_bytes"]
-            + disk["cache_bytes"]
-            + disk["rollback_bytes"]
-            + disk["safety_margin_bytes"]
-        )
-
-    assert required == {topology["minimum_disk_available_bytes"]}
-
-
-def test_source_context_is_immutable_offline_and_contains_exact_upstream_hotfixes() -> (
-    None
-):
-    recipe = _document("mia-deepseek-v4-flash.json")
-    source = _document("mia-deepseek-v4-flash-source.json")
-    dockerfile = (CONTEXT / "Dockerfile").read_text(encoding="utf-8")
-    launcher = (CONTEXT / "mia-deepseek-v4-flash").read_text(encoding="utf-8")
-    digest, archive_bytes = _canonical_bundle_identity()
-    bundle = generate_source_bundle(
-        {
-            path.relative_to(CONTEXT).as_posix(): path.read_bytes()
-            for path in CONTEXT.rglob("*")
-            if path.is_file()
-        }
+def _resolve(reference: dict[str, object]) -> dict[str, object]:
+    document = _load(
+        ROOT
+        / "config"
+        / KIND_ROOT[str(reference["kind"])]
+        / f"{reference['slug']}.json"
     )
-    assert not any(
-        path.suffix == ".pyc" or "__pycache__" in path.parts
-        for path in CONTEXT.rglob("*")
-    )
+    validate_catalog_document(document)
+    assert document["identity"]["publisher"] == reference["publisher"]
+    assert document["identity"]["slug"] == reference["slug"]
+    assert catalog_content_sha256(document) == reference["content_sha256"]
+    return document
 
-    assert recipe["build"]["context"] == {
-        "sha256": digest,
-        "expected_bytes": archive_bytes,
-        "media_type": "application/vnd.vonk-forge.source-bundle.v1+tar",
+
+def test_mia_is_vllm_distribution_plus_patch() -> None:
+    recipe = _recipe()
+    validate_recipe(recipe)
+    harness = _resolve(recipe["execution"]["harness"])
+    distribution = _resolve(recipe["runtime"]["distribution"])
+    patch = _resolve(recipe["execution"]["patch_bundle"])
+
+    assert harness["compiler_slug"] == "vllm"
+    assert harness["topology_modes"] == ["single"]
+    assert distribution["identity"]["slug"] == "anemll-vllm-mia"
+    assert patch["identity"]["slug"] == "mia-deepseek-v4-flash-0731"
+    assert recipe["topology"]["mode"] == "distributed"
+    assert recipe["topology"]["node_count"] == 2
+    assert recipe["topology"]["parallelism"]["world_size"] == 2
+
+
+def test_official_model_version_has_complete_exact_74_file_inventory() -> None:
+    version = _resolve(_recipe()["model"])
+    artifacts = version["artifacts"]
+
+    assert version["source"] == {
+        "repository": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark",
+        "revision": MODEL_REVISION,
     }
-    assert dockerfile.startswith(f"FROM {RUNTIME_IMAGE}\n")
+    assert version["format"] == {
+        "container": "safetensors",
+        "precision": "fp4-fp8-mixed",
+        "quantization": "moe-experts-fp4-remaining-fp8",
+    }
+    assert len(artifacts) == 74
+    assert len({artifact["path"] for artifact in artifacts}) == 74
+    assert sum(artifact["download_bytes"] for artifact in artifacts) == 166_898_666_055
+    assert version["sizes"] == {
+        "download_bytes": 166_898_666_055,
+        "installed_bytes": 166_898_666_055,
+    }
+    assert all(artifact["revision"] == MODEL_REVISION for artifact in artifacts)
+    assert version["access"] == {
+        "visibility": "public",
+        "gated": False,
+        "authentication": "none",
+    }
+    assert version["limits"]["context_tokens"] == 1_048_576
+
+
+def test_anemll_distribution_is_immutable_and_explicitly_verifies_tp2() -> None:
+    distribution = _resolve(_recipe()["runtime"]["distribution"])
+
+    assert distribution["source"] == {
+        "repository": "https://github.com/Anemll/dspark-vllm-gx10",
+        "revision": ANEMLL_COMMIT,
+        "archive_sha256": "9b3e1de63857220506201c5416df29260691597e3ae7ed7cf18f532b642803ea",
+        "license": "MIT",
+    }
+    assert distribution["image"] == IMAGE
+    assert distribution["image_manifest"] == {
+        "digest": "a83948492cf13df455170fb42885f5ef4db54fefe0feff0f841ecbff464ac9d8",
+        "size": 9530,
+        "config_digest": "3430d6614a8e2925f34d059af6caf05aff42387326db4d05639a60f10f2654d8",
+        "compressed_layers_bytes": 9_787_494_235,
+    }
+    capability = distribution["capabilities"]["distributed_vllm"]
+    assert capability == {
+        "verified": True,
+        "mechanism": "vllm-mp",
+        "topology_mode": "distributed",
+        "node_count": 2,
+        "world_size": 2,
+        "tensor_parallel_size": 2,
+        "pipeline_parallel_size": 1,
+        "data_parallel_size": 1,
+        "fabric": "nccl-roce",
+        "endpoint_role": "entrypoint",
+        "worker_role": "worker",
+        "rank_loss_withdraws_endpoint": True,
+    }
+
+
+def test_mia_patch_bundle_is_ordered_hashed_and_build_time_only() -> None:
+    recipe = _recipe()
+    patch = _resolve(recipe["execution"]["patch_bundle"])
+    context = ROOT / "adapters/deepseek/mia-vllm"
+
+    assert patch["source"]["repository"] == (
+        "https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark"
+    )
+    assert patch["source"]["revision"] == MIA_COMMIT
+    assert [item["order"] for item in patch["patches"]] == list(
+        range(1, len(PATCH_SHA256) + 1)
+    )
+    assert {Path(item["path"]).name: item["sha256"] for item in patch["patches"]} == (
+        PATCH_SHA256
+    )
+    assert patch["pre_patch_tree_sha256"] != patch["post_patch_tree_sha256"]
+    assert recipe["runtime"]["lifecycle"]["pre_start"] == []
+    assert recipe["build"]["network"] == {"mode": "none", "hosts": []}
+
+    dockerfile = (context / "Dockerfile").read_text(encoding="utf-8")
+    assert dockerfile.startswith(f"FROM {IMAGE}\n")
+    assert "ARG MIA_SOURCE_" not in dockerfile
+    assert "ARG ANEMLL_SOURCE_" not in dockerfile
+    assert "ARG PRE_PATCH_" not in dockerfile
+    assert "ARG PATCHED_" not in dockerfile
+    assert "apply-build-patches.py" in dockerfile
+    assert "verify-patched-tree.py" in dockerfile
     assert dockerfile.rstrip().endswith("USER 10001:10001\nENTRYPOINT []")
-    assert "apt-get" not in dockerfile
-    assert "pip install" not in dockerfile
-    assert "curl " not in dockerfile
-    assert "wget " not in dockerfile
-    assert source["runtime_image"] in dockerfile
-    assert enforce_build_source_policy(recipe, bundle).passed is True
-    assert "groupadd --gid 10001 vonk" in dockerfile
-    assert "useradd --uid 10001 --gid 10001" in dockerfile
-    assert "--home-dir /state --no-create-home" in dockerfile
-    assert "--shell /usr/sbin/nologin" in dockerfile
-    assert "export USER=vonk" in launcher
-    assert "export LOGNAME=vonk" in launcher
-    assert 'export XDG_CACHE_HOME="${state}/cache"' in launcher
-    assert 'export TORCHINDUCTOR_CACHE_DIR="${state}/cache/torchinductor"' in launcher
-    assert 'export TRITON_CACHE_DIR="${state}/cache/triton"' in launcher
-
-    # Every COPY commits the complete 18.8 GB base through rootless
-    # fuse-overlayfs on Spark. Keep the independently permissioned encoding
-    # and patch directories, but install the five executable files together.
-    assert dockerfile.count("\nCOPY ") <= 3
-    assert (
-        "COPY --chmod=0755 apply-reasoning-default.py resolve-model.py "
-        "resolve-roce.py worker-readiness-proxy.py mia-deepseek-v4-flash /opt/vonk/"
-    ) in dockerfile
-
-    for filename, expected_sha256 in PATCH_SHA256.items():
-        payload = (CONTEXT / "patches" / filename).read_bytes()
+    patcher = (context / "apply-build-patches.py").read_text(encoding="utf-8")
+    for filename, digest in PATCH_SHA256.items():
+        assert filename in patcher
+        payload = (context / "patches" / filename).read_bytes()
         if filename in {
             "hotfix-dsv4-issue27-partial-prefill-concurrency.py",
             "hotfix-dsv4-issue43-decode-fairness-and-diag.py",
             "hotfix-dsv4-issue55-tool-truncation.py",
         }:
-            # Upstream omits these files' final newlines; the source bundle
-            # normalizes them while preserving every source character.
             payload = payload.removesuffix(b"\n")
-        assert hashlib.sha256(payload).hexdigest() == expected_sha256
-        assert filename in dockerfile
-    assert (
-        dockerfile.index("hotfix-encoding-dsv4-issue21.py")
-        < dockerfile.index("hotfix-dsv4-issue31-v2-thinking-budget-gpu.py")
-        < dockerfile.index("hotfix-dsv4-issue55-tool-truncation.py")
-        < dockerfile.index("hotfix-dsv4-issue27-partial-prefill-concurrency.py")
-        < dockerfile.index("hotfix-dsv4-issue43-decode-fairness-and-diag.py")
-        < dockerfile.index("hotfix-dsv4-issue26-hybrid-swa-min.py")
+        assert __import__("hashlib").sha256(payload).hexdigest() == digest
+
+    bundle = generate_source_bundle(
+        {
+            path.relative_to(context).as_posix(): path.read_bytes()
+            for path in sorted(context.rglob("*"))
+            if path.is_file()
+        }
     )
-    patched_scheduler = (
-        "/usr/local/lib/python3.12/dist-packages/vllm/v1/core/sched/scheduler.py"
-    )
-    assert dockerfile.index(patched_scheduler) > dockerfile.index(
-        "hotfix-dsv4-issue43-decode-fairness-and-diag.py"
-    )
-    encoder = (CONTEXT / "encoding/encoding_dsv4.py").read_bytes()
-    assert hashlib.sha256(encoder).hexdigest() == (
-        "abc0d26120250dda0ae077dc64aa28836026e61e970854aaeb792445e6a0dde6"
-    )
-
-    assert "--tensor-parallel-size 2" in launcher
-    assert "--pipeline-parallel-size 1" in launcher
-    assert "--kv-cache-dtype nvfp4_ds_mla" in launcher
-    assert "--max-model-len 1048576" in launcher
-    assert "--distributed-executor-backend mp" in launcher
-    assert "--nnodes 2" in launcher
-    assert "VONK_RANK" in launcher and "--headless" in launcher
-    assert "worker-readiness-proxy.py" in launcher
-    assert "if [[ ${VONK_RANK} == 1 ]]; then" in launcher
-    assert 'wait -n "${vllm_pid}" "${proxy_pid}"' in launcher
-    assert "NCCL_IB_GID_INDEX" in launcher
-    assert "ip -o -4 address show" not in launcher
-    assert "read -r fabric_interface fabric_hca fabric_gid" in launcher
-    assert '/opt/vonk/resolve-roce.py "${VONK_LOCAL_ADDR}"' in launcher
-    assert "DSPARK_SUPPRESS_STOPS_IN_REASONING=1" in launcher
-    assert "HF_HUB_OFFLINE=1" in launcher
-    assert "/opt/vonk/resolve-model.py" in launcher
-    for forbidden in ("curl ", "wget ", "git clone", "ssh ", "pip install"):
-        assert forbidden not in launcher
-
-    readiness_proxy = CONTEXT / "worker-readiness-proxy.py"
-    assert readiness_proxy.is_file()
-    assert "worker-readiness-proxy.py" in dockerfile
-    assert str(readiness_proxy.name) in dockerfile
+    assert recipe["build"]["context"]["sha256"] == bundle.sha256
+    assert enforce_build_source_policy(recipe, bundle).passed is True
 
 
-def test_worker_readiness_proxy_exposes_only_rank_zero_models() -> None:
-    class UpstreamHandler(BaseHTTPRequestHandler):
-        def log_message(self, _format: str, *_args: object) -> None:
-            return
+def test_mia_topology_declares_rank_lifecycle_readiness_and_failure() -> None:
+    recipe = _recipe()
+    topology = recipe["topology"]
 
-        def do_GET(self) -> None:
-            body = b'{"object":"list","data":[]}'
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-    namespace = runpy.run_path(str(CONTEXT / "worker-readiness-proxy.py"))
-    handler = namespace["ReadinessHandler"]
-    upstream = ThreadingHTTPServer(("127.0.0.1", 0), UpstreamHandler)
-    handler.upstream = f"http://127.0.0.1:{upstream.server_port}/v1/models"
-    proxy = ThreadingHTTPServer(("127.0.0.1", 0), handler)
-    threads = [
-        threading.Thread(target=server.serve_forever, daemon=True)
-        for server in (upstream, proxy)
+    assert [(role["name"], role["count"], role["endpoint_owner"]) for role in topology["roles"]] == [
+        ("entrypoint", 1, True),
+        ("worker", 1, False),
     ]
-    for thread in threads:
-        thread.start()
-    try:
-        with urllib.request.urlopen(
-            f"http://127.0.0.1:{proxy.server_port}/v1/models", timeout=2
-        ) as response:
-            assert response.status == 200
-            assert json.loads(response.read()) == {"object": "list", "data": []}
-        try:
-            urllib.request.urlopen(
-                f"http://127.0.0.1:{proxy.server_port}/health", timeout=2
-            )
-        except urllib.error.HTTPError as error:
-            assert error.code == 404
-        else:
-            raise AssertionError("worker readiness proxy exposed an unexpected path")
-    finally:
-        for server in (proxy, upstream):
-            server.shutdown()
-            server.server_close()
-        for thread in threads:
-            thread.join(timeout=2)
+    assert topology["start_order"] == ["worker", "entrypoint"]
+    assert topology["stop_order"] == ["entrypoint", "worker"]
+    assert recipe["runtime"]["lifecycle"]["readiness"] == {
+        "strategy": "endpoint-owner-after-all-ranks",
+        "path": "/v1/models",
+        "timeout_seconds": 900,
+    }
+    assert recipe["runtime"]["lifecycle"]["failure"] == {
+        "rank_loss": "withdraw-endpoint",
+        "recovery": "restart-worker-then-entrypoint",
+    }
 
 
-def test_roce_resolver_derives_interface_from_the_selected_ipv4(
-    tmp_path: Path,
-) -> None:
-    namespace = runpy.run_path(str(CONTEXT / "resolve-roce.py"))
-    resolve_roce = namespace["resolve_roce"]
-    root = tmp_path / "infiniband"
-    port = root / "rocep1s0f1" / "ports" / "1"
-    for relative, value in (
-        ("gid_attrs/ndevs/3", "enp1s0f1np1\n"),
-        ("gid_attrs/types/3", "RoCE v2\n"),
-        ("gids/3", "::ffff:192.168.100.10\n"),
-    ):
-        path = port / relative
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(value, encoding="utf-8")
+def test_only_verified_distribution_owned_vllm_tp2_compiles() -> None:
+    recipe = _recipe()
+    harness = _resolve(recipe["execution"]["harness"])
+    distribution = _resolve(recipe["runtime"]["distribution"])
+    patch = _resolve(recipe["execution"]["patch_bundle"])
+    registry = HarnessRegistry.with_builtins()
 
-    assert resolve_roce(root, "192.168.100.10") == (
-        "enp1s0f1np1",
-        "rocep1s0f1",
-        "3",
+    worker = registry.compile(
+        harness,
+        recipe,
+        distribution,
+        patch,
+        {},
+        recipe["topology"],
+        "worker",
+        1,
+    )
+    entrypoint = registry.compile(
+        harness,
+        recipe,
+        distribution,
+        patch,
+        {},
+        recipe["topology"],
+        "entrypoint",
+        0,
     )
 
-    duplicate = root / "rocep2s0f1" / "ports" / "1"
-    for relative, value in (
-        ("gid_attrs/ndevs/3", "enp2s0f1np1\n"),
-        ("gid_attrs/types/3", "RoCE v2\n"),
-        ("gids/3", "::ffff:192.168.100.10\n"),
-    ):
-        path = duplicate / relative
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(value, encoding="utf-8")
-    assert resolve_roce(root, "192.168.100.10") is None
+    for rank, projection in ((1, worker), (0, entrypoint)):
+        assert projection.command[0] == "/opt/vonk/bin/vllm"
+        assert projection.command[projection.command.index("--nnodes") + 1] == "2"
+        assert projection.command[projection.command.index("--node-rank") + 1] == str(rank)
+        assert projection.command[projection.command.index("--tensor-parallel-size") + 1] == "2"
+        assert projection.command[projection.command.index("--distributed-executor-backend") + 1] == "mp"
+        assert "sh" not in projection.command
+        assert "-c" not in projection.command
+
+    unverified = copy.deepcopy(distribution)
+    unverified["capabilities"]["distributed_vllm"]["verified"] = False
+    with pytest.raises(HarnessCompileError, match="runtime distribution"):
+        registry.compile(
+            harness,
+            recipe,
+            unverified,
+            patch,
+            {},
+            recipe["topology"],
+            "worker",
+            1,
+        )
+
+    wrong_fabric = copy.deepcopy(distribution)
+    wrong_fabric["capabilities"]["distributed_vllm"]["fabric"] = "tcp"
+    with pytest.raises(HarnessCompileError, match="verified distributed vLLM distribution"):
+        VllmHarnessCompiler().compile(
+            recipe,
+            wrong_fabric,
+            patch,
+            {},
+            recipe["topology"],
+            "worker",
+            1,
+        )
 
 
-def test_legacy_mia_adapter_remains_the_accepted_immutable_release() -> None:
-    legacy = ROOT / "adapters/deepseek/mia-vllm/runtime-manifest.json"
-    assert hashlib.sha256(legacy.read_bytes()).hexdigest() == (
-        "11fa4d36945ed6530daf29f8b4342feaab90ad9cd47fa505cfd9858a358ebf37"
+def test_mia_runtime_spec_preserves_verified_host_fabric_authority() -> None:
+    recipe = _recipe()
+    harness = _resolve(recipe["execution"]["harness"])
+    distribution = _resolve(recipe["runtime"]["distribution"])
+    patch = _resolve(recipe["execution"]["patch_bundle"])
+    spec = compile_runtime_spec(
+        recipe,
+        resolved_entities={
+            "model_version": SimpleNamespace(
+                content_sha256=recipe["model"]["content_sha256"]
+            ),
+            "harness": SimpleNamespace(
+                document=harness,
+                content_sha256=recipe["execution"]["harness"]["content_sha256"],
+            ),
+            "runtime_distribution": SimpleNamespace(
+                document=distribution,
+                content_sha256=recipe["runtime"]["distribution"]["content_sha256"],
+            ),
+            "patch_bundle": SimpleNamespace(
+                document=patch,
+                content_sha256=recipe["execution"]["patch_bundle"]["content_sha256"],
+            ),
+        },
+        parameters={},
+        role="worker",
+        rank=1,
+        recipe_build_id="00000000-0000-4000-8000-000000000001",
+        image_digest="sha256:" + "d" * 64,
     )
+
+    assert spec["security"]["network_mode"] == "none"
+    assert spec["security"]["host_network"] is True
+    assert spec["topology"] == {
+        "name": "dual",
+        "node_count": 2,
+        "rank": 1,
+        "role": "worker",
+    }

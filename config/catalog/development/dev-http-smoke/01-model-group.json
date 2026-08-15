@@ -1,1 +1,0 @@
-{"schema_version":1,"kind":"model-group","identity":{"publisher":"vonk","slug":"development-fixtures"},"metadata":{"title":"Development fixtures","description":"Immutable model group for local development acceptance fixtures.","tags":["development","synthetic"]},"family":"development-fixtures"}

@@ -1,0 +1,156 @@
+{
+  "schema_version": 1,
+  "identity": {"publisher": "vonk-forge", "slug": "deepseek-v4-flash-0731-ds4-single"},
+  "metadata": {
+    "title": "DeepSeek V4 Flash 0731 DS4 single Spark",
+    "description": "One DGX Spark running DS4 with the current 96/128-GB mixed IQ2_XXS/Q2_K target and DSpark support GGUF.",
+    "tags": ["deepseek", "ds4", "openai", "single", "spark"]
+  },
+  "model": {
+    "kind": "model-version",
+    "publisher": "antirez",
+    "slug": "deepseek-v4-flash-0731-ds4",
+    "content_sha256": "a54f12dd8653ff220efed3d5b1efa667ab95f060e16211f1cdba7e0a2dcfeafb"
+  },
+  "execution": {
+    "harness": {
+      "kind": "execution-harness",
+      "publisher": "vonk-forge",
+      "slug": "ds4",
+      "content_sha256": "ac139f771cc97b27c1cf6fd97404b6a4db56d6d1725b4282cc5af0289a5421b3"
+    },
+    "patch_bundle": null
+  },
+  "build": {
+    "context": {
+      "sha256": "228fede9f501c71514aba8ced8058b05e73ad606c47a2ba32ff257d695177de6",
+      "expected_bytes": 10240,
+      "media_type": "application/vnd.vonk-forge.source-bundle.v1+tar"
+    },
+    "dockerfile": "Dockerfile",
+    "platform": "linux/arm64",
+    "arguments": [],
+    "network": {"mode": "public", "hosts": ["codeload.github.com", "nvcr.io"]},
+    "resources": {
+      "download_bytes": 6500000000,
+      "temporary_bytes": 16000000000,
+      "memory_bytes": 8000000000,
+      "timeout_seconds": 7200
+    }
+  },
+  "parameters": [],
+  "artifacts": [
+    {
+      "id": "target",
+      "kind": "http.file",
+      "repository": "https://huggingface.co/antirez/deepseek-v4-gguf/resolve/e7f04037032990db0346398d249baf9fb9df1ccc/DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf",
+      "revision": "sha256:ca22ae2f838e14077c22bc1c1417b71b45b5e5a3687bd96c2ac6e17fdb6261c0",
+      "download_bytes": 86720111488,
+      "installed_bytes": 86720111488,
+      "mount": {"target": "/models", "read_only": true},
+      "roles": ["entrypoint"]
+    },
+    {
+      "id": "drafter",
+      "kind": "http.file",
+      "repository": "https://huggingface.co/antirez/deepseek-v4-gguf/resolve/e7f04037032990db0346398d249baf9fb9df1ccc/DeepSeek-V4-Flash-DSpark-support-0731.gguf",
+      "revision": "sha256:7e319924541db3f7a163ed7e11d7532a70d48228ab59d36cb81e1d4511885360",
+      "download_bytes": 5989114272,
+      "installed_bytes": 5989114272,
+      "mount": {"target": "/models", "read_only": true},
+      "roles": ["entrypoint"]
+    }
+  ],
+  "runtime": {
+    "distribution": {
+      "kind": "runtime-distribution",
+      "publisher": "antirez",
+      "slug": "ds4-spark",
+      "content_sha256": "00c2a17548a549333dab8af8b31ec0b4d9af53ee80838f3a83c65faafebc1f22"
+    },
+    "entrypoint": ["/opt/vonk/bin/ds4-serve"],
+    "arguments": [
+      {"name": "model", "value": "/models/DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf"},
+      {"name": "draft-model", "value": "/models/DeepSeek-V4-Flash-DSpark-support-0731.gguf"},
+      {"name": "ctx-size", "value": 131072},
+      {"name": "batch-size", "value": 2}
+    ],
+    "environment": [
+      {"name": "DS4_LOG_LEVEL", "value": "INFO"},
+      {"name": "HF_HUB_OFFLINE", "value": "1"}
+    ],
+    "security": {
+      "devices": ["nvidia.com/gpu=all"],
+      "capabilities": [],
+      "host_network": false,
+      "privileged": false,
+      "user": "10001:10001",
+      "mounts": [
+        {"source": "model", "target": "/models", "read_only": true},
+        {"source": "outputs", "target": "/outputs", "read_only": false}
+      ]
+    },
+    "lifecycle": {
+      "pre_start": [],
+      "post_stop": [],
+      "stop_timeout_seconds": 120,
+      "readiness": {"strategy": "endpoint-owner", "path": "/v1/models", "timeout_seconds": 900},
+      "failure": {"rank_loss": "not-applicable", "recovery": "restart-entrypoint"}
+    }
+  },
+  "topology": {
+    "name": "solo",
+    "mode": "single",
+    "node_count": 1,
+    "roles": [
+      {
+        "name": "entrypoint",
+        "count": 1,
+        "endpoint_owner": true,
+        "artifacts": ["target", "drafter"],
+        "resources": {
+          "disk": {
+            "image_bytes": 10000000000,
+            "artifact_bytes": 92709225760,
+            "staging_bytes": 10000000000,
+            "cache_bytes": 8000000000,
+            "rollback_bytes": 0,
+            "safety_margin_bytes": 10000000000
+          },
+          "memory": {
+            "kind": "unified",
+            "startup_peak_bytes": 115000000000,
+            "steady_state_bytes": 108000000000,
+            "runtime_growth_bytes": 4000000000,
+            "system_reserve_bytes": 8000000000
+          }
+        }
+      }
+    ],
+    "parallelism": {"world_size": 1, "tensor": 1, "pipeline": 1, "data": 1, "backend": "local"},
+    "fabric": {"connectivity": "none", "minimum_bandwidth_mbps": 0},
+    "start_order": ["entrypoint"],
+    "stop_order": ["entrypoint"]
+  },
+  "interfaces": [
+    {
+      "adapter": "openai",
+      "port": 8080,
+      "model_aliases": ["deepseek-v4-flash"],
+      "health_path": "/v1/models"
+    }
+  ],
+  "validation": {
+    "validators": [
+      {"interface": "openai", "checks": ["endpoint.healthy", "chat.nonempty", "chat.max-output-64"]}
+    ],
+    "benchmarks": [
+      {"name": "bounded-chat", "framework": "openai", "configuration": {"max_output_tokens": 64, "requests": 1, "timeout_seconds": 300}}
+    ]
+  },
+  "provenance": {
+    "source_kind": "global",
+    "source_reference": "https://github.com/antirez/ds4/tree/84cc882352757baf628a1776badf7cc54d584e28",
+    "attribution": ["DeepSeek AI", "Salvatore Sanfilippo (antirez)"]
+  }
+}

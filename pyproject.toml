@@ -49,7 +49,6 @@ packages = ["src/cluster_profiles"]
 required-version = "==0.16.1"
 target-version = "py312"
 extend-exclude = [
-    "config/recipes/development/mia-deepseek-v4-flash-context",
     "src/cluster_profiles/generated_control",
 ]
 

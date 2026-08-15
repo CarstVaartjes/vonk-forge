@@ -360,6 +360,7 @@ def _topology(node_count: int) -> dict[str, object]:
         "mode": "single" if node_count == 1 else "tensor_parallel",
         "node_count": node_count,
         "parallelism": {
+            "world_size": node_count,
             "tensor": node_count,
             "pipeline": 1,
             "data": 1,

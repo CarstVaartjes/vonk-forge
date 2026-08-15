@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "kind": "model-group",
+  "identity": {"publisher": "deepseek-ai", "slug": "deepseek-flash"},
+  "metadata": {
+    "title": "DeepSeek Flash",
+    "description": "DeepSeek's sparse mixture-of-experts Flash model lineage.",
+    "tags": ["deepseek", "language", "reasoning", "tool-use"]
+  },
+  "family": "deepseek-flash"
+}

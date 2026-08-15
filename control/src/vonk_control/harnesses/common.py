@@ -10,7 +10,7 @@ from pathlib import PurePosixPath
 
 from .contracts import HarnessBinding, HarnessMount, HarnessProjection
 
-_SAFE_ARGUMENT = re.compile(r"^[A-Za-z0-9_./:+@%=-]{1,2048}$")
+_SAFE_ARGUMENT = re.compile(r'^[A-Za-z0-9_./:+@%={},"<>-]{1,2048}$')
 _SAFE_ADAPTER_BASENAME = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 _NON_ROOT_UID = re.compile(r"^[1-9][0-9]*(?::[1-9][0-9]*)?$")
 _SHELL_EXECUTABLES = frozenset(
@@ -402,9 +402,12 @@ def validate_topology(
         or not 0 <= rank < node_count
     ):
         raise HarnessCompileError("harness topology is invalid")
+    world_size = parallelism.get("world_size")
     dimensions = tuple(parallelism.get(name) for name in ("tensor", "pipeline", "data"))
     if (
-        any(type(value) is not int or value < 1 for value in dimensions)
+        type(world_size) is not int
+        or world_size != node_count
+        or any(type(value) is not int or value < 1 for value in dimensions)
         or dimensions[0] * dimensions[1] * dimensions[2] != node_count
     ):
         raise HarnessCompileError("harness topology parallelism is inconsistent")
@@ -435,6 +438,10 @@ def validate_topology(
         or mode == "mpi"
         and node_count > 1
         and backend == "mpi"
+        or mode == "distributed"
+        and node_count > 1
+        and tensor == node_count
+        and pipeline == data == 1
     )
     if not mode_is_consistent:
         raise HarnessCompileError(
@@ -499,7 +506,21 @@ def projection(
         or security.get("capabilities") != []
     ):
         raise HarnessCompileError("runtime distribution security is invalid")
-    _require_recipe_mounts(recipe, str(security["user"]))
+    distribution_capabilities = distribution.get("capabilities")
+    distributed_vllm = (
+        distribution_capabilities.get("distributed_vllm")
+        if isinstance(distribution_capabilities, Mapping)
+        else None
+    )
+    topology = recipe.get("topology")
+    _require_recipe_mounts(
+        recipe,
+        str(security["user"]),
+        allow_host_network=isinstance(distributed_vllm, Mapping)
+        and distributed_vllm.get("verified") is True
+        and isinstance(topology, Mapping)
+        and topology.get("mode") == "distributed",
+    )
     value = HarnessProjection(
         slug=slug,
         contract_version=1,
@@ -648,7 +669,9 @@ def _validate_parameter_value(
         raise HarnessCompileError(f"harness parameter value is invalid: {name}")
 
 
-def _require_recipe_mounts(recipe: Mapping[str, object], user: str) -> None:
+def _require_recipe_mounts(
+    recipe: Mapping[str, object], user: str, *, allow_host_network: bool = False
+) -> None:
     artifacts = recipe.get("artifacts")
     runtime = recipe.get("runtime")
     security = runtime.get("security") if isinstance(runtime, Mapping) else None
@@ -666,7 +689,10 @@ def _require_recipe_mounts(recipe: Mapping[str, object], user: str) -> None:
         or not isinstance(security, Mapping)
         or security.get("user") != user
         or security.get("privileged") is not False
-        or security.get("host_network") is not False
+        or (
+            security.get("host_network") is not False
+            and not (allow_host_network and security.get("host_network") is True)
+        )
         or security.get("capabilities") != []
         or type(mounts) is not list
         or {

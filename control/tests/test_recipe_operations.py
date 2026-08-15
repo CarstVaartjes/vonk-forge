@@ -251,6 +251,7 @@ def setup_services(
             "mode": "tensor_parallel",
             "node_count": nodes,
             "parallelism": {
+                "world_size": nodes,
                 "tensor": nodes,
                 "pipeline": 1,
                 "data": 1,

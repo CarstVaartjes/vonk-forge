@@ -143,6 +143,116 @@ def validate_catalog_document(document: Mapping[str, object]) -> None:
         raise CatalogContractError(
             f"catalog.schema.{error.validator}", path, _safe_detail(error)
         )
+    kind = document.get("kind")
+    if kind == CatalogKind.MODEL_VERSION.value:
+        _validate_model_version(document)
+    elif kind == CatalogKind.RUNTIME_DISTRIBUTION.value:
+        _validate_runtime_distribution(document)
+    elif kind == CatalogKind.PATCH_BUNDLE.value:
+        _validate_patch_bundle(document)
+
+
+def _validate_model_version(document: Mapping[str, object]) -> None:
+    artifacts = document.get("artifacts")
+    sizes = document.get("sizes")
+    source = document.get("source")
+    if not isinstance(artifacts, list) or not isinstance(sizes, Mapping):
+        raise CatalogContractError(
+            "catalog.model_version_shape", "artifacts", "model version inventory is invalid"
+        )
+    ids = [artifact.get("id") for artifact in artifacts if isinstance(artifact, Mapping)]
+    paths = [artifact.get("path") for artifact in artifacts if isinstance(artifact, Mapping)]
+    if len(ids) != len(artifacts) or len(set(ids)) != len(ids):
+        raise CatalogContractError(
+            "catalog.artifact_id", "artifacts", "artifact IDs must be unique"
+        )
+    if len(set(paths)) != len(paths):
+        raise CatalogContractError(
+            "catalog.artifact_path", "artifacts", "artifact paths must be unique"
+        )
+    revisions = {
+        artifact.get("revision")
+        for artifact in artifacts
+        if isinstance(artifact, Mapping)
+    }
+    if not isinstance(source, Mapping) or revisions != {source.get("revision")}:
+        raise CatalogContractError(
+            "catalog.artifact_revision",
+            "artifacts",
+            "every artifact revision must match the immutable model-version source",
+        )
+    for field in ("download_bytes", "installed_bytes"):
+        total = sum(
+            int(artifact[field])
+            for artifact in artifacts
+            if isinstance(artifact, Mapping)
+        )
+        if sizes.get(field) != total:
+            raise CatalogContractError(
+                "catalog.artifact_size",
+                f"sizes.{field}",
+                f"{field} must equal the exact artifact inventory total",
+            )
+
+
+def _validate_runtime_distribution(document: Mapping[str, object]) -> None:
+    manifest = document.get("image_manifest")
+    image = document.get("image")
+    if manifest is not None:
+        if not isinstance(manifest, Mapping) or not isinstance(image, str):
+            raise CatalogContractError(
+                "catalog.image_manifest", "image_manifest", "image manifest is invalid"
+            )
+        if image.rsplit("@sha256:", 1)[-1] != manifest.get("digest"):
+            raise CatalogContractError(
+                "catalog.image_manifest",
+                "image_manifest.digest",
+                "image manifest digest must match the pinned image",
+            )
+    capabilities = document.get("capabilities")
+    distributed = (
+        capabilities.get("distributed_vllm")
+        if isinstance(capabilities, Mapping)
+        else None
+    )
+    if distributed is None:
+        return
+    harness = document.get("implements_harness")
+    dimensions = tuple(
+        distributed.get(name)
+        for name in (
+            "tensor_parallel_size",
+            "pipeline_parallel_size",
+            "data_parallel_size",
+        )
+    )
+    if (
+        not isinstance(harness, Mapping)
+        or harness.get("slug") != "vllm"
+        or any(type(value) is not int for value in dimensions)
+        or dimensions[0] * dimensions[1] * dimensions[2]
+        != distributed.get("world_size")
+        or distributed.get("world_size") != distributed.get("node_count")
+    ):
+        raise CatalogContractError(
+            "catalog.distributed_vllm",
+            "capabilities.distributed_vllm",
+            "distributed vLLM capability must bind vLLM and an exact rank topology",
+        )
+
+
+def _validate_patch_bundle(document: Mapping[str, object]) -> None:
+    patches = document.get("patches")
+    if patches is None:
+        return
+    if not isinstance(patches, list) or [
+        patch.get("order") if isinstance(patch, Mapping) else None for patch in patches
+    ] != list(range(1, len(patches) + 1)):
+        raise CatalogContractError(
+            "catalog.patch_order",
+            "patches",
+            "patch order must be contiguous and start at one",
+        )
 
 
 def parse_catalog_reference(

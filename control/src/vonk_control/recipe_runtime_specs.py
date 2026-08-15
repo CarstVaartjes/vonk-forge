@@ -79,6 +79,9 @@ def compile_runtime_spec(
         or not isinstance(artifacts, list)
     ):
         raise RecipeRuntimeSpecError("recipe runtime is invalid")
+    runtime_security = runtime.get("security")
+    if not isinstance(runtime_security, Mapping):
+        raise RecipeRuntimeSpecError("recipe runtime security is invalid")
     role_artifacts = [
         copy.deepcopy(item)
         for item in artifacts
@@ -131,7 +134,7 @@ def compile_runtime_spec(
             "no_new_privileges": projection.no_new_privileges,
             "capabilities": list(projection.capabilities),
             "privileged": False,
-            "host_network": False,
+            "host_network": runtime_security.get("host_network") is True,
             "mounts": mounts,
         },
         "lifecycle": copy.deepcopy(runtime["lifecycle"]),

@@ -144,6 +144,7 @@ def recipe_document(
             "mode": "single",
             "node_count": 1,
             "parallelism": {
+                "world_size": 1,
                 "tensor": 1,
                 "pipeline": 1,
                 "data": 1,

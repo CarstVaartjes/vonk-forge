@@ -89,14 +89,12 @@ EXPECTED_COMMANDS = {
         "/opt/vonk/bin/ds4-serve",
         "--model",
         "/models/target.gguf",
-        "--draft-model",
+        "--mtp",
         "/models/drafter.gguf",
-        "--ctx-size",
+        "--ctx",
         "32768",
-        "--world-size",
-        "1",
-        "--rank",
-        "0",
+        "--dspark",
+        "--cuda",
         "--host",
         "0.0.0.0",
         "--port",
@@ -366,7 +364,7 @@ def test_builtin_harness_emits_an_exact_shell_free_projection(slug: str) -> None
             "--kv_cache_free_gpu_memory_fraction",
         ),
         ("llama-cpp", "parallel", 2, "--parallel"),
-        ("ds4", "batch-size", 8, "--batch-size"),
+        ("ds4", "batch-size", 8, "--batched-session"),
         ("diffusers", "seed", 0, "--seed"),
         ("comfyui", "seed", 0, "--seed"),
         ("pytorch-pipeline", "timeout-seconds", 300, "--timeout-seconds"),
@@ -588,12 +586,13 @@ def test_topology_mode_must_match_parallelism_dimensions() -> None:
         _compile("vllm", recipe=recipe)
 
 
-def test_ds4_binds_numeric_rank_and_world_size_from_topology() -> None:
+def test_ds4_rejects_unsupported_multi_node_topology() -> None:
     recipe = _recipe("ds4")
     topology = recipe["topology"]
     topology["name"] = "pair"
     topology["mode"] = "data_parallel"
     topology["node_count"] = 2
+    topology["parallelism"]["world_size"] = 2
     topology["parallelism"]["data"] = 2
     topology["parallelism"]["backend"] = "tcp"
     topology["fabric"] = {
@@ -612,12 +611,8 @@ def test_ds4_binds_numeric_rank_and_world_size_from_topology() -> None:
     topology["start_order"] = ["worker", "entrypoint"]
     topology["stop_order"] = ["entrypoint", "worker"]
 
-    projection = _compile(
-        "ds4", recipe=recipe, topology=topology, role="worker", rank=1
-    )
-
-    assert projection.command[projection.command.index("--world-size") + 1] == "2"
-    assert projection.command[projection.command.index("--rank") + 1] == "1"
+    with pytest.raises(HarnessCompileError, match="topology"):
+        _compile("ds4", recipe=recipe, topology=topology, role="worker", rank=1)
 
 
 @pytest.mark.parametrize("slug", ["diffusers", "comfyui", "pytorch-pipeline"])

@@ -86,6 +86,7 @@ def _document(*, family: str, nodes: int = 1, title: str = "Visual title") -> di
         topology["mode"] = "tensor_parallel"
         topology["node_count"] = nodes
         topology["parallelism"] = {
+            "world_size": nodes,
             "tensor": nodes,
             "pipeline": 1,
             "data": 1,
@@ -1781,6 +1782,7 @@ def test_huge_topology_role_count_is_projected_with_constant_bounded_memory() ->
     topology = document["topology"]
     topology["node_count"] = 1_000_000
     topology["roles"][1]["count"] = 999_999
+    topology["parallelism"]["world_size"] = 1_000_000
     topology["parallelism"]["tensor"] = 1_000_000
     validate_recipe(document)
     with sessions.begin() as session:
@@ -1891,6 +1893,7 @@ def test_schema_valid_oversized_recipe_numbers_are_saturated_with_a_reason() -> 
     topology = document["topology"]
     topology["node_count"] = huge + 1
     topology["roles"][1]["count"] = huge
+    topology["parallelism"]["world_size"] = huge + 1
     topology["parallelism"]["tensor"] = huge + 1
     topology["fabric"]["minimum_bandwidth_mbps"] = huge
     for role in topology["roles"]:

@@ -113,7 +113,7 @@
         }
       }
     ],
-    "parallelism": {"tensor": 1, "pipeline": 1, "data": 1, "backend": "local"},
+    "parallelism": {"world_size": 1, "tensor": 1, "pipeline": 1, "data": 1, "backend": "local"},
     "fabric": {"connectivity": "none", "minimum_bandwidth_mbps": 0},
     "start_order": ["entrypoint"],
     "stop_order": ["entrypoint"]

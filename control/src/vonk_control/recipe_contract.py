@@ -239,16 +239,21 @@ def _validate_recipe_semantics(document: Mapping[str, object]) -> None:
             "exactly one single-node role must own the endpoint",
         )
     parallelism = _mapping(topology.get("parallelism"), "topology.parallelism")
-    world_size = (
+    computed_world_size = (
         int(parallelism["tensor"])
         * int(parallelism["pipeline"])
         * int(parallelism["data"])
     )
-    if world_size != node_count:
+    declared_world_size = parallelism.get("world_size")
+    if (
+        type(declared_world_size) is not int
+        or declared_world_size != computed_world_size
+        or declared_world_size != node_count
+    ):
         raise RecipeContractError(
             "recipe.topology_parallelism",
             "topology.parallelism",
-            "parallelism product must equal node_count",
+            "world_size and parallelism product must equal node_count",
         )
     fabric = _mapping(topology.get("fabric"), "topology.fabric")
     if (node_count == 1) != (fabric.get("connectivity") == "none"):

@@ -21,10 +21,9 @@ from .contracts import HarnessProjection
 
 _ARGUMENTS = {
     "model": ArgumentSpec("--model", validate=model_file(".gguf")),
-    "draft-model": ArgumentSpec("--draft-model", validate=model_file(".gguf")),
-    "ctx-size": ArgumentSpec("--ctx-size", validate=integer(1, 10_000_000)),
-    "gpu-layers": ArgumentSpec("--gpu-layers", validate=integer(0, 999)),
-    "batch-size": ArgumentSpec("--batch-size", validate=integer(1, 65_536)),
+    "draft-model": ArgumentSpec("--mtp", validate=model_file(".gguf")),
+    "ctx-size": ArgumentSpec("--ctx", validate=integer(1, 10_000_000)),
+    "batch-size": ArgumentSpec("--batched-session", validate=integer(1, 65_536)),
     "host": ArgumentSpec("--host", emit=False, validate=one_of("0.0.0.0")),
     "port": ArgumentSpec("--port", emit=False, validate=integer(1024, 65_535)),
 }
@@ -49,14 +48,14 @@ class Ds4HarnessCompiler:
         del patch
         require_entrypoint(recipe, ("/opt/vonk/bin/ds4-serve",))
         arguments, parsed = compile_arguments(recipe, parameters, _ARGUMENTS)
-        if "--model" not in parsed or "--draft-model" not in parsed:
+        if "--model" not in parsed or "--mtp" not in parsed:
             raise HarnessCompileError("DS4 requires target and draft model paths")
         port = require_openai_interface(recipe)
-        node_count, _parallelism = validate_topology(
+        validate_topology(
             topology,
             role,
             rank,
-            modes=frozenset({"single", "data_parallel"}),
+            modes=frozenset({"single"}),
         )
         environment = compile_environment(
             recipe, frozenset({"DS4_LOG_LEVEL", "HF_HUB_OFFLINE"})
@@ -66,10 +65,8 @@ class Ds4HarnessCompiler:
             command=(
                 "/opt/vonk/bin/ds4-serve",
                 *arguments,
-                "--world-size",
-                str(node_count),
-                "--rank",
-                str(rank),
+                "--dspark",
+                "--cuda",
                 "--host",
                 "0.0.0.0",
                 "--port",

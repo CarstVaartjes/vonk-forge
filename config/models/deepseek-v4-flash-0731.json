@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "kind": "model",
+  "identity": {"publisher": "deepseek-ai", "slug": "deepseek-v4-flash-0731"},
+  "metadata": {
+    "title": "DeepSeek V4 Flash 0731",
+    "description": "DeepSeek V4 Flash 0731 sparse MoE checkpoint generation with DSpark speculative support.",
+    "tags": ["deepseek", "language", "moe", "reasoning", "tool-use"]
+  },
+  "model_group": {
+    "kind": "model-group",
+    "publisher": "deepseek-ai",
+    "slug": "deepseek-flash",
+    "content_sha256": "c28a3ab4a7f3feedfa28d375b139ccf94ab9fad6d16adb62888a06cc27926997"
+  },
+  "architecture": "DeepSeek V4 sparse mixture-of-experts transformer with DSpark speculative module"
+}

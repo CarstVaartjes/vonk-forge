@@ -811,7 +811,10 @@ def _validate_builtin_harness(
         or type(exceptions) is not list
     ):
         raise HarnessCompileError("resolved built-in harness contract is invalid")
-    if type(mode) is not str or mode not in topology_modes:
+    distribution_owned_vllm = compiler.slug == "vllm" and mode == "distributed"
+    if type(mode) is not str or (
+        mode not in topology_modes and not distribution_owned_vllm
+    ):
         raise HarnessCompileError("resolved built-in harness topology is incompatible")
     if not interface_names or any(
         type(name) is not str or name not in adapters for name in interface_names

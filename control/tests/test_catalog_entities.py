@@ -47,25 +47,61 @@ def model(group_digest: str) -> dict[str, object]:
 
 
 def model_version(model_digest: str) -> dict[str, object]:
+    model_reference = {
+        "kind": "model",
+        "publisher": "vonk-forge",
+        "slug": "synthetic-tiny",
+        "content_sha256": model_digest,
+    }
     return {
         **_base("model-version", "synthetic-tiny-fp16", "Synthetic Tiny FP16"),
-        "model": {
-            "kind": "model",
-            "publisher": "vonk-forge",
-            "slug": "synthetic-tiny",
-            "content_sha256": model_digest,
-        },
+        "model": model_reference,
         "version": "1.0.0",
-        "license": {"spdx": "Apache-2.0", "attribution": []},
+        "source": {
+            "repository": "https://huggingface.co/vonk-forge/synthetic-tiny",
+            "revision": "0123456789abcdef0123456789abcdef01234567",
+        },
+        "lineage": {
+            "publisher": "vonk-forge",
+            "relation": "official",
+            "source_model": model_reference,
+            "derivation": "Synthetic fixture published directly in FP16.",
+        },
+        "format": {
+            "container": "safetensors",
+            "precision": "fp16",
+            "quantization": "none",
+        },
+        "parameters": {"total": 1, "active": 1},
+        "limits": {"context_tokens": 128},
+        "sizes": {"download_bytes": 1024, "installed_bytes": 1024},
+        "license": {
+            "spdx": "Apache-2.0",
+            "url": "https://www.apache.org/licenses/LICENSE-2.0",
+            "attribution": [],
+            "operator_acceptance_required": False,
+        },
+        "access": {
+            "visibility": "public",
+            "gated": False,
+            "authentication": "none",
+        },
         "artifacts": [
             {
-                "kind": "huggingface.snapshot",
+                "id": "weights",
+                "path": "model.safetensors",
+                "kind": "huggingface.file",
                 "repository": "vonk-forge/synthetic-tiny",
                 "revision": "0123456789abcdef0123456789abcdef01234567",
                 "sha256": "c" * 64,
+                "download_bytes": 1024,
                 "installed_bytes": 1024,
+                "roles": ["model"],
             }
         ],
+        "dependencies": [],
+        "availability": "active",
+        "supersedes": None,
     }
 
 

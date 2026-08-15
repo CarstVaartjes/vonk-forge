@@ -14,14 +14,46 @@
     "content_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
   },
   "version": "1.0.0",
-  "license": {"spdx": "Apache-2.0", "attribution": []},
+  "source": {
+    "repository": "https://huggingface.co/vonk-forge/synthetic-tiny",
+    "revision": "0123456789abcdef0123456789abcdef01234567"
+  },
+  "lineage": {
+    "publisher": "vonk-forge",
+    "relation": "official",
+    "source_model": {
+      "kind": "model",
+      "publisher": "vonk-forge",
+      "slug": "synthetic-tiny",
+      "content_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "derivation": "Synthetic contract fixture."
+  },
+  "format": {"container": "safetensors", "precision": "fp16", "quantization": "none"},
+  "parameters": {"total": 1024, "active": 1024},
+  "limits": {"context_tokens": 1024},
+  "sizes": {"download_bytes": 1024, "installed_bytes": 1024},
+  "license": {
+    "spdx": "Apache-2.0",
+    "url": "https://www.apache.org/licenses/LICENSE-2.0",
+    "attribution": [],
+    "operator_acceptance_required": false
+  },
+  "access": {"visibility": "public", "gated": false, "authentication": "none"},
   "artifacts": [
     {
-      "kind": "huggingface.snapshot",
-      "repository": "vonk-forge/synthetic-tiny",
+      "id": "weights",
+      "path": "model.safetensors",
+      "kind": "huggingface.file",
+      "repository": "https://huggingface.co/vonk-forge/synthetic-tiny",
       "revision": "0123456789abcdef0123456789abcdef01234567",
       "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-      "installed_bytes": 1024
+      "download_bytes": 1024,
+      "installed_bytes": 1024,
+      "roles": ["weights"]
     }
-  ]
+  ],
+  "dependencies": [],
+  "availability": "active",
+  "supersedes": null
 }
