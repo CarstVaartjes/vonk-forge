@@ -226,7 +226,7 @@ test("Fleet cards and bounded history are keyboard-accessible with local evidenc
   await page.keyboard.press("Enter");
   await expect(page.getByRole("complementary", {name: "Aurora details"})).toBeVisible();
   await expect(page.getByRole("button", {name: "Close Aurora details"})).toBeFocused();
-  await expect(page.getByRole("img", {name: "Aurora GPU utilization history"})).toHaveAccessibleDescription(/2 reported (samples|buckets)/);
+  await expect(page.getByRole("img", {name: "Aurora GPU utilization history"})).toHaveAccessibleDescription(/1 reported buckets/);
   await page.getByRole("button", {name: "24 hours"}).click();
   await expect(page.getByRole("button", {name: "24 hours"})).toHaveAttribute("aria-pressed", "true");
 });
@@ -240,11 +240,11 @@ test("Node history chooses honest rollups on desktop and mobile", async ({page})
 
     await page.getByRole("button", {name: "7 days"}).click();
     await expect(page.getByRole("button", {name: "7 days"})).toHaveAttribute("aria-pressed", "true");
-    await expect(page.getByText(/Showing minute samples/)).toBeVisible();
+    await expect(page.getByText(/Showing 15-minute buckets across the full 7-day window/)).toBeVisible();
     await expect(page.getByRole("img", {name: "Aurora GPU utilization history"})).toHaveAccessibleDescription(/reported buckets/);
 
     await page.getByRole("button", {name: "1 year"}).click();
-    await expect(page.getByText(/Showing 15-minute samples/)).toBeVisible();
+    await expect(page.getByText(/Showing newest 1,500 15-minute buckets within 1 year/)).toBeVisible();
     await expect.poll(() => page.evaluate(() => ({
       body: document.body.scrollWidth,
       document: document.documentElement.scrollWidth,

@@ -568,6 +568,44 @@ def test_history_returns_ordered_minute_rollups_with_nullable_metrics_omitted(
 
 
 @pytest.mark.parametrize(
+    ("resolution", "window", "step_seconds"),
+    [
+        ("minute", timedelta(days=30), 60),
+        ("fifteen-minute", timedelta(days=365), 900),
+    ],
+)
+def test_history_rollup_cap_keeps_newest_points_chronological(
+    telemetry, resolution: str, window: timedelta, step_seconds: int
+) -> None:
+    repository, sessions, _, _ = telemetry
+    resolution_seconds = step_seconds
+    start = NOW - window
+    starts = [start + timedelta(seconds=step_seconds * index) for index in range(1_501)]
+    with sessions.begin() as session:
+        session.add_all(
+            NodeTelemetryRollupBucket(
+                resolution_seconds=resolution_seconds,
+                node_id=NODE_A,
+                bucket_start=bucket_start,
+                source_sample_count=1,
+                gap_samples=0,
+            )
+            for bucket_start in starts
+        )
+
+    points = repository.history(
+        NODE_A,
+        start,
+        NOW,
+        1_500,
+        resolution=resolution,
+    )
+
+    assert len(points) == 1_500
+    assert [point.bucket_start for point in points] == starts[1:]
+
+
+@pytest.mark.parametrize(
     ("resolution", "window", "message"),
     [
         ("raw", timedelta(hours=24, microseconds=1), "24 hours"),

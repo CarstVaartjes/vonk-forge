@@ -67,8 +67,8 @@ test("loads bounded history ranges and renders accessible summaries", async () =
   expect(calls[0]).toMatchObject({
     start: "2026-08-15T11:00:00.000Z",
     end: "2026-08-15T12:00:00.000Z",
-    maximum: 360,
-    resolution: "raw",
+    maximum: 60,
+    resolution: "minute",
   });
 
   await userEvent.click(screen.getByRole("button", {name: "24 hours"}));
@@ -78,7 +78,7 @@ test("loads bounded history ranges and renders accessible summaries", async () =
     start: "2026-08-14T12:00:00.000Z",
     end: "2026-08-15T12:00:00.000Z",
     maximum: 1440,
-    resolution: "raw",
+    resolution: "minute",
   });
   expect(screen.getByRole("button", {name: "24 hours"})).toHaveAttribute("aria-pressed", "true");
 
@@ -139,13 +139,44 @@ test("selects an honest rollup resolution for long history windows", async () =>
 
   await userEvent.click(screen.getByRole("button", {name: "7 days"}));
   await waitFor(() => expect(calls).toHaveLength(2));
-  expect(calls[1]).toMatchObject({resolution: "minute", maximum: 1500});
-  expect(screen.getByText(/minute samples/i)).toBeVisible();
+  expect(calls[1]).toMatchObject({resolution: "fifteen-minute", maximum: 672});
+  expect(screen.getByText(/15-minute buckets across the full 7-day window/i)).toBeVisible();
 
   await userEvent.click(screen.getByRole("button", {name: "1 year"}));
   await waitFor(() => expect(calls).toHaveLength(3));
   expect(calls[2]).toMatchObject({resolution: "fifteen-minute", maximum: 1500});
-  expect(screen.getByText(/15-minute samples/i)).toBeVisible();
+  expect(screen.getByText(/newest 1,500 15-minute buckets within 1 year/i)).toBeVisible();
+});
+
+test("refreshes selected history after live telemetry without stealing focus", async () => {
+  const calls: Array<{resolution: string; maximum: number; start: string; end: string}> = [];
+  const control = {
+    nodeTelemetryHistory: async (_nodeId: string, start: string, end: string, resolution: string, maximum: number) => {
+      calls.push({end, maximum, resolution, start});
+      return history(start, end);
+    },
+  } as unknown as ControlApi;
+  const initial = node();
+  const view = render(<NodeDetail api={control} node={initial} now={NOW} onClose={() => undefined}/>);
+  await screen.findByRole("img", {name: "Spark One GPU utilization history"});
+
+  await userEvent.click(screen.getByRole("button", {name: "7 days"}));
+  await waitFor(() => expect(calls).toHaveLength(2));
+  expect(screen.getByRole("button", {name: "7 days"})).toHaveFocus();
+
+  const refreshed = node();
+  refreshed.telemetry = {
+    age_seconds: 0,
+    freshness: "live",
+    sample: history().points[1] as Extract<TelemetryHistory["points"][number], {id: string}>,
+  };
+  view.rerender(<NodeDetail api={control} node={refreshed} now={new Date("2026-08-15T12:01:00Z")} onClose={() => undefined}/>);
+
+  await waitFor(() => expect(calls).toHaveLength(3));
+  expect(calls[2]).toMatchObject({resolution: "fifteen-minute", maximum: 672});
+  expect(screen.getByRole("button", {name: "7 days"})).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("button", {name: "7 days"})).toHaveFocus();
+  view.unmount();
 });
 
 test("separates complete and healthy recipe evidence from transitional group state", async () => {

@@ -7,13 +7,13 @@ import {StatusPill} from "./status-pill";
 type HistoryRange = "1h" | "6h" | "24h" | "7d" | "30d" | "90d" | "1y";
 
 const HISTORY_RANGES: Record<HistoryRange, {hours: number; label: string; maximumPoints: number; resolution: TelemetryResolution; resolutionLabel: string}> = {
-  "1h": {hours: 1, label: "1 hour", maximumPoints: 360, resolution: "raw", resolutionLabel: "raw samples"},
-  "6h": {hours: 6, label: "6 hours", maximumPoints: 720, resolution: "raw", resolutionLabel: "raw samples"},
-  "24h": {hours: 24, label: "24 hours", maximumPoints: 1440, resolution: "raw", resolutionLabel: "raw samples"},
-  "7d": {hours: 24 * 7, label: "7 days", maximumPoints: 1500, resolution: "minute", resolutionLabel: "minute samples"},
-  "30d": {hours: 24 * 30, label: "30 days", maximumPoints: 1500, resolution: "minute", resolutionLabel: "minute samples"},
-  "90d": {hours: 24 * 90, label: "90 days", maximumPoints: 1500, resolution: "fifteen-minute", resolutionLabel: "15-minute samples"},
-  "1y": {hours: 24 * 365, label: "1 year", maximumPoints: 1500, resolution: "fifteen-minute", resolutionLabel: "15-minute samples"},
+  "1h": {hours: 1, label: "1 hour", maximumPoints: 60, resolution: "minute", resolutionLabel: "minute buckets across the full 1-hour window"},
+  "6h": {hours: 6, label: "6 hours", maximumPoints: 360, resolution: "minute", resolutionLabel: "minute buckets across the full 6-hour window"},
+  "24h": {hours: 24, label: "24 hours", maximumPoints: 1440, resolution: "minute", resolutionLabel: "minute buckets across the full 24-hour window"},
+  "7d": {hours: 24 * 7, label: "7 days", maximumPoints: 672, resolution: "fifteen-minute", resolutionLabel: "15-minute buckets across the full 7-day window"},
+  "30d": {hours: 24 * 30, label: "30 days", maximumPoints: 1500, resolution: "fifteen-minute", resolutionLabel: "newest 1,500 15-minute buckets within 30 days"},
+  "90d": {hours: 24 * 90, label: "90 days", maximumPoints: 1500, resolution: "fifteen-minute", resolutionLabel: "newest 1,500 15-minute buckets within 90 days"},
+  "1y": {hours: 24 * 365, label: "1 year", maximumPoints: 1500, resolution: "fifteen-minute", resolutionLabel: "newest 1,500 15-minute buckets within 1 year"},
 };
 
 type RawMetricName = "gpu_utilization_percent" | "memory_available_bytes" | "temperature_c";
@@ -26,11 +26,11 @@ function metricSeries(points: readonly TelemetryHistoryPoint[], name: RawMetricN
   return points.map(point => {
     if (isRollupPoint(point)) {
       const metric = point.metrics[name];
-      return metric ? {minimum: metric.minimum, mean: metric.mean, maximum: metric.maximum} : null;
+      return metric ? {count: metric.count, minimum: metric.minimum, mean: metric.mean, maximum: metric.maximum} : null;
     }
     const value = point[name];
     return typeof value === "number" && Number.isFinite(value)
-      ? {minimum: value, mean: value, maximum: value}
+      ? {count: 1, minimum: value, mean: value, maximum: value}
       : null;
   });
 }
@@ -53,7 +53,6 @@ export function NodeDetail({
 }) {
   const headingId = useId();
   const closeButton = useRef<HTMLButtonElement>(null);
-  const historyEnd = useRef(new Date(now));
   const [range, setRange] = useState<HistoryRange>("1h");
   const [history, setHistory] = useState<TelemetryHistory>();
   const [historyError, setHistoryError] = useState("");
@@ -65,7 +64,7 @@ export function NodeDetail({
   useEffect(() => {
     const controller = new AbortController();
     const selection = HISTORY_RANGES[range];
-    const end = historyEnd.current;
+    const end = new Date(now);
     const start = new Date(end.getTime() - selection.hours * 60 * 60 * 1000);
     setHistoryLoading(true);
     setHistory(undefined);
@@ -88,7 +87,7 @@ export function NodeDetail({
       if (!controller.signal.aborted) setHistoryLoading(false);
     });
     return () => controller.abort();
-  }, [api, node.id, range, retryRevision]);
+  }, [api, node.id, node.telemetry?.sample.id, range, retryRevision]);
 
   const points = history?.points ?? [];
   const installed = node.installed.filter(item => item.complete);

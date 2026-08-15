@@ -22,6 +22,22 @@ test("exposes an accessible chart and visible text summary", () => {
   expect(chart.querySelector("path")).toHaveAttribute("aria-hidden", "true");
 });
 
+test("weights rollup means by reported metric count", () => {
+  render(<Sparkline
+    label="GPU utilization history"
+    values={[]}
+    sampleLabel="buckets"
+    series={[
+      {minimum: 10, mean: 10, maximum: 10, count: 1},
+      {minimum: 30, mean: 30, maximum: 30, count: 3},
+    ]}
+    formatValue={value => `${Math.round(value)}%`}
+  />);
+
+  expect(screen.getByRole("img", {name: "GPU utilization history"})).toHaveAccessibleDescription("Mean 25%; latest mean 30%; reported range 10% to 30%; 2 reported buckets.");
+  expect(screen.getByText("Mean 25% · Range 10%–30% · 2 reported buckets")).toBeVisible();
+});
+
 test("states when no finite samples were reported", () => {
   render(<Sparkline label="Temperature history" values={[null, Number.NaN]}/>);
 

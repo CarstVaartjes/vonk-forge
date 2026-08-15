@@ -5,6 +5,7 @@ const HEIGHT = 30;
 const PADDING = 2;
 
 export type SparklineSeriesPoint = {
+  count: number;
   minimum: number;
   mean: number;
   maximum: number;
@@ -88,7 +89,9 @@ export function Sparkline({
   const finite = values.filter((value): value is number => typeof value === "number" && Number.isFinite(value));
   const hasSeries = series !== undefined;
   const normalizedSeries = (series ?? []).map(value =>
-    value !== null && value !== undefined
+      value !== null && value !== undefined
+      && Number.isFinite(value.count)
+      && value.count > 0
       && Number.isFinite(value.minimum)
       && Number.isFinite(value.mean)
       && Number.isFinite(value.maximum)
@@ -104,7 +107,8 @@ export function Sparkline({
     : undefined;
   const seriesLatest = seriesValues.at(-1)?.mean;
   const seriesMean = seriesValues.length > 0
-    ? seriesValues.reduce((total, value) => total + value.mean, 0) / seriesValues.length
+    ? seriesValues.reduce((total, value) => total + value.mean * value.count, 0)
+      / seriesValues.reduce((total, value) => total + value.count, 0)
     : undefined;
   const minimum = hasSeries ? seriesMinimum : finite.length > 0 ? Math.min(...finite) : undefined;
   const maximum = hasSeries ? seriesMaximum : finite.length > 0 ? Math.max(...finite) : undefined;
