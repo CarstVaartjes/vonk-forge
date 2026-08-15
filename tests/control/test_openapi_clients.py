@@ -121,10 +121,12 @@ def test_generator_is_idempotent_and_admin_schema_is_secret_free() -> None:
         "/api/v1/agents",
         "/api/v1/endpoints/{alias}",
         "/api/v1/fleet",
+        "/api/v1/fleet/stream",
         "/api/v1/jobs/{job_id}",
         "/api/v1/jobs/{job_id}/logs",
         "/api/v1/jobs/{job_id}/resume",
         "/api/v1/nodes/status",
+        "/api/v1/nodes/{node_id}/telemetry",
         "/api/v1/profiles/{profile_id}/plan",
         "/api/v1/reconciliations",
         "/api/v1/reconciliations/plan",
@@ -147,11 +149,20 @@ def test_generator_is_idempotent_and_admin_schema_is_secret_free() -> None:
             "type": "apiKey",
         },
     }
+    operations = _operations(schema)
+    assert operations["streamFleetEvents"]["security"] == [
+        {"BrowserSession": []}
+    ]
     assert all(
         operation["security"] == [{"BearerAuth": []}]
-        for operation_id, operation in _operations(schema).items()
+        for operation_id, operation in operations.items()
         if operation_id
-        not in {"getBrowserSession", "loginBrowser", "logoutBrowser"}
+        not in {
+            "getBrowserSession",
+            "loginBrowser",
+            "logoutBrowser",
+            "streamFleetEvents",
+        }
     )
 
     assert {
@@ -169,6 +180,7 @@ def test_generator_is_idempotent_and_admin_schema_is_secret_free() -> None:
         "getFleetStatus",
         "getJob",
         "getNodeStatuses",
+        "getNodeTelemetryHistory",
         "getPublishedEndpoint",
         "listAgents",
         "listJobLogs",
@@ -185,6 +197,13 @@ def test_generator_is_idempotent_and_admin_schema_is_secret_free() -> None:
         reference = response_schema["$ref"]
         component = schema["components"]["schemas"][reference.rsplit("/", 1)[-1]]
         assert component["additionalProperties"] is False
+
+    assert by_id["getFleetStatus"]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/FleetSnapshot"}
+    assert by_id["getNodeStatuses"]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/FleetStatusResponse"}
 
     serialized = json.dumps(schema, sort_keys=True).lower()
     for forbidden in (

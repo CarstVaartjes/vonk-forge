@@ -10,6 +10,7 @@ from .build_plan_response import BuildPlanResponse
 from .build_preview_request import BuildPreviewRequest
 from .build_request import BuildRequest
 from .cancel_reconciliation_response_cancel_reconciliation_api_v1_reconciliations_reconciliation_id_cancel_post import CancelReconciliationResponseCancelReconciliationApiV1ReconciliationsReconciliationIdCancelPost
+from .capacity_reservations import CapacityReservations
 from .catalog_problem import CatalogProblem
 from .change_request import ChangeRequest
 from .create_recipe_request import CreateRecipeRequest
@@ -23,6 +24,9 @@ from .enrollment_grant_response import EnrollmentGrantResponse
 from .enrollment_grant_response_purpose import EnrollmentGrantResponsePurpose
 from .enrollment_list_response import EnrollmentListResponse
 from .enrollment_summary import EnrollmentSummary
+from .fleet_node import FleetNode
+from .fleet_node_labels import FleetNodeLabels
+from .fleet_snapshot import FleetSnapshot
 from .fleet_status_response import FleetStatusResponse
 from .fork_recipe_request import ForkRecipeRequest
 from .get_platform_update_response_update_status_api_v1_updates_rollout_id_get import GetPlatformUpdateResponseUpdateStatusApiV1UpdatesRolloutIdGet
@@ -39,6 +43,8 @@ from .install_node_plan_response import InstallNodePlanResponse
 from .install_plan_response import InstallPlanResponse
 from .install_preview_request import InstallPreviewRequest
 from .install_request import InstallRequest
+from .inventory_state import InventoryState
+from .inventory_state_freshness import InventoryStateFreshness
 from .job_detail_response import JobDetailResponse
 from .job_logs_response import JobLogsResponse
 from .job_operation_progress import JobOperationProgress
@@ -58,6 +64,8 @@ from .mapping_request import MappingRequest
 from .mapping_request_parameters import MappingRequestParameters
 from .mapping_response import MappingResponse
 from .migration_grant_request import MigrationGrantRequest
+from .node_connection import NodeConnection
+from .node_connection_online_state import NodeConnectionOnlineState
 from .node_status import NodeStatus
 from .node_status_labels import NodeStatusLabels
 from .operation_response import OperationResponse
@@ -115,11 +123,14 @@ from .plan_workload_request import PlanWorkloadRequest
 from .plan_workload_requests import PlanWorkloadRequests
 from .preview_proposal_response_proposal_preview_api_v1_proposals_post import PreviewProposalResponseProposalPreviewApiV1ProposalsPost
 from .preview_request import PreviewRequest
+from .projection_reason import ProjectionReason
+from .projection_reason_severity import ProjectionReasonSeverity
 from .proposal_change_request import ProposalChangeRequest
 from .proposal_change_request_document import ProposalChangeRequestDocument
 from .proposal_request import ProposalRequest
 from .publication_export_request import PublicationExportRequest
 from .recipe_list_response import RecipeListResponse
+from .recipe_presence import RecipePresence
 from .recipe_revision_response import RecipeRevisionResponse
 from .recipe_revision_response_document import RecipeRevisionResponseDocument
 from .recipe_revision_response_lifecycle import RecipeRevisionResponseLifecycle
@@ -139,6 +150,8 @@ from .resolve_import_request_overlays import ResolveImportRequestOverlays
 from .resolve_recipe_request import ResolveRecipeRequest
 from .run_node_plan_response import RunNodePlanResponse
 from .run_plan_response import RunPlanResponse
+from .run_presence import RunPresence
+from .run_presence_group_state import RunPresenceGroupState
 from .run_preview_request import RunPreviewRequest
 from .run_rank_status_response import RunRankStatusResponse
 from .run_request import RunRequest
@@ -148,6 +161,11 @@ from .source_check_request import SourceCheckRequest
 from .source_policy_finding_response import SourcePolicyFindingResponse
 from .source_policy_response import SourcePolicyResponse
 from .submit_change_response_submit_change_api_v1_changes_post import SubmitChangeResponseSubmitChangeApiV1ChangesPost
+from .telemetry_details import TelemetryDetails
+from .telemetry_history_response import TelemetryHistoryResponse
+from .telemetry_point import TelemetryPoint
+from .telemetry_state import TelemetryState
+from .telemetry_state_freshness import TelemetryStateFreshness
 from .test_report_request import TestReportRequest
 from .test_report_request_report import TestReportRequestReport
 from .update_apply_request import UpdateApplyRequest
@@ -168,6 +186,7 @@ __all__ = (
     "BuildPreviewRequest",
     "BuildRequest",
     "CancelReconciliationResponseCancelReconciliationApiV1ReconciliationsReconciliationIdCancelPost",
+    "CapacityReservations",
     "CatalogProblem",
     "ChangeRequest",
     "CreateRecipeRequest",
@@ -181,6 +200,9 @@ __all__ = (
     "EnrollmentGrantResponsePurpose",
     "EnrollmentListResponse",
     "EnrollmentSummary",
+    "FleetNode",
+    "FleetNodeLabels",
+    "FleetSnapshot",
     "FleetStatusResponse",
     "ForkRecipeRequest",
     "GetPlatformUpdateResponseUpdateStatusApiV1UpdatesRolloutIdGet",
@@ -197,6 +219,8 @@ __all__ = (
     "InstallPlanResponse",
     "InstallPreviewRequest",
     "InstallRequest",
+    "InventoryState",
+    "InventoryStateFreshness",
     "JobDetailResponse",
     "JobLogsResponse",
     "JobOperationProgress",
@@ -216,6 +240,8 @@ __all__ = (
     "MappingRequestParameters",
     "MappingResponse",
     "MigrationGrantRequest",
+    "NodeConnection",
+    "NodeConnectionOnlineState",
     "NodeStatus",
     "NodeStatusLabels",
     "OperationResponse",
@@ -273,11 +299,14 @@ __all__ = (
     "PlanWorkloadRequests",
     "PreviewProposalResponseProposalPreviewApiV1ProposalsPost",
     "PreviewRequest",
+    "ProjectionReason",
+    "ProjectionReasonSeverity",
     "ProposalChangeRequest",
     "ProposalChangeRequestDocument",
     "ProposalRequest",
     "PublicationExportRequest",
     "RecipeListResponse",
+    "RecipePresence",
     "RecipeRevisionResponse",
     "RecipeRevisionResponseDocument",
     "RecipeRevisionResponseLifecycle",
@@ -297,6 +326,8 @@ __all__ = (
     "ResolveRecipeRequest",
     "RunNodePlanResponse",
     "RunPlanResponse",
+    "RunPresence",
+    "RunPresenceGroupState",
     "RunPreviewRequest",
     "RunRankStatusResponse",
     "RunRequest",
@@ -306,6 +337,11 @@ __all__ = (
     "SourcePolicyFindingResponse",
     "SourcePolicyResponse",
     "SubmitChangeResponseSubmitChangeApiV1ChangesPost",
+    "TelemetryDetails",
+    "TelemetryHistoryResponse",
+    "TelemetryPoint",
+    "TelemetryState",
+    "TelemetryStateFreshness",
     "TestReportRequest",
     "TestReportRequestReport",
     "UpdateApplyRequest",

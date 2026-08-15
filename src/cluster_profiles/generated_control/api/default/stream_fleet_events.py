@@ -8,7 +8,6 @@ from ...types import Response, UNSET
 from ... import errors
 
 from ...models.bounded_error_response import BoundedErrorResponse
-from ...models.fleet_snapshot import FleetSnapshot
 from typing import cast
 
 
@@ -24,7 +23,7 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "get",
-        "url": "/api/v1/fleet",
+        "url": "/api/v1/fleet/stream",
     }
 
 
@@ -32,13 +31,17 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, FleetSnapshot]]:
+def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, str]]:
     if response.status_code == 200:
-        response_200 = FleetSnapshot.from_dict(response.json())
-
-
-
+        response_200 = response.text
         return response_200
+
+    if response.status_code == 400:
+        response_400 = BoundedErrorResponse.from_dict(response.json())
+
+
+
+        return response_400
 
     if response.status_code == 401:
         response_401 = BoundedErrorResponse.from_dict(response.json())
@@ -60,7 +63,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, FleetSnapshot]]:
+def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, str]]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -73,15 +76,15 @@ def sync_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[Union[BoundedErrorResponse, FleetSnapshot]]:
-    """ Fleet View
+) -> Response[Union[BoundedErrorResponse, str]]:
+    """ Fleet Event Stream
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, FleetSnapshot]]
+        Response[Union[BoundedErrorResponse, str]]
      """
 
 
@@ -99,15 +102,15 @@ def sync(
     *,
     client: AuthenticatedClient,
 
-) -> Optional[Union[BoundedErrorResponse, FleetSnapshot]]:
-    """ Fleet View
+) -> Optional[Union[BoundedErrorResponse, str]]:
+    """ Fleet Event Stream
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, FleetSnapshot]
+        Union[BoundedErrorResponse, str]
      """
 
 
@@ -120,15 +123,15 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[Union[BoundedErrorResponse, FleetSnapshot]]:
-    """ Fleet View
+) -> Response[Union[BoundedErrorResponse, str]]:
+    """ Fleet Event Stream
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, FleetSnapshot]]
+        Response[Union[BoundedErrorResponse, str]]
      """
 
 
@@ -146,15 +149,15 @@ async def asyncio(
     *,
     client: AuthenticatedClient,
 
-) -> Optional[Union[BoundedErrorResponse, FleetSnapshot]]:
-    """ Fleet View
+) -> Optional[Union[BoundedErrorResponse, str]]:
+    """ Fleet Event Stream
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, FleetSnapshot]
+        Union[BoundedErrorResponse, str]
      """
 
 

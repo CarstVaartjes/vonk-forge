@@ -635,6 +635,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/fleet/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Fleet Event Stream */
+        get: operations["streamFleetEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/jobs": {
         parameters: {
             query?: never;
@@ -729,6 +746,23 @@ export interface paths {
         };
         /** Node Status View */
         get: operations["getNodeStatuses"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nodes/{node_id}/telemetry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Node Telemetry History */
+        get: operations["getNodeTelemetryHistory"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1538,6 +1572,19 @@ export interface components {
             /** Request Key */
             request_key: string;
         };
+        /** CapacityReservations */
+        CapacityReservations: {
+            /** Disk Bytes */
+            disk_bytes: number;
+            /** Gpu Memory Bytes */
+            gpu_memory_bytes: number;
+            /** Host Memory Bytes */
+            host_memory_bytes: number;
+            /** Port Count */
+            port_count: number;
+            /** Unified Memory Bytes */
+            unified_memory_bytes: number;
+        };
         /** CatalogProblem */
         CatalogProblem: {
             /** Code */
@@ -1669,6 +1716,51 @@ export interface components {
             rejection_reason?: string | null;
             /** State */
             state: string;
+        };
+        /** FleetNode */
+        FleetNode: {
+            connection: components["schemas"]["NodeConnection"];
+            /** Display Name */
+            display_name: string;
+            /** Hostname */
+            hostname: string;
+            /** Id */
+            id: string;
+            /** Installed */
+            installed: components["schemas"]["RecipePresence"][];
+            inventory: components["schemas"]["InventoryState"] | null;
+            /** Labels */
+            labels: {
+                [key: string]: string;
+            };
+            /** Lifecycle */
+            lifecycle: string;
+            /** Loaded */
+            loaded: components["schemas"]["RunPresence"][];
+            reservations: components["schemas"]["CapacityReservations"];
+            telemetry: components["schemas"]["TelemetryState"] | null;
+            /** Warnings */
+            warnings: components["schemas"]["ProjectionReason"][];
+        };
+        /** FleetSnapshot */
+        FleetSnapshot: {
+            /** Event Cursor */
+            event_cursor: number;
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /** Nodes */
+            nodes: components["schemas"]["FleetNode"][];
+            /** Repository Commit */
+            repository_commit: string;
+            /**
+             * Schema Version
+             * @default 1
+             * @constant
+             */
+            schema_version: 1;
         };
         /** FleetStatusResponse */
         FleetStatusResponse: {
@@ -1811,6 +1903,52 @@ export interface components {
             recipe_build_id: string;
             /** Request Key */
             request_key: string;
+        };
+        /** InventoryState */
+        InventoryState: {
+            /** Age Seconds */
+            age_seconds: number;
+            /** Artifact Store Read Only */
+            artifact_store_read_only: boolean;
+            /** Capabilities */
+            capabilities: string[];
+            /** Container Runtime Version */
+            container_runtime_version: string;
+            /** Disk Free Bytes */
+            disk_free_bytes: number;
+            /** Disk Total Bytes */
+            disk_total_bytes: number;
+            /** Fabric Address */
+            fabric_address?: string | null;
+            /** Fabric Bandwidth Mbps */
+            fabric_bandwidth_mbps?: number | null;
+            /**
+             * Freshness
+             * @enum {string}
+             */
+            freshness: "fresh" | "stale";
+            /** Gpu Count */
+            gpu_count: number;
+            /** Gpu Memory Free Bytes */
+            gpu_memory_free_bytes: number;
+            /** Gpu Memory Total Bytes */
+            gpu_memory_total_bytes: number;
+            /** Host Memory Free Bytes */
+            host_memory_free_bytes: number;
+            /** Host Memory Total Bytes */
+            host_memory_total_bytes: number;
+            /** Nvidia Driver Version */
+            nvidia_driver_version: string;
+            /**
+             * Observed At
+             * Format: date-time
+             */
+            observed_at: string;
+            /**
+             * Received At
+             * Format: date-time
+             */
+            received_at: string;
         };
         /** JobDetailResponse */
         JobDetailResponse: {
@@ -2002,6 +2140,20 @@ export interface components {
              * @default 600
              */
             ttl_seconds: number;
+        };
+        /** NodeConnection */
+        NodeConnection: {
+            /** Agent State */
+            agent_state: string;
+            /** Last Seen Age Seconds */
+            last_seen_age_seconds: number | null;
+            /** Last Seen At */
+            last_seen_at: string | null;
+            /**
+             * Online State
+             * @enum {string}
+             */
+            online_state: "online" | "offline" | "unregistered";
         };
         /** NodeStatus */
         NodeStatus: {
@@ -2738,6 +2890,18 @@ export interface components {
             /** Source Yaml */
             source_yaml: string;
         };
+        /** ProjectionReason */
+        ProjectionReason: {
+            /** Code */
+            code: string;
+            /** Detail */
+            detail: string;
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "info" | "warning" | "error";
+        };
         /** ProposalChangeRequest */
         ProposalChangeRequest: {
             /** Document */
@@ -2765,6 +2929,37 @@ export interface components {
             next_cursor?: string | null;
             /** Recipes */
             recipes: components["schemas"]["RecipeSummaryResponse"][];
+        };
+        /** RecipePresence */
+        RecipePresence: {
+            /** Complete */
+            complete: boolean;
+            /** Degraded Reason */
+            degraded_reason?: string | null;
+            /** Expected Rank Count */
+            expected_rank_count: number;
+            /** Group State */
+            group_state: string;
+            /** Installation Id */
+            installation_id: string;
+            /** Member Node Ids */
+            member_node_ids: string[];
+            /** Present Ranks */
+            present_ranks: number[];
+            /** Profile Name */
+            profile_name: string;
+            /** Rank */
+            rank: number;
+            /** Rank State */
+            rank_state: string;
+            /** Recipe Id */
+            recipe_id: string;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /** Role */
+            role: string;
+            /** Title */
+            title: string;
         };
         /** RecipeRevisionResponse */
         RecipeRevisionResponse: {
@@ -2987,6 +3182,50 @@ export interface components {
             /** Recipe Revision Id */
             recipe_revision_id: string;
         };
+        /** RunPresence */
+        RunPresence: {
+            /** Alias */
+            alias: string;
+            /** Degraded Reason */
+            degraded_reason?: string | null;
+            /** Expected Rank Count */
+            expected_rank_count: number;
+            /**
+             * Group State
+             * @enum {string}
+             */
+            group_state: "healthy" | "degraded";
+            /** Healthy */
+            healthy: boolean;
+            /** Installation Id */
+            installation_id: string;
+            /** Member Node Ids */
+            member_node_ids: string[];
+            /** Present Ranks */
+            present_ranks: number[];
+            /** Rank */
+            rank: number;
+            /** Rank Age Seconds */
+            rank_age_seconds: number;
+            /** Rank Fresh */
+            rank_fresh: boolean;
+            /** Rank State */
+            rank_state: string;
+            /** Recipe Id */
+            recipe_id: string;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /** Role */
+            role: string;
+            /** Route State */
+            route_state: string;
+            /** Run Id */
+            run_id: string;
+            /** Run State */
+            run_state: string;
+            /** Title */
+            title: string;
+        };
         /** RunPreviewRequest */
         RunPreviewRequest: {
             /** Installation Id */
@@ -3077,6 +3316,99 @@ export interface components {
             passed: boolean;
             /** Source Bundle Sha256 */
             source_bundle_sha256: string;
+        };
+        /** TelemetryDetails */
+        TelemetryDetails: {
+            /** Accelerator Name */
+            accelerator_name?: string | null;
+            /** Accelerator Performance State */
+            accelerator_performance_state?: string | null;
+        };
+        /** TelemetryHistoryResponse */
+        TelemetryHistoryResponse: {
+            /**
+             * End
+             * Format: date-time
+             */
+            end: string;
+            /** Maximum Points */
+            maximum_points: number;
+            /** Node Id */
+            node_id: string;
+            /** Points */
+            points: components["schemas"]["TelemetryPoint"][];
+            /**
+             * Schema Version
+             * @default 1
+             * @constant
+             */
+            schema_version: 1;
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+        };
+        /** TelemetryPoint */
+        TelemetryPoint: {
+            /** Boot Id */
+            boot_id: string;
+            /** Cpu Utilization Percent */
+            cpu_utilization_percent?: number | null;
+            details: components["schemas"]["TelemetryDetails"];
+            /** Disk Free Bytes */
+            disk_free_bytes?: number | null;
+            /** Disk Total Bytes */
+            disk_total_bytes?: number | null;
+            /** Gap Samples */
+            gap_samples: number;
+            /** Gpu Memory Free Bytes */
+            gpu_memory_free_bytes?: number | null;
+            /** Gpu Memory Total Bytes */
+            gpu_memory_total_bytes?: number | null;
+            /** Gpu Utilization Percent */
+            gpu_utilization_percent?: number | null;
+            /** Id */
+            id: string;
+            /** Load Average 1M */
+            load_average_1m?: number | null;
+            /** Memory Available Bytes */
+            memory_available_bytes?: number | null;
+            /** Memory Total Bytes */
+            memory_total_bytes?: number | null;
+            /** Network Receive Bytes Per Second */
+            network_receive_bytes_per_second?: number | null;
+            /** Network Transmit Bytes Per Second */
+            network_transmit_bytes_per_second?: number | null;
+            /** Node Id */
+            node_id: string;
+            /**
+             * Observed At
+             * Format: date-time
+             */
+            observed_at: string;
+            /** Power Watts */
+            power_watts?: number | null;
+            /**
+             * Received At
+             * Format: date-time
+             */
+            received_at: string;
+            /** Sequence */
+            sequence: number;
+            /** Temperature C */
+            temperature_c?: number | null;
+        };
+        /** TelemetryState */
+        TelemetryState: {
+            /** Age Seconds */
+            age_seconds: number;
+            /**
+             * Freshness
+             * @enum {string}
+             */
+            freshness: "live" | "delayed" | "stale";
+            sample: components["schemas"]["TelemetryPoint"];
         };
         /** TestReportRequest */
         TestReportRequest: {
@@ -5146,11 +5478,67 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["FleetStatusResponse"];
+                    "application/json": components["schemas"]["FleetSnapshot"];
                 };
             };
             /** @description Unauthorized */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    streamFleetEvents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Durable Fleet event stream */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5491,6 +5879,68 @@ export interface operations {
             };
             /** @description Unauthorized */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    getNodeTelemetryHistory: {
+        parameters: {
+            query: {
+                start: string;
+                end: string;
+                maximum_points?: number;
+            };
+            header?: never;
+            path: {
+                node_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TelemetryHistoryResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
