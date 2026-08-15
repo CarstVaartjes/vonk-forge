@@ -341,26 +341,31 @@
         "additionalProperties": false,
         "properties": {
           "disk_bytes": {
+            "maximum": 9.223372036854776e+18,
             "minimum": 0.0,
             "title": "Disk Bytes",
             "type": "integer"
           },
           "gpu_memory_bytes": {
+            "maximum": 9.223372036854776e+18,
             "minimum": 0.0,
             "title": "Gpu Memory Bytes",
             "type": "integer"
           },
           "host_memory_bytes": {
+            "maximum": 9.223372036854776e+18,
             "minimum": 0.0,
             "title": "Host Memory Bytes",
             "type": "integer"
           },
           "port_count": {
+            "maximum": 9.223372036854776e+18,
             "minimum": 0.0,
             "title": "Port Count",
             "type": "integer"
           },
           "unified_memory_bytes": {
+            "maximum": 9.223372036854776e+18,
             "minimum": 0.0,
             "title": "Unified Memory Bytes",
             "type": "integer"
@@ -874,9 +879,15 @@
           },
           "labels": {
             "additionalProperties": {
+              "maxLength": 256,
+              "minLength": 1,
               "type": "string"
             },
             "maxProperties": 64,
+            "propertyNames": {
+              "maxLength": 64,
+              "minLength": 1
+            },
             "title": "Labels",
             "type": "object"
           },
@@ -1412,6 +1423,7 @@
         "additionalProperties": false,
         "properties": {
           "age_seconds": {
+            "maximum": 9.223372036854776e+18,
             "minimum": 0.0,
             "title": "Age Seconds",
             "type": "number"
@@ -1422,6 +1434,8 @@
           },
           "capabilities": {
             "items": {
+              "maxLength": 64,
+              "minLength": 1,
               "type": "string"
             },
             "maxItems": 64,
@@ -1435,11 +1449,13 @@
             "type": "string"
           },
           "disk_free_bytes": {
+            "maximum": 9.223372036854776e+18,
             "minimum": 0.0,
             "title": "Disk Free Bytes",
             "type": "integer"
           },
           "disk_total_bytes": {
+            "maximum": 9.223372036854776e+18,
             "minimum": 0.0,
             "title": "Disk Total Bytes",
             "type": "integer"
@@ -1459,6 +1475,7 @@
           "fabric_bandwidth_mbps": {
             "anyOf": [
               {
+                "maximum": 9.223372036854776e+18,
                 "minimum": 1.0,
                 "type": "integer"
               },
@@ -1477,26 +1494,31 @@
             "type": "string"
           },
           "gpu_count": {
+            "maximum": 2147483647.0,
             "minimum": 0.0,
             "title": "Gpu Count",
             "type": "integer"
           },
           "gpu_memory_free_bytes": {
+            "maximum": 9.223372036854776e+18,
             "minimum": 0.0,
             "title": "Gpu Memory Free Bytes",
             "type": "integer"
           },
           "gpu_memory_total_bytes": {
+            "maximum": 9.223372036854776e+18,
             "minimum": 0.0,
             "title": "Gpu Memory Total Bytes",
             "type": "integer"
           },
           "host_memory_free_bytes": {
+            "maximum": 9.223372036854776e+18,
             "minimum": 0.0,
             "title": "Host Memory Free Bytes",
             "type": "integer"
           },
           "host_memory_total_bytes": {
+            "maximum": 9.223372036854776e+18,
             "minimum": 0.0,
             "title": "Host Memory Total Bytes",
             "type": "integer"
@@ -2139,14 +2161,32 @@
         "additionalProperties": false,
         "properties": {
           "agent_state": {
-            "maxLength": 24,
-            "minLength": 1,
+            "enum": [
+              "unregistered",
+              "pending",
+              "active",
+              "retired",
+              "revoked"
+            ],
             "title": "Agent State",
+            "type": "string"
+          },
+          "certificate_state": {
+            "enum": [
+              "valid",
+              "missing",
+              "not-yet-valid",
+              "expired",
+              "revoked",
+              "inactive"
+            ],
+            "title": "Certificate State",
             "type": "string"
           },
           "last_seen_age_seconds": {
             "anyOf": [
               {
+                "maximum": 9.223372036854776e+18,
                 "minimum": 0.0,
                 "type": "number"
               },
@@ -2168,6 +2208,30 @@
             ],
             "title": "Last Seen At"
           },
+          "offline_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "unregistered",
+                  "agent-inactive",
+                  "agent-revoked",
+                  "never-seen",
+                  "last-seen-in-future",
+                  "stale",
+                  "certificate-missing",
+                  "certificate-not-yet-valid",
+                  "certificate-expired",
+                  "certificate-revoked",
+                  "certificate-inactive"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Offline Reason"
+          },
           "online_state": {
             "enum": [
               "online",
@@ -2180,7 +2244,9 @@
         },
         "required": [
           "agent_state",
+          "certificate_state",
           "online_state",
+          "offline_reason",
           "last_seen_at",
           "last_seen_age_seconds"
         ],
@@ -4634,8 +4700,16 @@
         "additionalProperties": false,
         "properties": {
           "code": {
-            "maxLength": 64,
-            "minLength": 1,
+            "enum": [
+              "node.offline",
+              "inventory.missing",
+              "inventory.stale",
+              "telemetry.missing",
+              "telemetry.delayed",
+              "telemetry.stale",
+              "install.partial",
+              "run.degraded"
+            ],
             "title": "Code",
             "type": "string"
           },
@@ -4765,7 +4839,16 @@
           "degraded_reason": {
             "anyOf": [
               {
-                "maxLength": 64,
+                "enum": [
+                  "external-member",
+                  "mapping-incomplete",
+                  "missing-ranks",
+                  "unexpected-ranks",
+                  "rank-membership-mismatch",
+                  "installation-not-installed",
+                  "rank-not-installed",
+                  "rank-incomplete-bytes"
+                ],
                 "type": "string"
               },
               {
@@ -4781,19 +4864,26 @@
             "type": "integer"
           },
           "group_state": {
-            "maxLength": 24,
-            "minLength": 1,
+            "enum": [
+              "planned",
+              "installing",
+              "installed",
+              "partial",
+              "failed",
+              "uninstalled"
+            ],
             "title": "Group State",
             "type": "string"
           },
           "installation_id": {
-            "maxLength": 36,
+            "maxLength": 128,
             "minLength": 1,
             "title": "Installation Id",
             "type": "string"
           },
           "member_node_ids": {
             "items": {
+              "pattern": "^spk_[0-9a-f]{32}$",
               "type": "string"
             },
             "maxItems": 500,
@@ -4802,6 +4892,8 @@
           },
           "present_ranks": {
             "items": {
+              "maximum": 499.0,
+              "minimum": 0.0,
               "type": "integer"
             },
             "maxItems": 500,
@@ -4815,24 +4907,31 @@
             "type": "string"
           },
           "rank": {
+            "maximum": 499.0,
             "minimum": 0.0,
             "title": "Rank",
             "type": "integer"
           },
           "rank_state": {
-            "maxLength": 24,
-            "minLength": 1,
+            "enum": [
+              "planned",
+              "installing",
+              "installed",
+              "partial",
+              "failed",
+              "uninstalled"
+            ],
             "title": "Rank State",
             "type": "string"
           },
           "recipe_id": {
-            "maxLength": 36,
+            "maxLength": 128,
             "minLength": 1,
             "title": "Recipe Id",
             "type": "string"
           },
           "recipe_revision_id": {
-            "maxLength": 36,
+            "maxLength": 128,
             "minLength": 1,
             "title": "Recipe Revision Id",
             "type": "string"
@@ -5575,7 +5674,17 @@
           "degraded_reason": {
             "anyOf": [
               {
-                "maxLength": 64,
+                "enum": [
+                  "external-member",
+                  "mapping-incomplete",
+                  "missing-ranks",
+                  "unexpected-ranks",
+                  "rank-membership-mismatch",
+                  "run-not-running",
+                  "rank-not-running",
+                  "rank-stale",
+                  "route-not-published"
+                ],
                 "type": "string"
               },
               {
@@ -5603,13 +5712,14 @@
             "type": "boolean"
           },
           "installation_id": {
-            "maxLength": 36,
+            "maxLength": 128,
             "minLength": 1,
             "title": "Installation Id",
             "type": "string"
           },
           "member_node_ids": {
             "items": {
+              "pattern": "^spk_[0-9a-f]{32}$",
               "type": "string"
             },
             "maxItems": 500,
@@ -5618,6 +5728,8 @@
           },
           "present_ranks": {
             "items": {
+              "maximum": 499.0,
+              "minimum": 0.0,
               "type": "integer"
             },
             "maxItems": 500,
@@ -5625,11 +5737,13 @@
             "type": "array"
           },
           "rank": {
+            "maximum": 499.0,
             "minimum": 0.0,
             "title": "Rank",
             "type": "integer"
           },
           "rank_age_seconds": {
+            "maximum": 9.223372036854776e+18,
             "minimum": 0.0,
             "title": "Rank Age Seconds",
             "type": "number"
@@ -5639,19 +5753,26 @@
             "type": "boolean"
           },
           "rank_state": {
-            "maxLength": 24,
-            "minLength": 1,
+            "enum": [
+              "planned",
+              "starting",
+              "running",
+              "stopping",
+              "stopped",
+              "failed",
+              "lost"
+            ],
             "title": "Rank State",
             "type": "string"
           },
           "recipe_id": {
-            "maxLength": 36,
+            "maxLength": 128,
             "minLength": 1,
             "title": "Recipe Id",
             "type": "string"
           },
           "recipe_revision_id": {
-            "maxLength": 36,
+            "maxLength": 128,
             "minLength": 1,
             "title": "Recipe Revision Id",
             "type": "string"
@@ -5663,20 +5784,31 @@
             "type": "string"
           },
           "route_state": {
-            "maxLength": 24,
-            "minLength": 1,
+            "enum": [
+              "withdrawn",
+              "pending",
+              "published",
+              "failed"
+            ],
             "title": "Route State",
             "type": "string"
           },
           "run_id": {
-            "maxLength": 36,
+            "maxLength": 128,
             "minLength": 1,
             "title": "Run Id",
             "type": "string"
           },
           "run_state": {
-            "maxLength": 24,
-            "minLength": 1,
+            "enum": [
+              "planned",
+              "starting",
+              "running",
+              "stopping",
+              "stopped",
+              "failed",
+              "lost"
+            ],
             "title": "Run State",
             "type": "string"
           },
@@ -5991,6 +6123,7 @@
             "anyOf": [
               {
                 "maxLength": 256,
+                "minLength": 1,
                 "type": "string"
               },
               {
@@ -6003,6 +6136,7 @@
             "anyOf": [
               {
                 "maxLength": 32,
+                "minLength": 1,
                 "type": "string"
               },
               {
@@ -6068,8 +6202,7 @@
         "additionalProperties": false,
         "properties": {
           "boot_id": {
-            "maxLength": 36,
-            "minLength": 36,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
             "title": "Boot Id",
             "type": "string"
           },
@@ -6092,6 +6225,7 @@
           "disk_free_bytes": {
             "anyOf": [
               {
+                "maximum": 17592186044416.0,
                 "minimum": 0.0,
                 "type": "integer"
               },
@@ -6104,6 +6238,7 @@
           "disk_total_bytes": {
             "anyOf": [
               {
+                "maximum": 17592186044416.0,
                 "minimum": 0.0,
                 "type": "integer"
               },
@@ -6122,6 +6257,7 @@
           "gpu_memory_free_bytes": {
             "anyOf": [
               {
+                "maximum": 17592186044416.0,
                 "minimum": 0.0,
                 "type": "integer"
               },
@@ -6134,6 +6270,7 @@
           "gpu_memory_total_bytes": {
             "anyOf": [
               {
+                "maximum": 17592186044416.0,
                 "minimum": 0.0,
                 "type": "integer"
               },
@@ -6157,14 +6294,14 @@
             "title": "Gpu Utilization Percent"
           },
           "id": {
-            "maxLength": 36,
-            "minLength": 1,
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
             "title": "Id",
             "type": "string"
           },
           "load_average_1m": {
             "anyOf": [
               {
+                "maximum": 1000000.0,
                 "minimum": 0.0,
                 "type": "number"
               },
@@ -6177,6 +6314,7 @@
           "memory_available_bytes": {
             "anyOf": [
               {
+                "maximum": 17592186044416.0,
                 "minimum": 0.0,
                 "type": "integer"
               },
@@ -6189,6 +6327,7 @@
           "memory_total_bytes": {
             "anyOf": [
               {
+                "maximum": 17592186044416.0,
                 "minimum": 0.0,
                 "type": "integer"
               },
@@ -6201,6 +6340,7 @@
           "network_receive_bytes_per_second": {
             "anyOf": [
               {
+                "maximum": 1000000000000000.0,
                 "minimum": 0.0,
                 "type": "number"
               },
@@ -6213,6 +6353,7 @@
           "network_transmit_bytes_per_second": {
             "anyOf": [
               {
+                "maximum": 1000000000000000.0,
                 "minimum": 0.0,
                 "type": "number"
               },
@@ -6235,6 +6376,7 @@
           "power_watts": {
             "anyOf": [
               {
+                "maximum": 100000.0,
                 "minimum": 0.0,
                 "type": "number"
               },
@@ -6258,6 +6400,8 @@
           "temperature_c": {
             "anyOf": [
               {
+                "maximum": 300.0,
+                "minimum": -100.0,
                 "type": "number"
               },
               {
@@ -6284,6 +6428,7 @@
         "additionalProperties": false,
         "properties": {
           "age_seconds": {
+            "maximum": 9.223372036854776e+18,
             "minimum": 0.0,
             "title": "Age Seconds",
             "type": "number"
@@ -9224,6 +9369,26 @@
     "/api/v1/fleet/stream": {
       "get": {
         "operationId": "streamFleetEvents",
+        "parameters": [
+          {
+            "description": "Optional durable Fleet cursor; duplicate and numeric validity are checked from the raw header list.",
+            "in": "header",
+            "name": "Last-Event-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional durable Fleet cursor; duplicate and numeric validity are checked from the raw header list.",
+              "title": "Last-Event-Id"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -9254,6 +9419,16 @@
               }
             },
             "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           },
           "503": {
             "content": {

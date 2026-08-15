@@ -6,6 +6,12 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from ..models.recipe_presence_degraded_reason_type_0 import check_recipe_presence_degraded_reason_type_0
+from ..models.recipe_presence_degraded_reason_type_0 import RecipePresenceDegradedReasonType0
+from ..models.recipe_presence_group_state import check_recipe_presence_group_state
+from ..models.recipe_presence_group_state import RecipePresenceGroupState
+from ..models.recipe_presence_rank_state import check_recipe_presence_rank_state
+from ..models.recipe_presence_rank_state import RecipePresenceRankState
 from ..types import UNSET, Unset
 from typing import cast
 from typing import cast, Union
@@ -26,34 +32,34 @@ class RecipePresence:
         Attributes:
             complete (bool):
             expected_rank_count (int):
-            group_state (str):
+            group_state (RecipePresenceGroupState):
             installation_id (str):
             member_node_ids (list[str]):
             present_ranks (list[int]):
             profile_name (str):
             rank (int):
-            rank_state (str):
+            rank_state (RecipePresenceRankState):
             recipe_id (str):
             recipe_revision_id (str):
             role (str):
             title (str):
-            degraded_reason (Union[None, Unset, str]):
+            degraded_reason (Union[None, RecipePresenceDegradedReasonType0, Unset]):
      """
 
     complete: bool
     expected_rank_count: int
-    group_state: str
+    group_state: RecipePresenceGroupState
     installation_id: str
     member_node_ids: list[str]
     present_ranks: list[int]
     profile_name: str
     rank: int
-    rank_state: str
+    rank_state: RecipePresenceRankState
     recipe_id: str
     recipe_revision_id: str
     role: str
     title: str
-    degraded_reason: Union[None, Unset, str] = UNSET
+    degraded_reason: Union[None, RecipePresenceDegradedReasonType0, Unset] = UNSET
 
 
 
@@ -64,7 +70,7 @@ class RecipePresence:
 
         expected_rank_count = self.expected_rank_count
 
-        group_state = self.group_state
+        group_state: str = self.group_state
 
         installation_id = self.installation_id
 
@@ -80,7 +86,7 @@ class RecipePresence:
 
         rank = self.rank
 
-        rank_state = self.rank_state
+        rank_state: str = self.rank_state
 
         recipe_id = self.recipe_id
 
@@ -93,6 +99,8 @@ class RecipePresence:
         degraded_reason: Union[None, Unset, str]
         if isinstance(self.degraded_reason, Unset):
             degraded_reason = UNSET
+        elif isinstance(self.degraded_reason, str):
+            degraded_reason = self.degraded_reason
         else:
             degraded_reason = self.degraded_reason
 
@@ -128,7 +136,10 @@ class RecipePresence:
 
         expected_rank_count = d.pop("expected_rank_count")
 
-        group_state = d.pop("group_state")
+        group_state = check_recipe_presence_group_state(d.pop("group_state"))
+
+
+
 
         installation_id = d.pop("installation_id")
 
@@ -142,7 +153,10 @@ class RecipePresence:
 
         rank = d.pop("rank")
 
-        rank_state = d.pop("rank_state")
+        rank_state = check_recipe_presence_rank_state(d.pop("rank_state"))
+
+
+
 
         recipe_id = d.pop("recipe_id")
 
@@ -152,12 +166,22 @@ class RecipePresence:
 
         title = d.pop("title")
 
-        def _parse_degraded_reason(data: object) -> Union[None, Unset, str]:
+        def _parse_degraded_reason(data: object) -> Union[None, RecipePresenceDegradedReasonType0, Unset]:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                degraded_reason_type_0 = check_recipe_presence_degraded_reason_type_0(data)
+
+
+
+                return degraded_reason_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union[None, RecipePresenceDegradedReasonType0, Unset], data)
 
         degraded_reason = _parse_degraded_reason(d.pop("degraded_reason", UNSET))
 

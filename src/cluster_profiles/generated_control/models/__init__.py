@@ -65,6 +65,9 @@ from .mapping_request_parameters import MappingRequestParameters
 from .mapping_response import MappingResponse
 from .migration_grant_request import MigrationGrantRequest
 from .node_connection import NodeConnection
+from .node_connection_agent_state import NodeConnectionAgentState
+from .node_connection_certificate_state import NodeConnectionCertificateState
+from .node_connection_offline_reason_type_0 import NodeConnectionOfflineReasonType0
 from .node_connection_online_state import NodeConnectionOnlineState
 from .node_status import NodeStatus
 from .node_status_labels import NodeStatusLabels
@@ -124,6 +127,7 @@ from .plan_workload_requests import PlanWorkloadRequests
 from .preview_proposal_response_proposal_preview_api_v1_proposals_post import PreviewProposalResponseProposalPreviewApiV1ProposalsPost
 from .preview_request import PreviewRequest
 from .projection_reason import ProjectionReason
+from .projection_reason_code import ProjectionReasonCode
 from .projection_reason_severity import ProjectionReasonSeverity
 from .proposal_change_request import ProposalChangeRequest
 from .proposal_change_request_document import ProposalChangeRequestDocument
@@ -131,6 +135,9 @@ from .proposal_request import ProposalRequest
 from .publication_export_request import PublicationExportRequest
 from .recipe_list_response import RecipeListResponse
 from .recipe_presence import RecipePresence
+from .recipe_presence_degraded_reason_type_0 import RecipePresenceDegradedReasonType0
+from .recipe_presence_group_state import RecipePresenceGroupState
+from .recipe_presence_rank_state import RecipePresenceRankState
 from .recipe_revision_response import RecipeRevisionResponse
 from .recipe_revision_response_document import RecipeRevisionResponseDocument
 from .recipe_revision_response_lifecycle import RecipeRevisionResponseLifecycle
@@ -151,7 +158,11 @@ from .resolve_recipe_request import ResolveRecipeRequest
 from .run_node_plan_response import RunNodePlanResponse
 from .run_plan_response import RunPlanResponse
 from .run_presence import RunPresence
+from .run_presence_degraded_reason_type_0 import RunPresenceDegradedReasonType0
 from .run_presence_group_state import RunPresenceGroupState
+from .run_presence_rank_state import RunPresenceRankState
+from .run_presence_route_state import RunPresenceRouteState
+from .run_presence_run_state import RunPresenceRunState
 from .run_preview_request import RunPreviewRequest
 from .run_rank_status_response import RunRankStatusResponse
 from .run_request import RunRequest
@@ -241,6 +252,9 @@ __all__ = (
     "MappingResponse",
     "MigrationGrantRequest",
     "NodeConnection",
+    "NodeConnectionAgentState",
+    "NodeConnectionCertificateState",
+    "NodeConnectionOfflineReasonType0",
     "NodeConnectionOnlineState",
     "NodeStatus",
     "NodeStatusLabels",
@@ -300,6 +314,7 @@ __all__ = (
     "PreviewProposalResponseProposalPreviewApiV1ProposalsPost",
     "PreviewRequest",
     "ProjectionReason",
+    "ProjectionReasonCode",
     "ProjectionReasonSeverity",
     "ProposalChangeRequest",
     "ProposalChangeRequestDocument",
@@ -307,6 +322,9 @@ __all__ = (
     "PublicationExportRequest",
     "RecipeListResponse",
     "RecipePresence",
+    "RecipePresenceDegradedReasonType0",
+    "RecipePresenceGroupState",
+    "RecipePresenceRankState",
     "RecipeRevisionResponse",
     "RecipeRevisionResponseDocument",
     "RecipeRevisionResponseLifecycle",
@@ -327,7 +345,11 @@ __all__ = (
     "RunNodePlanResponse",
     "RunPlanResponse",
     "RunPresence",
+    "RunPresenceDegradedReasonType0",
     "RunPresenceGroupState",
+    "RunPresenceRankState",
+    "RunPresenceRouteState",
+    "RunPresenceRunState",
     "RunPreviewRequest",
     "RunRankStatusResponse",
     "RunRequest",

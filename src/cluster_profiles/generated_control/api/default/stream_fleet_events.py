@@ -8,13 +8,23 @@ from ...types import Response, UNSET
 from ... import errors
 
 from ...models.bounded_error_response import BoundedErrorResponse
+from ...models.http_validation_error import HTTPValidationError
+from ...types import UNSET, Unset
 from typing import cast
+from typing import cast, Union
+from typing import Union
 
 
 
 def _get_kwargs(
+    *,
+    last_event_id: Union[None, Unset, str] = UNSET,
 
 ) -> dict[str, Any]:
+    headers: dict[str, Any] = {}
+    if not isinstance(last_event_id, Unset):
+        headers["Last-Event-ID"] = last_event_id
+
 
 
 
@@ -27,11 +37,12 @@ def _get_kwargs(
     }
 
 
+    _kwargs["headers"] = headers
     return _kwargs
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, str]]:
+def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, HTTPValidationError, str]]:
     if response.status_code == 200:
         response_200 = response.text
         return response_200
@@ -50,6 +61,13 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
 
         return response_401
 
+    if response.status_code == 422:
+        response_422 = HTTPValidationError.from_dict(response.json())
+
+
+
+        return response_422
+
     if response.status_code == 503:
         response_503 = BoundedErrorResponse.from_dict(response.json())
 
@@ -63,7 +81,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, str]]:
+def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, HTTPValidationError, str]]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -75,20 +93,26 @@ def _build_response(*, client: Union[AuthenticatedClient, Client], response: htt
 def sync_detailed(
     *,
     client: AuthenticatedClient,
+    last_event_id: Union[None, Unset, str] = UNSET,
 
-) -> Response[Union[BoundedErrorResponse, str]]:
+) -> Response[Union[BoundedErrorResponse, HTTPValidationError, str]]:
     """ Fleet Event Stream
+
+    Args:
+        last_event_id (Union[None, Unset, str]): Optional durable Fleet cursor; duplicate and
+            numeric validity are checked from the raw header list.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, str]]
+        Response[Union[BoundedErrorResponse, HTTPValidationError, str]]
      """
 
 
     kwargs = _get_kwargs(
+        last_event_id=last_event_id,
 
     )
 
@@ -101,41 +125,53 @@ def sync_detailed(
 def sync(
     *,
     client: AuthenticatedClient,
+    last_event_id: Union[None, Unset, str] = UNSET,
 
-) -> Optional[Union[BoundedErrorResponse, str]]:
+) -> Optional[Union[BoundedErrorResponse, HTTPValidationError, str]]:
     """ Fleet Event Stream
+
+    Args:
+        last_event_id (Union[None, Unset, str]): Optional durable Fleet cursor; duplicate and
+            numeric validity are checked from the raw header list.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, str]
+        Union[BoundedErrorResponse, HTTPValidationError, str]
      """
 
 
     return sync_detailed(
         client=client,
+last_event_id=last_event_id,
 
     ).parsed
 
 async def asyncio_detailed(
     *,
     client: AuthenticatedClient,
+    last_event_id: Union[None, Unset, str] = UNSET,
 
-) -> Response[Union[BoundedErrorResponse, str]]:
+) -> Response[Union[BoundedErrorResponse, HTTPValidationError, str]]:
     """ Fleet Event Stream
+
+    Args:
+        last_event_id (Union[None, Unset, str]): Optional durable Fleet cursor; duplicate and
+            numeric validity are checked from the raw header list.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, str]]
+        Response[Union[BoundedErrorResponse, HTTPValidationError, str]]
      """
 
 
     kwargs = _get_kwargs(
+        last_event_id=last_event_id,
 
     )
 
@@ -148,20 +184,26 @@ async def asyncio_detailed(
 async def asyncio(
     *,
     client: AuthenticatedClient,
+    last_event_id: Union[None, Unset, str] = UNSET,
 
-) -> Optional[Union[BoundedErrorResponse, str]]:
+) -> Optional[Union[BoundedErrorResponse, HTTPValidationError, str]]:
     """ Fleet Event Stream
+
+    Args:
+        last_event_id (Union[None, Unset, str]): Optional durable Fleet cursor; duplicate and
+            numeric validity are checked from the raw header list.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, str]
+        Union[BoundedErrorResponse, HTTPValidationError, str]
      """
 
 
     return (await asyncio_detailed(
         client=client,
+last_event_id=last_event_id,
 
     )).parsed

@@ -6,6 +6,8 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from ..models.projection_reason_code import check_projection_reason_code
+from ..models.projection_reason_code import ProjectionReasonCode
 from ..models.projection_reason_severity import check_projection_reason_severity
 from ..models.projection_reason_severity import ProjectionReasonSeverity
 from typing import cast
@@ -23,12 +25,12 @@ T = TypeVar("T", bound="ProjectionReason")
 class ProjectionReason:
     """
         Attributes:
-            code (str):
+            code (ProjectionReasonCode):
             detail (str):
             severity (ProjectionReasonSeverity):
      """
 
-    code: str
+    code: ProjectionReasonCode
     detail: str
     severity: ProjectionReasonSeverity
 
@@ -37,7 +39,7 @@ class ProjectionReason:
 
 
     def to_dict(self) -> dict[str, Any]:
-        code = self.code
+        code: str = self.code
 
         detail = self.detail
 
@@ -59,7 +61,10 @@ class ProjectionReason:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        code = d.pop("code")
+        code = check_projection_reason_code(d.pop("code"))
+
+
+
 
         detail = d.pop("detail")
 

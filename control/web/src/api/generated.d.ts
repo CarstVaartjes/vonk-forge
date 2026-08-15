@@ -2143,12 +2143,22 @@ export interface components {
         };
         /** NodeConnection */
         NodeConnection: {
-            /** Agent State */
-            agent_state: string;
+            /**
+             * Agent State
+             * @enum {string}
+             */
+            agent_state: "unregistered" | "pending" | "active" | "retired" | "revoked";
+            /**
+             * Certificate State
+             * @enum {string}
+             */
+            certificate_state: "valid" | "missing" | "not-yet-valid" | "expired" | "revoked" | "inactive";
             /** Last Seen Age Seconds */
             last_seen_age_seconds: number | null;
             /** Last Seen At */
             last_seen_at: string | null;
+            /** Offline Reason */
+            offline_reason: ("unregistered" | "agent-inactive" | "agent-revoked" | "never-seen" | "last-seen-in-future" | "stale" | "certificate-missing" | "certificate-not-yet-valid" | "certificate-expired" | "certificate-revoked" | "certificate-inactive") | null;
             /**
              * Online State
              * @enum {string}
@@ -2892,8 +2902,11 @@ export interface components {
         };
         /** ProjectionReason */
         ProjectionReason: {
-            /** Code */
-            code: string;
+            /**
+             * Code
+             * @enum {string}
+             */
+            code: "node.offline" | "inventory.missing" | "inventory.stale" | "telemetry.missing" | "telemetry.delayed" | "telemetry.stale" | "install.partial" | "run.degraded";
             /** Detail */
             detail: string;
             /**
@@ -2935,11 +2948,14 @@ export interface components {
             /** Complete */
             complete: boolean;
             /** Degraded Reason */
-            degraded_reason?: string | null;
+            degraded_reason?: ("external-member" | "mapping-incomplete" | "missing-ranks" | "unexpected-ranks" | "rank-membership-mismatch" | "installation-not-installed" | "rank-not-installed" | "rank-incomplete-bytes") | null;
             /** Expected Rank Count */
             expected_rank_count: number;
-            /** Group State */
-            group_state: string;
+            /**
+             * Group State
+             * @enum {string}
+             */
+            group_state: "planned" | "installing" | "installed" | "partial" | "failed" | "uninstalled";
             /** Installation Id */
             installation_id: string;
             /** Member Node Ids */
@@ -2950,8 +2966,11 @@ export interface components {
             profile_name: string;
             /** Rank */
             rank: number;
-            /** Rank State */
-            rank_state: string;
+            /**
+             * Rank State
+             * @enum {string}
+             */
+            rank_state: "planned" | "installing" | "installed" | "partial" | "failed" | "uninstalled";
             /** Recipe Id */
             recipe_id: string;
             /** Recipe Revision Id */
@@ -3187,7 +3206,7 @@ export interface components {
             /** Alias */
             alias: string;
             /** Degraded Reason */
-            degraded_reason?: string | null;
+            degraded_reason?: ("external-member" | "mapping-incomplete" | "missing-ranks" | "unexpected-ranks" | "rank-membership-mismatch" | "run-not-running" | "rank-not-running" | "rank-stale" | "route-not-published") | null;
             /** Expected Rank Count */
             expected_rank_count: number;
             /**
@@ -3209,20 +3228,29 @@ export interface components {
             rank_age_seconds: number;
             /** Rank Fresh */
             rank_fresh: boolean;
-            /** Rank State */
-            rank_state: string;
+            /**
+             * Rank State
+             * @enum {string}
+             */
+            rank_state: "planned" | "starting" | "running" | "stopping" | "stopped" | "failed" | "lost";
             /** Recipe Id */
             recipe_id: string;
             /** Recipe Revision Id */
             recipe_revision_id: string;
             /** Role */
             role: string;
-            /** Route State */
-            route_state: string;
+            /**
+             * Route State
+             * @enum {string}
+             */
+            route_state: "withdrawn" | "pending" | "published" | "failed";
             /** Run Id */
             run_id: string;
-            /** Run State */
-            run_state: string;
+            /**
+             * Run State
+             * @enum {string}
+             */
+            run_state: "planned" | "starting" | "running" | "stopping" | "stopped" | "failed" | "lost";
             /** Title */
             title: string;
         };
@@ -5504,7 +5532,10 @@ export interface operations {
     streamFleetEvents: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Optional durable Fleet cursor; duplicate and numeric validity are checked from the raw header list. */
+                "Last-Event-ID"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -5535,6 +5566,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
             /** @description Service Unavailable */
