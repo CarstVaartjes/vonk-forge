@@ -7,10 +7,18 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+    Ed25519PrivateKey,
+    Ed25519PublicKey,
+)
 from vonk_control.catalog_contract import catalog_content_sha256
 from vonk_control.harnesses import BUILTIN_HARNESS_SLUGS, HarnessCompileError
-from vonk_control.harnesses.common import SyntheticHarnessCompiler, validate_projection
+from vonk_control.harnesses.common import (
+    SyntheticHarnessCompiler,
+    custom_adapter_command,
+    structured_command,
+    validate_projection,
+)
 from vonk_control.harnesses.registry import (
     HarnessRegistry,
     TrustedBuiltinComposition,
@@ -243,16 +251,77 @@ def test_registry_copies_trusted_signer_key_data_at_construction(
     )
 
 
-def test_registry_accepts_an_ed25519_public_key_as_inert_trusted_data(
+class RecordingEd25519PublicKey(Ed25519PublicKey):
+    def __init__(self, raw: bytes) -> None:
+        self.raw = raw
+        self.public_bytes_raw_called = False
+
+    def __copy__(self):
+        return self
+
+    def __eq__(self, other: object) -> bool:
+        return self is other
+
+    def public_bytes(self, encoding, format) -> bytes:
+        raise AssertionError("public_bytes must not execute")
+
+    def public_bytes_raw(self) -> bytes:
+        self.public_bytes_raw_called = True
+        return self.raw
+
+    def verify(self, signature: bytes, data: bytes) -> None:
+        raise AssertionError("caller-owned verification must not execute")
+
+
+class BytesSubclass(bytes):
+    pass
+
+
+def test_registry_rejects_an_ed25519_public_key_without_executing_it(
     signed_source_bundle,
 ) -> None:
-    store, issuer, receipt, _stored, bundle = signed_source_bundle
-    registry = HarnessRegistry(
-        source_bundle_store=store,
-        trusted_signer_keys={issuer.key_id: issuer.public_key},
+    store, issuer, _receipt, _stored, _bundle = signed_source_bundle
+    public_key = RecordingEd25519PublicKey(issuer.public_key_bytes)
+
+    with pytest.raises(TypeError, match="trusted signer public key"):
+        HarnessRegistry(
+            source_bundle_store=store,
+            trusted_signer_keys={issuer.key_id: public_key},
+        )
+
+    assert public_key.public_bytes_raw_called is False
+
+
+def test_registry_rejects_non_exact_bytes_trusted_signer_values(
+    signed_source_bundle,
+) -> None:
+    store, issuer, _receipt, _stored, _bundle = signed_source_bundle
+    invalid_values = (
+        bytearray(issuer.public_key_bytes),
+        memoryview(issuer.public_key_bytes),
+        issuer.public_key,
+        BytesSubclass(issuer.public_key_bytes),
     )
 
-    registry.register(source_bundle=_source_identity(bundle), receipt=receipt)
+    for value in invalid_values:
+        with pytest.raises(TypeError, match="trusted signer public key"):
+            HarnessRegistry(
+                source_bundle_store=store,
+                trusted_signer_keys={issuer.key_id: value},
+            )
+
+
+@pytest.mark.parametrize("length", [0, 31, 33])
+def test_registry_rejects_wrong_length_trusted_signer_bytes(
+    tmp_path: Path, length: int
+) -> None:
+    public_key = b"k" * length
+
+    with pytest.raises(TypeError, match="trusted signer public key"):
+        HarnessRegistry(
+            source_bundle_store=SourceBundleStore(tmp_path / "source-bundles"),
+            trusted_signer_keys={hashlib.sha256(public_key).hexdigest(): public_key},
+        )
 
 
 def adapter_document(
@@ -385,6 +454,39 @@ class EqualToAnyString:
         return True
 
 
+class CallbackString(str):
+    def __new__(cls, value: str):
+        instance = super().__new__(cls, value)
+        instance.influenced_validation = False
+        return instance
+
+    def __bool__(self) -> bool:
+        self.influenced_validation = True
+        return len(self) > 0
+
+    def __eq__(self, other: object) -> bool:
+        self.influenced_validation = True
+        return str.__eq__(self, other)
+
+    def __ne__(self, other: object) -> bool:
+        self.influenced_validation = True
+        return str.__ne__(self, other)
+
+    def __hash__(self) -> int:
+        self.influenced_validation = True
+        return str.__hash__(self)
+
+    def lower(self) -> str:
+        self.influenced_validation = True
+        return str.lower(self)
+
+    def startswith(self, prefix, start=0, end=None) -> bool:
+        self.influenced_validation = True
+        if end is None:
+            return str.startswith(self, prefix, start)
+        return str.startswith(self, prefix, start, end)
+
+
 def test_trusted_builtin_composition_accepts_concrete_compilers_for_every_slug() -> (
     None
 ):
@@ -421,6 +523,18 @@ def test_trusted_builtin_composition_rejects_wrong_contract_version() -> None:
 
     with pytest.raises(HarnessCompileError, match="identity"):
         HarnessRegistry.from_trusted_builtins(TrustedBuiltinComposition(compilers))
+
+
+def test_trusted_builtin_slug_rejects_a_string_subclass_before_using_it() -> None:
+    slug = CallbackString("vllm")
+    compilers = (ConcreteBuiltinStub(slug),) + tuple(
+        ConcreteBuiltinStub(value) for value in BUILTIN_HARNESS_SLUGS[1:]
+    )
+
+    with pytest.raises(HarnessCompileError, match="identity"):
+        HarnessRegistry.from_trusted_builtins(TrustedBuiltinComposition(compilers))
+
+    assert slug.influenced_validation is False
 
 
 @pytest.mark.parametrize("version", [True, False, 1.0, "1"])
@@ -775,6 +889,56 @@ def test_projection_requires_exact_empty_capabilities_tuple(
 
     with pytest.raises(HarnessCompileError, match="capabilities"):
         validate_projection(replace(projection, capabilities=capabilities))
+
+
+@pytest.mark.parametrize("parser", [structured_command, custom_adapter_command])
+def test_command_parsers_reject_a_string_subclass_before_using_it(parser) -> None:
+    argument = CallbackString("--model")
+
+    with pytest.raises(HarnessCompileError, match="command"):
+        parser(("/opt/vonk/adapters/bin/serve", argument))
+
+    assert argument.influenced_validation is False
+
+
+def test_projection_command_rejects_a_string_subclass_before_using_it() -> None:
+    projection = compile_harness(
+        HarnessRegistry.with_builtins(), harness_document("vllm")
+    )
+    argument = CallbackString("--model")
+
+    with pytest.raises(HarnessCompileError, match="command"):
+        validate_projection(
+            replace(
+                projection,
+                command=("/opt/vonk/adapters/bin/serve", argument),
+            )
+        )
+
+    assert argument.influenced_validation is False
+
+
+def test_registry_role_rejects_a_string_subclass_before_using_it() -> None:
+    document = harness_document("vllm")
+    distribution = distribution_document("vllm")
+    implementation = distribution["implements_harness"]
+    assert isinstance(implementation, dict)
+    implementation["content_sha256"] = catalog_content_sha256(document)
+    role = CallbackString("entrypoint")
+
+    with pytest.raises(HarnessCompileError, match="topology binding"):
+        HarnessRegistry.with_builtins().compile(
+            document,
+            recipe={"runtime": {"entrypoint": ["serve"]}},
+            distribution=distribution,
+            patch=None,
+            parameters={},
+            topology={"node_count": 1},
+            role=role,
+            rank=0,
+        )
+
+    assert role.influenced_validation is False
 
 
 @pytest.mark.parametrize(

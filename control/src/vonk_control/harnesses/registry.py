@@ -113,7 +113,7 @@ class _BundleHarnessCompiler:
         rank: int,
     ) -> HarnessProjection:
         if not isinstance(parameters, Mapping) or any(
-            not isinstance(name, str) or name not in self.spec.allowed_parameters
+            type(name) is not str or name not in self.spec.allowed_parameters
             for name in parameters
         ):
             raise HarnessCompileError("adapter parameters are not allowed")
@@ -127,7 +127,7 @@ class _BundleHarnessCompiler:
             raise HarnessCompileError("adapter environment is invalid")
         if any(
             not isinstance(item, Mapping)
-            or not isinstance(item.get("name"), str)
+            or type(item.get("name")) is not str
             or item["name"] not in self.spec.allowed_environment
             for item in environment
         ):
@@ -138,21 +138,31 @@ class _BundleHarnessCompiler:
         if (
             type(node_count) is not int
             or not self.spec.minimum_nodes <= node_count <= self.spec.maximum_nodes
+            or type(role) is not str
             or role not in self.spec.roles
             or type(rank) is not int
             or not 0 <= rank < node_count
         ):
             raise HarnessCompileError("adapter topology is invalid")
-        expected_security = {
-            "network_mode": "none",
-            "user": self.spec.user,
-            "no_new_privileges": True,
-            "capabilities": [],
-        }
+        platform = distribution.get("platform")
+        image = distribution.get("image")
+        security = distribution.get("security")
         if (
-            distribution.get("platform") != "linux/arm64"
-            or distribution.get("image") != self.spec.image
-            or distribution.get("security") != expected_security
+            type(platform) is not str
+            or platform != "linux/arm64"
+            or type(image) is not str
+            or image != self.spec.image
+            or not isinstance(security, Mapping)
+            or set(security)
+            != {"network_mode", "user", "no_new_privileges", "capabilities"}
+            or type(security.get("network_mode")) is not str
+            or security.get("network_mode") != "none"
+            or type(security.get("user")) is not str
+            or security.get("user") != self.spec.user
+            or type(security.get("no_new_privileges")) is not bool
+            or security.get("no_new_privileges") is not True
+            or type(security.get("capabilities")) is not list
+            or security.get("capabilities") != []
         ):
             raise HarnessCompileError("adapter distribution expectation is invalid")
         return HarnessProjection(
@@ -185,7 +195,7 @@ class HarnessRegistry:
         self,
         *,
         source_bundle_store: SourceBundleStore | None = None,
-        trusted_signer_keys: Mapping[str, bytes | Ed25519PublicKey] | None = None,
+        trusted_signer_keys: Mapping[str, bytes] | None = None,
     ) -> None:
         if (
             source_bundle_store is not None
@@ -279,25 +289,54 @@ class HarnessRegistry:
         if isinstance(compiler, _BundleHarnessCompiler):
             adapters = harness.get("adapters")
             if (
-                not isinstance(adapters, list)
+                type(adapters) is not list
+                or any(type(adapter) is not str for adapter in adapters)
                 or tuple(adapters) != compiler.spec.interfaces
             ):
                 raise HarnessCompileError("adapter interface expectation is invalid")
         runtime_distribution = _resolved_document(distribution, "runtime distribution")
+        distribution_kind = runtime_distribution.get("kind")
+        distribution_platform = runtime_distribution.get("platform")
         if (
-            runtime_distribution.get("kind") != "runtime-distribution"
-            or runtime_distribution.get("platform") != "linux/arm64"
+            type(distribution_kind) is not str
+            or distribution_kind != "runtime-distribution"
+            or type(distribution_platform) is not str
+            or distribution_platform != "linux/arm64"
         ):
             raise HarnessCompileError("runtime distribution must target linux/arm64")
         harness_identity = harness.get("identity")
         implemented_harness = runtime_distribution.get("implements_harness")
         harness_digest = _resolved_digest(resolved_harness, harness)
+        harness_publisher = (
+            harness_identity.get("publisher")
+            if isinstance(harness_identity, Mapping)
+            else None
+        )
+        implemented_publisher = (
+            implemented_harness.get("publisher")
+            if isinstance(implemented_harness, Mapping)
+            else None
+        )
+        implemented_slug = (
+            implemented_harness.get("slug")
+            if isinstance(implemented_harness, Mapping)
+            else None
+        )
+        implemented_digest = (
+            implemented_harness.get("content_sha256")
+            if isinstance(implemented_harness, Mapping)
+            else None
+        )
         if (
             not isinstance(harness_identity, Mapping)
             or not isinstance(implemented_harness, Mapping)
-            or implemented_harness.get("publisher") != harness_identity.get("publisher")
-            or implemented_harness.get("slug") != slug
-            or implemented_harness.get("content_sha256") != harness_digest
+            or type(harness_publisher) is not str
+            or type(implemented_publisher) is not str
+            or implemented_publisher != harness_publisher
+            or type(implemented_slug) is not str
+            or implemented_slug != slug
+            or type(implemented_digest) is not str
+            or implemented_digest != harness_digest
         ):
             raise HarnessCompileError("runtime distribution does not implement harness")
         distribution_digest = _resolved_digest(distribution, runtime_distribution)
@@ -307,7 +346,7 @@ class HarnessRegistry:
         if (
             type(node_count) is not int
             or node_count < 1
-            or not isinstance(role, str)
+            or type(role) is not str
             or not role
             or type(rank) is not int
             or not 0 <= rank < node_count
@@ -317,7 +356,7 @@ class HarnessRegistry:
             recipe, runtime_distribution, patch, parameters, topology, role, rank
         )
         _require_compiler_identity(compiler, slug)
-        if projection.slug != slug:
+        if type(projection.slug) is not str or projection.slug != slug:
             raise HarnessCompileError("harness compiler projection identity is invalid")
         projection = replace(
             projection,
@@ -403,7 +442,7 @@ class HarnessRegistry:
 
 
 def _trusted_signer_key_data(
-    value: Mapping[str, bytes | Ed25519PublicKey] | None,
+    value: Mapping[str, bytes] | None,
 ) -> Mapping[str, bytes]:
     if value is None:
         return MappingProxyType({})
@@ -413,16 +452,9 @@ def _trusted_signer_key_data(
     for key_id, public_key in value.items():
         if type(key_id) is not str or _DIGEST.fullmatch(key_id) is None:
             raise TypeError("trusted signer key ID is invalid")
-        if type(public_key) is bytes:
-            key_bytes = bytes(public_key)
-        elif isinstance(public_key, Ed25519PublicKey):
-            key_bytes = public_key.public_bytes_raw()
-        else:
+        if type(public_key) is not bytes or len(public_key) != 32:
             raise TypeError("trusted signer public key is invalid")
-        try:
-            Ed25519PublicKey.from_public_bytes(key_bytes)
-        except (TypeError, ValueError) as error:
-            raise TypeError("trusted signer public key is invalid") from error
+        key_bytes = memoryview(public_key).tobytes()
         if hashlib.sha256(key_bytes).hexdigest() != key_id:
             raise TypeError("trusted signer key ID does not match public key")
         normalized[key_id] = key_bytes
@@ -494,7 +526,7 @@ def _parse_adapter_spec(bundle: _VerifiedSourceBundle) -> _AdapterSpec:
         or schema_version != 1
         or type(contract_version) is not int
         or contract_version != 1
-        or not isinstance(slug, str)
+        or type(slug) is not str
         or not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,62}", slug)
     ):
         raise HarnessCompileError("source bundle adapter document is invalid")
@@ -546,21 +578,23 @@ def _parse_adapter_spec(bundle: _VerifiedSourceBundle) -> _AdapterSpec:
     ):
         raise HarnessCompileError("source bundle adapter topology is invalid")
     security = distribution["security"]
+    platform = distribution["platform"]
     image = distribution["image"]
     user = security.get("user") if isinstance(security, Mapping) else None
     if (
-        distribution["platform"] != "linux/arm64"
-        or not isinstance(image, str)
-        or not isinstance(user, str)
+        type(platform) is not str
+        or platform != "linux/arm64"
+        or type(image) is not str
+        or type(user) is not str
         or not isinstance(security, Mapping)
+        or set(security)
+        != {"network_mode", "user", "no_new_privileges", "capabilities"}
+        or type(security.get("network_mode")) is not str
+        or security.get("network_mode") != "none"
         or type(security.get("no_new_privileges")) is not bool
-        or security
-        != {
-            "network_mode": "none",
-            "user": user,
-            "no_new_privileges": True,
-            "capabilities": [],
-        }
+        or security.get("no_new_privileges") is not True
+        or type(security.get("capabilities")) is not list
+        or security.get("capabilities") != []
     ):
         raise HarnessCompileError("source bundle adapter distribution is invalid")
     try:
@@ -612,8 +646,8 @@ def _adapter_mount(value: object, *, model: bool) -> HarnessMount:
     read_only = value.get("read_only")
     isolated = value.get("isolated", False)
     if (
-        not isinstance(source, str)
-        or not isinstance(target, str)
+        type(source) is not str
+        or type(target) is not str
         or type(read_only) is not bool
         or read_only is not model
         or type(isolated) is not bool
@@ -624,17 +658,18 @@ def _adapter_mount(value: object, *, model: bool) -> HarnessMount:
 
 
 def _string_tuple(value: object, label: str) -> tuple[str, ...]:
-    if not isinstance(value, list) or any(
-        not isinstance(item, str) or not item for item in value
+    if type(value) is not list or any(
+        type(item) is not str or not item for item in value
     ):
         raise HarnessCompileError(f"{label} is invalid")
     return tuple(value)
 
 
 def _compiler_identity(compiler: object) -> HarnessCompiler:
+    slug = getattr(compiler, "slug", None)
     if (
-        not isinstance(getattr(compiler, "slug", None), str)
-        or not compiler.slug
+        type(slug) is not str
+        or not slug
         or type(getattr(compiler, "contract_version", None)) is not int
         or compiler.contract_version != 1
         or not callable(getattr(compiler, "compile", None))
@@ -645,7 +680,7 @@ def _compiler_identity(compiler: object) -> HarnessCompiler:
 
 def _require_compiler_identity(compiler: object, slug: str) -> None:
     _compiler_identity(compiler)
-    if compiler.slug != slug:
+    if type(slug) is not str or compiler.slug != slug:
         raise HarnessCompileError("harness compiler source identity is invalid")
 
 
@@ -667,7 +702,9 @@ def _resolved_digest(
 ) -> str:
     digest = catalog_content_sha256(document)
     revision_digest = getattr(value, "content_sha256", None)
-    if revision_digest is not None and revision_digest != digest:
+    if revision_digest is not None and (
+        type(revision_digest) is not str or revision_digest != digest
+    ):
         raise HarnessCompileError("resolved catalog identity is invalid")
     return digest
 
@@ -677,18 +714,23 @@ def _harness_identity(
 ) -> tuple[str, Mapping[str, object]]:
     identity = document.get("identity")
     bundle = document.get("source_bundle")
+    kind = document.get("kind")
+    runtime_interface = document.get("runtime_interface")
+    slug = identity.get("slug") if isinstance(identity, Mapping) else None
     if (
         type(document.get("schema_version")) is not int
         or document.get("schema_version") != 1
-        or document.get("kind") != "execution-harness"
-        or document.get("runtime_interface") != "vonk.runtime.v1"
+        or type(kind) is not str
+        or kind != "execution-harness"
+        or type(runtime_interface) is not str
+        or runtime_interface != "vonk.runtime.v1"
         or not isinstance(identity, Mapping)
-        or not isinstance(identity.get("slug"), str)
+        or type(slug) is not str
         or not isinstance(bundle, Mapping)
     ):
         raise HarnessCompileError("resolved execution harness is invalid")
     _bundle_identity(bundle)
-    return identity["slug"], bundle
+    return slug, bundle
 
 
 def _bundle_identity(bundle: Mapping[str, object]) -> tuple[str, int, str]:
@@ -698,10 +740,11 @@ def _bundle_identity(bundle: Mapping[str, object]) -> tuple[str, int, str]:
     expected_bytes = bundle.get("expected_bytes")
     media_type = bundle.get("media_type")
     if (
-        not isinstance(digest, str)
+        type(digest) is not str
         or _DIGEST.fullmatch(digest) is None
         or type(expected_bytes) is not int
         or expected_bytes < 1
+        or type(media_type) is not str
         or media_type != _BUNDLE_MEDIA_TYPE
     ):
         raise HarnessCompileError("harness source bundle is invalid")

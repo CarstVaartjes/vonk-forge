@@ -31,7 +31,7 @@ def structured_command(value: object) -> tuple[str, ...]:
     if not command or len(command) > 64:
         raise HarnessCompileError("harness command size is invalid")
     if any(
-        not isinstance(item, str) or _SAFE_ARGUMENT.fullmatch(item) is None
+        type(item) is not str or _SAFE_ARGUMENT.fullmatch(item) is None
         for item in command
     ):
         raise HarnessCompileError("harness command contains unsafe shell syntax")
@@ -63,6 +63,8 @@ def custom_adapter_command(value: object) -> tuple[str, ...]:
 
 
 def validate_projection(projection: HarnessProjection) -> None:
+    if type(projection.slug) is not str or not projection.slug:
+        raise HarnessCompileError("harness projection slug is invalid")
     if type(projection.command) is not tuple:
         raise HarnessCompileError("harness command must use the exact tuple contract")
     structured_command(projection.command)
@@ -200,18 +202,29 @@ class SyntheticHarnessCompiler:
         if not isinstance(security, Mapping):
             raise HarnessCompileError("runtime distribution security is invalid")
         capabilities = security.get("capabilities")
-        if not isinstance(capabilities, list) or not all(
-            isinstance(value, str) for value in capabilities
+        if type(capabilities) is not list or not all(
+            type(value) is str for value in capabilities
         ):
             raise HarnessCompileError("runtime distribution capabilities are invalid")
+        image = distribution.get("image")
+        network_mode = security.get("network_mode")
+        user = security.get("user")
+        if (
+            type(image) is not str
+            or type(network_mode) is not str
+            or type(user) is not str
+        ):
+            raise HarnessCompileError(
+                "runtime distribution security strings are invalid"
+            )
         return HarnessProjection(
             slug=self.slug,
             contract_version=self.contract_version,
             command=structured_command(entrypoint),
-            image=str(distribution.get("image")),
-            network_mode=str(security.get("network_mode")),
+            image=image,
+            network_mode=network_mode,
             architecture="linux/arm64",
-            user=str(security.get("user")),
+            user=user,
             no_new_privileges=security.get("no_new_privileges") is True,
             capabilities=tuple(capabilities),
             model_mounts=(HarnessMount("/run/vonk/models", "/models", read_only=True),),

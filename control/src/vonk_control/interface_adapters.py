@@ -39,6 +39,8 @@ _ADAPTERS = {
 
 
 def interface_adapter(name: str) -> InterfaceAdapter:
+    if type(name) is not str:
+        raise InterfaceAdapterError("unknown interface adapter")
     adapter = _ADAPTERS.get(name)
     if adapter is None:
         raise InterfaceAdapterError("unknown interface adapter")
