@@ -98,3 +98,55 @@ They fail behind the production 50-byte Podman runroot evidence guard. That guar
 1. The claim-isolation regression now uses the production retry-delay policy and lane supervisor, but deliberately does not make a live mTLS request or execute a real claim. Client transport behavior and exact telemetry status classification are covered separately in the library capture tests.
 2. Reservation blocks trade at most 63 skipped sequence values after a same-boot process crash for roughly one durable SQLite write every 128 seconds at the nominal cadence. Skips are monotonic and wire-compatible.
 3. The full unfiltered Rust package remains red only in the two pre-existing platform-specific recipe-builder tests described above.
+
+## Fix round 2 — isolate telemetry durability from control state
+
+Fix commit: `1d95dea` (`fix: isolate telemetry sequence state`), based on `a4af138`. This commit is local only; it was not pushed and no pull request was opened.
+
+The round 1 design used `state.sqlite`. That description is retained above as historical review context but is superseded by this round: sharing SQLite's single-writer lock allowed a telemetry `BEGIN IMMEDIATE` reservation to delay or fail claim/result transactions with `SQLITE_BUSY`.
+
+Telemetry sequence state now has one owner and one database:
+
+- path: `<data_dir>/telemetry-state.sqlite`;
+- table: a telemetry-owned strict `metadata(key, value)` table;
+- creation: atomic `create_new` with mode `0600`;
+- reopen: regular files only, reset to mode `0600` before SQLite opens;
+- unsafe paths: symlinks and files with more than one hard link fail closed;
+- database policy: WAL, `synchronous=FULL`, foreign keys enabled, trusted schema disabled, and a one-second telemetry-only busy timeout.
+
+The control `state.sqlite` schema and `StateStore` implementation are unchanged. Telemetry reservations no longer open, query, lock, or write that database. A deterministic regression holds `BEGIN IMMEDIATE` on `telemetry-state.sqlite` while a real `StateStore::begin` claim transaction commits on `state.sqlite`; the control transaction completes within the 500 ms bound instead of waiting for a telemetry lock.
+
+All round 1 reservation/crash semantics remain intact. Additional boundary coverage proves:
+
+- one collector emits sequence `63` and then reserves/emits `64`;
+- a final 32-value partial block emits `i64::MAX - 31` through `i64::MAX`, then reports `SequenceExhausted`;
+- a one-value final block emits `i64::MAX` exactly once, then reports `SequenceExhausted`;
+- corrupt metadata, a symlinked telemetry database, and a hard link to the control database all fail closed;
+- the resulting telemetry database has exact Unix mode `0600`.
+
+### Round 2 TDD evidence
+
+| Phase | Evidence |
+|---|---|
+| RED — independent owner | The focused target failed to compile because the requested `TELEMETRY_STATE_FILENAME` contract did not exist. |
+| GREEN — independent database | After implementing safe creation/opening, 15 tests passed; the corrupt-state fixture exposed an outdated insert assumption and was corrected to corrupt the existing telemetry row. All 16 tests then passed. |
+| RED — hard-link isolation | `hardlinked_control_database_fails_closed` failed because a second filename for the control inode was accepted. |
+| GREEN — inode isolation | Requiring exactly one hard link made the regression pass and prevents filename-level separation from disguising a shared SQLite lock. |
+
+### Round 2 final verification
+
+| Command | Result |
+|---|---|
+| `cargo fmt --check` | Exit 0 |
+| `cargo test -p vonk-agent --test telemetry` | 17 passed |
+| `cargo test -p vonk-agent --lib` | 29 passed |
+| `cargo test -p vonk-agent --bin vonk-agent` | 5 passed |
+| `cargo check -p vonk-agent` | Exit 0 |
+| `git diff --check` | Exit 0 |
+
+Round 2 changes exactly `rust/crates/vonk-agent/src/telemetry.rs`, `rust/crates/vonk-agent/tests/telemetry.rs`, and this report. `main.rs` required no change. No `state.rs`, OCI, readiness, workload, MIA, controller, frontend, NAS, or Spark files or systems were changed.
+
+### Round 2 concerns
+
+1. An unreleased development run of round 1 may leave the old `telemetry_sequence_v1` metadata row in `state.sqlite`. Round 2 never reads or locks that row; it is harmless and is intentionally not migrated or deleted from control-owned state.
+2. The owner-only check covers the durable database file. SQLite manages transient WAL/shared-memory sidecars while the connection is open; they contain only boot/sequence reservation state and inherit the protected database/directory environment.
