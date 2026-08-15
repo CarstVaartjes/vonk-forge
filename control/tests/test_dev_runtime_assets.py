@@ -744,6 +744,7 @@ def test_litellm_supervisor_materializes_file_secrets_without_environment(
 ) -> None:
     supervisor = _litellm_supervisor()
     secret_values = {
+        "os.environ/LITELLM_DATABASE_URL": "postgresql://litellm:db@postgres/litellm",
         "os.environ/LITELLM_MASTER_KEY": "master-file-sentinel",
         "os.environ/LITELLM_UPSTREAM_KEY": "upstream-file-sentinel",
     }
@@ -762,6 +763,7 @@ def test_litellm_supervisor_materializes_file_secrets_without_environment(
     assert effective == destination
     document = json.loads(destination.read_bytes())
     assert document["general_settings"] == {
+        "database_url": secret_values["os.environ/LITELLM_DATABASE_URL"],
         "disable_admin_ui": True,
         "master_key": secret_values["os.environ/LITELLM_MASTER_KEY"],
         "store_model_in_db": False,
@@ -775,6 +777,27 @@ def test_litellm_supervisor_materializes_file_secrets_without_environment(
         os.environ[name.removeprefix("os.environ/")] == "environment-leak"
         for name in secret_values
     )
+
+
+def test_litellm_supervisor_uses_the_safer_v2_migration_resolver() -> None:
+    supervisor = _litellm_supervisor()
+
+    assert supervisor._litellm_command(Path("/tmp/effective.json")) == [
+        "litellm",
+        "--config",
+        "/tmp/effective.json",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "4000",
+        "--use_v2_migration_resolver",
+    ]
+
+
+def test_litellm_supervisor_allows_first_run_database_migrations() -> None:
+    supervisor = _litellm_supervisor()
+
+    assert supervisor.STARTUP_SECONDS == 120
 
 
 @pytest.mark.parametrize(
@@ -839,6 +862,7 @@ def test_litellm_supervisor_materializes_the_exact_verified_bytes_after_path_swa
         now=now,
     )
     secret_values = {
+        "os.environ/LITELLM_DATABASE_URL": "postgresql://litellm:db@postgres/litellm",
         "os.environ/LITELLM_MASTER_KEY": "master-file-sentinel",
         "os.environ/LITELLM_UPSTREAM_KEY": "upstream-file-sentinel",
     }

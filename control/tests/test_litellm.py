@@ -38,6 +38,49 @@ def test_rendered_config_contains_secret_references_not_values(tmp_path: Path) -
     assert decoded["model_list"][0]["model_name"] == "deepseek"
 
 
+def test_public_model_name_can_target_a_distinct_local_upstream(
+    tmp_path: Path,
+) -> None:
+    policy = LiteLlmPolicy(
+        models={
+            "deepseek": {
+                "requests_per_minute": 30,
+                "tokens_per_minute": 10_000,
+                "upstream_model": "deepseek-v4-flash-dspark",
+            }
+        }
+    )
+
+    config = json.loads(
+        LiteLlmPublisher(
+            tmp_path, validate=lambda _: True, apply=lambda _: None
+        ).render(_snapshot(), policy)
+    )
+
+    assert config["model_list"][0]["model_name"] == "deepseek"
+    assert (
+        config["model_list"][0]["litellm_params"]["model"]
+        == "openai/deepseek-v4-flash-dspark"
+    )
+
+
+def test_upstream_model_must_be_a_bounded_local_identifier(tmp_path: Path) -> None:
+    policy = LiteLlmPolicy(
+        models={
+            "deepseek": {
+                "requests_per_minute": 30,
+                "tokens_per_minute": 10_000,
+                "upstream_model": "../remote model",
+            }
+        }
+    )
+
+    with pytest.raises(LiteLlmPolicyError, match="upstream model"):
+        LiteLlmPublisher(
+            tmp_path, validate=lambda _: True, apply=lambda _: None
+        ).render(_snapshot(), policy)
+
+
 def test_rendered_config_enables_ui_without_database_model_authority(
     tmp_path: Path,
 ) -> None:

@@ -6,7 +6,7 @@ uses public `:dev` control images and the signed APT `dev` channel produced
 from accepted `main` commits. Production uses the separate trusted host
 updater and is not installed with this guide.
 
-The finished NAS directory contains only `docker-compose.yml` and `secrets/`.
+The finished NAS directory contains only `docker-compose.yaml` and `secrets/`.
 GPU nodes receive only the public controller CA and their own locally generated
 identity. No GitHub, GHCR, R2, database, signing, or model credential is copied
 to a GPU node or baked into an image.
@@ -67,12 +67,12 @@ Open the successful **Development images** GitHub Actions run for the accepted
 artifact:
 
 - retain `docker-compose.dev.yml` as the publisher input; the publisher writes
-  it to the NAS as `docker-compose.yml`;
+  it to the NAS as `docker-compose.yaml`;
 - retain `docker-compose.pinned.yml` off the NAS for exact reproduction or
   guarded recovery.
 
 Both GHCR packages must pull anonymously. Do not install a registry token on
-the NAS. Normal updates pull/redeploy the unchanged `docker-compose.yml`;
+the NAS. Normal updates pull/redeploy the unchanged `docker-compose.yaml`;
 restarting containers alone does not fetch a moved `:dev` tag.
 
 ## 3. Generate and publish the NAS project
@@ -105,10 +105,20 @@ uv run --project control --frozen scripts/dev-runtime-secrets.py \
   --registry-hostname '<REGISTRY_HOSTNAME>' \
   --tailscale-oauth-client-id-file '<LOCAL_OAUTH_INPUT_DIRECTORY>/client-id' \
   --tailscale-oauth-client-secret-file '<LOCAL_OAUTH_INPUT_DIRECTORY>/client-secret'
-uv run --project control --frozen scripts/dev-runtime-project \
+```
+
+Use the generic remote publisher for a NAS reached from Windows or WSL. This is
+the recommended Windows/WSL path because publication occurs on the NAS's real
+Linux filesystem, not through the `Z:`/SMB client view:
+
+```bash
+uv run --project control --frozen scripts/dev-runtime-project-remote \
   --source-compose '<DOWNLOAD_DIRECTORY>/docker-compose.dev.yml' \
   --secrets-dir '<LOCAL_STAGING_DIRECTORY>/secrets' \
-  --destination '<MOUNTED_NAS_PARENT>/vonk-forge' \
+  --ssh-target '<NAS_SSH_TARGET>' \
+  --identity-file '<ABSOLUTE_SSH_IDENTITY_FILE>' \
+  --remote-destination '<NAS_LINUX_DOCKER_PARENT>/vonk-forge' \
+  --docker-mode sudo \
   --nas-address '<NAS_MANAGEMENT_IP>' \
   --management-cidrs '<NODE_MANAGEMENT_CIDR>' \
   --direct-fabric-cidrs '<DIRECT_FABRIC_CIDRS_OR_NONE>' \
@@ -117,40 +127,62 @@ uv run --project control --frozen scripts/dev-runtime-project \
   --registry-hostname '<REGISTRY_HOSTNAME>'
 ```
 
+The remote operator must already have strict SSH host-key trust and either
+direct Docker access (`--docker-mode direct`) or non-interactive Docker access
+through `sudo -n` (`--docker-mode sudo`). Docker access is root-equivalent; do
+not grant `NOPASSWD: ALL`. The helper uses batch-mode SSH, pulls the public
+accepted API image anonymously, stages inputs RAM-only under NAS tmpfs, and
+runs the existing publisher without network, capabilities, a writable root, or
+additional host mounts. It removes the exact tmpfs stage after success, error,
+interrupt, or SSH disconnect. It does not clone this repository onto the NAS.
+
+After success, the Windows share or NAS file manager must show only
+`docker-compose.yaml` plus `secrets/` inside `vonk-forge/`. Keep
+`docker-compose.pinned.yml` and the complete 22-file source generation off the
+NAS project.
+
+An advanced Linux operator may instead give `docker-compose.dev.yml` to
+`scripts/dev-runtime-project` with a directly mounted absolute destination.
+That path is supported only when the mount itself provides the required POSIX
+ownership, `fchmod`, local staging, and exclusive `flock`. WSL `9p`, DrvFs,
+CIFS, and many SMB mounts do not. A failure there is a security result: do not
+weaken modes, locking, or publisher checks; use the remote command above.
+
 Supply the raw OAuth client secret exactly as issued. The generated Compose
 derives the required non-ephemeral enrollment credential only in the
 Tailscale gateway's tmpfs; neither the local secret generation nor the NAS
 project contains a second plaintext credential file.
 
-Back up exactly 21 local source files as one encrypted generation. Create a
+Back up exactly 22 local source files as one encrypted generation. Create a
 1Password Password item named **Vonk Forge NAS Development Administrator**,
 set its username to exact `admin`, and store the local `admin-password` there
 without placing it in a command argument or terminal output. The publisher
-copies exactly 17 files to the NAS. The four local-only files are
+copies exactly 18 files to the NAS. The four local-only files are
 `admin-password`, `controller-ca-key`, `git-signing-key.pub`, and
 `host-runtime-grant-public-key`; the plaintext administrator password is never
 published to the NAS. Do not display secret contents while checking the
-result. The publisher takes a nonblocking Linux file lock on the
-mounted share and rejects a concurrent invocation; it fails closed if locking
-is unavailable. If an SMB write, mount, or workstation is interrupted, do not
+result. The underlying publisher takes a nonblocking Linux file lock on the
+NAS filesystem and rejects a concurrent invocation; it fails closed if locking
+is unavailable. If a publication, SSH connection, or workstation is interrupted, do not
 edit the destination or delete the hidden `.vonk-forge-publish` recovery
-journal or `.vonk-forge-publish.cleanup` tombstone. Remount the same share and
-rerun the same command; under the exclusive lock, a stale rollback journal is
+journal or `.vonk-forge-publish.cleanup` tombstone. Rerun the same command;
+under the exclusive lock, a stale rollback journal is
 restored and a stale cleanup tombstone is safely discarded before publication
 retries. A stable hidden lock file beside (never inside) the project coordinates
 publishers across workstations and is safe to retain. A successful run removes
 both hidden transaction states from the project and leaves exactly
-`docker-compose.yml` plus `secrets/`.
+`docker-compose.yaml` plus `secrets/`.
 
-An existing installation with a valid pre-browser 17-file local source can be
-upgraded without rotating its CA, database password, or other authority:
-repeat the generator command once with `--upgrade-browser-access`, then back up
-the resulting 21-file generation and republish it. This add-only migration
-preserves every existing secret byte and refuses every other incomplete,
-unknown, symlinked, or inconsistent state. Its own interrupted hidden
-`.browser-access-upgrade-*` transaction is recoverable: do not edit it; rerun
-the identical command with the same OAuth inputs. An older valid 15-file source
-first needs the separate `--upgrade-host-runtime-authority` transition.
+An existing installation with a valid 21-file browser-access generation can be
+upgraded without rotating its CA, control database password, or other
+authority: repeat the generator command once with
+`--upgrade-litellm-key-management`, back up the resulting 22-file generation,
+and republish it. This add-only migration creates only
+`litellm-database-password`, preserves every existing secret byte, and safely
+accepts a retry after interruption. A valid pre-browser 17-file generation
+first needs `--upgrade-browser-access`; an older valid 15-file generation first
+needs `--upgrade-host-runtime-authority`. Each transition refuses partial,
+unknown, symlinked, or inconsistent state.
 
 ## 4. Configure names and start the NAS stack
 
@@ -169,7 +201,7 @@ Allow the GPU-node management CIDR to reach NAS TCP 8443 and reject other
 sources. In the NAS Docker/Compose UI:
 
 1. Import the `vonk-forge/` directory as a project.
-2. Select `docker-compose.yml` and choose **Pull**, then **Redeploy**.
+2. Select `docker-compose.yaml` and choose **Pull**, then **Redeploy**.
 3. Keep all named volumes.
 4. Wait for PostgreSQL, API, worker, Caddy, and LiteLLM to become healthy.
 

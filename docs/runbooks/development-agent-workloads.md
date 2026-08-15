@@ -111,10 +111,13 @@ uv run --project control --frozen scripts/dev-runtime-secrets.py \
   --registry-hostname '<REGISTRY_HOSTNAME>' \
   --tailscale-oauth-client-id-file '<LOCAL_OAUTH_INPUT_DIRECTORY>/client-id' \
   --tailscale-oauth-client-secret-file '<LOCAL_OAUTH_INPUT_DIRECTORY>/client-secret'
-uv run --project control --frozen scripts/dev-runtime-project \
+uv run --project control --frozen scripts/dev-runtime-project-remote \
   --source-compose '<DOWNLOAD_DIRECTORY>/docker-compose.dev.yml' \
   --secrets-dir '<LOCAL_SECRETS_DIR>' \
-  --destination '<MOUNTED_NAS_PARENT>/vonk-forge' \
+  --ssh-target '<NAS_SSH_TARGET>' \
+  --identity-file '<ABSOLUTE_SSH_IDENTITY_FILE>' \
+  --remote-destination '<NAS_LINUX_DOCKER_PARENT>/vonk-forge' \
+  --docker-mode sudo \
   --nas-address '<NAS_MANAGEMENT_IP>' \
   --management-cidrs '<NODE_MANAGEMENT_CIDR>' \
   --direct-fabric-cidrs '<DIRECT_FABRIC_CIDRS_OR_NONE>' \
@@ -123,11 +126,11 @@ uv run --project control --frozen scripts/dev-runtime-project \
   --registry-hostname '<REGISTRY_HOSTNAME>'
 ```
 
-The generator creates exactly 21 local source files: exactly 17 deployment
+The generator creates exactly 22 local source files: exactly 18 deployment
 files plus four local-only files: `admin-password`, `controller-ca-key`,
 `git-signing-key.pub`, and `host-runtime-grant-public-key`. The protected local
 source preserves the administrator, controller, Git-signing, and host-runtime
-authorities, so include all 21 files in one encrypted 1Password generation or
+authorities, so include all 22 files in one encrypted 1Password generation or
 equivalent backup before first deployment. None of the four local-only files
 is copied to the NAS; in particular, the plaintext `admin-password` stays only
 in the local generation, its encrypted backup, and the named 1Password item.
@@ -144,16 +147,18 @@ unchanged, and can recover if power is lost after publishing the private half.
 That produces the valid pre-browser 17-file source generation. Rerun the full
 command with both OAuth input files and `--upgrade-browser-access`; this
 add-only browser migration preserves all 17 existing bytes and adds the four
-browser files. Back up the resulting 21-file generation before deployment. It
+browser files. Then run `--upgrade-litellm-key-management` to add only
+`litellm-database-password`. Back up the resulting 22-file generation
+before deployment. It
 rejects a public-only key, unknown file, inconsistent generation, or ordinary
 incomplete directory; do not work around that refusal by replacing the CA or
 server certificate.
 
 `dev-runtime-project` validates the complete local generation and projects
-exactly 17 deployment files into the NAS `secrets/` directory; it excludes
+exactly 18 deployment files into the NAS `secrets/` directory; it excludes
 `admin-password`, `controller-ca-key`, `git-signing-key.pub`, and
 `host-runtime-grant-public-key`. The NAS project must contain only
-`docker-compose.yml` and `secrets/`. Choose **Pull** then **Redeploy** in the
+`docker-compose.yaml` and `secrets/`. Choose **Pull** then **Redeploy** in the
 Docker UI and keep every named volume. Successful one-shot cohort,
 initialization, and migration containers are expected to exit; PostgreSQL,
 API, worker, Caddy, and LiteLLM must then be healthy. Never print secret values
@@ -622,6 +627,11 @@ the exact stopped rank without rebuilding or deleting its managed state:
 ssh '<SPARK_2_SSH_TARGET>' sudo docker start "vonk-$RUN_ID"
 ```
 
+This rank-only start applies only to runtimes whose workers can rejoin a live
+coordinator. A recipe runbook may instead require a coordinated restart of all
+exact managed containers in the gang. Follow that recipe-specific rule while
+preserving the same run ID, containers, installation, and caches.
+
 Wait for its health endpoint and next authenticated snapshot, then resume with:
 
 ```text
@@ -691,6 +701,12 @@ agent storage, model files, containers, NAS named volumes, or the repository
 volume. Preserve immutable caches after refcounts reach zero unless a separate
 reviewed garbage-collection operation selects them.
 
+Uninstall revalidates the bounded local installation specification and exact
+recipe content digest before removing that installation's metadata. It does
+not re-hash shared model payloads: those immutable artifacts are verified when
+they are acquired and before they are used. Treat an uninstall that scales
+with model size as a runtime defect, not as an expected cleanup delay.
+
 ## Rollback and secret rotation
 
 Normal development update is an unchanged mutable Compose file followed by
@@ -702,12 +718,13 @@ matching full-state restore.
 
 Rotate the PostgreSQL password and database URL only as one coordinated pair.
 Rotate Git signing authority with historical public-key retention. Rotate
-agent/controller PKI, host-runtime signing authority, LiteLLM/proxy tokens, and
-token-signing authority as one planned new 21-file local
+agent/controller PKI, host-runtime signing authority, LiteLLM/proxy tokens,
+LiteLLM database password, and token-signing authority as one planned new
+22-file local
 source generation: back it up, distribute replacement public trust first,
 schedule re-enrollment/client key change, install the replacement helper public
 key on every node before switching the private signer, project the exact
-17-file NAS bundle,
+18-file NAS bundle,
 and pull/redeploy. Never overwrite one CA private key or one server certificate
 in isolation and hope the other projections recover.
 
@@ -745,7 +762,7 @@ uv run --project control --frozen scripts/dev-runtime-project \
   --enroll-hostname '<ENROLLMENT_HOSTNAME>' \
   --agent-hostname '<CONTROLLER_HOSTNAME>' \
   --registry-hostname '<REGISTRY_HOSTNAME>'
-docker compose -f "$ACCEPTANCE_ROOT/project/docker-compose.yml" config --quiet
+docker compose -f "$ACCEPTANCE_ROOT/project/docker-compose.yaml" config --quiet
 uv run --project control pytest \
   control/tests/test_development_recipe_fixture.py -q
 ```

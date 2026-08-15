@@ -11,6 +11,7 @@ AGENT_PKI = ROOT / "docs/runbooks/agent-pki.md"
 DEV_NAS = ROOT / "docs/runbooks/development-nas-installation.md"
 COMPOSE_README = ROOT / "deploy/compose/README.md"
 ARCHITECTURE = ROOT / "docs/architecture-overview.md"
+ARCHITECTURE_HTML = ROOT / "docs/vonk-forge-architecture.html"
 SUPPLY_CHAIN = ROOT / "docs/runbooks/supply-chain.md"
 DEV_WORKLOADS = ROOT / "docs/runbooks/development-agent-workloads.md"
 MIA_TWO_SPARK = ROOT / "docs/runbooks/mia-deepseek-v4-flash.md"
@@ -82,6 +83,48 @@ def test_readme_describes_the_spark_native_runtime_boundary() -> None:
     assert "Spark-managed Docker/NVIDIA runtime" in text
     assert "for isolated recipe builds only" in text
     assert "Docker is only required on the NAS" not in text
+
+
+def test_architecture_explains_one_two_and_many_node_shapes() -> None:
+    markdown = _normalized_text(ARCHITECTURE)
+    html = _normalized_text(ARCHITECTURE_HTML)
+
+    for text in (markdown, html):
+        for required in (
+            "One Spark",
+            "Two Sparks",
+            "Many Sparks",
+            "Tailscale → Caddy → LiteLLM",
+            "spk_…",
+            "mia-deepseek-v4-flash",
+            "agents.vonk-forge.lan:8443",
+        ):
+            assert required in text
+        assert "stable" in text
+        assert "IP address is not identity" in text
+        assert "no fixed fleet size" in text
+
+    assert "single-node runtime" in markdown
+    assert "tensor-parallel gang" in markdown
+    assert "independent workloads and gangs" in markdown
+    assert "GPU nodes never receive Tailscale OAuth" in html
+    assert "LiteLLM never discovers containers" in html
+    assert "agents.vonk.lan" not in html
+
+
+def test_mia_runbook_distinguishes_image_receipts_from_model_loading() -> None:
+    text = _normalized_text(MIA_TWO_SPARK)
+
+    for required in (
+        "18,908,041,728-byte runtime image",
+        "155.43 GiB model checkpoint",
+        "does not redownload",
+        "new signed import receipt",
+        "full digest verification",
+        "not a release SLA",
+        "146 seconds",
+    ):
+        assert required in text
 
 
 def test_active_agent_install_examples_keep_pairing_and_controller_inputs_together() -> None:
@@ -277,7 +320,7 @@ def test_development_nas_contract_keeps_only_compose_file_and_secrets_directory(
     text = _normalized_text(DEV_NAS)
 
     assert "Its contents must be exactly:" in text
-    assert "├── docker-compose.yml" in text
+    assert "├── docker-compose.yaml" in text
     assert "└── secrets/" in text
     assert "No `current/`, source tree, Dockerfiles, or `.env` file belongs in this project." in text
 
@@ -439,8 +482,9 @@ def test_secret_docs_separate_local_backup_from_exact_nas_projection() -> None:
     runbook = _normalized_text(DEV_WORKLOADS)
     design = _normalized_text(DEV_WORKLOADS_DESIGN)
 
-    assert "exactly 21 local source files" in runbook
-    assert "exactly 17 deployment files" in runbook
+    assert "exactly 22 local source files" in runbook
+    assert "exactly 18 deployment files" in runbook
+    assert "`--upgrade-litellm-key-management`" in runbook
     assert "four local-only files" in runbook
     assert "15-file" in runbook
     assert "add-only" in runbook
@@ -498,8 +542,9 @@ def test_complete_runbook_uses_current_browser_secret_generation_contract() -> N
 
     assert "--tailscale-oauth-client-id-file" in text
     assert "--tailscale-oauth-client-secret-file" in text
-    assert "exactly 21 local source files" in normalized
-    assert "exactly 17 deployment files" in normalized
+    assert "exactly 22 local source files" in normalized
+    assert "exactly 18 deployment files" in normalized
+    assert "litellm-database-password" in normalized
     for local_only in (
         "`admin-password`",
         "`controller-ca-key`",
@@ -508,6 +553,7 @@ def test_complete_runbook_uses_current_browser_secret_generation_contract() -> N
     ):
         assert local_only in text
     assert "--upgrade-browser-access" in text
+    assert "--upgrade-litellm-key-management" in text
     assert "Pull** then **Redeploy" in text
 
 

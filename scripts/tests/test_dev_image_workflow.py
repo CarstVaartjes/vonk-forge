@@ -78,6 +78,7 @@ def test_focused_publication_gate_covers_auth_web_caddy_and_tailscale() -> None:
         "deploy/compose/tests/test_agent_ingress.py",
         "scripts/tests/test_dev_runtime_secrets.py",
         "scripts/tests/test_dev_runtime_project.py",
+        "scripts/tests/test_dev_runtime_project_remote.py",
         "scripts/tests/test_dev_admin_token.py",
         "control/tests/test_dev_cohort.py",
         "control/tests/test_dev_auth_init.py",

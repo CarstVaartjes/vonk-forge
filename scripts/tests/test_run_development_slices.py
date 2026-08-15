@@ -1135,6 +1135,25 @@ def test_model_multinode_runner_proves_failure_recovery_restart_and_cleanup(
     )
 
 
+def test_model_inference_allows_a_bounded_reasoning_budget(
+    tmp_path: Path, server: SliceServer
+) -> None:
+    server.nodes = [NODE, NODE_2]
+
+    result, _evidence_path = _run_model(
+        tmp_path, server, "--stop-after", "inference-ok"
+    )
+
+    assert result.returncode == 0, result.stderr
+    inference_requests = [
+        json.loads(body)
+        for method, path, body in server.request_bodies
+        if method == "POST" and path == "/v1/chat/completions"
+    ]
+    assert len(inference_requests) == 1
+    assert inference_requests[0]["max_tokens"] == 128
+
+
 def test_model_runner_requires_exact_private_qualification(
     tmp_path: Path, server: SliceServer
 ) -> None:

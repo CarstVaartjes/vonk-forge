@@ -94,6 +94,8 @@ def setup(
     failed_rank=False,
     validate=lambda _: True,
     clock=None,
+    run_alias="qwen",
+    runtime_model_aliases=("qwen",),
 ):
     tmp_path.mkdir(parents=True, exist_ok=True)
     engine = create_engine(f"sqlite:///{tmp_path / 'routes.sqlite'}")
@@ -126,7 +128,13 @@ def setup(
             revision_number=1,
             lifecycle="resolved",
             schema_version=1,
-            document={},
+            document={
+                "runtime": {
+                    "endpoint": {
+                        "model_aliases": list(runtime_model_aliases),
+                    }
+                }
+            },
             content_sha256="a" * 64,
             created_by="admin",
             created_at=NOW,
@@ -207,7 +215,7 @@ def setup(
             installation_id=installation.id,
             mapping_id=mapping.id,
             mapping_generation=1,
-            alias="qwen",
+            alias=run_alias,
             plan_digest="c" * 64,
             plan={},
             state="running",
@@ -330,6 +338,33 @@ def test_all_ranks_must_be_fresh_and_ready_but_only_entrypoint_is_routed(
         == "http://10.0.0.2:8000/v1"
     )
     assert b"10.0.0.3" not in applied[-1]
+
+
+def test_public_alias_routes_to_primary_runtime_model_alias(tmp_path: Path) -> None:
+    service, _publisher, applied, run_id = setup(
+        tmp_path,
+        run_alias="public-qwen",
+        runtime_model_aliases=("internal-qwen", "compat-qwen"),
+    )
+
+    service.publish_run(run_id)
+
+    model = json.loads(applied[-1])["model_list"][0]
+    assert model["model_name"] == "public-qwen"
+    assert model["litellm_params"]["model"] == "openai/internal-qwen"
+
+
+def test_missing_runtime_model_authority_blocks_route_publication(
+    tmp_path: Path,
+) -> None:
+    service, _publisher, applied, run_id = setup(
+        tmp_path, runtime_model_aliases=()
+    )
+
+    with pytest.raises(RecipeRouteError, match="model authority"):
+        service.publish_run(run_id)
+
+    assert applied == []
 
 
 def test_tailnet_endpoint_is_accepted_by_configured_management_policy(

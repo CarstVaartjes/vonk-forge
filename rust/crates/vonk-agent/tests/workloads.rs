@@ -588,6 +588,162 @@ fn installation_records_and_rechecks_a_content_manifest() {
 }
 
 #[test]
+fn absent_installation_has_no_recipe_identity() {
+    let runner = FakeRunner {
+        calls: RefCell::new(vec![]),
+        outputs: RefCell::new(VecDeque::new()),
+    };
+    let directory = tempdir().unwrap();
+    let runtime = OciRuntime {
+        runner: &runner,
+        data_root: directory.path(),
+        huggingface_curl_config: None,
+    };
+
+    assert_eq!(
+        runtime
+            .recipe_digest_if_present("cb555393-764b-4eb6-8f15-b416d289428f")
+            .unwrap(),
+        None
+    );
+}
+
+#[test]
+fn present_installation_exposes_its_recipe_identity() {
+    let runner = FakeRunner {
+        calls: RefCell::new(vec![]),
+        outputs: RefCell::new(VecDeque::new()),
+    };
+    let directory = tempdir().unwrap();
+    let installation_id = "cb555393-764b-4eb6-8f15-b416d289428f";
+    let installation = directory.path().join("installations").join(installation_id);
+    fs::create_dir_all(&installation).unwrap();
+    fs::write(installation.join("recipe-content.sha256"), DIGEST).unwrap();
+    let runtime = OciRuntime {
+        runner: &runner,
+        data_root: directory.path(),
+        huggingface_curl_config: None,
+    };
+
+    assert_eq!(
+        runtime
+            .recipe_digest_if_present(installation_id)
+            .unwrap()
+            .as_deref(),
+        Some(DIGEST)
+    );
+}
+
+#[test]
+fn unsafe_installation_metadata_is_not_treated_as_absent() {
+    let runner = FakeRunner {
+        calls: RefCell::new(vec![]),
+        outputs: RefCell::new(VecDeque::new()),
+    };
+    let directory = tempdir().unwrap();
+    let installations = directory.path().join("installations");
+    fs::create_dir(&installations).unwrap();
+    symlink(
+        directory.path().join("outside"),
+        installations.join("cb555393-764b-4eb6-8f15-b416d289428f"),
+    )
+    .unwrap();
+    let runtime = OciRuntime {
+        runner: &runner,
+        data_root: directory.path(),
+        huggingface_curl_config: None,
+    };
+
+    assert!(
+        runtime
+            .recipe_digest_if_present("cb555393-764b-4eb6-8f15-b416d289428f")
+            .is_err()
+    );
+}
+
+#[test]
+fn uninstall_removes_matching_metadata_without_rehashing_model_artifacts() {
+    let runner = FakeRunner {
+        calls: RefCell::new(vec![]),
+        outputs: RefCell::new(VecDeque::new()),
+    };
+    let directory = tempdir().unwrap();
+    let installation_id = "cb555393-764b-4eb6-8f15-b416d289428f";
+    let installation = directory.path().join("installations").join(installation_id);
+    fs::create_dir_all(&installation).unwrap();
+    fs::write(
+        installation.join("spec.json"),
+        serde_json::to_vec(&spec()).unwrap(),
+    )
+    .unwrap();
+    fs::write(installation.join("recipe-content.sha256"), DIGEST).unwrap();
+    let runtime = OciRuntime {
+        runner: &runner,
+        data_root: directory.path(),
+        huggingface_curl_config: None,
+    };
+
+    runtime.uninstall(installation_id, DIGEST).unwrap();
+
+    assert!(!installation.exists());
+    assert!(runner.calls.borrow().is_empty());
+}
+
+#[test]
+fn uninstall_preserves_metadata_when_recipe_identity_does_not_match() {
+    let runner = FakeRunner {
+        calls: RefCell::new(vec![]),
+        outputs: RefCell::new(VecDeque::new()),
+    };
+    let directory = tempdir().unwrap();
+    let installation_id = "cb555393-764b-4eb6-8f15-b416d289428f";
+    let installation = directory.path().join("installations").join(installation_id);
+    fs::create_dir_all(&installation).unwrap();
+    fs::write(
+        installation.join("spec.json"),
+        serde_json::to_vec(&spec()).unwrap(),
+    )
+    .unwrap();
+    fs::write(installation.join("recipe-content.sha256"), DIGEST).unwrap();
+    let runtime = OciRuntime {
+        runner: &runner,
+        data_root: directory.path(),
+        huggingface_curl_config: None,
+    };
+
+    assert!(runtime.uninstall(installation_id, &"b".repeat(64)).is_err());
+    assert!(installation.exists());
+}
+
+#[test]
+fn uninstall_rejects_symlinked_recipe_identity() {
+    let runner = FakeRunner {
+        calls: RefCell::new(vec![]),
+        outputs: RefCell::new(VecDeque::new()),
+    };
+    let directory = tempdir().unwrap();
+    let installation_id = "cb555393-764b-4eb6-8f15-b416d289428f";
+    let installation = directory.path().join("installations").join(installation_id);
+    fs::create_dir_all(&installation).unwrap();
+    fs::write(
+        installation.join("spec.json"),
+        serde_json::to_vec(&spec()).unwrap(),
+    )
+    .unwrap();
+    let outside_digest = directory.path().join("outside-digest");
+    fs::write(&outside_digest, DIGEST).unwrap();
+    symlink(&outside_digest, installation.join("recipe-content.sha256")).unwrap();
+    let runtime = OciRuntime {
+        runner: &runner,
+        data_root: directory.path(),
+        huggingface_curl_config: None,
+    };
+
+    assert!(runtime.uninstall(installation_id, DIGEST).is_err());
+    assert!(installation.exists());
+}
+
+#[test]
 fn http_artifacts_reject_private_hosts_before_curl_runs() {
     let runner = FakeRunner {
         calls: RefCell::new(vec![]),

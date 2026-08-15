@@ -651,13 +651,20 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         Ok(metadata)
     }
 
-    pub fn uninstall(&self, installation_id: &str) -> Result<(), OciError> {
+    pub fn uninstall(
+        &self,
+        installation_id: &str,
+        expected_recipe_digest: &str,
+    ) -> Result<(), OciError> {
         let installation = managed_path(self.data_root, "installations", installation_id)?;
         let metadata = fs::symlink_metadata(&installation)?;
         if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
             return Err(OciError::Artifact);
         }
-        self.verify_installation(installation_id)?;
+        self.load_spec(installation_id)?;
+        if self.recipe_digest(installation_id)? != expected_recipe_digest {
+            return Err(OciError::Artifact);
+        }
         fs::remove_dir_all(installation)?;
         File::open(self.data_root.join("installations"))?.sync_all()?;
         Ok(())
@@ -695,7 +702,8 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
     pub fn recipe_digest(&self, installation_id: &str) -> Result<String, OciError> {
         let path = managed_path(self.data_root, "installations", installation_id)?
             .join("recipe-content.sha256");
-        let value = fs::read_to_string(path)?;
+        let value =
+            String::from_utf8(read_regular_file(&path, 64)?).map_err(|_| OciError::Artifact)?;
         if value.len() != 64
             || !value
                 .bytes()
@@ -704,6 +712,22 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             return Err(OciError::Artifact);
         }
         Ok(value)
+    }
+
+    pub fn recipe_digest_if_present(
+        &self,
+        installation_id: &str,
+    ) -> Result<Option<String>, OciError> {
+        let installation = managed_path(self.data_root, "installations", installation_id)?;
+        let metadata = match fs::symlink_metadata(&installation) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+        if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+            return Err(OciError::Artifact);
+        }
+        self.recipe_digest(installation_id).map(Some)
     }
 
     pub fn installed_bytes(&self, installation_id: &str) -> Result<u64, OciError> {

@@ -51,6 +51,7 @@ DEPLOYMENT_SECRET_NAMES = frozenset(
         "database-url",
         "git-signing-key",
         "host-runtime-grant-private-key",
+        "litellm-database-password",
         "litellm-master-key",
         "litellm-upstream-key",
         "management-cidrs",
@@ -71,6 +72,10 @@ LOCAL_SOURCE_SECRET_NAMES = DEPLOYMENT_SECRET_NAMES | frozenset(
 # Compatibility for the project publisher, which validates the complete local
 # source before publishing its fixed deployment subset.
 RUNTIME_SECRET_NAMES = LOCAL_SOURCE_SECRET_NAMES
+_LITELLM_DATABASE_PASSWORD = "litellm-database-password"
+_PRE_LITELLM_KEY_MANAGEMENT_SECRET_NAMES = RUNTIME_SECRET_NAMES - {
+    _LITELLM_DATABASE_PASSWORD
+}
 _BROWSER_ACCESS_SECRET_NAMES = frozenset(
     {
         "admin-password",
@@ -742,6 +747,7 @@ def _secret_bundle(
         .sign(controller_key, algorithm=None)
     )
     password = secrets.token_hex(32)
+    litellm_database_password = secrets.token_hex(32)
     admin_password, admin_password_verifier = _admin_credential_pair()
     private_pem = lambda key: key.private_bytes(
         serialization.Encoding.PEM,
@@ -786,6 +792,9 @@ def _secret_bundle(
         "host-runtime-grant-private-key": private_pem(host_runtime_key),
         "host-runtime-grant-public-key": (
             host_runtime_key.public_key().public_bytes_raw().hex() + "\n"
+        ).encode("ascii"),
+        "litellm-database-password": (
+            litellm_database_password + "\n"
         ).encode("ascii"),
         "litellm-master-key": token(),
         "litellm-upstream-key": token(),
@@ -1013,6 +1022,11 @@ def _validate_bundle(
         raise RuntimeSecretError(
             "development database URL does not match its credential"
         )
+    litellm_database_password = bundle["litellm-database-password"].decode(
+        "ascii", errors="strict"
+    )
+    if not re.fullmatch(r"[0-9a-f]{64}\n", litellm_database_password):
+        raise RuntimeSecretError("development LiteLLM database credential is invalid")
     if bundle["management-cidrs"] != ("\n".join(management_cidrs) + "\n").encode(
         "ascii"
     ):
@@ -1127,6 +1141,37 @@ def _upgrade_host_runtime_authority(
         _write_file(directory, _HOST_RUNTIME_PRIVATE, private)
         os.fsync(directory)
     _write_file(directory, _HOST_RUNTIME_PUBLIC, public)
+    os.fsync(directory)
+    installed = {name: _read_file(directory, name) for name in RUNTIME_SECRET_NAMES}
+    _validate_bundle(
+        installed,
+        management_cidrs=management_cidrs,
+        enroll_hostname=enroll_hostname,
+        agent_hostname=agent_hostname,
+        registry_hostname=registry_hostname,
+    )
+
+
+def _upgrade_litellm_key_management(
+    directory: int,
+    bundle: dict[str, bytes],
+    *,
+    management_cidrs: tuple[str, ...],
+    enroll_hostname: str,
+    agent_hostname: str,
+    registry_hostname: str,
+) -> None:
+    password = (secrets.token_hex(32) + "\n").encode("ascii")
+    candidate = dict(bundle)
+    candidate[_LITELLM_DATABASE_PASSWORD] = password
+    _validate_bundle(
+        candidate,
+        management_cidrs=management_cidrs,
+        enroll_hostname=enroll_hostname,
+        agent_hostname=agent_hostname,
+        registry_hostname=registry_hostname,
+    )
+    _write_file(directory, _LITELLM_DATABASE_PASSWORD, password)
     os.fsync(directory)
     installed = {name: _read_file(directory, name) for name in RUNTIME_SECRET_NAMES}
     _validate_bundle(
@@ -2622,6 +2667,7 @@ def prepare_runtime_secrets(
     tailscale_oauth_client_id_file: Path,
     tailscale_oauth_client_secret_file: Path,
     upgrade_host_runtime_authority: bool = False,
+    upgrade_litellm_key_management: bool = False,
     upgrade_browser_access: bool = False,
     rotate_admin_password: bool = False,
     rotate_tailscale_oauth: bool = False,
@@ -2631,6 +2677,7 @@ def prepare_runtime_secrets(
         sum(
             (
                 upgrade_host_runtime_authority,
+                upgrade_litellm_key_management,
                 upgrade_browser_access,
                 rotate_admin_password,
                 rotate_tailscale_oauth,
@@ -2678,6 +2725,42 @@ def prepare_runtime_secrets(
             )
             names = set(os.listdir(existing_descriptor))
             if names:
+                if upgrade_litellm_key_management:
+                    if names == RUNTIME_SECRET_NAMES:
+                        completed = {
+                            name: _read_file(existing_descriptor, name)
+                            for name in names
+                        }
+                        _validate_bundle(
+                            completed,
+                            management_cidrs=cidrs,
+                            enroll_hostname=enroll,
+                            agent_hostname=agent,
+                            registry_hostname=registry,
+                        )
+                        return secrets_dir
+                    if names != _PRE_LITELLM_KEY_MANAGEMENT_SECRET_NAMES:
+                        for name in sorted(names):
+                            if name not in RUNTIME_SECRET_NAMES:
+                                raise RuntimeSecretError(
+                                    "development secrets directory contains unknown entries"
+                                )
+                            _read_file(existing_descriptor, name)
+                        raise RuntimeSecretError(
+                            "LiteLLM key-management upgrade requires the exact prior generation"
+                        )
+                    prior_bundle = {
+                        name: _read_file(existing_descriptor, name) for name in names
+                    }
+                    _upgrade_litellm_key_management(
+                        existing_descriptor,
+                        prior_bundle,
+                        management_cidrs=cidrs,
+                        enroll_hostname=enroll,
+                        agent_hostname=agent,
+                        registry_hostname=registry,
+                    )
+                    return secrets_dir
                 if upgrade_browser_access:
                     if names == RUNTIME_SECRET_NAMES:
                         completed = {
@@ -2791,7 +2874,12 @@ def prepare_runtime_secrets(
                 return secrets_dir
         else:
             existing_metadata = None
-        if upgrade_browser_access or rotate_admin_password or rotate_tailscale_oauth:
+        if (
+            upgrade_litellm_key_management
+            or upgrade_browser_access
+            or rotate_admin_password
+            or rotate_tailscale_oauth
+        ):
             raise RuntimeSecretError(
                 "development secret operation requires an existing generation"
             )
@@ -2912,6 +3000,11 @@ def _arguments() -> argparse.Namespace:
         ),
     )
     operations.add_argument(
+        "--upgrade-litellm-key-management",
+        action="store_true",
+        help="add the dedicated LiteLLM database credential to an exact prior generation",
+    )
+    operations.add_argument(
         "--upgrade-browser-access",
         action="store_true",
         help="add browser access secrets to the exact prior generation",
@@ -2953,6 +3046,9 @@ def main() -> int:
                 arguments.tailscale_oauth_client_secret_file
             ),
             upgrade_host_runtime_authority=(arguments.upgrade_host_runtime_authority),
+            upgrade_litellm_key_management=(
+                arguments.upgrade_litellm_key_management
+            ),
             upgrade_browser_access=arguments.upgrade_browser_access,
             rotate_admin_password=arguments.rotate_admin_password,
             rotate_tailscale_oauth=arguments.rotate_tailscale_oauth,

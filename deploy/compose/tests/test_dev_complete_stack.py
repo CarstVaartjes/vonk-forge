@@ -266,16 +266,19 @@ def test_browser_auth_password_is_streamed_outside_container_metadata(
     assert captured["input_text"] == password
 
 
-def _unused_ports() -> tuple[int, int]:
+def _unused_ports() -> tuple[int, int, int]:
     with (
         socket.socket(socket.AF_INET, socket.SOCK_STREAM) as api_listener,
         socket.socket(socket.AF_INET, socket.SOCK_STREAM) as agent_listener,
+        socket.socket(socket.AF_INET, socket.SOCK_STREAM) as inference_listener,
     ):
         api_listener.bind(("127.0.0.1", 0))
         agent_listener.bind(("0.0.0.0", 0))
+        inference_listener.bind(("127.0.0.1", 0))
         return (
             int(api_listener.getsockname()[1]),
             int(agent_listener.getsockname()[1]),
+            int(inference_listener.getsockname()[1]),
         )
 
 
@@ -533,12 +536,63 @@ def _assert_litellm_health(container: str) -> None:
     _run(["docker", "exec", container, "python", "-c", code], timeout=15)
 
 
+def _create_restricted_litellm_virtual_key(
+    *, port: int, master_key: str
+) -> str:
+    payload = json.dumps({
+        "key_alias": "complete-stack-restricted",
+        "models": ["mia-deepseek-v4-flash"],
+        "allowed_routes": ["openai_routes"],
+    }).encode()
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{port}/key/generate",
+        data=payload,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {master_key}",
+            "Content-Type": "application/json",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=15) as response:
+        generated = json.loads(response.read())
+        assert response.status == 200
+    key = generated["key"]
+    assert isinstance(key, str) and key and key != master_key
+    return key
+
+
+def _assert_litellm_management_denied(*, port: int, key: str) -> None:
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{port}/key/list",
+        method="GET",
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    with pytest.raises(urllib.error.HTTPError) as denied:
+        urllib.request.urlopen(request, timeout=15)
+    assert denied.value.code in {401, 403}
+
+
+def _wait_for_litellm_port(port: int) -> None:
+    deadline = time.monotonic() + 120
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(
+                f"http://127.0.0.1:{port}/health/liveliness", timeout=3
+            ) as response:
+                if response.status == 200:
+                    return
+        except (OSError, urllib.error.URLError):
+            pass
+        time.sleep(1)
+    pytest.fail("LiteLLM did not become healthy after restart")
+
+
 def test_complete_development_stack_enforces_tls_identity_and_acks_routes(
     tmp_path: Path,
 ) -> None:
     _require_local_images()
     project = f"vonk-stack-{uuid.uuid4().hex[:12]}"
-    api_port, agent_port = _unused_ports()
+    api_port, agent_port, inference_port = _unused_ports()
     secrets = tmp_path / "secrets"
     oauth_inputs = tmp_path / "oauth-inputs"
     oauth_inputs.mkdir(mode=0o700)
@@ -554,6 +608,7 @@ def test_complete_development_stack_enforces_tls_identity_and_acks_routes(
         **os.environ,
         "VONK_AGENT_PORT": str(agent_port),
         "VONK_DEV_PORT": str(api_port),
+        "VONK_DEV_INFERENCE_PORT": str(inference_port),
         "VONK_DEV_MANAGEMENT_CIDRS": (
             "127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
         ),
@@ -740,6 +795,16 @@ def test_complete_development_stack_enforces_tls_identity_and_acks_routes(
         _assert_direct_spoof_is_rejected(api_port)
 
         _assert_litellm_health(litellm_container)
+        master_key = (secrets / "litellm-master-key").read_text(
+            encoding="ascii"
+        ).strip()
+        virtual_key = _create_restricted_litellm_virtual_key(
+            port=inference_port, master_key=master_key
+        )
+        _assert_litellm_management_denied(port=inference_port, key=virtual_key)
+        _run(["docker", "restart", litellm_container], timeout=60)
+        _wait_for_litellm_port(inference_port)
+        _assert_litellm_management_denied(port=inference_port, key=virtual_key)
         marker_digest = _publish_activation(api_container)
         _wait_for_exact_ack(litellm_container, marker_digest)
         _assert_litellm_health(litellm_container)

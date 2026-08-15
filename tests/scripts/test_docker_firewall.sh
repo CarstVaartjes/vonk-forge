@@ -63,6 +63,23 @@ $iptables -C VONK-FORGE-HOST -i vonk-fabric -s 192.168.100.11 \
     -d 192.168.100.10 -p udp -j RETURN
 $iptables -C VONK-FORGE-HOST -d 192.168.100.10 -p tcp -j DROP
 $iptables -C VONK-FORGE-HOST -d 192.168.100.10 -p udp -j DROP
+peer_tcp_position=$($iptables -S VONK-FORGE-HOST | awk \
+    '/-i vonk-fabric/ && /-s 192\.168\.100\.11/ && /-p tcp/ && /-j RETURN/ { print NR }')
+endpoint_drop_position=$($iptables -S VONK-FORGE-HOST | awk \
+    '/-p tcp/ && /--dport 8888/ && /-j DROP/ { print NR }')
+test -n "$peer_tcp_position"
+test -n "$endpoint_drop_position"
+test "$peer_tcp_position" -lt "$endpoint_drop_position"
+$iptables -D VONK-FORGE-HOST -i vonk-fabric -s 192.168.100.11 \
+    -d 192.168.100.10 -p tcp -j RETURN
+$iptables -A VONK-FORGE-HOST -i vonk-fabric -s 192.168.100.11 \
+    -d 192.168.100.10 -p tcp -j RETURN
+if $helper --config "$config" check >/dev/null 2>&1; then
+    echo "host endpoint drop shadowed peer traffic without detection" >&2
+    exit 1
+fi
+$helper --config "$config" apply
+$helper --config "$config" check
 $iptables -C VONK-FORGE -i vonk-mgmt -p tcp -s 192.168.1.231 \
     -m conntrack --ctorigdst 192.168.1.211 --ctorigdstport 8000 -j RETURN
 $iptables -C VONK-FORGE -i vonk-fabric -p tcp -s 192.168.100.11 \

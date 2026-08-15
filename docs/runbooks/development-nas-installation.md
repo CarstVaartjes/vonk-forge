@@ -14,7 +14,7 @@ directory when creating a Docker/Compose project. Its contents must be exactly:
 
 ```text
 vonk-forge/
-├── docker-compose.yml
+├── docker-compose.yaml
 └── secrets/
     ├── agent-ca-certificate
     ├── agent-ca-key
@@ -26,6 +26,7 @@ vonk-forge/
     ├── database-url
     ├── git-signing-key
     ├── host-runtime-grant-private-key
+    ├── litellm-database-password
     ├── litellm-master-key
     ├── litellm-upstream-key
     ├── management-cidrs
@@ -105,9 +106,9 @@ The publication workflows expose three clearly named files:
 
 For normal development, give `docker-compose.dev.yml` to
 `scripts/dev-runtime-project`; it publishes that artifact as
-`docker-compose.yml`. A moved tag does not change a
+`docker-compose.yaml`. A moved tag does not change a
 running project: after a successful publication, pull/redeploy the unchanged
-`docker-compose.yml`, not restart containers and not replace the file. The
+`docker-compose.yaml`, not restart containers and not replace the file. The
 pinned file is deliberately an exception for
 reproduction or recovery; this development guide never installs the production
 graph or its much larger production credential set.
@@ -127,7 +128,8 @@ The operator-owned bundle has narrow service projections:
 | `host-runtime-grant-private-key` | initializer, then API projection only | Signs short-lived, operation-bound grants for the root helper on enrolled GPU nodes. Its matching public key is installed on nodes and is not copied to the NAS. |
 | `agent-ca-certificate`, `agent-ca-key`, `agent-proxy-auth` | initializer, then separated API/Caddy projections | Agent certificate issuance and authenticated proxy boundary. |
 | `controller-ca`, `controller-server-certificate`, `controller-server-key` | operator backup plus Caddy projection | Server trust for the two agent hostnames. |
-| `litellm-master-key`, `litellm-upstream-key` | initializer, then LiteLLM-only projection | User-facing development inference and internal upstream authentication. |
+| `litellm-database-password` | initializer, then separate database-initializer and LiteLLM projections | Dedicated password for the `litellm` role and database; it is not the control database credential. |
+| `litellm-master-key`, `litellm-upstream-key` | initializer, then LiteLLM-only projection | Local LiteLLM administration and internal upstream authentication. Workstations receive restricted virtual keys instead. |
 | `management-cidrs` | initializer, API, worker, and Caddy projections | Exact management networks allowed to use agent ingress. |
 | `token-signing-key` | initializer, then API projection only | Random authority used to sign short-lived development administrator tokens. |
 | `tailscale-oauth-client-id`, `tailscale-oauth-client-secret` | initializer, then Tailscale-only projection | Scoped unattended gateway enrollment; no API, worker, Caddy, or GPU-node consumer. |
@@ -136,10 +138,12 @@ On first start, the networked `dev-repository-init` service fetches and verifies
 the public repository without receiving any runtime secret. The separate
 `network_mode: none` `dev-init` service generates an admin-grant private key and
 a worker API token without mounting the repository. It projects authority into distinct API, migration, worker,
-Caddy, and LiteLLM named volumes: API gets its signing and enrollment
+Caddy, LiteLLM-database-initializer, and LiteLLM named volumes: API gets its signing and enrollment
 authority; migration gets only the database URL; worker gets the database URL,
-management CIDRs, and worker token; Caddy gets only TLS/proxy material; and
-LiteLLM gets only its two keys. The authentication initializer gets only the
+management CIDRs, and worker token; Caddy gets only TLS/proxy material; the
+database initializer gets the control database URL plus the dedicated
+LiteLLM password; and LiteLLM gets only its two keys plus its generated
+dedicated database URL. The authentication initializer gets only the
 database URL and administrator verifier. The Tailscale gateway gets only its
 OAuth pair and persistent node state. The worker cannot read the verifier,
 session authority, OAuth pair, or Git signing key. Those values
@@ -154,13 +158,13 @@ commit. Download the artifact named
 `docker-compose.dev.yml` and `docker-compose.pinned.yml`. Keep both on local
 operator storage. Pass `docker-compose.dev.yml` to
 `scripts/dev-runtime-project` as shown below; the publisher validates and writes
-it as the NAS project's `docker-compose.yml`. Do not rename or copy either
+it as the NAS project's `docker-compose.yaml`. Do not rename or copy either
 artifact into the NAS project by hand. Do not edit the first-party image
 references or add digests: the mutable `:dev` channel is intentionally selected
 when the Docker UI pulls.
 
 In the NAS file manager, confirm that the artifact is named
-`docker-compose.yml` and that the project UI identifies it as a Compose file;
+`docker-compose.yaml` and that the project UI identifies it as a Compose file;
 do not edit image references, add a digest, or add a build section. Both GHCR
 packages must be public. A pull-only NAS needs no registry login. If the Docker
 UI requests credentials, stop and correct package visibility instead of
@@ -268,43 +272,46 @@ and expiry dates. It never prints secret values. It creates regular files with
 mode `0600` in an operator-owned mode `0700` directory and refuses an
 incomplete, unknown, symlinked, or inconsistent existing bundle.
 
-A fresh generation contains exactly 21 local source files. Before publication,
+A fresh generation contains exactly 22 local source files. Before publication,
 create a 1Password Password item named **Vonk Forge NAS Development
 Administrator**, set its username to exact `admin`, and transfer the local
 `admin-password` into its password field through the 1Password application.
 Do not put the password in a CLI argument, terminal output, note field, or
-browser storage. Keep the complete 21-file generation as an encrypted backup;
+browser storage. Keep the complete 22-file generation as an encrypted backup;
 the 1Password item is the normal login copy, not a replacement for the
 generation backup.
 
-The publisher copies exactly 17 files into the NAS `secrets/` directory. The
+The publisher copies exactly 18 files into the NAS `secrets/` directory. The
 four local-only files are `admin-password`, `controller-ca-key`,
 `git-signing-key.pub`, and `host-runtime-grant-public-key`. In particular, the
 plaintext administrator password is never published to the NAS. The publisher
 and `dev-init` then enforce the disjoint service ownership boundaries described
 above; a read-only mount is not used as a substitute for separating secrets.
 
-For an existing valid pre-browser 17-file local source generation, repeat the
-same command with `--upgrade-browser-access`. This add-only operation preserves
-every existing secret byte and key relationship and creates only
-`admin-password`, `admin-password-verifier`, `tailscale-oauth-client-id`, and
-`tailscale-oauth-client-secret`. Back up the resulting 21-file generation
-before publication. If the source is the older valid 15-file generation, first
-run the separately documented `--upgrade-host-runtime-authority` transition,
-then run `--upgrade-browser-access`. Neither switch repairs partial, unknown,
+For an existing valid 21-file browser-access generation, repeat the same
+command with `--upgrade-litellm-key-management`. This add-only operation
+creates only `litellm-database-password`, preserves every existing secret byte,
+and validates an already-completed retry. Back up the resulting 22-file
+generation before publication. A valid pre-browser 17-file generation first
+needs `--upgrade-browser-access`; an older valid 15-file generation first needs
+`--upgrade-host-runtime-authority`. Neither switch repairs partial, unknown,
 symlinked, or inconsistent state created outside its own transaction. If power
 or the workstation process is lost during the browser upgrade, leave the hidden
 `.browser-access-upgrade-*` transaction untouched and rerun the identical
-command with the same OAuth inputs. The generator verifies the digest journal
-and safely finishes or rolls back its own interrupted add-only transaction.
+command with the same OAuth inputs.
 
-Publish the accepted Compose and that exact bundle to the mounted NAS share:
+Publish the accepted Compose and that exact bundle on the NAS's real Linux
+filesystem. For Windows, WSL, and ordinary SMB clients, use the generic remote
+publisher:
 
 ```bash
-uv run --project control --frozen scripts/dev-runtime-project \
+uv run --project control --frozen scripts/dev-runtime-project-remote \
   --source-compose '<DOWNLOAD_DIRECTORY>/docker-compose.dev.yml' \
   --secrets-dir '<LOCAL_STAGING_DIRECTORY>/secrets' \
-  --destination '<MOUNTED_NAS_PARENT>/vonk-forge' \
+  --ssh-target '<NAS_SSH_TARGET>' \
+  --identity-file '<ABSOLUTE_SSH_IDENTITY_FILE>' \
+  --remote-destination '<NAS_LINUX_DOCKER_PARENT>/vonk-forge' \
+  --docker-mode sudo \
   --nas-address '<NAS_MANAGEMENT_IP>' \
   --management-cidrs '<NODE_MANAGEMENT_CIDR>' \
   --direct-fabric-cidrs '<DIRECT_FABRIC_CIDRS_OR_NONE>' \
@@ -313,10 +320,30 @@ uv run --project control --frozen scripts/dev-runtime-project \
   --registry-hostname '<REGISTRY_HOSTNAME>'
 ```
 
-This is the supported copy operation: it renders only the site hostnames,
-the explicit direct-fabric policy, verifies every source and destination byte,
-and permits only
-`docker-compose.yml` plus `secrets/` at the destination. The helper takes a
+This is the recommended Windows/WSL copy operation. The remote operator must
+already have strict SSH host-key trust and either direct Docker access with
+`--docker-mode direct` or non-interactive Docker access through `sudo -n` with
+`--docker-mode sudo`. Docker authority is root-equivalent; never grant
+`NOPASSWD: ALL` merely to run this helper. Batch-mode SSH transports one
+bounded validated generation into a RAM-only NAS tmpfs stage. The helper pulls
+the accepted public API image anonymously and runs the existing publisher with
+no network, read-only root, all capabilities dropped, `no-new-privileges`, the
+NAS operator's numeric identity, and only the destination parent writable. Its
+trap removes the exact tmpfs stage after success, failure, interruption, or
+disconnect. It does not clone this repository onto the NAS.
+
+The existing `scripts/dev-runtime-project` remains the underlying publisher
+and the direct-mounted alternative. A Linux operator may give
+`docker-compose.dev.yml` to `scripts/dev-runtime-project` with an absolute
+mounted destination only when that mount provides real POSIX ownership,
+`fchmod`, local staging, and exclusive `flock`. WSL `9p`, DrvFs, CIFS, and many
+SMB mounts cannot. Windows write access is not evidence that these operations
+work. Failure is intentional: do not weaken file modes, locking, or publisher
+checks; use `scripts/dev-runtime-project-remote` instead.
+
+Both entrypoints render only the site hostnames and explicit direct-fabric
+policy, verify every source and destination byte, and permit only
+`docker-compose.yaml` plus `secrets/` at the destination. The helper takes a
 nonblocking exclusive Linux file lock in a stable hidden sibling of the project
 before inspecting or recovering a transaction. The lock remains outside the
 two-item project and is reused by later publications. A live second publisher
@@ -343,6 +370,7 @@ The content classes are:
 |---|---|
 | `postgres-password` | 64 lowercase hexadecimal characters followed by one newline. |
 | `database-url` | `postgresql+psycopg://control:<postgres-password>@postgres:5432/control` followed by one newline, where `<postgres-password>` is the exact value in `postgres-password`. |
+| `litellm-database-password` | Independent 64-character lowercase hexadecimal password followed by one newline; startup derives the dedicated `litellm` database URL inside service projections. |
 | `admin-password` | Local-only 43-character unpadded base64url administrator password; store it in the named 1Password item and encrypted backup. |
 | `admin-password-verifier` | Argon2id PHC verifier published to the authentication projection; it is not a login credential. |
 | `git-signing-key` | One unencrypted Ed25519 OpenSSH private key followed by one newline; the initializer has no interactive passphrase input. |
@@ -355,7 +383,7 @@ The content classes are:
 
 Do not overwrite existing secret files during a normal redeploy. If you copied
 them through an SMB share or NAS file manager, safely eject/disconnect the
-share after copying and use the NAS file manager to confirm only the 17
+share after copying and use the NAS file manager to confirm only the 18
 expected names appear.
 Back up that exact host bundle before first start and after every rotation, but
 confirm the backup by filename, size, and timestamp only; never reveal the
@@ -370,13 +398,21 @@ configuration output into diagnostics.
 
 ## SMB/file-manager preparation
 
-Use an SMB client only as the mounted destination of
-`scripts/dev-runtime-project`; secret generation occurs on private local
-storage. The SMB client must create regular files with the exact names and
-content rules above; it must not leave a public key, temporary copy, or
-duplicate filename in the project directory. If publication is interrupted,
-leave its hidden journal untouched and rerun the publisher before importing or
-redeploying the NAS project.
+For the recommended remote path, the SMB client is only a read-only operator
+view after publication: use Windows Explorer or the NAS file manager to confirm
+that `vonk-forge/` visibly contains `docker-compose.yaml` plus `secrets/`, then
+select that directory in the Docker UI. Secret generation and validation occur
+on private local Linux storage, while mutation occurs on the NAS's real Linux
+filesystem. Do not manually copy a public key, temporary file, pinned Compose,
+or duplicate filename into the project directory. If publication is
+interrupted, leave its hidden journal untouched and rerun the remote publisher
+before importing or redeploying the NAS project.
+
+A directly mounted Linux destination is an advanced alternative only after the
+publisher itself accepts the mount's POSIX semantics. `9p`, DrvFs, CIFS, and
+SMB rejection must not be bypassed. The NAS share remains useful for viewing
+the final two-item project; it is not the authority for Linux mode or lock
+behavior.
 
 Obtain the unencrypted private key through the approved secret-management
 process, then copy it as a regular file from protected local storage. SMB is a
@@ -426,11 +462,11 @@ LAN.
 
 ## Create and redeploy the Compose project
 
-In a generic NAS Docker UI (UGREEN calls this a Docker Project):
+In a generic NAS Docker project UI:
 
 1. Create or import a project from the NAS-local `vonk-forge/` directory.
-2. Select `docker-compose.yml`; retain its relative `./secrets/...` paths.
-3. Verify that `secrets/` contains exactly the 17 names in the project tree
+2. Select `docker-compose.yaml`; retain its relative `./secrets/...` paths.
+3. Verify that `secrets/` contains exactly the 18 names in the project tree
    above, without opening their contents in the UI.
 4. Choose **Pull** then **Redeploy** for the project. Do not choose build or
    restart; there is no build context and restart cannot fetch a moved `:dev`
@@ -442,7 +478,9 @@ After the UI reports the deployment, follow the two prerequisite lanes in the
 job and container status: the cohort reset, API and worker cohort reporters,
 and cohort verifier complete in one lane while PostgreSQL becomes healthy in
 the other. Only then may `dev-repository-init`, the offline `dev-init`, and
-`migrate` complete. The isolated `dev-auth-init` then installs the exact
+`migrate` complete. The isolated `dev-litellm-database-init` creates or
+reconciles the dedicated `litellm` role and database without exposing its
+password to the control API or worker. The isolated `dev-auth-init` then installs the exact
 administrator verifier before the long-running API and worker can become
 healthy. A one-shot service that exits
 successfully is complete, not failed. The API remains bound to NAS loopback for
@@ -474,7 +512,7 @@ confirm the login page returns; logout revokes the server-side browser session.
 
 ## Update after an accepted development publication
 
-Keep `docker-compose.yml` unchanged. In the NAS Docker UI, open the existing
+Keep `docker-compose.yaml` unchanged. In the NAS Docker UI, open the existing
 project and pull/redeploy it. Do not replace the Compose file, restart existing
 containers, delete `secrets/`, or delete named volumes. The repository
 volume has two deliberately separate branches: `main` is the accepted
@@ -520,7 +558,7 @@ installation, updates, or an incompatible migration.
 
 Download `docker-compose.pinned.yml` from the accepted workflow artifact for
 the target cohort, verify its workflow commit and immutable image digests, and
-replace `docker-compose.yml` with that exact pinned artifact before running the
+replace `docker-compose.yaml` with that exact pinned artifact before running the
 procedure. Merely keeping the pinned file elsewhere does not select it. Record
 the pinned 40-character commit as `expected_commit`; the checks below refuse a
 mutable tag, a different pinned commit, or a target that is not in the current
@@ -531,7 +569,7 @@ from the running API before stopping the project. This remains correct if a NAS
 UI changes the Compose project name. Replace `<NAS_PROJECT_DIRECTORY>` with the
 absolute NAS-local directory selected by the Docker Project UI. This is a
 site input: the validation below refuses a relative path, a symlinked project
-root, a missing `docker-compose.yml` or `secrets/`, and unexpected top-level
+root, a missing `docker-compose.yaml` or `secrets/`, and unexpected top-level
 project entries before it runs a Docker command:
 
 ```bash
@@ -543,18 +581,18 @@ case "$NAS_PROJECT_DIRECTORY" in
 esac
 test -d "$NAS_PROJECT_DIRECTORY"
 test ! -L "$NAS_PROJECT_DIRECTORY"
-test -f "$NAS_PROJECT_DIRECTORY/docker-compose.yml"
+test -f "$NAS_PROJECT_DIRECTORY/docker-compose.yaml"
 test -d "$NAS_PROJECT_DIRECTORY/secrets"
 mapfile -d '' -t unexpected_entries < <(
   find "$NAS_PROJECT_DIRECTORY" -mindepth 1 -maxdepth 1 \
-    ! -name docker-compose.yml ! -name secrets -print0
+    ! -name docker-compose.yaml ! -name secrets -print0
 )
 test "${#unexpected_entries[@]}" -eq 0
 cd -- "$NAS_PROJECT_DIRECTORY"
 expected_commit=REPLACE_WITH_PINNED_40_CHARACTER_COMMIT
 [[ "$expected_commit" =~ ^[0-9a-f]{40}$ ]]
 mapfile -t selected_images < <(
-  sudo docker compose -f docker-compose.yml config --images
+  sudo docker compose -f docker-compose.yaml config --images
 )
 selected_first_party=0
 for image in "${selected_images[@]}"; do
@@ -572,7 +610,7 @@ for image in "${selected_images[@]}"; do
   esac
 done
 test "$selected_first_party" -eq 2
-api_container=$(sudo docker compose -f docker-compose.yml ps -q control-api)
+api_container=$(sudo docker compose -f docker-compose.yaml ps -q control-api)
 test -n "$api_container"
 current_commit=$(sudo docker exec "$api_container" \
   git -C /repository rev-parse refs/heads/main)
@@ -597,13 +635,13 @@ printf 'repository volume selected for deletion: %s (%s)\n' \
 printf 'Type the exact volume name to confirm: '
 read -r confirmation
 test "$confirmation" = "$repository_volume"
-sudo docker compose -f docker-compose.yml down
+sudo docker compose -f docker-compose.yaml down
 sudo docker volume rm -- "$repository_volume"
-sudo docker compose -f docker-compose.yml up -d --wait
+sudo docker compose -f docker-compose.yaml up -d --wait
 ```
 
 This is destructive to local branches and unpushed changes in that one volume.
-The restart still uses the already-selected pinned `docker-compose.yml`; after
+The restart still uses the already-selected pinned `docker-compose.yaml`; after
 it becomes healthy, confirm the repository `main` ref equals
 `expected_commit`. Do not use `down --volumes`. A rollback that requires
 database state must use a tested, matching backup rather than ad hoc volume
@@ -664,7 +702,7 @@ as a substitute for restoring PostgreSQL or generated-secret state.
   record it with the replacement OAuth item, and pass it as
   `--tailscale-oauth-rotation-id <uuid>` on the first attempt and every retry.
   The generator keeps a mode-`0600`, fixed-length, hash-only receipt history
-  beside the 21-file generation; include that receipt and the rotation ID in
+  beside the 22-file generation; include that receipt and the rotation ID in
   the encrypted source backup. The history rejects a stale operation ID or any
   previously used credential pair, so an old retry cannot roll back a newer
   rotation. The locked transaction validates the existing
@@ -673,15 +711,16 @@ as a substitute for restoring PostgreSQL or generated-secret state.
   with its mode and ownership, and rolls back an interrupted install before a
   retry. A retry with the same UUID is idempotent even after final transaction
   cleanup; a different UUID cannot authorize an unchanged pair. Back up the
-  completed 21-file generation and its receipt, republish it with
-  `scripts/dev-runtime-project`, then choose **Pull** then **Redeploy** while
-  preserving every named volume. Rotate the
+  completed 22-file generation and its receipt, republish it with the supported
+  project publisher—normally `scripts/dev-runtime-project-remote` from
+  Windows/WSL—then choose **Pull** then **Redeploy** while preserving every
+  named volume. Rotate the
   administrator password and revoke browser sessions separately if application
   authority may also have been exposed.
 - To rotate the Git signing key, create a complete replacement local generation
   with the secret generator, retain the former public key wherever historical
   development signatures are verified, and publish the complete validated
-  generation with `scripts/dev-runtime-project`. Never edit the active NAS
+  generation with the same supported project publisher. Never edit the active NAS
   `secrets/` directory file by file. The offline `dev-init` refreshes the
   API-only projection during redeploy.
 - The PostgreSQL password and `database-url` are one credential pair. Never
@@ -701,7 +740,7 @@ as a substitute for restoring PostgreSQL or generated-secret state.
   a blind file-by-file replacement causes an outage. Follow the complete
   rotation window in [Development agent workloads](development-agent-workloads.md#rollback-and-secret-rotation).
 
-Back up all 17 host secret files and every named volume needed for continuity
+Back up all 18 host secret files and every named volume needed for continuity
 to encrypted, access-controlled storage. The repository volume can be cloned
 again from public GitHub, but local `deploy` history, `main`,
 `refs/vonk/deploy-base`, other local refs, and signed changes exist only in its
@@ -737,6 +776,13 @@ volume and matching password/URL pair from the same recovery point.
 - Loopback API unavailable during bounded acceptance or recovery: verify the
   NAS-local listener and the restricted SSH forwarding boundary above. This is
   not a substitute for repairing the normal Tailscale browser route.
+- First LiteLLM start can spend up to two minutes applying its dedicated
+  database migrations. Leave the container running during that startup grace;
+  an interrupted Prisma migration can be recorded as failed. If `P3009` follows
+  an interruption of a brand-new database that has never stored a virtual key,
+  recreate only the dedicated `litellm` database and redeploy. Once any virtual
+  key exists, treat that database as stateful: restore or repair it instead of
+  deleting it.
 - Migration failure: preserve the PostgreSQL volume and diagnose the migration.
   Deleting data is not a migration repair.
 

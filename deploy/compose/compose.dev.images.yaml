@@ -123,6 +123,7 @@ services:
       VONK_DEV_API_SECRET_ROOT: /api-secrets
       VONK_DEV_CADDY_SECRET_ROOT: /caddy-secrets
       VONK_DEV_LITELLM_SECRET_ROOT: /litellm-secrets
+      VONK_DEV_LITELLM_DATABASE_SECRET_ROOT: /litellm-database-secrets
       VONK_DEV_MIGRATE_SECRET_ROOT: /migrate-secrets
       VONK_DEV_INIT_PHASE: runtime
       VONK_DEV_RUNTIME_CONFIG_ROOT: /runtime-config
@@ -138,6 +139,7 @@ services:
       - dev-api-secrets:/api-secrets
       - dev-caddy-secrets:/caddy-secrets
       - dev-litellm-secrets:/litellm-secrets
+      - dev-litellm-database-secrets:/litellm-database-secrets
       - dev-migrate-secrets:/migrate-secrets
       - dev-runtime-config:/runtime-config
       - dev-tailscale-secrets:/tailscale-secrets
@@ -170,6 +172,8 @@ services:
         target: /host-secrets/host-runtime-grant-private-key
       - source: litellm-master-key
         target: /host-secrets/litellm-master-key
+      - source: litellm-database-password
+        target: /host-secrets/litellm-database-password
       - source: litellm-upstream-key
         target: /host-secrets/litellm-upstream-key
       - source: management-cidrs
@@ -261,6 +265,22 @@ services:
       dev-init: {condition: service_completed_successfully}
     restart: "no"
 
+  dev-litellm-database-init:
+    image: *api-image
+    pull_policy: always
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    command: [python, -m, vonk_control.dev_litellm_database]
+    volumes:
+      - dev-litellm-database-secrets:/run/secrets:ro
+    networks: [data]
+    depends_on:
+      postgres: {condition: service_healthy}
+      dev-init: {condition: service_completed_successfully}
+    restart: "no"
+
   control-worker:
     image: *worker-image
     pull_policy: always
@@ -339,7 +359,7 @@ services:
       retries: 20
 
   litellm:
-    image: ghcr.io/berriai/litellm:v1.81.14-stable@sha256:a3ce130137752e6b085de521b773eacbb641c8b6322c6f538453e860e7b9cf43
+    image: ghcr.io/berriai/litellm:v1.96.2@sha256:154e23bb5f31b1f10e16392a8ef299bd2cde08de3a64a6849002cfcc25ce3c63
     pull_policy: always
     entrypoint: [/run/vonk-runtime/litellm-entrypoint.sh]
     user: "10002:10001"
@@ -348,18 +368,23 @@ services:
     security_opt: [no-new-privileges:true]
     environment:
       DISABLE_ADMIN_UI: "True"
-      HOME: /tmp
+      HOME: /run/vonk-litellm
+      LITELLM_MIGRATION_DIR: /run/vonk-litellm/migrations
       SERVER_ROOT_PATH: /litellm
       STORE_MODEL_IN_DB: "False"
+      XDG_CACHE_HOME: /run/vonk-litellm/cache
     volumes:
       - dev-runtime-config:/run/vonk-runtime:ro
       - dev-litellm-secrets:/run/secrets:ro
       - dev-route-publications:/routes:ro
       - dev-supervisor-state:/supervisor
-    tmpfs: [/tmp]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,mode=1777
+      - /run/vonk-litellm:rw,exec,nosuid,nodev,mode=0700,uid=10002,gid=10001
     ports: ["127.0.0.1:${VONK_DEV_INFERENCE_PORT:-4000}:4000"]
-    networks: [application, ingress]
+    networks: [application, data, ingress]
     depends_on:
+      dev-litellm-database-init: {condition: service_completed_successfully}
       dev-init: {condition: service_completed_successfully}
       dev-supervisor-init: {condition: service_completed_successfully}
     healthcheck:
@@ -367,6 +392,7 @@ services:
       interval: 15s
       timeout: 5s
       retries: 10
+      start_period: 120s
 
   caddy:
     image: caddy:2.11.4@sha256:844f60b64e4724a5aa8245e019dace0d3f199f7433ce6c57676cb30a920dbad9
@@ -503,6 +529,8 @@ secrets:
     file: ./secrets/controller-server-key
   litellm-master-key:
     file: ./secrets/litellm-master-key
+  litellm-database-password:
+    file: ./secrets/litellm-database-password
   litellm-upstream-key:
     file: ./secrets/litellm-upstream-key
   management-cidrs:
@@ -526,6 +554,7 @@ volumes:
   dev-api-secrets: {}
   dev-caddy-secrets: {}
   dev-litellm-secrets: {}
+  dev-litellm-database-secrets: {}
   dev-migrate-secrets: {}
   dev-runtime-config: {}
   dev-tailscale-secrets: {}

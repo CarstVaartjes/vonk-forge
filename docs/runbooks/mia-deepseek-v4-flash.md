@@ -66,7 +66,9 @@ management address. Spark peer TCP/UDP is accepted only on the selected fabric
 interface, from the declared peer, to the selected local fabric address. It
 also permits a process to reach its own selected fabric address over loopback;
 PyTorch rendezvous requires rank 0 to join its own store through that address.
-Do not add a wildcard `INPUT` rule.
+The exact peer-fabric acceptance must precede host-endpoint port drops so the
+headless worker can reach rank 0's readiness endpoint. Do not add a wildcard
+`INPUT` rule.
 
 ## Qualify the exact inputs
 
@@ -138,14 +140,24 @@ unique RoCEv2 GID, so it does not depend on `iproute2` inside the runtime image.
 If that lookup fails, verify the selected direct-fabric address and the node's
 RoCEv2 GID configuration; do not add packages to a running container.
 
+The acceptance run publishes the stable client-facing model name
+`mia-deepseek-v4-flash`. The runtime itself serves the recipe's primary
+`runtime.endpoint.model_aliases` value, `deepseek-v4-flash-dspark`. The control
+worker binds those two names in the acknowledged LiteLLM generation; clients
+must use the public name and never depend on the runtime-local name. A missing
+or invalid primary runtime alias blocks route publication.
+
 Rank 1 remains a native vLLM headless worker, so it does not provide its own
 OpenAI API. A minimal runtime-local readiness proxy exposes only
 `/v1/models` on rank 1 and forwards that probe over the selected fabric to rank
 0. The proxy runs only while the headless vLLM process is alive. Rank 0 cannot
-serve that endpoint until both tensor-parallel ranks have joined, so each
-agent's normal local readiness check proves the worker process is alive and the
-complete two-rank engine is serving. Client traffic and the published route
-still terminate only at rank 0.
+serve that endpoint during the initial start until both tensor-parallel ranks
+have joined, so the normal local checks gate initial publication. After an
+established NCCL process group loses a rank, however, the surviving rank-0 HTTP
+process can continue answering `/v1/models` even though inference is no longer
+usable. The acceptance driver's real chat request is therefore the
+authoritative recovery check. Client traffic and the published route still
+terminate only at rank 0.
 
 After a long image import, authenticated inventory can briefly be older than
 the installation admission limit. The driver retries only previews whose sole
@@ -153,11 +165,23 @@ blocker is `install.stale_inventory`, for at most two minutes and within the
 overall timeout. Every other blocker remains an immediate failure, and no
 installation is submitted until a fresh preview is allowed.
 
+Keep the two large data classes separate when judging that wait. The accepted
+wrapper is an 18,908,041,728-byte runtime image; the 155.43 GiB model checkpoint
+is an independently verified read-only cache object and is not baked into that
+image. Reusing a cache does not redownload either object, but a new installation
+still needs a new signed import receipt. Each target therefore performs full
+digest verification before Docker import rather than trusting a mutable local
+tag. In the 2026-08-15 two-Spark acceptance, the parallel image-import job took
+about 19 minutes and native checkpoint loading took 146 seconds before kernel
+and CUDA-graph warmup. Those values explain the observed phases; they are not a
+release SLA. Do not disable hashing or delete caches to make this gate appear
+faster.
+
 ## Connect Pi
 
-Create a dedicated LiteLLM virtual key restricted to the stable `deepseek`
-alias. Never copy `litellm-master-key` to a workstation. From the trusted local
-inference tunnel, with shell tracing disabled:
+Create a dedicated LiteLLM virtual key restricted to the stable
+`mia-deepseek-v4-flash` alias. Never copy `litellm-master-key` to a workstation.
+From the trusted local inference tunnel, with shell tracing disabled:
 
 ```bash
 set +x
@@ -166,10 +190,16 @@ master_key="$(< '<LOCAL_SECRETS_DIR>/litellm-master-key')"
 curl -fsS 'http://127.0.0.1:<LOCAL_INFERENCE_PORT>/key/generate' \
   -H "Authorization: Bearer $master_key" \
   -H 'Content-Type: application/json' \
-  --data '{"models":["deepseek"],"key_alias":"pi-dev"}' \
+  --data '{"models":["mia-deepseek-v4-flash"],"allowed_routes":["openai_routes"],"key_alias":"pi-dev"}' \
   | jq -er '.key' > '<LOCAL_SECRETS_DIR>/pi-litellm-key'
 unset master_key
 ```
+
+The generated key is stored in LiteLLM's dedicated PostgreSQL database, so a
+normal NAS pull/redeploy preserves it. The `models` scope limits inference to
+the stable MIA alias and `allowed_routes` excludes LiteLLM management APIs.
+The Tailscale Caddy route exposes only OpenAI-compatible traffic; key creation,
+listing, and revocation remain on the trusted NAS loopback endpoint.
 
 Store that generated value in the operator's password manager as
 `Vonk Forge Pi/LiteLLM API Key`. On the Tailscale-connected workstation, save
@@ -192,7 +222,7 @@ this provider in `~/.pi/agent/models.json`:
       },
       "models": [
         {
-          "id": "deepseek",
+          "id": "mia-deepseek-v4-flash",
           "name": "Vonk Forge DeepSeek V4 Flash",
           "reasoning": true,
           "input": ["text"],
@@ -216,19 +246,29 @@ provider and model:
 
 ```powershell
 $env:VONK_PI_API_KEY = op read 'op://Private/Vonk Forge Pi/LiteLLM API Key/password'
-pi --provider vonk-forge --model deepseek
+pi --provider vonk-forge --model mia-deepseek-v4-flash
 ```
 
-The workstation must be connected to the same tailnet. Revoke this virtual key
-in LiteLLM if the workstation or password-manager item is compromised.
+The workstation must be connected to the same tailnet. If the workstation or
+password-manager item is compromised, use the same trusted loopback tunnel and
+the local master-key file to call LiteLLM `POST /key/delete` for that exact
+virtual key, then delete the password-manager item. Never rotate or distribute
+the master key merely to revoke one client.
 
 ## Failure, recovery, and cleanup
 
 Use the run ID in the private evidence file. Follow the generic
 [rank failure and recovery procedure](development-agent-workloads.md#real-multi-node-failure-and-recovery):
 inspect all Vonk management labels, stop only rank 1's exact managed container,
-resume to `--stop-after route-withdrawn-after-failure`, start that same
-container, and resume to `--stop-after inference-recovered`.
+and resume to `--stop-after route-withdrawn-after-failure`.
+
+MIA's native tensor-parallel vLLM engine does not support hot rank rejoin. Once
+the withdrawal is proven, stop rank 0's exact managed container as well, then
+start the same rank-0 container followed by the same rank-1 container. This is
+a coordinated restart of the existing gang, not a rebuild, reinstall, or cache
+mutation. Do not accept a republished `/v1/models` route as recovery by itself;
+resume to `--stop-after inference-recovered` and require the real chat request
+to pass.
 
 Then perform the documented supervisor and NAS restart checkpoint and run the
 same command without `--stop-after`. It must prove fresh agents, healthy ranks,

@@ -51,6 +51,7 @@ SYNTHETIC_SECRETS = {
     "database-url": "postgresql+psycopg://control:synthetic@postgres:5432/control\n",
     "git-signing-key": "synthetic-git-signing-key\n",
     "host-runtime-grant-private-key": "synthetic-host-runtime-grant-private-key\n",
+    "litellm-database-password": "a" * 64 + "\n",
     "litellm-master-key": "synthetic-litellm-master-key\n",
     "litellm-upstream-key": "synthetic-litellm-upstream-key\n",
     "management-cidrs": "127.0.0.1/32\n",

@@ -47,8 +47,9 @@ loss, administrator password loss, and break-glass loopback.
   files, and run the development generator's atomic
   `--rotate-tailscale-oauth` operation with one recorded non-secret UUIDv4
   `--tailscale-oauth-rotation-id` against the complete validated local
-  generation. Republish with `scripts/dev-runtime-project`, choose **Pull**
-  then **Redeploy**, and preserve every named volume. The transaction changes
+  generation. Republish with the supported project publisher—normally
+  `scripts/dev-runtime-project-remote` from Windows/WSL—choose **Pull** then
+  **Redeploy**, and preserve every named volume. The transaction changes
   only the two OAuth files and rolls back an interrupted install. Reuse the
   exact UUID for every retry and include the fixed-length hash-only sidecar
   receipt history in the encrypted source backup. Stale UUIDs and previously

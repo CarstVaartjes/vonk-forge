@@ -25,6 +25,8 @@ _WRITE_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEX
 _MAX_FILE_BYTES = 2 * 1024 * 1024
 _PUBLICATION_JOURNAL = ".vonk-forge-publish"
 _PUBLICATION_TOMBSTONE = ".vonk-forge-publish.cleanup"
+_COMPOSE_FILE = "docker-compose.yaml"
+_LEGACY_COMPOSE_FILE = "docker-compose.yml"
 _LOCAL_STAGING_FILESYSTEMS = frozenset(
     {
         "btrfs",
@@ -52,6 +54,7 @@ _PUBLISHED_SECRET_NAMES = frozenset(
         "database-url",
         "git-signing-key",
         "host-runtime-grant-private-key",
+        "litellm-database-password",
         "litellm-master-key",
         "litellm-upstream-key",
         "management-cidrs",
@@ -359,7 +362,8 @@ def _validate_destination(destination: Path) -> tuple[Path, bool]:
     if not stat.S_ISDIR(destination_metadata.st_mode):
         raise ProjectPublicationError("project destination is unsafe")
     allowed = {
-        "docker-compose.yml",
+        _COMPOSE_FILE,
+        _LEGACY_COMPOSE_FILE,
         "secrets",
         _PUBLICATION_JOURNAL,
         _PUBLICATION_TOMBSTONE,
@@ -367,11 +371,12 @@ def _validate_destination(destination: Path) -> tuple[Path, bool]:
     entries = {entry.name for entry in destination.iterdir()}
     if not entries <= allowed:
         raise ProjectPublicationError("project destination contains unexpected entries")
-    compose = destination / "docker-compose.yml"
-    if compose.exists() or compose.is_symlink():
-        metadata = compose.lstat()
-        if not stat.S_ISREG(metadata.st_mode):
-            raise ProjectPublicationError("existing project Compose file is unsafe")
+    for compose_name in (_COMPOSE_FILE, _LEGACY_COMPOSE_FILE):
+        compose = destination / compose_name
+        if compose.exists() or compose.is_symlink():
+            metadata = compose.lstat()
+            if not stat.S_ISREG(metadata.st_mode):
+                raise ProjectPublicationError("existing project Compose file is unsafe")
     secret_destination = destination / "secrets"
     if secret_destination.exists() or secret_destination.is_symlink():
         metadata = secret_destination.lstat()
@@ -443,7 +448,13 @@ def _release_publication_lock(descriptor: int) -> None:
 
 
 def _generation_paths() -> tuple[str, ...]:
-    return ("docker-compose.yml",) + tuple(
+    return (_COMPOSE_FILE,) + tuple(
+        f"secrets/{name}" for name in sorted(_PUBLISHED_SECRET_NAMES)
+    )
+
+
+def _all_generation_paths() -> tuple[str, ...]:
+    return (_COMPOSE_FILE, _LEGACY_COMPOSE_FILE) + tuple(
         f"secrets/{name}" for name in sorted(_PUBLISHED_SECRET_NAMES)
     )
 
@@ -454,7 +465,7 @@ def _digest(content: bytes) -> str:
 
 def _read_generation(destination: Path) -> dict[str, bytes]:
     generation: dict[str, bytes] = {}
-    for relative in _generation_paths():
+    for relative in _all_generation_paths():
         path = destination / relative
         if path.exists() or path.is_symlink():
             generation[relative] = _read_regular(path, private=True)
@@ -498,12 +509,13 @@ def _load_recovery_generation(journal: Path) -> dict[str, bytes] | None:
         or not isinstance(manifest.get("new"), dict)
     ):
         raise ProjectPublicationError("publication journal is invalid")
-    allowed = set(_generation_paths())
+    allowed_old = set(_all_generation_paths())
+    required_new = set(_generation_paths())
     old_hashes = manifest["old"]
     new_hashes = manifest["new"]
     if (
-        not set(old_hashes) <= allowed
-        or set(new_hashes) != allowed
+        not set(old_hashes) <= allowed_old
+        or set(new_hashes) != required_new
         or any(
             not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None
             for value in (*old_hashes.values(), *new_hashes.values())
@@ -570,7 +582,7 @@ def _restore_generation(
 ) -> None:
     secret_destination = destination / "secrets"
     secret_destination.mkdir(mode=0o700, exist_ok=True)
-    for relative in _generation_paths():
+    for relative in _all_generation_paths():
         path = destination / relative
         if relative in generation:
             _replace_visible(path, generation[relative], scratch)
@@ -842,7 +854,7 @@ def _remove_local_staging(
         os.close(secrets_directory)
         os.rmdir("secrets", dir_fd=directory)
     try:
-        os.unlink("docker-compose.yml", dir_fd=directory)
+        os.unlink(_COMPOSE_FILE, dir_fd=directory)
     except FileNotFoundError:
         pass
     os.close(directory)
@@ -928,7 +940,7 @@ def publish_project(
         )
         staging_secrets = _open_private_staging_child(staging_directory, "secrets")
         staged_compose = _write_verified_at(
-            staging_directory, "docker-compose.yml", compose
+            staging_directory, _COMPOSE_FILE, compose
         )
         staged_secrets: dict[str, bytes] = {}
         for name in sorted(_PUBLISHED_SECRET_NAMES):
@@ -948,7 +960,7 @@ def publish_project(
         _remove_publication_tombstone(destination)
         _recover_publication(destination)
         old_generation = _read_generation(destination)
-        new_generation = {"docker-compose.yml": staged_compose}
+        new_generation = {_COMPOSE_FILE: staged_compose}
         new_generation.update(
             {
                 f"secrets/{name}": staged_secrets[name]
@@ -965,8 +977,9 @@ def publish_project(
                     new_generation[relative],
                     journal / "scratch",
                 )
+            (destination / _LEGACY_COMPOSE_FILE).unlink(missing_ok=True)
             if {entry.name for entry in destination.iterdir()} != {
-                "docker-compose.yml",
+                _COMPOSE_FILE,
                 "secrets",
                 _PUBLICATION_JOURNAL,
             }:

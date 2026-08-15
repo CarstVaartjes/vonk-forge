@@ -22,6 +22,12 @@ def _module():
     return module
 
 
+def test_supervisor_allows_first_run_database_migrations() -> None:
+    module = _module()
+
+    assert module.STARTUP_SECONDS == 120
+
+
 def _bundle(module, tmp_path: Path, *, now: datetime, expires_at: datetime):
     root = tmp_path / "routes"
     config = b'{"model_list":[{"model_name":"chat"}]}\n'
