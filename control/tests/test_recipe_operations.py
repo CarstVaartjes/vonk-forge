@@ -348,11 +348,10 @@ def started_recipe(
     request_id: str,
     alias: str = "qwen",
 ):
-    plan = service.preview_run(installation_id)
+    plan = service.preview_run(installation_id, alias)
     operation = service.start(
         plan,
         plan_digest=plan.plan_digest,
-        alias=alias,
         actor="admin",
         request_id=request_id,
     )
@@ -608,14 +607,13 @@ def test_run_admission_and_start_queue_roll_back_together(tmp_path: Path) -> Non
     service.record_node_result(
         install.id, nodes[0], succeeded=True, evidence={"installed_bytes": 120}
     )
-    run_plan = service.preview_run(install.owner_id)
+    run_plan = service.preview_run(install.owner_id, "qwen")
     service._agent_jobs = FailingQueue()
 
     with pytest.raises(RuntimeError, match="queue write failed"):
         service.start(
             run_plan,
             plan_digest=run_plan.plan_digest,
-            alias="qwen",
             actor="admin",
             request_id="c" * 36,
         )
@@ -635,6 +633,68 @@ def test_run_admission_and_start_queue_roll_back_together(tmp_path: Path) -> Non
         assert session.scalar(select(Job).where(Job.request_id == "c" * 36)) is None
 
 
+def test_start_rejects_alias_mismatched_digest_before_side_effects_and_replays_exactly(
+    tmp_path: Path,
+) -> None:
+    sessions, service, queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="0" * 35 + "1"
+    )
+    qwen = service.preview_run(installation.owner_id, "qwen")
+    alternate = service.preview_run(installation.owner_id, "qwen-alt")
+
+    assert qwen.plan_digest != alternate.plan_digest
+    with pytest.raises(RecipeOperationConflict, match="does not match preview"):
+        service.start(
+            alternate,
+            plan_digest=qwen.plan_digest,
+            actor="admin",
+            request_id="0" * 35 + "2",
+        )
+
+    with sessions() as session:
+        assert tuple(session.scalars(select(RecipeRun))) == ()
+        assert tuple(
+            session.scalars(
+                select(ResourceReservation).where(
+                    ResourceReservation.owner_kind == "run"
+                )
+            )
+        ) == ()
+        assert tuple(session.scalars(select(Job).where(Job.kind == "recipe.start"))) == ()
+        assert tuple(
+            session.scalars(
+                select(AgentOperation).where(AgentOperation.kind == "recipe.start")
+            )
+        ) == ()
+    assert queue.available == 1
+
+    started = service.start(
+        qwen,
+        plan_digest=qwen.plan_digest,
+        actor="admin",
+        request_id="0" * 35 + "3",
+    )
+    replayed = service.start(
+        qwen,
+        plan_digest=qwen.plan_digest,
+        actor="admin",
+        request_id="0" * 35 + "3",
+    )
+
+    assert replayed == started
+    assert queue.available == 2
+    with sessions() as session:
+        run = session.get(RecipeRun, started.owner_id)
+        job = session.get(Job, started.id)
+        child = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == started.id)
+        )
+        assert run is not None and job is not None and child is not None
+        assert run.alias == qwen.alias == run.plan["alias"] == child.payload["alias"]
+        assert job.payload["plan_digest"] == qwen.plan_digest == started.plan_digest
+
+
 def test_stop_state_and_queue_creation_roll_back_together(tmp_path: Path) -> None:
     withdrawn: list[str] = []
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
@@ -650,11 +710,10 @@ def test_stop_state_and_queue_creation_roll_back_together(tmp_path: Path) -> Non
     service.record_node_result(
         install.id, nodes[0], succeeded=True, evidence={"installed_bytes": 120}
     )
-    run_plan = service.preview_run(install.owner_id)
+    run_plan = service.preview_run(install.owner_id, "qwen")
     start = service.start(
         run_plan,
         plan_digest=run_plan.plan_digest,
-        alias="qwen",
         actor="admin",
         request_id="1" * 35 + "b",
     )
@@ -1367,11 +1426,10 @@ def test_start_stop_and_uninstall_preserve_capacity_safely(tmp_path: Path) -> No
         install.id, nodes[0], succeeded=True, evidence={"installed_bytes": 120}
     )
 
-    run_plan = service.preview_run(install.owner_id)
+    run_plan = service.preview_run(install.owner_id, "qwen")
     start = service.start(
         run_plan,
         plan_digest=run_plan.plan_digest,
-        alias="qwen",
         actor="admin",
         request_id="5" * 36,
     )
@@ -1691,7 +1749,9 @@ def test_start_fences_only_active_uninstall_operations_after_installation_lock(
     installation = installed_recipe(
         service, mapping_id, build_id, nodes, request_id="9" * 35 + "e"
     )
-    run_plan = service.preview_run(installation.owner_id)
+    run_plan = service.preview_run(
+        installation.owner_id, "fenced" if blocked else "allowed"
+    )
     uninstall_plan = service.preview_uninstall(installation.owner_id)
     uninstall = service.uninstall(
         installation.owner_id,
@@ -1709,7 +1769,6 @@ def test_start_fences_only_active_uninstall_operations_after_installation_lock(
             service.start(
                 run_plan,
                 plan_digest=run_plan.plan_digest,
-                alias="fenced",
                 actor="admin",
                 request_id="9" * 35 + "0",
             )
@@ -1717,7 +1776,6 @@ def test_start_fences_only_active_uninstall_operations_after_installation_lock(
         started = service.start(
             run_plan,
             plan_digest=run_plan.plan_digest,
-            alias="allowed",
             actor="admin",
             request_id="9" * 35 + "0",
         )
@@ -1786,11 +1844,10 @@ def test_run_status_projects_exact_rank_health_without_agent_secrets(
         service.record_node_result(
             install.id, node_id, succeeded=True, evidence={"installed_bytes": 120}
         )
-    run_plan = service.preview_run(install.owner_id)
+    run_plan = service.preview_run(install.owner_id, "qwen")
     start = service.start(
         run_plan,
         plan_digest=run_plan.plan_digest,
-        alias="qwen",
         actor="admin",
         request_id="a" * 36,
     )
@@ -1840,11 +1897,10 @@ def test_authenticated_run_observations_project_failure_recovery_and_missing_ran
         service.record_node_result(
             install.id, node_id, succeeded=True, evidence={"installed_bytes": 120}
         )
-    run_plan = service.preview_run(install.owner_id)
+    run_plan = service.preview_run(install.owner_id, "observed-gang")
     start = service.start(
         run_plan,
         plan_digest=run_plan.plan_digest,
-        alias="observed-gang",
         actor="admin",
         request_id="c" * 36,
     )
@@ -1918,12 +1974,11 @@ def test_multinode_start_is_bound_to_authenticated_fabric_rendezvous(
         service.record_node_result(
             install.id, node, succeeded=True, evidence={"installed_bytes": 120}
         )
-    run_plan = service.preview_run(install.owner_id)
+    run_plan = service.preview_run(install.owner_id, "qwen-gang")
     assert run_plan.allowed is True
     start = service.start(
         run_plan,
         plan_digest=run_plan.plan_digest,
-        alias="qwen-gang",
         actor="admin",
         request_id="e" * 36,
     )
@@ -1969,11 +2024,10 @@ def test_multinode_worker_endpoint_is_never_published_on_management_lan(
             install.id, node, succeeded=True, evidence={"installed_bytes": 120}
         )
 
-    run_plan = service.preview_run(install.owner_id)
+    run_plan = service.preview_run(install.owner_id, "qwen-gang")
     start = service.start(
         run_plan,
         plan_digest=run_plan.plan_digest,
-        alias="qwen-gang",
         actor="admin",
         request_id="a" * 35 + "2",
     )
@@ -2007,11 +2061,10 @@ def test_failed_multinode_start_queues_idempotent_stop_for_every_rank(
         service.record_node_result(
             install.id, node, succeeded=True, evidence={"installed_bytes": 120}
         )
-    run_plan = service.preview_run(install.owner_id)
+    run_plan = service.preview_run(install.owner_id, "qwen-gang")
     start = service.start(
         run_plan,
         plan_digest=run_plan.plan_digest,
-        alias="qwen-gang",
         actor="admin",
         request_id="f" * 35 + "1",
     )
@@ -2067,11 +2120,10 @@ def test_concurrent_final_rank_results_serialize_gang_cleanup(
         service.record_node_result(
             install.id, node, succeeded=True, evidence={"installed_bytes": 120}
         )
-    run_plan = service.preview_run(install.owner_id)
+    run_plan = service.preview_run(install.owner_id, "qwen-gang")
     start = service.start(
         run_plan,
         plan_digest=run_plan.plan_digest,
-        alias="qwen-gang",
         actor="admin",
         request_id="e" * 36,
     )
@@ -2321,7 +2373,7 @@ def test_postgres_start_waiting_on_accepted_uninstall_is_rejected(
     installation = installed_recipe(
         service, mapping_id, build_id, nodes, request_id="f" * 35 + "4"
     )
-    run_plan = service.preview_run(installation.owner_id)
+    run_plan = service.preview_run(installation.owner_id, "must-not-start")
     uninstall_plan = service.preview_uninstall(installation.owner_id)
     available_before = queue.available
     role = threading.local()
@@ -2364,7 +2416,6 @@ def test_postgres_start_waiting_on_accepted_uninstall_is_rejected(
             return service.start(
                 run_plan,
                 plan_digest=run_plan.plan_digest,
-                alias="must-not-start",
                 actor="admin",
                 request_id="f" * 35 + "6",
             )

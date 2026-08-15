@@ -75,6 +75,7 @@ class Recipes:
         )
         self.run_plan = RunPlan(
             installation_id=INSTALLATION,
+            alias="qwen",
             mapping_id=MAPPING,
             mapping_generation=1,
             recipe_revision_id=REVISION,
@@ -222,8 +223,8 @@ class Recipes:
             None,
         )
 
-    def preview_run(self, installation):
-        self.calls.append(("preview_run", installation))
+    def preview_run(self, installation, alias):
+        self.calls.append(("preview_run", (installation, alias)))
         return self.run_plan
 
     def start(self, plan, **kwargs):
@@ -335,12 +336,14 @@ def test_preview_install_and_run_expose_exact_capacity_math() -> None:
     run = client.post(
         "/api/v1/recipes/run-plans/preview",
         headers=headers(),
-        json={"installation_id": INSTALLATION},
+        json={"installation_id": INSTALLATION, "alias": "qwen"},
     )
 
     assert install.status_code == run.status_code == 200
     assert install.json()["nodes"][0]["free_after_bytes"] == 880
     assert run.json()["nodes"][0]["required_memory_bytes"] == 200
+    assert run.json()["alias"] == "qwen"
+    assert _recipes.calls[-1] == ("preview_run", (INSTALLATION, "qwen"))
     assert len(install.json()["plan_digest"]) == 64
 
 

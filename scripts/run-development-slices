@@ -1131,7 +1131,10 @@ class Runner:
         )
 
     def running(self) -> None:
-        request = {"installation_id": self.outputs["installation_id"]}
+        request = {
+            "installation_id": self.outputs["installation_id"],
+            "alias": self.slug,
+        }
 
         response = self._create_run(request, purpose="start")
         failed_start: dict[str, str] = {}
@@ -1239,7 +1242,6 @@ class Runner:
             "/api/v1/recipes/runs",
             {
                 **request,
-                "alias": self.slug,
                 "plan_digest": plan_digest,
                 "request_key": request_key,
             },
@@ -1267,7 +1269,6 @@ class Runner:
                 "/api/v1/recipes/runs",
                 {
                     **request,
-                    "alias": self.slug,
                     "plan_digest": plan_digest,
                     "request_key": request_key,
                 },

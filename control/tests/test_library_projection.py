@@ -1945,7 +1945,7 @@ def test_installation_coverage_matches_run_admission_without_byte_thresholds(
         sessions,
         inventory_max_age=300,
         memory_floor_bytes=50,
-    ).plan_run(identifiers["installation_id"], now=NOW)
+    ).plan_run(identifiers["installation_id"], "model", now=NOW)
     projection = _projection(sessions)
     summary = projection.list().models[0].recipes[0].installations[0]
     recommendation = projection.detail(_uuid(82)).placement[0].recommendations[0]
@@ -1989,7 +1989,7 @@ def test_low_install_byte_evidence_matches_run_admission_and_stages_run() -> Non
         sessions,
         inventory_max_age=300,
         memory_floor_bytes=50,
-    ).plan_run(identifiers["installation_id"], now=NOW)
+    ).plan_run(identifiers["installation_id"], "model", now=NOW)
     projection = _projection(sessions)
     summary = projection.list().models[0].recipes[0].installations[0]
     recommendation = projection.detail(_uuid(83)).placement[0].recommendations[0]
@@ -2170,7 +2170,7 @@ def test_installation_coverage_matches_run_admission_mapping_authority(
             sessions,
             inventory_max_age=300,
             memory_floor_bytes=50,
-        ).plan_run(identifiers["installation_id"], now=NOW)
+        ).plan_run(identifiers["installation_id"], "model", now=NOW)
 
     projection = _projection(sessions)
     summary = projection.list().models[0].recipes[0].installations[0]

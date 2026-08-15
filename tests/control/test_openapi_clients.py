@@ -276,6 +276,28 @@ def test_generated_python_models_compile() -> None:
     assert set(PYTHON_CLIENT.rglob("*.pyc")) == bytecode_before
 
 
+def test_generated_run_preview_contracts_require_digest_bound_alias() -> None:
+    schema = json.loads(OPENAPI.read_text())["components"]["schemas"]
+    assert "alias" in schema["RunPreviewRequest"]["required"]
+    assert "alias" in schema["RunPlanResponse"]["required"]
+
+    from cluster_profiles.generated_control.models.run_preview_request import (
+        RunPreviewRequest,
+    )
+
+    request = RunPreviewRequest(
+        installation_id="00000000-0000-4000-8000-000000000001",
+        alias="qwen",
+    )
+    assert request.to_dict()["alias"] == "qwen"
+
+    typescript = TYPESCRIPT_CLIENT.read_text()
+    request_contract = typescript.split("RunPreviewRequest: {", 1)[1].split("};", 1)[0]
+    response_contract = typescript.split("RunPlanResponse: {", 1)[1].split("};", 1)[0]
+    assert "alias: string;" in request_contract
+    assert "alias: string;" in response_contract
+
+
 def test_generated_python_client_imports_in_the_root_locked_environment() -> None:
     result = subprocess.run(
         [

@@ -16,6 +16,7 @@ const GIB = 1024 ** 3;
 
 function loadPlan(warnings: {code: string; detail: string}[] = []): LibraryLoadPlan {
   return {
+    alias: "qwen-chat",
     allowed: true,
     installation_id: "installation-chat",
     mapping_generation: 4,
@@ -95,7 +96,7 @@ test("previews Load authority, applies its digest, and keeps partial grouped pro
   await user.click(review);
 
   const dialog = await screen.findByRole("dialog", {name: "Review Load"});
-  expect(previewLibraryLoad).toHaveBeenCalledWith({installation_id: "installation-chat"});
+  expect(previewLibraryLoad).toHaveBeenCalledWith({installation_id: "installation-chat", alias: "qwen-chat"});
   expect(within(dialog).getByText("Existing recipes remain loaded. Forge will not unload anything automatically.")).toBeVisible();
   expect(within(dialog).getByText("Authoritative capacity evidence permits Qwen Code to coexist.")).toBeVisible();
   expect(within(dialog).getByText("Rank 0 · leader · endpoint owner")).toBeVisible();

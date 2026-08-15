@@ -466,7 +466,18 @@ class SliceHandler(BaseHTTPRequestHandler):
             )
         elif path.endswith("run-plans/preview"):
             plan_digest = self.server.run_plan_digest
-            self._json(200, {"allowed": True, "plan_digest": plan_digest, "nodes": []})
+            if payload.get("alias") != self.server.slug:
+                self._json(422, {"detail": "run preview alias is required"})
+                return
+            self._json(
+                200,
+                {
+                    "alias": payload["alias"],
+                    "allowed": True,
+                    "plan_digest": plan_digest,
+                    "nodes": [],
+                },
+            )
         elif path == "/api/v1/recipes/stop-plans/preview":
             blocker = (
                 self.server.stop_preview_blockers.pop(0)

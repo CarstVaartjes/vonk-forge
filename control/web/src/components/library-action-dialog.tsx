@@ -24,10 +24,10 @@ function message(value: unknown): string {
   return (value instanceof Error ? value.message : "The control authority request failed.").slice(0, 256);
 }
 
-function preview(api: LibraryApi, target: LibraryActionTarget): Promise<LibraryActionPlan> {
+function preview(api: LibraryApi, target: LibraryActionTarget, alias: string): Promise<LibraryActionPlan> {
   if (target.kind === "mapping") return api.previewLibraryMapping(target.input);
   if (target.kind === "install") return api.previewLibraryInstall(target.input);
-  if (target.kind === "run") return api.previewLibraryLoad(target.input);
+  if (target.kind === "run") return api.previewLibraryLoad({...target.input, alias});
   if (target.kind === "stop") return api.previewLibraryStop(target.runId);
   return api.previewLibraryUninstall(target.installationId);
 }
@@ -52,7 +52,7 @@ function Plan({plan, target}: {plan: LibraryActionPlan; target: LibraryActionTar
   return <UninstallPreview plan={plan as LibraryUninstallPlan}/>;
 }
 
-async function apply(api: LibraryApi, target: LibraryActionTarget, plan: LibraryActionPlan, alias: string): Promise<LibraryOperation | null> {
+async function apply(api: LibraryApi, target: LibraryActionTarget, plan: LibraryActionPlan): Promise<LibraryOperation | null> {
   if (target.kind === "mapping") {
     const mapping = plan as LibraryMappingPlan;
     await api.applyLibraryMapping({...target.input, placement_digest: mapping.placement_digest});
@@ -64,7 +64,7 @@ async function apply(api: LibraryApi, target: LibraryActionTarget, plan: Library
   }
   if (target.kind === "run") {
     const load = plan as LibraryLoadPlan;
-    return api.applyLibraryLoad({...target.input, alias, plan_digest: load.plan_digest});
+    return api.applyLibraryLoad({...target.input, alias: load.alias, plan_digest: load.plan_digest});
   }
   if (target.kind === "stop") return api.applyLibraryStop(target.runId, (plan as LibraryStopPlan).plan_digest);
   return api.applyLibraryUninstall(target.installationId, (plan as LibraryUninstallPlan).plan_digest);
@@ -97,12 +97,12 @@ export function LibraryActionDialog({alias, api, onApplied, onClose, onRefresh, 
     setApplyError("");
     setStale(false);
     setPlan(undefined);
-    void preview(api, target)
+    void preview(api, target, alias)
       .then(value => { if (active) setPlan(value); })
       .catch(value => { if (active) setPreviewError(message(value)); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [api, previewAttempt, target]);
+  }, [alias, api, previewAttempt, target]);
 
   useEffect(() => {
     close.current?.focus();
@@ -128,7 +128,7 @@ export function LibraryActionDialog({alias, api, onApplied, onClose, onRefresh, 
     setApplying(true);
     setApplyError("");
     try {
-      const operation = await apply(api, target, plan, alias);
+      const operation = await apply(api, target, plan);
       if (operation) onApplied(operation, name);
       setApplying(false);
       onClose();

@@ -3897,6 +3897,8 @@ export interface components {
         };
         /** RunPlanResponse */
         RunPlanResponse: {
+            /** Alias */
+            alias: string;
             /** Allowed */
             allowed: boolean;
             /** Installation Id */
@@ -3972,6 +3974,8 @@ export interface components {
         };
         /** RunPreviewRequest */
         RunPreviewRequest: {
+            /** Alias */
+            alias: string;
             /** Installation Id */
             installation_id: string;
         };

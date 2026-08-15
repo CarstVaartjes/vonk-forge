@@ -354,8 +354,8 @@ class RecipeOperationService:
             authority_digest=plan_digest,
         )
 
-    def preview_run(self, installation_id: str) -> RunPlan:
-        return self._run_admission.plan_run(installation_id, now=self._clock())
+    def preview_run(self, installation_id: str, alias: str) -> RunPlan:
+        return self._run_admission.plan_run(installation_id, alias, now=self._clock())
 
     def run_status(self, run_id: str) -> RecipeRunStatus:
         now = _aware(self._clock())
@@ -473,17 +473,16 @@ class RecipeOperationService:
         plan: RunPlan,
         *,
         plan_digest: str,
-        alias: str,
         actor: str,
         request_id: str,
     ) -> RecipeOperationView:
-        existing = self._idempotent(request_id, "recipe.start", plan_digest)
-        if existing is not None:
-            return existing
         if plan_digest != plan.plan_digest:
             raise RecipeOperationConflict(
                 "submitted plan digest does not match preview"
             )
+        existing = self._idempotent(request_id, "recipe.start", plan_digest)
+        if existing is not None:
+            return existing
         now = self._clock()
         with self._sessions.begin() as session:
             presences = {
@@ -529,7 +528,7 @@ class RecipeOperationService:
                 raise RecipeOperationConflict("recipe installation is not runnable")
             try:
                 run_id = self._run_admission.accept_run_in_session(
-                    session, plan, alias=alias, actor=actor, now=now
+                    session, plan, actor=actor, now=now
                 )
             except (RuntimeError, ValueError) as error:
                 raise RecipeOperationConflict(str(error)) from error
@@ -562,7 +561,7 @@ class RecipeOperationService:
                             "mapping_generation": plan.mapping_generation,
                             "image_digest": installation.image_digest,
                             "plan_digest": plan.plan_digest,
-                            "alias": alias,
+                            "alias": plan.alias,
                             "rank": node.rank,
                             "role": node.role,
                             "port": node.port,

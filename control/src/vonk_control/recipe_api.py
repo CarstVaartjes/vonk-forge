@@ -160,6 +160,7 @@ class RunNodePlanResponse(StrictModel):
 
 class RunPlanResponse(StrictModel):
     installation_id: str
+    alias: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]{0,62}$")
     mapping_id: str
     mapping_generation: int
     recipe_revision_id: str
@@ -312,10 +313,10 @@ class InstallRequest(InstallPreviewRequest):
 
 class RunPreviewRequest(StrictModel):
     installation_id: str = Field(pattern=_UUID)
+    alias: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]{0,62}$")
 
 
 class RunRequest(RunPreviewRequest):
-    alias: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]{0,62}$")
     plan_digest: str = Field(pattern=_DIGEST)
     request_key: str = Field(pattern=_UUID)
 
@@ -580,7 +581,7 @@ def install_recipe_operation_routes(
     )
     def preview_run(body: RunPreviewRequest, actor: Actor = authenticated):
         administrator(actor)
-        return asdict(recipes().preview_run(body.installation_id))
+        return asdict(recipes().preview_run(body.installation_id, body.alias))
 
     @app.post(
         "/api/v1/recipes/stop-plans/preview",
@@ -615,11 +616,10 @@ def install_recipe_operation_routes(
     def start(body: RunRequest, request: Request, actor: Actor = authenticated):
         administrator(actor)
         try:
-            plan = recipes().preview_run(body.installation_id)
+            plan = recipes().preview_run(body.installation_id, body.alias)
             value = recipes().start(
                 plan,
                 plan_digest=body.plan_digest,
-                alias=body.alias,
                 actor=actor.subject,
                 request_id=body.request_key,
             )

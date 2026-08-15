@@ -7565,6 +7565,11 @@
       "RunPlanResponse": {
         "additionalProperties": false,
         "properties": {
+          "alias": {
+            "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
+            "title": "Alias",
+            "type": "string"
+          },
           "allowed": {
             "title": "Allowed",
             "type": "boolean"
@@ -7599,6 +7604,7 @@
         },
         "required": [
           "installation_id",
+          "alias",
           "mapping_id",
           "mapping_generation",
           "recipe_revision_id",
@@ -7807,6 +7813,11 @@
       "RunPreviewRequest": {
         "additionalProperties": false,
         "properties": {
+          "alias": {
+            "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
+            "title": "Alias",
+            "type": "string"
+          },
           "installation_id": {
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
             "title": "Installation Id",
@@ -7814,7 +7825,8 @@
           }
         },
         "required": [
-          "installation_id"
+          "installation_id",
+          "alias"
         ],
         "title": "RunPreviewRequest",
         "type": "object"
