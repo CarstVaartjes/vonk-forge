@@ -440,11 +440,44 @@ def test_retention_window_reads_one_database_snapshot(sessions) -> None:
     assert len(statements) == 1
 
 
+def test_replay_batch_reads_events_and_retention_metadata_from_one_snapshot(
+    sessions,
+) -> None:
+    times = iter((NOW, NOW + timedelta(hours=1), NOW + timedelta(hours=2)))
+    repository = FleetEventRepository(sessions, clock=lambda: next(times))
+    with sessions.begin() as session:
+        repository.append_in_session(session, _draft(entity_id="job-1"))
+        repository.append_in_session(session, _draft(entity_id="job-2"))
+        repository.append_in_session(session, _draft(entity_id="job-3"))
+
+    statements: list[str] = []
+
+    def observe(_connection, _cursor, statement, _parameters, _context, _many) -> None:
+        if statement.lstrip().upper().startswith("SELECT"):
+            statements.append(statement)
+
+    engine = sessions.kw["bind"]
+    event.listen(engine, "before_cursor_execute", observe)
+    try:
+        batch = repository.replay_after(
+            0, NOW + timedelta(hours=24, minutes=30), limit=1
+        )
+    finally:
+        event.remove(engine, "before_cursor_execute", observe)
+
+    assert batch.high_watermark == 3
+    assert batch.first_retained_id == 2
+    assert [value.id for value in batch.events] == [2]
+    assert len(statements) == 1
+
+
 @pytest.mark.parametrize("limit", [0, 129])
 def test_repository_rejects_unbounded_read_limits(sessions, limit: int) -> None:
     repository = FleetEventRepository(sessions, clock=lambda: NOW)
     with pytest.raises(ValueError, match="limit"):
         repository.after(0, NOW, limit=limit)
+    with pytest.raises(ValueError, match="limit"):
+        repository.replay_after(0, NOW, limit=limit)
 
 
 def test_recorder_captures_every_authoritative_insert_with_public_payloads(

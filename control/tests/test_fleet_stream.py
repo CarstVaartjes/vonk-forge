@@ -9,19 +9,36 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event, update
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.browser_auth import BrowserAuthService
-from vonk_control.fleet_events import FleetEvent, FleetRetentionWindow
+from vonk_control.fleet_events import (
+    FleetEvent,
+    FleetEventDraft,
+    FleetEventRepository,
+    FleetReplayBatch,
+)
 from vonk_control.fleet_projection import FleetSnapshot
 from vonk_control.fleet_stream import FleetStream, parse_last_event_id
-from vonk_control.models import Base, User
+from vonk_control.models import (
+    AgentNode,
+    Base,
+    FleetEventCursor,
+    FleetStreamEvent,
+    NodeTelemetrySample,
+    User,
+)
 from vonk_control.passwords import hash_password
-from vonk_control.telemetry import TelemetryDetailsInput, TelemetrySampleView
+from vonk_control.telemetry import (
+    TelemetryDetailsInput,
+    TelemetryRepository,
+    TelemetrySampleView,
+)
 
 NOW = datetime(2026, 8, 15, 12, 0, tzinfo=UTC)
 COMMIT = "a" * 40
@@ -50,36 +67,39 @@ class Events:
         *,
         high_watermark: int,
         first_retained_id: int | None,
-        batches: list[tuple[FleetEvent, ...] | BaseException] | None = None,
+        batches: list[
+            tuple[FleetEvent, ...] | FleetReplayBatch | BaseException
+        ]
+        | None = None,
     ) -> None:
         self.high_watermark_value = high_watermark
         self.first_retained_id = first_retained_id
         self.batches = list(batches or [])
         self.high_watermark_calls = 0
-        self.retention_calls: list[datetime] = []
-        self.after_calls: list[tuple[int, datetime, int]] = []
+        self.replay_calls: list[tuple[int, datetime, int]] = []
 
     def high_watermark(self) -> int:
         self.high_watermark_calls += 1
         return self.high_watermark_value
 
-    def retention_window(self, now: datetime) -> FleetRetentionWindow:
-        self.retention_calls.append(now)
-        return FleetRetentionWindow(
+    def replay_after(
+        self, last_id: int, now: datetime, *, limit: int
+    ) -> FleetReplayBatch:
+        self.replay_calls.append((last_id, now, limit))
+        if not self.batches:
+            events = ()
+        else:
+            value = self.batches.pop(0)
+            if isinstance(value, BaseException):
+                raise value
+            if isinstance(value, FleetReplayBatch):
+                return value
+            events = value
+        return FleetReplayBatch(
             high_watermark=self.high_watermark_value,
             first_retained_id=self.first_retained_id,
+            events=events,
         )
-
-    def after(
-        self, last_id: int, now: datetime, *, limit: int
-    ) -> tuple[FleetEvent, ...]:
-        self.after_calls.append((last_id, now, limit))
-        if not self.batches:
-            return ()
-        value = self.batches.pop(0)
-        if isinstance(value, BaseException):
-            raise value
-        return value
 
 
 class Telemetry:
@@ -110,6 +130,42 @@ class Timing:
     async def sleep(self, seconds: float) -> None:
         self.sleeps.append(seconds)
         self.seconds += seconds
+
+
+class PoolProbe:
+    def __init__(self, engine) -> None:
+        self.active = 0
+        self.maximum = 0
+        event.listen(engine, "checkout", self.checkout)
+        event.listen(engine, "checkin", self.checkin)
+
+    def checkout(self, _connection, _record, _proxy) -> None:
+        self.active += 1
+        self.maximum = max(self.maximum, self.active)
+
+    def checkin(self, _connection, _record) -> None:
+        self.active -= 1
+
+
+def _production_stream_store():
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    return engine, sessions, FleetEventRepository(sessions, clock=lambda: NOW)
+
+
+def _operation_draft(identifier: int) -> FleetEventDraft:
+    return FleetEventDraft(
+        event_type="operation-state",
+        node_id=None,
+        entity_kind="job",
+        entity_id=f"job-{identifier}",
+        payload={"schema_version": 1, "state": "running"},
+    )
 
 
 def _event(
@@ -311,8 +367,7 @@ def test_resume_replays_ordered_events_with_one_hydration_and_refresh_semantics(
         "projection_refresh_required": True,
         "schema_version": 1,
     }
-    assert events.retention_calls == [NOW]
-    assert events.after_calls == [(5, NOW, 128)]
+    assert events.replay_calls == [(5, NOW, 128)]
     assert telemetry.calls == [(SAMPLE_ID,)]
     assert projection.cursors == []
 
@@ -371,7 +426,7 @@ def test_initial_snapshot_uses_watermark_then_replays_later_event() -> None:
     assert replay_data["projection_refresh_required"] is True
     assert events.high_watermark_calls == 1
     assert projection.cursors == [5]
-    assert events.after_calls == [(5, NOW, 128)]
+    assert events.replay_calls == [(5, NOW, 128)]
 
 
 @pytest.mark.parametrize(
@@ -421,7 +476,7 @@ def test_invalid_resume_window_resets_to_current_snapshot(
     assert data["reset_reason"] == reason
     assert data["snapshot"]["event_cursor"] == high_watermark
     assert projection.cursors == [high_watermark]
-    assert events.after_calls == []
+    assert events.replay_calls == [(cursor, NOW, 128)]
 
 
 def test_missing_telemetry_reference_forces_snapshot_reset() -> None:
@@ -473,6 +528,63 @@ def test_missing_telemetry_reference_forces_snapshot_reset() -> None:
     assert projection.cursors == [9]
 
 
+def test_midstream_retention_loss_resets_before_delivering_later_event() -> None:
+    later = _event(
+        6,
+        "operation-state",
+        payload={"schema_version": 1, "entity_id": "job-6", "state": "running"},
+        entity_kind="job",
+    )
+    events = Events(
+        high_watermark=6,
+        first_retained_id=5,
+        batches=[
+            FleetReplayBatch(
+                high_watermark=6,
+                first_retained_id=5,
+                events=(),
+            ),
+            FleetReplayBatch(
+                high_watermark=6,
+                first_retained_id=6,
+                events=(later,),
+            ),
+        ],
+    )
+    projection = Projection()
+    timing = Timing()
+    stream = FleetStream(
+        events,
+        Telemetry(),
+        projection,
+        clock=timing.clock,
+        monotonic=timing.monotonic,
+        sleep=timing.sleep,
+    )
+
+    async def read() -> str:
+        generator = stream.events(4)
+        try:
+            return await anext(generator)
+        finally:
+            await generator.aclose()
+
+    fields, data = _parsed_frame(asyncio.run(read()))
+
+    assert fields == {
+        "retry": "2000",
+        "id": "6",
+        "event": "fleet-snapshot",
+    }
+    assert data["reset_reason"] == "retention-gap"
+    assert data["snapshot"]["event_cursor"] == 6
+    assert projection.cursors == [6]
+    assert events.replay_calls == [
+        (4, NOW, 128),
+        (4, NOW + timedelta(seconds=1), 128),
+    ]
+
+
 def test_empty_stream_polls_once_per_second_and_keeps_alive_by_fifteen_seconds() -> None:
     events = Events(high_watermark=0, first_retained_id=None)
     timing = Timing()
@@ -500,8 +612,8 @@ def test_empty_stream_polls_once_per_second_and_keeps_alive_by_fifteen_seconds()
     }
     assert data is None
     assert timing.sleeps == [1.0] * 15
-    assert [call[0] for call in events.after_calls] == [0] * 16
-    assert [call[1] for call in events.after_calls] == [
+    assert [call[0] for call in events.replay_calls] == [0] * 16
+    assert [call[1] for call in events.replay_calls] == [
         NOW + timedelta(seconds=second) for second in range(16)
     ]
 
@@ -531,7 +643,229 @@ def test_database_failure_terminates_without_emitting_or_advancing() -> None:
             await generator.aclose()
 
     asyncio.run(read())
-    assert events.after_calls == [(4, NOW, 128)]
+    assert events.replay_calls == [(4, NOW, 128)]
+
+
+def test_production_repositories_bound_queries_and_release_before_yield_cancel() -> None:
+    engine, sessions, repository = _production_stream_store()
+    sample_ids = [f"00000000-0000-4000-8000-{value:012x}" for value in range(1, 129)]
+    with sessions.begin() as session:
+        session.add(AgentNode(node_id=NODE_ID, state="active", capabilities=[]))
+        session.add_all(
+            NodeTelemetrySample(
+                id=sample_id,
+                node_id=NODE_ID,
+                boot_id="00000000-0000-4000-8000-000000000999",
+                sequence=sequence,
+                observed_at=NOW,
+                received_at=NOW,
+                cpu_utilization_percent=1.0,
+                load_average_1m=None,
+                memory_total_bytes=None,
+                memory_available_bytes=None,
+                disk_total_bytes=None,
+                disk_free_bytes=None,
+                gpu_utilization_percent=None,
+                gpu_memory_total_bytes=None,
+                gpu_memory_free_bytes=None,
+                temperature_c=None,
+                power_watts=None,
+                network_receive_bytes_per_second=None,
+                network_transmit_bytes_per_second=None,
+                gap_samples=0,
+                details={},
+            )
+            for sequence, sample_id in enumerate(sample_ids)
+        )
+        for sequence, sample_id in enumerate(sample_ids, start=1):
+            repository.append_in_session(
+                session,
+                FleetEventDraft(
+                    event_type="node-telemetry",
+                    node_id=NODE_ID,
+                    entity_kind="node-telemetry-latest",
+                    entity_id=NODE_ID,
+                    payload={
+                        "schema_version": 1,
+                        "node_id": NODE_ID,
+                        "sample_id": sample_id,
+                    },
+                ),
+            )
+
+    probe = PoolProbe(engine)
+    selects: list[str] = []
+
+    def observe(_connection, _cursor, statement, _parameters, _context, _many) -> None:
+        if statement.lstrip().upper().startswith("SELECT"):
+            selects.append(statement.lower())
+
+    event.listen(engine, "before_cursor_execute", observe)
+    stream = FleetStream(
+        repository,
+        TelemetryRepository(sessions, clock=lambda: NOW),
+        Projection(),
+        clock=lambda: NOW,
+    )
+
+    async def read_one_and_cancel() -> str:
+        generator = stream.events(0)
+        frame = await anext(generator)
+        assert probe.active == 0
+        await generator.aclose()
+        assert probe.active == 0
+        return frame
+
+    try:
+        fields, _data = _parsed_frame(asyncio.run(read_one_and_cancel()))
+    finally:
+        event.remove(engine, "before_cursor_execute", observe)
+
+    assert fields["id"] == "1"
+    assert fields["event"] == "node-telemetry"
+    assert sum("fleet_stream_events" in statement for statement in selects) == 1
+    assert sum("from node_telemetry_samples" in statement for statement in selects) == 1
+    assert len(selects) == 2
+    assert probe.maximum == 1
+
+
+def test_production_replay_advances_cursor_only_after_yield_resumes() -> None:
+    engine, sessions, repository = _production_stream_store()
+    with sessions.begin() as session:
+        repository.append_in_session(session, _operation_draft(1))
+    calls: list[int] = []
+
+    class RecordingRepository:
+        def high_watermark(self) -> int:
+            return repository.high_watermark()
+
+        def replay_after(self, last_id: int, now: datetime, *, limit: int):
+            calls.append(last_id)
+            return repository.replay_after(last_id, now, limit=limit)
+
+    probe = PoolProbe(engine)
+    timing = Timing()
+    stream = FleetStream(
+        RecordingRepository(),
+        TelemetryRepository(sessions, clock=timing.clock),
+        Projection(),
+        clock=timing.clock,
+        monotonic=timing.monotonic,
+        sleep=timing.sleep,
+    )
+
+    async def read_two() -> tuple[str, str]:
+        generator = stream.events(0)
+        try:
+            first = await anext(generator)
+            assert calls == [0]
+            assert probe.active == 0
+            with sessions.begin() as session:
+                repository.append_in_session(session, _operation_draft(2))
+            assert calls == [0]
+            second = await anext(generator)
+            return first, second
+        finally:
+            await generator.aclose()
+
+    first, second = asyncio.run(read_two())
+    assert [_parsed_frame(frame)[0]["id"] for frame in (first, second)] == ["1", "2"]
+    assert calls == [0, 1]
+    assert probe.active == 0
+
+
+def test_production_replay_db_failure_terminates_and_releases_connection() -> None:
+    engine, sessions, repository = _production_stream_store()
+    with sessions.begin() as session:
+        repository.append_in_session(session, _operation_draft(1))
+    probe = PoolProbe(engine)
+    timing = Timing()
+    stream = FleetStream(
+        repository,
+        TelemetryRepository(sessions, clock=timing.clock),
+        Projection(),
+        clock=timing.clock,
+        monotonic=timing.monotonic,
+        sleep=timing.sleep,
+    )
+
+    async def fail_after_first() -> None:
+        generator = stream.events(0)
+        try:
+            assert _parsed_frame(await anext(generator))[0]["id"] == "1"
+            assert probe.active == 0
+            FleetStreamEvent.__table__.drop(engine)
+            with pytest.raises(SQLAlchemyError):
+                await anext(generator)
+            assert probe.active == 0
+        finally:
+            await generator.aclose()
+
+    asyncio.run(fail_after_first())
+
+
+def test_production_replay_resets_when_event_expires_while_connected() -> None:
+    engine, sessions, repository = _production_stream_store()
+    probe = PoolProbe(engine)
+    timing = Timing()
+    inserted = False
+
+    async def sleep_and_insert(seconds: float) -> None:
+        nonlocal inserted
+        assert probe.active == 0
+        timing.seconds += seconds
+        if inserted:
+            return
+        inserted = True
+        with sessions.begin() as session:
+            session.add_all(
+                [
+                    FleetStreamEvent(
+                        id=5,
+                        event_type="operation-state",
+                        node_id=None,
+                        entity_kind="job",
+                        entity_id="job-5",
+                        payload={"schema_version": 1, "state": "running"},
+                        occurred_at=NOW - timedelta(hours=23, minutes=59),
+                        expires_at=NOW + timedelta(milliseconds=500),
+                    ),
+                    FleetStreamEvent(
+                        id=6,
+                        event_type="operation-state",
+                        node_id=None,
+                        entity_kind="job",
+                        entity_id="job-6",
+                        payload={"schema_version": 1, "state": "running"},
+                        occurred_at=NOW,
+                        expires_at=NOW + timedelta(hours=24),
+                    ),
+                ]
+            )
+            session.execute(update(FleetEventCursor).values(last_id=6))
+
+    projection = Projection()
+    stream = FleetStream(
+        repository,
+        TelemetryRepository(sessions, clock=timing.clock),
+        projection,
+        clock=timing.clock,
+        monotonic=timing.monotonic,
+        sleep=sleep_and_insert,
+    )
+
+    async def read_reset() -> str:
+        generator = stream.events(0)
+        try:
+            return await anext(generator)
+        finally:
+            await generator.aclose()
+
+    fields, data = _parsed_frame(asyncio.run(read_reset()))
+    assert fields == {"retry": "2000", "id": "6", "event": "fleet-snapshot"}
+    assert data["reset_reason"] == "retention-gap"
+    assert projection.cursors == [6]
+    assert probe.active == 0
 
 
 @dataclass

@@ -4,14 +4,15 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import func, select
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .fleet_events import FleetEventRepository
 from .models import (
+    AgentCertificate,
     AgentNode,
     ClusterMapping,
     ClusterMappingNode,
@@ -32,136 +33,230 @@ from .telemetry import (
 
 _COMMIT_PATTERN = r"^[0-9a-f]{40}$"
 _NODE_PATTERN = r"^spk_[0-9a-f]{32}$"
+_UUID_PATTERN = (
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+)
 _MAX_FLEET_NODES = 500
 _MAX_OPERATIONAL_GROUPS = 512
 _MAX_GROUP_MEMBER_ROWS = 8_192
+_MAX_SIGNED_BIGINT = 9_223_372_036_854_775_807
+_MAX_SIGNED_INTEGER = 2_147_483_647
+_MAX_TELEMETRY_BYTES = 16 * 1024**4
+_MAX_TELEMETRY_RATE = 1_000_000_000_000_000.0
+
+NodeId = Annotated[str, StringConstraints(pattern=_NODE_PATTERN)]
+UuidId = Annotated[str, StringConstraints(pattern=_UUID_PATTERN)]
+CommitId = Annotated[str, StringConstraints(pattern=_COMMIT_PATTERN)]
+Text32 = Annotated[str, StringConstraints(min_length=1, max_length=32)]
+Text64 = Annotated[str, StringConstraints(min_length=1, max_length=64)]
+Text128 = Annotated[str, StringConstraints(min_length=1, max_length=128)]
+Text200 = Annotated[str, StringConstraints(min_length=1, max_length=200)]
+Text256 = Annotated[str, StringConstraints(min_length=1, max_length=256)]
+Rank = Annotated[int, Field(ge=0, le=_MAX_FLEET_NODES - 1)]
+
+AgentState = Literal["unregistered", "pending", "active", "retired", "revoked"]
+CertificateState = Literal[
+    "valid", "missing", "not-yet-valid", "expired", "revoked", "inactive"
+]
+OfflineReason = Literal[
+    "unregistered",
+    "agent-inactive",
+    "agent-revoked",
+    "never-seen",
+    "last-seen-in-future",
+    "stale",
+    "certificate-missing",
+    "certificate-not-yet-valid",
+    "certificate-expired",
+    "certificate-revoked",
+    "certificate-inactive",
+]
+InstallationState = Literal[
+    "planned", "installing", "installed", "partial", "failed", "uninstalled"
+]
+RunState = Literal[
+    "planned", "starting", "running", "stopping", "stopped", "failed", "lost"
+]
+RouteState = Literal["withdrawn", "pending", "published", "failed"]
+InstallDegradedReason = Literal[
+    "external-member",
+    "mapping-incomplete",
+    "missing-ranks",
+    "unexpected-ranks",
+    "rank-membership-mismatch",
+    "installation-not-installed",
+    "rank-not-installed",
+    "rank-incomplete-bytes",
+]
+RunDegradedReason = Literal[
+    "external-member",
+    "mapping-incomplete",
+    "missing-ranks",
+    "unexpected-ranks",
+    "rank-membership-mismatch",
+    "run-not-running",
+    "rank-not-running",
+    "rank-stale",
+    "route-not-published",
+]
 
 
 class _StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
 
 class ProjectionReason(_StrictModel):
-    code: str = Field(min_length=1, max_length=64)
-    detail: str = Field(min_length=1, max_length=256)
+    code: Literal[
+        "node.offline",
+        "inventory.missing",
+        "inventory.stale",
+        "telemetry.missing",
+        "telemetry.delayed",
+        "telemetry.stale",
+        "install.partial",
+        "run.degraded",
+    ]
+    detail: Text256
     severity: Literal["info", "warning", "error"]
 
 
 class NodeConnection(_StrictModel):
-    agent_state: str = Field(min_length=1, max_length=24)
+    agent_state: AgentState
+    certificate_state: CertificateState
     online_state: Literal["online", "offline", "unregistered"]
+    offline_reason: OfflineReason | None
     last_seen_at: datetime | None
-    last_seen_age_seconds: float | None = Field(ge=0)
+    last_seen_age_seconds: float | None = Field(
+        ge=0, le=float(_MAX_SIGNED_BIGINT)
+    )
 
 
 class InventoryState(_StrictModel):
     observed_at: datetime
     received_at: datetime
-    age_seconds: float = Field(ge=0)
+    age_seconds: float = Field(ge=0, le=float(_MAX_SIGNED_BIGINT))
     freshness: Literal["fresh", "stale"]
-    disk_total_bytes: int = Field(ge=0)
-    disk_free_bytes: int = Field(ge=0)
-    host_memory_total_bytes: int = Field(ge=0)
-    host_memory_free_bytes: int = Field(ge=0)
-    gpu_memory_total_bytes: int = Field(ge=0)
-    gpu_memory_free_bytes: int = Field(ge=0)
-    gpu_count: int = Field(ge=0)
+    disk_total_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
+    disk_free_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
+    host_memory_total_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
+    host_memory_free_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
+    gpu_memory_total_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
+    gpu_memory_free_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
+    gpu_count: int = Field(ge=0, le=_MAX_SIGNED_INTEGER)
     artifact_store_read_only: bool
-    capabilities: list[str] = Field(max_length=64)
+    capabilities: list[Text64] = Field(max_length=64)
     fabric_address: str | None = Field(default=None, max_length=45)
-    fabric_bandwidth_mbps: int | None = Field(default=None, ge=1)
-    nvidia_driver_version: str = Field(min_length=1, max_length=256)
-    container_runtime_version: str = Field(min_length=1, max_length=256)
+    fabric_bandwidth_mbps: int | None = Field(
+        default=None, ge=1, le=_MAX_SIGNED_BIGINT
+    )
+    nvidia_driver_version: Text256
+    container_runtime_version: Text256
 
 
 class TelemetryDetails(_StrictModel):
-    accelerator_name: str | None = Field(default=None, max_length=256)
-    accelerator_performance_state: str | None = Field(default=None, max_length=32)
+    accelerator_name: Text256 | None = None
+    accelerator_performance_state: Text32 | None = None
 
 
 class TelemetryPoint(_StrictModel):
-    id: str = Field(min_length=1, max_length=36)
-    node_id: str = Field(pattern=_NODE_PATTERN)
-    boot_id: str = Field(min_length=36, max_length=36)
-    sequence: int = Field(ge=0, le=9_223_372_036_854_775_807)
+    id: UuidId
+    node_id: NodeId
+    boot_id: UuidId
+    sequence: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
     observed_at: datetime
     received_at: datetime
     cpu_utilization_percent: float | None = Field(default=None, ge=0, le=100)
-    load_average_1m: float | None = Field(default=None, ge=0)
-    memory_total_bytes: int | None = Field(default=None, ge=0)
-    memory_available_bytes: int | None = Field(default=None, ge=0)
-    disk_total_bytes: int | None = Field(default=None, ge=0)
-    disk_free_bytes: int | None = Field(default=None, ge=0)
+    load_average_1m: float | None = Field(default=None, ge=0, le=1_000_000)
+    memory_total_bytes: int | None = Field(
+        default=None, ge=0, le=_MAX_TELEMETRY_BYTES
+    )
+    memory_available_bytes: int | None = Field(
+        default=None, ge=0, le=_MAX_TELEMETRY_BYTES
+    )
+    disk_total_bytes: int | None = Field(
+        default=None, ge=0, le=_MAX_TELEMETRY_BYTES
+    )
+    disk_free_bytes: int | None = Field(
+        default=None, ge=0, le=_MAX_TELEMETRY_BYTES
+    )
     gpu_utilization_percent: float | None = Field(default=None, ge=0, le=100)
-    gpu_memory_total_bytes: int | None = Field(default=None, ge=0)
-    gpu_memory_free_bytes: int | None = Field(default=None, ge=0)
-    temperature_c: float | None = None
-    power_watts: float | None = Field(default=None, ge=0)
-    network_receive_bytes_per_second: float | None = Field(default=None, ge=0)
-    network_transmit_bytes_per_second: float | None = Field(default=None, ge=0)
-    gap_samples: int = Field(ge=0, le=9_223_372_036_854_775_807)
+    gpu_memory_total_bytes: int | None = Field(
+        default=None, ge=0, le=_MAX_TELEMETRY_BYTES
+    )
+    gpu_memory_free_bytes: int | None = Field(
+        default=None, ge=0, le=_MAX_TELEMETRY_BYTES
+    )
+    temperature_c: float | None = Field(default=None, ge=-100, le=300)
+    power_watts: float | None = Field(default=None, ge=0, le=100_000)
+    network_receive_bytes_per_second: float | None = Field(
+        default=None, ge=0, le=_MAX_TELEMETRY_RATE
+    )
+    network_transmit_bytes_per_second: float | None = Field(
+        default=None, ge=0, le=_MAX_TELEMETRY_RATE
+    )
+    gap_samples: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
     details: TelemetryDetails
 
 
 class TelemetryState(_StrictModel):
-    age_seconds: float = Field(ge=0)
+    age_seconds: float = Field(ge=0, le=float(_MAX_SIGNED_BIGINT))
     freshness: Literal["live", "delayed", "stale"]
     sample: TelemetryPoint
 
 
 class RecipePresence(_StrictModel):
-    installation_id: str = Field(min_length=1, max_length=36)
-    recipe_id: str = Field(min_length=1, max_length=36)
-    recipe_revision_id: str = Field(min_length=1, max_length=36)
-    title: str = Field(min_length=1, max_length=200)
-    profile_name: str = Field(min_length=1, max_length=64)
+    installation_id: Text128
+    recipe_id: Text128
+    recipe_revision_id: Text128
+    title: Text200
+    profile_name: Text64
     expected_rank_count: int = Field(ge=1, le=_MAX_FLEET_NODES)
-    present_ranks: list[int] = Field(max_length=_MAX_FLEET_NODES)
-    member_node_ids: list[str] = Field(max_length=_MAX_FLEET_NODES)
-    rank: int = Field(ge=0)
-    role: str = Field(min_length=1, max_length=64)
-    group_state: str = Field(min_length=1, max_length=24)
-    rank_state: str = Field(min_length=1, max_length=24)
+    present_ranks: list[Rank] = Field(max_length=_MAX_FLEET_NODES)
+    member_node_ids: list[NodeId] = Field(max_length=_MAX_FLEET_NODES)
+    rank: Rank
+    role: Text64
+    group_state: InstallationState
+    rank_state: InstallationState
     complete: bool
-    degraded_reason: str | None = Field(default=None, max_length=64)
+    degraded_reason: InstallDegradedReason | None = None
 
 
 class RunPresence(_StrictModel):
-    run_id: str = Field(min_length=1, max_length=36)
-    installation_id: str = Field(min_length=1, max_length=36)
-    recipe_id: str = Field(min_length=1, max_length=36)
-    recipe_revision_id: str = Field(min_length=1, max_length=36)
-    title: str = Field(min_length=1, max_length=200)
-    alias: str = Field(min_length=1, max_length=128)
+    run_id: Text128
+    installation_id: Text128
+    recipe_id: Text128
+    recipe_revision_id: Text128
+    title: Text200
+    alias: Text128
     expected_rank_count: int = Field(ge=1, le=_MAX_FLEET_NODES)
-    present_ranks: list[int] = Field(max_length=_MAX_FLEET_NODES)
-    member_node_ids: list[str] = Field(max_length=_MAX_FLEET_NODES)
-    rank: int = Field(ge=0)
-    role: str = Field(min_length=1, max_length=64)
-    run_state: str = Field(min_length=1, max_length=24)
-    route_state: str = Field(min_length=1, max_length=24)
-    rank_state: str = Field(min_length=1, max_length=24)
-    rank_age_seconds: float = Field(ge=0)
+    present_ranks: list[Rank] = Field(max_length=_MAX_FLEET_NODES)
+    member_node_ids: list[NodeId] = Field(max_length=_MAX_FLEET_NODES)
+    rank: Rank
+    role: Text64
+    run_state: RunState
+    route_state: RouteState
+    rank_state: RunState
+    rank_age_seconds: float = Field(ge=0, le=float(_MAX_SIGNED_BIGINT))
     rank_fresh: bool
     group_state: Literal["healthy", "degraded"]
     healthy: bool
-    degraded_reason: str | None = Field(default=None, max_length=64)
+    degraded_reason: RunDegradedReason | None = None
 
 
 class CapacityReservations(_StrictModel):
-    disk_bytes: int = Field(ge=0)
-    unified_memory_bytes: int = Field(ge=0)
-    host_memory_bytes: int = Field(ge=0)
-    gpu_memory_bytes: int = Field(ge=0)
-    port_count: int = Field(ge=0)
+    disk_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
+    unified_memory_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
+    host_memory_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
+    gpu_memory_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
+    port_count: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
 
 
 class FleetNode(_StrictModel):
-    id: str = Field(pattern=_NODE_PATTERN)
-    display_name: str = Field(min_length=1, max_length=200)
-    hostname: str = Field(max_length=255)
-    lifecycle: str = Field(min_length=1, max_length=64)
-    labels: dict[str, str] = Field(max_length=64)
+    id: NodeId
+    display_name: Text200
+    hostname: Annotated[str, StringConstraints(max_length=255)]
+    lifecycle: Text64
+    labels: dict[Text64, Text256] = Field(max_length=64)
     connection: NodeConnection
     inventory: InventoryState | None
     telemetry: TelemetryState | None
@@ -173,15 +268,15 @@ class FleetNode(_StrictModel):
 
 class FleetSnapshot(_StrictModel):
     schema_version: Literal[1] = 1
-    event_cursor: int = Field(ge=0, le=9_223_372_036_854_775_807)
+    event_cursor: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
     generated_at: datetime
-    repository_commit: str = Field(pattern=_COMMIT_PATTERN)
+    repository_commit: CommitId
     nodes: list[FleetNode] = Field(max_length=_MAX_FLEET_NODES)
 
 
 class TelemetryHistoryResponse(_StrictModel):
     schema_version: Literal[1] = 1
-    node_id: str = Field(pattern=_NODE_PATTERN)
+    node_id: NodeId
     start: datetime
     end: datetime
     maximum_points: int = Field(ge=1, le=1_500)
@@ -284,6 +379,7 @@ class FleetProjection:
                     .order_by(AgentNode.node_id)
                 )
             }
+            certificates = self._current_certificates(session, node_ids, current)
             inventories = self._latest_inventory(session, node_ids)
             telemetry = self._telemetry.latest_in_session(session, node_ids)
             installation_rows = self._installation_rows(session, node_ids)
@@ -299,8 +395,12 @@ class FleetProjection:
                     .limit(_MAX_GROUP_MEMBER_ROWS)
                 )
             )
-            installed = self._installed_presence(installation_rows, mapping_nodes)
-            loaded = self._loaded_presence(run_rows, mapping_nodes, current)
+            installed = self._installed_presence(
+                installation_rows, mapping_nodes, frozenset(node_ids)
+            )
+            loaded = self._loaded_presence(
+                run_rows, mapping_nodes, frozenset(node_ids), current
+            )
             reservations = self._reservations(session, node_ids)
         return FleetSnapshot(
             event_cursor=event_cursor,
@@ -312,6 +412,7 @@ class FleetProjection:
                     fleet_nodes[node_id],
                     current=current,
                     agent=agents.get(node_id),
+                    certificate=certificates.get(node_id),
                     inventory=inventories.get(node_id),
                     telemetry=telemetry.get(node_id),
                     installed=installed.get(node_id, ()),
@@ -378,6 +479,43 @@ class FleetProjection:
         if len(nodes) > _MAX_FLEET_NODES:
             raise ValueError("Fleet document contains more than 500 nodes")
         return commit, nodes
+
+    @staticmethod
+    def _current_certificates(
+        session: Session, node_ids: Sequence[str], current: datetime
+    ) -> dict[str, AgentCertificate]:
+        valid = (
+            (AgentCertificate.state == "active")
+            & (AgentCertificate.revoked_at.is_(None))
+            & (AgentCertificate.ca_revoked_at.is_(None))
+            & (AgentCertificate.not_before <= current)
+            & (AgentCertificate.not_after > current)
+        )
+        ranked = (
+            select(
+                AgentCertificate.serial.label("serial"),
+                func.row_number()
+                .over(
+                    partition_by=AgentCertificate.node_id,
+                    order_by=(
+                        case((valid, 0), else_=1),
+                        AgentCertificate.generation.desc(),
+                        AgentCertificate.not_after.desc(),
+                        AgentCertificate.serial.desc(),
+                    ),
+                )
+                .label("position"),
+            )
+            .where(AgentCertificate.node_id.in_(node_ids))
+            .subquery()
+        )
+        rows = session.scalars(
+            select(AgentCertificate)
+            .join(ranked, AgentCertificate.serial == ranked.c.serial)
+            .where(ranked.c.position == 1)
+            .order_by(AgentCertificate.node_id)
+        )
+        return {row.node_id: row for row in rows}
 
     @staticmethod
     def _latest_inventory(
@@ -468,7 +606,10 @@ class FleetProjection:
         expected_count: int,
         expected: Sequence[ClusterMappingNode],
         actual: Sequence[InstallationNode | RunNode],
+        fleet_node_ids: frozenset[str],
     ) -> str | None:
+        if any(value.node_id not in fleet_node_ids for value in (*expected, *actual)):
+            return "external-member"
         expected_ranks = [value.rank for value in expected]
         actual_ranks = [value.rank for value in actual]
         if len(expected) != expected_count or expected_ranks != list(
@@ -493,6 +634,7 @@ class FleetProjection:
         self,
         rows: Sequence[object],
         mapping_rows: Sequence[ClusterMappingNode],
+        fleet_node_ids: frozenset[str],
     ) -> dict[str, tuple[RecipePresence, ...]]:
         mappings = self._mapping_members(mapping_rows)
         grouped: dict[str, list[object]] = {}
@@ -507,10 +649,14 @@ class FleetProjection:
             mapping = group[0][2]
             revision = group[0][3]
             recipe = group[0][4]
+            visible_nodes = [
+                node for node in nodes if node.node_id in fleet_node_ids
+            ]
             reason = self._exact_group_reason(
                 expected_count=mapping.node_count,
                 expected=mappings.get(mapping.id, ()),
                 actual=nodes,
+                fleet_node_ids=fleet_node_ids,
             )
             if reason is None and installation.state != "installed":
                 reason = "installation-not-installed"
@@ -520,9 +666,9 @@ class FleetProjection:
                 node.installed_bytes < node.required_bytes for node in nodes
             ):
                 reason = "rank-incomplete-bytes"
-            present_ranks = [node.rank for node in nodes]
-            member_node_ids = sorted(node.node_id for node in nodes)
-            for node in nodes:
+            present_ranks = [node.rank for node in visible_nodes]
+            member_node_ids = sorted(node.node_id for node in visible_nodes)
+            for node in visible_nodes:
                 by_node.setdefault(node.node_id, []).append(
                     RecipePresence(
                         installation_id=installation.id,
@@ -552,6 +698,7 @@ class FleetProjection:
         self,
         rows: Sequence[object],
         mapping_rows: Sequence[ClusterMappingNode],
+        fleet_node_ids: frozenset[str],
         current: datetime,
     ) -> dict[str, tuple[RunPresence, ...]]:
         mappings = self._mapping_members(mapping_rows)
@@ -569,10 +716,14 @@ class FleetProjection:
             mapping = group[0][2]
             revision = group[0][4]
             recipe = group[0][5]
+            visible_nodes = [
+                node for node in nodes if node.node_id in fleet_node_ids
+            ]
             reason = self._exact_group_reason(
                 expected_count=mapping.node_count,
                 expected=mappings.get(mapping.id, ()),
                 actual=nodes,
+                fleet_node_ids=fleet_node_ids,
             )
             freshness: dict[str, tuple[float, bool]] = {}
             for node in nodes:
@@ -592,9 +743,9 @@ class FleetProjection:
                 reason = "rank-stale"
             if reason is None and run.route_state != "published":
                 reason = "route-not-published"
-            present_ranks = [node.rank for node in nodes]
-            member_node_ids = sorted(node.node_id for node in nodes)
-            for node in nodes:
+            present_ranks = [node.rank for node in visible_nodes]
+            member_node_ids = sorted(node.node_id for node in visible_nodes)
+            for node in visible_nodes:
                 rank_age, rank_fresh = freshness[node.id]
                 by_node.setdefault(node.node_id, []).append(
                     RunPresence(
@@ -694,6 +845,7 @@ class FleetProjection:
         *,
         current: datetime,
         agent: AgentNode | None,
+        certificate: AgentCertificate | None,
         inventory: NodeInventorySnapshot | None,
         telemetry: TelemetrySampleView | None,
         installed: Sequence[RecipePresence],
@@ -701,7 +853,7 @@ class FleetProjection:
         reservations: Mapping[str, tuple[int, int]],
     ) -> FleetNode:
         warnings: list[ProjectionReason] = []
-        connection = self._connection(agent, current)
+        connection = self._connection(agent, certificate, current)
         inventory_state = self._inventory(inventory, current)
         telemetry_state = self._telemetry_state(telemetry, current)
         if connection.online_state != "online":
@@ -792,28 +944,66 @@ class FleetProjection:
             warnings=warnings,
         )
 
-    def _connection(self, value: AgentNode | None, current: datetime) -> NodeConnection:
+    def _connection(
+        self,
+        value: AgentNode | None,
+        certificate: AgentCertificate | None,
+        current: datetime,
+    ) -> NodeConnection:
+        certificate_state = self._certificate_state(certificate, current)
         if value is None:
             return NodeConnection(
                 agent_state="unregistered",
+                certificate_state=certificate_state,
                 online_state="unregistered",
+                offline_reason="unregistered",
                 last_seen_at=None,
                 last_seen_age_seconds=None,
             )
         last_seen = None if value.last_seen_at is None else _utc(value.last_seen_at)
         age = None if last_seen is None else max(0.0, (current - last_seen).total_seconds())
-        online = (
-            value.state == "active"
-            and value.revoked_at is None
-            and last_seen is not None
-            and timedelta(0) <= current - last_seen <= timedelta(seconds=self._agent_online_seconds)
-        )
+        if value.state == "revoked" or value.revoked_at is not None:
+            offline_reason = "agent-revoked"
+        elif value.state != "active":
+            offline_reason = "agent-inactive"
+        elif certificate_state != "valid":
+            offline_reason = f"certificate-{certificate_state}"
+        elif last_seen is None:
+            offline_reason = "never-seen"
+        elif current - last_seen < timedelta(0):
+            offline_reason = "last-seen-in-future"
+        elif current - last_seen > timedelta(seconds=self._agent_online_seconds):
+            offline_reason = "stale"
+        else:
+            offline_reason = None
         return NodeConnection(
             agent_state=value.state,
-            online_state="online" if online else "offline",
+            certificate_state=certificate_state,
+            online_state="online" if offline_reason is None else "offline",
+            offline_reason=offline_reason,
             last_seen_at=last_seen,
             last_seen_age_seconds=age,
         )
+
+    @staticmethod
+    def _certificate_state(
+        value: AgentCertificate | None, current: datetime
+    ) -> str:
+        if value is None:
+            return "missing"
+        if (
+            value.state == "revoked"
+            or value.revoked_at is not None
+            or value.ca_revoked_at is not None
+        ):
+            return "revoked"
+        if value.state != "active":
+            return "inactive"
+        if _utc(value.not_before) > current:
+            return "not-yet-valid"
+        if _utc(value.not_after) <= current:
+            return "expired"
+        return "valid"
 
     def _inventory(
         self, value: NodeInventorySnapshot | None, current: datetime

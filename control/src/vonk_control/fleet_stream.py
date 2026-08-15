@@ -8,7 +8,7 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from datetime import UTC, datetime
 
-from .fleet_events import FleetEvent, FleetEventRepository, FleetRetentionWindow
+from .fleet_events import FleetEvent, FleetEventRepository, FleetReplayBatch
 from .fleet_projection import FleetProjection, FleetSnapshot, telemetry_point
 from .telemetry import TelemetryRepository, TelemetrySampleView
 
@@ -115,20 +115,7 @@ class FleetStream:
                 )
                 retry = False
             else:
-                window = self._events.retention_window(self._clock())
-                reset_reason = self._reset_reason(last_event_id, window)
-                if reset_reason is not None:
-                    current_cursor = window.high_watermark
-                    snapshot = self._projection.read_at(current_cursor)
-                    yield _event_frame(
-                        current_cursor,
-                        "fleet-snapshot",
-                        _snapshot_data(snapshot, reset_reason),
-                        retry=retry,
-                    )
-                    retry = False
-                else:
-                    current_cursor = last_event_id
+                current_cursor = last_event_id
 
             last_emit = self._monotonic()
             last_poll: float | None = None
@@ -139,12 +126,25 @@ class FleetStream:
                         await self._sleep(POLL_INTERVAL_SECONDS - elapsed)
                 now = self._clock()
                 last_poll = self._monotonic()
-                batch = self._events.after(current_cursor, now, limit=128)
-                self._validate_order(batch, current_cursor)
-                if batch:
-                    samples = self._hydrate_telemetry(batch)
+                replay = self._events.replay_after(current_cursor, now, limit=128)
+                reset_reason = self._reset_reason(current_cursor, replay)
+                if reset_reason is not None:
+                    current_cursor = replay.high_watermark
+                    snapshot = self._projection.read_at(current_cursor)
+                    yield _event_frame(
+                        current_cursor,
+                        "fleet-snapshot",
+                        _snapshot_data(snapshot, reset_reason),
+                        retry=retry,
+                    )
+                    retry = False
+                    last_emit = self._monotonic()
+                    continue
+                self._validate_order(replay.events, current_cursor)
+                if replay.events:
+                    samples = self._hydrate_telemetry(replay.events)
                     if samples is None:
-                        current_cursor = self._events.high_watermark()
+                        current_cursor = replay.high_watermark
                         snapshot = self._projection.read_at(current_cursor)
                         yield _event_frame(
                             current_cursor,
@@ -155,7 +155,7 @@ class FleetStream:
                         retry = False
                         last_emit = self._monotonic()
                         continue
-                    for event in batch:
+                    for event in replay.events:
                         data = self._event_data(event, samples)
                         yield _event_frame(
                             event.id,
@@ -178,7 +178,7 @@ class FleetStream:
 
     @staticmethod
     def _reset_reason(
-        last_event_id: int, window: FleetRetentionWindow
+        last_event_id: int, window: FleetReplayBatch
     ) -> str | None:
         if last_event_id > window.high_watermark:
             return "cursor-ahead"

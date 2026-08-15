@@ -4,10 +4,20 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy import create_engine, event, update
 from sqlalchemy.orm import sessionmaker
-from vonk_control.fleet_projection import FleetProjection
+from vonk_control.fleet_projection import (
+    CapacityReservations,
+    FleetProjection,
+    FleetSnapshot,
+    NodeConnection,
+    RecipePresence,
+    TelemetryDetails,
+    TelemetryPoint,
+)
 from vonk_control.models import (
+    AgentCertificate,
     AgentNode,
     Base,
     ClusterMapping,
@@ -125,6 +135,30 @@ def _telemetry(
     )
 
 
+def _certificate(
+    node_id: str,
+    serial: str,
+    *,
+    generation: int = 1,
+    state: str = "active",
+    not_before: datetime = NOW - timedelta(days=1),
+    not_after: datetime = NOW + timedelta(days=1),
+    revoked_at: datetime | None = None,
+    ca_revoked_at: datetime | None = None,
+) -> AgentCertificate:
+    return AgentCertificate(
+        serial=serial,
+        node_id=node_id,
+        not_before=not_before,
+        not_after=not_after,
+        fingerprint=f"fingerprint-{serial}",
+        state=state,
+        generation=generation,
+        revoked_at=revoked_at,
+        ca_revoked_at=ca_revoked_at,
+    )
+
+
 def test_read_uses_repository_membership_latest_rows_and_a_bounded_query_set() -> None:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -159,6 +193,14 @@ def test_read_uses_repository_membership_latest_rows_and_a_bounded_query_set() -
                     capabilities=[],
                     last_seen_at=NOW,
                 ),
+            ]
+        )
+        session.flush()
+        session.add_all(
+            [
+                _certificate(NODE_A, "bounded-a"),
+                _certificate(NODE_B, "bounded-b"),
+                _certificate(EXTRA_NODE, "bounded-external"),
             ]
         )
         session.add_all(
@@ -223,7 +265,9 @@ def test_read_uses_repository_membership_latest_rows_and_a_bounded_query_set() -
                 "labels": {"rack": "left"},
                 "connection": {
                     "agent_state": "active",
+                    "certificate_state": "valid",
                     "online_state": "online",
+                    "offline_reason": None,
                     "last_seen_at": "2026-08-15T11:59:55Z",
                     "last_seen_age_seconds": 5.0,
                 },
@@ -295,7 +339,9 @@ def test_read_uses_repository_membership_latest_rows_and_a_bounded_query_set() -
                 "labels": {"rack": "right"},
                 "connection": {
                     "agent_state": "active",
+                    "certificate_state": "valid",
                     "online_state": "online",
+                    "offline_reason": None,
                     "last_seen_at": "2026-08-15T11:59:53Z",
                     "last_seen_age_seconds": 7.0,
                 },
@@ -339,7 +385,14 @@ def test_read_uses_repository_membership_latest_rows_and_a_bounded_query_set() -
         ],
     }
     selects = [statement for statement in statements if statement.startswith("select")]
-    assert len(selects) == 8
+    assert len(selects) == 9
+    certificate_reads = [
+        statement for statement in selects if "agent_certificates" in statement
+    ]
+    assert len(certificate_reads) == 1
+    assert "row_number() over (partition by agent_certificates.node_id" in (
+        certificate_reads[0]
+    )
     telemetry_reads = [
         statement for statement in selects if "node_telemetry_samples" in statement
     ]
@@ -382,6 +435,231 @@ def test_read_captures_the_committed_cursor_before_repository_projection() -> No
     assert snapshot.event_cursor == 41
 
 
+def test_projection_dtos_reject_coercion_unbounded_values_and_open_vocabularies() -> None:
+    with pytest.raises(ValidationError, match="event_cursor"):
+        FleetSnapshot(
+            event_cursor="1",
+            generated_at=NOW,
+            repository_commit=COMMIT,
+            nodes=[],
+        )
+    with pytest.raises(ValidationError, match="disk_bytes"):
+        CapacityReservations(
+            disk_bytes=9_223_372_036_854_775_808,
+            unified_memory_bytes=0,
+            host_memory_bytes=0,
+            gpu_memory_bytes=0,
+            port_count=0,
+        )
+    with pytest.raises(ValidationError, match="agent_state"):
+        NodeConnection(
+            agent_state="invented",
+            certificate_state="valid",
+            online_state="online",
+            offline_reason=None,
+            last_seen_at=NOW,
+            last_seen_age_seconds=0.0,
+        )
+    presence = {
+        "installation_id": "00000000-0000-4000-8000-000000000001",
+        "recipe_id": "00000000-0000-4000-8000-000000000002",
+        "recipe_revision_id": "00000000-0000-4000-8000-000000000003",
+        "title": "Recipe",
+        "profile_name": "pair",
+        "expected_rank_count": 1,
+        "present_ranks": [0],
+        "member_node_ids": [NODE_A],
+        "rank": 0,
+        "role": "entrypoint",
+        "group_state": "installed",
+        "rank_state": "installed",
+        "complete": True,
+        "degraded_reason": None,
+    }
+    with pytest.raises(ValidationError, match="member_node_ids"):
+        RecipePresence(**{**presence, "member_node_ids": ["external-node"]})
+    with pytest.raises(ValidationError, match="role"):
+        RecipePresence(**{**presence, "role": "x" * 65})
+    with pytest.raises(ValidationError, match="degraded_reason"):
+        RecipePresence(**{**presence, "degraded_reason": "invented"})
+
+    point = {
+        "id": "00000000-0000-4000-8000-000000000004",
+        "node_id": NODE_A,
+        "boot_id": "00000000-0000-4000-8000-000000000005",
+        "sequence": 1,
+        "observed_at": NOW,
+        "received_at": NOW,
+        "gap_samples": 0,
+        "details": TelemetryDetails(),
+    }
+    with pytest.raises(ValidationError, match="memory_total_bytes"):
+        TelemetryPoint(**{**point, "memory_total_bytes": 16 * 1024**4 + 1})
+    with pytest.raises(ValidationError, match="load_average_1m"):
+        TelemetryPoint(**{**point, "load_average_1m": 1_000_000.01})
+    with pytest.raises(ValidationError, match="temperature_c"):
+        TelemetryPoint(**{**point, "temperature_c": float("nan")})
+
+
+def test_projection_schema_is_finite_for_states_items_and_task3_numbers() -> None:
+    definitions = FleetSnapshot.model_json_schema()["$defs"]
+
+    assert definitions["NodeConnection"]["properties"]["agent_state"] == {
+        "enum": ["unregistered", "pending", "active", "retired", "revoked"],
+        "title": "Agent State",
+        "type": "string",
+    }
+    assert definitions["RecipePresence"]["properties"]["group_state"]["enum"] == [
+        "planned",
+        "installing",
+        "installed",
+        "partial",
+        "failed",
+        "uninstalled",
+    ]
+    assert definitions["RunPresence"]["properties"]["run_state"]["enum"] == [
+        "planned",
+        "starting",
+        "running",
+        "stopping",
+        "stopped",
+        "failed",
+        "lost",
+    ]
+    assert definitions["RecipePresence"]["properties"]["member_node_ids"][
+        "items"
+    ]["pattern"] == "^spk_[0-9a-f]{32}$"
+    telemetry = definitions["TelemetryPoint"]["properties"]
+    assert telemetry["load_average_1m"]["anyOf"][0]["maximum"] == 1_000_000
+    assert telemetry["memory_total_bytes"]["anyOf"][0]["maximum"] == (
+        16 * 1024**4
+    )
+    assert telemetry["temperature_c"]["anyOf"][0] == {
+        "maximum": 300.0,
+        "minimum": -100.0,
+        "type": "number",
+    }
+    assert telemetry["network_receive_bytes_per_second"]["anyOf"][0][
+        "maximum"
+    ] == 1_000_000_000_000_000
+
+
+def test_connection_uses_certificate_authority_and_finite_offline_precedence() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    node_ids = [f"spk_{index:032x}" for index in range(1, 13)]
+    nodes = {
+        node_id: {
+            "display_name": node_id,
+            "hostname": "node.internal",
+            "lifecycle": "managed",
+            "labels": {},
+        }
+        for node_id in node_ids
+    }
+    with sessions.begin() as session:
+        session.add_all(
+            [
+                AgentNode(
+                    node_id=node_ids[1],
+                    state="revoked",
+                    capabilities=[],
+                    last_seen_at=NOW,
+                    revoked_at=NOW,
+                ),
+                AgentNode(
+                    node_id=node_ids[2],
+                    state="pending",
+                    capabilities=[],
+                    last_seen_at=NOW,
+                ),
+                AgentNode(node_id=node_ids[3], state="active", capabilities=[], last_seen_at=NOW),
+                AgentNode(node_id=node_ids[4], state="active", capabilities=[], last_seen_at=NOW),
+                AgentNode(node_id=node_ids[5], state="active", capabilities=[], last_seen_at=NOW),
+                AgentNode(node_id=node_ids[6], state="active", capabilities=[], last_seen_at=NOW),
+                AgentNode(node_id=node_ids[7], state="active", capabilities=[], last_seen_at=NOW),
+                AgentNode(node_id=node_ids[8], state="active", capabilities=[]),
+                AgentNode(
+                    node_id=node_ids[9],
+                    state="active",
+                    capabilities=[],
+                    last_seen_at=NOW + timedelta(microseconds=1),
+                ),
+                AgentNode(
+                    node_id=node_ids[10],
+                    state="active",
+                    capabilities=[],
+                    last_seen_at=NOW - timedelta(seconds=151),
+                ),
+                AgentNode(node_id=node_ids[11], state="active", capabilities=[], last_seen_at=NOW),
+            ]
+        )
+        session.flush()
+        session.add_all(
+            [
+                _certificate(node_ids[1], "agent-revoked-valid"),
+                _certificate(
+                    node_ids[2],
+                    "agent-inactive-revoked",
+                    ca_revoked_at=NOW,
+                ),
+                _certificate(
+                    node_ids[4],
+                    "certificate-revoked",
+                    ca_revoked_at=NOW,
+                ),
+                _certificate(node_ids[5], "certificate-inactive", state="staged"),
+                _certificate(
+                    node_ids[6],
+                    "certificate-future",
+                    not_before=NOW + timedelta(microseconds=1),
+                ),
+                _certificate(
+                    node_ids[7],
+                    "certificate-expired",
+                    not_after=NOW,
+                ),
+                _certificate(node_ids[8], "never-seen-valid"),
+                _certificate(node_ids[9], "future-seen-valid"),
+                _certificate(node_ids[10], "stale-valid"),
+                _certificate(node_ids[11], "valid-older", generation=1),
+                _certificate(
+                    node_ids[11],
+                    "staged-newer",
+                    generation=2,
+                    state="staged",
+                    not_after=NOW + timedelta(days=2),
+                ),
+            ]
+        )
+
+    snapshot = FleetProjection(Repository(nodes), sessions, clock=lambda: NOW).read()
+
+    assert [
+        (
+            node.connection.agent_state,
+            node.connection.certificate_state,
+            node.connection.online_state,
+            node.connection.offline_reason,
+        )
+        for node in snapshot.nodes
+    ] == [
+        ("unregistered", "missing", "unregistered", "unregistered"),
+        ("revoked", "valid", "offline", "agent-revoked"),
+        ("pending", "revoked", "offline", "agent-inactive"),
+        ("active", "missing", "offline", "certificate-missing"),
+        ("active", "revoked", "offline", "certificate-revoked"),
+        ("active", "inactive", "offline", "certificate-inactive"),
+        ("active", "not-yet-valid", "offline", "certificate-not-yet-valid"),
+        ("active", "expired", "offline", "certificate-expired"),
+        ("active", "valid", "offline", "never-seen"),
+        ("active", "valid", "offline", "last-seen-in-future"),
+        ("active", "valid", "offline", "stale"),
+        ("active", "valid", "online", None),
+    ]
+
+
 def test_freshness_boundaries_keep_telemetry_agent_and_inventory_independent() -> None:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -413,6 +691,8 @@ def test_freshness_boundaries_keep_telemetry_agent_and_inventory_independent() -
                     - timedelta(seconds=150 if node_id != NODE_D else 151),
                 )
             )
+            session.flush()
+            session.add(_certificate(node_id, f"freshness-{index}"))
             inventory_age = timedelta(
                 seconds=300, milliseconds=1 if node_id == NODE_B else 0
             )
@@ -511,6 +791,13 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank() -> None:
                     capabilities=[],
                     last_seen_at=NOW,
                 ),
+            ]
+        )
+        session.flush()
+        session.add_all(
+            [
+                _certificate(NODE_A, "groups-a"),
+                _certificate(NODE_B, "groups-b"),
             ]
         )
         recipe = LocalRecipe(
@@ -886,6 +1173,32 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank() -> None:
         "install.partial",
         "run.degraded",
     ]
+
+    repository_only = FleetProjection(
+        Repository({NODE_A: nodes[NODE_A]}), sessions, clock=lambda: NOW
+    ).read().nodes[0]
+    external_install = next(
+        value
+        for value in repository_only.installed
+        if value.installation_id == complete_installation_id
+    )
+    external_run = next(
+        value for value in repository_only.loaded if value.run_id == healthy_run_id
+    )
+
+    assert (
+        external_install.present_ranks,
+        external_install.member_node_ids,
+        external_install.complete,
+        external_install.degraded_reason,
+    ) == ([0], [NODE_A], False, "external-member")
+    assert (
+        external_run.present_ranks,
+        external_run.member_node_ids,
+        external_run.healthy,
+        external_run.group_state,
+        external_run.degraded_reason,
+    ) == ([0], [NODE_A], False, "degraded", "external-member")
 
 
 def test_history_is_repository_authorized_raw_bounded_and_chronological() -> None:

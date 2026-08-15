@@ -295,6 +295,67 @@ def test_generated_python_client_imports_in_the_root_locked_environment() -> Non
     assert result.returncode == 0, result.stderr
 
 
+def test_stream_resume_header_is_in_openapi_python_and_typescript_clients() -> None:
+    schema = json.loads(OPENAPI.read_text())
+    operation = schema["paths"]["/api/v1/fleet/stream"]["get"]
+    assert operation["parameters"] == [
+        {
+            "description": (
+                "Optional durable Fleet cursor; duplicate and numeric validity "
+                "are checked from the raw header list."
+            ),
+            "in": "header",
+            "name": "Last-Event-ID",
+            "required": False,
+            "schema": {
+                "anyOf": [{"type": "string"}, {"type": "null"}],
+                "description": (
+                    "Optional durable Fleet cursor; duplicate and numeric validity "
+                    "are checked from the raw header list."
+                ),
+                "title": "Last-Event-Id",
+            },
+        }
+    ]
+
+    from cluster_profiles.generated_control.api.default import stream_fleet_events
+
+    assert stream_fleet_events._get_kwargs(last_event_id="17")["headers"] == {
+        "Last-Event-ID": "17"
+    }
+    typescript = TYPESCRIPT_CLIENT.read_text()
+    assert '"Last-Event-ID"?: string | null;' in typescript
+
+
+def test_generated_fleet_projection_vocabulary_is_finite() -> None:
+    schema = json.loads(OPENAPI.read_text())["components"]["schemas"]
+    assert schema["NodeConnection"]["properties"]["certificate_state"]["enum"] == [
+        "valid",
+        "missing",
+        "not-yet-valid",
+        "expired",
+        "revoked",
+        "inactive",
+    ]
+    offline = schema["NodeConnection"]["properties"]["offline_reason"]
+    assert offline["anyOf"][0]["enum"] == [
+        "unregistered",
+        "agent-inactive",
+        "agent-revoked",
+        "never-seen",
+        "last-seen-in-future",
+        "stale",
+        "certificate-missing",
+        "certificate-not-yet-valid",
+        "certificate-expired",
+        "certificate-revoked",
+        "certificate-inactive",
+    ]
+    typescript = TYPESCRIPT_CLIENT.read_text()
+    assert 'certificate_state: "valid" | "missing" | "not-yet-valid"' in typescript
+    assert 'degraded_reason?: ("external-member" | "mapping-incomplete"' in typescript
+
+
 def test_generated_python_client_parses_documented_operation_errors() -> None:
     import httpx
 

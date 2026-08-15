@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, ClassVar
 
-from sqlalchemy import event, func, insert, select, update
+from sqlalchemy import event, func, insert, select, true, update
 from sqlalchemy import inspect as sqlalchemy_inspect
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -85,6 +85,13 @@ class FleetRetentionWindow:
     first_retained_id: int | None
 
 
+@dataclass(frozen=True, slots=True)
+class FleetReplayBatch:
+    high_watermark: int
+    first_retained_id: int | None
+    events: tuple[FleetEvent, ...]
+
+
 def _utc_now() -> datetime:
     return datetime.now(UTC)
 
@@ -151,9 +158,15 @@ def _as_value(row: Any) -> FleetEvent:
         entity_kind=row.entity_kind,
         entity_id=row.entity_id,
         payload=dict(row.payload),
-        occurred_at=row.occurred_at,
-        expires_at=row.expires_at,
+        occurred_at=_database_utc(row.occurred_at),
+        expires_at=_database_utc(row.expires_at),
     )
+
+
+def _database_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def _cursor_lock_statement() -> Any:
@@ -270,6 +283,81 @@ class FleetEventRepository:
                 .limit(limit)
             ).all()
             return tuple(_as_value(row) for row in rows)
+
+    def replay_after(
+        self, last_id: int, now: datetime, *, limit: int
+    ) -> FleetReplayBatch:
+        """Read replay rows and continuity metadata in one database snapshot."""
+
+        if type(last_id) is not int or not 0 <= last_id <= 9_223_372_036_854_775_807:
+            raise ValueError("Fleet event cursor is invalid")
+        if not 1 <= limit <= MAX_REPLAY_BATCH:
+            raise ValueError("Fleet event read limit must be between 1 and 128")
+        replay = (
+            select(
+                FleetStreamEvent.id,
+                FleetStreamEvent.event_type,
+                FleetStreamEvent.node_id,
+                FleetStreamEvent.entity_kind,
+                FleetStreamEvent.entity_id,
+                FleetStreamEvent.payload,
+                FleetStreamEvent.occurred_at,
+                FleetStreamEvent.expires_at,
+            )
+            .where(
+                FleetStreamEvent.id > last_id,
+                FleetStreamEvent.expires_at > now,
+            )
+            .order_by(FleetStreamEvent.id)
+            .limit(limit)
+            .subquery()
+        )
+        first_retained = (
+            select(func.min(FleetStreamEvent.id))
+            .where(FleetStreamEvent.expires_at > now)
+            .scalar_subquery()
+        )
+        statement = (
+            select(
+                FleetEventCursor.last_id,
+                first_retained,
+                replay.c.id,
+                replay.c.event_type,
+                replay.c.node_id,
+                replay.c.entity_kind,
+                replay.c.entity_id,
+                replay.c.payload,
+                replay.c.occurred_at,
+                replay.c.expires_at,
+            )
+            .select_from(FleetEventCursor)
+            .outerjoin(replay, true())
+            .where(FleetEventCursor.singleton_id == 1)
+            .order_by(replay.c.id)
+        )
+        with self._sessions() as session:
+            rows = session.execute(statement).all()
+        if not rows:
+            raise RuntimeError("fleet event cursor singleton is not initialized")
+        events = tuple(
+            FleetEvent(
+                id=row[2],
+                event_type=row[3],
+                node_id=row[4],
+                entity_kind=row[5],
+                entity_id=row[6],
+                payload=dict(row[7]),
+                occurred_at=_database_utc(row[8]),
+                expires_at=_database_utc(row[9]),
+            )
+            for row in rows
+            if row[2] is not None
+        )
+        return FleetReplayBatch(
+            high_watermark=rows[0][0],
+            first_retained_id=rows[0][1],
+            events=events,
+        )
 
 
 class FleetEventRecorder:

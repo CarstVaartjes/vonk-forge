@@ -1126,6 +1126,25 @@ def test_fleet_operation_registry_keeps_visual_and_evidence_contracts_distinct()
     assert paths["/api/v1/fleet/stream"]["get"]["operationId"] == (
         "streamFleetEvents"
     )
+    assert paths["/api/v1/fleet/stream"]["get"]["parameters"] == [
+        {
+            "description": (
+                "Optional durable Fleet cursor; duplicate and numeric validity "
+                "are checked from the raw header list."
+            ),
+            "in": "header",
+            "name": "Last-Event-ID",
+            "required": False,
+            "schema": {
+                "anyOf": [{"type": "string"}, {"type": "null"}],
+                "description": (
+                    "Optional durable Fleet cursor; duplicate and numeric validity "
+                    "are checked from the raw header list."
+                ),
+                "title": "Last-Event-Id",
+            },
+        }
+    ]
     assert paths["/api/v1/fleet/stream"]["get"]["security"] == [
         {"BrowserSession": []}
     ]

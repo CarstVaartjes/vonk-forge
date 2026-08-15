@@ -21,6 +21,7 @@ from fastapi import (
     Body,
     Depends,
     FastAPI,
+    Header,
     HTTPException,
     Query,
     Request,
@@ -1285,6 +1286,16 @@ def create_app(
     )
     async def fleet_event_stream(
         request: Request,
+        _documented_last_event_id: Annotated[
+            str | None,
+            Header(
+                alias="Last-Event-ID",
+                description=(
+                    "Optional durable Fleet cursor; duplicate and numeric validity "
+                    "are checked from the raw header list."
+                ),
+            ),
+        ] = None,
         _actor: Actor = authenticated_browser_actor,
     ) -> StreamingResponse:
         try:
