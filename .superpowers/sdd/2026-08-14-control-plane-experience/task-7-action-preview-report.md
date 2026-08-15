@@ -54,3 +54,30 @@ A diagnostic full `control/tests` run reached `1863 passed, 61 skipped`, then re
 ## Scope
 
 Changed only recipe action plans, recipe operation/route/API wiring, the explicit authorization registry, and corresponding backend tests. No generated client, frontend, Rust, MIA, runtime, readiness, desired-state, dependency, migration, or live-system file changed. Nothing was pushed and no pull request was opened.
+
+## Review fix round 1 — uninstall replay and Start fencing
+
+Implementation commit: `587f85c` (`fix(control): fence recipe uninstall concurrency`), based on `8a7afe550f04975cb2bc927092cb262c5e45a797`.
+
+The review findings were reproduced against the current operation ordering:
+
+- Uninstall's transaction-local replay check ran before `RecipeInstallation FOR UPDATE`, so a duplicate PostgreSQL request could wait for the first request, then recompute a plan containing that first request as an active-operation blocker.
+- Start checked only persisted installation state after acquiring the installation lock. Because accepted Uninstall work intentionally leaves that state `installed` until terminal results, a waiting Start could enqueue after Uninstall committed.
+
+The fix is limited to two post-lock checks. Uninstall now acquires the selected installation lock before its exact owner/kind/request-key/action-digest replay recheck. Start now rejects a same-session authoritative `recipe.uninstall` Job for the selected installation when its state is `queued` or `running`; terminal `failed` and `succeeded` jobs do not create a permanent blocker. A different request still reaches the existing active-operation conflict and cannot replay another operation.
+
+TDD RED was recorded before production edits: the portable active-state regression failed for both `queued` and `running` because Start did not raise; terminal-state and different-request controls passed; the two new PostgreSQL tests collected and skipped without Docker (`2 failed, 3 passed, 2 skipped`). After the fix, the same selection reported `5 passed, 2 skipped`.
+
+The PostgreSQL regressions use emitted installation-lock statements, backend PIDs, `pg_blocking_pids`, and `pg_stat_activity.wait_event_type = 'Lock'` rather than scheduling sleeps. They prove duplicate Uninstall returns equal operation views with one complete parent/child group, and that Start genuinely waits behind accepted Uninstall before being rejected without a Start Job, child, or run.
+
+Final verification:
+
+| Command/scope | Result |
+| --- | --- |
+| Full recipe-operation service suite | `44 passed, 5 skipped, 18 warnings` |
+| Recipe operation/route/API/OpenAPI/authorization slice | `91 passed, 5 skipped, 18 warnings` |
+| PostgreSQL concurrency collection | Five clean Docker-required skips, including duplicate Uninstall and Uninstall-vs-Start |
+| Pinned Ruff 0.16.1 lint and format on both changed Python files | Passed; two files formatted |
+| CPython `compileall`, `git diff --check`, staged diff check | Passed |
+
+Fix-round scope is exactly `recipe_operations.py`, `test_recipe_operations.py`, and this report. The intervening caller fix and all route/API/model/migration/frontend/generated/Rust/MIA/runtime/readiness/live-system files remain untouched. Nothing was pushed and no pull request was opened.
