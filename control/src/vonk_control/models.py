@@ -2363,6 +2363,33 @@ class NodeTelemetryRollupDirty(Base):
     )
 
 
+class TelemetryMaintenanceState(Base):
+    """Durable singleton used to coordinate bounded rollup fairness."""
+
+    __tablename__ = "telemetry_maintenance_state"
+    __table_args__ = (
+        CheckConstraint(
+            "singleton_id = 1", name="ck_telemetry_maintenance_state_singleton"
+        ),
+        CheckConstraint(
+            "next_resolution_seconds IN (60, 900)",
+            name="ck_telemetry_maintenance_state_resolution",
+        ),
+    )
+    singleton_id: Mapped[int] = mapped_column(SmallInteger, primary_key=True)
+    next_resolution_seconds: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+
+
+@event.listens_for(TelemetryMaintenanceState.__table__, "after_create")
+def _seed_telemetry_maintenance_state(_target, connection, **_kw) -> None:
+    connection.execute(
+        TelemetryMaintenanceState.__table__.insert().values(
+            singleton_id=1,
+            next_resolution_seconds=60,
+        )
+    )
+
+
 class FleetEventCursor(Base):
     __tablename__ = "fleet_event_cursor"
     __table_args__ = (

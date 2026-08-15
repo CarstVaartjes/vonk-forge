@@ -7,7 +7,11 @@ from alembic.script import ScriptDirectory
 from sqlalchemy import CheckConstraint, create_engine, inspect, text
 from sqlalchemy.exc import IntegrityError
 from vonk_control import models
-from vonk_control.models import FleetEventCursor, FleetStreamEvent
+from vonk_control.models import (
+    FleetEventCursor,
+    FleetStreamEvent,
+    TelemetryMaintenanceState,
+)
 
 
 def config(url: str) -> Config:
@@ -15,9 +19,9 @@ def config(url: str) -> Config:
     value.set_main_option("script_location", str(root / "migrations")); value.set_main_option("sqlalchemy.url", url); return value
 
 
-def test_database_migrations_are_one_exact_linear_chain_at_0025() -> None:
+def test_database_migrations_are_one_exact_linear_chain_at_0026() -> None:
     script = ScriptDirectory.from_config(config("sqlite://"))
-    assert script.get_heads() == ["0025_telemetry_retention"]
+    assert script.get_heads() == ["0026_telemetry_maintenance_state"]
     assert (
         script.get_revision("0025_telemetry_retention").down_revision
         == "0024_fleet_stream_events"
@@ -51,6 +55,7 @@ def test_database_migrations_are_one_exact_linear_chain_at_0025() -> None:
         "0023_node_telemetry",
         "0024_fleet_stream_events",
         "0025_telemetry_retention",
+        "0026_telemetry_maintenance_state",
     ]
 
 
@@ -428,3 +433,70 @@ def test_telemetry_rollup_migration_and_models_have_exact_schema_parity(
         } == {
             (index.name, tuple(index.columns.keys())) for index in model_table.indexes
         }
+
+
+def test_telemetry_maintenance_state_upgrade_seed_and_downgrade(
+    tmp_path: Path,
+) -> None:
+    url = f"sqlite:///{tmp_path / 'telemetry-maintenance-state.sqlite'}"
+    migration_config = config(url)
+    command.upgrade(migration_config, "0026_telemetry_maintenance_state")
+    engine = create_engine(url)
+    inspector = inspect(engine)
+
+    assert "telemetry_maintenance_state" in inspector.get_table_names()
+    assert [
+        column["name"]
+        for column in inspector.get_columns("telemetry_maintenance_state")
+    ] == ["singleton_id", "next_resolution_seconds"]
+    assert {
+        constraint["name"]
+        for constraint in inspector.get_check_constraints("telemetry_maintenance_state")
+    } == {
+        "ck_telemetry_maintenance_state_singleton",
+        "ck_telemetry_maintenance_state_resolution",
+    }
+    with engine.connect() as connection:
+        assert connection.execute(
+            text(
+                "SELECT singleton_id,next_resolution_seconds "
+                "FROM telemetry_maintenance_state"
+            )
+        ).one() == (1, 60)
+
+    model_table = TelemetryMaintenanceState.__table__
+    assert [
+        (
+            column["name"],
+            str(column["type"].compile(dialect=engine.dialect)),
+            column["nullable"],
+            bool(column["primary_key"]),
+        )
+        for column in inspector.get_columns(model_table.name)
+    ] == [
+        (
+            column.name,
+            str(column.type.compile(dialect=engine.dialect)),
+            column.nullable,
+            column.primary_key,
+        )
+        for column in model_table.columns
+    ]
+    assert {
+        constraint["name"]: " ".join(constraint["sqltext"].split())
+        for constraint in inspector.get_check_constraints(model_table.name)
+    } == {
+        constraint.name: " ".join(
+            str(
+                constraint.sqltext.compile(
+                    dialect=engine.dialect,
+                    compile_kwargs={"literal_binds": True},
+                )
+            ).split()
+        )
+        for constraint in model_table.constraints
+        if isinstance(constraint, CheckConstraint) and constraint.name is not None
+    }
+
+    command.downgrade(migration_config, "0025_telemetry_retention")
+    assert "telemetry_maintenance_state" not in inspect(engine).get_table_names()

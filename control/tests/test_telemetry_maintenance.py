@@ -26,6 +26,7 @@ from vonk_control.models import (
     NodeTelemetryRollupDirty,
     NodeTelemetryRollupMetric,
     NodeTelemetrySample,
+    TelemetryMaintenanceState,
 )
 from vonk_control.telemetry import (
     TelemetryDetailsInput,
@@ -331,6 +332,66 @@ def test_single_dirty_slot_alternates_resolutions_under_minute_backlog(
             )
             == 2
         )
+
+
+def test_single_dirty_slot_alternates_across_maintenance_instances(
+    sessions,
+) -> None:
+    quarter_start = datetime(2026, 8, 15, 11, 45, tzinfo=UTC)
+    minute_starts = [quarter_start + timedelta(minutes=offset) for offset in range(3)]
+    with sessions.begin() as session:
+        session.add_all(
+            _raw(
+                f"fair-workers-{index}",
+                start,
+                sequence=index + 1,
+                cpu=float(index),
+            )
+            for index, start in enumerate(minute_starts)
+        )
+        session.add_all(
+            NodeTelemetryRollupDirty(
+                resolution_seconds=60,
+                node_id=NODE_A,
+                bucket_start=start,
+            )
+            for start in minute_starts
+        )
+        session.add(
+            NodeTelemetryRollupDirty(
+                resolution_seconds=900,
+                node_id=NODE_A,
+                bucket_start=quarter_start,
+            )
+        )
+
+    first_worker = telemetry_maintenance.TelemetryMaintenance(
+        sessions, clock=lambda: NOW
+    )
+    second_worker = telemetry_maintenance.TelemetryMaintenance(
+        sessions, clock=lambda: NOW
+    )
+
+    first_worker.run_once(dirty_limit=1)
+    second_worker.run_once(dirty_limit=1)
+
+    with sessions() as session:
+        assert (
+            session.get(
+                NodeTelemetryRollupBucket,
+                (900, NODE_A, quarter_start),
+            )
+            is not None
+        )
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(NodeTelemetryRollupDirty)
+                .where(NodeTelemetryRollupDirty.resolution_seconds == 60)
+            )
+            == 2
+        )
+        assert session.get(TelemetryMaintenanceState, 1).next_resolution_seconds == 60
 
 
 def test_odd_dirty_limit_reserves_work_for_both_resolutions(sessions) -> None:

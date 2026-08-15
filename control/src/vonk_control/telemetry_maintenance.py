@@ -20,6 +20,7 @@ from .models import (
     NodeTelemetryRollupDirty,
     NodeTelemetryRollupMetric,
     NodeTelemetrySample,
+    TelemetryMaintenanceState,
 )
 
 RollupResolution = Literal[60, 900]
@@ -120,6 +121,31 @@ def _lock_nodes(session: Session, node_ids: list[str]) -> None:
             .order_by(AgentNode.node_id)
             .with_for_update(of=AgentNode)
         ).all()
+
+
+def _lock_maintenance_state(session: Session) -> RollupResolution:
+    """Lock and return the durable global single-slot fairness pointer."""
+
+    if session.connection().dialect.name == "sqlite":
+        session.execute(
+            update(TelemetryMaintenanceState)
+            .where(TelemetryMaintenanceState.singleton_id == 1)
+            .values(singleton_id=TelemetryMaintenanceState.singleton_id)
+        )
+        resolution = session.scalar(
+            select(TelemetryMaintenanceState.next_resolution_seconds).where(
+                TelemetryMaintenanceState.singleton_id == 1
+            )
+        )
+    else:
+        resolution = session.scalar(
+            select(TelemetryMaintenanceState.next_resolution_seconds)
+            .where(TelemetryMaintenanceState.singleton_id == 1)
+            .with_for_update()
+        )
+    if resolution not in (60, 900):
+        raise RuntimeError("telemetry maintenance state singleton is not initialized")
+    return resolution
 
 
 def _bucket_end(session: Session, column, seconds: int):
@@ -262,7 +288,6 @@ class TelemetryMaintenance:
     ) -> None:
         self._sessions = sessions
         self._clock = clock
-        self._next_single_resolution: RollupResolution = 60
 
     def run_once(
         self,
@@ -333,9 +358,12 @@ class TelemetryMaintenance:
             self._prune_events(session, now=now, limit=limit)
 
     def _run_rollups(self, dirty_limit: int) -> None:
+        if dirty_limit == 1:
+            self._run_single_rollup()
+            return
+
         with self._sessions() as session:
             candidates = self._select_dirty_candidates(session, dirty_limit)
-        claimed_resolution: RollupResolution | None = None
         with self._sessions.begin() as session:
             _lock_nodes(session, [identity[1] for identity in candidates])
             dirty = (
@@ -349,15 +377,48 @@ class TelemetryMaintenance:
                 else []
             )
             dirty.sort(key=lambda identity: (identity[0], identity[2], identity[1]))
-            if dirty_limit == 1 and dirty:
-                claimed_resolution = dirty[0][0]
             for resolution_seconds, node_id, start in dirty:
                 if resolution_seconds == 60:
                     self._recompute_minute(session, node_id, start)
                 else:
                     self._recompute_quarter_hour(session, node_id, start)
-        if claimed_resolution is not None:
-            self._next_single_resolution = 900 if claimed_resolution == 60 else 60
+
+    def _run_single_rollup(self) -> None:
+        """Claim one dirty bucket while coordinating fairness across workers."""
+
+        with self._sessions.begin() as session:
+            preferred = _lock_maintenance_state(session)
+            candidates = session.execute(_dirty_candidate_statement(preferred, 1)).all()
+            if not candidates:
+                other: RollupResolution = 900 if preferred == 60 else 60
+                candidates = session.execute(_dirty_candidate_statement(other, 1)).all()
+
+            _lock_nodes(session, [identity[1] for identity in candidates])
+            dirty = (
+                [
+                    (resolution_seconds, node_id, _database_utc(start))
+                    for resolution_seconds, node_id, start in session.execute(
+                        _claim_dirty_identities_statement(candidates)
+                    ).all()
+                ]
+                if candidates
+                else []
+            )
+            dirty.sort(key=lambda identity: (identity[0], identity[2], identity[1]))
+            for resolution_seconds, node_id, start in dirty:
+                if resolution_seconds == 60:
+                    self._recompute_minute(session, node_id, start)
+                else:
+                    self._recompute_quarter_hour(session, node_id, start)
+                session.execute(
+                    update(TelemetryMaintenanceState)
+                    .where(TelemetryMaintenanceState.singleton_id == 1)
+                    .values(
+                        next_resolution_seconds=(
+                            900 if resolution_seconds == 60 else 60
+                        )
+                    )
+                )
 
     def _select_dirty_candidates(
         self,
@@ -365,8 +426,7 @@ class TelemetryMaintenance:
         limit: int,
     ) -> list[tuple[int, str, datetime]]:
         if limit == 1:
-            other: RollupResolution = 900 if self._next_single_resolution == 60 else 60
-            quotas = ((self._next_single_resolution, 1), (other, 1))
+            quotas = ((60, 1), (900, 1))
         else:
             quotas = ((60, (limit + 1) // 2), (900, limit // 2))
 

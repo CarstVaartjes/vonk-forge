@@ -341,3 +341,75 @@ Task 9A-specific verification limitation.
 
 No frontend, API, generated-client, Rust, MIA recipe, runtime, readiness, or
 live-system files were changed in fix round 1.
+
+## Fix round 2 — durable multi-worker one-item fairness — 2026-08-15
+
+### Review finding addressed
+
+The remaining review finding was that `_next_single_resolution` lived on each
+`TelemetryMaintenance` instance and advanced only after that instance
+successfully claimed work. Multiple workers could therefore start with the
+same 60-second preference; a worker that lost the exact claim did not advance
+its pointer and could repeatedly favor a continuous minute backlog, starving
+900-second work.
+
+### Implementation
+
+- Added migration `0026_telemetry_maintenance_state` and the matching
+  `TelemetryMaintenanceState` model. The singleton is seeded with a 60-second
+  preference and constrained to the two supported resolutions.
+- For `dirty_limit=1`, maintenance locks the singleton state row before
+  selecting a preferred candidate. PostgreSQL uses `SELECT ... FOR UPDATE`;
+  SQLite uses a stable no-op `UPDATE` to acquire the database writer lock.
+- Preferred-candidate selection, deterministic fallback, exact
+  `DELETE ... RETURNING`, recomputation, and alternation update share one
+  transaction. The durable pointer advances only when the returned claim is
+  non-empty, then flips to the other resolution. A missing preferred queue
+  falls back to the other queue and leaves the next preference at the
+  resolution that was not served.
+- The previous instance-local pointer was removed. Multi-item quota behavior
+  remains unchanged.
+
+### Strict TDD and focused evidence
+
+- RED: the new two-instance regression initially failed during collection with
+  `ImportError: cannot import name 'TelemetryMaintenanceState'`, before the
+  model, migration, or maintenance implementation existed.
+- GREEN: after implementation,
+  `test_single_dirty_slot_alternates_across_maintenance_instances` passed,
+  proving that two independently constructed workers share the durable
+  alternation and process the 900-second bucket despite three queued
+  60-second buckets.
+- Final focused command:
+
+  ```text
+  uv run --project control --frozen pytest \
+    control/tests/test_telemetry.py \
+    control/tests/test_telemetry_maintenance.py \
+    control/tests/test_telemetry_postgres.py \
+    control/tests/test_admission_migration.py -q -rs
+  ```
+
+  Result: `73 passed, 3 skipped, 21 warnings in 3.39s`. The three skips are
+  Docker-gated PostgreSQL telemetry concurrency tests; Docker is unavailable
+  on this host. The warnings are the existing pytest temporary-directory
+  cleanup warnings on this host.
+
+### Static, compile, and scope evidence
+
+- Pinned Ruff 0.16.1 lint over the five changed Python files: `All checks
+  passed!`.
+- Pinned Ruff 0.16.1 range-format checks for every newly changed code/test
+  section: all reported `1 file already formatted`.
+- Frozen control `compileall` over `control/src`, `control/migrations`, and
+  the changed migration/maintenance tests: exit 0.
+- `git diff --check`: exit 0.
+- The only code/test files in this fix round are:
+  `control/src/vonk_control/models.py`,
+  `control/src/vonk_control/telemetry_maintenance.py`,
+  `control/migrations/versions/0026_telemetry_maintenance_state.py`,
+  `control/tests/test_admission_migration.py`, and
+  `control/tests/test_telemetry_maintenance.py`.
+- No frontend, API, generated-client, Rust, MIA recipe, runtime, readiness, or
+  live-system files were changed. The branch was not pushed during this fix
+  round.
