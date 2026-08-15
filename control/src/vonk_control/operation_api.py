@@ -45,6 +45,11 @@ _ADMIN_OPERATION_IDS = {
     ("post", "/api/v1/agents/nodes/{node_id}/revoke"): "revokeAgentNode",
     ("get", "/api/v1/fleet"): "getFleetStatus",
     ("get", "/api/v1/fleet/stream"): "streamFleetEvents",
+    ("get", "/api/v1/library"): "listLibrary",
+    (
+        "get",
+        "/api/v1/library/recipes/{recipe_id}",
+    ): "getLibraryRecipe",
     ("get", "/api/v1/nodes/status"): "getNodeStatuses",
     (
         "get",

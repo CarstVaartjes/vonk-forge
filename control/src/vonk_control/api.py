@@ -66,6 +66,7 @@ from .cluster_mappings import ClusterMappingService
 from .fleet_projection import FleetSnapshot, TelemetryHistoryResponse
 from .fleet_stream import parse_last_event_id
 from .global_catalog import GlobalCatalogClient
+from .library_api import install_library_routes
 from .metrics import MetricsRegistry
 from .operation_api import (
     AgentsResponse,
@@ -969,6 +970,7 @@ def create_app(
     fleet: Callable[[], Mapping[str, object]],
     fleet_projection: Any | None = None,
     fleet_stream: Any | None = None,
+    library_projection: Any | None = None,
     now: Callable[[], int] = lambda: int(time.time()),
     admin: AdminServices | None = None,
     metrics: MetricsRegistry | None = None,
@@ -1221,6 +1223,11 @@ def create_app(
         audits=audits,
         service=catalog,
         global_catalog=global_catalog,
+    )
+    install_library_routes(
+        app,
+        actor_dependency=authenticated_actor,
+        projection=library_projection,
     )
     install_workload_run_routes(
         app, actor_dependency=authenticated_actor, audits=audits, workflow=workload_run
@@ -2044,6 +2051,7 @@ def production_app() -> FastAPI:
     from .host_state import HostGenerationStore
     from .install_admission import InstallAdmissionService
     from .jobs import JobService
+    from .library_projection import LibraryProjection
     from .logging import JobLogStore
     from .metrics import MetricsRegistry, OperationalMetricsCollector
     from .models import Job
@@ -2169,6 +2177,16 @@ def production_app() -> FastAPI:
         telemetry_repository,
         visual_fleet,
         clock=clock,
+    )
+    visual_library = LibraryProjection(
+        sessions,
+        cursors=cursor_codec,
+        clock=clock,
+        inventory_fresh_seconds=300,
+        telemetry_live_seconds=6,
+        telemetry_delayed_seconds=20,
+        disk_floor_bytes=10_000_000_000,
+        memory_floor_bytes=4_000_000_000,
     )
     metrics = MetricsRegistry()
     operational_metrics = OperationalMetricsCollector(
@@ -2378,6 +2396,7 @@ def production_app() -> FastAPI:
         fleet=dashboard.fleet,
         fleet_projection=visual_fleet,
         fleet_stream=visual_fleet_stream,
+        library_projection=visual_library,
         admin=AdminServices(
             repository,
             proposals,
