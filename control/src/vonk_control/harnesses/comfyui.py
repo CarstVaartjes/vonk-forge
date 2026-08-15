@@ -14,6 +14,7 @@ from .common import (
     projection,
     require_entrypoint,
     require_job_interface,
+    require_literal_arguments,
     require_mime_validator,
     require_source_bundle_identity,
     sha256,
@@ -54,6 +55,11 @@ class ComfyUiHarnessCompiler:
         del patch
         require_entrypoint(recipe, ("/opt/vonk/bin/comfyui-job",))
         require_source_bundle_identity(recipe)
+        require_literal_arguments(
+            recipe,
+            frozenset({"workflow", "workflow-sha256"}),
+            label="ComfyUI workflow identity",
+        )
         arguments, parsed = compile_arguments(recipe, parameters, _ARGUMENTS)
         if "--workflow" not in parsed or "--workflow-sha256" not in parsed:
             raise HarnessCompileError("ComfyUI workflow identity is incomplete")

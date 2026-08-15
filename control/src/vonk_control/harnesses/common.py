@@ -275,6 +275,27 @@ def compile_arguments(
     return tuple(rendered), parsed
 
 
+def require_literal_arguments(
+    recipe: Mapping[str, object], names: frozenset[str], *, label: str
+) -> None:
+    """Require selected identity-bearing arguments to be recipe literals."""
+    runtime = recipe.get("runtime")
+    arguments = runtime.get("arguments") if isinstance(runtime, Mapping) else None
+    if type(arguments) is not list:
+        raise HarnessCompileError(f"{label} is invalid")
+    selected = [
+        item
+        for item in arguments
+        if isinstance(item, Mapping) and item.get("name") in names
+    ]
+    if (
+        len(selected) != len(names)
+        or {item.get("name") for item in selected} != names
+        or any(set(item) != {"name", "value"} for item in selected)
+    ):
+        raise HarnessCompileError(f"{label} must be a literal immutable workflow")
+
+
 def compile_environment(
     recipe: Mapping[str, object], allowlist: frozenset[str]
 ) -> tuple[tuple[str, str], ...]:
@@ -324,6 +345,18 @@ def require_job_interface(recipe: Mapping[str, object], allowed: frozenset[str])
 def require_mime_validator(
     recipe: Mapping[str, object], interface: str, output_mime: str
 ) -> None:
+    expected_family = {
+        "image-job": "image/",
+        "audio-job": "audio/",
+        "video-job": "video/",
+        "mesh-job": "model/",
+    }.get(interface)
+    if (
+        not output_mime
+        or "/" not in output_mime
+        or (expected_family is not None and not output_mime.startswith(expected_family))
+    ):
+        raise HarnessCompileError("harness job interface MIME family is incompatible")
     validation = recipe.get("validation")
     validators = (
         validation.get("validators") if isinstance(validation, Mapping) else None
@@ -337,7 +370,7 @@ def require_mime_validator(
         not isinstance(validator, Mapping)
         or validator.get("interface") != interface
         or type(checks) is not list
-        or checks.count(check) != 1
+        or checks != [check]
     ):
         raise HarnessCompileError("harness requires one declared MIME validator")
 

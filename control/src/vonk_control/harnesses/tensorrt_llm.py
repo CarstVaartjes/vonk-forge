@@ -61,23 +61,21 @@ class TensorRtLlmHarnessCompiler:
         require_entrypoint(recipe, ("/usr/local/bin/trtllm-serve", "serve", "/models"))
         arguments, parsed = compile_arguments(recipe, parameters, _ARGUMENTS)
         port = require_openai_interface(recipe)
-        _node_count, parallelism = validate_topology(
+        validate_topology(
             topology,
             role,
             rank,
-            modes=frozenset(
-                {"single", "tensor_parallel", "pipeline_parallel", "hybrid", "mpi"}
-            ),
+            modes=frozenset({"single"}),
         )
-        expected = (
+        configured = (
             int(str(parsed.get("--tp_size", "1"))),
             int(str(parsed.get("--pp_size", "1"))),
             int(str(parsed.get("--ep_size", "1"))),
         )
-        actual = tuple(parallelism.get(name) for name in ("tensor", "pipeline", "data"))
-        if actual != expected:
+        if configured != (1, 1, 1):
             raise HarnessCompileError(
-                "TensorRT-LLM parallelism does not match topology"
+                "TensorRT-LLM single-node harness does not support distributed "
+                "parallelism or expert parallelism"
             )
         environment = compile_environment(
             recipe, frozenset({"NCCL_DEBUG", "HF_HUB_OFFLINE"})

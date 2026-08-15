@@ -36,6 +36,7 @@ from vonk_control.agent_jobs import AgentJobService
 from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
+from vonk_control.catalog_contract import catalog_content_sha256
 from vonk_control.catalog_service import CatalogService
 from vonk_control.enrollment import EnrollmentDenied, EnrollmentService
 from vonk_control.metrics import MetricsRegistry, OperationalMetricsCollector
@@ -1846,13 +1847,47 @@ def test_rust_agent_enrollment_shape_remains_controller_compatible(
     assert body["grant_token"] not in repr(event)
 
 
-def test_agent_rejects_recipe_spec_without_exact_resolved_dependencies(
+def test_agent_runtime_spec_requires_exact_dependencies_and_registry_projection(
     agent_system,
 ) -> None:
     client, services, _, clock = agent_system
     document = json.loads(
         (Path(__file__).parent / "fixtures/global/recipe-v1-minimal.json").read_text()
     )
+    harness_document = json.loads(
+        (Path(__file__).parents[2] / "config/execution-harnesses/vllm.json").read_text()
+    )
+    harness_digest = catalog_content_sha256(harness_document)
+    distribution_document = runtime_distribution(
+        harness_digest,
+        slug="vllm-arm64",
+        harness_slug="vllm",
+    )
+    distribution_digest = catalog_content_sha256(distribution_document)
+    document["execution"]["harness"] = {
+        "kind": "execution-harness",
+        "publisher": "vonk-forge",
+        "slug": "vllm",
+        "content_sha256": harness_digest,
+    }
+    document["runtime"]["distribution"] = {
+        "kind": "runtime-distribution",
+        "publisher": "vonk-forge",
+        "slug": "vllm-arm64",
+        "content_sha256": distribution_digest,
+    }
+    document["runtime"]["entrypoint"] = [
+        "/opt/vonk/bin/vllm",
+        "serve",
+        "/models",
+    ]
+    document["runtime"]["arguments"].append(
+        {"name": "tensor-parallel-size", "value": 1}
+    )
+    document["runtime"]["security"]["mounts"] = [
+        {"source": "model", "target": "/models", "read_only": True},
+        {"source": "outputs", "target": "/outputs", "read_only": False},
+    ]
     digest = recipe_content_sha256(document)
     recipe_id = str(uuid.uuid4())
     revision_id = str(uuid.uuid4())
@@ -1972,6 +2007,20 @@ def test_agent_rejects_recipe_spec_without_exact_resolved_dependencies(
         cursors=TokenCodec(b"c" * 32).cursor_codec(),
     )
     _seed_recipe_dependencies(catalog, document)
+    resolved_harness = _resolve_entity(catalog, harness_document)
+    resolved_distribution = _resolve_entity(catalog, distribution_document)
+    document["execution"]["harness"] = {
+        "kind": "execution-harness",
+        "publisher": "vonk-forge",
+        "slug": "vllm",
+        "content_sha256": resolved_harness.content_sha256,
+    }
+    document["runtime"]["distribution"] = {
+        "kind": "runtime-distribution",
+        "publisher": "vonk-forge",
+        "slug": "vllm-arm64",
+        "content_sha256": resolved_distribution.content_sha256,
+    }
     with services.sessions.begin() as session:
         session.execute(
             update(LocalRecipeRevision)
@@ -1989,6 +2038,50 @@ def test_agent_rejects_recipe_spec_without_exact_resolved_dependencies(
     assert resolved.json()["identity"][
         "recipe_revision_sha256"
     ] == recipe_content_sha256(document)
+    assert resolved.json()["runtime"]["entrypoint"] == [
+        "/opt/vonk/bin/vllm",
+        "serve",
+        "/models",
+        "--max-model-len",
+        "32768",
+        "--tensor-parallel-size",
+        "1",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+    ]
+    assert resolved.json()["runtime"]["arguments"] == []
+    shell_authority = copy.deepcopy(document)
+    shell_authority["runtime"]["entrypoint"] = [
+        "/bin/sh",
+        "-c",
+        "/tmp/recipe-authored-payload",
+    ]
+    with services.sessions.begin() as session:
+        session.execute(
+            update(LocalRecipeRevision)
+            .where(LocalRecipeRevision.id == revision_id)
+            .values(
+                document=shell_authority,
+                content_sha256=recipe_content_sha256(shell_authority),
+            )
+        )
+    rejected_shell = client.get(
+        f"/agent/v1/recipe-installations/{installation_id}/spec",
+        headers=agent_headers(NODE_A, "serial-a"),
+    )
+    assert rejected_shell.status_code == 409
+    assert "entrypoint" in rejected_shell.json()["detail"]
+    with services.sessions.begin() as session:
+        session.execute(
+            update(LocalRecipeRevision)
+            .where(LocalRecipeRevision.id == revision_id)
+            .values(
+                document=document,
+                content_sha256=recipe_content_sha256(document),
+            )
+        )
     incompatible_harness = _resolve_entity(
         catalog, execution_harness("different-harness", source_sha256="c" * 64)
     )
@@ -2032,6 +2125,7 @@ def test_agent_rejects_recipe_spec_without_exact_resolved_dependencies(
         runtime_distribution(
             str(document["execution"]["harness"]["content_sha256"]),
             slug="other-runtime",
+            harness_slug="vllm",
         ),
     )
     incompatible_patch = _resolve_entity(

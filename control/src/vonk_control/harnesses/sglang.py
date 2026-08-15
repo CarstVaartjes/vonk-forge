@@ -54,15 +54,17 @@ class SglangHarnessCompiler:
         if parsed.get("--model-path") != "/models":
             raise HarnessCompileError("SGLang model path is invalid")
         port = require_openai_interface(recipe)
-        _node_count, parallelism = validate_topology(
+        validate_topology(
             topology,
             role,
             rank,
-            modes=frozenset({"single", "tensor_parallel", "data_parallel", "hybrid"}),
+            modes=frozenset({"single"}),
         )
         tensor = int(str(parsed.get("--tensor-parallel-size", "1")))
-        if parallelism.get("tensor") != tensor or parallelism.get("pipeline") != 1:
-            raise HarnessCompileError("SGLang parallelism does not match topology")
+        if tensor != 1:
+            raise HarnessCompileError(
+                "SGLang single-node harness does not support distributed parallelism"
+            )
         environment = compile_environment(
             recipe, frozenset({"NCCL_DEBUG", "HF_HUB_OFFLINE"})
         )

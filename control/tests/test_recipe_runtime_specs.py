@@ -5,64 +5,99 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from vonk_control.catalog_contract import catalog_content_sha256
+from vonk_control.recipe_contract import recipe_content_sha256
 from vonk_control.recipe_runtime_specs import (
     RecipeRuntimeSpecError,
     compile_runtime_spec,
 )
 
+ROOT = Path(__file__).resolve().parents[2]
+BASE_RECIPE = ROOT / "control/tests/fixtures/global/recipe-v1-minimal.json"
+VLLM_HARNESS = ROOT / "config/execution-harnesses/vllm.json"
 
-def test_runtime_spec_binds_built_image_role_and_mapping_parameters() -> None:
-    document = json.loads(
-        (Path(__file__).parent / "fixtures/global/recipe-v1-minimal.json").read_text()
-    )
-    entrypoint = document["topology"]["roles"][0]
-    document["artifacts"][0]["roles"] = ["entrypoint", "worker"]
-    document["topology"] = {
-        **document["topology"],
-        "name": "pair",
-        "mode": "tensor_parallel",
-        "node_count": 2,
-        "roles": [
-            entrypoint,
-            {**entrypoint, "name": "worker", "endpoint_owner": False},
-        ],
-        "parallelism": {"tensor": 2, "pipeline": 1, "data": 1, "backend": "tcp"},
-        "fabric": {"connectivity": "connected", "minimum_bandwidth_mbps": 1},
-        "start_order": ["worker", "entrypoint"],
-        "stop_order": ["entrypoint", "worker"],
+
+def _exact_builtin_inputs():
+    document = json.loads(BASE_RECIPE.read_text(encoding="utf-8"))
+    harness = json.loads(VLLM_HARNESS.read_text(encoding="utf-8"))
+    harness_digest = catalog_content_sha256(harness)
+    distribution = {
+        "schema_version": 1,
+        "kind": "runtime-distribution",
+        "identity": {"publisher": "vonk-forge", "slug": "vllm-arm64"},
+        "metadata": {
+            "title": "vLLM ARM64",
+            "description": "Exact built-in runtime-spec fixture.",
+            "tags": ["synthetic"],
+        },
+        "implements_harness": {
+            "kind": "execution-harness",
+            "publisher": "vonk-forge",
+            "slug": "vllm",
+            "content_sha256": harness_digest,
+        },
+        "platform": "linux/arm64",
+        "image": "registry.example/vonk/vllm@sha256:" + "c" * 64,
+        "security": {
+            "network_mode": "none",
+            "user": "10001:10001",
+            "no_new_privileges": True,
+            "capabilities": [],
+        },
+        "sha256": "d" * 64,
     }
-    parameter = {
-        "name": "mapped-value",
-        "description": "Mapped runtime fixture",
-        "type": "integer",
-        "default": 7,
-        "change_effect": "restart",
+    distribution_digest = catalog_content_sha256(distribution)
+    document["execution"]["harness"] = {
+        "kind": "execution-harness",
+        "publisher": "vonk-forge",
+        "slug": "vllm",
+        "content_sha256": harness_digest,
     }
-    document["parameters"].append(parameter)
-    parameter_name = parameter["name"]
+    document["runtime"]["distribution"] = {
+        "kind": "runtime-distribution",
+        "publisher": "vonk-forge",
+        "slug": "vllm-arm64",
+        "content_sha256": distribution_digest,
+    }
+    document["runtime"]["entrypoint"] = [
+        "/opt/vonk/bin/vllm",
+        "serve",
+        "/models",
+    ]
     document["runtime"]["arguments"].append(
-        {"name": "mapped-value", "parameter": parameter_name}
+        {"name": "tensor-parallel-size", "value": 1}
     )
-
+    document["runtime"]["security"]["mounts"] = [
+        {"source": "model", "target": "/models", "read_only": True},
+        {"source": "outputs", "target": "/outputs", "read_only": False},
+    ]
     resolved_entities = {
         "model_version": SimpleNamespace(
             content_sha256=document["model"]["content_sha256"]
         ),
         "harness": SimpleNamespace(
-            content_sha256=document["execution"]["harness"]["content_sha256"]
+            document=harness,
+            content_sha256=harness_digest,
         ),
         "runtime_distribution": SimpleNamespace(
-            content_sha256=document["runtime"]["distribution"]["content_sha256"]
+            document=distribution,
+            content_sha256=distribution_digest,
         ),
         "patch_bundle": None,
     }
-    arguments = {item["name"]: item["default"] for item in document["parameters"]}
+    return document, resolved_entities
+
+
+def test_runtime_spec_is_compiled_from_the_trusted_builtin_projection() -> None:
+    document, resolved_entities = _exact_builtin_inputs()
+    parameters = {item["name"]: item["default"] for item in document["parameters"]}
+
     spec = compile_runtime_spec(
         document,
         resolved_entities=resolved_entities,
-        parameters=arguments,
-        role="worker",
-        rank=1,
+        parameters=parameters,
+        role="entrypoint",
+        rank=0,
         recipe_build_id="00000000-0000-4000-8000-000000000001",
         image_digest="sha256:" + "d" * 64,
     )
@@ -71,17 +106,45 @@ def test_runtime_spec_binds_built_image_role_and_mapping_parameters() -> None:
         "localhost/vonk/recipe-build-00000000-0000-4000-8000-000000000001"
         "@sha256:" + "d" * 64
     )
-    assert spec["runtime"]["execution_harness"] == document["execution"]["harness"]
-    assert spec["runtime"]["distribution"] == document["runtime"]["distribution"]
-    assert {item["name"]: item["value"] for item in spec["runtime"]["arguments"]}[
-        "mapped-value"
-    ] == parameter["default"]
-    assert all("worker" in item["roles"] for item in spec["artifacts"])
-    assert spec["interfaces"] == document["interfaces"]
-    assert spec["security"] == document["runtime"]["security"]
-    assert spec["lifecycle"] == document["runtime"]["lifecycle"]
+    assert spec["runtime"]["entrypoint"] == [
+        "/opt/vonk/bin/vllm",
+        "serve",
+        "/models",
+        "--max-model-len",
+        "32768",
+        "--tensor-parallel-size",
+        "1",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+    ]
+    assert spec["runtime"]["arguments"] == []
+    assert spec["runtime"]["environment"] == []
+    assert spec["security"] == {
+        "network_mode": "none",
+        "user": "10001:10001",
+        "no_new_privileges": True,
+        "capabilities": [],
+        "privileged": False,
+        "host_network": False,
+        "mounts": [
+            {
+                "source": "/run/vonk/models",
+                "target": "/models",
+                "read_only": True,
+                "isolated": False,
+            },
+            {
+                "source": "/run/vonk/outputs",
+                "target": "/outputs",
+                "read_only": False,
+                "isolated": True,
+            },
+        ],
+    }
     assert spec["identity"] == {
-        "recipe_revision_sha256": "2d77a8438dceee605821a3d2c89424ce883f65523251f6560e1a00fd4919a608",
+        "recipe_revision_sha256": recipe_content_sha256(document),
         "model_version_sha256": document["model"]["content_sha256"],
         "harness_sha256": document["execution"]["harness"]["content_sha256"],
         "runtime_distribution_sha256": document["runtime"]["distribution"][
@@ -89,20 +152,36 @@ def test_runtime_spec_binds_built_image_role_and_mapping_parameters() -> None:
         ],
         "patch_bundle_sha256": None,
     }
-    assert spec["topology"] == {
-        "name": "pair",
-        "node_count": 2,
-        "rank": 1,
-        "role": "worker",
-    }
+
+
+def test_runtime_spec_rejects_recipe_authored_shell_authority() -> None:
+    document, resolved_entities = _exact_builtin_inputs()
+    document["runtime"]["entrypoint"] = ["/bin/sh", "-c", "touch /tmp/owned"]
+    parameters = {item["name"]: item["default"] for item in document["parameters"]}
+
+    with pytest.raises(RecipeRuntimeSpecError, match="entrypoint"):
+        compile_runtime_spec(
+            document,
+            resolved_entities=resolved_entities,
+            parameters=parameters,
+            role="entrypoint",
+            rank=0,
+            recipe_build_id="00000000-0000-4000-8000-000000000001",
+            image_digest="sha256:" + "d" * 64,
+        )
+
+
+def test_runtime_spec_rejects_a_role_that_does_not_bind_the_exact_rank() -> None:
+    document, resolved_entities = _exact_builtin_inputs()
+    parameters = {item["name"]: item["default"] for item in document["parameters"]}
 
     with pytest.raises(RecipeRuntimeSpecError, match="role"):
         compile_runtime_spec(
             document,
             resolved_entities=resolved_entities,
-            parameters=arguments,
-            role="entrypoint",
-            rank=1,
+            parameters=parameters,
+            role="worker",
+            rank=0,
             recipe_build_id="00000000-0000-4000-8000-000000000001",
             image_digest="sha256:" + "d" * 64,
         )

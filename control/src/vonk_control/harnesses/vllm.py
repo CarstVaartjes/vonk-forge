@@ -72,22 +72,18 @@ class VllmHarnessCompiler:
         require_entrypoint(recipe, ("/opt/vonk/bin/vllm", "serve", "/models"))
         arguments, parsed = compile_arguments(recipe, parameters, _ARGUMENTS)
         port = require_openai_interface(recipe)
-        _node_count, parallelism = validate_topology(
+        validate_topology(
             topology,
             role,
             rank,
-            modes=frozenset(
-                {"single", "tensor_parallel", "pipeline_parallel", "hybrid", "ray"}
-            ),
+            modes=frozenset({"single"}),
         )
         tensor = int(str(parsed.get("--tensor-parallel-size", "1")))
         pipeline = int(str(parsed.get("--pipeline-parallel-size", "1")))
-        if (
-            parallelism.get("tensor") != tensor
-            or parallelism.get("pipeline") != pipeline
-            or parallelism.get("data") != 1
-        ):
-            raise HarnessCompileError("vLLM parallelism does not match topology")
+        if tensor != 1 or pipeline != 1:
+            raise HarnessCompileError(
+                "vLLM single-node harness does not support distributed parallelism"
+            )
         environment = compile_environment(
             recipe, frozenset({"NCCL_DEBUG", "HF_HUB_OFFLINE"})
         )

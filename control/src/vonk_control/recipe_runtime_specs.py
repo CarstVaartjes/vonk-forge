@@ -15,6 +15,8 @@ from .catalog_contract import (
     CatalogReference,
     parse_catalog_reference,
 )
+from .harnesses import HarnessRegistry
+from .harnesses.common import HarnessCompileError
 from .models import CatalogEntity, CatalogEntityRevision
 from .recipe_contract import (
     recipe_content_sha256,
@@ -24,6 +26,7 @@ from .recipe_contract import (
 )
 
 _OCI_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
+_BUILTIN_HARNESS_REGISTRY = HarnessRegistry.with_builtins()
 
 
 class RecipeRuntimeSpecError(ValueError):
@@ -45,28 +48,26 @@ def compile_runtime_spec(
     if not isinstance(rank, int) or isinstance(rank, bool):
         raise RecipeRuntimeSpecError("mapped rank is invalid")
     references = recipe_references(document)
-    model_version, harness, distribution = references[:3]
+    model_version = references[0]
     patch = references[3] if len(references) == 4 else None
     _require_resolved_entity(resolved_entities, "model_version", model_version)
-    _require_resolved_entity(resolved_entities, "harness", harness)
-    _require_resolved_entity(resolved_entities, "runtime_distribution", distribution)
-    if patch is None:
-        if resolved_entities.get("patch_bundle") is not None:
-            raise RecipeRuntimeSpecError("resolved patch identity is invalid")
-    else:
-        _require_resolved_entity(resolved_entities, "patch_bundle", patch)
     topology = recipe_topology(document)
-    roles = topology.get("roles")
-    if not isinstance(roles, list):
-        raise RecipeRuntimeSpecError("recipe topology roles are invalid")
-    expanded_roles = [
-        str(item["name"])
-        for item in roles
-        if isinstance(item, Mapping)
-        for _ in range(int(item["count"]))
-    ]
-    if rank < 0 or rank >= len(expanded_roles) or expanded_roles[rank] != role:
-        raise RecipeRuntimeSpecError("mapped role does not match the topology rank")
+    try:
+        projection = _BUILTIN_HARNESS_REGISTRY.compile(
+            resolved_entities.get("harness"),
+            recipe=document,
+            distribution=resolved_entities.get("runtime_distribution"),
+            patch=resolved_entities.get("patch_bundle"),
+            parameters=parameters,
+            topology=topology,
+            role=role,
+            rank=rank,
+        )
+    except HarnessCompileError as error:
+        raise RecipeRuntimeSpecError(str(error)) from error
+    binding = projection.binding
+    if binding is None:
+        raise RecipeRuntimeSpecError("harness projection binding is missing")
     runtime = document["runtime"]
     execution = document["execution"]
     interfaces = document["interfaces"]
@@ -78,18 +79,6 @@ def compile_runtime_spec(
         or not isinstance(artifacts, list)
     ):
         raise RecipeRuntimeSpecError("recipe runtime is invalid")
-    arguments: list[dict[str, object]] = []
-    for raw in runtime["arguments"]:
-        if not isinstance(raw, Mapping):
-            raise RecipeRuntimeSpecError("runtime argument is invalid")
-        if "parameter" in raw:
-            parameter = raw["parameter"]
-            if not isinstance(parameter, str) or parameter not in parameters:
-                raise RecipeRuntimeSpecError("mapped runtime parameter is unavailable")
-            value = copy.deepcopy(parameters[parameter])
-        else:
-            value = copy.deepcopy(raw["value"])
-        arguments.append({"name": str(raw["name"]), "value": value})
     role_artifacts = [
         copy.deepcopy(item)
         for item in artifacts
@@ -103,17 +92,28 @@ def compile_runtime_spec(
         "execution_harness": copy.deepcopy(execution["harness"]),
         "distribution": copy.deepcopy(runtime["distribution"]),
         "image": (f"localhost/vonk/recipe-build-{recipe_build_id}@{image_digest}"),
-        "architecture": "linux/arm64",
-        "entrypoint": copy.deepcopy(runtime["entrypoint"]),
-        "arguments": arguments,
-        "environment": copy.deepcopy(runtime["environment"]),
+        "architecture": projection.architecture,
+        "entrypoint": list(projection.command),
+        "arguments": [],
+        "environment": [
+            {"name": name, "value": value} for name, value in projection.environment
+        ],
     }
+    mounts = [
+        {
+            "source": mount.source,
+            "target": mount.target,
+            "read_only": mount.read_only,
+            "isolated": mount.isolated,
+        }
+        for mount in (*projection.model_mounts, projection.output_mount)
+    ]
     return {
         "identity": {
             "recipe_revision_sha256": recipe_content_sha256(document),
             "model_version_sha256": model_version.content_sha256,
-            "harness_sha256": harness.content_sha256,
-            "runtime_distribution_sha256": distribution.content_sha256,
+            "harness_sha256": binding.harness_content_sha256,
+            "runtime_distribution_sha256": binding.distribution_content_sha256,
             "patch_bundle_sha256": patch.content_sha256 if patch else None,
         },
         "topology": {
@@ -125,7 +125,15 @@ def compile_runtime_spec(
         "runtime": compiled_runtime,
         "artifacts": role_artifacts,
         "interfaces": copy.deepcopy(interfaces),
-        "security": copy.deepcopy(runtime["security"]),
+        "security": {
+            "network_mode": projection.network_mode,
+            "user": projection.user,
+            "no_new_privileges": projection.no_new_privileges,
+            "capabilities": list(projection.capabilities),
+            "privileged": False,
+            "host_network": False,
+            "mounts": mounts,
+        },
         "lifecycle": copy.deepcopy(runtime["lifecycle"]),
     }
 

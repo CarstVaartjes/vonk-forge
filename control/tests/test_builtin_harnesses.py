@@ -509,6 +509,56 @@ def test_builtin_harness_rejects_unsupported_topology_modes(
         _compile(slug, recipe=recipe, topology=recipe["topology"])
 
 
+@pytest.mark.parametrize(
+    ("slug", "mode"),
+    [
+        ("vllm", "tensor_parallel"),
+        ("vllm", "pipeline_parallel"),
+        ("vllm", "hybrid"),
+        ("vllm", "ray"),
+        ("sglang", "tensor_parallel"),
+        ("sglang", "data_parallel"),
+        ("sglang", "hybrid"),
+        ("tensorrt-llm", "tensor_parallel"),
+        ("tensorrt-llm", "pipeline_parallel"),
+        ("tensorrt-llm", "hybrid"),
+        ("tensorrt-llm", "mpi"),
+    ],
+)
+def test_distributed_engine_modes_are_neither_advertised_nor_compiled(
+    slug: str, mode: str
+) -> None:
+    assert _harness_document(slug)["topology_modes"] == ["single"]
+    recipe = _recipe(slug)
+    recipe["topology"]["mode"] = mode
+
+    with pytest.raises(HarnessCompileError, match="topology"):
+        _compile(slug, recipe=recipe, topology=recipe["topology"])
+
+
+@pytest.mark.parametrize(
+    ("slug", "argument"),
+    [
+        ("vllm", "tensor-parallel-size"),
+        ("sglang", "tensor-parallel-size"),
+        ("tensorrt-llm", "tp-size"),
+        ("tensorrt-llm", "pp-size"),
+        ("tensorrt-llm", "ep-size"),
+    ],
+)
+def test_single_node_engine_boundary_rejects_distributed_parallelism(
+    slug: str, argument: str
+) -> None:
+    recipe = _recipe(slug)
+    selected = next(
+        item for item in recipe["runtime"]["arguments"] if item["name"] == argument
+    )
+    selected["value"] = 2
+
+    with pytest.raises(HarnessCompileError, match="single-node"):
+        _compile(slug, recipe=recipe)
+
+
 def test_vllm_parallelism_must_equal_the_exact_topology_world_size() -> None:
     recipe = _recipe("vllm")
     tensor = next(
@@ -534,7 +584,7 @@ def test_topology_mode_must_match_parallelism_dimensions() -> None:
     recipe = _recipe("vllm")
     recipe["topology"]["mode"] = "tensor_parallel"
 
-    with pytest.raises(HarnessCompileError, match="mode"):
+    with pytest.raises(HarnessCompileError, match="topology"):
         _compile("vllm", recipe=recipe)
 
 
@@ -598,6 +648,49 @@ def test_comfyui_requires_an_immutable_workflow_from_the_recipe_bundle() -> None
         _compile("comfyui", recipe=recipe)
 
 
+@pytest.mark.parametrize(
+    ("argument_name", "parameter_name"),
+    [
+        ("workflow", "workflow_path"),
+        ("workflow-sha256", "workflow_digest"),
+    ],
+)
+def test_comfyui_workflow_identity_cannot_reference_runtime_parameters(
+    argument_name: str, parameter_name: str
+) -> None:
+    recipe = _recipe("comfyui")
+    argument = next(
+        item for item in recipe["runtime"]["arguments"] if item["name"] == argument_name
+    )
+    value = argument.pop("value")
+    argument["parameter"] = parameter_name
+    recipe["parameters"] = [
+        {
+            "name": parameter_name,
+            "description": "Forbidden mutable workflow identity.",
+            "type": "string",
+            "default": value,
+            "change_effect": "restart",
+        }
+    ]
+
+    with pytest.raises(HarnessCompileError, match="literal immutable workflow"):
+        _compile("comfyui", recipe=recipe, parameters={parameter_name: value})
+
+
+def test_comfyui_rejects_a_tampered_workflow_digest() -> None:
+    recipe = _recipe("comfyui")
+    workflow_sha256 = next(
+        item
+        for item in recipe["runtime"]["arguments"]
+        if item["name"] == "workflow-sha256"
+    )
+    workflow_sha256["value"] = "e" * 63
+
+    with pytest.raises(HarnessCompileError, match="workflow"):
+        _compile("comfyui", recipe=recipe)
+
+
 def test_comfyui_requires_an_exact_source_bundle_identity() -> None:
     recipe = _recipe("comfyui")
     recipe["build"]["context"]["sha256"] = "mutable"
@@ -653,6 +746,82 @@ def test_parameter_substitution_uses_declared_typed_bounds() -> None:
 
     with pytest.raises(HarnessCompileError, match="parameter"):
         _compile("vllm", recipe=recipe, parameters={"max_model_len": 0})
+
+
+@pytest.mark.parametrize(
+    ("slug", "interface", "output_mime"),
+    [
+        ("diffusers", "image-job", "image/png"),
+        ("diffusers", "audio-job", "audio/wav"),
+        ("diffusers", "video-job", "video/mp4"),
+        ("diffusers", "artifact-job", "application/octet-stream"),
+        ("diffusers", "artifact-job", "image/png"),
+        ("comfyui", "image-job", "image/jpeg"),
+        ("comfyui", "audio-job", "audio/wav"),
+        ("comfyui", "video-job", "video/mp4"),
+        ("comfyui", "artifact-job", "application/octet-stream"),
+        ("comfyui", "artifact-job", "video/mp4"),
+        ("pytorch-pipeline", "image-job", "image/png"),
+        ("pytorch-pipeline", "audio-job", "audio/wav"),
+        ("pytorch-pipeline", "video-job", "video/mp4"),
+        ("pytorch-pipeline", "mesh-job", "model/gltf-binary"),
+        ("pytorch-pipeline", "artifact-job", "application/octet-stream"),
+        ("pytorch-pipeline", "artifact-job", "model/gltf-binary"),
+    ],
+)
+def test_job_interfaces_accept_only_their_matching_output_media_family(
+    slug: str, interface: str, output_mime: str
+) -> None:
+    recipe = _recipe(slug)
+    recipe["interfaces"] = [{"adapter": interface, "path": "/outputs"}]
+    output = next(
+        item for item in recipe["runtime"]["arguments"] if item["name"] == "output-mime"
+    )
+    output["value"] = output_mime
+    recipe["validation"]["validators"] = [
+        {"interface": interface, "checks": [_mime_check(output_mime)]}
+    ]
+
+    projection = _compile(slug, recipe=recipe)
+
+    assert projection.command[projection.command.index("--output-mime") + 1] == (
+        output_mime
+    )
+
+
+@pytest.mark.parametrize(
+    ("slug", "interface", "output_mime"),
+    [
+        ("diffusers", "image-job", "audio/wav"),
+        ("diffusers", "audio-job", "video/mp4"),
+        ("comfyui", "video-job", "image/png"),
+        ("pytorch-pipeline", "mesh-job", "image/png"),
+    ],
+)
+def test_job_interfaces_reject_mismatched_output_media_families(
+    slug: str, interface: str, output_mime: str
+) -> None:
+    recipe = _recipe(slug)
+    recipe["interfaces"] = [{"adapter": interface, "path": "/outputs"}]
+    output = next(
+        item for item in recipe["runtime"]["arguments"] if item["name"] == "output-mime"
+    )
+    output["value"] = output_mime
+    recipe["validation"]["validators"] = [
+        {"interface": interface, "checks": [_mime_check(output_mime)]}
+    ]
+
+    with pytest.raises(HarnessCompileError, match="MIME family"):
+        _compile(slug, recipe=recipe)
+
+
+@pytest.mark.parametrize("slug", ["diffusers", "comfyui", "pytorch-pipeline"])
+def test_job_mime_validator_evidence_must_match_exactly(slug: str) -> None:
+    recipe = _recipe(slug)
+    recipe["validation"]["validators"][0]["checks"].append("endpoint.healthy")
+
+    with pytest.raises(HarnessCompileError, match="MIME validator"):
+        _compile(slug, recipe=recipe)
 
 
 def test_catalog_contains_exactly_eight_canonical_builtin_harness_documents() -> None:
