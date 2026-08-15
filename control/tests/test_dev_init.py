@@ -67,6 +67,7 @@ def _set_main_environment(
         "worker": tmp_path / "worker",
         "caddy": tmp_path / "caddy",
         "litellm": tmp_path / "litellm",
+        "litellm_database": tmp_path / "litellm-database",
         "auth": tmp_path / "auth",
         "tailscale": tmp_path / "tailscale",
         "runtime_config": tmp_path / "runtime-config",
@@ -86,6 +87,10 @@ def _set_main_environment(
         ("VONK_DEV_LITELLM_SECRET_ROOT", str(paths["litellm"])),
         ("VONK_DEV_AUTH_SECRET_ROOT", str(paths["auth"])),
         ("VONK_DEV_TAILSCALE_SECRET_ROOT", str(paths["tailscale"])),
+        (
+            "VONK_DEV_LITELLM_DATABASE_SECRET_ROOT",
+            str(paths["litellm_database"]),
+        ),
         ("VONK_DEV_RUNTIME_CONFIG_ROOT", str(paths["runtime_config"])),
         ("VONK_CONTROL_IDENTITY_ROOT", str(paths["identity"])),
         ("VONK_STATE_PATH", str(paths["state"])),
@@ -784,6 +789,7 @@ def _secret_source(root: Path) -> Path:
         "controller-ca": b"controller-ca-public-sentinel\n",
         "controller-server-certificate": b"controller-server-certificate-sentinel\n",
         "controller-server-key": b"controller-server-private-key-sentinel\n",
+        "litellm-database-password": b"a" * 64 + b"\n",
         "litellm-master-key": b"litellm-master-key-sentinel\n",
         "litellm-upstream-key": b"litellm-upstream-key-sentinel\n",
         "management-cidrs": b"192.0.2.0/24\n2001:db8::/64\n",
@@ -850,6 +856,7 @@ def test_stage_runtime_secrets_projects_exact_disjoint_service_authority(
             "worker",
             "caddy",
             "litellm",
+            "litellm-database",
             "auth",
             "tailscale",
         )
@@ -864,6 +871,7 @@ def test_stage_runtime_secrets_projects_exact_disjoint_service_authority(
         roots["litellm"],
         roots["auth"],
         roots["tailscale"],
+        roots["litellm-database"],
     )
 
     assert {path.name for path in roots["api"].iterdir()} == {
@@ -892,8 +900,16 @@ def test_stage_runtime_secrets_projects_exact_disjoint_service_authority(
         "management-cidrs",
     }
     assert {path.name for path in roots["litellm"].iterdir()} == {
+        "litellm-database-url",
         "litellm-master-key",
         "litellm-upstream-key",
+    }
+    assert (roots["litellm"] / "litellm-database-url").read_bytes() == (
+        b"postgresql://litellm:" + b"a" * 64 + b"@postgres:5432/litellm\n"
+    )
+    assert {path.name for path in roots["litellm-database"].iterdir()} == {
+        "database-url",
+        "litellm-database-password",
     }
     assert {path.name for path in roots["auth"].iterdir()} == {
         "admin-password-verifier",
@@ -943,6 +959,7 @@ def test_stage_runtime_secrets_assigns_exact_service_owners_when_root(
             "worker",
             "caddy",
             "litellm",
+            "litellm-database",
             "auth",
             "tailscale",
         )
@@ -957,6 +974,8 @@ def test_stage_runtime_secrets_assigns_exact_service_owners_when_root(
         "database-url",
         "git-signing-key",
         "host-runtime-grant-private-key",
+        "litellm-database-password",
+        "litellm-database-url",
         "litellm-master-key",
         "litellm-upstream-key",
         "management-cidrs",
@@ -991,6 +1010,7 @@ def test_stage_runtime_secrets_assigns_exact_service_owners_when_root(
         roots["litellm"],
         roots["auth"],
         roots["tailscale"],
+        roots["litellm-database"],
     )
 
     assert set(owners.values()) == {
@@ -1012,7 +1032,7 @@ def test_stage_runtime_secrets_assigns_exact_service_owners_when_root(
     assert all(
         owner == (10001, 10001)
         for (root, _name), owner in owners.items()
-        if root in {"api", "migrate", "worker", "auth"}
+        if root in {"api", "migrate", "worker", "auth", "litellm-database"}
     )
     assert all(
         owner == (0, 0)
@@ -1032,6 +1052,7 @@ def test_stage_runtime_secrets_creates_disjoint_service_projections(
     litellm_root = tmp_path / "litellm"
     auth_root = tmp_path / "auth"
     tailscale_root = tmp_path / "tailscale"
+    litellm_database_root = tmp_path / "litellm-database"
 
     stage_runtime_secrets(
         source,
@@ -1042,6 +1063,7 @@ def test_stage_runtime_secrets_creates_disjoint_service_projections(
         litellm_root,
         auth_root,
         tailscale_root,
+        litellm_database_root,
     )
 
     assert {path.name for path in api_root.iterdir()} == {
@@ -1116,6 +1138,7 @@ def test_stage_runtime_secrets_rejects_symlink_inputs_and_projection_roots(
             tmp_path / "litellm",
             tmp_path / "auth",
             tmp_path / "tailscale",
+            tmp_path / "litellm-database",
         )
 
     source = _secret_source(tmp_path / "safe-source")
@@ -1133,6 +1156,7 @@ def test_stage_runtime_secrets_rejects_symlink_inputs_and_projection_roots(
             tmp_path / "litellm",
             tmp_path / "auth",
             tmp_path / "tailscale",
+            tmp_path / "litellm-database",
         )
 
 
@@ -1165,6 +1189,7 @@ def test_stage_runtime_secrets_rejects_parent_symlink_aliases_before_mutation(
                 tmp_path / "litellm",
                 tmp_path / "auth",
                 tmp_path / "tailscale",
+                tmp_path / "litellm-database",
             )
 
     after = shared.stat()
@@ -1190,6 +1215,7 @@ def test_stage_runtime_secrets_requires_absolute_projection_paths(
             tmp_path / "litellm",
             tmp_path / "auth",
             tmp_path / "tailscale",
+            tmp_path / "litellm-database",
         )
 
     assert not (tmp_path / "api").exists()
@@ -1221,6 +1247,7 @@ def test_stage_runtime_secrets_rejects_symlinked_parent_components(
                 tmp_path / "litellm",
                 tmp_path / "auth",
                 tmp_path / "tailscale",
+                tmp_path / "litellm-database",
             )
 
     assert not any(actual_parent.iterdir())
@@ -1237,6 +1264,7 @@ def test_stage_runtime_secrets_preserves_generated_credentials_and_refreshes_inp
     litellm_root = tmp_path / "litellm"
     auth_root = tmp_path / "auth"
     tailscale_root = tmp_path / "tailscale"
+    litellm_database_root = tmp_path / "litellm-database"
     stage_runtime_secrets(
         source,
         api_root,
@@ -1246,6 +1274,7 @@ def test_stage_runtime_secrets_preserves_generated_credentials_and_refreshes_inp
         litellm_root,
         auth_root,
         tailscale_root,
+        litellm_database_root,
     )
     admin_key = (api_root / "admin-grant-private-key").read_bytes()
     worker_token = (worker_root / "worker-api-token").read_bytes()
@@ -1267,6 +1296,7 @@ def test_stage_runtime_secrets_preserves_generated_credentials_and_refreshes_inp
         litellm_root,
         auth_root,
         tailscale_root,
+        litellm_database_root,
     )
 
     assert (api_root / "admin-grant-private-key").read_bytes() == admin_key
@@ -1325,6 +1355,7 @@ def test_stage_runtime_secrets_does_not_clear_canonical_credentials(
             "litellm",
             "auth",
             "tailscale",
+            "litellm-database",
         )
     ]
     stage_runtime_secrets(source, *roots)
@@ -1362,6 +1393,7 @@ def test_stage_runtime_secrets_never_stages_the_worker_canonical_on_rerun(
             "litellm",
             "auth",
             "tailscale",
+            "litellm-database",
         )
     ]
     stage_runtime_secrets(source, *roots)
@@ -1445,6 +1477,7 @@ def test_stage_runtime_secrets_faults_preserve_canonical_credentials_and_token_c
             "litellm",
             "auth",
             "tailscale",
+            "litellm-database",
         )
     ]
     stage_runtime_secrets(source, *roots)
@@ -1507,6 +1540,7 @@ def test_stage_runtime_secrets_initializes_pristine_docker_volume_roots(
             "litellm",
             "auth",
             "tailscale",
+            "litellm-database",
         )
     ]
     for root in roots:
@@ -1526,6 +1560,7 @@ def test_stage_runtime_secrets_initializes_pristine_docker_volume_roots(
         roots[4]: (10002, 10001),
         roots[5]: (10001, 10001),
         roots[6]: (0, 0),
+        roots[7]: (10001, 10001),
     }
     root_chowns = {
         path: (uid, gid) for path, uid, gid in ownership if path in expected_owners
@@ -1552,6 +1587,7 @@ def test_stage_runtime_secrets_rejects_mixed_pristine_and_unsafe_roots_without_m
             "litellm",
             "auth",
             "tailscale",
+            "litellm-database",
         )
     ]
     for root in (roots[0], roots[1], roots[3], roots[4]):
@@ -1595,6 +1631,7 @@ def test_stage_runtime_secrets_rejects_nonempty_docker_volume_roots_without_muta
             "litellm",
             "auth",
             "tailscale",
+            "litellm-database",
         )
     ]
     for root in roots:
@@ -1636,6 +1673,7 @@ def test_stage_runtime_secrets_rejects_wrong_pristine_root_metadata(
             "litellm",
             "auth",
             "tailscale",
+            "litellm-database",
         )
     ]
     for root in roots:
@@ -1673,6 +1711,7 @@ def test_stage_runtime_secrets_rejects_unsafe_entries_without_mutation(
             "litellm",
             "auth",
             "tailscale",
+            "litellm-database",
         )
     ]
     stage_runtime_secrets(source, *roots)
@@ -1731,6 +1770,7 @@ def test_stage_runtime_secrets_rejects_wrong_root_mode_without_mutation(
             "litellm",
             "auth",
             "tailscale",
+            "litellm-database",
         )
     ]
     stage_runtime_secrets(source, *roots)
@@ -1759,6 +1799,7 @@ def test_stage_runtime_secrets_preflights_existing_roots_before_creating_missing
             "litellm",
             "auth",
             "tailscale",
+            "litellm-database",
         )
     ]
     roots[1].mkdir(mode=0o700)
@@ -1787,6 +1828,7 @@ def test_stage_runtime_secrets_rejects_wrong_root_owner_without_mutation(
             "litellm",
             "auth",
             "tailscale",
+            "litellm-database",
         )
     ]
     stage_runtime_secrets(source, *roots)
@@ -1833,6 +1875,7 @@ def test_stage_runtime_secrets_rejects_wrong_entry_metadata_without_mutation(
             "litellm",
             "auth",
             "tailscale",
+            "litellm-database",
         )
     ]
     stage_runtime_secrets(source, *roots)
@@ -1896,6 +1939,7 @@ def test_stage_runtime_secrets_rejects_malformed_generated_credentials(
     litellm_root = tmp_path / "litellm"
     auth_root = tmp_path / "auth"
     tailscale_root = tmp_path / "tailscale"
+    litellm_database_root = tmp_path / "litellm-database"
     stage_runtime_secrets(
         source,
         api_root,
@@ -1905,6 +1949,7 @@ def test_stage_runtime_secrets_rejects_malformed_generated_credentials(
         litellm_root,
         auth_root,
         tailscale_root,
+        litellm_database_root,
     )
     root = api_root if projection == "api" else worker_root
     root.chmod(0o700)
@@ -1924,6 +1969,7 @@ def test_stage_runtime_secrets_rejects_malformed_generated_credentials(
             litellm_root,
             auth_root,
             tailscale_root,
+            litellm_database_root,
         )
 
     assert target.read_bytes() == malformed
@@ -1947,6 +1993,7 @@ def test_stage_runtime_secrets_rejects_symlinked_generated_credentials(
     litellm_root = tmp_path / "litellm"
     auth_root = tmp_path / "auth"
     tailscale_root = tmp_path / "tailscale"
+    litellm_database_root = tmp_path / "litellm-database"
     stage_runtime_secrets(
         source,
         api_root,
@@ -1956,6 +2003,7 @@ def test_stage_runtime_secrets_rejects_symlinked_generated_credentials(
         litellm_root,
         auth_root,
         tailscale_root,
+        litellm_database_root,
     )
     root = api_root if projection == "api" else worker_root
     root.chmod(0o700)
@@ -1976,6 +2024,7 @@ def test_stage_runtime_secrets_rejects_symlinked_generated_credentials(
             litellm_root,
             auth_root,
             tailscale_root,
+            litellm_database_root,
         )
 
     assert target.is_symlink()
@@ -1995,6 +2044,7 @@ def test_main_initializes_repository_synthetic_state_and_runtime_secrets(
     litellm_root = tmp_path / "litellm"
     auth_root = tmp_path / "auth"
     tailscale_root = tmp_path / "tailscale"
+    litellm_database_root = tmp_path / "litellm-database"
     runtime_config_root = tmp_path / "runtime-config"
     identity = tmp_path / "identity"
     state = tmp_path / "state"
@@ -2011,6 +2061,10 @@ def test_main_initializes_repository_synthetic_state_and_runtime_secrets(
     monkeypatch.setenv("VONK_DEV_LITELLM_SECRET_ROOT", str(litellm_root))
     monkeypatch.setenv("VONK_DEV_AUTH_SECRET_ROOT", str(auth_root))
     monkeypatch.setenv("VONK_DEV_TAILSCALE_SECRET_ROOT", str(tailscale_root))
+    monkeypatch.setenv(
+        "VONK_DEV_LITELLM_DATABASE_SECRET_ROOT",
+        str(litellm_database_root),
+    )
     monkeypatch.setenv("VONK_DEV_RUNTIME_CONFIG_ROOT", str(runtime_config_root))
     monkeypatch.setenv("VONK_DEV_API_IMAGE", API_IMAGE)
     monkeypatch.setenv("VONK_DEV_WORKER_IMAGE", WORKER_IMAGE)
@@ -2032,6 +2086,7 @@ def test_main_initializes_repository_synthetic_state_and_runtime_secrets(
     assert (worker_root / "worker-api-token").is_file()
     assert (caddy_root / "controller-server-key").is_file()
     assert (litellm_root / "litellm-master-key").is_file()
+    assert (litellm_database_root / "litellm-database-password").is_file()
     assert (auth_root / "admin-password-verifier").is_file()
     assert (tailscale_root / "tailscale-oauth-client-secret").is_file()
     assert (runtime_config_root / "Caddyfile").is_file()
@@ -2273,6 +2328,10 @@ def test_main_preflights_all_required_environment_before_cloning(
     monkeypatch.setenv("VONK_DEV_AUTH_SECRET_ROOT", str(tmp_path / "auth"))
     monkeypatch.setenv("VONK_DEV_TAILSCALE_SECRET_ROOT", str(tmp_path / "tailscale"))
     monkeypatch.setenv(
+        "VONK_DEV_LITELLM_DATABASE_SECRET_ROOT",
+        str(tmp_path / "litellm-database"),
+    )
+    monkeypatch.setenv(
         "VONK_DEV_RUNTIME_CONFIG_ROOT",
         str(tmp_path / "runtime-config"),
     )
@@ -2300,6 +2359,10 @@ def test_main_rejects_an_unpinned_process_image_before_cloning(
     monkeypatch.setenv("VONK_DEV_LITELLM_SECRET_ROOT", str(tmp_path / "litellm"))
     monkeypatch.setenv("VONK_DEV_AUTH_SECRET_ROOT", str(tmp_path / "auth"))
     monkeypatch.setenv("VONK_DEV_TAILSCALE_SECRET_ROOT", str(tmp_path / "tailscale"))
+    monkeypatch.setenv(
+        "VONK_DEV_LITELLM_DATABASE_SECRET_ROOT",
+        str(tmp_path / "litellm-database"),
+    )
     monkeypatch.setenv(
         "VONK_DEV_RUNTIME_CONFIG_ROOT",
         str(tmp_path / "runtime-config"),

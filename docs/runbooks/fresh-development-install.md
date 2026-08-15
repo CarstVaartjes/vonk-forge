@@ -122,11 +122,11 @@ derives the required non-ephemeral enrollment credential only in the
 Tailscale gateway's tmpfs; neither the local secret generation nor the NAS
 project contains a second plaintext credential file.
 
-Back up exactly 21 local source files as one encrypted generation. Create a
+Back up exactly 22 local source files as one encrypted generation. Create a
 1Password Password item named **Vonk Forge NAS Development Administrator**,
 set its username to exact `admin`, and store the local `admin-password` there
 without placing it in a command argument or terminal output. The publisher
-copies exactly 17 files to the NAS. The four local-only files are
+copies exactly 18 files to the NAS. The four local-only files are
 `admin-password`, `controller-ca-key`, `git-signing-key.pub`, and
 `host-runtime-grant-public-key`; the plaintext administrator password is never
 published to the NAS. Do not display secret contents while checking the
@@ -142,15 +142,16 @@ publishers across workstations and is safe to retain. A successful run removes
 both hidden transaction states from the project and leaves exactly
 `docker-compose.yml` plus `secrets/`.
 
-An existing installation with a valid pre-browser 17-file local source can be
-upgraded without rotating its CA, database password, or other authority:
-repeat the generator command once with `--upgrade-browser-access`, then back up
-the resulting 21-file generation and republish it. This add-only migration
-preserves every existing secret byte and refuses every other incomplete,
-unknown, symlinked, or inconsistent state. Its own interrupted hidden
-`.browser-access-upgrade-*` transaction is recoverable: do not edit it; rerun
-the identical command with the same OAuth inputs. An older valid 15-file source
-first needs the separate `--upgrade-host-runtime-authority` transition.
+An existing installation with a valid 21-file browser-access generation can be
+upgraded without rotating its CA, control database password, or other
+authority: repeat the generator command once with
+`--upgrade-litellm-key-management`, back up the resulting 22-file generation,
+and republish it. This add-only migration creates only
+`litellm-database-password`, preserves every existing secret byte, and safely
+accepts a retry after interruption. A valid pre-browser 17-file generation
+first needs `--upgrade-browser-access`; an older valid 15-file generation first
+needs `--upgrade-host-runtime-authority`. Each transition refuses partial,
+unknown, symlinked, or inconsistent state.
 
 ## 4. Configure names and start the NAS stack
 

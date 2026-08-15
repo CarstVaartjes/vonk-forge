@@ -122,8 +122,9 @@ def test_development_nas_runbook_documents_private_browser_prerequisites() -> No
 def test_development_nas_runbook_documents_exact_browser_secret_boundary() -> None:
     text = _normalized_text(RUNBOOK)
 
-    assert "exactly 21 local source files" in text
-    assert "exactly 17 files" in text
+    assert "exactly 22 local source files" in text
+    assert "exactly 18 files" in text
+    assert "`litellm-database-password`" in text
     for local_only in (
         "`admin-password`",
         "`controller-ca-key`",
@@ -142,6 +143,7 @@ def test_existing_install_browser_upgrade_and_normal_journey_are_complete() -> N
 
     for required in (
         "`--upgrade-browser-access`",
+        "`--upgrade-litellm-key-management`",
         "preserves every existing secret byte",
         "**Pull** then **Redeploy**",
         "Keep every named volume",

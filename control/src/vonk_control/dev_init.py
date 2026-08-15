@@ -28,6 +28,7 @@ from .host_state import HostOperationPlan, SelectionReceipt
 _COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 _IMAGE = re.compile(r"[^\s]{1,1900}@sha256:[0-9a-f]{64}\Z")
 _WORKER_TOKEN = re.compile(rb"[A-Za-z0-9_-]{43}\Z")
+_LITELLM_DATABASE_PASSWORD = re.compile(rb"[0-9a-f]{64}\n\Z")
 _PUBLIC_REPOSITORY_URL = "https://github.com/CarstVaartjes/vonk-forge.git"
 _DEPLOYMENT_BASE_REF = "refs/vonk/deploy-base"
 _ZERO_COMMIT = "0" * 40
@@ -68,7 +69,16 @@ _PROJECTION_FILES = {
             "management-cidrs",
         }
     ),
-    "LiteLLM": frozenset({"litellm-master-key", "litellm-upstream-key"}),
+    "LiteLLM": frozenset(
+        {
+            "litellm-database-url",
+            "litellm-master-key",
+            "litellm-upstream-key",
+        }
+    ),
+    "LiteLLM database initializer": frozenset(
+        {"database-url", "litellm-database-password"}
+    ),
     "auth": frozenset({"database-url", "admin-password-verifier"}),
     "Tailscale": frozenset(
         {"tailscale-oauth-client-id", "tailscale-oauth-client-secret"}
@@ -967,8 +977,9 @@ def stage_runtime_secrets(
     litellm_root: Path,
     auth_root: Path,
     tailscale_root: Path,
+    litellm_database_root: Path,
 ) -> None:
-    """Stage seven disjoint, service-owned runtime-secret projections."""
+    """Stage eight disjoint, service-owned runtime-secret projections."""
     source = Path(source)
     roots = (
         (Path(api_root), "API", _API_UID, _API_GID),
@@ -982,6 +993,12 @@ def stage_runtime_secrets(
             "Tailscale",
             _TAILSCALE_UID,
             _TAILSCALE_GID,
+        ),
+        (
+            Path(litellm_database_root),
+            "LiteLLM database initializer",
+            _API_UID,
+            _API_GID,
         ),
     )
     _directory(source, label="development secret source")
@@ -1005,6 +1022,16 @@ def stage_runtime_secrets(
     controller_server_key = _read_source_secret(source, "controller-server-key")
     litellm_master_key = _read_source_secret(source, "litellm-master-key")
     litellm_upstream_key = _read_source_secret(source, "litellm-upstream-key")
+    litellm_database_password = _read_source_secret(
+        source, "litellm-database-password"
+    )
+    if _LITELLM_DATABASE_PASSWORD.fullmatch(litellm_database_password) is None:
+        raise DevInitError("development LiteLLM database password is invalid")
+    litellm_database_url = (
+        b"postgresql://litellm:"
+        + litellm_database_password.rstrip(b"\n")
+        + b"@postgres:5432/litellm\n"
+    )
     management_cidrs = _read_source_secret(source, "management-cidrs")
     token_signing_key = _read_source_secret(source, "token-signing-key")
     admin_password_verifier = _read_source_secret(source, "admin-password-verifier")
@@ -1076,7 +1103,9 @@ def stage_runtime_secrets(
                 )
             )
 
-        api, migrate, worker, caddy, litellm, auth, tailscale = descriptors
+        api, migrate, worker, caddy, litellm, auth, tailscale, litellm_database = (
+            descriptors
+        )
         admin_present = "admin-grant-private-key" in os.listdir(api)
         worker_present = "worker-api-token" in os.listdir(worker)
         admin_key = _admin_credential(api)
@@ -1184,6 +1213,7 @@ def stage_runtime_secrets(
                     gid=_CADDY_GID,
                 )
             for name, content in (
+                ("litellm-database-url", litellm_database_url),
                 ("litellm-master-key", litellm_master_key),
                 ("litellm-upstream-key", litellm_upstream_key),
             ):
@@ -1193,6 +1223,17 @@ def stage_runtime_secrets(
                     content,
                     uid=_LITELLM_UID,
                     gid=_LITELLM_GID,
+                )
+            for name, content in (
+                ("database-url", database_url),
+                ("litellm-database-password", litellm_database_password),
+            ):
+                _write_projection_secret(
+                    litellm_database,
+                    name,
+                    content,
+                    uid=_API_UID,
+                    gid=_API_GID,
                 )
             for name, content in (
                 ("database-url", database_url),
@@ -1406,7 +1447,7 @@ def main() -> int:
             _required_environment("VONK_DEV_REPOSITORY_URL"),
         )
     runtime_paths: (
-        tuple[Path, Path, Path, Path, Path, Path, Path, Path, Path] | None
+        tuple[Path, Path, Path, Path, Path, Path, Path, Path, Path, Path] | None
     ) = None
     if phase in {"all", "runtime"}:
         runtime_paths = (
@@ -1418,6 +1459,7 @@ def main() -> int:
             Path(_required_environment("VONK_DEV_LITELLM_SECRET_ROOT")),
             Path(_required_environment("VONK_DEV_AUTH_SECRET_ROOT")),
             Path(_required_environment("VONK_DEV_TAILSCALE_SECRET_ROOT")),
+            Path(_required_environment("VONK_DEV_LITELLM_DATABASE_SECRET_ROOT")),
             Path(_required_environment("VONK_DEV_RUNTIME_CONFIG_ROOT")),
         )
     generation = _development_generation_identity()
@@ -1442,6 +1484,7 @@ def main() -> int:
         litellm_secret_root,
         auth_secret_root,
         tailscale_secret_root,
+        litellm_database_secret_root,
         runtime_config_root,
     ) = runtime_paths
     stage_runtime_secrets(
@@ -1453,6 +1496,7 @@ def main() -> int:
         litellm_secret_root,
         auth_secret_root,
         tailscale_secret_root,
+        litellm_database_secret_root,
     )
     stage_development_assets("vonk_control.resources.dev", runtime_config_root)
     identity_root = Path(

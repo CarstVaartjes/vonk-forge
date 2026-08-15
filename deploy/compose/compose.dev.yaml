@@ -73,6 +73,7 @@ services:
       VONK_DEV_EXPECTED_COMMIT: "${VONK_DEV_EXPECTED_COMMIT:?run scripts/dev-compose first}"
       VONK_DEV_LOCAL_ACCEPTANCE: "1"
       VONK_DEV_MIGRATE_SECRET_ROOT: /migrate-secrets
+      VONK_DEV_LITELLM_DATABASE_SECRET_ROOT: /litellm-database-secrets
       VONK_DEV_REPOSITORY_URL: file:///source-origin
       VONK_DEV_SECRET_SOURCE_ROOT: /host-secrets
       VONK_DEV_WORKER_SECRET_ROOT: /worker-secrets
@@ -86,6 +87,7 @@ services:
       - dev-repository:/repository
       - dev-api-secrets:/api-secrets
       - dev-migrate-secrets:/migrate-secrets
+      - dev-litellm-database-secrets:/litellm-database-secrets
       - dev-worker-secrets:/worker-secrets
       - dev-control-identity:/control-identity
       - dev-control-state:/state
@@ -96,6 +98,8 @@ services:
         target: /host-secrets/database-url
       - source: git-signing-key
         target: /host-secrets/git-signing-key
+      - source: litellm-database-password
+        target: /host-secrets/litellm-database-password
     restart: "no"
 
   control-worker:
@@ -170,6 +174,8 @@ secrets:
     file: "${VONK_DEV_SECRETS_DIR:?run scripts/dev-compose first}/database-url"
   git-signing-key:
     file: "${VONK_DEV_SECRETS_DIR:?run scripts/dev-compose first}/git-signing-key"
+  litellm-database-password:
+    file: "${VONK_DEV_SECRETS_DIR:?run scripts/dev-compose first}/litellm-database-password"
 
 volumes:
   dev-postgres-data: {}
@@ -180,4 +186,5 @@ volumes:
   dev-repository: {}
   dev-api-secrets: {}
   dev-migrate-secrets: {}
+  dev-litellm-database-secrets: {}
   dev-worker-secrets: {}

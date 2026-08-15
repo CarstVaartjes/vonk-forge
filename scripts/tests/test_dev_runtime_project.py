@@ -47,6 +47,7 @@ EXPECTED_PROJECT_FILES = {
     "secrets/database-url",
     "secrets/git-signing-key",
     "secrets/host-runtime-grant-private-key",
+    "secrets/litellm-database-password",
     "secrets/litellm-master-key",
     "secrets/litellm-upstream-key",
     "secrets/management-cidrs",

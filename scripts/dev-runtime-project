@@ -52,6 +52,7 @@ _PUBLISHED_SECRET_NAMES = frozenset(
         "database-url",
         "git-signing-key",
         "host-runtime-grant-private-key",
+        "litellm-database-password",
         "litellm-master-key",
         "litellm-upstream-key",
         "management-cidrs",

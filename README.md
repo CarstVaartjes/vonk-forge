@@ -101,7 +101,7 @@ reproduction or guarded recovery. Signed releases separately publish the full
 `docker-compose.production.yml`. The NAS pulls public images and never
 receives source, Dockerfiles, build contexts, or image archives. Follow the
 [development NAS installation guide](docs/runbooks/development-nas-installation.md)
-for the complete 17-file deployed runtime bundle and generic Compose-project
+for the complete 18-file deployed runtime bundle and generic Compose-project
 import.
 
 Repository contributors with the two `dev-local` images already built can run

@@ -30,6 +30,7 @@ EXPECTED_SECRET_NAMES = {
     "database-url",
     "git-signing-key",
     "host-runtime-grant-private-key",
+    "litellm-database-password",
     "litellm-master-key",
     "litellm-upstream-key",
     "management-cidrs",
@@ -126,7 +127,7 @@ def test_litellm_loopback_port_has_a_noninternal_network(tmp_path: Path) -> None
     _, output = _rendered_dev(tmp_path)
 
     service = _compose_service(output, "litellm")
-    assert set(service["networks"]) == {"application", "ingress"}
+    assert set(service["networks"]) == {"application", "data", "ingress"}
     assert service["ports"] == [
         {
             "mode": "ingress",
