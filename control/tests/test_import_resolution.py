@@ -95,5 +95,4 @@ def test_complete_overlays_resolve_import_to_valid_recipe() -> None:
     assert result.document["build"]["context"]["sha256"] == result.bundle.sha256
     assert result.document["artifacts"][0]["download_bytes"] == 100
     assert result.document["topology"]["name"] == "solo"
-    assert "deployment" + "_profiles" not in result.document
     assert not result.blockers

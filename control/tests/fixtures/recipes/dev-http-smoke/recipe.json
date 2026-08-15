@@ -17,14 +17,14 @@
     "kind": "model-version",
     "publisher": "vonk",
     "slug": "dev-http-smoke-version",
-    "content_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+    "content_sha256": "70168975723e23edf164266d602934316e7e2aef78aab3a666e92cc384c2524a"
   },
   "execution": {
     "harness": {
       "kind": "execution-harness",
       "publisher": "vonk",
       "slug": "dev-http-smoke",
-      "content_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+      "content_sha256": "6d927a3041c72d71ecb6a1591d15dac41f24f7dbef25c3ae4b98b99df09dd4a2"
     },
     "patch_bundle": null
   },
@@ -71,7 +71,7 @@
       "kind": "runtime-distribution",
       "publisher": "vonk",
       "slug": "python-linux-arm64",
-      "content_sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+      "content_sha256": "04fa40cf4b99d4863866cdcdbfbae1b9236bc4f6e98fdfdae718c2042c6ebfda"
     },
     "entrypoint": [
       "python",

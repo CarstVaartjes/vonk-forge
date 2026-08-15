@@ -1,0 +1,1 @@
+{"schema_version":1,"kind":"model-group","identity":{"publisher":"vonk","slug":"deepseek-flash"},"metadata":{"title":"DeepSeek Flash","description":"Immutable model group for reviewed DeepSeek Flash development recipes.","tags":["deepseek","development"]},"family":"deepseek-flash"}

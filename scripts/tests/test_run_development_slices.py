@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tarfile
 import threading
+import urllib.parse
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -45,7 +46,7 @@ NODE = "spk_0123456789abcdef0123456789abcdef"
 NODE_2 = "spk_fedcba9876543210fedcba9876543210"
 ADMIN_TOKEN = "admin-secret-marker"
 INFERENCE_TOKEN = "inference-secret-marker"
-RECIPE_DIGEST = "585b83a971181a32e3605463ce7f7f3eb5c94ac4658b207da1d4ef7de378a947"
+RECIPE_DIGEST = "544c30a6d5af4106573b2e9d74ebd405a60ed89604edfe81a600302cc09a5e47"
 
 
 class SliceServer(ThreadingHTTPServer):
@@ -106,6 +107,9 @@ class SliceServer(ThreadingHTTPServer):
         self.fleet_digest = "b" * 64
         self.artifact_set_digests = {NODE: "7" * 64, NODE_2: "7" * 64}
         self.rank_states = {NODE: "running", NODE_2: "running"}
+        self.entity_mismatch = False
+        self.entity = 0
+        self.entities: dict[tuple[str, str, str], dict[str, object]] = {}
 
 
 class SliceHandler(BaseHTTPRequestHandler):
@@ -148,12 +152,86 @@ class SliceHandler(BaseHTTPRequestHandler):
             raise RuntimeError("handled failure")
         return body
 
+    @staticmethod
+    def _entity_response(record: dict[str, object]) -> dict[str, object]:
+        document = record["document"]
+        assert isinstance(document, dict)
+        identity = document["identity"]
+        metadata = document["metadata"]
+        assert isinstance(identity, dict)
+        assert isinstance(metadata, dict)
+        return {
+            "entity_id": record["entity_id"],
+            "kind": document["kind"],
+            "publisher": identity["publisher"],
+            "slug": identity["slug"],
+            "title": metadata["title"],
+            "revision_id": record["revision_id"],
+            "revision_number": record["revision_number"],
+            "lifecycle": record["lifecycle"],
+            "schema_version": document["schema_version"],
+            "document": document,
+            "content_sha256": record["content_sha256"],
+            "created_by": "development-runner",
+            "created_at": "2026-08-15T12:00:00+00:00",
+        }
+
     def do_GET(self) -> None:
         try:
             self._record()
         except RuntimeError:
             return
-        if self.path == "/api/v1/fleet":
+        parsed = urllib.parse.urlsplit(self.path)
+        if parsed.path == "/api/v1/catalog/entities":
+            query = urllib.parse.parse_qs(parsed.query)
+            kind = query.get("kind", [None])[0]
+            publisher = query.get("publisher", [None])[0]
+            if self.server.entity_mismatch and not self.server.entities:
+                document = json.loads(
+                    (
+                        ROOT
+                        / "config/catalog/development/dev-http-smoke/01-model-group.json"
+                    ).read_text()
+                )
+                document["metadata"]["title"] = "Mismatched development fixture"
+                record = {
+                    "entity_id": "50000000-0000-4000-8000-000000000001",
+                    "revision_id": "50000000-0000-4000-8001-000000000001",
+                    "revision_number": 2,
+                    "lifecycle": "resolved",
+                    "document": document,
+                    "content_sha256": "f" * 64,
+                }
+                identity = document["identity"]
+                self.server.entities[
+                    (document["kind"], identity["publisher"], identity["slug"])
+                ] = record
+            entities = [
+                self._entity_response(record)
+                for (
+                    entity_kind,
+                    entity_publisher,
+                    _slug,
+                ), record in self.server.entities.items()
+                if (kind is None or entity_kind == kind)
+                and (publisher is None or entity_publisher == publisher)
+            ]
+            self._json(200, {"entities": entities, "next_cursor": None})
+        elif parsed.path.startswith("/api/v1/catalog/entities/"):
+            entity_id = parsed.path.rsplit("/", 1)[-1]
+            record = next(
+                (
+                    value
+                    for value in self.server.entities.values()
+                    if value["entity_id"] == entity_id
+                ),
+                None,
+            )
+            if record is None:
+                self._json(404, {"detail": "not found"})
+            else:
+                self._json(200, self._entity_response(record))
+        elif self.path == "/api/v1/fleet":
             self._json(
                 200,
                 {
@@ -363,8 +441,50 @@ class SliceHandler(BaseHTTPRequestHandler):
         except RuntimeError:
             return
         payload = json.loads(body) if body else {}
-        path = self.path
-        if path == "/api/v1/catalog/recipes":
+        path = urllib.parse.urlsplit(self.path).path
+        if path == "/api/v1/catalog/entities":
+            document = payload["document"]
+            identity = document["identity"]
+            key = (document["kind"], identity["publisher"], identity["slug"])
+            if key in self.server.entities:
+                self._json(409, {"detail": "catalog entity identity already exists"})
+                return
+            self.server.entity += 1
+            record = {
+                "entity_id": f"50000000-0000-4000-8000-{self.server.entity:012d}",
+                "revision_id": f"50000000-0000-4000-8001-{self.server.entity:012d}",
+                "revision_number": 1,
+                "lifecycle": "draft",
+                "document": document,
+                "content_sha256": None,
+            }
+            self.server.entities[key] = record
+            self._json(201, self._entity_response(record))
+        elif path.startswith("/api/v1/catalog/entities/") and path.endswith("/resolve"):
+            entity_id = path.rsplit("/", 2)[-2]
+            record = next(
+                (
+                    value
+                    for value in self.server.entities.values()
+                    if value["entity_id"] == entity_id
+                ),
+                None,
+            )
+            if record is None:
+                self._json(404, {"detail": "not found"})
+                return
+            if payload.get("expected_revision") != record["revision_number"]:
+                self._json(409, {"detail": "stale revision"})
+                return
+            record["revision_number"] = int(record["revision_number"]) + 1
+            record["lifecycle"] = "resolved"
+            record["content_sha256"] = hashlib.sha256(
+                json.dumps(
+                    record["document"], sort_keys=True, separators=(",", ":")
+                ).encode()
+            ).hexdigest()
+            self._json(200, self._entity_response(record))
+        elif path == "/api/v1/catalog/recipes":
             self.server.recipe_created = True
             document = payload["document"]
             self.server.slug = payload["slug"]
@@ -775,6 +895,63 @@ def _run_model(
     return result, evidence
 
 
+def _run_model_single(
+    tmp_path: Path,
+    server: SliceServer,
+    *extra: str,
+    qualification: Path | None = None,
+):
+    admin = _token(tmp_path / "admin-token", ADMIN_TOKEN)
+    inference = _token(tmp_path / "inference-token", INFERENCE_TOKEN)
+    qualification = qualification or _qualification(tmp_path / "qualification.json")
+    evidence = tmp_path / "model-single-evidence.json"
+    result = subprocess.run(
+        (
+            sys.executable,
+            str(RUNNER),
+            "--api-base",
+            f"http://127.0.0.1:{server.server_port}",
+            "--admin-token-file",
+            str(admin),
+            "--inference-token-file",
+            str(inference),
+            "--phase",
+            "model-single",
+            "--qualification-file",
+            str(qualification),
+            "--builder-node",
+            NODE,
+            "--target-node",
+            NODE,
+            "--evidence-file",
+            str(evidence),
+            "--timeout-seconds",
+            "2",
+            "--poll-seconds",
+            "0.01",
+            *extra,
+        ),
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return result, evidence
+
+
+def _contains_sensitive_key(value: object) -> bool:
+    if isinstance(value, dict):
+        return any(
+            key.lower()
+            in {"authorization", "credential", "password", "secret", "token"}
+            or _contains_sensitive_key(child)
+            for key, child in value.items()
+        )
+    if isinstance(value, list):
+        return any(_contains_sensitive_key(child) for child in value)
+    return False
+
+
 def test_runner_help_exposes_restart_and_failure_checkpoints() -> None:
     result = subprocess.run(
         (sys.executable, str(RUNNER), "--help"),
@@ -787,6 +964,119 @@ def test_runner_help_exposes_restart_and_failure_checkpoints() -> None:
     assert result.returncode == 0
     assert "--stop-after" in result.stdout
     assert "Pause after an accepted state" in result.stdout
+
+
+def test_runner_authors_exact_entities_in_dependency_order_before_recipe(
+    tmp_path: Path, server: SliceServer
+) -> None:
+    result, _evidence = _run(tmp_path, server, "--stop-after", "recipe-resolved")
+
+    assert result.returncode == 0, result.stderr
+    entity_creates = [
+        (index, json.loads(body))
+        for index, (method, path, body) in enumerate(server.request_bodies)
+        if method == "POST" and path == "/api/v1/catalog/entities"
+    ]
+    assert [payload["document"]["kind"] for _index, payload in entity_creates] == [
+        "model-group",
+        "model",
+        "model-version",
+        "execution-harness",
+        "runtime-distribution",
+    ]
+    recipe_index = next(
+        index
+        for index, (method, path, _body) in enumerate(server.request_bodies)
+        if method == "POST" and path == "/api/v1/catalog/recipes"
+    )
+    assert all(index < recipe_index for index, _payload in entity_creates)
+    entity_resolves = [
+        index
+        for index, (method, path, _body) in enumerate(server.request_bodies)
+        if method == "POST"
+        and path.startswith("/api/v1/catalog/entities/")
+        and path.endswith("/resolve")
+    ]
+    assert len(entity_resolves) == 5
+    assert all(index < recipe_index for index in entity_resolves)
+    assert all(
+        not _contains_sensitive_key(payload) for _index, payload in entity_creates
+    )
+    encoded_entities = json.dumps([payload for _index, payload in entity_creates])
+    assert ADMIN_TOKEN not in encoded_entities
+    assert INFERENCE_TOKEN not in encoded_entities
+
+
+def test_runner_entity_authoring_is_idempotent(
+    tmp_path: Path, server: SliceServer
+) -> None:
+    first_root = tmp_path / "first"
+    second_root = tmp_path / "second"
+    first_root.mkdir()
+    second_root.mkdir()
+
+    first, _ = _run(first_root, server, "--stop-after", "recipe-resolved")
+    second, _ = _run(second_root, server, "--stop-after", "recipe-resolved")
+
+    assert first.returncode == 0, first.stderr
+    assert second.returncode == 0, second.stderr
+    entity_creates = [
+        body
+        for method, path, body in server.request_bodies
+        if method == "POST" and path == "/api/v1/catalog/entities"
+    ]
+    assert len(entity_creates) == 5
+
+
+def test_runner_refuses_mismatched_existing_entity_before_recipe(
+    tmp_path: Path, server: SliceServer
+) -> None:
+    server.entity_mismatch = True
+
+    result, _evidence = _run(tmp_path, server, "--stop-after", "recipe-resolved")
+
+    assert result.returncode == 1
+    assert result.stderr.strip() == (
+        "development slice failed: existing catalog entity does not match checked-in input"
+    )
+    assert not any(
+        path.startswith("/api/v1/catalog/recipes")
+        for _method, path, _authorization in server.requests
+    )
+
+
+def test_model_phases_select_native_single_and_pair_recipes(
+    tmp_path: Path, server: SliceServer
+) -> None:
+    server.nodes = [NODE]
+    single_root = tmp_path / "single"
+    pair_root = tmp_path / "pair"
+    single_root.mkdir()
+    pair_root.mkdir()
+
+    single, _ = _run_model_single(
+        single_root, server, "--stop-after", "recipe-resolved"
+    )
+    assert single.returncode == 0, single.stderr
+    single_document = next(
+        json.loads(body)["document"]
+        for method, path, body in server.request_bodies
+        if method == "POST" and path == "/api/v1/catalog/recipes"
+    )
+    assert single_document["topology"]["node_count"] == 1
+
+    server.requests.clear()
+    server.request_bodies.clear()
+    server.recipe_created = False
+    server.nodes = [NODE, NODE_2]
+    pair, _ = _run_model(pair_root, server, "--stop-after", "recipe-resolved")
+    assert pair.returncode == 0, pair.stderr
+    pair_document = next(
+        json.loads(body)["document"]
+        for method, path, body in server.request_bodies
+        if method == "POST" and path == "/api/v1/catalog/recipes"
+    )
+    assert pair_document["topology"]["node_count"] == 2
 
 
 def test_runner_completes_exact_public_lifecycle_without_secret_leaks(
@@ -1130,7 +1420,7 @@ def test_model_multinode_runner_proves_failure_recovery_restart_and_cleanup(
     )
     assert server.route_published is False
     assert any(
-        path == "/api/v1/endpoints/development-deepseek-smoke"
+        path == "/api/v1/endpoints/development-deepseek-smoke-pair"
         for _method, path, _authorization in server.requests
     )
 

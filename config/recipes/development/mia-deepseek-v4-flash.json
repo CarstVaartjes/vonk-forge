@@ -19,16 +19,21 @@
     "kind": "model-version",
     "publisher": "vonk",
     "slug": "deepseek-v4-flash-version",
-    "content_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+    "content_sha256": "3adf0827b2e486da82214644bece21b4d1d740bc3c66730213175dcc2ca30ee1"
   },
   "execution": {
     "harness": {
       "kind": "execution-harness",
       "publisher": "vonk",
       "slug": "mia-deepseek-v4-flash",
-      "content_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+      "content_sha256": "ce502a691d2578b0de674155f5ee34e823848cfabf1c71a7e375563c5dfb406d"
     },
-    "patch_bundle": null
+    "patch_bundle": {
+      "kind": "patch-bundle",
+      "publisher": "vonk",
+      "slug": "mia-deepseek-v4-flash-patches",
+      "content_sha256": "9d868fae740f9458b6401fc6608b59ae6b568db92d5aea3e137948a479bd885a"
+    }
   },
   "build": {
     "context": {
@@ -74,7 +79,7 @@
       "kind": "runtime-distribution",
       "publisher": "vonk",
       "slug": "mia-dsv4-flash-linux-arm64",
-      "content_sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+      "content_sha256": "742f9b4a6696f9b857dbc26ce1ffac145c36ba05e65541c614d234010ef70f65"
     },
     "entrypoint": [
       "/opt/vonk/mia-deepseek-v4-flash"

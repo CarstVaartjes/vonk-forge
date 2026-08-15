@@ -2,11 +2,11 @@
   "schema_version": 1,
   "identity": {
     "publisher": "vonk",
-    "slug": "development-deepseek-smoke"
+    "slug": "development-deepseek-smoke-pair"
   },
   "metadata": {
-    "title": "Development DeepSeek model smoke",
-    "description": "Digest-pinned DS4 and DeepSeek smoke recipe for a two-rank replicated development gang with a pre-launch TCP fabric exchange.",
+    "title": "DeepSeek V4 Flash DS4 paired-Spark development smoke",
+    "description": "Reviewed immutable paired-Spark DS4 development acceptance recipe for DeepSeek V4 Flash.",
     "tags": [
       "deepseek",
       "development",
@@ -17,14 +17,14 @@
     "kind": "model-version",
     "publisher": "vonk",
     "slug": "development-deepseek-version",
-    "content_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+    "content_sha256": "f14e8e9fc162266548866fa3f2f2516bc65e3ffd1012da5e3bc876538f3d8a32"
   },
   "execution": {
     "harness": {
       "kind": "execution-harness",
       "publisher": "vonk",
       "slug": "development-deepseek-smoke",
-      "content_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+      "content_sha256": "cb039d05b9c75a3ce4533c774f9f92cbd812a3c00a44a93dc4649c0821907af7"
     },
     "patch_bundle": null
   },
@@ -88,7 +88,7 @@
       "kind": "runtime-distribution",
       "publisher": "vonk",
       "slug": "ds4-smoke-linux-arm64",
-      "content_sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+      "content_sha256": "735ff5568f506f6a30f1fa872fb93567743c0d3dcce90c759ec50e6e86990f30"
     },
     "entrypoint": [
       "/opt/vonk/model-smoke"

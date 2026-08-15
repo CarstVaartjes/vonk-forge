@@ -144,11 +144,11 @@ def _classify(
         )
     elif top == "runtime":
         disposition, destination, reason, detail, blocking = (
-            ImportDisposition.TRANSFORMED,
-            "/runtime/adapter",
-            "runtime.adapter",
-            "The WorkloadRun runtime name is normalized to a typed Vonk runtime adapter.",
-            False,
+            ImportDisposition.RESOLUTION_REQUIRED,
+            "/execution/harness",
+            "execution.harness",
+            "The WorkloadRun runtime name is not immutable execution-harness authority; select an exact resolved harness and runtime distribution.",
+            True,
         )
     elif top == "container":
         immutable = (
@@ -269,7 +269,7 @@ def _draft(
     maximum = source.max_nodes or minimum
     node_count = min(maximum, minimum + 63)
     family = projection.family if projection is not None else source.runtime
-    adapter = re.sub(r"[^a-z0-9_]+", "_", family.lower()).strip("_") or "custom"
+    runtime_family = re.sub(r"[^a-z0-9_]+", "_", family.lower()).strip("_") or "custom"
     entrypoints = {
         "vllm": ["vllm", "serve", "/models"],
         "sglang": ["python", "-m", "sglang.launch_server", "--model-path", "/models"],
@@ -286,7 +286,7 @@ def _draft(
         },
         "model": _catalog_reference("model-version", f"{slug}-version"),
         "execution": {
-            "harness": _catalog_reference("execution-harness", f"{adapter}-openai"),
+            "harness": _catalog_reference("execution-harness", "unresolved-harness"),
             "patch_bundle": None,
         },
         "build": {
@@ -321,9 +321,9 @@ def _draft(
         ],
         "runtime": {
             "distribution": _catalog_reference(
-                "runtime-distribution", f"{adapter}-linux-arm64"
+                "runtime-distribution", "unresolved-distribution"
             ),
-            "entrypoint": entrypoints.get(adapter, [adapter]),
+            "entrypoint": entrypoints.get(runtime_family, [runtime_family]),
             "arguments": projection.recipe_arguments()
             if projection is not None
             else [],

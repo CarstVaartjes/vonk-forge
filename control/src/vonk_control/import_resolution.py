@@ -206,6 +206,7 @@ def resolve_import(
             in {
                 "/container",
                 "/model_revision",
+                "/runtime",
                 "/@missing/resources",
                 "/@missing/security",
                 "/@missing/topology-fabric",

@@ -25,6 +25,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 SYNTHETIC_ROOT = ROOT / "control/tests/fixtures/recipes/dev-http-smoke"
 MODEL_ROOT = ROOT / "config/recipes/development"
+DEVELOPMENT_CATALOG_ROOT = ROOT / "config/catalog/development"
 SYNTHETIC_STATES = (
     "inventory-ready",
     "recipe-resolved",
@@ -68,6 +69,11 @@ MAXIMUM_EVIDENCE_BYTES = 2 * 1024 * 1024
 MODEL_ACCEPTANCE_MAX_TOKENS = 128
 SOURCE_MEDIA_TYPE = "application/vnd.vonk-forge.source-bundle.v1+tar"
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
+CATALOG_SLUG = re.compile(r"[a-z0-9][a-z0-9-]{1,62}\Z")
+SENSITIVE_KEY = re.compile(
+    r"(?:^|_)(?:authorization|credential|password|secret|token|private_key|certificate)(?:$|_)",
+    re.IGNORECASE,
+)
 
 
 class SliceError(RuntimeError):
@@ -288,6 +294,7 @@ class Client:
         *,
         content_type: str = "application/json",
         allowed: tuple[int, ...] = (200, 201, 202),
+        query: dict[str, str | int] | None = None,
     ) -> tuple[int, object | None]:
         if not path.startswith("/") or "?" in path or "#" in path:
             raise SliceError("request path is invalid")
@@ -298,8 +305,10 @@ class Client:
             data = payload
         else:
             data = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        query_string = urllib.parse.urlencode(query or {})
+        request_path = path + (f"?{query_string}" if query_string else "")
         request = urllib.request.Request(
-            self.base + path,
+            self.base + request_path,
             data=data,
             method=method,
             headers={
@@ -419,6 +428,122 @@ def _recipe_content_digest(document: dict[str, object]) -> str:
         separators=(",", ":"),
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _sensitive_catalog_path(value: object, path: str = "$") -> str | None:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if SENSITIVE_KEY.search(str(key)):
+                return f"{path}.{key}"
+            found = _sensitive_catalog_path(child, f"{path}.{key}")
+            if found is not None:
+                return found
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            found = _sensitive_catalog_path(child, f"{path}[{index}]")
+            if found is not None:
+                return found
+    return None
+
+
+def _reference_identity(value: object) -> tuple[str, str, str, str]:
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"kind", "publisher", "slug", "content_sha256"}
+        or value.get("kind")
+        not in {
+            "model-group",
+            "model",
+            "model-version",
+            "execution-harness",
+            "runtime-distribution",
+            "patch-bundle",
+        }
+        or CATALOG_SLUG.fullmatch(str(value.get("publisher", ""))) is None
+        or CATALOG_SLUG.fullmatch(str(value.get("slug", ""))) is None
+        or SHA256.fullmatch(str(value.get("content_sha256", ""))) is None
+    ):
+        raise SliceError("development catalog reference is invalid")
+    return (
+        str(value["kind"]),
+        str(value["publisher"]),
+        str(value["slug"]),
+        str(value["content_sha256"]),
+    )
+
+
+def _catalog_documents(
+    path: Path, recipe: dict[str, object]
+) -> tuple[tuple[dict[str, object], str], ...]:
+    try:
+        paths = sorted(path.glob("*.json"))
+        if not 1 <= len(paths) <= 32:
+            raise SliceError("development catalog input is invalid")
+        documents = [json.loads(item.read_text(encoding="utf-8")) for item in paths]
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise SliceError("development catalog input is invalid") from error
+    result: list[tuple[dict[str, object], str]] = []
+    resolved: set[tuple[str, str, str, str]] = set()
+    for document in documents:
+        if not isinstance(document, dict) or _sensitive_catalog_path(document):
+            raise SliceError("development catalog input is invalid")
+        identity = document.get("identity")
+        kind = document.get("kind")
+        if (
+            document.get("schema_version") != 1
+            or not isinstance(identity, dict)
+            or CATALOG_SLUG.fullmatch(str(identity.get("publisher", ""))) is None
+            or CATALOG_SLUG.fullmatch(str(identity.get("slug", ""))) is None
+            or kind
+            not in {
+                "model-group",
+                "model",
+                "model-version",
+                "execution-harness",
+                "runtime-distribution",
+                "patch-bundle",
+            }
+        ):
+            raise SliceError("development catalog input is invalid")
+        dependency = {
+            "model": "model_group",
+            "model-version": "model",
+            "runtime-distribution": "implements_harness",
+            "patch-bundle": "applies_to",
+        }.get(str(kind))
+        if (
+            dependency is not None
+            and _reference_identity(document.get(dependency)) not in resolved
+        ):
+            raise SliceError("development catalog dependency order is invalid")
+        digest = _recipe_content_digest(document)
+        exact = (
+            str(kind),
+            str(identity["publisher"]),
+            str(identity["slug"]),
+            digest,
+        )
+        if exact in resolved:
+            raise SliceError("development catalog input is invalid")
+        resolved.add(exact)
+        result.append((document, digest))
+    try:
+        recipe_references = (
+            _reference_identity(recipe.get("model")),
+            _reference_identity(recipe["execution"]["harness"]),
+            _reference_identity(recipe["runtime"]["distribution"]),
+        )
+        patch_reference = recipe["execution"].get("patch_bundle")
+        if patch_reference is not None:
+            recipe_references = (
+                *recipe_references,
+                _reference_identity(patch_reference),
+            )
+    except (KeyError, TypeError) as error:
+        raise SliceError("recipe catalog references are invalid") from error
+    if not set(recipe_references) <= resolved:
+        raise SliceError("recipe catalog references do not match checked-in entities")
+    return tuple(result)
 
 
 def _model_qualification(
@@ -548,11 +673,12 @@ class Runner:
         )
         # Tokens remain only inside the clients and are never persisted or printed.
         del admin_token, inference_token
-        self.recipe_path = args.recipe or (
-            SYNTHETIC_ROOT / "recipe.json"
-            if args.phase == "synthetic"
-            else MODEL_ROOT / "model-smoke.json"
-        )
+        default_recipes = {
+            "synthetic": SYNTHETIC_ROOT / "recipe.json",
+            "model-single": MODEL_ROOT / "model-smoke-single.json",
+            "model-multinode": MODEL_ROOT / "model-smoke-pair.json",
+        }
+        self.recipe_path = args.recipe or default_recipes[args.phase]
         try:
             self.recipe = json.loads(self.recipe_path.read_text(encoding="utf-8"))
             self.expected = (
@@ -568,6 +694,18 @@ class Runner:
             raise SliceError("recipe acceptance input is invalid") from error
         if not isinstance(self.recipe, dict) or not isinstance(self.expected, dict):
             raise SliceError("recipe acceptance input is invalid")
+        if args.catalog is not None:
+            catalog_path = args.catalog
+        elif args.phase == "synthetic":
+            catalog_path = DEVELOPMENT_CATALOG_ROOT / "dev-http-smoke"
+        elif self.recipe_path.name in {
+            "model-smoke-single.json",
+            "model-smoke-pair.json",
+        }:
+            catalog_path = DEVELOPMENT_CATALOG_ROOT / "model-smoke"
+        else:
+            catalog_path = DEVELOPMENT_CATALOG_ROOT / self.recipe_path.stem
+        self.catalog_documents = _catalog_documents(catalog_path, self.recipe)
         self.recipe_digest = _recipe_content_digest(self.recipe)
         self.slug = str(self.recipe.get("identity", {}).get("slug", ""))
         if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,62}", self.slug):
@@ -590,10 +728,16 @@ class Runner:
                 raise SliceError("failure rank is only valid for multi-node acceptance")
             self.topology_name = "solo"
         self.targets = targets
+        model_companion = (
+            MODEL_ROOT / "model-smoke"
+            if self.recipe_path.name
+            in {"model-smoke-single.json", "model-smoke-pair.json"}
+            else self.recipe_path
+        )
         self.source_context = args.source_context or (
             self.recipe_path.parent / "context"
             if args.phase == "synthetic"
-            else self.recipe_path.with_name(f"{self.recipe_path.stem}-context")
+            else model_companion.with_name(f"{model_companion.stem}-context")
         )
         self.qualification: dict[str, Any] | None = None
         qualification_sha256: str | None = None
@@ -611,7 +755,7 @@ class Runner:
                 builder_node=args.builder_node,
                 target_nodes=targets,
                 recipe=self.recipe,
-                recipe_path=self.recipe_path,
+                recipe_path=model_companion,
                 source_context=self.source_context,
             )
         expected_inputs = {
@@ -821,6 +965,7 @@ class Runner:
         )
 
     def recipe_resolved(self) -> None:
+        self._ensure_catalog_entities()
         _, listed_payload = self.control.request("GET", "/api/v1/catalog/recipes")
         listed = _object(listed_payload, "recipe catalog").get("recipes")
         existing = (
@@ -899,6 +1044,97 @@ class Runner:
         ):
             raise SliceError("resolved recipe does not match acceptance input")
         self.complete("recipe-resolved", fields)
+
+    def _ensure_catalog_entities(self) -> None:
+        for document, digest in self.catalog_documents:
+            identity = document["identity"]
+            if not isinstance(identity, dict):
+                raise SliceError("development catalog input is invalid")
+            kind = str(document["kind"])
+            publisher = str(identity["publisher"])
+            slug = str(identity["slug"])
+            existing: dict[str, Any] | None = None
+            cursor: str | None = None
+            while True:
+                query: dict[str, str | int] = {
+                    "kind": kind,
+                    "publisher": publisher,
+                    "limit": 100,
+                }
+                if cursor is not None:
+                    query["cursor"] = cursor
+                _, listed_payload = self.control.request(
+                    "GET", "/api/v1/catalog/entities", query=query
+                )
+                listed = _object(listed_payload, "catalog entity list")
+                entities = listed.get("entities")
+                if not isinstance(entities, list):
+                    raise SliceError("catalog entity list response is invalid")
+                existing = next(
+                    (
+                        item
+                        for item in entities
+                        if isinstance(item, dict) and item.get("slug") == slug
+                    ),
+                    None,
+                )
+                if existing is not None:
+                    break
+                next_cursor = listed.get("next_cursor")
+                if next_cursor is None:
+                    break
+                if not isinstance(next_cursor, str):
+                    raise SliceError("catalog entity list response is invalid")
+                cursor = next_cursor
+            if existing is None:
+                _, created_payload = self.control.request(
+                    "POST", "/api/v1/catalog/entities", {"document": document}
+                )
+                current = _object(created_payload, "catalog entity creation")
+            else:
+                current = existing
+            if (
+                current.get("kind") != kind
+                or current.get("publisher") != publisher
+                or current.get("slug") != slug
+                or current.get("document") != document
+            ):
+                raise SliceError(
+                    "existing catalog entity does not match checked-in input"
+                )
+            if current.get("lifecycle") == "resolved":
+                if current.get("content_sha256") != digest:
+                    raise SliceError(
+                        "existing catalog entity does not match checked-in input"
+                    )
+                continue
+            entity_id = current.get("entity_id")
+            revision_number = current.get("revision_number")
+            if (
+                current.get("lifecycle") != "draft"
+                or not isinstance(entity_id, str)
+                or not isinstance(revision_number, int)
+            ):
+                raise SliceError(
+                    "existing catalog entity does not match checked-in input"
+                )
+            _, resolved_payload = self.control.request(
+                "POST",
+                f"/api/v1/catalog/entities/{entity_id}/resolve",
+                {"expected_revision": revision_number},
+            )
+            resolved = _object(resolved_payload, "catalog entity resolution")
+            if (
+                resolved.get("kind") != kind
+                or resolved.get("publisher") != publisher
+                or resolved.get("slug") != slug
+                or resolved.get("document") != document
+                or resolved.get("lifecycle") != "resolved"
+                or resolved.get("content_sha256") != digest
+            ):
+                raise SliceError(
+                    "resolved catalog entity does not match checked-in input"
+                )
 
     def source_verified(self) -> None:
         archive, digest, file_count = _source_bundle(self.source_context)
@@ -1530,6 +1766,7 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--target-node", action="append", required=True)
     parser.add_argument("--evidence-file", type=Path, required=True)
     parser.add_argument("--recipe", type=Path)
+    parser.add_argument("--catalog", type=Path)
     parser.add_argument("--source-context", type=Path)
     parser.add_argument("--qualification-file", type=Path)
     parser.add_argument("--failure-node")
@@ -1546,6 +1783,8 @@ def _arguments() -> argparse.Namespace:
     args.evidence_file = args.evidence_file.resolve()
     if args.recipe is not None:
         args.recipe = args.recipe.resolve()
+    if args.catalog is not None:
+        args.catalog = args.catalog.resolve()
     if args.source_context is not None:
         args.source_context = args.source_context.resolve()
     if args.qualification_file is not None:

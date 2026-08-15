@@ -147,7 +147,7 @@ def _evidence() -> dict[str, object]:
 
 def test_checked_recipe_memory_envelope_matches_healthy_spark_qualification() -> None:
     recipe = json.loads(
-        (ROOT / "config/recipes/development/model-smoke.json").read_text()
+        (ROOT / "config/recipes/development/model-smoke-pair.json").read_text()
     )
     topology = json.loads(
         (ROOT / "config/recipes/development/model-smoke-multinode.json").read_text()
@@ -461,7 +461,7 @@ def test_repository_model_documents_qualify_and_share_exact_identities(
         (ROOT / "config/recipes/development/model-smoke-multinode.json").read_text()
     )
     recipe = json.loads(
-        (ROOT / "config/recipes/development/model-smoke.json").read_text()
+        (ROOT / "config/recipes/development/model-smoke-pair.json").read_text()
     )
     dockerfile = (MODEL_CONTEXT / "Dockerfile").read_text(encoding="utf-8")
     from_instructions = [
@@ -688,7 +688,7 @@ def test_model_recipe_source_bundle_ships_the_fabric_gate() -> None:
         "vonk_control.source_bundles"
     ).generate_source_bundle
     recipe = json.loads(
-        (ROOT / "config/recipes/development/model-smoke.json").read_text()
+        (ROOT / "config/recipes/development/model-smoke-pair.json").read_text()
     )
     dockerfile = (MODEL_CONTEXT / "Dockerfile").read_text(encoding="utf-8")
     files = {
