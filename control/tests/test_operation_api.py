@@ -1152,3 +1152,38 @@ def test_fleet_operation_registry_keeps_visual_and_evidence_contracts_distinct()
     assert paths["/api/v1/nodes/status"]["get"]["security"] == [
         {"BearerAuth": []}
     ]
+
+
+def test_recipe_action_preview_registry_is_explicit_and_strict() -> None:
+    client, _operator, _reconciler, _audits = _client()
+
+    schema = operation_api.admin_openapi_schema(client.app)
+    paths = schema["paths"]
+
+    assert paths["/api/v1/recipes/stop-plans/preview"]["post"]["operationId"] == (
+        "previewRecipeStop"
+    )
+    assert (
+        paths["/api/v1/recipes/uninstall-plans/preview"]["post"]["operationId"]
+        == "previewRecipeUninstall"
+    )
+    assert paths["/api/v1/recipes/runs/{run_id}/stop"]["post"]["operationId"] == (
+        "stopRecipeRun"
+    )
+    assert (
+        paths["/api/v1/recipes/installations/{installation_id}/uninstall"]["post"][
+            "operationId"
+        ]
+        == "uninstallRecipe"
+    )
+    for component in (
+        "StopPreviewRequest",
+        "StopRequest",
+        "UninstallPreviewRequest",
+        "UninstallRequest",
+        "StopPlanResponse",
+        "UninstallPlanResponse",
+    ):
+        assert (
+            schema["components"]["schemas"][component]["additionalProperties"] is False
+        )

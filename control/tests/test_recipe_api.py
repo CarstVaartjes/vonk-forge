@@ -8,6 +8,14 @@ from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.cluster_mappings import ClusterMappingPlacement, ClusterMappingPlan
 from vonk_control.install_admission import InstallNodePlan, InstallPlan
+from vonk_control.recipe_action_plans import (
+    ActionReason,
+    StopNodeImpact,
+    StopPlan,
+    UninstallConsequences,
+    UninstallNodeImpact,
+    UninstallPlan,
+)
 from vonk_control.recipe_builds import RecipeBuildPlan
 from vonk_control.recipe_operations import (
     RecipeOperationView,
@@ -94,6 +102,49 @@ class Recipes:
                 ),
             ),
             plan_digest="c" * 64,
+        )
+        self.stop_plan = StopPlan(
+            run_id=RUN,
+            installation_id=INSTALLATION,
+            recipe_revision_id=REVISION,
+            alias="qwen",
+            run_state="running",
+            route_state="published",
+            route_generation=7,
+            route_digest="d" * 64,
+            authority_digest="c" * 64,
+            allowed=True,
+            route_withdrawal=True,
+            nodes=(StopNodeImpact(NODE, 0, "entrypoint", "running", 200, 200),),
+            total_active_memory_reservation_bytes=200,
+            blockers=(),
+            warnings=(
+                ActionReason(
+                    "stop.capacity_release_deferred",
+                    "Capacity remains reserved until every selected rank stops.",
+                ),
+            ),
+            plan_digest="4" * 64,
+        )
+        self.uninstall_plan = UninstallPlan(
+            installation_id=INSTALLATION,
+            recipe_id="00000000-0000-4000-8000-000000000007",
+            recipe_revision_id=REVISION,
+            recipe_content_sha256="a" * 64,
+            recipe_content={"schema_version": 1},
+            installation_authority_digest="a" * 64,
+            original_plan_digest="b" * 64,
+            installation_state="installed",
+            allowed=True,
+            nodes=(UninstallNodeImpact(NODE, 0, "entrypoint", "installed", 120),),
+            bytes_removed=120,
+            active_runs=(),
+            active_run_count=0,
+            active_runs_truncated=False,
+            blockers=(),
+            warnings=(),
+            consequences=UninstallConsequences(),
+            plan_digest="5" * 64,
         )
         self.calls: list[tuple[str, object]] = []
         self.mapping_plan = ClusterMappingPlan(
@@ -184,8 +235,12 @@ class Recipes:
     def stop(self, run_id, **kwargs):
         self.calls.append(("stop", (run_id, kwargs)))
         return RecipeOperationView(
-            OPERATION, "recipe.stop", run_id, "running", "c" * 64, (NODE,), None
+            OPERATION, "recipe.stop", run_id, "running", "4" * 64, (NODE,), None
         )
+
+    def preview_stop(self, run_id):
+        self.calls.append(("preview_stop", run_id))
+        return self.stop_plan
 
     def run_status(self, run_id):
         if run_id != RUN:
@@ -216,10 +271,14 @@ class Recipes:
             "recipe.uninstall",
             installation_id,
             "running",
-            "b" * 64,
+            "5" * 64,
             (NODE,),
             None,
         )
+
+    def preview_uninstall(self, installation_id):
+        self.calls.append(("preview_uninstall", installation_id))
+        return self.uninstall_plan
 
     def retry(self, operation_id, **kwargs):
         self.calls.append(("retry", (operation_id, kwargs)))
@@ -408,20 +467,36 @@ def test_start_progress_stop_retry_and_uninstall_routes_are_stable() -> None:
     progress = client.get(
         f"/api/v1/recipes/operations/{OPERATION}", headers=headers("viewer")
     )
+    stop_preview = client.post(
+        "/api/v1/recipes/stop-plans/preview",
+        headers=headers(),
+        json={"run_id": RUN},
+    )
     stop = client.post(
         f"/api/v1/recipes/runs/{RUN}/stop",
         headers=headers(),
-        json={"request_key": "10000000-0000-4000-8000-000000000003"},
+        json={
+            "plan_digest": "4" * 64,
+            "request_key": "10000000-0000-4000-8000-000000000003",
+        },
     )
     retry = client.post(
         f"/api/v1/recipes/operations/{OPERATION}/retry",
         headers=headers(),
         json={"request_key": "10000000-0000-4000-8000-000000000004"},
     )
+    uninstall_preview = client.post(
+        "/api/v1/recipes/uninstall-plans/preview",
+        headers=headers(),
+        json={"installation_id": INSTALLATION},
+    )
     uninstall = client.post(
         f"/api/v1/recipes/installations/{INSTALLATION}/uninstall",
         headers=headers(),
-        json={"request_key": "10000000-0000-4000-8000-000000000005"},
+        json={
+            "plan_digest": "5" * 64,
+            "request_key": "10000000-0000-4000-8000-000000000005",
+        },
     )
 
     assert {
@@ -431,12 +506,56 @@ def test_start_progress_stop_retry_and_uninstall_routes_are_stable() -> None:
         uninstall.status_code,
     } == {202}
     assert progress.status_code == 200
+    assert stop_preview.status_code == uninstall_preview.status_code == 200
+    assert stop_preview.json()["total_active_memory_reservation_bytes"] == 200
+    assert uninstall_preview.json()["consequences"] == {
+        "catalog_retained": True,
+        "automatic_stop": False,
+        "reinstall_required": True,
+    }
     paths = client.get("/openapi.json").json()["paths"]
     assert (
         paths["/api/v1/recipes/install-plans/preview"]["post"]["operationId"]
         == "previewRecipeInstall"
     )
     assert paths["/api/v1/recipes/runs"]["post"]["operationId"] == "startRecipeRun"
+    assert (
+        paths["/api/v1/recipes/stop-plans/preview"]["post"]["operationId"]
+        == "previewRecipeStop"
+    )
+    assert (
+        paths["/api/v1/recipes/uninstall-plans/preview"]["post"]["operationId"]
+        == "previewRecipeUninstall"
+    )
+
+
+def test_stop_and_uninstall_contracts_are_admin_only_strict_and_digest_bound() -> None:
+    client, headers, _recipes, _audits = setup()
+
+    denied = client.post(
+        "/api/v1/recipes/stop-plans/preview",
+        headers=headers("operator"),
+        json={"run_id": RUN},
+    )
+    extra = client.post(
+        "/api/v1/recipes/uninstall-plans/preview",
+        headers=headers(),
+        json={"installation_id": INSTALLATION, "force": True},
+    )
+    stop_unbound = client.post(
+        f"/api/v1/recipes/runs/{RUN}/stop",
+        headers=headers(),
+        json={"request_key": "10000000-0000-4000-8000-000000000006"},
+    )
+    uninstall_unbound = client.post(
+        f"/api/v1/recipes/installations/{INSTALLATION}/uninstall",
+        headers=headers(),
+        json={"request_key": "10000000-0000-4000-8000-000000000007"},
+    )
+
+    assert denied.status_code == 403
+    assert extra.status_code == 422
+    assert stop_unbound.status_code == uninstall_unbound.status_code == 422
 
 
 def test_administrator_run_status_is_typed_rank_health_without_secrets() -> None:

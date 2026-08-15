@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, event, select, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
@@ -25,6 +25,7 @@ from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
 )
+from vonk_control.litellm import LiteLlmGeneration
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
@@ -33,19 +34,24 @@ from vonk_control.models import (
     Base,
     InstallationNode,
     Job,
+    LocalRecipe,
+    LocalRecipeRevision,
     NodeArtifact,
     RecipeBuild,
     RecipeInstallation,
     RecipeRun,
     ResourceReservation,
+    RoutePublicationOwner,
     RunNode,
 )
+from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operations import (
     RecipeOperationConflict,
     RecipeOperationService,
     RecipeRunObservation,
     record_recipe_run_observations,
 )
+from vonk_control.recipe_routes import RecipeRouteService
 from vonk_control.run_admission import RunAdmissionService
 
 
@@ -89,6 +95,35 @@ class FailingQueue(RecordingQueue):
         raise RuntimeError("queue write failed")
 
 
+class ConcurrentPublisher:
+    def __init__(self) -> None:
+        self._guard = threading.Lock()
+        self._generation = 0
+        self.aliases: list[tuple[str, ...]] = []
+
+    def publish(self, state, _policy):
+        with self._guard:
+            self._generation += 1
+            self.aliases.append(tuple(sorted(state.aliases)))
+            return LiteLlmGeneration(
+                self._generation,
+                state.digest,
+                state.digest,
+                "memory",
+            )
+
+    def publish_empty(self, route_digest):
+        with self._guard:
+            self._generation += 1
+            self.aliases.append(())
+            return LiteLlmGeneration(
+                self._generation,
+                route_digest,
+                route_digest,
+                "memory",
+            )
+
+
 NOW = datetime(2026, 8, 7, 12, tzinfo=UTC)
 
 
@@ -111,7 +146,9 @@ def start_evidence(payload: dict[str, object]) -> dict[str, object]:
     }
 
 
-def setup_services(tmp_path: Path, *, nodes: int = 1, engine=None):
+def setup_services(
+    tmp_path: Path, *, nodes: int = 1, engine=None, route_withdrawer=None
+):
     engine = engine or create_engine(
         f"sqlite:///{tmp_path / 'operations.sqlite'}",
         connect_args={"check_same_thread": False},
@@ -272,8 +309,154 @@ def setup_services(tmp_path: Path, *, nodes: int = 1, engine=None):
         run_admission=run,
         agent_jobs=queue,
         clock=lambda: NOW,
+        route_withdrawer=route_withdrawer,
     )
     return sessions, service, queue, mapping_id, build_id, node_ids
+
+
+def installed_recipe(
+    service: RecipeOperationService,
+    mapping_id: str,
+    build_id: str,
+    nodes: tuple[str, ...],
+    *,
+    request_id: str,
+):
+    plan = service.preview_install(mapping_id, build_id)
+    operation = service.install(
+        plan,
+        plan_digest=plan.plan_digest,
+        actor="admin",
+        request_id=request_id,
+    )
+    for node_id in nodes:
+        service.record_node_result(
+            operation.id,
+            node_id,
+            succeeded=True,
+            evidence={"installed_bytes": 120},
+        )
+    return operation
+
+
+def started_recipe(
+    sessions,
+    service: RecipeOperationService,
+    installation_id: str,
+    nodes: tuple[str, ...],
+    *,
+    request_id: str,
+    alias: str = "qwen",
+):
+    plan = service.preview_run(installation_id)
+    operation = service.start(
+        plan,
+        plan_digest=plan.plan_digest,
+        alias=alias,
+        actor="admin",
+        request_id=request_id,
+    )
+    with sessions() as session:
+        children = tuple(
+            session.scalars(
+                select(AgentOperation)
+                .where(AgentOperation.parent_job_id == operation.id)
+                .order_by(AgentOperation.node_id)
+            )
+        )
+    for child in children:
+        service.record_node_result(
+            operation.id,
+            child.node_id,
+            succeeded=True,
+            evidence=start_evidence(child.payload),
+        )
+    assert {child.node_id for child in children} == set(nodes)
+    return operation
+
+
+def bind_route_publications(
+    sessions,
+    service: RecipeOperationService,
+    publisher: ConcurrentPublisher,
+) -> tuple[RecipeOperationService, RecipeRouteService]:
+    routes = RecipeRouteService(
+        sessions,
+        publisher=publisher,
+        management_policy=ManagementAddressPolicy.parse("192.168.1.0/24"),
+        clock=lambda: NOW,
+        maximum_age_seconds=300,
+    )
+    bound = RecipeOperationService(
+        sessions,
+        install_admission=service._install_admission,
+        run_admission=service._run_admission,
+        agent_jobs=service._agent_jobs,
+        clock=lambda: NOW,
+        route_publications=routes,
+    )
+    return bound, routes
+
+
+def clone_running_run(sessions, source_run_id: str, *, alias: str) -> str:
+    run_id = str(uuid.uuid4())
+    authority = hashlib.sha256(alias.encode()).hexdigest()
+    with sessions.begin() as session:
+        source = session.get(RecipeRun, source_run_id)
+        source_nodes = tuple(
+            session.scalars(
+                select(RunNode)
+                .where(RunNode.run_id == source_run_id)
+                .order_by(RunNode.rank)
+            )
+        )
+        assert source is not None
+        session.add(
+            RecipeRun(
+                id=run_id,
+                installation_id=source.installation_id,
+                mapping_id=source.mapping_id,
+                mapping_generation=source.mapping_generation,
+                alias=alias,
+                plan_digest=authority,
+                plan={**source.plan, "plan_digest": authority},
+                state="running",
+                route_state="pending",
+                actor="admin",
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.add_all(
+            RunNode(
+                run_id=run_id,
+                node_id=node.node_id,
+                rank=node.rank,
+                role=node.role,
+                state="running",
+                port=node.port + 10,
+                reserved_memory_bytes=node.reserved_memory_bytes,
+                endpoint=dict(node.endpoint) if node.endpoint is not None else None,
+                evidence_digest=node.evidence_digest,
+                updated_at=NOW,
+            )
+            for node in source_nodes
+        )
+        session.add_all(
+            ResourceReservation(
+                node_id=node.node_id,
+                kind="unified-memory",
+                resource_key=authority,
+                amount_bytes=node.reserved_memory_bytes,
+                owner_kind="run",
+                owner_id=run_id,
+                state="active",
+                plan_digest=authority,
+                created_at=NOW,
+            )
+            for node in source_nodes
+        )
+    return run_id
 
 
 @pytest.fixture(scope="module")
@@ -429,7 +612,10 @@ def test_run_admission_and_start_queue_roll_back_together(tmp_path: Path) -> Non
 
 
 def test_stop_state_and_queue_creation_roll_back_together(tmp_path: Path) -> None:
-    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    withdrawn: list[str] = []
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, route_withdrawer=withdrawn.append
+    )
     install_plan = service.preview_install(mapping_id, build_id)
     install = service.install(
         install_plan,
@@ -455,15 +641,454 @@ def test_stop_state_and_queue_creation_roll_back_together(tmp_path: Path) -> Non
         evidence = start_evidence(child.payload)
     service.record_node_result(start.id, nodes[0], succeeded=True, evidence=evidence)
     service._agent_jobs = FailingQueue()
+    plan = service.preview_stop(start.owner_id)
 
     with pytest.raises(RuntimeError, match="queue write failed"):
-        service.stop(start.owner_id, actor="admin", request_id="1" * 35 + "c")
+        service.stop(
+            start.owner_id,
+            plan_digest=plan.plan_digest,
+            actor="admin",
+            request_id="1" * 35 + "c",
+        )
 
     with sessions() as session:
         assert session.get(RecipeRun, start.owner_id).state == "running"
         assert (
             session.scalar(select(Job).where(Job.request_id == "1" * 35 + "c")) is None
         )
+    assert withdrawn == []
+
+
+def test_stop_withdrawal_failure_rolls_back_job_and_run_state(tmp_path: Path) -> None:
+    withdrawn: list[str] = []
+
+    def fail_withdrawal(run_id: str) -> None:
+        withdrawn.append(run_id)
+        raise RuntimeError("route withdrawal failed")
+
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, route_withdrawer=fail_withdrawal
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="1" * 35 + "d"
+    )
+    run = started_recipe(
+        sessions,
+        service,
+        installation.owner_id,
+        nodes,
+        request_id="1" * 35 + "e",
+    )
+    with sessions.begin() as session:
+        stored = session.get(RecipeRun, run.owner_id)
+        assert stored is not None
+        stored.route_state = "published"
+    plan = service.preview_stop(run.owner_id)
+
+    with pytest.raises(RuntimeError, match="route withdrawal failed"):
+        service.stop(
+            run.owner_id,
+            plan_digest=plan.plan_digest,
+            actor="admin",
+            request_id="1" * 35 + "f",
+        )
+
+    assert withdrawn == [run.owner_id]
+    with sessions() as session:
+        stored = session.get(RecipeRun, run.owner_id)
+        assert stored is not None
+        assert (stored.state, stored.route_state) == ("running", "published")
+        assert (
+            session.scalar(select(Job).where(Job.request_id == "1" * 35 + "f")) is None
+        )
+
+
+def test_stop_commit_failure_after_publication_is_safe_side(tmp_path: Path) -> None:
+    withdrawn: list[str] = []
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, route_withdrawer=withdrawn.append
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="2" * 35 + "c"
+    )
+    run = started_recipe(
+        sessions,
+        service,
+        installation.owner_id,
+        nodes,
+        request_id="2" * 35 + "d",
+    )
+    with sessions.begin() as session:
+        stored = session.get(RecipeRun, run.owner_id)
+        assert stored is not None
+        stored.route_state = "published"
+        session.add(
+            RoutePublicationOwner(
+                singleton_id=1,
+                reconciliation_id=None,
+                owner_generation=0,
+                updated_at=NOW,
+            )
+        )
+    plan = service.preview_stop(run.owner_id)
+
+    def fail_commit(_session) -> None:
+        raise RuntimeError("database commit failed")
+
+    event.listen(sessions.class_, "before_commit", fail_commit)
+    try:
+        with pytest.raises(RuntimeError, match="database commit failed"):
+            service.stop(
+                run.owner_id,
+                plan_digest=plan.plan_digest,
+                actor="admin",
+                request_id="2" * 35 + "e",
+            )
+    finally:
+        event.remove(sessions.class_, "before_commit", fail_commit)
+
+    assert withdrawn == [run.owner_id]
+    with sessions() as session:
+        stored = session.get(RecipeRun, run.owner_id)
+        assert stored is not None
+        assert (stored.state, stored.route_state) == ("running", "published")
+        assert (
+            session.scalar(select(Job).where(Job.request_id == "2" * 35 + "e")) is None
+        )
+
+
+def test_stop_preview_blocks_nonexact_reservation_authority(tmp_path: Path) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="2" * 35 + "f"
+    )
+    run = started_recipe(
+        sessions,
+        service,
+        installation.owner_id,
+        nodes,
+        request_id="2" * 35 + "0",
+    )
+    with sessions.begin() as session:
+        reservation = session.scalar(
+            select(ResourceReservation).where(
+                ResourceReservation.owner_kind == "run",
+                ResourceReservation.owner_id == run.owner_id,
+                ResourceReservation.kind == "unified-memory",
+            )
+        )
+        assert reservation is not None
+        reservation.plan_digest = "0" * 64
+
+    plan = service.preview_stop(run.owner_id)
+
+    assert plan.allowed is False
+    assert [reason.code for reason in plan.blockers] == [
+        "stop.reservation_membership_changed"
+    ]
+
+
+def test_stop_preview_is_stable_exact_and_defers_capacity_release(
+    tmp_path: Path,
+) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="2" * 35 + "a"
+    )
+    run = started_recipe(
+        sessions,
+        service,
+        installation.owner_id,
+        nodes,
+        request_id="2" * 35 + "b",
+    )
+
+    first = service.preview_stop(run.owner_id)
+    second = service.preview_stop(run.owner_id)
+
+    assert second == first
+    assert first.allowed is True
+    assert first.run_id == run.owner_id
+    assert first.installation_id == installation.owner_id
+    assert first.authority_digest == run.plan_digest
+    assert first.route_withdrawal is True
+    assert [(node.node_id, node.rank, node.role) for node in first.nodes] == [
+        (nodes[0], 0, "entrypoint"),
+        (nodes[1], 1, "worker"),
+    ]
+    assert [node.active_memory_reservation_bytes for node in first.nodes] == [225, 225]
+    assert first.total_active_memory_reservation_bytes == 450
+    assert [warning.code for warning in first.warnings] == [
+        "stop.capacity_release_deferred"
+    ]
+    assert len(first.plan_digest) == 64
+
+
+@pytest.mark.parametrize("changed_fact", ("state", "rank", "route", "reservation"))
+def test_stop_apply_rejects_stale_plan_before_route_or_queue_side_effects(
+    tmp_path: Path, changed_fact: str
+) -> None:
+    withdrawn: list[str] = []
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, route_withdrawer=withdrawn.append
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="3" * 35 + "a"
+    )
+    run = started_recipe(
+        sessions,
+        service,
+        installation.owner_id,
+        nodes,
+        request_id="3" * 35 + "b",
+    )
+    plan = service.preview_stop(run.owner_id)
+    with sessions.begin() as session:
+        stored_run = session.get(RecipeRun, run.owner_id)
+        rank = session.scalar(select(RunNode).where(RunNode.run_id == run.owner_id))
+        reservation = session.scalar(
+            select(ResourceReservation).where(
+                ResourceReservation.owner_kind == "run",
+                ResourceReservation.owner_id == run.owner_id,
+                ResourceReservation.kind == "unified-memory",
+            )
+        )
+        assert stored_run is not None and rank is not None and reservation is not None
+        if changed_fact == "state":
+            stored_run.state = "lost"
+        elif changed_fact == "rank":
+            rank.role = "changed"
+        elif changed_fact == "route":
+            stored_run.route_state = "failed"
+        else:
+            reservation.amount_bytes += 1
+
+    changed = service.preview_stop(run.owner_id)
+    assert changed.plan_digest != plan.plan_digest
+    with pytest.raises(RecipeOperationConflict, match="stale or blocked"):
+        service.stop(
+            run.owner_id,
+            plan_digest=plan.plan_digest,
+            actor="admin",
+            request_id="3" * 35 + "c",
+        )
+
+    assert withdrawn == []
+    with sessions() as session:
+        assert (
+            session.scalar(select(Job).where(Job.request_id == "3" * 35 + "c")) is None
+        )
+
+
+def test_stop_replay_is_bound_to_selected_run_kind_and_action_digest(
+    tmp_path: Path,
+) -> None:
+    withdrawn: list[str] = []
+    sessions, service, queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2, route_withdrawer=withdrawn.append
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="4" * 35 + "a"
+    )
+    first_run = started_recipe(
+        sessions,
+        service,
+        installation.owner_id,
+        nodes,
+        request_id="4" * 35 + "b",
+        alias="first",
+    )
+    second_run_id = str(uuid.uuid4())
+    second_authority = "9" * 64
+    with sessions.begin() as session:
+        source = session.get(RecipeRun, first_run.owner_id)
+        source_nodes = tuple(
+            session.scalars(
+                select(RunNode)
+                .where(RunNode.run_id == first_run.owner_id)
+                .order_by(RunNode.rank)
+            )
+        )
+        assert source is not None
+        second_plan_document = {**source.plan, "plan_digest": second_authority}
+        session.add(
+            RecipeRun(
+                id=second_run_id,
+                installation_id=source.installation_id,
+                mapping_id=source.mapping_id,
+                mapping_generation=source.mapping_generation,
+                alias="second",
+                plan_digest=second_authority,
+                plan=second_plan_document,
+                state="running",
+                route_state="published",
+                actor="admin",
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.add_all(
+            RunNode(
+                run_id=second_run_id,
+                node_id=node.node_id,
+                rank=node.rank,
+                role=node.role,
+                state=node.state,
+                port=node.port + 10,
+                reserved_memory_bytes=node.reserved_memory_bytes,
+                updated_at=NOW,
+            )
+            for node in source_nodes
+        )
+    first_plan = service.preview_stop(first_run.owner_id)
+    second_plan = service.preview_stop(second_run_id)
+    request_key = "4" * 35 + "d"
+
+    operation = service.stop(
+        first_run.owner_id,
+        plan_digest=first_plan.plan_digest,
+        actor="admin",
+        request_id=request_key,
+    )
+    replay = service.stop(
+        first_run.owner_id,
+        plan_digest=first_plan.plan_digest,
+        actor="admin",
+        request_id=request_key,
+    )
+    with pytest.raises(RecipeOperationConflict, match="request key"):
+        service.stop(
+            second_run_id,
+            plan_digest=second_plan.plan_digest,
+            actor="admin",
+            request_id=request_key,
+        )
+
+    assert replay == operation
+    assert operation.plan_digest == first_plan.plan_digest
+    assert operation.nodes == tuple(sorted(nodes))
+    assert withdrawn == [first_run.owner_id]
+    assert queue.available == 3
+    with sessions() as session:
+        children = tuple(
+            session.scalars(
+                select(AgentOperation)
+                .where(AgentOperation.parent_job_id == operation.id)
+                .order_by(AgentOperation.node_id)
+            )
+        )
+        assert len(children) == 2
+        assert {child.base_commit for child in children} == {first_run.plan_digest[:40]}
+        assert {child.payload["plan_digest"] for child in children} == {
+            first_run.plan_digest
+        }
+
+
+def test_concurrent_duplicate_stop_maps_to_one_operation_on_sqlite(
+    tmp_path: Path,
+) -> None:
+    withdrawn: list[str] = []
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, route_withdrawer=withdrawn.append
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="4" * 35 + "e"
+    )
+    run = started_recipe(
+        sessions,
+        service,
+        installation.owner_id,
+        nodes,
+        request_id="4" * 35 + "f",
+    )
+    plan = service.preview_stop(run.owner_id)
+    start = threading.Barrier(2)
+    request_key = "4" * 35 + "0"
+
+    def stop() -> str:
+        start.wait()
+        return service.stop(
+            run.owner_id,
+            plan_digest=plan.plan_digest,
+            actor="admin",
+            request_id=request_key,
+        ).id
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        operation_ids = list(pool.map(lambda _index: stop(), range(2)))
+
+    assert len(set(operation_ids)) == 1
+    assert withdrawn == [run.owner_id]
+    with sessions() as session:
+        assert (
+            len(
+                tuple(session.scalars(select(Job).where(Job.request_id == request_key)))
+            )
+            == 1
+        )
+
+
+def test_partial_multinode_stop_retains_every_active_capacity_reservation(
+    tmp_path: Path,
+) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="5" * 35 + "a"
+    )
+    run = started_recipe(
+        sessions,
+        service,
+        installation.owner_id,
+        nodes,
+        request_id="5" * 35 + "b",
+    )
+    with sessions() as session:
+        before = len(
+            tuple(
+                session.scalars(
+                    select(ResourceReservation).where(
+                        ResourceReservation.owner_kind == "run",
+                        ResourceReservation.owner_id == run.owner_id,
+                        ResourceReservation.state == "active",
+                    )
+                )
+            )
+        )
+    plan = service.preview_stop(run.owner_id)
+    operation = service.stop(
+        run.owner_id,
+        plan_digest=plan.plan_digest,
+        actor="admin",
+        request_id="5" * 35 + "c",
+    )
+
+    service.record_node_result(
+        operation.id, nodes[0], succeeded=True, evidence={"stopped": True}
+    )
+    service.record_node_result(
+        operation.id,
+        nodes[1],
+        succeeded=False,
+        evidence={"code": "stop.failed"},
+    )
+
+    assert service.get(operation.id).state == "failed"
+    with sessions() as session:
+        assert session.get(RecipeRun, run.owner_id).state == "failed"
+        active = tuple(
+            session.scalars(
+                select(ResourceReservation).where(
+                    ResourceReservation.owner_kind == "run",
+                    ResourceReservation.owner_id == run.owner_id,
+                    ResourceReservation.state == "active",
+                )
+            )
+        )
+        assert len(active) == before
 
 
 def test_partial_install_fails_as_a_group_and_can_retry(tmp_path: Path) -> None:
@@ -735,8 +1360,18 @@ def test_start_stop_and_uninstall_preserve_capacity_safely(tmp_path: Path) -> No
         assert child.payload["world_size"] == 1
         assert child.payload["master_address"] is None
         evidence = start_evidence(child.payload)
-    with pytest.raises(RecipeOperationConflict, match="active run"):
-        service.uninstall(install.owner_id, actor="admin", request_id="6" * 36)
+    blocked_uninstall = service.preview_uninstall(install.owner_id)
+    assert blocked_uninstall.allowed is False
+    assert [reason.code for reason in blocked_uninstall.blockers] == [
+        "uninstall.active_run"
+    ]
+    with pytest.raises(RecipeOperationConflict, match="stale or blocked"):
+        service.uninstall(
+            install.owner_id,
+            plan_digest=blocked_uninstall.plan_digest,
+            actor="admin",
+            request_id="6" * 36,
+        )
 
     service.record_node_result(
         start.id,
@@ -745,10 +1380,22 @@ def test_start_stop_and_uninstall_preserve_capacity_safely(tmp_path: Path) -> No
         evidence=evidence,
     )
     assert service.get(start.id).state == "succeeded"
-    stop = service.stop(start.owner_id, actor="admin", request_id="7" * 36)
+    stop_plan = service.preview_stop(start.owner_id)
+    stop = service.stop(
+        start.owner_id,
+        plan_digest=stop_plan.plan_digest,
+        actor="admin",
+        request_id="7" * 36,
+    )
     assert service.get(stop.id).state == "running"
-    with pytest.raises(RecipeOperationConflict, match="not stoppable"):
-        service.stop(start.owner_id, actor="admin", request_id="7" * 35 + "a")
+    blocked_stop = service.preview_stop(start.owner_id)
+    with pytest.raises(RecipeOperationConflict, match="stale or blocked"):
+        service.stop(
+            start.owner_id,
+            plan_digest=blocked_stop.plan_digest,
+            actor="admin",
+            request_id="7" * 35 + "a",
+        )
     service.record_node_result(
         stop.id, nodes[0], succeeded=True, evidence={"stopped": True}
     )
@@ -765,13 +1412,248 @@ def test_start_stop_and_uninstall_preserve_capacity_safely(tmp_path: Path) -> No
         assert run.state == "stopped"
         assert reservations == []
 
-    uninstall = service.uninstall(install.owner_id, actor="admin", request_id="8" * 36)
+    uninstall_plan = service.preview_uninstall(install.owner_id)
+    uninstall = service.uninstall(
+        install.owner_id,
+        plan_digest=uninstall_plan.plan_digest,
+        actor="admin",
+        request_id="8" * 36,
+    )
     service.record_node_result(
         uninstall.id, nodes[0], succeeded=True, evidence={"removed": True}
     )
     with sessions() as session:
         installation = session.get(RecipeInstallation, install.owner_id)
+        assert installation is not None
         assert installation.state == "uninstalled"
+        revision = session.get(LocalRecipeRevision, installation.recipe_revision_id)
+        assert revision is not None
+        assert session.get(LocalRecipe, revision.recipe_id) is not None
+
+
+def test_uninstall_preview_has_exact_bytes_content_and_fixed_consequences(
+    tmp_path: Path,
+) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="8" * 35 + "a"
+    )
+
+    first = service.preview_uninstall(installation.owner_id)
+    second = service.preview_uninstall(installation.owner_id)
+
+    assert second == first
+    assert first.allowed is True
+    assert first.installation_id == installation.owner_id
+    assert first.original_plan_digest == installation.plan_digest
+    assert first.bytes_removed == 240
+    assert [
+        (node.node_id, node.rank, node.role, node.installed_bytes)
+        for node in first.nodes
+    ] == [
+        (nodes[0], 0, "entrypoint", 120),
+        (nodes[1], 1, "worker", 120),
+    ]
+    assert first.active_runs == ()
+    assert first.consequences.catalog_retained is True
+    assert first.consequences.automatic_stop is False
+    assert first.consequences.reinstall_required is True
+    with sessions() as session:
+        stored = session.get(RecipeInstallation, installation.owner_id)
+        assert stored is not None
+        revision = session.get(LocalRecipeRevision, stored.recipe_revision_id)
+        assert revision is not None
+        assert first.installation_authority_digest == revision.content_sha256
+        assert first.recipe_content == revision.document
+
+    with sessions.begin() as session:
+        session.execute(
+            update(LocalRecipeRevision)
+            .where(LocalRecipeRevision.id == first.recipe_revision_id)
+            .values(document={**first.recipe_content, "description": "changed"})
+        )
+    assert service.preview_uninstall(installation.owner_id).plan_digest != (
+        first.plan_digest
+    )
+
+
+def test_uninstall_unknown_bytes_and_active_runs_block_without_implicit_stop(
+    tmp_path: Path,
+) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="8" * 35 + "b"
+    )
+    run = started_recipe(
+        sessions,
+        service,
+        installation.owner_id,
+        nodes,
+        request_id="8" * 35 + "c",
+    )
+    active = service.preview_uninstall(installation.owner_id)
+    assert active.allowed is False
+    assert [item.run_id for item in active.active_runs] == [run.owner_id]
+    with pytest.raises(RecipeOperationConflict, match="stale or blocked"):
+        service.uninstall(
+            installation.owner_id,
+            plan_digest=active.plan_digest,
+            actor="admin",
+            request_id="8" * 35 + "d",
+        )
+    with sessions() as session:
+        assert (
+            session.scalar(select(Job).where(Job.request_id == "8" * 35 + "d")) is None
+        )
+        assert (
+            session.scalar(
+                select(Job).where(
+                    Job.kind == "recipe.stop",
+                    Job.payload["owner_id"].as_string() == run.owner_id,
+                )
+            )
+            is None
+        )
+
+    with sessions.begin() as session:
+        stored_run = session.get(RecipeRun, run.owner_id)
+        stored_installation = session.get(RecipeInstallation, installation.owner_id)
+        failed_node = session.scalar(
+            select(InstallationNode).where(
+                InstallationNode.installation_id == installation.owner_id,
+                InstallationNode.node_id == nodes[1],
+            )
+        )
+        assert stored_run is not None and stored_installation is not None
+        assert failed_node is not None
+        stored_run.state = "stopped"
+        stored_installation.state = "partial"
+        failed_node.state = "failed"
+    unknown = service.preview_uninstall(installation.owner_id)
+    assert unknown.allowed is False
+    assert unknown.bytes_removed is None
+    assert [reason.code for reason in unknown.blockers] == ["uninstall.bytes_unknown"]
+    assert unknown.nodes[1].installed_bytes is None
+
+
+def test_uninstall_rejects_stale_bytes_before_transactional_full_group_queue(
+    tmp_path: Path,
+) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="8" * 35 + "e"
+    )
+    stale = service.preview_uninstall(installation.owner_id)
+    with sessions.begin() as session:
+        node = session.scalar(
+            select(InstallationNode).where(
+                InstallationNode.installation_id == installation.owner_id,
+                InstallationNode.node_id == nodes[1],
+            )
+        )
+        assert node is not None
+        node.installed_bytes += 1
+    assert (
+        service.preview_uninstall(installation.owner_id).plan_digest
+        != stale.plan_digest
+    )
+
+    with pytest.raises(RecipeOperationConflict, match="stale or blocked"):
+        service.uninstall(
+            installation.owner_id,
+            plan_digest=stale.plan_digest,
+            actor="admin",
+            request_id="8" * 35 + "f",
+        )
+    with sessions() as session:
+        assert (
+            session.scalar(select(Job).where(Job.request_id == "8" * 35 + "f")) is None
+        )
+
+    fresh = service.preview_uninstall(installation.owner_id)
+    operation = service.uninstall(
+        installation.owner_id,
+        plan_digest=fresh.plan_digest,
+        actor="admin",
+        request_id="8" * 35 + "0",
+    )
+    replay = service.uninstall(
+        installation.owner_id,
+        plan_digest=fresh.plan_digest,
+        actor="admin",
+        request_id="8" * 35 + "0",
+    )
+    assert replay == operation
+    with sessions() as session:
+        children = tuple(
+            session.scalars(
+                select(AgentOperation)
+                .where(AgentOperation.parent_job_id == operation.id)
+                .order_by(AgentOperation.node_id)
+            )
+        )
+        revision = session.get(
+            LocalRecipeRevision,
+            session.get(RecipeInstallation, installation.owner_id).recipe_revision_id,
+        )
+        assert len(children) == 2
+        assert revision is not None
+        assert {child.base_commit for child in children} == {
+            revision.content_sha256[:40]
+        }
+        assert {child.payload["plan_digest"] for child in children} == {
+            installation.plan_digest
+        }
+
+
+def test_uninstall_queue_rollback_and_request_key_are_owner_bound(
+    tmp_path: Path,
+) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    first = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="9" * 35 + "a"
+    )
+    second = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="9" * 35 + "b"
+    )
+    first_plan = service.preview_uninstall(first.owner_id)
+    second_plan = service.preview_uninstall(second.owner_id)
+    service._agent_jobs = FailingQueue()
+
+    with pytest.raises(RuntimeError, match="queue write failed"):
+        service.uninstall(
+            first.owner_id,
+            plan_digest=first_plan.plan_digest,
+            actor="admin",
+            request_id="9" * 35 + "c",
+        )
+    with sessions() as session:
+        assert session.get(RecipeInstallation, first.owner_id).state == "installed"
+        assert (
+            session.scalar(select(Job).where(Job.request_id == "9" * 35 + "c")) is None
+        )
+
+    service._agent_jobs = RecordingQueue()
+    operation = service.uninstall(
+        first.owner_id,
+        plan_digest=first_plan.plan_digest,
+        actor="admin",
+        request_id="9" * 35 + "d",
+    )
+    with pytest.raises(RecipeOperationConflict, match="request key"):
+        service.uninstall(
+            second.owner_id,
+            plan_digest=second_plan.plan_digest,
+            actor="admin",
+            request_id="9" * 35 + "d",
+        )
+    assert operation.owner_id == first.owner_id
 
 
 def test_run_status_projects_exact_rank_health_without_agent_secrets(
@@ -1126,6 +2008,110 @@ def test_concurrent_final_rank_results_serialize_gang_cleanup(
         ) == set(nodes)
 
 
+def test_postgres_disjoint_stops_serialize_one_route_candidate(
+    tmp_path: Path, postgres_engine
+) -> None:
+    Base.metadata.drop_all(postgres_engine)
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2, engine=postgres_engine
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="e" * 35 + "1"
+    )
+    first = started_recipe(
+        sessions,
+        service,
+        installation.owner_id,
+        nodes,
+        request_id="e" * 35 + "2",
+        alias="first",
+    )
+    second_run_id = clone_running_run(sessions, first.owner_id, alias="second")
+    publisher = ConcurrentPublisher()
+    service, routes = bind_route_publications(sessions, service, publisher)
+    routes.publish_run(first.owner_id)
+    routes.publish_run(second_run_id)
+    plans = {
+        first.owner_id: service.preview_stop(first.owner_id),
+        second_run_id: service.preview_stop(second_run_id),
+    }
+    start = threading.Barrier(2)
+
+    def stop(item: tuple[str, str]) -> str:
+        run_id, request_key = item
+        start.wait()
+        return service.stop(
+            run_id,
+            plan_digest=plans[run_id].plan_digest,
+            actor="admin",
+            request_id=request_key,
+        ).id
+
+    requests = (
+        (first.owner_id, "e" * 35 + "3"),
+        (second_run_id, "e" * 35 + "4"),
+    )
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        operation_ids = list(pool.map(stop, requests))
+
+    assert len(set(operation_ids)) == 2
+    assert publisher.aliases[-1] == ()
+    with sessions() as session:
+        assert [
+            (
+                session.get(RecipeRun, run_id).state,
+                session.get(RecipeRun, run_id).route_state,
+            )
+            for run_id, _request_key in requests
+        ] == [("stopping", "withdrawn"), ("stopping", "withdrawn")]
+
+
+def test_postgres_duplicate_stop_request_returns_same_operation(
+    tmp_path: Path, postgres_engine
+) -> None:
+    Base.metadata.drop_all(postgres_engine)
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, engine=postgres_engine
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="e" * 35 + "5"
+    )
+    run = started_recipe(
+        sessions,
+        service,
+        installation.owner_id,
+        nodes,
+        request_id="e" * 35 + "6",
+    )
+    publisher = ConcurrentPublisher()
+    service, routes = bind_route_publications(sessions, service, publisher)
+    routes.publish_run(run.owner_id)
+    plan = service.preview_stop(run.owner_id)
+    request_key = "e" * 35 + "7"
+    start = threading.Barrier(2)
+
+    def stop() -> str:
+        start.wait()
+        return service.stop(
+            run.owner_id,
+            plan_digest=plan.plan_digest,
+            actor="admin",
+            request_id=request_key,
+        ).id
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        operation_ids = list(pool.map(lambda _index: stop(), range(2)))
+
+    assert len(set(operation_ids)) == 1
+    with sessions() as session:
+        assert (
+            len(
+                tuple(session.scalars(select(Job).where(Job.request_id == request_key)))
+            )
+            == 1
+        )
+
+
 def test_changed_plan_or_reused_request_key_is_rejected(tmp_path: Path) -> None:
     _sessions, service, _queue, mapping_id, build_id, _nodes = setup_services(tmp_path)
     plan = service.preview_install(mapping_id, build_id)
@@ -1135,4 +2121,9 @@ def test_changed_plan_or_reused_request_key_is_rejected(tmp_path: Path) -> None:
         plan, plan_digest=plan.plan_digest, actor="admin", request_id="a" * 36
     )
     with pytest.raises(RecipeOperationConflict, match="request key"):
-        service.stop("f" * 36, actor="admin", request_id="a" * 36)
+        service.stop(
+            "f" * 36,
+            plan_digest="0" * 64,
+            actor="admin",
+            request_id="a" * 36,
+        )

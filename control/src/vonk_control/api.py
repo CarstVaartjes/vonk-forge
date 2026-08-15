@@ -2353,7 +2353,7 @@ def production_app() -> FastAPI:
         ),
         agent_jobs=agent_services.operations,
         clock=clock,
-        route_withdrawer=lambda run_id: recipe_routes.withdraw_run(run_id),
+        route_publications=recipe_routes,
         builds=RecipeBuildService(
             sessions,
             bundles=SourceBundleStore(settings.state_path / "source-bundles"),
