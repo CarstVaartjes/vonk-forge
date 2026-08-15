@@ -36,6 +36,10 @@ _NODE_PATTERN = r"^spk_[0-9a-f]{32}$"
 _UUID_PATTERN = (
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 )
+_BOOT_UUID_PATTERN = (
+    r"^(?!00000000-0000-0000-0000-000000000000$)"
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+)
 _MAX_FLEET_NODES = 500
 _MAX_OPERATIONAL_GROUPS = 512
 _MAX_GROUP_MEMBER_ROWS = 8_192
@@ -46,6 +50,7 @@ _MAX_TELEMETRY_RATE = 1_000_000_000_000_000.0
 
 NodeId = Annotated[str, StringConstraints(pattern=_NODE_PATTERN)]
 UuidId = Annotated[str, StringConstraints(pattern=_UUID_PATTERN)]
+BootId = Annotated[str, StringConstraints(pattern=_BOOT_UUID_PATTERN)]
 CommitId = Annotated[str, StringConstraints(pattern=_COMMIT_PATTERN)]
 Text32 = Annotated[str, StringConstraints(min_length=1, max_length=32)]
 Text64 = Annotated[str, StringConstraints(min_length=1, max_length=64)]
@@ -159,9 +164,11 @@ class TelemetryDetails(_StrictModel):
 
 
 class TelemetryPoint(_StrictModel):
+    model_config = ConfigDict(regex_engine="python-re")
+
     id: UuidId
     node_id: NodeId
-    boot_id: UuidId
+    boot_id: BootId
     sequence: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
     observed_at: datetime
     received_at: datetime

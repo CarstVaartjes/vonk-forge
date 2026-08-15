@@ -24,7 +24,7 @@ from vonk_control.telemetry import (
 
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
-BOOT_A = uuid.UUID("00000000-0000-4000-8000-000000000001")
+BOOT_A = uuid.UUID("00000000-0000-0000-0000-000000000001")
 BOOT_B = uuid.UUID("00000000-0000-4000-8000-000000000002")
 NOW = datetime(2026, 8, 3, 12, tzinfo=UTC)
 START = NOW - timedelta(minutes=5)

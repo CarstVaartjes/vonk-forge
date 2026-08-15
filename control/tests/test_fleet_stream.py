@@ -17,6 +17,7 @@ from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.browser_auth import BrowserAuthService
+from vonk_control.db import session_factory
 from vonk_control.fleet_events import (
     FleetEvent,
     FleetEventDraft,
@@ -44,6 +45,7 @@ NOW = datetime(2026, 8, 15, 12, 0, tzinfo=UTC)
 COMMIT = "a" * 40
 NODE_ID = "spk_" + "1" * 32
 SAMPLE_ID = "00000000-0000-4000-8000-000000000001"
+NON_RFC_BOOT_ID = "00000000-0000-0000-0000-000000000001"
 PASSWORD = "correct horse battery staple"
 
 
@@ -136,8 +138,12 @@ class PoolProbe:
     def __init__(self, engine) -> None:
         self.active = 0
         self.maximum = 0
+        self.active_transactions = 0
         event.listen(engine, "checkout", self.checkout)
         event.listen(engine, "checkin", self.checkin)
+        event.listen(engine, "begin", self.begin)
+        event.listen(engine, "commit", self.end_transaction)
+        event.listen(engine, "rollback", self.end_transaction)
 
     def checkout(self, _connection, _record, _proxy) -> None:
         self.active += 1
@@ -145,6 +151,12 @@ class PoolProbe:
 
     def checkin(self, _connection, _record) -> None:
         self.active -= 1
+
+    def begin(self, _connection) -> None:
+        self.active_transactions += 1
+
+    def end_transaction(self, _connection) -> None:
+        self.active_transactions -= 1
 
 
 def _production_stream_store():
@@ -154,7 +166,7 @@ def _production_stream_store():
         poolclass=StaticPool,
     )
     Base.metadata.create_all(engine)
-    sessions = sessionmaker(engine, expire_on_commit=False)
+    sessions = session_factory(engine)
     return engine, sessions, FleetEventRepository(sessions, clock=lambda: NOW)
 
 
@@ -192,7 +204,7 @@ def _sample() -> TelemetrySampleView:
     return TelemetrySampleView(
         id=SAMPLE_ID,
         node_id=NODE_ID,
-        boot_id=uuid.UUID("00000000-0000-4000-8000-000000000002"),
+        boot_id=uuid.UUID(NON_RFC_BOOT_ID),
         sequence=3,
         observed_at=NOW - timedelta(seconds=2),
         received_at=NOW - timedelta(seconds=1),
@@ -323,7 +335,7 @@ def test_resume_replays_ordered_events_with_one_hydration_and_refresh_semantics(
     assert telemetry_data == {
         "node_id": NODE_ID,
         "sample": {
-            "boot_id": "00000000-0000-4000-8000-000000000002",
+            "boot_id": NON_RFC_BOOT_ID,
             "cpu_utilization_percent": 12.5,
             "details": {
                 "accelerator_name": "NVIDIA GB10",
@@ -646,7 +658,7 @@ def test_database_failure_terminates_without_emitting_or_advancing() -> None:
     assert events.replay_calls == [(4, NOW, 128)]
 
 
-def test_production_repositories_bound_queries_and_release_before_yield_cancel() -> None:
+def test_production_repositories_bound_queries_and_release_before_orderly_close() -> None:
     engine, sessions, repository = _production_stream_store()
     sample_ids = [f"00000000-0000-4000-8000-{value:012x}" for value in range(1, 129)]
     with sessions.begin() as session:
@@ -655,7 +667,7 @@ def test_production_repositories_bound_queries_and_release_before_yield_cancel()
             NodeTelemetrySample(
                 id=sample_id,
                 node_id=NODE_ID,
-                boot_id="00000000-0000-4000-8000-000000000999",
+                boot_id=NON_RFC_BOOT_ID,
                 sequence=sequence,
                 observed_at=NOW,
                 received_at=NOW,
@@ -708,7 +720,7 @@ def test_production_repositories_bound_queries_and_release_before_yield_cancel()
         clock=lambda: NOW,
     )
 
-    async def read_one_and_cancel() -> str:
+    async def read_one_and_close() -> str:
         generator = stream.events(0)
         frame = await anext(generator)
         assert probe.active == 0
@@ -717,16 +729,80 @@ def test_production_repositories_bound_queries_and_release_before_yield_cancel()
         return frame
 
     try:
-        fields, _data = _parsed_frame(asyncio.run(read_one_and_cancel()))
+        fields, data = _parsed_frame(asyncio.run(read_one_and_close()))
     finally:
         event.remove(engine, "before_cursor_execute", observe)
 
     assert fields["id"] == "1"
     assert fields["event"] == "node-telemetry"
+    assert data["sample"]["boot_id"] == NON_RFC_BOOT_ID
     assert sum("fleet_stream_events" in statement for statement in selects) == 1
     assert sum("from node_telemetry_samples" in statement for statement in selects) == 1
     assert len(selects) == 2
     assert probe.maximum == 1
+
+
+def test_production_stream_cancellation_during_poll_await_leaves_no_resources() -> None:
+    engine, sessions, repository = _production_stream_store()
+    probe = PoolProbe(engine)
+    reads: list[str] = []
+
+    def observe(_connection, _cursor, statement, _parameters, _context, _many) -> None:
+        if statement.lstrip().upper().startswith("SELECT"):
+            reads.append(statement)
+
+    event.listen(engine, "before_cursor_execute", observe)
+
+    async def exercise() -> None:
+        sleep_entered = asyncio.Event()
+        sleep_release = asyncio.Event()
+
+        async def blocked_sleep(_seconds: float) -> None:
+            sleep_entered.set()
+            await sleep_release.wait()
+
+        stream = FleetStream(
+            repository,
+            TelemetryRepository(sessions, clock=lambda: NOW),
+            Projection(),
+            clock=lambda: NOW,
+            sleep=blocked_sleep,
+        )
+        generator = stream.events(0)
+        consumer = asyncio.create_task(anext(generator))
+        await asyncio.wait_for(sleep_entered.wait(), timeout=1)
+
+        assert len(reads) == 1
+        assert probe.active == 0
+        assert probe.active_transactions == 0
+
+        consumer.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await consumer
+
+        reads_after_cancel = len(reads)
+        sleep_release.set()
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+        assert consumer.done()
+        assert len(reads) == reads_after_cancel
+        assert probe.active == 0
+        assert probe.active_transactions == 0
+        assert {
+            task
+            for task in asyncio.all_tasks()
+            if task is not asyncio.current_task() and not task.done()
+        } == set()
+        await generator.aclose()
+
+    try:
+        asyncio.run(exercise())
+    finally:
+        event.remove(engine, "before_cursor_execute", observe)
+
+    assert probe.active == 0
+    assert probe.active_transactions == 0
 
 
 def test_production_replay_advances_cursor_only_after_yield_resumes() -> None:

@@ -351,6 +351,10 @@ def test_generated_fleet_projection_vocabulary_is_finite() -> None:
         "certificate-revoked",
         "certificate-inactive",
     ]
+    assert schema["TelemetryPoint"]["properties"]["boot_id"]["pattern"] == (
+        "^(?!00000000-0000-0000-0000-000000000000$)"
+        "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    )
     typescript = TYPESCRIPT_CLIENT.read_text()
     assert 'certificate_state: "valid" | "missing" | "not-yet-valid"' in typescript
     assert 'degraded_reason?: ("external-member" | "mapping-incomplete"' in typescript

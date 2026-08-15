@@ -43,6 +43,7 @@ NODE_B = "spk_" + "2" * 32
 NODE_C = "spk_" + "3" * 32
 NODE_D = "spk_" + "4" * 32
 EXTRA_NODE = "spk_" + "f" * 32
+NON_RFC_BOOT_ID = "00000000-0000-0000-0000-000000000001"
 
 
 class Repository:
@@ -106,11 +107,12 @@ def _telemetry(
     *,
     sequence: int,
     cpu: float,
+    boot_id: str = "00000000-0000-4000-8000-000000000001",
 ) -> NodeTelemetrySample:
     return NodeTelemetrySample(
         id=sample_id,
         node_id=node_id,
-        boot_id="00000000-0000-4000-8000-000000000001",
+        boot_id=boot_id,
         sequence=sequence,
         observed_at=observed_at,
         received_at=observed_at + timedelta(milliseconds=250),
@@ -501,6 +503,31 @@ def test_projection_dtos_reject_coercion_unbounded_values_and_open_vocabularies(
         TelemetryPoint(**{**point, "temperature_c": float("nan")})
 
 
+@pytest.mark.parametrize(
+    "boot_id",
+    [
+        "00000000-0000-0000-0000-000000000000",
+        "00000000-0000-0000-0000-00000000000A",
+        "00000000000000000000000000000001",
+    ],
+    ids=["nil", "uppercase", "compact"],
+)
+def test_fleet_telemetry_dto_rejects_nil_and_noncanonical_boot_ids(
+    boot_id: str,
+) -> None:
+    with pytest.raises(ValidationError, match="boot_id"):
+        TelemetryPoint(
+            id="00000000-0000-4000-8000-000000000004",
+            node_id=NODE_A,
+            boot_id=boot_id,
+            sequence=1,
+            observed_at=NOW,
+            received_at=NOW,
+            gap_samples=0,
+            details=TelemetryDetails(),
+        )
+
+
 def test_projection_schema_is_finite_for_states_items_and_task3_numbers() -> None:
     definitions = FleetSnapshot.model_json_schema()["$defs"]
 
@@ -530,6 +557,10 @@ def test_projection_schema_is_finite_for_states_items_and_task3_numbers() -> Non
         "items"
     ]["pattern"] == "^spk_[0-9a-f]{32}$"
     telemetry = definitions["TelemetryPoint"]["properties"]
+    assert telemetry["boot_id"]["pattern"] == (
+        "^(?!00000000-0000-0000-0000-000000000000$)"
+        "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    )
     assert telemetry["load_average_1m"]["anyOf"][0]["maximum"] == 1_000_000
     assert telemetry["memory_total_bytes"]["anyOf"][0]["maximum"] == (
         16 * 1024**4
@@ -1309,6 +1340,47 @@ def test_history_is_repository_authorized_raw_bounded_and_chronological() -> Non
             end=NOW,
             maximum_points=2,
         )
+
+
+def test_non_rfc_non_nil_boot_id_flows_through_snapshot_and_history() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    repository = Repository(
+        {
+            NODE_A: {
+                "display_name": "Alpha",
+                "hostname": "alpha.internal",
+                "lifecycle": "managed",
+                "labels": {},
+            }
+        }
+    )
+    with sessions.begin() as session:
+        session.add(AgentNode(node_id=NODE_A, state="active", capabilities=[]))
+        sample = _telemetry(
+            NODE_A,
+            "00000000-0000-4000-8000-000000000299",
+            NOW - timedelta(seconds=1),
+            sequence=1,
+            cpu=1.0,
+            boot_id=NON_RFC_BOOT_ID,
+        )
+        session.add(sample)
+        session.flush()
+        session.add(NodeTelemetryLatest(node_id=NODE_A, sample_id=sample.id))
+
+    projection = FleetProjection(repository, sessions, clock=lambda: NOW)
+    snapshot = projection.read()
+    history = projection.telemetry_history(
+        NODE_A,
+        start=NOW - timedelta(minutes=1),
+        end=NOW,
+        maximum_points=1,
+    )
+
+    assert snapshot.nodes[0].telemetry.sample.boot_id == NON_RFC_BOOT_ID
+    assert [point.boot_id for point in history.points] == [NON_RFC_BOOT_ID]
 
 
 def test_projection_selects_only_the_latest_512_current_installation_groups() -> None:
