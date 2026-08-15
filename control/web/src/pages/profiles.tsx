@@ -1,5 +1,5 @@
 import {useState} from "react";
-import type {ControlApi, FleetResponse, ReconciliationPlan as Plan} from "../api/types";
+import type {ControlApi, FleetEvidenceResponse, ReconciliationPlan as Plan} from "../api/types";
 import {ReconciliationPlan} from "../components/reconciliation-plan";
 import {RepositoryEditor} from "../components/repository-editor";
 
@@ -14,7 +14,7 @@ function boundedError(value: unknown): string {
 export function ProfilesPage({api}: {api: ControlApi}) {
   const [profileId, setProfileId] = useState("");
   const [plan, setPlan] = useState<Plan>();
-  const [fleet, setFleet] = useState<FleetResponse>();
+  const [fleet, setFleet] = useState<FleetEvidenceResponse>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -31,7 +31,7 @@ export function ProfilesPage({api}: {api: ControlApi}) {
     try {
       const [planned, liveFleet] = await Promise.all([
         api.planProfile(profileId),
-        api.fleet(),
+        api.fleetEvidence(),
       ]);
       setPlan(planned);
       setFleet(liveFleet);

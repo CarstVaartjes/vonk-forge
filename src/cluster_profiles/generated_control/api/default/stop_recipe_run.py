@@ -9,7 +9,7 @@ from ... import errors
 
 from ...models.http_validation_error import HTTPValidationError
 from ...models.operation_response import OperationResponse
-from ...models.request_key import RequestKey
+from ...models.stop_request import StopRequest
 from typing import cast
 
 
@@ -17,7 +17,7 @@ from typing import cast
 def _get_kwargs(
     run_id: str,
     *,
-    body: RequestKey,
+    body: StopRequest,
 
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
@@ -76,14 +76,14 @@ def sync_detailed(
     run_id: str,
     *,
     client: AuthenticatedClient,
-    body: RequestKey,
+    body: StopRequest,
 
 ) -> Response[Union[HTTPValidationError, OperationResponse]]:
     """ Stop
 
     Args:
         run_id (str):
-        body (RequestKey):
+        body (StopRequest):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -110,14 +110,14 @@ def sync(
     run_id: str,
     *,
     client: AuthenticatedClient,
-    body: RequestKey,
+    body: StopRequest,
 
 ) -> Optional[Union[HTTPValidationError, OperationResponse]]:
     """ Stop
 
     Args:
         run_id (str):
-        body (RequestKey):
+        body (StopRequest):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -139,14 +139,14 @@ async def asyncio_detailed(
     run_id: str,
     *,
     client: AuthenticatedClient,
-    body: RequestKey,
+    body: StopRequest,
 
 ) -> Response[Union[HTTPValidationError, OperationResponse]]:
     """ Stop
 
     Args:
         run_id (str):
-        body (RequestKey):
+        body (StopRequest):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -173,14 +173,14 @@ async def asyncio(
     run_id: str,
     *,
     client: AuthenticatedClient,
-    body: RequestKey,
+    body: StopRequest,
 
 ) -> Optional[Union[HTTPValidationError, OperationResponse]]:
     """ Stop
 
     Args:
         run_id (str):
-        body (RequestKey):
+        body (StopRequest):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.

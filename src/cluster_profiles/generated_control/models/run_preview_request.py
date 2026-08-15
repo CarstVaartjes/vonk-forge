@@ -20,9 +20,11 @@ T = TypeVar("T", bound="RunPreviewRequest")
 class RunPreviewRequest:
     """
         Attributes:
+            alias (str):
             installation_id (str):
      """
 
+    alias: str
     installation_id: str
 
 
@@ -30,12 +32,15 @@ class RunPreviewRequest:
 
 
     def to_dict(self) -> dict[str, Any]:
+        alias = self.alias
+
         installation_id = self.installation_id
 
 
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
+            "alias": alias,
             "installation_id": installation_id,
         })
 
@@ -46,9 +51,12 @@ class RunPreviewRequest:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
+        alias = d.pop("alias")
+
         installation_id = d.pop("installation_id")
 
         run_preview_request = cls(
+            alias=alias,
             installation_id=installation_id,
         )
 

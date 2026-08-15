@@ -23,9 +23,8 @@ def migration_config(database_url: str) -> Config:
     return value
 
 
-def test_recipe_deployment_authority_is_linear_head() -> None:
+def test_recipe_deployment_authority_follows_recipe_catalog() -> None:
     script = ScriptDirectory.from_config(migration_config("sqlite://"))
-    assert script.get_heads() == ["0021_browser_authentication"]
     assert script.get_revision("0016_recipe_deployment_authority").down_revision == (
         "0015_recipe_catalog"
     )

@@ -59,6 +59,7 @@ class RunNodePlan:
 @dataclass(frozen=True, slots=True)
 class RunPlan:
     installation_id: str
+    alias: str
     mapping_id: str
     mapping_generation: int
     recipe_revision_id: str
@@ -81,7 +82,12 @@ class RunAdmissionService:
         self._floor = memory_floor_bytes
 
     def plan_run(
-        self, installation_id: str, *, now: datetime, _session: Session | None = None
+        self,
+        installation_id: str,
+        alias: str,
+        *,
+        now: datetime,
+        _session: Session | None = None,
     ) -> RunPlan:
         with (
             nullcontext(_session) if _session is not None else self._sessions()
@@ -340,6 +346,7 @@ class RunAdmissionService:
         identity = {
             "schema_version": 1,
             "installation_id": installation_id,
+            "alias": alias,
             "mapping_id": mapping.id,
             "mapping_generation": mapping.generation,
             "recipe_revision_id": revision.id,
@@ -350,6 +357,7 @@ class RunAdmissionService:
         ).hexdigest()
         return RunPlan(
             installation_id,
+            alias,
             mapping.id,
             mapping.generation,
             revision.id,
@@ -358,20 +366,15 @@ class RunAdmissionService:
             digest,
         )
 
-    def accept_run(
-        self, plan: RunPlan, *, alias: str, actor: str, now: datetime
-    ) -> str:
+    def accept_run(self, plan: RunPlan, *, actor: str, now: datetime) -> str:
         with self._sessions.begin() as session:
-            return self.accept_run_in_session(
-                session, plan, alias=alias, actor=actor, now=now
-            )
+            return self.accept_run_in_session(session, plan, actor=actor, now=now)
 
     def accept_run_in_session(
         self,
         session: Session,
         plan: RunPlan,
         *,
-        alias: str,
         actor: str,
         now: datetime,
     ) -> str:
@@ -415,7 +418,9 @@ class RunAdmissionService:
             .where(NodeInventorySnapshot.node_id.in_(node_ids))
             .with_for_update()
         ).all()
-        fresh = self.plan_run(plan.installation_id, now=now, _session=session)
+        fresh = self.plan_run(
+            plan.installation_id, plan.alias, now=now, _session=session
+        )
         if (
             not fresh.allowed
             or fresh.plan_digest != plan.plan_digest
@@ -446,11 +451,12 @@ class RunAdmissionService:
             installation_id=plan.installation_id,
             mapping_id=plan.mapping_id,
             mapping_generation=plan.mapping_generation,
-            alias=alias,
+            alias=plan.alias,
             plan_digest=plan.plan_digest,
             plan={
                 "schema_version": 1,
                 "installation_id": plan.installation_id,
+                "alias": plan.alias,
                 "mapping_id": plan.mapping_id,
                 "mapping_generation": plan.mapping_generation,
                 "recipe_revision_id": plan.recipe_revision_id,

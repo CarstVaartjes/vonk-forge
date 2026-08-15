@@ -15,9 +15,8 @@ def config(database_url: str) -> Config:
     return value
 
 
-def test_browser_authentication_is_the_linear_head() -> None:
+def test_browser_authentication_follows_catalog_bridge() -> None:
     script = ScriptDirectory.from_config(config("sqlite://"))
-    assert script.get_heads() == ["0021_browser_authentication"]
     assert script.get_revision("0021_browser_authentication").down_revision == (
         "0020_recipe_catalog_bridge"
     )

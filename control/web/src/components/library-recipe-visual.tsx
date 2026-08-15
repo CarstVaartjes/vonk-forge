@@ -1,0 +1,74 @@
+import type {LibraryRecipeDetail} from "../api/types";
+
+type VisualRecipeDocument = NonNullable<LibraryRecipeDetail["visual_recipe"]>;
+
+function bytes(value: number): string {
+  return `${value.toLocaleString("en-US")} bytes`;
+}
+
+function values(items: readonly string[], empty: string): string {
+  return items.length > 0 ? items.join(" · ") : empty;
+}
+
+export function LibraryRecipeVisual({document}: {document: VisualRecipeDocument}) {
+  return <>
+    <section className="library-section recipe-essentials" aria-label="Model and runtime">
+      <div><span>Model family</span><strong>{document.workload.family}</strong></div>
+      <div><span>Capabilities</span><strong className="capability-chips">{document.workload.capabilities.length > 0
+        ? document.workload.capabilities.map((capability, index) => <span key={`${capability}:${index}`}>{capability}</span>)
+        : "Not declared"}</strong></div>
+      <div><span>Runtime</span><strong>{document.runtime.adapter} v{document.runtime.adapter_version}</strong></div>
+      <div><span>Endpoint</span><strong>{document.runtime.endpoint_protocol} · {document.runtime.endpoint_port}</strong></div>
+    </section>
+
+    <section className="library-section visual-document-section" aria-label="Build and artifacts">
+      <div className="section-heading"><div><p className="fleet-kicker">Visual document</p><h4>Build and artifacts</h4></div></div>
+      <dl className="visual-field-grid">
+        <div><dt>Schema version</dt><dd> {document.schema_version}</dd></div>
+        <div><dt>Dockerfile</dt><dd> {document.build.dockerfile}</dd></div>
+        <div><dt>Platform</dt><dd> {document.build.platform}</dd></div>
+        <div><dt>Network mode</dt><dd> {document.build.network_mode}</dd></div>
+        <div><dt>Network hosts</dt><dd> {values(document.build.network_hosts, "None")}</dd></div>
+        <div><dt>Context expected</dt><dd> {bytes(document.build.context.expected_bytes)}</dd></div>
+        <div><dt>Context media type</dt><dd> {document.build.context.media_type}</dd></div>
+        <div><dt>Download</dt><dd> {bytes(document.build.download_bytes)}</dd></div>
+        <div><dt>Temporary storage</dt><dd> {bytes(document.build.temporary_bytes)}</dd></div>
+        <div><dt>Build memory</dt><dd> {bytes(document.build.memory_bytes)}</dd></div>
+        <div><dt>Timeout</dt><dd> {document.build.timeout_seconds.toLocaleString("en-US")} seconds</dd></div>
+      </dl>
+      <p className="visual-digest"><span>Context digest</span><code>sha256:{document.build.context.sha256}</code></p>
+      <div className="visual-artifacts">
+        {document.artifacts.length === 0 && <p>No artifacts declared.</p>}
+        {document.artifacts.map((artifact, index) => <article key={`${artifact.id}:${index}`} aria-label={`Artifact ${artifact.id}`}>
+          <strong>{artifact.id}</strong>
+          <dl className="visual-field-grid">
+            <div><dt>Kind</dt><dd> {artifact.kind}</dd></div>
+            <div><dt>Repository</dt><dd> {artifact.repository}</dd></div>
+            <div><dt>Revision</dt><dd> {artifact.revision}</dd></div>
+            <div><dt>Download</dt><dd> {bytes(artifact.download_bytes)}</dd></div>
+            <div><dt>Installed</dt><dd> {bytes(artifact.installed_bytes)}</dd></div>
+            <div><dt>Roles</dt><dd> {values(artifact.roles, "None")}</dd></div>
+          </dl>
+        </article>)}
+      </div>
+    </section>
+
+    <section className="library-section visual-document-section" aria-label="Runtime contract">
+      <div className="section-heading"><div><p className="fleet-kicker">Declared interface</p><h4>Runtime contract</h4></div></div>
+      <dl className="visual-field-grid">
+        <div><dt>Interface</dt><dd> {document.runtime.interface}</dd></div>
+        <div><dt>Adapter</dt><dd> {document.runtime.adapter}</dd></div>
+        <div><dt>Version</dt><dd> {document.runtime.adapter_version}</dd></div>
+        <div><dt>Protocol</dt><dd> {document.runtime.endpoint_protocol}</dd></div>
+        <div><dt>Port</dt><dd> {document.runtime.endpoint_port.toLocaleString("en-US")}</dd></div>
+        <div><dt>Model aliases</dt><dd> {values(document.runtime.model_aliases, "None")}</dd></div>
+        <div><dt>Health path</dt><dd> {document.runtime.health_path}</dd></div>
+      </dl>
+    </section>
+
+    <section className="library-section evidence-columns" aria-label="Provenance and validation">
+      <div><h4>Provenance</h4><p>{document.provenance.source_kind} · {document.provenance.source_reference ?? "No external reference"}</p><p>{values(document.provenance.attribution, "No attribution declared")}</p></div>
+      <div><h4>Validation</h4><p>{values(document.validation.checks, "No checks declared")}</p><p>{document.validation.benchmark_count} benchmarks</p></div>
+    </section>
+  </>;
+}

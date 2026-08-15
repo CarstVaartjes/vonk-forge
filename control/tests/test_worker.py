@@ -1,8 +1,9 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from vonk_control import telemetry_maintenance
 from vonk_control.jobs import JobService
 from vonk_control.models import Base
 from vonk_control.worker import HandlerRequest, Worker
@@ -230,4 +231,86 @@ def test_worker_round_robins_package_rollouts_with_other_durable_sources(tmp_pat
         "reconciliation",
         "update",
         "package",
+    ]
+
+
+def test_telemetry_maintenance_cadence_is_fixed_aware_and_does_not_burst() -> None:
+    current = datetime(2026, 8, 15, 12, tzinfo=UTC)
+    calls: list[datetime] = []
+
+    class Maintenance:
+        def run_once(self) -> None:
+            calls.append(current)
+
+    cadence = telemetry_maintenance.TelemetryMaintenanceCadence(
+        Maintenance(), clock=lambda: current
+    )
+
+    cadence()
+    cadence()
+    assert calls == [datetime(2026, 8, 15, 12, tzinfo=UTC)]
+
+    current += timedelta(seconds=14, microseconds=999999)
+    cadence()
+    assert len(calls) == 1
+
+    current += timedelta(microseconds=1)
+    cadence()
+    assert len(calls) == 2
+
+    current += timedelta(seconds=45)
+    cadence()
+    cadence()
+    assert len(calls) == 3
+
+    invalid = telemetry_maintenance.TelemetryMaintenanceCadence(
+        Maintenance(), clock=lambda: current.replace(tzinfo=None)
+    )
+    with pytest.raises(ValueError, match="timezone-aware"):
+        invalid()
+
+
+def test_due_telemetry_housekeeping_does_not_consume_worker_source_turn(
+    tmp_path,
+) -> None:
+    jobs = _service(tmp_path)
+    jobs.enqueue("probe", "operator", "a" * 40, ["node"], {})
+    jobs.enqueue("probe", "operator", "a" * 40, ["node"], {})
+    current = datetime(2026, 8, 15, 12, tzinfo=UTC)
+    events: list[str] = []
+
+    class Maintenance:
+        def run_once(self) -> None:
+            events.append("maintenance")
+
+    class Source:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def tick(self) -> bool:
+            events.append(self.name)
+            return True
+
+    worker = Worker(
+        jobs,
+        "worker-1",
+        {"probe": lambda _request: events.append("generic") or {}},
+        housekeeping=telemetry_maintenance.TelemetryMaintenanceCadence(
+            Maintenance(), clock=lambda: current
+        ),
+        reconciliations=Source("reconciliation"),
+        updates=Source("update"),
+    )
+
+    for _ in range(3):
+        assert worker.run_once() is True
+        current += timedelta(seconds=15)
+
+    assert events == [
+        "maintenance",
+        "reconciliation",
+        "maintenance",
+        "update",
+        "maintenance",
+        "generic",
     ]

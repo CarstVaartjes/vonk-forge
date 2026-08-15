@@ -11,6 +11,7 @@ import re
 import stat
 import tempfile
 import time
+import uuid
 from collections import deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -83,6 +84,11 @@ from .recipe_runtime_specs import (
     resolve_recipe_entities,
 )
 from .source_bundles import SourceBundleError, SourceBundleStore
+from .telemetry import (
+    TelemetryDetailsInput,
+    TelemetryRepository,
+    TelemetrySampleInput,
+)
 
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _LIVE_OPERATION_STATES = frozenset({"queued", "running"})
@@ -92,6 +98,8 @@ _MAX_EVIDENCE_BYTES = 8 * 1024
 _MAX_ENROLLMENT_BODY_BYTES = 64 * 1024
 _MAX_ENROLLMENT_TOKEN_PREFIX_BYTES = 2 * 1024
 _MAX_ARTIFACT_BYTES = 256 * 1024 * 1024
+_MAX_TELEMETRY_CAPACITY_BYTES = 16 * 1024**4
+_MAX_TELEMETRY_RATE = 1_000_000_000_000_000.0
 MAX_RECIPE_IMAGE_BYTES = 16 * 1024**4
 _MAX_RANGE_BYTES = 8 * 1024 * 1024
 _MAX_TUF_METADATA_BYTES = 2 * 1024 * 1024
@@ -349,6 +357,130 @@ class RecipeRunObservationsRequest(BaseModel):
         identities = [run.run_id for run in self.runs]
         if len(identities) != len(set(identities)):
             raise ValueError("recipe run observation is duplicated")
+        return self
+
+
+class TelemetryDetailsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    accelerator_name: str | None = Field(
+        default=None, min_length=1, max_length=256
+    )
+    accelerator_performance_state: str | None = Field(
+        default=None, min_length=1, max_length=32
+    )
+
+
+class TelemetrySampleRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    boot_id: str = Field(
+        pattern=(
+            r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-"
+            r"[0-9a-f]{4}-[0-9a-f]{12}$"
+        )
+    )
+    sequence: int = Field(ge=0, le=2**63 - 1, strict=True)
+    observed_at: datetime
+    cpu_utilization_percent: float | None = Field(
+        ge=0, le=100, allow_inf_nan=False, strict=True
+    )
+    load_average_1m: float | None = Field(
+        ge=0, le=1_000_000, allow_inf_nan=False, strict=True
+    )
+    memory_total_bytes: int | None = Field(
+        ge=0, le=_MAX_TELEMETRY_CAPACITY_BYTES, strict=True
+    )
+    memory_available_bytes: int | None = Field(
+        ge=0, le=_MAX_TELEMETRY_CAPACITY_BYTES, strict=True
+    )
+    disk_total_bytes: int | None = Field(
+        ge=0, le=_MAX_TELEMETRY_CAPACITY_BYTES, strict=True
+    )
+    disk_free_bytes: int | None = Field(
+        ge=0, le=_MAX_TELEMETRY_CAPACITY_BYTES, strict=True
+    )
+    gpu_utilization_percent: float | None = Field(
+        ge=0, le=100, allow_inf_nan=False, strict=True
+    )
+    gpu_memory_total_bytes: int | None = Field(
+        ge=0, le=_MAX_TELEMETRY_CAPACITY_BYTES, strict=True
+    )
+    gpu_memory_free_bytes: int | None = Field(
+        ge=0, le=_MAX_TELEMETRY_CAPACITY_BYTES, strict=True
+    )
+    temperature_c: float | None = Field(
+        ge=-100, le=300, allow_inf_nan=False, strict=True
+    )
+    power_watts: float | None = Field(
+        ge=0, le=100_000, allow_inf_nan=False, strict=True
+    )
+    network_receive_bytes_per_second: float | None = Field(
+        ge=0, le=_MAX_TELEMETRY_RATE, allow_inf_nan=False, strict=True
+    )
+    network_transmit_bytes_per_second: float | None = Field(
+        ge=0, le=_MAX_TELEMETRY_RATE, allow_inf_nan=False, strict=True
+    )
+    gap_samples: int = Field(ge=0, le=2**63 - 1, strict=True)
+    details: TelemetryDetailsRequest = Field(default_factory=TelemetryDetailsRequest)
+
+    @field_validator("boot_id")
+    @classmethod
+    def nonzero_boot_id(cls, value: str) -> str:
+        if uuid.UUID(value).int == 0:
+            raise ValueError("telemetry boot ID cannot be nil")
+        return value
+
+    @field_validator("observed_at", mode="before")
+    @classmethod
+    def rfc3339_observed_at(cls, value: object) -> object:
+        if not isinstance(value, str):
+            # Pydantic turns ValueError into the stable request validation response.
+            raise ValueError(  # noqa: TRY004
+                "telemetry observed time must be an RFC 3339 string"
+            )
+        return value
+
+    @model_validator(mode="after")
+    def internally_consistent(self) -> TelemetrySampleRequest:
+        if self.observed_at.tzinfo is None or self.observed_at.utcoffset() is None:
+            raise ValueError("telemetry observed time must be timezone-aware")
+        for total, available in (
+            (self.memory_total_bytes, self.memory_available_bytes),
+            (self.disk_total_bytes, self.disk_free_bytes),
+            (self.gpu_memory_total_bytes, self.gpu_memory_free_bytes),
+        ):
+            if (total is None) is not (available is None) or (
+                total is not None and available is not None and available > total
+            ):
+                raise ValueError("telemetry capacity values are inconsistent")
+        return self
+
+
+class TelemetryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    schema_version: Literal[1]
+    samples: list[TelemetrySampleRequest] = Field(min_length=1, max_length=16)
+
+    @field_validator("schema_version", mode="before")
+    @classmethod
+    def exact_schema_version(cls, value: object) -> object:
+        if type(value) is not int or value != 1:
+            raise ValueError("telemetry schema version must be integer 1")
+        return value
+
+    @model_validator(mode="after")
+    def ordered_unique_samples(self) -> TelemetryRequest:
+        identities = [(sample.boot_id, sample.sequence) for sample in self.samples]
+        if len(identities) != len(set(identities)):
+            raise ValueError("telemetry sample is duplicated")
+        previous_by_boot: dict[str, int] = {}
+        for previous, current in zip(self.samples, self.samples[1:], strict=False):
+            if current.observed_at <= previous.observed_at:
+                raise ValueError("telemetry observation times must increase")
+        for sample in self.samples:
+            previous_sequence = previous_by_boot.get(sample.boot_id)
+            if previous_sequence is not None and sample.sequence <= previous_sequence:
+                raise ValueError("telemetry sequences must increase within one boot")
+            previous_by_boot[sample.boot_id] = sample.sequence
         return self
 
 
@@ -1403,6 +1535,51 @@ def install_agent_routes(
                     nvidia_driver_version=body.nvidia_driver_version,
                     container_runtime_version=body.container_runtime_version,
                 )
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from None
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @agent.post("/telemetry", status_code=status.HTTP_204_NO_CONTENT)
+    def telemetry(body: TelemetryRequest, request: Request) -> Response:
+        _scope_identity(request)
+        required = _require_services(services)
+        identity = _authenticated_identity(request, required)
+        try:
+            TelemetryRepository(required.sessions, clock=required.clock).record_batch(
+                identity.node_id,
+                tuple(
+                    TelemetrySampleInput(
+                        boot_id=uuid.UUID(sample.boot_id),
+                        sequence=sample.sequence,
+                        observed_at=sample.observed_at,
+                        cpu_utilization_percent=sample.cpu_utilization_percent,
+                        load_average_1m=sample.load_average_1m,
+                        memory_total_bytes=sample.memory_total_bytes,
+                        memory_available_bytes=sample.memory_available_bytes,
+                        disk_total_bytes=sample.disk_total_bytes,
+                        disk_free_bytes=sample.disk_free_bytes,
+                        gpu_utilization_percent=sample.gpu_utilization_percent,
+                        gpu_memory_total_bytes=sample.gpu_memory_total_bytes,
+                        gpu_memory_free_bytes=sample.gpu_memory_free_bytes,
+                        temperature_c=sample.temperature_c,
+                        power_watts=sample.power_watts,
+                        network_receive_bytes_per_second=(
+                            sample.network_receive_bytes_per_second
+                        ),
+                        network_transmit_bytes_per_second=(
+                            sample.network_transmit_bytes_per_second
+                        ),
+                        gap_samples=sample.gap_samples,
+                        details=TelemetryDetailsInput(
+                            accelerator_name=sample.details.accelerator_name,
+                            accelerator_performance_state=(
+                                sample.details.accelerator_performance_state
+                            ),
+                        ),
+                    )
+                    for sample in body.samples
+                ),
             )
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from None

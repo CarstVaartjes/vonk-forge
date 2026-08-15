@@ -15,12 +15,13 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Annotated, Any, Protocol
 
 from fastapi import (
     Body,
     Depends,
     FastAPI,
+    Header,
     HTTPException,
     Query,
     Request,
@@ -39,7 +40,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from starlette.responses import FileResponse
+from starlette.responses import FileResponse, StreamingResponse
 from vonk_agent_protocol import canonical_message
 
 from .agent_api import (
@@ -62,7 +63,10 @@ from .browser_auth import BrowserAuthenticationError, BrowserAuthService
 from .catalog_api import install_catalog_routes
 from .catalog_service import CatalogService
 from .cluster_mappings import ClusterMappingService
+from .fleet_projection import FleetSnapshot, TelemetryHistoryResponse
+from .fleet_stream import parse_last_event_id
 from .global_catalog import GlobalCatalogClient
+from .library_api import install_library_routes
 from .metrics import MetricsRegistry
 from .operation_api import (
     AgentsResponse,
@@ -92,6 +96,7 @@ from .reconcile import IneligibleCommit, StaleFleetEvidence
 from .repository import RepositoryPolicyError
 from .settings import StartupMode
 from .source_bundles import SourceBundleStore
+from .telemetry import TelemetryResolution
 from .workload_run_api import install_workload_run_routes
 from .workload_run_workflow import WorkloadRunWorkflow
 
@@ -107,6 +112,8 @@ _RECIPE_IMAGE_UPLOAD = re.compile(
 )
 _MAX_IDENTITY_PROJECTION_BYTES = 64 * 1024
 _LOGIN_PATH = "/api/v1/auth/login"
+_TELEMETRY_PATH = "/agent/v1/telemetry"
+_MAX_TELEMETRY_BODY_BYTES = 64 * 1024
 
 
 class _DuplicateJsonKey(ValueError):
@@ -962,6 +969,9 @@ def create_app(
     tokens: TokenCodec,
     audits: AuditSink,
     fleet: Callable[[], Mapping[str, object]],
+    fleet_projection: Any | None = None,
+    fleet_stream: Any | None = None,
+    library_projection: Any | None = None,
     now: Callable[[], int] = lambda: int(time.time()),
     admin: AdminServices | None = None,
     metrics: MetricsRegistry | None = None,
@@ -1039,6 +1049,25 @@ def create_app(
             media_type="application/json",
         )
 
+    @app.middleware("http")
+    async def telemetry_request_boundary(request: Request, call_next):
+        if request.method != "POST" or request.url.path != _TELEMETRY_PATH:
+            return await call_next(request)
+        try:
+            json.loads(
+                await _bounded_request_body(request, _MAX_TELEMETRY_BODY_BYTES),
+                object_pairs_hook=_reject_duplicate_json_keys,
+            )
+        except _RequestBodyTooLarge:
+            return Response(status_code=413)
+        except (UnicodeDecodeError, json.JSONDecodeError, _DuplicateJsonKey):
+            return Response(
+                content=canonical_message({"detail": "telemetry request is invalid"}),
+                status_code=422,
+                media_type="application/json",
+            )
+        return await call_next(request)
+
     app.add_middleware(
         TrustedProxyAgentIdentityMiddleware,
         trusted_proxy_auth=trusted_agent_proxy_auth,
@@ -1068,8 +1097,15 @@ def create_app(
             request.method == "PUT"
             and _RECIPE_IMAGE_UPLOAD.fullmatch(request.url.path) is not None
         )
+        telemetry_ingest = (
+            request.method == "POST" and request.url.path == _TELEMETRY_PATH
+        )
         maximum = MAX_RECIPE_IMAGE_BYTES if recipe_image_upload else 1_048_576
-        if length and int(length) > maximum and request.url.path != "/agent/v1/enroll":
+        if telemetry_ingest:
+            response = await call_next(request)
+        elif (
+            length and int(length) > maximum and request.url.path != "/agent/v1/enroll"
+        ):
             response = Response(status_code=413)
         else:
             body_too_large = False
@@ -1141,6 +1177,19 @@ def create_app(
         if authenticated.role not in MUTATION_ROLES[("POST", path)]:
             raise HTTPException(status_code=403, detail="insufficient role")
 
+    def browser_session_actor(request: Request) -> Actor:
+        encoded = request.cookies.get("vonk_session", "")
+        if not encoded:
+            raise HTTPException(status_code=401, detail="authentication required")
+        if browser_auth is None:
+            raise HTTPException(status_code=401, detail="authentication failed")
+        try:
+            return browser_auth.resolve(encoded).actor
+        except BrowserAuthenticationError:
+            raise HTTPException(
+                status_code=401, detail="authentication failed"
+            ) from None
+
     install_agent_routes(
         app,
         actor_dependency=actor,
@@ -1158,6 +1207,7 @@ def create_app(
             update_grants=updates,
         )
     authenticated_actor = Depends(actor)
+    authenticated_browser_actor = Depends(browser_session_actor)
 
     if browser_auth is not None:
         from .auth_api import install_auth_routes
@@ -1176,6 +1226,11 @@ def create_app(
         audits=audits,
         service=catalog,
         global_catalog=global_catalog,
+    )
+    install_library_routes(
+        app,
+        actor_dependency=authenticated_actor,
+        projection=library_projection,
     )
     install_workload_run_routes(
         app, actor_dependency=authenticated_actor, audits=audits, workflow=workload_run
@@ -1211,12 +1266,62 @@ def create_app(
 
     @app.get(
         "/api/v1/fleet",
-        response_model=FleetStatusResponse,
-        responses=bounded_error_responses(401),
+        response_model=FleetSnapshot,
+        responses=bounded_error_responses(401, 503),
         operation_id="getFleetStatus",
     )
-    def fleet_view(_actor: Actor = authenticated_actor) -> FleetStatusResponse:
-        return fleet_response(fleet())
+    def fleet_view(_actor: Actor = authenticated_actor) -> FleetSnapshot:
+        if fleet_projection is None:
+            raise HTTPException(status_code=503, detail="Fleet projection unavailable")
+        try:
+            return fleet_projection.read()
+        except (OSError, RuntimeError, TypeError, ValueError):
+            raise HTTPException(
+                status_code=503, detail="Fleet projection unavailable"
+            ) from None
+
+    @app.get(
+        "/api/v1/fleet/stream",
+        response_class=StreamingResponse,
+        responses={
+            200: {
+                "content": {"text/event-stream": {"schema": {"type": "string"}}},
+                "description": "Durable Fleet event stream",
+            },
+            **bounded_error_responses(400, 401, 503),
+        },
+        operation_id="streamFleetEvents",
+    )
+    async def fleet_event_stream(
+        request: Request,
+        _documented_last_event_id: Annotated[
+            str | None,
+            Header(
+                alias="Last-Event-ID",
+                description=(
+                    "Optional durable Fleet cursor; duplicate and numeric validity "
+                    "are checked from the raw header list."
+                ),
+            ),
+        ] = None,
+        _actor: Actor = authenticated_browser_actor,
+    ) -> StreamingResponse:
+        try:
+            last_event_id = parse_last_event_id(
+                request.headers.getlist("last-event-id")
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from None
+        if fleet_stream is None:
+            raise HTTPException(status_code=503, detail="Fleet stream unavailable")
+        return StreamingResponse(
+            fleet_stream.events(last_event_id),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-transform",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     @app.get(
         "/api/v1/nodes/status",
@@ -1226,6 +1331,41 @@ def create_app(
     )
     def node_status_view(_actor: Actor = authenticated_actor) -> FleetStatusResponse:
         return fleet_response(fleet())
+
+    @app.get(
+        "/api/v1/nodes/{node_id}/telemetry",
+        response_model=TelemetryHistoryResponse,
+        responses=bounded_error_responses(401, 404, 422, 503),
+        operation_id="getNodeTelemetryHistory",
+    )
+    def node_telemetry_history(
+        node_id: Annotated[str, ApiPath(pattern=r"^spk_[0-9a-f]{32}$")],
+        start: Annotated[datetime, Query()],
+        end: Annotated[datetime, Query()],
+        resolution: Annotated[TelemetryResolution, Query()],
+        maximum_points: Annotated[int, Query(ge=1, le=1_500)] = 1_500,
+        _actor: Actor = authenticated_actor,
+    ) -> TelemetryHistoryResponse:
+        if fleet_projection is None:
+            raise HTTPException(status_code=503, detail="Fleet projection unavailable")
+        try:
+            return fleet_projection.telemetry_history(
+                node_id,
+                start=start,
+                end=end,
+                maximum_points=maximum_points,
+                resolution=resolution,
+            )
+        except KeyError:
+            raise HTTPException(
+                status_code=404, detail="Fleet node not found"
+            ) from None
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from None
+        except (OSError, RuntimeError, TypeError):
+            raise HTTPException(
+                status_code=503, detail="Telemetry history unavailable"
+            ) from None
 
     @app.get(
         "/api/v1/endpoints/{alias}",
@@ -1906,11 +2046,15 @@ def production_app() -> FastAPI:
         DesiredStateResolver,
         durable_desired_state_observations,
     )
+    from .fleet_events import FleetEventRepository
+    from .fleet_projection import FleetProjection
+    from .fleet_stream import FleetStream
     from .git_policy import GitPolicy, PolicyStore
     from .hermes_routes import RepositoryHermesRoutePolicy
     from .host_state import HostGenerationStore
     from .install_admission import InstallAdmissionService
     from .jobs import JobService
+    from .library_projection import LibraryProjection
     from .logging import JobLogStore
     from .metrics import MetricsRegistry, OperationalMetricsCollector
     from .models import Job
@@ -1928,6 +2072,7 @@ def production_app() -> FastAPI:
     from .route_runtime import AtomicRouteBundlePublisher, FileSupervisorAcknowledger
     from .run_admission import RunAdmissionService
     from .settings import GenerationStartupSettings, Settings
+    from .telemetry import TelemetryRepository
     from .update_admin import (
         DurableUpdateGrantRefresher,
         PlatformUpdateAdminService,
@@ -2020,6 +2165,31 @@ def production_app() -> FastAPI:
         sessions,
         protocol_minimum=generation.protocol_minimum,
         protocol_maximum=generation.protocol_maximum,
+    )
+    telemetry_repository = TelemetryRepository(sessions, clock=clock)
+    fleet_event_repository = FleetEventRepository(sessions, clock=clock)
+    visual_fleet = FleetProjection(
+        repository,
+        sessions,
+        clock=clock,
+        events=fleet_event_repository,
+        telemetry=telemetry_repository,
+    )
+    visual_fleet_stream = FleetStream(
+        fleet_event_repository,
+        telemetry_repository,
+        visual_fleet,
+        clock=clock,
+    )
+    visual_library = LibraryProjection(
+        sessions,
+        cursors=cursor_codec,
+        clock=clock,
+        inventory_fresh_seconds=300,
+        telemetry_live_seconds=6,
+        telemetry_delayed_seconds=20,
+        disk_floor_bytes=10_000_000_000,
+        memory_floor_bytes=4_000_000_000,
     )
     metrics = MetricsRegistry()
     operational_metrics = OperationalMetricsCollector(
@@ -2186,7 +2356,7 @@ def production_app() -> FastAPI:
         ),
         agent_jobs=agent_services.operations,
         clock=clock,
-        route_withdrawer=lambda run_id: recipe_routes.withdraw_run(run_id),
+        route_publications=recipe_routes,
         builds=RecipeBuildService(
             sessions,
             bundles=SourceBundleStore(settings.state_path / "source-bundles"),
@@ -2233,6 +2403,9 @@ def production_app() -> FastAPI:
         tokens=token_codec,
         audits=SqlAuditStore(sessions, clock),
         fleet=dashboard.fleet,
+        fleet_projection=visual_fleet,
+        fleet_stream=visual_fleet_stream,
+        library_projection=visual_library,
         admin=AdminServices(
             repository,
             proposals,

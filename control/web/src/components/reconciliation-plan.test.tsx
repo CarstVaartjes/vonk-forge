@@ -106,7 +106,7 @@ it("shows the canonical plan evidence and submits only its exact digest after ty
   // immutable release, route, compatibility gate, or can apply a different digest.
   const applied: [string, string][] = [];
   const api = {
-    fleet: async () => readyFleet,
+    fleetEvidence: async () => readyFleet,
     applyReconciliation: async (planDigest: string, fleetEvidenceDigest: string) => {
       applied.push([planDigest, fleetEvidenceDigest]);
       return {base_commit: plan.commit, job_id: "job-1", reconciliation_id: plan.reconciliation_id, state: "queued"};
@@ -166,7 +166,7 @@ it("locks a rejected stale digest until the operator previews a new plan", async
   // Break caught: a 409 leaves the old exact confirmation active and invites
   // repeated mutation attempts against authority the server rejected as stale.
   const api = {
-    fleet: async () => readyFleet,
+    fleetEvidence: async () => readyFleet,
     applyReconciliation: async () => {
       throw new Error("Control API returned 409: reconciliation plan digest is stale");
     },
@@ -209,7 +209,7 @@ it("refreshes and binds live evidence immediately before exact-digest apply", as
   const applied: unknown[] = [];
   const changedFleet = {...readyFleet, evidence_digest: "9".repeat(64)} as Fleet;
   const api = {
-    fleet: async () => changedFleet,
+    fleetEvidence: async () => changedFleet,
     applyReconciliation: async (...args: unknown[]) => { applied.push(args); throw new Error("must not apply"); },
   } as unknown as ControlApi;
   render(<ReconciliationPlan api={api} fleet={readyFleet} plan={plan}/>);
@@ -225,7 +225,7 @@ it("refreshes and binds live evidence immediately before exact-digest apply", as
 
 it("fails closed when the pre-apply evidence refresh is unavailable", async () => {
   const api = {
-    fleet: async () => { throw new Error("Control API returned 503"); },
+    fleetEvidence: async () => { throw new Error("Control API returned 503"); },
     applyReconciliation: async () => { throw new Error("must not apply"); },
   } as unknown as ControlApi;
   render(<ReconciliationPlan api={api} fleet={readyFleet} plan={plan}/>);

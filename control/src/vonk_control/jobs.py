@@ -469,14 +469,22 @@ class JobService:
 
     def resume(self, job_id: str) -> None:
         with self._sessions.begin() as session:
+            job = session.get(Job, job_id)
+            if job is None or job.state != "waiting-for-operator":
+                raise ValueError("job is not waiting for operator")
+            now = self._clock()
             result = session.execute(
                 update(Job)
                 .where(Job.id == job_id, Job.state == "waiting-for-operator")
                 .values(
                     state="queued",
                     status_reason=None,
-                    updated_at=self._clock(),
+                    updated_at=now,
                 )
+                .execution_options(synchronize_session=False)
             )
             if result.rowcount != 1:
                 raise ValueError("job is not waiting for operator")
+            job.state = "queued"
+            job.status_reason = None
+            job.updated_at = now
