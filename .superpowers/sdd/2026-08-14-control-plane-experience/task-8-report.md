@@ -47,3 +47,43 @@ GREEN behavior is covered by `library-actions.test.tsx`: distinct Mapping/Instal
 - Responsive Library CSS/reflow work.
 - `fleet-library.spec.ts` expansion and four-width browser verification.
 - Final Task 8 report completion and final integration verification.
+
+## Task 8A review fix round 1
+
+Implementation commit: `31cc27576f81bdcce8654e189f9072612e506092` (`fix(control-web): address Library action review`).
+
+This round started from clean HEAD `744a810981ffa11570a5764eb651215b937bcbf0` and addresses all seven Important findings in `task-8a-review-round-1.md`. The generated alias contract already present at that base made the previewed alias digest-bound and replay-safe; no backend or generated-client edit was required in this round.
+
+### Fixes delivered
+
+1. Mapping review now carries the selected complete-group evidence into the preview and renders per-node disk requirements, active reservations, post-action headroom, exact artifact reuse, inventory freshness, and typed placement reasons. Install review explicitly classifies inventory as fresh, stale, or unavailable relative to the published freshness policy and preserves typed stale/unavailable blockers and warnings.
+2. Load review visibly displays `RunPlanResponse.alias`, and apply uses that exact preview response alias with its plan digest.
+3. Operation polling now obtains and publishes grouped job progress, performs the terminal recipe-authority refetch, and only then publishes terminal operation state. The deterministic deferred-promise regression proves effect cleanup can no longer discard job progress or terminal refresh.
+4. Every handwritten Library preview/apply/operation/run/job wrapper accepts and forwards `AbortSignal`. Preview and poll effects own abort controllers; imperative apply and operation retry paths abort on unmount and guard every post-await update/callback.
+5. The dialog creates one request key for each preview attempt. Mapping, Install, Load, Stop, and Remove apply payloads reuse that key after ambiguous errors; requesting a fresh preview rotates it. The client no longer silently invents a new apply key.
+6. Current operation authority and complete-group action controls now lead topology/provenance detail, selected-group actions precede secondary evidence, unavailable placement evidence is collapsed, and the focused `library.css` module supplies the base desktop three-pane hierarchy at widths of at least 900px.
+7. Library pagination exposes an authoritative Load more control, forwards the cursor and abort signal, merges recipes into an existing model family without duplication, preserves unlinked grouping, and continues until `next_cursor` is absent.
+
+### Strict TDD evidence
+
+The focused RED command was:
+
+`npm test -- --run src/api/client.test.ts src/components/library-actions.test.tsx src/pages/library.test.tsx`
+
+Observed RED before implementation: 3 files ran; 2 failed and 1 passed. Seven tests failed and 20 passed. The exact failures were missing endpoint alias display, missing Mapping capacity/freshness evidence, absent stable request key, missing `AbortSignal` on deferred job polling, absent preview cancellation, old action/evidence hierarchy, and absent Load more pagination.
+
+After implementation, the same focused command passed 3 files and all 27 tests. Added coverage also verifies typed stale Install reasons, apply/retry abort on cleanup, fresh-preview key rotation, exact apply aliases and digests, and same-family plus unlinked second-page merging.
+
+### Final verification
+
+- Focused Vitest: 3 files passed; 27 tests passed.
+- Full Vitest (`npm test -- --run`): 27 passed and 1 skipped files; 145 passed and 1 skipped tests.
+- Build (`npm run build`): TypeScript and Vite passed; 65 modules transformed; production assets emitted successfully.
+- `git diff --check`: clean before the implementation commit.
+- Scope audit: the implementation commit contains only handwritten `control/web/src` source, tests, and the focused Library stylesheet. It changes no backend, generated declaration, Rust, MIA recipe/runtime/readiness, migration, dependency, e2e, or live-system file.
+
+### Still deferred by instruction
+
+- Advanced JSON editing/upload and last-valid visual preview.
+- Responsive behavior below 900px and four-width browser work.
+- `control/web/e2e/fleet-library.spec.ts` changes and E2E execution.
