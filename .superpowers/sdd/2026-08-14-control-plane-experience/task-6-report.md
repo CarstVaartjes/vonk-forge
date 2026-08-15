@@ -1,10 +1,16 @@
 # Task 6 report — Reactive Fleet frontend
 
-Status: complete locally on `work/control-plane-frontend-ux`. Nothing was pushed and no pull request was opened.
+Status: complete and independently approved locally on `work/control-plane-frontend-ux`. Nothing was pushed and no pull request was opened.
 
 Exact base: `e60f6fa944960d4c9c49f559d96c968e6d9621e5`.
 
 Implementation commit: `e6f531a8f92394a1a0ad2aaf5c92f7b6cf29ab8a` (`feat: add reactive Fleet frontend`).
+
+Fix round 1 implementation commit: `8f3fd95d3727de58a6d0214cd3fb90fde6152d3f` (`fix(web): harden reactive Fleet reconciliation`).
+
+Fix round 2 implementation commit: `2b2268c1e3c39761d7fa64702cf702ab6c32083e` (`fix(web): reset Fleet sparse cursor timeline`).
+
+Fix round 3 implementation commit: `f767e0a294ab321d42717d5fc547628dec6b9010` (`fix(web): ignore stale Fleet timeline responses`).
 
 ## Scope
 
@@ -108,3 +114,68 @@ The one skipped Vitest is the pre-existing opt-in `admin-equivalence.live.test.t
 1. Playwright's process output includes the existing Node warning that `NO_COLOR` is ignored while `FORCE_COLOR` is set. This is outside browser page execution; the Fleet fixture separately captured zero browser `warning`/`error` console messages and zero page errors.
 2. The local SSE fixture sends a valid initial snapshot and then closes, which exercises visible reconnect state without holding a server connection open. Unit tests provide deterministic open/error/poll/recovery and cleanup coverage; no live controller, NAS, Tailscale, or Spark was contacted.
 3. History is intentionally capped at 24 hours and 1,440 points for Task 6. Longer rollup windows remain outside this task and are not implied by the UI.
+
+## Independent review fix round 1
+
+The first independent review found no Critical issue and six Important issues.
+The implementation commit `8f3fd95` addresses the exact reviewed range
+`313c104..8f3fd95`:
+
+1. Sparse recipe/operation refresh now retains a required event cursor and
+   retries with bounded exponential delay until a REST or reset snapshot at or
+   beyond that cursor is accepted. Telemetry advancing during the request can no
+   longer cause the sparse requirement to be discarded.
+2. A healthy EventSource now keeps a separate 30-second non-overlapping REST
+   reconciliation interval so agent presence, certificate, inventory, run-rank,
+   and projected warning expiry continue to advance. Reconnect polling remains a
+   distinct visible state, and cleanup stops both mechanisms and aborts requests.
+3. Telemetry events require `sample.node_id` to match the envelope node ID.
+   Accepted patches and client clock aging reconcile only telemetry warning
+   codes, preserving server-owned non-telemetry warnings.
+4. Only complete installations are labeled and counted as Installed; only
+   healthy complete runs are labeled and counted as Loaded now. Incomplete and
+   degraded evidence remains visible in separate Installation state and Run
+   state sections with group/run/rank/route facts.
+5. Summary warnings count unique active projected/local conditions, and live
+   unified capacity is explicitly known, partial, or unknown. Missing evidence
+   is never rendered as measured `0 B`.
+6. Update notices break long digests and identifiers, with overflow coverage at
+   360, 768, 1280, and 1920 pixels. The two-node fixture now mirrors group
+   membership on both nodes, and EventSource tests cover browser-managed
+   reconnect continuity.
+
+Controller verification on the committed fix:
+
+| Command | Exact result |
+|---|---|
+| `npm test -- --run` | 25 files passed, 1 skipped; 130 tests passed, 1 skipped; exit 0. |
+| `npm run build` | TypeScript and Vite production build passed; 53 modules transformed; exit 0. |
+| `npm exec playwright test e2e/fleet-library.spec.ts` | 2 local-only Fleet scenarios passed; exit 0. |
+| `git diff --check 313c104..8f3fd95` | Exit 0. |
+
+Re-review round 1 found that an authoritative backward reset still retained a
+sparse requirement from the prior cursor timeline. Commit `2b2268c` makes every
+accepted authoritative reset replace that timeline, clearing the reducer and
+hook-local requirement, retry attempt, queued refresh, and pending retry timer.
+
+Re-review round 2 then exercised a stronger race: an old-timeline REST response
+already in flight when the reset arrives. Commit `f767e0a` gives each snapshot
+request a timeline generation and increments it on authoritative reset. A late
+response from an older generation cannot dispatch, advance a cursor, clear a
+current requirement, change retry state, report a stale error, or schedule an
+obsolete retry. The regression holds the response through reset, then proves
+the replacement timeline advances normally through telemetry and a new sparse
+refresh.
+
+Final controller/reviewer evidence:
+
+| Command | Exact result |
+|---|---|
+| Focused reducer/hook Vitest after round 3 | 2 files passed; 24 tests passed; exit 0. |
+| `npm test -- --run` after round 3 | 25 files passed, 1 skipped; 132 tests passed, 1 skipped; exit 0. |
+| `npm run build` after round 3 | TypeScript and Vite production build passed; exit 0. |
+| `git diff --check 2b2268c..f767e0a` | Exit 0. |
+
+The final independent re-review APPROVED `2b2268c..f767e0a` with no Critical or
+Important findings. Across Task 6, the review required three fix rounds before
+approval; no review gate was waived.
