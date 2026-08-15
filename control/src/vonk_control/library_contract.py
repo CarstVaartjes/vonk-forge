@@ -54,6 +54,8 @@ class _StrictModel(BaseModel):
 
 
 class ProjectionReason(_StrictModel):
+    model_config = ConfigDict(title="LibraryProjectionReason")
+
     code: Text80
     detail: Text256
     severity: Literal["info", "warning", "error"]

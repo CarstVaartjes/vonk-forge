@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 from vonk_control import operation_api
 from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
+from vonk_control.library_contract import ProjectionReason as LibraryProjectionReason
 from vonk_control.library_projection import (
     FreshnessPolicy,
     LibraryRecipeDetail,
@@ -193,4 +196,71 @@ def test_library_openapi_has_stable_operations_typed_models_and_bearer_security(
     ):
         assert (
             schema["components"]["schemas"][component]["additionalProperties"] is False
+        )
+
+
+def test_library_openapi_reason_schema_has_a_unique_strict_identity() -> None:
+    """Library responses must not collide with Fleet in generated clients."""
+
+    client, _operator, _library = _client()
+    schema = operation_api.admin_openapi_schema(client.app)
+    schemas = schema["components"]["schemas"]
+    library_reason_ref = (
+        "#/components/schemas/vonk_control__library_contract__ProjectionReason"
+    )
+    library_reason = schemas[library_reason_ref.rsplit("/", 1)[-1]]
+    fleet_reason = schemas["vonk_control__fleet_projection__ProjectionReason"]
+
+    assert library_reason["title"] == "LibraryProjectionReason"
+    assert fleet_reason["title"] == "ProjectionReason"
+    assert library_reason["additionalProperties"] is False
+
+    reachable = set()
+    pending = [
+        "LibrarySnapshot",
+        "LibraryRecipeDetail",
+    ]
+    while pending:
+        name = pending.pop()
+        if name in reachable:
+            continue
+        reachable.add(name)
+        component = schemas[name]
+        references: list[str] = []
+        values = [component]
+        while values:
+            value = values.pop()
+            if isinstance(value, dict):
+                reference = value.get("$ref")
+                if isinstance(reference, str):
+                    references.append(reference)
+                values.extend(value.values())
+            elif isinstance(value, list):
+                values.extend(value)
+        for reference in references:
+            if reference.startswith("#/components/schemas/"):
+                dependency = reference.rsplit("/", 1)[-1]
+                assert dependency in schemas
+                pending.append(dependency)
+
+    reason_references = [
+        component["properties"]["reasons"]["items"]["$ref"]
+        for component in (schemas[name] for name in reachable)
+        if "reasons" in component.get("properties", {})
+    ]
+    assert reason_references
+    assert set(reason_references) == {library_reason_ref}
+
+    with pytest.raises(ValidationError):
+        LibraryProjectionReason(
+            code=1,
+            detail="The stored recipe document is invalid.",
+            severity="error",
+        )
+    with pytest.raises(ValidationError):
+        LibraryProjectionReason(
+            code="recipe.document_invalid",
+            detail="The stored recipe document is invalid.",
+            severity="error",
+            unexpected=True,
         )
