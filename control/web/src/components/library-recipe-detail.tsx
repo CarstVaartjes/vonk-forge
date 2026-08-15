@@ -39,7 +39,7 @@ function operationLabel(kind: string, state: string): string {
 export function LibraryRecipeAuthority({api, detail, onRefresh, policy}: {
   api: LibraryApi;
   detail: LibraryRecipeDetail;
-  onRefresh(): Promise<void>;
+  onRefresh(signal: AbortSignal): Promise<void>;
   policy: LibrarySnapshot["freshness_policy"];
 }) {
   const [review, setReview] = useState<LibraryActionReview>();
@@ -113,6 +113,6 @@ export function LibraryRecipeAuthority({api, detail, onRefresh, policy}: {
       <a href={`/catalog/${encodeURIComponent(detail.recipe.recipe_id)}/map`}>Cluster mapping</a>
       <a href={`/catalog/${encodeURIComponent(detail.recipe.recipe_id)}`}>Raw editor</a>
     </nav>
-    {review && <LibraryActionDialog alias={alias} api={api} evidence={review.evidence} generatedAt={detail.generated_at} onApplied={onApplied} onClose={closeReview} onRefresh={onRefresh} policy={policy} target={review.target}/>}
+    {review && <LibraryActionDialog alias={alias} api={api} evidence={review.evidence} onApplied={onApplied} onClose={closeReview} onRefresh={onRefresh} policy={policy} target={review.target}/>}
   </div>;
 }

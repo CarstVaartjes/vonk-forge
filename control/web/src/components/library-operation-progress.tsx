@@ -22,7 +22,7 @@ export function LibraryOperationProgress({api, name, onChange, onRefresh, operat
   api: LibraryApi;
   name: LibraryActionName;
   onChange(operation: LibraryOperation): void;
-  onRefresh(): Promise<void>;
+  onRefresh(signal: AbortSignal): Promise<void>;
   operation: LibraryOperation;
 }) {
   const [job, setJob] = useState<JobDetail>();
@@ -60,7 +60,7 @@ export function LibraryOperationProgress({api, name, onChange, onRefresh, operat
         }
         if (controller.signal.aborted) return;
         if (operationSettled(next.state)) {
-          await onRefresh();
+          await onRefresh(controller.signal);
           if (controller.signal.aborted) return;
           onChange(next);
           return;

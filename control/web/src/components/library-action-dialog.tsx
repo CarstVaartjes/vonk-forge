@@ -46,15 +46,15 @@ function applyLabel(target: LibraryActionTarget): string {
   return "Remove selected installation";
 }
 
-function Plan({evidence, generatedAt, plan, policy, target}: {
+function Plan({evidence, plan, policy, previewReceivedAt, target}: {
   evidence?: LibraryPlacementGroup;
-  generatedAt: string;
   plan: LibraryActionPlan;
   policy: LibrarySnapshot["freshness_policy"];
+  previewReceivedAt: number;
   target: LibraryActionTarget;
 }) {
   if (target.kind === "mapping") return <MappingPreview evidence={evidence} plan={plan as LibraryMappingPlan} policy={policy}/>;
-  if (target.kind === "install") return <InstallPreview generatedAt={generatedAt} plan={plan as LibraryInstallPlan} policy={policy}/>;
+  if (target.kind === "install") return <InstallPreview plan={plan as LibraryInstallPlan} policy={policy} previewReceivedAt={previewReceivedAt}/>;
   if (target.kind === "run") return <LoadPreview plan={plan as LibraryLoadPlan}/>;
   if (target.kind === "stop") return <StopPreview plan={plan as LibraryStopPlan}/>;
   return <UninstallPreview plan={plan as LibraryUninstallPlan}/>;
@@ -78,14 +78,13 @@ async function apply(api: LibraryApi, target: LibraryActionTarget, plan: Library
   return api.applyLibraryUninstall(target.installationId, {plan_digest: (plan as LibraryUninstallPlan).plan_digest, request_key: requestKey}, signal);
 }
 
-export function LibraryActionDialog({alias, api, evidence, generatedAt, onApplied, onClose, onRefresh, policy, target}: {
+export function LibraryActionDialog({alias, api, evidence, onApplied, onClose, onRefresh, policy, target}: {
   alias: string;
   api: LibraryApi;
   evidence?: LibraryPlacementGroup;
-  generatedAt: string;
   onApplied(operation: LibraryOperation, name: LibraryActionName): void;
   onClose(): void;
-  onRefresh(): Promise<void>;
+  onRefresh(signal: AbortSignal): Promise<void>;
   policy: LibrarySnapshot["freshness_policy"];
   target: LibraryActionTarget;
 }) {
@@ -96,6 +95,7 @@ export function LibraryActionDialog({alias, api, evidence, generatedAt, onApplie
   const [applying, setApplying] = useState(false);
   const [stale, setStale] = useState(false);
   const [previewAttempt, setPreviewAttempt] = useState(0);
+  const [previewReceivedAt, setPreviewReceivedAt] = useState(0);
   const dialog = useRef<HTMLDivElement>(null);
   const close = useRef<HTMLButtonElement>(null);
   const applyController = useRef<AbortController | undefined>(undefined);
@@ -120,8 +120,14 @@ export function LibraryActionDialog({alias, api, evidence, generatedAt, onApplie
     setApplyError("");
     setStale(false);
     setPlan(undefined);
+    setPreviewReceivedAt(0);
     void preview(api, target, alias, controller.signal)
-      .then(value => { if (!controller.signal.aborted) setPlan(value); })
+      .then(value => {
+        if (!controller.signal.aborted) {
+          setPreviewReceivedAt(Date.now());
+          setPlan(value);
+        }
+      })
       .catch(value => { if (!controller.signal.aborted) setPreviewError(message(value)); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
@@ -156,7 +162,7 @@ export function LibraryActionDialog({alias, api, evidence, generatedAt, onApplie
     try {
       const operation = await apply(api, target, plan, requestKey.current, controller.signal);
       if (!mounted.current || controller.signal.aborted) return;
-      await onRefresh();
+      await onRefresh(controller.signal);
       if (!mounted.current || controller.signal.aborted) return;
       if (operation) onApplied(operation, name);
       setApplying(false);
@@ -178,7 +184,7 @@ export function LibraryActionDialog({alias, api, evidence, generatedAt, onApplie
       <div className="library-action-dialog-body">
         {loading && <p role="status">Loading {name} preview…</p>}
         {previewError && <div className="fleet-error" role="alert"><p>{previewError}</p><button type="button" onClick={() => setPreviewAttempt(value => value + 1)}>Retry preview</button></div>}
-        {plan && <Plan evidence={evidence} generatedAt={generatedAt} plan={plan} policy={policy} target={target}/>}
+        {plan && <Plan evidence={evidence} plan={plan} policy={policy} previewReceivedAt={previewReceivedAt} target={target}/>}
         {applyError && <div className="fleet-error" role="alert"><p>{applyError}</p><p>The reviewed authority remains open. Review again if the underlying state changed.</p>{stale && <button type="button" onClick={() => setPreviewAttempt(value => value + 1)}>Review fresh preview</button>}</div>}
       </div>
       <footer>

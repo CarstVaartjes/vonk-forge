@@ -41,7 +41,7 @@ export function LibraryBrowser({api, detail, detailError, detailLoading, onNavig
   detailError: string;
   detailLoading: boolean;
   onNavigate: Navigate;
-  onRefresh(): Promise<void>;
+  onRefresh(signal: AbortSignal): Promise<void>;
   route: LibraryRoute;
   snapshot: LibrarySnapshot;
 }) {

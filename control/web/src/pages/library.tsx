@@ -78,14 +78,15 @@ export function LibraryPage({api, path, onNavigate}: {
 
   const route = libraryRoute(path);
   const recipeId = route.kind === "recipe" ? route.recipeId : undefined;
-  const refreshDetail = useCallback(async () => {
-    if (!recipeId) return;
+  const refreshDetail = useCallback(async (signal: AbortSignal) => {
+    if (!recipeId || signal.aborted) return;
     try {
-      const value = await api.libraryRecipe(recipeId);
+      const value = await api.libraryRecipe(recipeId, signal);
+      if (signal.aborted) return;
       setDetail(value);
       setDetailError("");
     } catch (value) {
-      setDetailError(value instanceof Error ? value.message.slice(0, 256) : "Unable to refresh recipe authority");
+      if (!signal.aborted) setDetailError(value instanceof Error ? value.message.slice(0, 256) : "Unable to refresh recipe authority");
     }
   }, [api, recipeId]);
   useEffect(() => {

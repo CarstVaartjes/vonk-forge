@@ -20,13 +20,23 @@ function reasonSets(nodes: Array<{blockers: {code: string; detail: string}[]; wa
   };
 }
 
-function inventoryFreshness(observedAt: string | null, generatedAt: string, policy: LibrarySnapshot["freshness_policy"]): string {
-  if (!observedAt) return "Inventory unavailable · observation not reported";
-  const observed = Date.parse(observedAt);
-  const generated = Date.parse(generatedAt);
-  if (!Number.isFinite(observed) || !Number.isFinite(generated)) return "Inventory unavailable · invalid observation time";
-  const age = Math.max(0, Math.round((generated - observed) / 1000));
-  return `Inventory ${age < policy.inventory_fresh_seconds ? "fresh" : "stale"} · ${age}s`;
+type InstallNodePlan = LibraryInstallPlan["nodes"][number];
+
+function typedInventoryState(node: InstallNodePlan): "stale" | "unavailable" | undefined {
+  const codes = node.blockers.concat(node.warnings).map(reason => reason.code.toLowerCase());
+  if (codes.some(code => code.includes("inventory") && /missing|unavailable|not[_-]reported/.test(code))) return "unavailable";
+  if (codes.some(code => code.includes("inventory") && code.includes("stale"))) return "stale";
+  return undefined;
+}
+
+function inventoryFreshness(node: InstallNodePlan, previewReceivedAt: number, policy: LibrarySnapshot["freshness_policy"]): string {
+  const typedState = typedInventoryState(node);
+  if (typedState === "unavailable") return "Inventory unavailable · server preview evidence";
+  if (!node.inventory_observed_at) return "Inventory unavailable · observation not reported";
+  const observed = Date.parse(node.inventory_observed_at);
+  if (!Number.isFinite(observed) || !Number.isFinite(previewReceivedAt)) return "Inventory unavailable · invalid observation time";
+  const age = Math.max(0, Math.round((previewReceivedAt - observed) / 1000));
+  return `Inventory ${typedState === "stale" || age >= policy.inventory_fresh_seconds ? "stale" : "fresh"} · ${age}s`;
 }
 
 export function MappingPreview({evidence, plan, policy}: {
@@ -51,10 +61,10 @@ export function MappingPreview({evidence, plan, policy}: {
   </div>;
 }
 
-export function InstallPreview({generatedAt, plan, policy}: {
-  generatedAt: string;
+export function InstallPreview({plan, policy, previewReceivedAt}: {
   plan: LibraryInstallPlan;
   policy: LibrarySnapshot["freshness_policy"];
+  previewReceivedAt: number;
 }) {
   const reasons = reasonSets(plan.nodes);
   return <div className="action-preview">
@@ -63,7 +73,7 @@ export function InstallPreview({generatedAt, plan, policy}: {
       <strong>Rank {node.rank} · {node.role} · {node.node_id}</strong>
       <span>{formatBytes(node.required_bytes)} disk required · {formatBytes(node.required_download_bytes)} download · {formatBytes(node.reused_bytes)} reused</span>
       <span>{formatBytes(node.active_reserved_bytes)} reserved · {node.free_bytes == null ? "Disk inventory unavailable" : `${formatBytes(node.free_bytes)} free`}{node.free_after_bytes == null ? "" : ` · ${formatBytes(node.free_after_bytes)} after`}</span>
-      <span>{inventoryFreshness(node.inventory_observed_at, generatedAt, policy)}</span>
+      <span>{inventoryFreshness(node, previewReceivedAt, policy)}</span>
       <span>Observed {node.inventory_observed_at ?? "not reported"}</span>
     </li>)}</ol>
     <LibraryPlanReasons heading="Install blockers" reasons={reasons.blockers}/>

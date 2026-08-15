@@ -164,6 +164,13 @@ test("applies Mapping and Install only from their distinct authoritative preview
   // reviewed digest, or let Install omit its exact build/mapping authority.
   history.replaceState(null, "", "/library/recipes/recipe-chat");
   const detail = structuredClone(fullLibraryDetail);
+  const lateInstallPlan = structuredClone(installPlan);
+  lateInstallPlan.nodes[0].inventory_observed_at = "2026-08-15T12:09:50Z";
+  lateInstallPlan.nodes[0].warnings = [{code: "inventory.stale", detail: "Server preview classified node-alpha inventory as stale."}];
+  lateInstallPlan.nodes[1].inventory_observed_at = "2026-08-15T12:09:40Z";
+  lateInstallPlan.nodes[1].warnings = [{code: "inventory.unavailable", detail: "Server preview could not authorize node-beta inventory."}];
+  lateInstallPlan.nodes.push({...lateInstallPlan.nodes[1], inventory_observed_at: "2026-08-15T12:01:00Z", node_id: "node-gamma", rank: 2, warnings: []});
+  vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-08-15T12:10:00Z"));
   detail.placement[0].recommendations[0].preview_targets = [
     {kind: "mapping", input: {recipe_revision_id: "revision-chat", profile_name: "pair", node_ids: ["node-alpha", "node-beta"], parameters: {tensor_parallel: 2}}},
     {kind: "install", input: {recipe_build_id: "build-chat", mapping_id: "mapping-chat"}},
@@ -175,7 +182,7 @@ test("applies Mapping and Install only from their distinct authoritative preview
     librarySnapshot: async () => librarySnapshot,
     libraryRecipe: vi.fn(async () => detail),
     previewLibraryMapping: vi.fn(async () => mappingPlan), applyLibraryMapping,
-    previewLibraryInstall: vi.fn(async () => installPlan), applyLibraryInstall,
+    previewLibraryInstall: vi.fn(async () => lateInstallPlan), applyLibraryInstall,
   } as unknown as ControlApi;
   const user = userEvent.setup();
   render(<App api={api}/>);
@@ -198,11 +205,15 @@ test("applies Mapping and Install only from their distinct authoritative preview
 
   await user.click(within(group).getByRole("button", {name: "Review Install"}));
   const install = await screen.findByRole("dialog", {name: "Review Install"});
-  expect(within(install).getAllByText("60.0 GiB disk required · 40.0 GiB download · 20.0 GiB reused")).toHaveLength(2);
-  expect(within(install).getByText("Inventory fresh · 10s")).toBeVisible();
-  expect(within(install).getByText("Inventory stale · 600s")).toBeVisible();
+  expect(within(install).getAllByText("60.0 GiB disk required · 40.0 GiB download · 20.0 GiB reused")).toHaveLength(3);
+  expect(within(install).getByText("Inventory stale · 10s")).toBeVisible();
+  expect(within(install).getByText("Inventory stale · 540s")).toBeVisible();
+  expect(within(install).getByText("Inventory unavailable · server preview evidence")).toBeVisible();
+  expect(within(install).queryByText(/^Inventory fresh/)).not.toBeInTheDocument();
   expect(within(install).getByText("inventory.stale")).toBeVisible();
-  expect(within(install).getByText("Admission inventory is stale for node-beta.")).toBeVisible();
+  expect(within(install).getByText("inventory.unavailable")).toBeVisible();
+  expect(within(install).getByText("Server preview classified node-alpha inventory as stale.")).toBeVisible();
+  expect(within(install).getByText("Server preview could not authorize node-beta inventory.")).toBeVisible();
   await user.click(within(install).getByRole("button", {name: "Install on selected nodes"}));
   expect(applyLibraryInstall).toHaveBeenCalledWith({recipe_build_id: "build-chat", mapping_id: "mapping-chat", plan_digest: "install-plan-digest", request_key: expect.any(String)}, expect.any(AbortSignal));
   expect(await screen.findByRole("region", {name: "Install operation progress"})).toHaveTextContent("Operation complete");
@@ -354,6 +365,70 @@ test("aborts in-flight preview, apply, operation, and job requests on cleanup", 
   await waitFor(() => expect(retrySignal).toBeInstanceOf(AbortSignal));
   retryRender.unmount();
   expect(retrySignal?.aborted).toBe(true);
+});
+
+test("aborts an apply-owned detail refresh and ignores its late authority response", async () => {
+  // Break caught: closing an applying review aborts the mutation but leaves its
+  // signal-less detail refresh alive to overwrite the still-mounted page.
+  history.replaceState(null, "", "/library/recipes/recipe-chat");
+  let refreshSignal: AbortSignal | undefined;
+  let resolveRefresh!: (value: typeof fullLibraryDetail) => void;
+  const refresh = new Promise<typeof fullLibraryDetail>(resolve => { resolveRefresh = resolve; });
+  const libraryRecipe = vi.fn((_recipeId: string, signal?: AbortSignal) => {
+    if (libraryRecipe.mock.calls.length === 1) return Promise.resolve(fullLibraryDetail);
+    refreshSignal = signal;
+    return refresh;
+  });
+  const api = {
+    librarySnapshot: async () => librarySnapshot,
+    libraryRecipe,
+    previewLibraryLoad: async () => loadPlan(),
+    applyLibraryLoad: async () => operation("queued"),
+    libraryOperation: vi.fn(async () => operation("running")),
+  } as unknown as ControlApi;
+  const user = userEvent.setup();
+  render(<App api={api}/>);
+
+  const placement = await screen.findByRole("region", {name: "Complete placement groups"});
+  const selector = within(placement).getByRole("button", {name: /Select complete group/});
+  await user.click(selector);
+  await user.click(within(selector.closest("article")!).getByRole("button", {name: "Review Load"}));
+  const dialog = await screen.findByRole("dialog", {name: "Review Load"});
+  await user.click(within(dialog).getByRole("button", {name: "Load selected installation"}));
+  await waitFor(() => expect(libraryRecipe).toHaveBeenCalledTimes(2));
+  await user.click(within(dialog).getByRole("button", {name: "Close review"}));
+
+  expect(refreshSignal).toBeInstanceOf(AbortSignal);
+  expect(refreshSignal?.aborted).toBe(true);
+  const lateDetail = structuredClone(fullLibraryDetail);
+  lateDetail.recipe.title = "Late refresh must be ignored";
+  resolveRefresh(lateDetail);
+  await act(async () => { await Promise.resolve(); });
+  expect(screen.queryByText("Late refresh must be ignored")).not.toBeInTheDocument();
+  expect(screen.queryByRole("region", {name: "Load operation progress"})).not.toBeInTheDocument();
+});
+
+test("aborts a terminal-poll detail refresh and suppresses its late state callback", async () => {
+  // Break caught: terminal operation cleanup aborts polling but not the detail
+  // refresh awaited before publishing terminal operation state.
+  let refreshSignal: AbortSignal | undefined;
+  let resolveRefresh!: () => void;
+  const refresh = new Promise<void>(resolve => { resolveRefresh = resolve; });
+  const onRefresh = vi.fn((signal?: AbortSignal) => {
+    refreshSignal = signal;
+    return refresh;
+  });
+  const onChange = vi.fn();
+  const api = {libraryOperation: vi.fn(async () => operation("succeeded"))} as unknown as ControlApi;
+  const rendered = render(<LibraryOperationProgress api={api} name="Load" operation={operation("running")} onChange={onChange} onRefresh={onRefresh}/>);
+
+  await waitFor(() => expect(onRefresh).toHaveBeenCalledTimes(1));
+  rendered.unmount();
+  expect(refreshSignal).toBeInstanceOf(AbortSignal);
+  expect(refreshSignal?.aborted).toBe(true);
+  resolveRefresh();
+  await act(async () => { await Promise.resolve(); });
+  expect(onChange).not.toHaveBeenCalled();
 });
 
 test("retries a failed preview without closing its review", async () => {
