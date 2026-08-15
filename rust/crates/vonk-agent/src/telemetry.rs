@@ -370,12 +370,12 @@ impl TelemetryQueue {
     }
 
     pub fn push(&mut self, sample: TelemetrySample) {
-        if self.samples.len() == MAX_QUEUE_SAMPLES {
-            if let Some(dropped) = self.samples.pop_front() {
-                let lost = dropped.gap_samples.saturating_add(1);
-                if let Some(oldest_retained) = self.samples.front_mut() {
-                    oldest_retained.gap_samples = oldest_retained.gap_samples.saturating_add(lost);
-                }
+        if self.samples.len() == MAX_QUEUE_SAMPLES
+            && let Some(dropped) = self.samples.pop_front()
+        {
+            let lost = dropped.gap_samples.saturating_add(1);
+            if let Some(oldest_retained) = self.samples.front_mut() {
+                oldest_retained.gap_samples = oldest_retained.gap_samples.saturating_add(lost);
             }
         }
         self.samples.push_back(sample);
