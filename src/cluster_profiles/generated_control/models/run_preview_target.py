@@ -65,7 +65,7 @@ class RunPreviewTarget:
 
 
         kind = cast(Union[Literal['run'], Unset] , d.pop("kind", UNSET))
-        if kind != 'run'and not isinstance(kind, Unset):
+        if kind != 'run' and not isinstance(kind, Unset):
             raise ValueError(f"kind must match const 'run', got '{kind}'")
 
         run_preview_target = cls(

@@ -11,6 +11,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 import pytest
 from sqlalchemy import create_engine, event, select, text, update
@@ -426,21 +427,36 @@ def clone_running_run(sessions, source_run_id: str, *, alias: str) -> str:
                 updated_at=NOW,
             )
         )
-        session.add_all(
-            RunNode(
-                run_id=run_id,
-                node_id=node.node_id,
-                rank=node.rank,
-                role=node.role,
-                state="running",
-                port=node.port + 10,
-                reserved_memory_bytes=node.reserved_memory_bytes,
-                endpoint=dict(node.endpoint) if node.endpoint is not None else None,
-                evidence_digest=node.evidence_digest,
-                updated_at=NOW,
+        cloned_nodes = []
+        for node in source_nodes:
+            port = node.port + 10
+            endpoint = dict(node.endpoint) if node.endpoint is not None else None
+            if endpoint is not None and isinstance(endpoint.get("url"), str):
+                parsed = urlsplit(endpoint["url"])
+                host = parsed.hostname
+                if host is None or parsed.port is None:
+                    raise AssertionError(
+                        "running test endpoint must include a host and port"
+                    )
+                netloc = f"[{host}]" if ":" in host else host
+                endpoint["url"] = urlunsplit(
+                    parsed._replace(netloc=f"{netloc}:{port}")
+                )
+            cloned_nodes.append(
+                RunNode(
+                    run_id=run_id,
+                    node_id=node.node_id,
+                    rank=node.rank,
+                    role=node.role,
+                    state="running",
+                    port=port,
+                    reserved_memory_bytes=node.reserved_memory_bytes,
+                    endpoint=endpoint,
+                    evidence_digest=node.evidence_digest,
+                    updated_at=NOW,
+                )
             )
-            for node in source_nodes
-        )
+        session.add_all(cloned_nodes)
         session.add_all(
             ResourceReservation(
                 node_id=node.node_id,

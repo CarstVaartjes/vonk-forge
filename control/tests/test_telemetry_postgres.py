@@ -25,7 +25,7 @@ from vonk_control.telemetry import (
     TelemetryRepository,
     TelemetrySampleInput,
 )
-from vonk_control.telemetry_maintenance import TelemetryMaintenance
+from vonk_control.telemetry_maintenance import TelemetryMaintenance, bucket_start
 
 NODE_A = "spk_" + "a" * 32
 BOOT_A = uuid.UUID("00000000-0000-4000-8000-000000000001")
@@ -321,7 +321,7 @@ def test_postgres_node_first_maintenance_avoids_late_ingestion_deadlock(
         event.remove(postgres_engine, "before_cursor_execute", before_statement)
         event.remove(postgres_engine, "after_cursor_execute", after_statement)
 
-    start = NOW.replace(second=0, microsecond=0)
+    start = bucket_start(NOW - timedelta(seconds=30), 60)
     with sessions() as session:
         assert (
             session.get(

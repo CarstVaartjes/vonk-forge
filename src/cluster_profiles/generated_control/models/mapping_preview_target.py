@@ -65,7 +65,7 @@ class MappingPreviewTarget:
 
 
         kind = cast(Union[Literal['mapping'], Unset] , d.pop("kind", UNSET))
-        if kind != 'mapping'and not isinstance(kind, Unset):
+        if kind != 'mapping' and not isinstance(kind, Unset):
             raise ValueError(f"kind must match const 'mapping', got '{kind}'")
 
         mapping_preview_target = cls(

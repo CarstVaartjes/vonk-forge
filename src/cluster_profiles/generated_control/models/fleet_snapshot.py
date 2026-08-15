@@ -101,7 +101,7 @@ class FleetSnapshot:
         repository_commit = d.pop("repository_commit")
 
         schema_version = cast(Union[Literal[1], Unset] , d.pop("schema_version", UNSET))
-        if schema_version != 1and not isinstance(schema_version, Unset):
+        if schema_version != 1 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 1, got '{schema_version}'")
 
         fleet_snapshot = cls(

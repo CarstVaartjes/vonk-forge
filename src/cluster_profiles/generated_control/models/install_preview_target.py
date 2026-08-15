@@ -65,7 +65,7 @@ class InstallPreviewTarget:
 
 
         kind = cast(Union[Literal['install'], Unset] , d.pop("kind", UNSET))
-        if kind != 'install'and not isinstance(kind, Unset):
+        if kind != 'install' and not isinstance(kind, Unset):
             raise ValueError(f"kind must match const 'install', got '{kind}'")
 
         install_preview_target = cls(

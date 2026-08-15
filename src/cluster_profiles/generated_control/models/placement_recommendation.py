@@ -287,7 +287,7 @@ class PlacementRecommendation:
         group_complete = d.pop("group_complete", UNSET)
 
         ranking_scope = cast(Union[Literal['bounded-advisory'], Unset] , d.pop("ranking_scope", UNSET))
-        if ranking_scope != 'bounded-advisory'and not isinstance(ranking_scope, Unset):
+        if ranking_scope != 'bounded-advisory' and not isinstance(ranking_scope, Unset):
             raise ValueError(f"ranking_scope must match const 'bounded-advisory', got '{ranking_scope}'")
 
         placement_recommendation = cls(
