@@ -1,81 +1,22 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://api.vonkforge.ai/schemas/recipe/v1.schema.json",
-  "title": "Vonk Forge source-first recipe v1",
+  "title": "Vonk Forge execution recipe v1",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "schema_version",
-    "identity",
-    "metadata",
-    "workload",
-    "build",
-    "parameters",
-    "artifacts",
-    "runtime",
-    "deployment_profiles",
-    "validation",
-    "provenance"
-  ],
+  "required": ["schema_version", "identity", "metadata", "model", "execution", "build", "parameters", "artifacts", "runtime", "topology", "interfaces", "validation", "provenance"],
   "properties": {
     "schema_version": {"const": 1},
-    "identity": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["publisher", "slug"],
-      "properties": {
-        "publisher": {"$ref": "#/$defs/slug"},
-        "slug": {"$ref": "#/$defs/slug"}
-      }
-    },
-    "metadata": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["title", "description", "tags"],
-      "properties": {
-        "title": {"type": "string", "minLength": 1, "maxLength": 120},
-        "description": {"type": "string", "minLength": 1, "maxLength": 4000},
-        "tags": {
-          "type": "array",
-          "maxItems": 20,
-          "uniqueItems": true,
-          "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9.-]{0,39}$"}
-        }
-      }
-    },
-    "workload": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["family", "capabilities"],
-      "properties": {
-        "family": {"type": "string", "pattern": "^[a-z0-9][a-z0-9.-]{0,63}$"},
-        "capabilities": {
-          "type": "array",
-          "minItems": 1,
-          "uniqueItems": true,
-          "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"}
-        }
-      }
-    },
+    "identity": {"$ref": "#/$defs/identity"},
+    "metadata": {"$ref": "#/$defs/metadata"},
+    "model": {"$ref": "#/$defs/modelVersionReference"},
+    "execution": {"$ref": "#/$defs/executionHarnessReference"},
     "build": {"$ref": "#/$defs/build"},
-    "parameters": {
-      "type": "array",
-      "maxItems": 128,
-      "items": {"$ref": "#/$defs/parameter"}
-    },
-    "artifacts": {
-      "type": "array",
-      "minItems": 1,
-      "maxItems": 32,
-      "items": {"$ref": "#/$defs/artifact"}
-    },
+    "parameters": {"type": "array", "maxItems": 128, "items": {"$ref": "#/$defs/parameter"}},
+    "artifacts": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"$ref": "#/$defs/artifact"}},
     "runtime": {"$ref": "#/$defs/runtime"},
-    "deployment_profiles": {
-      "type": "array",
-      "minItems": 1,
-      "maxItems": 64,
-      "items": {"$ref": "#/$defs/deploymentProfile"}
-    },
+    "topology": {"$ref": "#/$defs/topology"},
+    "interfaces": {"type": "array", "minItems": 1, "maxItems": 6, "items": {"$ref": "#/$defs/interface"}},
     "validation": {"$ref": "#/$defs/validation"},
     "provenance": {"$ref": "#/$defs/provenance"}
   },
@@ -85,347 +26,29 @@
     "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
     "bytes": {"type": "integer", "minimum": 0},
     "scalar": {"type": ["string", "integer", "boolean"]},
-    "containerPath": {
-      "type": "string",
-      "pattern": "^/(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$",
-      "maxLength": 256
-    },
-    "bundlePath": {
-      "type": "string",
-      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$",
-      "maxLength": 256
-    },
-    "build": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["context", "dockerfile", "platform", "arguments", "network", "resources"],
-      "properties": {
-        "context": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["sha256", "expected_bytes", "media_type"],
-          "properties": {
-            "sha256": {"$ref": "#/$defs/sha256"},
-            "expected_bytes": {"type": "integer", "minimum": 1},
-            "media_type": {"const": "application/vnd.vonk-forge.source-bundle.v1+tar"}
-          }
-        },
-        "dockerfile": {"$ref": "#/$defs/bundlePath"},
-        "target": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,64}$"},
-        "platform": {"const": "linux/arm64"},
-        "arguments": {
-          "type": "array",
-          "maxItems": 64,
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["name", "value"],
-            "properties": {
-              "name": {"$ref": "#/$defs/name"},
-              "value": {"$ref": "#/$defs/scalar"}
-            }
-          }
-        },
-        "network": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["mode", "hosts"],
-          "properties": {
-            "mode": {"enum": ["none", "public"]},
-            "hosts": {
-              "type": "array",
-              "maxItems": 64,
-              "uniqueItems": true,
-              "items": {"type": "string", "pattern": "^[A-Za-z0-9.-]+$", "maxLength": 253}
-            }
-          }
-        },
-        "resources": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["download_bytes", "temporary_bytes", "memory_bytes", "timeout_seconds"],
-          "properties": {
-            "download_bytes": {"$ref": "#/$defs/bytes"},
-            "temporary_bytes": {"type": "integer", "minimum": 1},
-            "memory_bytes": {"type": "integer", "minimum": 1},
-            "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 86400}
-          }
-        }
-      }
-    },
-    "parameter": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["name", "description", "type", "default", "change_effect"],
-      "properties": {
-        "name": {"$ref": "#/$defs/name"},
-        "description": {"type": "string", "minLength": 1, "maxLength": 512},
-        "type": {"enum": ["string", "integer", "boolean", "enum"]},
-        "default": {"$ref": "#/$defs/scalar"},
-        "minimum": {"type": "integer"},
-        "maximum": {"type": "integer"},
-        "allowed_values": {
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 128,
-          "uniqueItems": true,
-          "items": {"$ref": "#/$defs/scalar"}
-        },
-        "pattern": {"type": "string", "maxLength": 256},
-        "change_effect": {"enum": ["rebuild", "reinstall", "restart"]}
-      }
-    },
-    "artifact": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["id", "kind", "repository", "revision", "download_bytes", "installed_bytes", "mount", "roles"],
-      "properties": {
-        "id": {"$ref": "#/$defs/name"},
-        "kind": {"enum": ["huggingface.snapshot", "http.file", "oci.artifact"]},
-        "repository": {"type": "string", "minLength": 1, "maxLength": 512},
-        "revision": {"type": "string", "minLength": 40, "maxLength": 71},
-        "download_bytes": {"type": "integer", "minimum": 1},
-        "installed_bytes": {"type": "integer", "minimum": 1},
-        "mount": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["target", "read_only"],
-          "properties": {
-            "target": {"$ref": "#/$defs/containerPath"},
-            "read_only": {"type": "boolean"}
-          }
-        },
-        "roles": {
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 32,
-          "uniqueItems": true,
-          "items": {"$ref": "#/$defs/name"}
-        }
-      }
-    },
-    "argument": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["name"],
-      "properties": {
-        "name": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$"},
-        "value": {"$ref": "#/$defs/scalar"},
-        "parameter": {"$ref": "#/$defs/name"}
-      },
-      "oneOf": [
-        {"required": ["value"], "not": {"required": ["parameter"]}},
-        {"required": ["parameter"], "not": {"required": ["value"]}}
-      ]
-    },
-    "environment": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["name"],
-      "properties": {
-        "name": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,127}$"},
-        "value": {"$ref": "#/$defs/scalar"},
-        "secret": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]{0,127}$"}
-      },
-      "oneOf": [
-        {"required": ["value"], "not": {"required": ["secret"]}},
-        {"required": ["secret"], "not": {"required": ["value"]}}
-      ]
-    },
-    "runtime": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["interface", "adapter", "adapter_version", "entrypoint", "arguments", "environment", "endpoint", "security", "lifecycle"],
-      "properties": {
-        "interface": {"const": "vonk.runtime.v1"},
-        "adapter": {"$ref": "#/$defs/name"},
-        "adapter_version": {"type": "integer", "minimum": 1},
-        "entrypoint": {
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 32,
-          "items": {"type": "string", "minLength": 1, "maxLength": 512}
-        },
-        "arguments": {"type": "array", "maxItems": 128, "items": {"$ref": "#/$defs/argument"}},
-        "environment": {"type": "array", "maxItems": 128, "items": {"$ref": "#/$defs/environment"}},
-        "endpoint": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["protocol", "port", "model_aliases", "health_path"],
-          "properties": {
-            "protocol": {"const": "openai"},
-            "port": {"type": "integer", "minimum": 1024, "maximum": 65535},
-            "model_aliases": {
-              "type": "array",
-              "minItems": 1,
-              "maxItems": 16,
-              "uniqueItems": true,
-              "items": {"type": "string", "minLength": 1, "maxLength": 120}
-            },
-            "health_path": {"type": "string", "pattern": "^/[A-Za-z0-9_./-]+$", "maxLength": 256}
-          }
-        },
-        "security": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["devices", "capabilities", "host_network", "privileged", "user", "mounts"],
-          "properties": {
-            "devices": {"type": "array", "maxItems": 8, "uniqueItems": true, "items": {"enum": ["nvidia.com/gpu=all"]}},
-            "capabilities": {"type": "array", "maxItems": 0},
-            "host_network": {"type": "boolean"},
-            "privileged": {"const": false},
-            "user": {"type": "string", "pattern": "^(?!0(?::0)?$)[1-9][0-9]*(?::[1-9][0-9]*)?$"},
-            "mounts": {
-              "type": "array",
-              "minItems": 1,
-              "maxItems": 32,
-              "items": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": ["source", "target", "read_only"],
-                "properties": {
-                  "source": {"$ref": "#/$defs/name"},
-                  "target": {"$ref": "#/$defs/containerPath"},
-                  "read_only": {"type": "boolean"}
-                }
-              }
-            }
-          }
-        },
-        "lifecycle": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["pre_start", "post_stop", "stop_timeout_seconds"],
-          "properties": {
-            "pre_start": {"type": "array", "maxItems": 16, "items": {"$ref": "#/$defs/argv"}},
-            "post_stop": {"type": "array", "maxItems": 16, "items": {"$ref": "#/$defs/argv"}},
-            "stop_timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 600}
-          }
-        }
-      }
-    },
-    "argv": {
-      "type": "array",
-      "minItems": 1,
-      "maxItems": 64,
-      "items": {"type": "string", "minLength": 1, "maxLength": 512}
-    },
-    "disk": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["image_bytes", "artifact_bytes", "staging_bytes", "cache_bytes", "rollback_bytes", "safety_margin_bytes"],
-      "properties": {
-        "image_bytes": {"$ref": "#/$defs/bytes"},
-        "artifact_bytes": {"$ref": "#/$defs/bytes"},
-        "staging_bytes": {"$ref": "#/$defs/bytes"},
-        "cache_bytes": {"$ref": "#/$defs/bytes"},
-        "rollback_bytes": {"$ref": "#/$defs/bytes"},
-        "safety_margin_bytes": {"$ref": "#/$defs/bytes"}
-      }
-    },
-    "memory": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["kind", "startup_peak_bytes", "steady_state_bytes", "runtime_growth_bytes", "system_reserve_bytes"],
-      "properties": {
-        "kind": {"enum": ["unified", "host", "accelerator"]},
-        "startup_peak_bytes": {"type": "integer", "minimum": 1},
-        "steady_state_bytes": {"type": "integer", "minimum": 1},
-        "runtime_growth_bytes": {"$ref": "#/$defs/bytes"},
-        "system_reserve_bytes": {"$ref": "#/$defs/bytes"}
-      }
-    },
-    "role": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["name", "count", "endpoint_owner", "artifacts", "resources"],
-      "properties": {
-        "name": {"$ref": "#/$defs/name"},
-        "count": {"type": "integer", "minimum": 1},
-        "endpoint_owner": {"type": "boolean"},
-        "artifacts": {"type": "array", "maxItems": 32, "uniqueItems": true, "items": {"$ref": "#/$defs/name"}},
-        "resources": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["disk", "memory"],
-          "properties": {
-            "disk": {"$ref": "#/$defs/disk"},
-            "memory": {"$ref": "#/$defs/memory"}
-          }
-        }
-      }
-    },
-    "deploymentProfile": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["name", "description", "node_count", "strategy", "parallelism", "roles", "fabric", "parameter_overrides", "measurement"],
-      "properties": {
-        "name": {"$ref": "#/$defs/name"},
-        "description": {"type": "string", "minLength": 1, "maxLength": 512},
-        "node_count": {"type": "integer", "minimum": 1},
-        "strategy": {"enum": ["single", "tensor_parallel", "pipeline_parallel", "data_parallel", "hybrid", "ray", "mpi"]},
-        "parallelism": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["tensor", "pipeline", "data", "backend"],
-          "properties": {
-            "tensor": {"type": "integer", "minimum": 1},
-            "pipeline": {"type": "integer", "minimum": 1},
-            "data": {"type": "integer", "minimum": 1},
-            "backend": {"$ref": "#/$defs/name"}
-          }
-        },
-        "roles": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"$ref": "#/$defs/role"}},
-        "fabric": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["connectivity", "minimum_bandwidth_mbps"],
-          "properties": {
-            "connectivity": {"enum": ["none", "connected", "full_mesh", "switch"]},
-            "minimum_bandwidth_mbps": {"type": "integer", "minimum": 0}
-          }
-        },
-        "parameter_overrides": {"type": "object", "maxProperties": 128, "additionalProperties": {"$ref": "#/$defs/scalar"}},
-        "measurement": {"enum": ["declared", "derived", "measured"]}
-      }
-    },
-    "validation": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["checks", "benchmarks"],
-      "properties": {
-        "checks": {
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 64,
-          "uniqueItems": true,
-          "items": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]+$"}
-        },
-        "benchmarks": {
-          "type": "array",
-          "maxItems": 32,
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["name", "framework", "configuration"],
-            "properties": {
-              "name": {"$ref": "#/$defs/name"},
-              "framework": {"$ref": "#/$defs/name"},
-              "configuration": {"type": "object", "maxProperties": 64, "additionalProperties": {"$ref": "#/$defs/scalar"}}
-            }
-          }
-        }
-      }
-    },
-    "provenance": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["source_kind", "source_reference", "attribution"],
-      "properties": {
-        "source_kind": {"enum": ["local", "workload_run", "global", "fork"]},
-        "source_reference": {"type": ["string", "null"], "maxLength": 2048},
-        "attribution": {"type": "array", "maxItems": 32, "items": {"type": "string", "minLength": 1, "maxLength": 512}}
-      }
-    }
+    "containerPath": {"type": "string", "pattern": "^/(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$", "maxLength": 256},
+    "bundlePath": {"type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$", "maxLength": 256},
+    "identity": {"type": "object", "additionalProperties": false, "required": ["publisher", "slug"], "properties": {"publisher": {"$ref": "#/$defs/slug"}, "slug": {"$ref": "#/$defs/slug"}}},
+    "metadata": {"type": "object", "additionalProperties": false, "required": ["title", "description", "tags"], "properties": {"title": {"type": "string", "minLength": 1, "maxLength": 120}, "description": {"type": "string", "minLength": 1, "maxLength": 4000}, "tags": {"type": "array", "maxItems": 20, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9.-]{0,39}$"}}}},
+    "reference": {"type": "object", "additionalProperties": false, "required": ["kind", "publisher", "slug", "content_sha256"], "properties": {"kind": {"enum": ["model-group", "model", "model-version", "execution-harness", "runtime-distribution", "patch-bundle"]}, "publisher": {"$ref": "#/$defs/slug"}, "slug": {"$ref": "#/$defs/slug"}, "content_sha256": {"$ref": "#/$defs/sha256"}}},
+    "modelVersionReference": {"allOf": [{"$ref": "#/$defs/reference"}, {"properties": {"kind": {"const": "model-version"}}}]},
+    "executionHarnessReference": {"allOf": [{"$ref": "#/$defs/reference"}, {"properties": {"kind": {"const": "execution-harness"}}}]},
+    "runtimeDistributionReference": {"allOf": [{"$ref": "#/$defs/reference"}, {"properties": {"kind": {"const": "runtime-distribution"}}}]},
+    "build": {"type": "object", "additionalProperties": false, "required": ["context", "dockerfile", "platform", "arguments", "network", "resources"], "properties": {"context": {"type": "object", "additionalProperties": false, "required": ["sha256", "expected_bytes", "media_type"], "properties": {"sha256": {"$ref": "#/$defs/sha256"}, "expected_bytes": {"type": "integer", "minimum": 1}, "media_type": {"const": "application/vnd.vonk-forge.source-bundle.v1+tar"}}}, "dockerfile": {"$ref": "#/$defs/bundlePath"}, "target": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,64}$"}, "platform": {"const": "linux/arm64"}, "arguments": {"type": "array", "maxItems": 64, "items": {"type": "object", "additionalProperties": false, "required": ["name", "value"], "properties": {"name": {"$ref": "#/$defs/name"}, "value": {"$ref": "#/$defs/scalar"}}}}, "network": {"type": "object", "additionalProperties": false, "required": ["mode", "hosts"], "properties": {"mode": {"enum": ["none", "public"]}, "hosts": {"type": "array", "maxItems": 64, "uniqueItems": true, "items": {"type": "string", "pattern": "^[A-Za-z0-9.-]+$", "maxLength": 253}}}}, "resources": {"type": "object", "additionalProperties": false, "required": ["download_bytes", "temporary_bytes", "memory_bytes", "timeout_seconds"], "properties": {"download_bytes": {"$ref": "#/$defs/bytes"}, "temporary_bytes": {"type": "integer", "minimum": 1}, "memory_bytes": {"type": "integer", "minimum": 1}, "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 86400}}}}},
+    "parameter": {"type": "object", "additionalProperties": false, "required": ["name", "description", "type", "default", "change_effect"], "properties": {"name": {"$ref": "#/$defs/name"}, "description": {"type": "string", "minLength": 1, "maxLength": 512}, "type": {"enum": ["string", "integer", "boolean", "enum"]}, "default": {"$ref": "#/$defs/scalar"}, "minimum": {"type": "integer"}, "maximum": {"type": "integer"}, "allowed_values": {"type": "array", "minItems": 1, "maxItems": 128, "uniqueItems": true, "items": {"$ref": "#/$defs/scalar"}}, "pattern": {"type": "string", "maxLength": 256}, "change_effect": {"enum": ["rebuild", "reinstall", "restart"]}}},
+    "artifact": {"type": "object", "additionalProperties": false, "required": ["id", "kind", "repository", "revision", "download_bytes", "installed_bytes", "mount", "roles"], "properties": {"id": {"$ref": "#/$defs/name"}, "kind": {"enum": ["huggingface.snapshot", "http.file", "oci.artifact"]}, "repository": {"type": "string", "minLength": 1, "maxLength": 512}, "revision": {"type": "string", "minLength": 40, "maxLength": 71}, "download_bytes": {"type": "integer", "minimum": 1}, "installed_bytes": {"type": "integer", "minimum": 1}, "mount": {"type": "object", "additionalProperties": false, "required": ["target", "read_only"], "properties": {"target": {"$ref": "#/$defs/containerPath"}, "read_only": {"type": "boolean"}}}, "roles": {"type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": {"$ref": "#/$defs/name"}}}},
+    "argument": {"type": "object", "additionalProperties": false, "required": ["name"], "properties": {"name": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$"}, "value": {"$ref": "#/$defs/scalar"}, "parameter": {"$ref": "#/$defs/name"}}, "oneOf": [{"required": ["value"], "not": {"required": ["parameter"]}}, {"required": ["parameter"], "not": {"required": ["value"]}}]},
+    "environment": {"type": "object", "additionalProperties": false, "required": ["name"], "properties": {"name": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,127}$"}, "value": {"$ref": "#/$defs/scalar"}, "secret": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]{0,127}$"}}, "oneOf": [{"required": ["value"], "not": {"required": ["secret"]}}, {"required": ["secret"], "not": {"required": ["value"]}}]},
+    "runtime": {"type": "object", "additionalProperties": false, "required": ["distribution", "entrypoint", "arguments", "environment", "security", "lifecycle"], "properties": {"distribution": {"$ref": "#/$defs/runtimeDistributionReference"}, "entrypoint": {"$ref": "#/$defs/argv"}, "arguments": {"type": "array", "maxItems": 128, "items": {"$ref": "#/$defs/argument"}}, "environment": {"type": "array", "maxItems": 128, "items": {"$ref": "#/$defs/environment"}}, "security": {"$ref": "#/$defs/security"}, "lifecycle": {"$ref": "#/$defs/lifecycle"}}},
+    "argv": {"type": "array", "minItems": 1, "maxItems": 64, "items": {"type": "string", "minLength": 1, "maxLength": 512}},
+    "security": {"type": "object", "additionalProperties": false, "required": ["devices", "capabilities", "host_network", "privileged", "user", "mounts"], "properties": {"devices": {"type": "array", "maxItems": 8, "uniqueItems": true, "items": {"enum": ["nvidia.com/gpu=all"]}}, "capabilities": {"type": "array", "maxItems": 0}, "host_network": {"type": "boolean"}, "privileged": {"const": false}, "user": {"type": "string", "pattern": "^(?!0(?::0)?$)[1-9][0-9]*(?::[1-9][0-9]*)?$"}, "mounts": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"type": "object", "additionalProperties": false, "required": ["source", "target", "read_only"], "properties": {"source": {"$ref": "#/$defs/name"}, "target": {"$ref": "#/$defs/containerPath"}, "read_only": {"type": "boolean"}}}}}},
+    "lifecycle": {"type": "object", "additionalProperties": false, "required": ["pre_start", "post_stop", "stop_timeout_seconds"], "properties": {"pre_start": {"type": "array", "maxItems": 16, "items": {"$ref": "#/$defs/argv"}}, "post_stop": {"type": "array", "maxItems": 16, "items": {"$ref": "#/$defs/argv"}}, "stop_timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 600}}},
+    "disk": {"type": "object", "additionalProperties": false, "required": ["image_bytes", "artifact_bytes", "staging_bytes", "cache_bytes", "rollback_bytes", "safety_margin_bytes"], "properties": {"image_bytes": {"$ref": "#/$defs/bytes"}, "artifact_bytes": {"$ref": "#/$defs/bytes"}, "staging_bytes": {"$ref": "#/$defs/bytes"}, "cache_bytes": {"$ref": "#/$defs/bytes"}, "rollback_bytes": {"$ref": "#/$defs/bytes"}, "safety_margin_bytes": {"$ref": "#/$defs/bytes"}}},
+    "memory": {"type": "object", "additionalProperties": false, "required": ["kind", "startup_peak_bytes", "steady_state_bytes", "runtime_growth_bytes", "system_reserve_bytes"], "properties": {"kind": {"enum": ["unified", "host", "accelerator"]}, "startup_peak_bytes": {"type": "integer", "minimum": 1}, "steady_state_bytes": {"type": "integer", "minimum": 1}, "runtime_growth_bytes": {"$ref": "#/$defs/bytes"}, "system_reserve_bytes": {"$ref": "#/$defs/bytes"}}},
+    "role": {"type": "object", "additionalProperties": false, "required": ["name", "count", "endpoint_owner", "artifacts", "resources"], "properties": {"name": {"$ref": "#/$defs/name"}, "count": {"type": "integer", "minimum": 1}, "endpoint_owner": {"type": "boolean"}, "artifacts": {"type": "array", "maxItems": 32, "uniqueItems": true, "items": {"$ref": "#/$defs/name"}}, "resources": {"type": "object", "additionalProperties": false, "required": ["disk", "memory"], "properties": {"disk": {"$ref": "#/$defs/disk"}, "memory": {"$ref": "#/$defs/memory"}}}}},
+    "topology": {"type": "object", "additionalProperties": false, "required": ["name", "mode", "node_count", "roles", "parallelism", "fabric", "start_order", "stop_order"], "properties": {"name": {"$ref": "#/$defs/name"}, "mode": {"enum": ["single", "tensor_parallel", "pipeline_parallel", "data_parallel", "hybrid", "ray", "mpi"]}, "node_count": {"type": "integer", "minimum": 1}, "roles": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"$ref": "#/$defs/role"}}, "parallelism": {"type": "object", "additionalProperties": false, "required": ["tensor", "pipeline", "data", "backend"], "properties": {"tensor": {"type": "integer", "minimum": 1}, "pipeline": {"type": "integer", "minimum": 1}, "data": {"type": "integer", "minimum": 1}, "backend": {"$ref": "#/$defs/name"}}}, "fabric": {"type": "object", "additionalProperties": false, "required": ["connectivity", "minimum_bandwidth_mbps"], "properties": {"connectivity": {"enum": ["none", "connected", "full_mesh", "switch"]}, "minimum_bandwidth_mbps": {"type": "integer", "minimum": 0}}}, "start_order": {"type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": {"$ref": "#/$defs/name"}}, "stop_order": {"type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": {"$ref": "#/$defs/name"}}}},
+    "interface": {"type": "object", "additionalProperties": false, "required": ["adapter"], "properties": {"adapter": {"enum": ["openai", "image-job", "audio-job", "video-job", "mesh-job", "artifact-job"]}, "port": {"type": "integer", "minimum": 1024, "maximum": 65535}, "model_aliases": {"type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 120}}, "health_path": {"type": "string", "pattern": "^/[A-Za-z0-9_./-]+$", "maxLength": 256}, "path": {"type": "string", "pattern": "^/[A-Za-z0-9_./-]+$", "maxLength": 256}}, "allOf": [{"if": {"properties": {"adapter": {"const": "openai"}}}, "then": {"required": ["port", "model_aliases", "health_path"]}}, {"if": {"properties": {"adapter": {"enum": ["image-job", "audio-job", "video-job", "mesh-job", "artifact-job"]}}}, "then": {"required": ["path"]}}]},
+    "validation": {"type": "object", "additionalProperties": false, "required": ["validators", "benchmarks"], "properties": {"validators": {"type": "array", "minItems": 1, "maxItems": 64, "items": {"type": "object", "additionalProperties": false, "required": ["interface", "checks"], "properties": {"interface": {"enum": ["openai", "image-job", "audio-job", "video-job", "mesh-job", "artifact-job"]}, "checks": {"type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]+$"}}}}}, "benchmarks": {"type": "array", "maxItems": 32, "items": {"type": "object", "additionalProperties": false, "required": ["name", "framework", "configuration"], "properties": {"name": {"$ref": "#/$defs/name"}, "framework": {"$ref": "#/$defs/name"}, "configuration": {"type": "object", "maxProperties": 64, "additionalProperties": {"$ref": "#/$defs/scalar"}}}}}}},
+    "provenance": {"type": "object", "additionalProperties": false, "required": ["source_kind", "source_reference", "attribution"], "properties": {"source_kind": {"enum": ["local", "workload_run", "global", "fork"]}, "source_reference": {"type": ["string", "null"], "maxLength": 2048}, "attribution": {"type": "array", "maxItems": 32, "items": {"type": "string", "minLength": 1, "maxLength": 512}}}}
   }
 }

@@ -31,6 +31,8 @@ def test_control_wheel_contains_runtime_contract_schemas(tmp_path: Path) -> None
         members = set(archive.namelist())
 
     assert {
+        "vonk_control/schemas/catalog-entity-v1.schema.json",
+        "vonk_control/schemas/harness-evidence-v1.schema.json",
         "vonk_control/schemas/recipe-v1.schema.json",
         "vonk_control/schemas/test-report-v1.schema.json",
     } <= members
@@ -43,10 +45,13 @@ def test_control_wheel_contains_runtime_contract_schemas(tmp_path: Path) -> None
             (
                 "import json,sys;"
                 "sys.path.insert(0,sys.argv[1]);"
-                "from vonk_control.catalog_service import _test_report_validator;"
+                "from jsonschema import Draft202012Validator;"
                 "from vonk_control.recipe_contract import validate_recipe;"
+                "from vonk_control.schema_resources import read_runtime_schema;"
                 "validate_recipe(json.load(open(sys.argv[2], encoding='utf-8')));"
-                "_test_report_validator()"
+                "[Draft202012Validator.check_schema(json.loads(read_runtime_schema(name))) "
+                "for name in ('catalog-entity-v1.schema.json','harness-evidence-v1.schema.json',"
+                "'recipe-v1.schema.json','test-report-v1.schema.json')]"
             ),
             str(wheel),
             str(fixture),

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://api.vonkforge.ai/schemas/harness-evidence/v1.schema.json",
+  "title": "Vonk Forge execution harness evidence v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "recipe", "execution_harness", "runtime_distribution", "outcome", "artifacts"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "recipe": {"$ref": "#/$defs/reference"},
+    "execution_harness": {"$ref": "#/$defs/reference"},
+    "runtime_distribution": {"$ref": "#/$defs/reference"},
+    "outcome": {"enum": ["passed", "failed"]},
+    "artifacts": {"type": "array", "maxItems": 64, "items": {"type": "object", "additionalProperties": false, "required": ["name", "sha256"], "properties": {"name": {"type": "string", "minLength": 1, "maxLength": 256}, "sha256": {"$ref": "#/$defs/sha256"}}}}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "slug": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,62}$"},
+    "reference": {"type": "object", "additionalProperties": false, "required": ["kind", "publisher", "slug", "content_sha256"], "properties": {"kind": {"enum": ["model-group", "model", "model-version", "execution-harness", "runtime-distribution", "patch-bundle"]}, "publisher": {"$ref": "#/$defs/slug"}, "slug": {"$ref": "#/$defs/slug"}, "content_sha256": {"$ref": "#/$defs/sha256"}}}
+  }
+}

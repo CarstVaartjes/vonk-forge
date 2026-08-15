@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "kind": "model-version",
+  "identity": {"publisher": "vonk-forge", "slug": "synthetic-tiny-fp16"},
+  "metadata": {
+    "title": "Synthetic Tiny FP16",
+    "description": "A minimal immutable model version for contract tests.",
+    "tags": ["synthetic", "text"]
+  },
+  "model": {
+    "kind": "model",
+    "publisher": "vonk-forge",
+    "slug": "synthetic-tiny",
+    "content_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "version": "1.0.0",
+  "license": {"spdx": "Apache-2.0", "attribution": []},
+  "artifacts": [
+    {
+      "kind": "huggingface.snapshot",
+      "repository": "vonk-forge/synthetic-tiny",
+      "revision": "0123456789abcdef0123456789abcdef01234567",
+      "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "installed_bytes": 1024
+    }
+  ]
+}

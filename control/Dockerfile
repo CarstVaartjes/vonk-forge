@@ -15,6 +15,8 @@ COPY pyproject.toml /vonk-cluster-profiles/
 COPY src/cluster_profiles /vonk-cluster-profiles/src/cluster_profiles
 COPY control/pyproject.toml ./
 COPY control/src ./src
+COPY schemas/global/catalog-entity-v1.schema.json /schemas/global/catalog-entity-v1.schema.json
+COPY schemas/global/harness-evidence-v1.schema.json /schemas/global/harness-evidence-v1.schema.json
 COPY schemas/global/recipe-v1.schema.json /schemas/global/recipe-v1.schema.json
 COPY schemas/global/test-report-v1.schema.json /schemas/global/test-report-v1.schema.json
 COPY --from=web /web/dist ./src/vonk_control/web

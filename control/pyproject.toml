@@ -38,6 +38,8 @@ packages = ["src/vonk_control"]
 artifacts = ["src/vonk_control/resources/**", "src/vonk_control/web/**"]
 
 [tool.hatch.build.targets.wheel.force-include]
+"../schemas/global/catalog-entity-v1.schema.json" = "vonk_control/schemas/catalog-entity-v1.schema.json"
+"../schemas/global/harness-evidence-v1.schema.json" = "vonk_control/schemas/harness-evidence-v1.schema.json"
 "../schemas/global/recipe-v1.schema.json" = "vonk_control/schemas/recipe-v1.schema.json"
 "../schemas/global/test-report-v1.schema.json" = "vonk_control/schemas/test-report-v1.schema.json"
 
