@@ -71,6 +71,12 @@ Text200 = Annotated[str, StringConstraints(min_length=1, max_length=200)]
 Text256 = Annotated[str, StringConstraints(min_length=1, max_length=256)]
 Text512 = Annotated[str, StringConstraints(min_length=1, max_length=512)]
 Scalar = str | int | bool
+DisplayScalar = (
+    Annotated[str, StringConstraints(max_length=512)]
+    | Annotated[int, Field(ge=-_MAX_SIGNED_BIGINT, le=_MAX_SIGNED_BIGINT)]
+    | bool
+    | None
+)
 
 
 class _StrictModel(BaseModel):
@@ -289,7 +295,7 @@ class RecipeProfile(_StrictModel):
     parallelism: RecipeParallelism
     roles: list[RecipeRole] = Field(min_length=1, max_length=32)
     fabric: RecipeFabric
-    parameter_overrides: dict[Text64, Scalar] = Field(max_length=128)
+    parameter_overrides: dict[Text64, DisplayScalar] = Field(max_length=128)
     measurement: Literal["declared", "derived", "measured"]
 
 
@@ -393,6 +399,30 @@ class PlacementLimits(_StrictModel):
     rejected_node_evidence_limit: Literal[32] = _MAX_REJECTED_NODES
     rejected_group_evidence_limit: Literal[16] = _MAX_REJECTED_GROUPS
     artifact_evidence_per_node_limit: Literal[512] = _MAX_NODE_ARTIFACTS_PER_NODE
+    operational_row_evidence_limit: Literal[512] = _MAX_OPERATIONAL_ROWS
+    operational_member_evidence_limit: Literal[16384] = _MAX_OPERATIONAL_MEMBERS
+
+
+EvidenceCollection = Literal[
+    "builds",
+    "mappings",
+    "mapping_members",
+    "installations",
+    "installation_members",
+    "runs",
+    "run_members",
+]
+
+
+class PlacementEvidenceCounts(_StrictModel):
+    builds: int = Field(ge=0, le=_MAX_OPERATIONAL_ROWS + 1)
+    mappings: int = Field(ge=0, le=_MAX_OPERATIONAL_ROWS + 1)
+    mapping_members: int = Field(ge=0, le=_MAX_OPERATIONAL_MEMBERS + 1)
+    installations: int = Field(ge=0, le=_MAX_OPERATIONAL_ROWS + 1)
+    installation_members: int = Field(ge=0, le=_MAX_OPERATIONAL_MEMBERS + 1)
+    runs: int = Field(ge=0, le=_MAX_OPERATIONAL_ROWS + 1)
+    run_members: int = Field(ge=0, le=_MAX_OPERATIONAL_MEMBERS + 1)
+    truncated_collections: list[EvidenceCollection] = Field(max_length=7)
 
 
 class PlacementNode(_StrictModel):
@@ -467,6 +497,7 @@ class ProfilePlacement(_StrictModel):
     search_complete: bool
     rejected_evidence_truncated: bool
     limits: PlacementLimits
+    evidence_counts: PlacementEvidenceCounts
     reasons: list[ProjectionReason] = Field(max_length=16)
 
 
@@ -527,12 +558,12 @@ def _saturating_headroom(available: object, *required: object) -> int:
 
 
 def _numeric_truncation_count(value: object) -> int:
-    """Count nonnegative integers that exceed the public signed-bigint bound."""
+    """Count integers outside the public signed-bigint display bound."""
 
     if isinstance(value, bool):
         return 0
     if isinstance(value, int):
-        return int(value > _MAX_SIGNED_BIGINT)
+        return int(not -_MAX_SIGNED_BIGINT <= value <= _MAX_SIGNED_BIGINT)
     if isinstance(value, Mapping):
         return sum(_numeric_truncation_count(item) for item in value.values())
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
@@ -540,10 +571,125 @@ def _numeric_truncation_count(value: object) -> int:
     return 0
 
 
-def _bounded_scalar(value: Scalar) -> Scalar:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+def _display_scalar_truncation_count(value: object) -> int:
+    if isinstance(value, str):
+        return int(len(value) > 512)
+    if isinstance(value, Mapping):
+        return sum(_display_scalar_truncation_count(item) for item in value.values())
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return sum(_display_scalar_truncation_count(item) for item in value)
+    return 0
+
+
+def _bounded_display_scalar(value: Scalar | None) -> DisplayScalar:
+    """Bound display-only scalars without feeding them back into actions."""
+
+    if value is None or isinstance(value, bool):
         return value
-    return _saturating_nonnegative(value)
+    if isinstance(value, str):
+        return value[:512]
+    return max(-_MAX_SIGNED_BIGINT, min(value, _MAX_SIGNED_BIGINT))
+
+
+@dataclass(frozen=True, slots=True)
+class _MemberEvidence:
+    node_id: str
+    rank: int
+    role: str
+    state: str | None = None
+    updated_at: datetime | None = None
+
+    @property
+    def identity(self) -> tuple[str, int, str]:
+        return (self.node_id, self.rank, self.role)
+
+
+@dataclass(frozen=True, slots=True)
+class _InstallationCoverage:
+    expected_rank_count: int
+    installed_rank_count: int
+    complete: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _RunHealth:
+    expected_rank_count: int
+    healthy_rank_count: int
+    healthy: bool
+
+
+def _members_are_exact(
+    expected: Sequence[_MemberEvidence], actual: Sequence[_MemberEvidence]
+) -> bool:
+    expected_identities = [item.identity for item in expected]
+    actual_identities = [item.identity for item in actual]
+    return (
+        bool(expected_identities)
+        and len(expected_identities) == len(set(expected_identities))
+        and len(actual_identities) == len(set(actual_identities))
+        and len(expected_identities) == len(actual_identities)
+        and set(expected_identities) == set(actual_identities)
+    )
+
+
+def _installation_coverage(
+    installation_state: str,
+    expected: Sequence[_MemberEvidence],
+    actual: Sequence[_MemberEvidence],
+    *,
+    declared_expected_count: int,
+) -> _InstallationCoverage:
+    """Match RunAdmission's exact installed-membership gate; bytes are informational."""
+
+    expected_identities = {item.identity for item in expected}
+    installed_identities = {
+        item.identity
+        for item in actual
+        if item.state == "installed" and item.identity in expected_identities
+    }
+    complete = (
+        installation_state == "installed"
+        and len(expected) == declared_expected_count
+        and _members_are_exact(expected, actual)
+        and all(item.state == "installed" for item in actual)
+    )
+    return _InstallationCoverage(
+        expected_rank_count=declared_expected_count,
+        installed_rank_count=len(installed_identities),
+        complete=complete,
+    )
+
+
+def _run_health(
+    expected: Sequence[_MemberEvidence],
+    actual: Sequence[_MemberEvidence],
+    *,
+    current: datetime,
+    declared_expected_count: int,
+) -> _RunHealth:
+    """Match run_status rank health independently of aggregate and route state."""
+
+    expected_identities = {item.identity for item in expected}
+    healthy_identities = {
+        item.identity
+        for item in actual
+        if item.identity in expected_identities
+        and item.state == "running"
+        and item.updated_at is not None
+        and timedelta(0)
+        <= current - _utc(item.updated_at)
+        < timedelta(seconds=_RUN_RANK_FRESH_SECONDS)
+    }
+    healthy = (
+        len(expected) == declared_expected_count
+        and _members_are_exact(expected, actual)
+        and len(healthy_identities) == declared_expected_count
+    )
+    return _RunHealth(
+        expected_rank_count=declared_expected_count,
+        healthy_rank_count=len(healthy_identities),
+        healthy=healthy,
+    )
 
 
 def _reason(code: str, detail: str, severity: str = "warning") -> ProjectionReason:
@@ -631,6 +777,28 @@ def _operational_truncation_reason(
     )
 
 
+def _placement_evidence_truncation_reason(
+    counts: PlacementEvidenceCounts,
+    *,
+    severity: Literal["warning", "error"],
+) -> ProjectionReason:
+    details = []
+    for name in counts.truncated_collections:
+        limit = (
+            _MAX_OPERATIONAL_MEMBERS
+            if name.endswith("_members")
+            else _MAX_OPERATIONAL_ROWS
+        )
+        details.append(f"{name}: at least {getattr(counts, name)}/{limit}")
+    return _reason(
+        "projection.evidence_truncated",
+        "Exact current placement evidence exceeded active limits ("
+        + "; ".join(details)
+        + "); affected groups fail closed.",
+        severity,
+    )
+
+
 def _projection_bound_reasons(
     recipe: LocalRecipe,
     document: Mapping[str, object] | None,
@@ -647,7 +815,18 @@ def _projection_bound_reasons(
             reasons.append(
                 _reason(
                     "recipe.numeric_truncated",
-                    f"The bounded Library projection saturated {numeric_truncations} nonnegative numeric values at the signed-bigint maximum; immutable recipe content is unchanged.",
+                    f"The bounded Library projection saturated {numeric_truncations} numeric values at the signed-bigint bounds; immutable recipe content is unchanged.",
+                )
+            )
+        display_scalar_truncations = sum(
+            _display_scalar_truncation_count(profile["parameter_overrides"])
+            for profile in profiles
+        )
+        if display_scalar_truncations:
+            reasons.append(
+                _reason(
+                    "recipe.display_scalar_truncated",
+                    f"The bounded Library projection truncated {display_scalar_truncations} display-only scalar values; action inputs still use the immutable recipe.",
                 )
             )
         if len(profiles) > _MAX_PROJECTED_PROFILES:
@@ -811,7 +990,7 @@ def _profile(value: Mapping[str, object]) -> RecipeProfile:
             ),
         ),
         parameter_overrides={
-            _bounded_text(key, 64): _bounded_scalar(item)
+            _bounded_text(key, 64): _bounded_display_scalar(item)
             for key, item in value["parameter_overrides"].items()
         },
         measurement=str(value["measurement"]),
@@ -924,6 +1103,19 @@ def _group_rows[Row](rows: Sequence[Row], field: str) -> dict[str, list[Row]]:
     return grouped
 
 
+def _member_evidence(rows: Sequence[object]) -> list[_MemberEvidence]:
+    return [
+        _MemberEvidence(
+            node_id=str(row.node_id),  # type: ignore[attr-defined]
+            rank=int(row.rank),  # type: ignore[attr-defined]
+            role=str(row.role),  # type: ignore[attr-defined]
+            state=getattr(row, "state", None),
+            updated_at=getattr(row, "updated_at", None),
+        )
+        for row in rows
+    ]
+
+
 @dataclass(frozen=True)
 class _OperationalRows:
     builds: Sequence[RecipeBuild]
@@ -961,6 +1153,16 @@ class _OperationalRows:
             installation_members=_group_rows(installation_nodes, "installation_id"),
             run_members=_group_rows(run_nodes, "run_id"),
         )
+
+
+@dataclass(frozen=True)
+class _PlacementOperationalEvidence:
+    operational: _OperationalRows
+    counts: PlacementEvidenceCounts
+
+    @property
+    def truncated(self) -> bool:
+        return bool(self.counts.truncated_collections)
 
 
 class LibraryProjection:
@@ -1075,46 +1277,14 @@ class LibraryProjection:
             rows = list(session.execute(statement.limit(limit + 1)))
             page = rows[:limit]
             recipe_ids = [recipe.id for recipe, _revision in page]
-            installation_coverage = (
-                select(
-                    InstallationNode.installation_id.label("installation_id"),
-                    func.count(InstallationNode.id).label("rank_count"),
-                    func.sum(
-                        case(
-                            (
-                                and_(
-                                    InstallationNode.state == "installed",
-                                    InstallationNode.installed_bytes
-                                    >= InstallationNode.required_bytes,
-                                ),
-                                1,
-                            ),
-                            else_=0,
-                        )
-                    ).label("installed_rank_count"),
-                )
-                .join(
-                    RecipeInstallation,
-                    RecipeInstallation.id == InstallationNode.installation_id,
-                )
-                .join(
-                    LocalRecipeRevision,
-                    LocalRecipeRevision.id == RecipeInstallation.recipe_revision_id,
-                )
-                .where(LocalRecipeRevision.recipe_id.in_(recipe_ids))
-                .group_by(InstallationNode.installation_id)
-                .subquery()
-            )
             ranked_installations = (
                 select(
                     LocalRecipeRevision.recipe_id.label("recipe_id"),
                     RecipeInstallation.id.label("installation_id"),
                     RecipeInstallation.recipe_revision_id.label("recipe_revision_id"),
+                    RecipeInstallation.mapping_id.label("mapping_id"),
                     RecipeInstallation.state.label("state"),
                     ClusterMapping.node_count.label("expected_rank_count"),
-                    func.coalesce(
-                        installation_coverage.c.installed_rank_count, 0
-                    ).label("installed_rank_count"),
                     func.count()
                     .over(partition_by=LocalRecipeRevision.recipe_id)
                     .label("total_count"),
@@ -1136,10 +1306,6 @@ class LibraryProjection:
                     ClusterMapping,
                     ClusterMapping.id == RecipeInstallation.mapping_id,
                 )
-                .outerjoin(
-                    installation_coverage,
-                    installation_coverage.c.installation_id == RecipeInstallation.id,
-                )
                 .where(
                     LocalRecipeRevision.recipe_id.in_(recipe_ids),
                     RecipeInstallation.state != "uninstalled",
@@ -1152,8 +1318,8 @@ class LibraryProjection:
                         ranked_installations.c.recipe_id,
                         ranked_installations.c.installation_id,
                         ranked_installations.c.recipe_revision_id,
+                        ranked_installations.c.mapping_id,
                         ranked_installations.c.state,
-                        ranked_installations.c.installed_rank_count,
                         ranked_installations.c.expected_rank_count,
                         ranked_installations.c.total_count,
                     )
@@ -1164,62 +1330,15 @@ class LibraryProjection:
                     )
                 )
             )
-            run_coverage = (
-                select(
-                    RecipeRun.id.label("run_id"),
-                    func.sum(
-                        case(
-                            (
-                                and_(
-                                    RunNode.id.is_not(None),
-                                    RunNode.node_id == ClusterMappingNode.node_id,
-                                    RunNode.role == ClusterMappingNode.role,
-                                    RunNode.state == "running",
-                                    RunNode.updated_at
-                                    > current
-                                    - timedelta(seconds=_RUN_RANK_FRESH_SECONDS),
-                                    RunNode.updated_at <= current,
-                                ),
-                                1,
-                            ),
-                            else_=0,
-                        )
-                    ).label("healthy_rank_count"),
-                )
-                .join(
-                    RecipeInstallation,
-                    RecipeInstallation.id == RecipeRun.installation_id,
-                )
-                .join(
-                    LocalRecipeRevision,
-                    LocalRecipeRevision.id == RecipeInstallation.recipe_revision_id,
-                )
-                .join(
-                    ClusterMappingNode,
-                    ClusterMappingNode.mapping_id == RecipeRun.mapping_id,
-                )
-                .outerjoin(
-                    RunNode,
-                    and_(
-                        RunNode.run_id == RecipeRun.id,
-                        RunNode.rank == ClusterMappingNode.rank,
-                    ),
-                )
-                .where(LocalRecipeRevision.recipe_id.in_(recipe_ids))
-                .group_by(RecipeRun.id)
-                .subquery()
-            )
             ranked_runs = (
                 select(
                     LocalRecipeRevision.recipe_id.label("recipe_id"),
                     RecipeRun.id.label("run_id"),
                     RecipeRun.installation_id.label("installation_id"),
+                    RecipeRun.mapping_id.label("mapping_id"),
                     RecipeInstallation.recipe_revision_id.label("recipe_revision_id"),
                     RecipeRun.state.label("state"),
                     RecipeRun.route_state.label("route_state"),
-                    func.coalesce(run_coverage.c.healthy_rank_count, 0).label(
-                        "healthy_rank_count"
-                    ),
                     ClusterMapping.node_count.label("expected_rank_count"),
                     func.count()
                     .over(partition_by=LocalRecipeRevision.recipe_id)
@@ -1243,7 +1362,6 @@ class LibraryProjection:
                     LocalRecipeRevision.id == RecipeInstallation.recipe_revision_id,
                 )
                 .join(ClusterMapping, ClusterMapping.id == RecipeRun.mapping_id)
-                .outerjoin(run_coverage, run_coverage.c.run_id == RecipeRun.id)
                 .where(
                     LocalRecipeRevision.recipe_id.in_(recipe_ids),
                     RecipeRun.state.in_(_ACTIVE_RUN_STATES),
@@ -1256,10 +1374,10 @@ class LibraryProjection:
                         ranked_runs.c.recipe_id,
                         ranked_runs.c.run_id,
                         ranked_runs.c.installation_id,
+                        ranked_runs.c.mapping_id,
                         ranked_runs.c.recipe_revision_id,
                         ranked_runs.c.state,
                         ranked_runs.c.route_state,
-                        ranked_runs.c.healthy_rank_count,
                         ranked_runs.c.expected_rank_count,
                         ranked_runs.c.total_count,
                     )
@@ -1270,11 +1388,62 @@ class LibraryProjection:
                     )
                 )
             )
+            mapping_ids = {
+                *(row.mapping_id for row in installation_rows),
+                *(row.mapping_id for row in run_rows),
+            }
+            installation_ids = [row.installation_id for row in installation_rows]
+            run_ids = [row.run_id for row in run_rows]
+            root_mapping_nodes = list(
+                session.scalars(
+                    select(ClusterMappingNode)
+                    .where(ClusterMappingNode.mapping_id.in_(mapping_ids))
+                    .order_by(ClusterMappingNode.mapping_id, ClusterMappingNode.rank)
+                    .limit(_MAX_OPERATIONAL_MEMBERS + 1)
+                )
+            )
+            root_installation_nodes = list(
+                session.scalars(
+                    select(InstallationNode)
+                    .where(InstallationNode.installation_id.in_(installation_ids))
+                    .order_by(InstallationNode.installation_id, InstallationNode.rank)
+                    .limit(_MAX_OPERATIONAL_MEMBERS + 1)
+                )
+            )
+            root_run_nodes = list(
+                session.scalars(
+                    select(RunNode)
+                    .where(RunNode.run_id.in_(run_ids))
+                    .order_by(RunNode.run_id, RunNode.rank)
+                    .limit(_MAX_OPERATIONAL_MEMBERS + 1)
+                )
+            )
+        root_members_truncated = any(
+            len(items) > _MAX_OPERATIONAL_MEMBERS
+            for items in (
+                root_mapping_nodes,
+                root_installation_nodes,
+                root_run_nodes,
+            )
+        )
+        mapping_members = _group_rows(
+            root_mapping_nodes[:_MAX_OPERATIONAL_MEMBERS], "mapping_id"
+        )
+        installation_members = _group_rows(
+            root_installation_nodes[:_MAX_OPERATIONAL_MEMBERS], "installation_id"
+        )
+        run_members = _group_rows(root_run_nodes[:_MAX_OPERATIONAL_MEMBERS], "run_id")
         installations: dict[str, list[LibraryInstallationSummary]] = {}
         installation_totals: dict[str, int] = {}
         for row in installation_rows:
-            expected = _saturating_nonnegative(row.expected_rank_count)
-            installed = _saturating_nonnegative(row.installed_rank_count)
+            coverage = _installation_coverage(
+                row.state,
+                _member_evidence(mapping_members.get(row.mapping_id, [])),
+                _member_evidence(installation_members.get(row.installation_id, [])),
+                declared_expected_count=int(row.expected_rank_count),
+            )
+            expected = _saturating_nonnegative(coverage.expected_rank_count)
+            installed = _saturating_nonnegative(coverage.installed_rank_count)
             installation_totals[row.recipe_id] = _saturating_nonnegative(
                 row.total_count
             )
@@ -1285,14 +1454,20 @@ class LibraryProjection:
                     state=row.state,
                     installed_rank_count=installed,
                     expected_rank_count=expected,
-                    complete=(row.state == "installed" and installed == expected),
+                    complete=coverage.complete and not root_members_truncated,
                 )
             )
         runs: dict[str, list[LibraryRunSummary]] = {}
         run_totals: dict[str, int] = {}
         for row in run_rows:
-            expected = _saturating_nonnegative(row.expected_rank_count)
-            healthy = _saturating_nonnegative(row.healthy_rank_count)
+            health = _run_health(
+                _member_evidence(mapping_members.get(row.mapping_id, [])),
+                _member_evidence(run_members.get(row.run_id, [])),
+                current=current,
+                declared_expected_count=int(row.expected_rank_count),
+            )
+            expected = _saturating_nonnegative(health.expected_rank_count)
+            healthy = _saturating_nonnegative(health.healthy_rank_count)
             run_totals[row.recipe_id] = _saturating_nonnegative(row.total_count)
             runs.setdefault(row.recipe_id, []).append(
                 LibraryRunSummary(
@@ -1303,12 +1478,7 @@ class LibraryProjection:
                     route_state=row.route_state,
                     healthy_rank_count=healthy,
                     expected_rank_count=expected,
-                    healthy=(
-                        row.state == "running"
-                        and row.route_state == "published"
-                        and expected > 0
-                        and healthy == expected
-                    ),
+                    healthy=health.healthy and not root_members_truncated,
                 )
             )
         grouped: dict[str, list[LibraryRecipeSummary]] = {}
@@ -1322,6 +1492,14 @@ class LibraryProjection:
                     include_visual_text=False,
                 )
             )
+            if root_members_truncated:
+                reasons.append(
+                    _reason(
+                        "projection.evidence_truncated",
+                        f"Root operational membership evidence exceeded the active limit of {_MAX_OPERATIONAL_MEMBERS}; completeness and health fail closed.",
+                        "warning",
+                    )
+                )
             capabilities: list[str] = []
             profiles: list[RecipeProfileSummary] = []
             family: str | None = None
@@ -1404,6 +1582,7 @@ class LibraryProjection:
     def detail(self, recipe_id: str) -> LibraryRecipeDetail:
         current = _utc(self._clock())
         latest = self._latest_revision_ids()
+        placement_evidence: _PlacementOperationalEvidence | None = None
         with self._sessions.begin() as session:
             row = session.execute(
                 select(LocalRecipe, LocalRecipeRevision)
@@ -1602,6 +1781,11 @@ class LibraryProjection:
                     .limit(_MAX_OPERATIONAL_MEMBERS)
                 )
             )
+            if document is not None and revision is not None:
+                placement_evidence = self._placement_operational_evidence(
+                    session,
+                    revision.id,
+                )
             agents = list(
                 session.scalars(
                     select(AgentNode)
@@ -1708,6 +1892,7 @@ class LibraryProjection:
                 reasons=_bounded_reasons(reasons, 16),
             )
         assert revision is not None
+        assert placement_evidence is not None
         profiles = [
             _profile(item)
             for item in document["deployment_profiles"][:_MAX_PROJECTED_PROFILES]
@@ -1727,7 +1912,7 @@ class LibraryProjection:
                 artifacts_by_node,
                 artifact_truncated_node_ids,
                 active_run_counts,
-                operational_rows,
+                placement_evidence,
                 current,
             )
             for profile in profiles
@@ -1741,6 +1926,177 @@ class LibraryProjection:
             operational_state=operational,
             placement=placement,
             reasons=_bounded_reasons(reasons, 16),
+        )
+
+    @staticmethod
+    def _placement_operational_evidence(
+        session: Session,
+        recipe_revision_id: str,
+    ) -> _PlacementOperationalEvidence:
+        """Load fail-closed current placement evidence apart from display history."""
+
+        run_rows = list(
+            session.scalars(
+                select(RecipeRun)
+                .join(
+                    RecipeInstallation,
+                    RecipeInstallation.id == RecipeRun.installation_id,
+                )
+                .where(
+                    RecipeInstallation.recipe_revision_id == recipe_revision_id,
+                    RecipeRun.state.in_(_ACTIVE_RUN_STATES),
+                )
+                .order_by(RecipeRun.updated_at.desc(), RecipeRun.id.desc())
+                .limit(_MAX_OPERATIONAL_ROWS + 1)
+            )
+        )
+        runs = run_rows[:_MAX_OPERATIONAL_ROWS]
+        referenced_installation_ids = {item.installation_id for item in runs}
+        installation_rows = list(
+            session.scalars(
+                select(RecipeInstallation)
+                .where(
+                    RecipeInstallation.recipe_revision_id == recipe_revision_id,
+                    RecipeInstallation.state != "uninstalled",
+                )
+                .order_by(
+                    case(
+                        (
+                            RecipeInstallation.id.in_(referenced_installation_ids),
+                            0,
+                        ),
+                        (RecipeInstallation.state == "installed", 1),
+                        else_=2,
+                    ),
+                    RecipeInstallation.updated_at.desc(),
+                    RecipeInstallation.id.desc(),
+                )
+                .limit(_MAX_OPERATIONAL_ROWS + 1)
+            )
+        )
+        installations = installation_rows[:_MAX_OPERATIONAL_ROWS]
+        referenced_mapping_ids = {
+            *(item.mapping_id for item in runs),
+            *(item.mapping_id for item in installations),
+        }
+        mapping_rows = list(
+            session.scalars(
+                select(ClusterMapping)
+                .where(
+                    ClusterMapping.recipe_revision_id == recipe_revision_id,
+                    ClusterMapping.state == "ready",
+                )
+                .order_by(
+                    case(
+                        (ClusterMapping.id.in_(referenced_mapping_ids), 0),
+                        else_=1,
+                    ),
+                    ClusterMapping.updated_at.desc(),
+                    ClusterMapping.id.desc(),
+                )
+                .limit(_MAX_OPERATIONAL_ROWS + 1)
+            )
+        )
+        mappings = mapping_rows[:_MAX_OPERATIONAL_ROWS]
+        referenced_build_ids = {item.recipe_build_id for item in installations}
+        build_rows = list(
+            session.scalars(
+                select(RecipeBuild)
+                .where(
+                    RecipeBuild.recipe_revision_id == recipe_revision_id,
+                    or_(
+                        RecipeBuild.id.in_(referenced_build_ids),
+                        RecipeBuild.state == "succeeded",
+                    ),
+                )
+                .order_by(
+                    case(
+                        (RecipeBuild.id.in_(referenced_build_ids), 0),
+                        else_=1,
+                    ),
+                    RecipeBuild.updated_at.desc(),
+                    RecipeBuild.id.desc(),
+                )
+                .limit(_MAX_OPERATIONAL_ROWS + 1)
+            )
+        )
+        builds = build_rows[:_MAX_OPERATIONAL_ROWS]
+        mapping_node_rows = list(
+            session.scalars(
+                select(ClusterMappingNode)
+                .where(
+                    ClusterMappingNode.mapping_id.in_([item.id for item in mappings])
+                )
+                .order_by(ClusterMappingNode.mapping_id, ClusterMappingNode.rank)
+                .limit(_MAX_OPERATIONAL_MEMBERS + 1)
+            )
+        )
+        installation_node_rows = list(
+            session.scalars(
+                select(InstallationNode)
+                .where(
+                    InstallationNode.installation_id.in_(
+                        [item.id for item in installations]
+                    )
+                )
+                .order_by(InstallationNode.installation_id, InstallationNode.rank)
+                .limit(_MAX_OPERATIONAL_MEMBERS + 1)
+            )
+        )
+        run_node_rows = list(
+            session.scalars(
+                select(RunNode)
+                .where(RunNode.run_id.in_([item.id for item in runs]))
+                .order_by(RunNode.run_id, RunNode.rank)
+                .limit(_MAX_OPERATIONAL_MEMBERS + 1)
+            )
+        )
+        observed_counts = {
+            "builds": len(build_rows),
+            "mappings": len(mapping_rows),
+            "mapping_members": len(mapping_node_rows),
+            "installations": len(installation_rows),
+            "installation_members": len(installation_node_rows),
+            "runs": len(run_rows),
+            "run_members": len(run_node_rows),
+        }
+        limits = {
+            "builds": _MAX_OPERATIONAL_ROWS,
+            "mappings": _MAX_OPERATIONAL_ROWS,
+            "mapping_members": _MAX_OPERATIONAL_MEMBERS,
+            "installations": _MAX_OPERATIONAL_ROWS,
+            "installation_members": _MAX_OPERATIONAL_MEMBERS,
+            "runs": _MAX_OPERATIONAL_ROWS,
+            "run_members": _MAX_OPERATIONAL_MEMBERS,
+        }
+        truncated_collections = [
+            name
+            for name in (
+                "builds",
+                "mappings",
+                "mapping_members",
+                "installations",
+                "installation_members",
+                "runs",
+                "run_members",
+            )
+            if observed_counts[name] > limits[name]
+        ]
+        counts = PlacementEvidenceCounts(
+            **observed_counts,
+            truncated_collections=truncated_collections,
+        )
+        return _PlacementOperationalEvidence(
+            operational=_OperationalRows.collect(
+                builds=builds,
+                mappings=mappings,
+                mapping_nodes=mapping_node_rows[:_MAX_OPERATIONAL_MEMBERS],
+                installations=installations,
+                installation_nodes=installation_node_rows[:_MAX_OPERATIONAL_MEMBERS],
+                runs=runs,
+                run_nodes=run_node_rows[:_MAX_OPERATIONAL_MEMBERS],
+            ),
+            counts=counts,
         )
 
     @staticmethod
@@ -2048,10 +2404,11 @@ class LibraryProjection:
         artifacts_by_node: Mapping[str, Sequence[NodeArtifact]],
         artifact_truncated_node_ids: frozenset[str] | set[str],
         active_run_counts: Mapping[str, int],
-        operational: _OperationalRows,
+        operational_evidence: _PlacementOperationalEvidence,
         current: datetime,
     ) -> ProfilePlacement:
         limits = PlacementLimits()
+        operational = operational_evidence.operational
         numeric_truncated = _numeric_truncation_count(document) > 0
         if profile.node_count > _MAX_CANDIDATE_NODES:
             unsupported_reasons = [
@@ -2069,6 +2426,13 @@ class LibraryProjection:
                         "warning",
                     )
                 )
+            if operational_evidence.truncated:
+                unsupported_reasons.append(
+                    _placement_evidence_truncation_reason(
+                        operational_evidence.counts,
+                        severity="error",
+                    )
+                )
             return ProfilePlacement(
                 profile_name=profile.name,
                 node_count=profile.node_count,
@@ -2080,6 +2444,7 @@ class LibraryProjection:
                 search_complete=False,
                 rejected_evidence_truncated=False,
                 limits=limits,
+                evidence_counts=operational_evidence.counts,
                 reasons=_bounded_reasons(unsupported_reasons, 16),
             )
         candidate_ids = [item.agent.node_id for item in candidates]
@@ -2107,6 +2472,7 @@ class LibraryProjection:
                 artifact_truncated_node_ids,
                 active_run_counts,
                 operational,
+                operational_evidence.truncated,
                 current,
             )
             if recommendation.eligible:
@@ -2121,6 +2487,7 @@ class LibraryProjection:
         search_complete = (
             not candidate_truncated
             and not artifact_evidence_truncated
+            and not operational_evidence.truncated
             and total_groups <= _MAX_EXAMINED_GROUPS
         )
         profile_reasons: list[ProjectionReason] = []
@@ -2138,6 +2505,13 @@ class LibraryProjection:
                     "projection.evidence_truncated",
                     f"Artifact evidence exceeded the active per-node limit of {_MAX_NODE_ARTIFACTS_PER_NODE}; affected groups are ineligible.",
                     "warning",
+                )
+            )
+        if operational_evidence.truncated:
+            profile_reasons.append(
+                _placement_evidence_truncation_reason(
+                    operational_evidence.counts,
+                    severity="warning",
                 )
             )
         if numeric_truncated:
@@ -2161,8 +2535,10 @@ class LibraryProjection:
                 len(rejected_groups) > _MAX_REJECTED_GROUPS
                 or candidate_truncated
                 or artifact_evidence_truncated
+                or operational_evidence.truncated
             ),
             limits=limits,
+            evidence_counts=operational_evidence.counts,
             reasons=_bounded_reasons(profile_reasons, 16),
         )
 
@@ -2192,6 +2568,7 @@ class LibraryProjection:
         artifact_truncated_node_ids: frozenset[str] | set[str],
         active_run_counts: Mapping[str, int],
         operational: _OperationalRows,
+        operational_evidence_truncated: bool,
         current: datetime,
     ) -> PlacementRecommendation:
         ordered = sorted(group, key=lambda value: value.agent.node_id)
@@ -2211,6 +2588,14 @@ class LibraryProjection:
             )
         ]
         reasons: list[ProjectionReason] = []
+        if operational_evidence_truncated:
+            reasons.append(
+                _reason(
+                    "projection.evidence_truncated",
+                    "Exact current operational lineage or membership exceeded an active evidence limit; this group fails closed.",
+                    "error",
+                )
+            )
         if any(item.agent.node_id in artifact_truncated_node_ids for item in ordered):
             reasons.append(
                 _reason(
@@ -2276,88 +2661,80 @@ class LibraryProjection:
                         "error",
                     )
                 )
-        usable_build = max(
-            (
-                item
-                for item in operational.builds
-                if item.recipe_revision_id == revision.id
-                and item.state == "succeeded"
-                and item.image_digest is not None
-                and item.image_bytes is not None
-            ),
-            key=lambda item: (_utc(item.updated_at), item.id),
-            default=None,
-        )
-        expected_members = [(item.node_id, item.rank, item.role) for item in placements]
+        usable_build = None
+        if not operational_evidence_truncated:
+            usable_build = max(
+                (
+                    item
+                    for item in operational.builds
+                    if item.recipe_revision_id == revision.id
+                    and item.state == "succeeded"
+                    and item.image_digest is not None
+                    and item.image_bytes is not None
+                ),
+                key=lambda item: (_utc(item.updated_at), item.id),
+                default=None,
+            )
+        expected_members = [
+            _MemberEvidence(item.node_id, item.rank, item.role) for item in placements
+        ]
         active_mapping_ids = {
             item.mapping_id
             for item in operational.runs
-            if item.state in _ACTIVE_RUN_STATES
+            if not operational_evidence_truncated and item.state in _ACTIVE_RUN_STATES
         }
         active_installation_ids = {
             item.installation_id
             for item in operational.runs
-            if item.state in _ACTIVE_RUN_STATES
+            if not operational_evidence_truncated and item.state in _ACTIVE_RUN_STATES
         }
         present_mapping_ids = {
             item.mapping_id
             for item in operational.installations
-            if item.state != "uninstalled"
+            if not operational_evidence_truncated and item.state != "uninstalled"
         }
         complete_installation_by_id = {
-            item.id: (
-                item.state == "installed"
-                and [
-                    (node.node_id, node.rank, node.role)
-                    for node in sorted(
-                        operational.installation_members.get(item.id, []),
-                        key=lambda value: value.rank,
-                    )
-                ]
-                == expected_members
-                and all(
-                    node.state == "installed"
-                    and node.installed_bytes >= node.required_bytes
-                    for node in operational.installation_members.get(item.id, [])
-                )
-            )
+            item.id: _installation_coverage(
+                item.state,
+                expected_members,
+                _member_evidence(operational.installation_members.get(item.id, [])),
+                declared_expected_count=profile.node_count,
+            ).complete
             for item in operational.installations
-            if item.state != "uninstalled"
+            if not operational_evidence_truncated and item.state != "uninstalled"
         }
         complete_mapping_ids = {
             item.mapping_id
             for item in operational.installations
             if complete_installation_by_id.get(item.id, False)
         }
-        persisted_mapping = max(
-            (
-                item
-                for item in operational.mappings
-                if item.recipe_revision_id == revision.id
-                and item.profile_name == profile.name
-                and item.state == "ready"
-                and [
-                    (node.node_id, node.rank, node.role)
-                    for node in sorted(
-                        operational.mapping_members.get(item.id, []),
-                        key=lambda value: value.rank,
+        persisted_mapping = None
+        if not operational_evidence_truncated:
+            persisted_mapping = max(
+                (
+                    item
+                    for item in operational.mappings
+                    if item.recipe_revision_id == revision.id
+                    and item.profile_name == profile.name
+                    and item.state == "ready"
+                    and _members_are_exact(
+                        expected_members,
+                        _member_evidence(operational.mapping_members.get(item.id, [])),
                     )
-                ]
-                == expected_members
-            ),
-            key=lambda item: (
-                3
-                if item.id in active_mapping_ids
-                else 2
-                if item.id in complete_mapping_ids
-                else 1
-                if item.id in present_mapping_ids
-                else 0,
-                _utc(item.updated_at),
-                item.id,
-            ),
-            default=None,
-        )
+                ),
+                key=lambda item: (
+                    3
+                    if item.id in active_mapping_ids
+                    else 2
+                    if item.id in complete_mapping_ids
+                    else 1
+                    if item.id in present_mapping_ids
+                    else 0,
+                    _utc(item.updated_at),
+                    item.id,
+                ),
+                default=None,
+            )
         matching_installations = sorted(
             (
                 item
@@ -2383,7 +2760,16 @@ class LibraryProjection:
             exact_partial = exact_partial or not complete
             if complete:
                 complete_installation_ids.append(installation.id)
-        if exact_complete:
+        if operational_evidence_truncated:
+            install_state = "not_present"
+            reasons.append(
+                _reason(
+                    "install.evidence_unavailable",
+                    "Exact current installation evidence is incomplete; no installation claim is made.",
+                    "warning",
+                )
+            )
+        elif exact_complete:
             install_state = "complete"
             reasons.append(
                 _reason(
@@ -2421,38 +2807,58 @@ class LibraryProjection:
         if active_runs:
             degraded_count = 0
             for run in active_runs:
-                members = sorted(
-                    operational.run_members.get(run.id, []),
-                    key=lambda value: value.rank,
+                health = _run_health(
+                    expected_members,
+                    _member_evidence(operational.run_members.get(run.id, [])),
+                    current=current,
+                    declared_expected_count=profile.node_count,
                 )
-                exact_members = [
-                    (node.node_id, node.rank, node.role) for node in members
-                ] == expected_members
-                ranks_healthy = exact_members and all(
-                    node.state == "running"
-                    and timedelta(0)
-                    <= current - _utc(node.updated_at)
-                    < timedelta(seconds=_RUN_RANK_FRESH_SECONDS)
-                    for node in members
-                )
-                if not (
-                    run.state == "running"
-                    and run.route_state == "published"
-                    and ranks_healthy
-                ):
+                if not health.healthy:
                     degraded_count += 1
+                if run.route_state == "pending":
+                    reasons.append(
+                        _reason(
+                            "run.route_pending",
+                            "Exact rank health is complete, but route publication is pending.",
+                            "warning",
+                        )
+                    )
+                elif run.route_state == "failed":
+                    reasons.append(
+                        _reason(
+                            "run.route_failed",
+                            "Exact rank health is projected separately from failed route publication.",
+                            "warning",
+                        )
+                    )
+                elif run.route_state == "withdrawn":
+                    reasons.append(
+                        _reason(
+                            "run.route_withdrawn",
+                            "Exact rank health is projected separately from a withdrawn route.",
+                            "warning",
+                        )
+                    )
             if degraded_count:
                 reasons.append(
                     _reason(
                         "run.degraded",
-                        f"{degraded_count} of {len(active_runs)} active exact runs lacks complete, running, fresh rank evidence or a published route.",
+                        f"{degraded_count} of {len(active_runs)} active exact runs lacks complete, running, fresh rank evidence.",
                         "warning",
                     )
                 )
         group_active_run_count = _saturating_nonnegative_sum(
             *(active_run_counts.get(item.agent.node_id, 0) for item in ordered)
         )
-        if group_active_run_count:
+        if operational_evidence_truncated and group_active_run_count:
+            reasons.append(
+                _reason(
+                    "run.presence_unverified",
+                    "Active run-rank presence exists, but capped exact lineage prevents a load claim.",
+                    "warning",
+                )
+            )
+        elif group_active_run_count:
             detail = (
                 f"{group_active_run_count} active run ranks are present on this group, including the selected recipe's exact persisted run."
                 if active_runs
@@ -2723,7 +3129,7 @@ class LibraryProjection:
                         recipe_revision_id=revision.id,
                         profile_name=profile.name,
                         node_ids=[item.agent.node_id for item in ordered],
-                        parameters=dict(profile.parameter_overrides),
+                        parameters={},
                     )
                 )
             )

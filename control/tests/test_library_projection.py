@@ -10,6 +10,7 @@ import pytest
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control.auth import TokenCodec
+from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.library_projection import LibraryProjection
 from vonk_control.models import (
     AgentNode,
@@ -30,6 +31,8 @@ from vonk_control.models import (
     RunNode,
 )
 from vonk_control.recipe_contract import recipe_content_sha256, validate_recipe
+from vonk_control.recipe_operations import RecipeOperationService
+from vonk_control.run_admission import RunAdmissionService
 
 NOW = datetime(2026, 8, 15, 12, tzinfo=UTC)
 FIXTURES = Path(__file__).parent / "fixtures" / "global"
@@ -225,6 +228,23 @@ def _projection(sessions: sessionmaker[Session]) -> LibraryProjection:
     )
 
 
+def _run_status_service(
+    sessions: sessionmaker[Session],
+) -> RecipeOperationService:
+    admission = RunAdmissionService(
+        sessions,
+        inventory_max_age=300,
+        memory_floor_bytes=50,
+    )
+    return RecipeOperationService(
+        sessions,
+        install_admission=object(),  # type: ignore[arg-type]
+        run_admission=admission,
+        agent_jobs=object(),  # type: ignore[arg-type]
+        clock=lambda: NOW,
+    )
+
+
 def _operational_group(
     session: Session,
     revision: LocalRecipeRevision,
@@ -278,7 +298,15 @@ def _operational_group(
         recipe_build_id=build.id,
         image_digest=build.image_digest,
         plan_digest=f"{42_000 + value:064x}",
-        plan={},
+        plan={
+            "schema_version": 1,
+            "nodes": [
+                {"node_id": node_id, "rank": rank, "role": role}
+                for rank, (node_id, (role, _endpoint_owner)) in enumerate(
+                    zip(sorted(node_ids), expanded_roles, strict=True)
+                )
+            ],
+        },
         state="installed" if installed else "partial",
         actor="operator",
         created_at=NOW - timedelta(minutes=2),
@@ -327,7 +355,19 @@ def _operational_group(
             mapping_generation=1,
             alias=f"recipe-{value}",
             plan_digest=f"{45_000 + value:064x}",
-            plan={},
+            plan={
+                "schema_version": 1,
+                "nodes": [
+                    {
+                        "node_id": node_id,
+                        "rank": rank,
+                        "role": role,
+                    }
+                    for rank, (node_id, (role, _endpoint_owner)) in enumerate(
+                        zip(sorted(node_ids), expanded_roles, strict=True)
+                    )
+                ],
+            },
             state="running",
             route_state="published",
             actor="operator",
@@ -486,13 +526,28 @@ def test_root_operational_summaries_are_exact_bounded_and_fair_per_recipe() -> N
     summaries = {item.slug: item for model in snapshot.models for item in model.recipes}
     alpha = summaries["alpha-history-heavy"]
     bravo_summary = summaries["bravo-current"]
-    assert len(statements) == 3
-    installation_query = next(
-        statement for statement in statements if "installation_nodes" in statement
+    assert len(statements) == 6
+    installation_window = next(
+        statement
+        for statement in statements
+        if "recipe_installations" in statement and "row_number()" in statement
     )
-    run_query = next(statement for statement in statements if "run_nodes" in statement)
-    assert installation_query.count("local_recipe_revisions.recipe_id IN") >= 2
-    assert run_query.count("local_recipe_revisions.recipe_id IN") >= 2
+    run_window = next(
+        statement
+        for statement in statements
+        if "recipe_runs" in statement and "row_number()" in statement
+    )
+    assert "local_recipe_revisions.recipe_id IN" in installation_window
+    assert "local_recipe_revisions.recipe_id IN" in run_window
+    for table, parent in (
+        ("cluster_mapping_nodes", "mapping_id IN"),
+        ("installation_nodes", "installation_id IN"),
+        ("run_nodes", "run_id IN"),
+    ):
+        membership_query = next(
+            statement for statement in statements if table in statement
+        )
+        assert parent in membership_query
     assert alpha.installation_total_count == 65
     assert alpha.installation_returned_count == 64
     assert alpha.installations_truncated is True
@@ -944,6 +999,8 @@ def test_placement_bounds_are_observable_and_unsupported_profiles_do_not_search(
         "rejected_node_evidence_limit": 32,
         "rejected_group_evidence_limit": 16,
         "artifact_evidence_per_node_limit": 512,
+        "operational_row_evidence_limit": 512,
+        "operational_member_evidence_limit": 16_384,
     }
     assert bounded.evaluated_group_count == 512
     assert bounded.search_complete is False
@@ -998,7 +1055,7 @@ def test_detail_uses_a_fixed_set_query_count_instead_of_candidate_services() -> 
     second = list(statements)
     event.remove(engine, "before_cursor_execute", record)
 
-    assert len(first) == len(second) == 14
+    assert len(first) == len(second) == 21
     for table in (
         "local_recipes",
         "cluster_mappings",
@@ -1306,7 +1363,7 @@ def test_active_run_lineage_precedes_512_newer_operational_rows_without_more_que
     detail = _projection(sessions).detail(_uuid(64))
     event.remove(engine, "before_cursor_execute", record)
 
-    assert len(statements) == 14
+    assert len(statements) == 21
     assert active["run_id"] in {item.run_id for item in detail.operational_state.runs}
     assert active["installation_id"] in {
         item.installation_id for item in detail.operational_state.installations
@@ -1846,3 +1903,366 @@ def test_per_node_artifact_evidence_truncation_is_observable() -> None:
     )
     assert rejected.eligible is False
     assert "projection.evidence_truncated" in {item.code for item in rejected.reasons}
+
+
+@pytest.mark.parametrize("rank_evidence", ["duplicate", "missing"])
+def test_installation_coverage_matches_run_admission_without_byte_thresholds(
+    rank_evidence: str,
+) -> None:
+    _engine, sessions = _database()
+    document = _document(family="install-parity", nodes=2, title="Install parity")
+    with sessions.begin() as session:
+        _recipe(
+            session,
+            82,
+            slug=f"install-parity-{rank_evidence}",
+            title="Install parity catalog title",
+            document=document,
+        )
+        revision = session.get(LocalRecipeRevision, _uuid(1_821))
+        node_a = _node(session, 1)
+        node_b = _node(session, 2)
+        identifiers = _operational_group(
+            session,
+            revision,
+            (node_a, node_b),
+            value=82,
+            installed=True,
+        )
+        installation_nodes = list(
+            session.query(InstallationNode)
+            .filter_by(installation_id=identifiers["installation_id"])
+            .order_by(InstallationNode.rank)
+        )
+        for node in installation_nodes:
+            node.installed_bytes = 1
+        if rank_evidence == "duplicate":
+            installation_nodes[1].rank = 0
+        else:
+            session.delete(installation_nodes[1])
+
+    admission = RunAdmissionService(
+        sessions,
+        inventory_max_age=300,
+        memory_floor_bytes=50,
+    ).plan_run(identifiers["installation_id"], now=NOW)
+    projection = _projection(sessions)
+    summary = projection.list().models[0].recipes[0].installations[0]
+    recommendation = projection.detail(_uuid(82)).placement[0].recommendations[0]
+    has_run_target = any(
+        target.kind == "run" for target in recommendation.preview_targets
+    )
+
+    assert admission.allowed is False
+    assert summary.complete is False
+    assert recommendation.install_state != "complete"
+    assert has_run_target is admission.allowed
+
+
+def test_low_install_byte_evidence_matches_run_admission_and_stages_run() -> None:
+    _engine, sessions = _database()
+    document = _document(family="low-byte-parity", nodes=2, title="Low bytes")
+    with sessions.begin() as session:
+        _recipe(
+            session,
+            83,
+            slug="low-byte-parity",
+            title="Low byte catalog title",
+            document=document,
+        )
+        revision = session.get(LocalRecipeRevision, _uuid(1_831))
+        node_a = _node(session, 1)
+        node_b = _node(session, 2)
+        identifiers = _operational_group(
+            session,
+            revision,
+            (node_a, node_b),
+            value=83,
+            installed=True,
+        )
+        for node in session.query(InstallationNode).filter_by(
+            installation_id=identifiers["installation_id"]
+        ):
+            node.installed_bytes = 1
+
+    admission = RunAdmissionService(
+        sessions,
+        inventory_max_age=300,
+        memory_floor_bytes=50,
+    ).plan_run(identifiers["installation_id"], now=NOW)
+    projection = _projection(sessions)
+    summary = projection.list().models[0].recipes[0].installations[0]
+    recommendation = projection.detail(_uuid(83)).placement[0].recommendations[0]
+
+    assert admission.allowed is True
+    assert summary.complete is True
+    assert summary.installed_rank_count == 2
+    assert recommendation.install_state == "complete"
+    assert any(target.kind == "run" for target in recommendation.preview_targets)
+
+
+@pytest.mark.parametrize(
+    ("aggregate_state", "route_state", "route_reason"),
+    [
+        ("starting", "pending", "run.route_pending"),
+        ("stopping", "failed", "run.route_failed"),
+    ],
+)
+def test_rank_health_matches_run_status_independently_of_run_and_route_state(
+    aggregate_state: str,
+    route_state: str,
+    route_reason: str,
+) -> None:
+    _engine, sessions = _database()
+    document = _document(family="run-health-parity", nodes=2, title="Run health")
+    with sessions.begin() as session:
+        _recipe(
+            session,
+            84,
+            slug=f"run-health-{route_state}",
+            title="Run health catalog title",
+            document=document,
+        )
+        revision = session.get(LocalRecipeRevision, _uuid(1_841))
+        node_a = _node(session, 1)
+        node_b = _node(session, 2)
+        identifiers = _operational_group(
+            session,
+            revision,
+            (node_a, node_b),
+            value=84,
+            installed=True,
+            running=True,
+        )
+        run = session.get(RecipeRun, identifiers["run_id"])
+        run.state = aggregate_state
+        run.route_state = route_state
+
+    authoritative = _run_status_service(sessions).run_status(identifiers["run_id"])
+    projection = _projection(sessions)
+    summary = projection.list().models[0].recipes[0].runs[0]
+    recommendation = projection.detail(_uuid(84)).placement[0].recommendations[0]
+    reason_codes = {reason.code for reason in recommendation.reasons}
+
+    assert authoritative.healthy is True
+    assert summary.healthy is authoritative.healthy
+    assert summary.state == aggregate_state
+    assert summary.route_state == route_state
+    assert "run.degraded" not in reason_codes
+    assert route_reason in reason_codes
+
+
+def test_more_than_512_active_exact_runs_fail_closed_for_placement_inputs() -> None:
+    _engine, sessions = _database()
+    document = _document(family="current-evidence-cap", title="Evidence cap")
+    with sessions.begin() as session:
+        _recipe(
+            session,
+            85,
+            slug="current-evidence-cap",
+            title="Evidence cap catalog title",
+            document=document,
+        )
+        revision = session.get(LocalRecipeRevision, _uuid(1_851))
+        node_id = _node(session, 1)
+        identifiers = _operational_group(
+            session,
+            revision,
+            (node_id,),
+            value=85,
+            installed=True,
+            running=True,
+        )
+        base_run = session.get(RecipeRun, identifiers["run_id"])
+        for value in range(512):
+            run_id = _uuid(1_000_000 + value)
+            session.add(
+                RecipeRun(
+                    id=run_id,
+                    installation_id=identifiers["installation_id"],
+                    mapping_id=identifiers["mapping_id"],
+                    mapping_generation=1,
+                    alias=f"active-{value}",
+                    plan_digest=f"{1_100_000 + value:064x}",
+                    plan=deepcopy(base_run.plan),
+                    state="running",
+                    route_state="published",
+                    actor="operator",
+                    created_at=NOW - timedelta(seconds=30),
+                    updated_at=NOW - timedelta(seconds=2),
+                )
+            )
+            session.flush()
+            session.add(
+                RunNode(
+                    id=_uuid(1_200_000 + value),
+                    run_id=run_id,
+                    node_id=node_id,
+                    rank=0,
+                    role="entrypoint",
+                    state="running",
+                    port=8_000,
+                    reserved_memory_bytes=120,
+                    observed_memory_bytes=80,
+                    endpoint=None,
+                    evidence_digest="e" * 64,
+                    updated_at=NOW - timedelta(seconds=2),
+                )
+            )
+
+    placement = _projection(sessions).detail(_uuid(85)).placement[0]
+    group = placement.rejected_groups[0]
+    codes = {reason.code for reason in group.reasons}
+
+    assert placement.search_complete is False
+    assert placement.limits.operational_row_evidence_limit == 512
+    assert placement.limits.operational_member_evidence_limit == 16_384
+    assert placement.evidence_counts.runs == 513
+    assert placement.evidence_counts.truncated_collections == ["runs"]
+    assert placement.recommendations == []
+    assert group.eligible is False
+    assert group.install_state == "not_present"
+    assert group.load_state == "not_loaded"
+    assert group.installation_ids == []
+    assert group.run_ids == []
+    assert {target.kind for target in group.preview_targets} == {"mapping"}
+    assert "projection.evidence_truncated" in codes
+    assert "install.complete" not in codes
+    assert "run.loaded" not in codes
+
+
+def test_display_scalars_are_bounded_without_changing_mapping_action_inputs() -> None:
+    _engine, sessions = _database()
+    document = _document(family="display-scalars", title="Display scalars")
+    huge = 1 << 80
+    long_text = "x" * 100_000
+    document["parameters"].extend(
+        [
+            {
+                "name": "display_text",
+                "description": "Display text",
+                "type": "string",
+                "default": "default",
+                "change_effect": "restart",
+            },
+            {
+                "name": "positive_value",
+                "description": "Positive value",
+                "type": "integer",
+                "default": 1,
+                "change_effect": "restart",
+            },
+            {
+                "name": "negative_value",
+                "description": "Negative value",
+                "type": "integer",
+                "default": -1,
+                "change_effect": "restart",
+            },
+            {
+                "name": "enabled",
+                "description": "Enabled",
+                "type": "boolean",
+                "default": False,
+                "change_effect": "restart",
+            },
+        ]
+    )
+    overrides = document["deployment_profiles"][0]["parameter_overrides"]
+    overrides.update(
+        {
+            "display_text": long_text,
+            "positive_value": huge,
+            "negative_value": -huge,
+            "enabled": True,
+        }
+    )
+    validate_recipe(document)
+    with sessions.begin() as session:
+        _recipe(
+            session,
+            86,
+            slug="display-scalars",
+            title="Display scalar catalog title",
+            document=document,
+        )
+        revision = session.get(LocalRecipeRevision, _uuid(1_861))
+        node_id = _node(session, 1)
+
+    detail = _projection(sessions).detail(_uuid(86))
+    profile = detail.profiles[0]
+    recommendation = detail.placement[0].recommendations[0]
+    mapping_target = next(
+        target for target in recommendation.preview_targets if target.kind == "mapping"
+    )
+    authoritative = ClusterMappingService(sessions).plan(
+        revision.id,
+        profile.name,
+        (node_id,),
+        parameters=mapping_target.input.parameters,
+    )
+
+    assert len(profile.parameter_overrides["display_text"]) == 512
+    assert profile.parameter_overrides["positive_value"] == 9_223_372_036_854_775_807
+    assert profile.parameter_overrides["negative_value"] == -9_223_372_036_854_775_807
+    assert profile.parameter_overrides["enabled"] is True
+    assert mapping_target.input.parameters == {}
+    assert authoritative.parameters["display_text"] == long_text
+    assert authoritative.parameters["positive_value"] == huge
+    assert authoritative.parameters["negative_value"] == -huge
+    assert authoritative.parameters["enabled"] is True
+    assert {
+        "recipe.display_scalar_truncated",
+        "recipe.numeric_truncated",
+    } <= {reason.code for reason in detail.reasons}
+
+
+def test_family_spans_pages_with_signed_compound_cursor_binding() -> None:
+    _engine, sessions = _database()
+    with sessions.begin() as session:
+        for value, slug in enumerate(("alpha-page", "bravo-page", "charlie-page"), 87):
+            _recipe(
+                session,
+                value,
+                slug=slug,
+                title=f"Page recipe {value}",
+                document=_document(family="paged-family", title=f"Page {value}"),
+            )
+
+    codec = TokenCodec(b"k" * 32).cursor_codec()
+    projection = LibraryProjection(
+        sessions,
+        cursors=codec,
+        clock=lambda: NOW,
+        disk_floor_bytes=50,
+        memory_floor_bytes=50,
+    )
+    first = projection.list(limit=1)
+    second = projection.list(limit=1, cursor=first.next_cursor)
+    third = projection.list(limit=1, cursor=second.next_cursor)
+
+    assert [page.models[0].family for page in (first, second, third)] == [
+        "paged-family",
+        "paged-family",
+        "paged-family",
+    ]
+    assert [page.models[0].recipes[0].slug for page in (first, second, third)] == [
+        "alpha-page",
+        "bravo-page",
+        "charlie-page",
+    ]
+    assert codec.decode(
+        first.next_cursor,
+        resource="library-recipes",
+        order="slug-asc/id-asc/v1",
+        context={"limit": 1},
+    ) == ["alpha-page", _uuid(87)]
+    assert projection.list(limit=1).next_cursor == first.next_cursor
+    with pytest.raises(ValueError, match="cursor"):
+        projection.list(limit=2, cursor=first.next_cursor)
+    with pytest.raises(ValueError, match="cursor"):
+        projection.list(
+            limit=1,
+            cursor=first.next_cursor[:-1]
+            + ("A" if first.next_cursor[-1] != "A" else "B"),
+        )
