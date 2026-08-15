@@ -1175,7 +1175,10 @@ def test_long_poll_wakes_on_enqueue_and_times_out_without_per_client_state(servi
     timeout_started = time.monotonic()
     assert jobs.claim(NODE_B, "serial-b", 30, 0.08) is None
     timeout_elapsed = time.monotonic() - timeout_started
-    assert 0.06 <= timeout_elapsed < 0.5
+    # The lower bound proves the requested long-poll timeout is honored. Keep
+    # the upper bound generous enough for a CPU-starved parallel CI worker to
+    # be scheduled after the condition deadline has already elapsed.
+    assert 0.06 <= timeout_elapsed < 1.5
 
 
 def test_long_poll_rechecks_database_for_another_process_enqueue(service) -> None:
