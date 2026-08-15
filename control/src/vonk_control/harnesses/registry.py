@@ -6,10 +6,13 @@ import hashlib
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
+from types import MappingProxyType
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from vonk_agent_protocol.workload_packages import (
+    PackageHelperSignature,
+    PackageObjectReceiptClaims,
     SignedPackageObjectReceipt,
     package_object_receipt_signing_bytes,
 )
@@ -23,14 +26,13 @@ from ..catalog_contract import (
 )
 from ..source_bundles import (
     BundleManifest,
-    GeneratedSourceBundle,
     SourceBundleError,
     SourceBundleStore,
 )
 from .common import (
     HarnessCompileError,
     SyntheticHarnessCompiler,
-    structured_command,
+    custom_adapter_command,
     validate_projection,
 )
 from .contracts import HarnessBinding, HarnessCompiler, HarnessMount, HarnessProjection
@@ -49,90 +51,20 @@ BUILTIN_HARNESS_SLUGS = (
 _ADAPTER_PATH = "harness-adapter-v1.json"
 _BUNDLE_MEDIA_TYPE = "application/vnd.vonk-forge.source-bundle.v1+tar"
 _DIGEST = re.compile(r"^[a-f0-9]{64}$")
+_MAPPING_PROXY_TYPE = type(MappingProxyType({}))
 _INTERFACES = frozenset(
     {"openai", "image-job", "audio-job", "video-job", "mesh-job", "artifact-job"}
 )
 
 
 @dataclass(frozen=True, slots=True)
-class VerifiedSourceBundle:
+class _VerifiedSourceBundle:
     digest: str
     archive_sha256: str
     archive: bytes
     files: Mapping[str, bytes]
     manifest: BundleManifest
     signer: str
-
-
-class SourceBundleReceiptVerifier:
-    """Verify existing Ed25519 package-object receipts for exact archive bytes."""
-
-    def __init__(self, public_key: Ed25519PublicKey) -> None:
-        if not isinstance(public_key, Ed25519PublicKey):
-            raise TypeError("source bundle receipt public key is invalid")
-        self._public_key = public_key
-        self.signer = hashlib.sha256(public_key.public_bytes_raw()).hexdigest()
-
-    def verify(
-        self, bundle: GeneratedSourceBundle, receipt: object
-    ) -> VerifiedSourceBundle:
-        archive_sha256 = hashlib.sha256(bundle.archive).hexdigest()
-        if type(receipt) is not SignedPackageObjectReceipt:
-            raise HarnessCompileError("source bundle receipt is invalid")
-        if (
-            receipt.signature.key_id != self.signer
-            or receipt.claims.object_digest != archive_sha256
-            or receipt.claims.size != len(bundle.archive)
-        ):
-            raise HarnessCompileError(
-                "source bundle receipt does not bind exact archive"
-            )
-        try:
-            self._public_key.verify(
-                bytes.fromhex(receipt.signature.value),
-                package_object_receipt_signing_bytes(receipt.claims),
-            )
-        except (InvalidSignature, ValueError, TypeError) as error:
-            raise HarnessCompileError(
-                "source bundle receipt signature is invalid"
-            ) from error
-        return VerifiedSourceBundle(
-            digest=bundle.sha256,
-            archive_sha256=archive_sha256,
-            archive=bundle.archive,
-            files=bundle.files,
-            manifest=bundle.manifest,
-            signer=self.signer,
-        )
-
-
-class SourceBundleAuthority:
-    """Load exact source bytes through the existing safe archive and receipt boundary."""
-
-    def __init__(
-        self, store: SourceBundleStore, verifier: SourceBundleReceiptVerifier
-    ) -> None:
-        if not isinstance(store, SourceBundleStore):
-            raise TypeError("source bundle store is invalid")
-        if not isinstance(verifier, SourceBundleReceiptVerifier):
-            raise TypeError("source bundle receipt verifier is invalid")
-        self._store = store
-        self._verifier = verifier
-
-    def verify(
-        self, identity: Mapping[str, object], receipt: object
-    ) -> VerifiedSourceBundle:
-        digest, expected_bytes, _media_type = _bundle_identity(identity)
-        try:
-            bundle = self._store.get(digest)
-        except SourceBundleError as error:
-            raise HarnessCompileError("source bundle verification failed") from error
-        if len(bundle.archive) != expected_bytes:
-            raise HarnessCompileError("source bundle verification failed")
-        verified = self._verifier.verify(bundle, receipt)
-        if verified.digest != digest:
-            raise HarnessCompileError("source bundle verification failed")
-        return verified
 
 
 @dataclass(frozen=True, slots=True)
@@ -244,17 +176,33 @@ class _CustomRegistration:
     identity: tuple[str, int, str]
     archive_sha256: str
     signer: str
-    receipt: object
+    receipt: SignedPackageObjectReceipt
     adapter_sha256: str
 
 
 class HarnessRegistry:
     def __init__(
-        self, *, source_bundle_authority: SourceBundleAuthority | None = None
+        self,
+        *,
+        source_bundle_store: SourceBundleStore | None = None,
+        trusted_signer_keys: Mapping[str, bytes | Ed25519PublicKey] | None = None,
     ) -> None:
+        if (
+            source_bundle_store is not None
+            and type(source_bundle_store) is not SourceBundleStore
+        ):
+            raise TypeError("source bundle store must be an exact SourceBundleStore")
+        if (source_bundle_store is None) != (trusted_signer_keys is None):
+            raise TypeError(
+                "source bundle store and trusted signer keys must be configured together"
+            )
+        trusted_keys = _trusted_signer_key_data(trusted_signer_keys)
+        if source_bundle_store is not None and not trusted_keys:
+            raise TypeError("source bundle trusted signer keys are required")
         self._compilers: dict[str, HarnessCompiler] = {}
         self._custom: dict[str, _CustomRegistration] = {}
-        self._source_bundle_authority = source_bundle_authority
+        self._source_bundle_store = source_bundle_store
+        self._trusted_signer_keys = trusted_keys
 
     @classmethod
     def with_builtins(cls) -> HarnessRegistry:
@@ -291,14 +239,13 @@ class HarnessRegistry:
         self, *, source_bundle: Mapping[str, object], receipt: object = None
     ) -> None:
         """Register only the repository-owned declarative signed-bundle adapter."""
-        if self._source_bundle_authority is None or not isinstance(
-            source_bundle, Mapping
-        ):
+        if self._source_bundle_store is None or not isinstance(source_bundle, Mapping):
             raise HarnessCompileError(
-                "custom adapter requires a source bundle authority"
+                "custom adapter requires a concrete source bundle store"
             )
         identity = _bundle_identity(source_bundle)
-        verified = self._source_bundle_authority.verify(source_bundle, receipt)
+        stored_receipt = _source_bundle_receipt(receipt)
+        verified = self._verify_source_bundle(source_bundle, stored_receipt)
         spec = _parse_adapter_spec(verified)
         if spec.slug in BUILTIN_HARNESS_SLUGS:
             raise HarnessCompileError(
@@ -311,7 +258,7 @@ class HarnessRegistry:
             identity=identity,
             archive_sha256=verified.archive_sha256,
             signer=verified.signer,
-            receipt=receipt,
+            receipt=stored_receipt,
             adapter_sha256=spec.digest,
         )
 
@@ -389,13 +336,13 @@ class HarnessRegistry:
         registered = self._custom.get(slug)
         if registered is not None:
             if (
-                self._source_bundle_authority is None
+                self._source_bundle_store is None
                 or _bundle_identity(bundle) != registered.identity
             ):
                 raise HarnessCompileError(
                     "custom adapter lacks the exact signed source bundle"
                 )
-            verified = self._source_bundle_authority.verify(bundle, registered.receipt)
+            verified = self._verify_source_bundle(bundle, registered.receipt)
             if (
                 verified.archive_sha256 != registered.archive_sha256
                 or verified.signer != registered.signer
@@ -411,8 +358,102 @@ class HarnessRegistry:
         _require_compiler_identity(compiler, slug)
         return compiler
 
+    def _verify_source_bundle(
+        self,
+        identity: Mapping[str, object],
+        receipt: SignedPackageObjectReceipt,
+    ) -> _VerifiedSourceBundle:
+        store = self._source_bundle_store
+        if store is None:
+            raise HarnessCompileError("source bundle verification failed")
+        digest, expected_bytes, _media_type = _bundle_identity(identity)
+        try:
+            bundle = SourceBundleStore.get(store, digest)
+        except SourceBundleError as error:
+            raise HarnessCompileError("source bundle verification failed") from error
+        archive_sha256 = hashlib.sha256(bundle.archive).hexdigest()
+        if len(bundle.archive) != expected_bytes or bundle.sha256 != digest:
+            raise HarnessCompileError("source bundle verification failed")
+        key_bytes = self._trusted_signer_keys.get(receipt.signature.key_id)
+        if key_bytes is None:
+            raise HarnessCompileError("source bundle receipt signer is not trusted")
+        if receipt.claims.object_digest != archive_sha256 or receipt.claims.size != len(
+            bundle.archive
+        ):
+            raise HarnessCompileError(
+                "source bundle receipt does not bind exact archive"
+            )
+        try:
+            Ed25519PublicKey.from_public_bytes(key_bytes).verify(
+                bytes.fromhex(receipt.signature.value),
+                package_object_receipt_signing_bytes(receipt.claims),
+            )
+        except (InvalidSignature, ValueError, TypeError) as error:
+            raise HarnessCompileError(
+                "source bundle receipt signature is invalid"
+            ) from error
+        return _VerifiedSourceBundle(
+            digest=bundle.sha256,
+            archive_sha256=archive_sha256,
+            archive=bundle.archive,
+            files=bundle.files,
+            manifest=bundle.manifest,
+            signer=receipt.signature.key_id,
+        )
 
-def _parse_adapter_spec(bundle: VerifiedSourceBundle) -> _AdapterSpec:
+
+def _trusted_signer_key_data(
+    value: Mapping[str, bytes | Ed25519PublicKey] | None,
+) -> Mapping[str, bytes]:
+    if value is None:
+        return MappingProxyType({})
+    if type(value) not in (dict, _MAPPING_PROXY_TYPE):
+        raise TypeError("trusted signer keys must be an inert concrete mapping")
+    normalized: dict[str, bytes] = {}
+    for key_id, public_key in value.items():
+        if type(key_id) is not str or _DIGEST.fullmatch(key_id) is None:
+            raise TypeError("trusted signer key ID is invalid")
+        if type(public_key) is bytes:
+            key_bytes = bytes(public_key)
+        elif isinstance(public_key, Ed25519PublicKey):
+            key_bytes = public_key.public_bytes_raw()
+        else:
+            raise TypeError("trusted signer public key is invalid")
+        try:
+            Ed25519PublicKey.from_public_bytes(key_bytes)
+        except (TypeError, ValueError) as error:
+            raise TypeError("trusted signer public key is invalid") from error
+        if hashlib.sha256(key_bytes).hexdigest() != key_id:
+            raise TypeError("trusted signer key ID does not match public key")
+        normalized[key_id] = key_bytes
+    return MappingProxyType(normalized)
+
+
+def _source_bundle_receipt(receipt: object) -> SignedPackageObjectReceipt:
+    if type(receipt) is not SignedPackageObjectReceipt:
+        raise HarnessCompileError("source bundle receipt is invalid")
+    try:
+        claims = receipt.claims
+        signature = receipt.signature
+        return SignedPackageObjectReceipt(
+            claims=PackageObjectReceiptClaims(
+                schema_version=claims.schema_version,
+                authority=claims.authority,
+                object_digest=claims.object_digest,
+                size=claims.size,
+                relative_name=claims.relative_name,
+            ),
+            signature=PackageHelperSignature(
+                algorithm=signature.algorithm,
+                key_id=signature.key_id,
+                value=signature.value,
+            ),
+        )
+    except (AttributeError, TypeError, ValueError) as error:
+        raise HarnessCompileError("source bundle receipt is invalid") from error
+
+
+def _parse_adapter_spec(bundle: _VerifiedSourceBundle) -> _AdapterSpec:
     manifest_file = tuple(
         item for item in bundle.manifest.files if item.path == _ADAPTER_PATH
     )
@@ -459,7 +500,7 @@ def _parse_adapter_spec(bundle: VerifiedSourceBundle) -> _AdapterSpec:
         raise HarnessCompileError("source bundle adapter document is invalid")
     argv = _string_tuple(document.get("argv_template"), "adapter argv template")
     try:
-        argv = structured_command(argv)
+        argv = custom_adapter_command(argv)
     except HarnessCompileError as error:
         raise HarnessCompileError("adapter argv template is invalid") from error
     parameters = frozenset(

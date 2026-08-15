@@ -4,12 +4,18 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
+from pathlib import PurePosixPath
 
-from .contracts import HarnessMount, HarnessProjection
+from .contracts import HarnessBinding, HarnessMount, HarnessProjection
 
 _SAFE_ARGUMENT = re.compile(r"^[A-Za-z0-9_./:+@%=-]{1,2048}$")
+_SAFE_ADAPTER_BASENAME = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 _NON_ROOT_UID = re.compile(r"^[1-9][0-9]*(?::[1-9][0-9]*)?$")
-_SHELL_EXECUTABLES = frozenset({"sh", "bash", "dash", "zsh", "/bin/sh", "/bin/bash"})
+_SHELL_EXECUTABLES = frozenset(
+    {"sh", "bash", "dash", "ash", "zsh", "ksh", "csh", "tcsh", "fish", "busybox"}
+)
+_SHELL_LAUNCHERS = frozenset({"env", "busybox", "sudo", "doas"})
+_CUSTOM_ADAPTER_BIN = PurePosixPath("/opt/vonk/adapters/bin")
 _IMAGE = re.compile(r"^[a-z0-9][a-z0-9._:/-]*@sha256:[a-f0-9]{64}$")
 _SOCKET_NAMES = ("docker.sock", "podman.sock", "containerd.sock", "cri-dockerd.sock")
 
@@ -29,22 +35,52 @@ def structured_command(value: object) -> tuple[str, ...]:
         for item in command
     ):
         raise HarnessCompileError("harness command contains unsafe shell syntax")
-    if command[0] in _SHELL_EXECUTABLES or "-c" in command:
+    executable = PurePosixPath(command[0]).name.lower()
+    if executable in (_SHELL_EXECUTABLES | _SHELL_LAUNCHERS) or "-c" in command:
         raise HarnessCompileError("harness command contains unsafe shell syntax")
     return command
 
 
+def custom_adapter_command(value: object) -> tuple[str, ...]:
+    command = structured_command(value)
+    executable = command[0]
+    path = PurePosixPath(executable)
+    if (
+        not executable.startswith("/")
+        or "//" in executable
+        or "\\" in executable
+        or "/./" in executable
+        or "/../" in executable
+        or executable.endswith(("/", "/.", "/.."))
+        or path.as_posix() != executable
+        or path.parent != _CUSTOM_ADAPTER_BIN
+        or _SAFE_ADAPTER_BASENAME.fullmatch(path.name) is None
+    ):
+        raise HarnessCompileError(
+            "custom adapter executable is outside the dedicated allowlist"
+        )
+    return command
+
+
 def validate_projection(projection: HarnessProjection) -> None:
+    if type(projection.command) is not tuple:
+        raise HarnessCompileError("harness command must use the exact tuple contract")
     structured_command(projection.command)
     if type(projection.contract_version) is not int or projection.contract_version != 1:
         raise HarnessCompileError("harness contract version is invalid")
-    if _IMAGE.fullmatch(projection.image) is None:
+    if type(projection.image) is not str or _IMAGE.fullmatch(projection.image) is None:
         raise HarnessCompileError("harness image must be digest-pinned")
-    if projection.network_mode != "none":
+    if type(projection.network_mode) is not str or projection.network_mode != "none":
         raise HarnessCompileError("harness projection requires an offline network")
-    if projection.architecture != "linux/arm64":
+    if (
+        type(projection.architecture) is not str
+        or projection.architecture != "linux/arm64"
+    ):
         raise HarnessCompileError("harness projection must target linux/arm64")
-    if _NON_ROOT_UID.fullmatch(projection.user) is None:
+    if (
+        type(projection.user) is not str
+        or _NON_ROOT_UID.fullmatch(projection.user) is None
+    ):
         raise HarnessCompileError(
             "harness projection user must be numeric and non-root"
         )
@@ -53,13 +89,24 @@ def validate_projection(projection: HarnessProjection) -> None:
         or not projection.no_new_privileges
     ):
         raise HarnessCompileError("harness projection must set no-new-privileges")
-    if projection.capabilities:
+    if (
+        type(projection.capabilities) is not tuple
+        or any(type(capability) is not str for capability in projection.capabilities)
+        or projection.capabilities
+    ):
         raise HarnessCompileError("harness projection must drop all capabilities")
-    if not projection.model_mounts or any(
-        type(mount.read_only) is not bool or not mount.read_only
-        for mount in projection.model_mounts
+    if (
+        type(projection.model_mounts) is not tuple
+        or not projection.model_mounts
+        or any(type(mount) is not HarnessMount for mount in projection.model_mounts)
+        or any(
+            type(mount.read_only) is not bool or not mount.read_only
+            for mount in projection.model_mounts
+        )
     ):
         raise HarnessCompileError("harness model mounts must be read-only")
+    if type(projection.output_mount) is not HarnessMount:
+        raise HarnessCompileError("harness outputs must use the exact mount contract")
     if (
         type(projection.output_mount.read_only) is not bool
         or projection.output_mount.read_only
@@ -79,14 +126,14 @@ def validate_projection(projection: HarnessProjection) -> None:
                 raise HarnessCompileError("harness mount source and target overlap")
     binding = projection.binding
     if (
-        binding is None
-        or not isinstance(binding.harness_content_sha256, str)
-        or not isinstance(binding.distribution_content_sha256, str)
+        type(binding) is not HarnessBinding
+        or type(binding.harness_content_sha256) is not str
+        or type(binding.distribution_content_sha256) is not str
         or not re.fullmatch(r"[a-f0-9]{64}", binding.harness_content_sha256)
         or not re.fullmatch(r"[a-f0-9]{64}", binding.distribution_content_sha256)
         or type(binding.topology_node_count) is not int
         or binding.topology_node_count < 1
-        or not isinstance(binding.role, str)
+        or type(binding.role) is not str
         or not binding.role
         or type(binding.rank) is not int
         or not 0 <= binding.rank < binding.topology_node_count
@@ -95,7 +142,7 @@ def validate_projection(projection: HarnessProjection) -> None:
 
 
 def _mount_path(value: str) -> None:
-    if not isinstance(value, str) or not value.startswith("/") or value == "/":
+    if type(value) is not str or not value.startswith("/") or value == "/":
         raise HarnessCompileError("harness mount paths must be absolute")
     if (
         "//" in value
