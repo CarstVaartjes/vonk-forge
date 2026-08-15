@@ -172,6 +172,75 @@ test("bounds repeated cursor pages while pinning selected and unlinked navigatio
   expect(within(unlinked).getByRole("link", {name: /Unlinked 3-19/})).toBeVisible();
 });
 
+test("restores an evicted recipe parent when browser Back revisits bounded history", async () => {
+  // Break caught: loading more while B is active can evict visited A; browser
+  // Back then loses A's model list, selected row, and parent-specific Back link.
+  history.replaceState(null, "", "/library/models/qwen%2F3");
+  const recipe = (id: string, title: string) => ({
+    ...codeRecipe,
+    recipe_id: id,
+    slug: id,
+    title,
+  });
+  const recipeA = recipe("recipe-a", "Recipe A");
+  const recipeB = recipe("recipe-b", "Recipe B");
+  const firstRecipes = [recipeA, recipeB, ...Array.from({length: 48}, (_, index) => recipe(`first-${index}`, `First ${index}`))];
+  const nextRecipes = Array.from({length: 50}, (_, index) => recipe(`next-${index}`, `Next ${index}`));
+  const firstPage = {
+    ...librarySnapshot,
+    models: [{...librarySnapshot.models[0], recipes: firstRecipes}],
+    unlinked_recipes: [],
+    next_cursor: "page-2",
+  };
+  const secondPage = {
+    ...librarySnapshot,
+    models: [{...librarySnapshot.models[0], recipes: nextRecipes}],
+    unlinked_recipes: [],
+    next_cursor: null,
+  };
+  const librarySnapshotRequest = vi.fn(async (cursor?: string) => cursor === "page-2" ? secondPage : firstPage);
+  const api = {
+    librarySnapshot: librarySnapshotRequest,
+    libraryRecipe: async (recipeId: string) => {
+      const selected = recipeId === recipeA.recipe_id ? recipeA : recipeB;
+      return {
+        ...minimalLibraryDetail,
+        recipe: {
+          ...minimalLibraryDetail.recipe,
+          recipe_id: selected.recipe_id,
+          slug: selected.slug,
+          title: selected.title,
+        },
+      };
+    },
+  } as unknown as ControlApi;
+  const user = userEvent.setup();
+  render(<App api={api}/>);
+
+  let recipes = await screen.findByRole("region", {name: "Recipes for Qwen 3"});
+  await user.click(within(recipes).getByRole("link", {name: /Recipe A/}));
+  await screen.findByRole("region", {name: "Recipe A recipe authority"});
+  await user.click(within(recipes).getByRole("link", {name: /Recipe B/}));
+  await screen.findByRole("region", {name: "Recipe B recipe authority"});
+  await user.click(screen.getByRole("button", {name: "Load more Library recipes"}));
+  await waitFor(() => expect(librarySnapshotRequest).toHaveBeenCalledWith("page-2", expect.any(AbortSignal)));
+
+  recipes = screen.getByRole("region", {name: "Recipes for Qwen 3"});
+  expect(recipes.querySelectorAll(".library-row")).toHaveLength(50);
+  expect(within(recipes).queryByRole("link", {name: /Recipe A/})).not.toBeInTheDocument();
+
+  act(() => {
+    history.replaceState(null, "", "/library/recipes/recipe-a");
+    dispatchEvent(new PopStateEvent("popstate"));
+  });
+
+  await screen.findByRole("region", {name: "Recipe A recipe authority"});
+  recipes = screen.getByRole("region", {name: "Recipes for Qwen 3"});
+  expect(recipes.querySelectorAll(".library-row")).toHaveLength(50);
+  expect(within(recipes).getByRole("link", {name: /Recipe A/})).toHaveAttribute("aria-current", "page");
+  expect(screen.getByRole("link", {name: "Back to Qwen 3 recipes"})).toHaveAttribute("href", "/library/models/qwen%2F3");
+});
+
 test("changes URL selection only on activation and preserves drill-down history", async () => {
   // Break caught: focus selects or fetches a model/recipe, one-family recipes
   // collapse into one row, unlinked recipes disappear, or navigation replaces

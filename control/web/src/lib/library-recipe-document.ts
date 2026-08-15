@@ -51,7 +51,12 @@ function scanIntegerLexemes(text: string): void {
     while (index < text.length) {
       if (text[index] === '"') {
         index += 1;
-        return JSON.parse(text.slice(start, index)) as string;
+        try {
+          return JSON.parse(text.slice(start, index)) as string;
+        } catch (value) {
+          if (value instanceof SyntaxError) throw new JsonLexemeScanError();
+          throw value;
+        }
       }
       if (text[index] === "\\") {
         index += text[index + 1] === "u" ? 6 : 2;

@@ -1,7 +1,6 @@
 import {useCallback, useEffect, useRef, useState} from "react";
 import type {MouseEvent} from "react";
-import type {LibraryApi, LibrarySnapshot} from "../api/types";
-import type {LibraryRecipeDetail} from "../api/types";
+import type {LibraryApi, LibraryModel, LibraryRecipeDetail, LibraryRecipeSummary, LibrarySnapshot} from "../api/types";
 import {LibraryBrowser} from "../components/library-browser";
 import {libraryRoute} from "../lib/library-route";
 import type {LibraryRoute} from "../lib/library-route";
@@ -9,6 +8,10 @@ import "./library.css";
 
 const LIBRARY_MODEL_WINDOW = 40;
 const LIBRARY_RECIPE_WINDOW = 50;
+
+type RouteParent =
+  | {kind: "model"; model: Omit<LibraryModel, "recipes">; recipe: LibraryRecipeSummary}
+  | {kind: "unlinked"; recipe: LibraryRecipeSummary};
 
 function boundedItems<T>(items: T[], limit: number, key: (item: T) => string, pinnedKey?: string): {items: T[]; truncated: boolean} {
   if (items.length <= limit) return {items, truncated: false};
@@ -58,6 +61,51 @@ function mergeSnapshot(current: LibrarySnapshot | undefined, next: LibrarySnapsh
   }, truncated};
 }
 
+function routeParent(snapshot: LibrarySnapshot, recipeId: string): RouteParent | undefined {
+  for (const model of snapshot.models) {
+    const recipe = model.recipes.find(item => item.recipe_id === recipeId);
+    if (recipe) {
+      const {recipes: _recipes, ...parent} = model;
+      return {kind: "model", model: parent, recipe};
+    }
+  }
+  const recipe = snapshot.unlinked_recipes.find(item => item.recipe_id === recipeId);
+  return recipe ? {kind: "unlinked", recipe} : undefined;
+}
+
+function restoreRouteParent(snapshot: LibrarySnapshot, recipeId: string, parent: RouteParent | undefined): LibrarySnapshot {
+  if (!parent || routeParent(snapshot, recipeId)) return snapshot;
+  if (parent.kind === "unlinked") {
+    const unlinked = boundedItems(
+      snapshot.unlinked_recipes.concat(parent.recipe),
+      LIBRARY_RECIPE_WINDOW,
+      recipe => recipe.recipe_id,
+      recipeId,
+    );
+    return {...snapshot, unlinked_recipes: unlinked.items};
+  }
+
+  const existing = snapshot.models.find(model => model.family === parent.model.family);
+  const restoredModel = existing
+    ? {
+        ...existing,
+        recipes: boundedItems(
+          existing.recipes.concat(parent.recipe),
+          LIBRARY_RECIPE_WINDOW,
+          recipe => recipe.recipe_id,
+          recipeId,
+        ).items,
+      }
+    : {...parent.model, recipes: [parent.recipe]};
+  const models = existing
+    ? snapshot.models.map(model => model.family === restoredModel.family ? restoredModel : model)
+    : snapshot.models.concat(restoredModel);
+  return {
+    ...snapshot,
+    models: boundedItems(models, LIBRARY_MODEL_WINDOW, model => model.family, restoredModel.family).items,
+  };
+}
+
 export function LibraryPage({api, path, onNavigate}: {
   api: LibraryApi;
   path: string;
@@ -74,6 +122,7 @@ export function LibraryPage({api, path, onNavigate}: {
   const [snapshotAttempt, setSnapshotAttempt] = useState(0);
   const [detailAttempt, setDetailAttempt] = useState(0);
   const loadMoreController = useRef<AbortController | undefined>(undefined);
+  const routeParents = useRef(new Map<string, RouteParent>());
   const heading = useRef<HTMLHeadingElement>(null);
   const route = libraryRoute(path);
 
@@ -154,6 +203,23 @@ export function LibraryPage({api, path, onNavigate}: {
     return () => { active = false; };
   }, [path]);
 
+  useEffect(() => {
+    if (!snapshot || route.kind !== "recipe") return;
+    const parent = routeParent(snapshot, route.recipeId);
+    if (!parent) return;
+    routeParents.current.delete(route.recipeId);
+    routeParents.current.set(route.recipeId, parent);
+    while (routeParents.current.size > LIBRARY_RECIPE_WINDOW) {
+      const oldest = routeParents.current.keys().next().value;
+      if (oldest === undefined) break;
+      routeParents.current.delete(oldest);
+    }
+  }, [route, snapshot]);
+
+  const browserSnapshot = snapshot && route.kind === "recipe"
+    ? restoreRouteParent(snapshot, route.recipeId, routeParents.current.get(route.recipeId))
+    : snapshot;
+
   return <div className="library-page">
     <header className="fleet-hero">
       <div>
@@ -165,7 +231,7 @@ export function LibraryPage({api, path, onNavigate}: {
     {error && <section className="fleet-error" role="alert"><h3>Library unavailable</h3><p>{error}</p><button type="button" onClick={() => setSnapshotAttempt(value => value + 1)}>Retry Library</button></section>}
     {!error && !snapshot && <section className="fleet-loading" role="status" aria-label="Loading Library"><span className="loading-orb" aria-hidden="true"/><div><h3>Opening Library</h3><p>Loading model, recipe, and placement authority…</p></div></section>}
     {snapshot && snapshot.models.length === 0 && snapshot.unlinked_recipes.length === 0 && <section className="fleet-empty"><h3>No recipes in the Library</h3><p>Create or import a recipe through the advanced catalog workflow.</p><a className="button" href="/catalog" onClick={event => onNavigate(event, "/catalog")}>Open advanced catalog</a></section>}
-    {snapshot && (snapshot.models.length > 0 || snapshot.unlinked_recipes.length > 0) && <LibraryBrowser
+    {browserSnapshot && (browserSnapshot.models.length > 0 || browserSnapshot.unlinked_recipes.length > 0) && <LibraryBrowser
       api={api}
       detail={detail}
       detailError={detailError}
@@ -174,7 +240,7 @@ export function LibraryPage({api, path, onNavigate}: {
       onRefresh={refreshDetail}
       onRetryDetail={() => setDetailAttempt(value => value + 1)}
       route={route}
-      snapshot={snapshot}
+      snapshot={browserSnapshot}
       windowed={paginationWindowed}
     />}
     {snapshot && (snapshot.next_cursor || paginationWindowed) && <div className="library-pagination">

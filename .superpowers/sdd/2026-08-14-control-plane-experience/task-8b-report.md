@@ -109,3 +109,31 @@ All commands ran in `control/web` with conflicting color variables removed.
 - `git diff --check` passed. `control/web/package-lock.json` is unchanged, and no dependency or `node_modules` artifact is included.
 
 The review's one Minor finding—large stylesheet and combined Fleet/Library E2E files—is deliberately deferred to final branch review as instructed. No unrelated file split or refactor was performed. No live system was contacted and no push was performed.
+
+## Task 8B review fix round 2
+
+This round addresses only the three new Important breakages in `task-8b-review-round-2.md`. The deferred Minor and unrelated refactoring remain out of scope.
+
+### Fixes delivered
+
+1. Local-preview dirtiness now records explicit preview origin instead of comparing document object identity. A newly deserialized server document with unchanged canonical content remains clean, while a real valid local edit remains visibly `Local preview · not saved` across an equivalent server refresh.
+2. The token-aware integer lexer converts malformed substring string parses into its internal scan-abort signal. The authoritative full-document `JSON.parse` therefore supplies final syntax locations; multiline invalid escapes and raw control characters now report the correct document line and column.
+3. Pagination retains a separate capped cache of visited recipe-parent metadata. If loading more while B is active evicts previously visited A, browser Back can reinsert A and its parent metadata into a derived bounded view. The model-specific recipe list, selected A row, and parent-specific Back link return without allowing more than 50 rendered recipe rows or 40 models. The same restoration path supports explicit Unlinked parents.
+
+### Strict RED→GREEN evidence
+
+- Equivalent canonical refresh: the focused regression failed 1/1 because a freshly deserialized but content-equivalent server document displayed `Local preview · not saved`. After explicit origin tracking, the complete Advanced file passed 6/6 and the regression also proved a genuine local edit remains dirty.
+- Full-document JSON location: both focused regressions failed, reporting line 2 columns 4 and 3 instead of line 3 columns 19 and 18. After treating substring `SyntaxError` as an internal lexer scan failure, the complete parser file passed 24/24.
+- Bounded browser history: the A→B→load-more→Back regression failed after A detail loaded because the parent pane became generic `Recipes` and Back fell through to Models. After adding capped visited-parent metadata and bounded reinsertion, the regression passed with exactly 50 recipe rows, A selected, `Recipes for Qwen 3`, and `Back to Qwen 3 recipes`.
+
+### Fix-round verification
+
+All commands ran in `control/web` with conflicting `NO_COLOR` and `FORCE_COLOR` variables removed.
+
+- Focused Vitest: `npm test -- --run src/components/library-recipe-advanced.test.tsx src/lib/library-recipe-document.test.ts src/pages/library.test.tsx` — 3 files passed; 38 tests passed.
+- Full Vitest: `npm test -- --run` — 29 files passed and 1 skipped; 182 tests passed and 1 intentional skip.
+- Production build: `npm run build` — TypeScript passed; Vite transformed 69 modules and emitted production assets.
+- Full local fixture Playwright: `npm run test:e2e` — 8/8 passed, including 360/768/1280/1920 widths, the exact and fractional breakpoint coverage, overflow checks, and empty console/page-error assertions.
+- `git diff --check`, handwritten-scope review, lockfile comparison to HEAD, and `node_modules` artifact check passed. The six implementation/test files plus these two reports are the only round-2 changes.
+
+Canonical validation was not relaxed, rendered pagination remains bounded, and no dependency, lockfile, backend, generated API, Rust, MIA/runtime/readiness, live-system, or unrelated style/E2E refactor was touched. The previously deferred Minor remains explicitly deferred. No push was performed.

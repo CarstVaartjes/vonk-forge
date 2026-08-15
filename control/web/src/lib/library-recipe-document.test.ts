@@ -11,6 +11,24 @@ test("reports JSON syntax with a useful line and column", () => {
 });
 
 test.each([
+  ["invalid escape", String.raw`{
+  "metadata": {
+    "title": "bad\q"
+  }
+}`, "Invalid JSON at line 3, column 19."],
+  ["raw control character", `{
+  "metadata": {
+    "title": "bad
+value"
+  }
+}`, "Invalid JSON at line 3, column 18."],
+])("reports the full-document location for a multiline %s", (_case, text, error) => {
+  // Break caught: the token-aware integer scan parsed a string substring and
+  // reported its substring-relative SyntaxError position as a document offset.
+  expect(parseVisualRecipeDocument(text)).toEqual({ok: false, error});
+});
+
+test.each([
   ["object root", "null", "$ must be an object."],
   ["schema version", JSON.stringify({...visual, schema_version: 2}), "$.schema_version must equal 1."],
   ["nested required field", JSON.stringify({...visual, workload: {capabilities: []}}), "$.workload.family must be a string."],

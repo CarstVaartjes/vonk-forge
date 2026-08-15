@@ -178,6 +178,42 @@ test("renders every canonical visual section from the valid local preview and la
     expect(evidence).toHaveTextContent(value);
 });
 
+test("tracks local preview origin across equivalent canonical refreshes", () => {
+  // Break caught: a newly deserialized but content-equivalent server document
+  // was mistaken for an unsaved edit because dirty state compared object identity.
+  const props = {
+    api: {} as LibraryApi,
+    onRefresh: async () => undefined,
+    policy: librarySnapshot.freshness_policy,
+  };
+  const equivalentDetail = {
+    ...fullLibraryDetail,
+    visual_recipe: JSON.parse(JSON.stringify(fullLibraryDetail.visual_recipe)),
+  };
+  const view = render(<LibraryRecipeAuthority {...props} detail={fullLibraryDetail}/>);
+
+  view.rerender(<LibraryRecipeAuthority {...props} detail={equivalentDetail}/>);
+  expect(screen.queryByText("Local preview · not saved")).not.toBeInTheDocument();
+
+  const advanced = screen.getByRole("group", {name: "Advanced recipe document"});
+  fireEvent.click(within(advanced).getByText("Advanced recipe document"));
+  const local = {
+    ...fullLibraryDetail.visual_recipe!,
+    workload: {...fullLibraryDetail.visual_recipe!.workload, family: "qwen/local-equivalent-refresh"},
+  };
+  fireEvent.change(within(advanced).getByRole("textbox", {name: "Recipe JSON"}), {
+    target: {value: JSON.stringify(local)},
+  });
+  expect(screen.getByText("Local preview · not saved")).toBeVisible();
+
+  view.rerender(<LibraryRecipeAuthority
+    {...props}
+    detail={{...fullLibraryDetail, visual_recipe: JSON.parse(JSON.stringify(fullLibraryDetail.visual_recipe))}}
+  />);
+  expect(screen.getByText("Local preview · not saved")).toBeVisible();
+  expect(screen.getByRole("region", {name: "Model and runtime"})).toHaveTextContent("qwen/local-equivalent-refresh");
+});
+
 test("resets canonical preview state without remounting focused controls and ignores polling-only refresh", async () => {
   // Break caught: using a React key to reset Advanced destroys the focused
   // editor/upload, while failing to reset can resurrect stale A to B to A state.

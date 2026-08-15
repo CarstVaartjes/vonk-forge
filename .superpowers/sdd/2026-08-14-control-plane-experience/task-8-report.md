@@ -134,3 +134,9 @@ All five Important findings from `task-8b-review-round-1.md` are resolved with f
 - Pagination renders bounded windows of 40 models and 50 recipes, pins active route context, preserves Unlinked navigation, and reports cursor/window state honestly.
 
 Fix-round verification: focused Vitest 45/45; full Vitest 178 passed with 1 intentional skip; TypeScript/Vite build passed with 69 modules; full local fixture E2E 8/8; diff check clean. The lockfile and dependencies remain unchanged, no live system was contacted, and nothing was pushed. The single Minor stylesheet/E2E-size finding remains deferred for final branch review exactly as requested.
+
+## Task 8B review fix round 2
+
+The three new Important breakages from `task-8b-review-round-2.md` are resolved through focused RED→GREEN cycles: equivalent deserialized canonical refreshes no longer create a false unsaved badge while real local edits remain dirty; malformed-string syntax locations now come from authoritative full-document parsing; and capped visited-parent metadata restores an evicted A recipe's model/Unlinked list, selected row, and specific Back link after A→B→load-more→browser-Back without exceeding bounded rendered windows.
+
+Fix-round verification: focused Vitest 38/38; full Vitest 182 passed with 1 intentional skip; TypeScript/Vite build passed with 69 modules; full local fixture E2E 8/8 including fractional breakpoint coverage; diff, lockfile, and artifact checks clean. Canonical validation remains strict, pagination remains bounded, the prior Minor remains deferred, no live system was contacted, and nothing was pushed. Full evidence is appended to `task-8b-report.md`.

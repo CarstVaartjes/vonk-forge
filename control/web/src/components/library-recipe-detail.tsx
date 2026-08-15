@@ -54,16 +54,16 @@ export function LibraryRecipeAuthority({api, detail, onRefresh, policy}: {
     detail.selected_revision?.content_sha256 ?? "",
     JSON.stringify(detail.visual_recipe),
   ].join(":");
-  const [preview, setPreview] = useState({document: detail.visual_recipe, canonicalKey: canonicalPreviewKey});
+  const [preview, setPreview] = useState({document: detail.visual_recipe, canonicalKey: canonicalPreviewKey, local: false});
   const trigger = useRef<HTMLButtonElement | null>(null);
   const visual = preview.canonicalKey === canonicalPreviewKey ? preview.document : detail.visual_recipe;
-  const localPreview = visual !== null && visual !== detail.visual_recipe;
+  const localPreview = visual !== null && preview.canonicalKey === canonicalPreviewKey && preview.local;
   const revision = detail.selected_revision;
   const alias = detail.visual_recipe?.runtime.model_aliases[0] ?? detail.recipe.slug;
   useEffect(() => {
     setPreview(current => current.canonicalKey === canonicalPreviewKey
       ? current
-      : {document: detail.visual_recipe, canonicalKey: canonicalPreviewKey});
+      : {document: detail.visual_recipe, canonicalKey: canonicalPreviewKey, local: false});
   }, [canonicalPreviewKey, detail.visual_recipe]);
   const closeReview = useCallback(() => {
     setReview(undefined);
@@ -125,7 +125,7 @@ export function LibraryRecipeAuthority({api, detail, onRefresh, policy}: {
     <LibraryReasons reasons={detail.reasons}/>
     {detail.visual_recipe && <LibraryRecipeAdvanced
       document={detail.visual_recipe}
-      onValidDocument={document => setPreview({document, canonicalKey: canonicalPreviewKey})}
+      onValidDocument={document => setPreview({document, canonicalKey: canonicalPreviewKey, local: true})}
       resetToken={canonicalPreviewKey}
     />}
     <nav className="advanced-workflows" aria-label="Advanced recipe workflows">
