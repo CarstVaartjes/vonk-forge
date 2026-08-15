@@ -17,6 +17,91 @@ Implemented Task 5B only from exact base
 
 All commits are local. Nothing was pushed and no pull request was opened.
 
+## Fix Round 1 (2026-08-15)
+
+Fix Round 1 was implemented on requested HEAD
+`0167b502193c66e3ea274e38c7df0fcf26245db2` and resolves all six independent
+review findings.
+
+- Source/tests commit: `788740ec3876cbd3d2029904a9062f6a843188bf`
+  (`fix(control): harden fleet projection and replay contracts`).
+- Generated contract/client commit:
+  `4d3199c3a3edf3ae47b986bee3694e5723bea4af`
+  (`chore(control): regenerate fleet API clients`).
+- This report update is committed separately; its hash is returned in the final
+  handoff.
+
+The fixes are:
+
+1. Installation and run completeness now fail closed with finite reason
+   `external-member` whenever an exact mapping or actual rank names a node that
+   is outside repository Fleet membership. External nodes are excluded from
+   `present_ranks` and `member_node_ids`. Literal installation and running-group
+   regressions cover the same boundary.
+2. The fixed projection query set now includes one deterministic ranked
+   certificate query. A currently valid active certificate outranks a newer
+   staged/invalid certificate; remaining ties use generation, expiry, and
+   serial. Connection DTOs expose finite `certificate_state` (`valid`,
+   `missing`, `not-yet-valid`, `expired`, `revoked`, `inactive`) and finite
+   `offline_reason`. Precedence is unregistered, agent revoked, agent inactive,
+   certificate cause, never seen, future last-seen, stale, then online. The
+   literal test covers every state/reason and the valid-old/staged-new selection.
+   An instrumented projection is now exactly nine SELECTs regardless of Fleet
+   size.
+3. Projection models use `ConfigDict(extra="forbid", strict=True,
+   allow_inf_nan=False)`. Identifiers, text, lists, ranks, signed integers, and
+   Task 3 telemetry values are bounded; agent/install/run/route/group/reason and
+   freshness vocabularies are finite. Coercion, overflow, non-finite values,
+   overlong items, and open vocabulary values are rejected. OpenAPI and
+   generated TypeScript preserve the finite unions.
+4. `FleetEventRepository.replay_after` returns a bounded event batch plus high
+   watermark and first-retained ID from one SQL statement/database snapshot.
+   Every stream poll rechecks continuity, so an event expiring while a client is
+   connected causes a `retention-gap` snapshot before any later event is
+   delivered. The stream remains capped at 128 events and one poll per second.
+5. `Last-Event-ID` is now an optional documented OpenAPI header and appears in
+   generated Python and TypeScript clients. Runtime authority remains
+   `request.headers.getlist("last-event-id")`, preserving duplicate, ASCII,
+   unsigned decimal, and signed-BIGINT rejection before streaming.
+6. Production SQLite repository instrumentation proves no checked-out
+   connection/session survives an await, frame yield, or cancellation; the
+   cursor advances only after a yielded frame resumes; 128 telemetry events use
+   one replay query and one hydration query; database failure terminates and
+   releases the connection; and the live retention-loss regression resets.
+   This testing also found and fixed SQLite's loss of timezone metadata at the
+   repository boundary by normalizing persisted event timestamps to UTC.
+
+The compatibility boundary is unchanged: `/api/v1/fleet` is the visual typed
+projection, while `/api/v1/nodes/status` remains `FleetStatusResponse` and
+retains the legacy reconciliation evidence digest. Planning/apply, worker
+authority, reconciliation, dashboard evidence, and metrics remain legacy. No
+handwritten frontend was changed; Task 6 still owns generated-client call-site
+migration.
+
+### Fix Round 1 TDD and verification
+
+Observed RED failures included external nodes being reported as complete valid
+members, absence of certificate fields/query, permissive DTO coercion/open
+schemas, absence of `replay_after`, stream use of separate retention/event
+reads, absence of the OpenAPI header, and stale generated clients. Each was run
+failing before its implementation change. Real-repository tests additionally
+exposed the SQLite naïve-timestamp failure before the UTC boundary fix.
+
+| Command | Result |
+|---|---|
+| `control/.venv/bin/pytest -q control/tests/test_fleet_projection.py control/tests/test_fleet_events.py control/tests/test_fleet_stream.py control/tests/test_operation_api.py` | `81 passed`; 12 unrelated macOS pytest temporary-cleanup warnings. |
+| `control/.venv/bin/pytest -q tests/control/test_openapi_clients.py` | `9 passed`; generator idempotence/drift, OpenAPI header, Python header, TypeScript header, finite vocabulary, and visual/legacy split all passed. Two pre-existing generated-Python `1and` syntax warnings remain. |
+| `scripts/generate-control-clients` | Exit 0; regenerated OpenAPI, Python, and TypeScript artifacts. The script retained its CPython 3.12.13 `control/.venv` behavior. |
+| `uvx ruff==0.16.1 check <all changed Python>` | `All checks passed!` |
+| `control/.venv/bin/python -m compileall -q control/src control/tests` | Exit 0. |
+| `git diff --check` | Exit 0. |
+| Broad `control/tests` attempt | `1790 passed, 59 skipped`; 65 failures and 42 errors are host/platform-only: Linux `/proc`, `memfd`, Unix peer-credential tests on macOS, and mandatory Docker/PostgreSQL fixtures with Docker unavailable. No failure was in a Task 5B file. |
+
+No live network, MIA, Rust, NAS, Sparks, worker-authority, metrics, planning, or
+handwritten frontend behavior was changed. The optional combined production
+recorder resume-contention proof was not added; the six required independent
+findings were completed without expanding scope.
+
 ## Exact implementation scope
 
 The source/tests commit contains exactly these eight files:
@@ -215,6 +300,7 @@ git diff --check
   EventSource implementation and must not be treated as proof of cookie or
   incremental streaming behavior; the route/OpenAPI and real browser-cookie
   integration tests provide that proof.
-- The full controller suite was not run; the requested focused suites plus
-  adjacent API composition/integration slices were run. No live network or
-  external system was accessed.
+- Fix Round 1 attempted the full controller suite. Its non-passing cases are the
+  macOS/Linux and unavailable-Docker constraints recorded above; the requested
+  focused and generated-client suites are green. No live network or external
+  system was accessed.
