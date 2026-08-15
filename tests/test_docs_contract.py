@@ -320,7 +320,7 @@ def test_development_nas_contract_keeps_only_compose_file_and_secrets_directory(
     text = _normalized_text(DEV_NAS)
 
     assert "Its contents must be exactly:" in text
-    assert "├── docker-compose.yml" in text
+    assert "├── docker-compose.yaml" in text
     assert "└── secrets/" in text
     assert "No `current/`, source tree, Dockerfiles, or `.env` file belongs in this project." in text
 

@@ -158,7 +158,7 @@ server certificate.
 exactly 18 deployment files into the NAS `secrets/` directory; it excludes
 `admin-password`, `controller-ca-key`, `git-signing-key.pub`, and
 `host-runtime-grant-public-key`. The NAS project must contain only
-`docker-compose.yml` and `secrets/`. Choose **Pull** then **Redeploy** in the
+`docker-compose.yaml` and `secrets/`. Choose **Pull** then **Redeploy** in the
 Docker UI and keep every named volume. Successful one-shot cohort,
 initialization, and migration containers are expected to exit; PostgreSQL,
 API, worker, Caddy, and LiteLLM must then be healthy. Never print secret values
@@ -701,6 +701,12 @@ agent storage, model files, containers, NAS named volumes, or the repository
 volume. Preserve immutable caches after refcounts reach zero unless a separate
 reviewed garbage-collection operation selects them.
 
+Uninstall revalidates the bounded local installation specification and exact
+recipe content digest before removing that installation's metadata. It does
+not re-hash shared model payloads: those immutable artifacts are verified when
+they are acquired and before they are used. Treat an uninstall that scales
+with model size as a runtime defect, not as an expected cleanup delay.
+
 ## Rollback and secret rotation
 
 Normal development update is an unchanged mutable Compose file followed by
@@ -756,7 +762,7 @@ uv run --project control --frozen scripts/dev-runtime-project \
   --enroll-hostname '<ENROLLMENT_HOSTNAME>' \
   --agent-hostname '<CONTROLLER_HOSTNAME>' \
   --registry-hostname '<REGISTRY_HOSTNAME>'
-docker compose -f "$ACCEPTANCE_ROOT/project/docker-compose.yml" config --quiet
+docker compose -f "$ACCEPTANCE_ROOT/project/docker-compose.yaml" config --quiet
 uv run --project control pytest \
   control/tests/test_development_recipe_fixture.py -q
 ```

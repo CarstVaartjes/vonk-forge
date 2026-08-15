@@ -14,7 +14,7 @@ directory when creating a Docker/Compose project. Its contents must be exactly:
 
 ```text
 vonk-forge/
-├── docker-compose.yml
+├── docker-compose.yaml
 └── secrets/
     ├── agent-ca-certificate
     ├── agent-ca-key
@@ -106,9 +106,9 @@ The publication workflows expose three clearly named files:
 
 For normal development, give `docker-compose.dev.yml` to
 `scripts/dev-runtime-project`; it publishes that artifact as
-`docker-compose.yml`. A moved tag does not change a
+`docker-compose.yaml`. A moved tag does not change a
 running project: after a successful publication, pull/redeploy the unchanged
-`docker-compose.yml`, not restart containers and not replace the file. The
+`docker-compose.yaml`, not restart containers and not replace the file. The
 pinned file is deliberately an exception for
 reproduction or recovery; this development guide never installs the production
 graph or its much larger production credential set.
@@ -158,13 +158,13 @@ commit. Download the artifact named
 `docker-compose.dev.yml` and `docker-compose.pinned.yml`. Keep both on local
 operator storage. Pass `docker-compose.dev.yml` to
 `scripts/dev-runtime-project` as shown below; the publisher validates and writes
-it as the NAS project's `docker-compose.yml`. Do not rename or copy either
+it as the NAS project's `docker-compose.yaml`. Do not rename or copy either
 artifact into the NAS project by hand. Do not edit the first-party image
 references or add digests: the mutable `:dev` channel is intentionally selected
 when the Docker UI pulls.
 
 In the NAS file manager, confirm that the artifact is named
-`docker-compose.yml` and that the project UI identifies it as a Compose file;
+`docker-compose.yaml` and that the project UI identifies it as a Compose file;
 do not edit image references, add a digest, or add a build section. Both GHCR
 packages must be public. A pull-only NAS needs no registry login. If the Docker
 UI requests credentials, stop and correct package visibility instead of
@@ -343,7 +343,7 @@ checks; use `scripts/dev-runtime-project-remote` instead.
 
 Both entrypoints render only the site hostnames and explicit direct-fabric
 policy, verify every source and destination byte, and permit only
-`docker-compose.yml` plus `secrets/` at the destination. The helper takes a
+`docker-compose.yaml` plus `secrets/` at the destination. The helper takes a
 nonblocking exclusive Linux file lock in a stable hidden sibling of the project
 before inspecting or recovering a transaction. The lock remains outside the
 two-item project and is reused by later publications. A live second publisher
@@ -400,7 +400,7 @@ configuration output into diagnostics.
 
 For the recommended remote path, the SMB client is only a read-only operator
 view after publication: use Windows Explorer or the NAS file manager to confirm
-that `vonk-forge/` visibly contains `docker-compose.yml` plus `secrets/`, then
+that `vonk-forge/` visibly contains `docker-compose.yaml` plus `secrets/`, then
 select that directory in the Docker UI. Secret generation and validation occur
 on private local Linux storage, while mutation occurs on the NAS's real Linux
 filesystem. Do not manually copy a public key, temporary file, pinned Compose,
@@ -462,10 +462,10 @@ LAN.
 
 ## Create and redeploy the Compose project
 
-In a generic NAS Docker UI (UGREEN calls this a Docker Project):
+In a generic NAS Docker project UI:
 
 1. Create or import a project from the NAS-local `vonk-forge/` directory.
-2. Select `docker-compose.yml`; retain its relative `./secrets/...` paths.
+2. Select `docker-compose.yaml`; retain its relative `./secrets/...` paths.
 3. Verify that `secrets/` contains exactly the 18 names in the project tree
    above, without opening their contents in the UI.
 4. Choose **Pull** then **Redeploy** for the project. Do not choose build or
@@ -512,7 +512,7 @@ confirm the login page returns; logout revokes the server-side browser session.
 
 ## Update after an accepted development publication
 
-Keep `docker-compose.yml` unchanged. In the NAS Docker UI, open the existing
+Keep `docker-compose.yaml` unchanged. In the NAS Docker UI, open the existing
 project and pull/redeploy it. Do not replace the Compose file, restart existing
 containers, delete `secrets/`, or delete named volumes. The repository
 volume has two deliberately separate branches: `main` is the accepted
@@ -558,7 +558,7 @@ installation, updates, or an incompatible migration.
 
 Download `docker-compose.pinned.yml` from the accepted workflow artifact for
 the target cohort, verify its workflow commit and immutable image digests, and
-replace `docker-compose.yml` with that exact pinned artifact before running the
+replace `docker-compose.yaml` with that exact pinned artifact before running the
 procedure. Merely keeping the pinned file elsewhere does not select it. Record
 the pinned 40-character commit as `expected_commit`; the checks below refuse a
 mutable tag, a different pinned commit, or a target that is not in the current
@@ -569,7 +569,7 @@ from the running API before stopping the project. This remains correct if a NAS
 UI changes the Compose project name. Replace `<NAS_PROJECT_DIRECTORY>` with the
 absolute NAS-local directory selected by the Docker Project UI. This is a
 site input: the validation below refuses a relative path, a symlinked project
-root, a missing `docker-compose.yml` or `secrets/`, and unexpected top-level
+root, a missing `docker-compose.yaml` or `secrets/`, and unexpected top-level
 project entries before it runs a Docker command:
 
 ```bash
@@ -581,18 +581,18 @@ case "$NAS_PROJECT_DIRECTORY" in
 esac
 test -d "$NAS_PROJECT_DIRECTORY"
 test ! -L "$NAS_PROJECT_DIRECTORY"
-test -f "$NAS_PROJECT_DIRECTORY/docker-compose.yml"
+test -f "$NAS_PROJECT_DIRECTORY/docker-compose.yaml"
 test -d "$NAS_PROJECT_DIRECTORY/secrets"
 mapfile -d '' -t unexpected_entries < <(
   find "$NAS_PROJECT_DIRECTORY" -mindepth 1 -maxdepth 1 \
-    ! -name docker-compose.yml ! -name secrets -print0
+    ! -name docker-compose.yaml ! -name secrets -print0
 )
 test "${#unexpected_entries[@]}" -eq 0
 cd -- "$NAS_PROJECT_DIRECTORY"
 expected_commit=REPLACE_WITH_PINNED_40_CHARACTER_COMMIT
 [[ "$expected_commit" =~ ^[0-9a-f]{40}$ ]]
 mapfile -t selected_images < <(
-  sudo docker compose -f docker-compose.yml config --images
+  sudo docker compose -f docker-compose.yaml config --images
 )
 selected_first_party=0
 for image in "${selected_images[@]}"; do
@@ -610,7 +610,7 @@ for image in "${selected_images[@]}"; do
   esac
 done
 test "$selected_first_party" -eq 2
-api_container=$(sudo docker compose -f docker-compose.yml ps -q control-api)
+api_container=$(sudo docker compose -f docker-compose.yaml ps -q control-api)
 test -n "$api_container"
 current_commit=$(sudo docker exec "$api_container" \
   git -C /repository rev-parse refs/heads/main)
@@ -635,13 +635,13 @@ printf 'repository volume selected for deletion: %s (%s)\n' \
 printf 'Type the exact volume name to confirm: '
 read -r confirmation
 test "$confirmation" = "$repository_volume"
-sudo docker compose -f docker-compose.yml down
+sudo docker compose -f docker-compose.yaml down
 sudo docker volume rm -- "$repository_volume"
-sudo docker compose -f docker-compose.yml up -d --wait
+sudo docker compose -f docker-compose.yaml up -d --wait
 ```
 
 This is destructive to local branches and unpushed changes in that one volume.
-The restart still uses the already-selected pinned `docker-compose.yml`; after
+The restart still uses the already-selected pinned `docker-compose.yaml`; after
 it becomes healthy, confirm the repository `main` ref equals
 `expected_commit`. Do not use `down --volumes`. A rollback that requires
 database state must use a tested, matching backup rather than ad hoc volume

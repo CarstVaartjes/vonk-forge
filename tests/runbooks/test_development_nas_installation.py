@@ -14,11 +14,11 @@ def test_development_nas_runbook_leads_with_the_mutable_two_item_project() -> No
     text = _normalized_text(RUNBOOK)
 
     assert "Its contents must be exactly:" in text
-    assert "├── docker-compose.yml" in text
+    assert "├── docker-compose.yaml" in text
     assert "└── secrets/" in text
     assert "give `docker-compose.dev.yml` to `scripts/dev-runtime-project`" in text
-    assert "publishes that artifact as `docker-compose.yml`" in text
-    assert "pull/redeploy the unchanged `docker-compose.yml`" in text
+    assert "publishes that artifact as `docker-compose.yaml`" in text
+    assert "pull/redeploy the unchanged `docker-compose.yaml`" in text
     assert "not restart" in text
 
 
@@ -209,22 +209,22 @@ def test_rollback_discovers_volume_and_requires_matching_database_state() -> Non
         if "expected_commit=REPLACE_WITH_PINNED_40_CHARACTER_COMMIT" in block
     ).split("```", maxsplit=1)[0]
 
-    assert "docker compose -f docker-compose.yml ps -q control-api" in text
+    assert "docker compose -f docker-compose.yaml ps -q control-api" in text
     assert "com.docker.compose.volume" in text
     assert "Type the exact volume name to confirm" in text
     assert "NAS_PROJECT_DIRECTORY='<NAS_PROJECT_DIRECTORY>'" in recovery_block
     assert 'case "$NAS_PROJECT_DIRECTORY" in' in recovery_block
     assert 'test -d "$NAS_PROJECT_DIRECTORY"' in recovery_block
-    assert 'test -f "$NAS_PROJECT_DIRECTORY/docker-compose.yml"' in recovery_block
+    assert 'test -f "$NAS_PROJECT_DIRECTORY/docker-compose.yaml"' in recovery_block
     assert 'test -d "$NAS_PROJECT_DIRECTORY/secrets"' in recovery_block
     assert 'cd -- "$NAS_PROJECT_DIRECTORY"' in recovery_block
     assert "/volume1/" not in recovery_block
     assert "Never treat a repository-volume\nreset as a database or runtime-state rollback" in text
     assert "identity, control state, route publications, supervisor state" in normalized
     assert "docker volume rm vonk-forge-dev_dev-repository" not in text
-    assert "replace `docker-compose.yml` with that exact pinned artifact" in normalized
+    assert "replace `docker-compose.yaml` with that exact pinned artifact" in normalized
     assert "expected_commit=REPLACE_WITH_PINNED_40_CHARACTER_COMMIT" in text
-    assert "docker compose -f docker-compose.yml config --images" in text
+    assert "docker compose -f docker-compose.yaml config --images" in text
     assert "git -C /repository rev-parse refs/heads/main" in text
     assert "git -C /repository merge-base --is-ancestor" in text
     assert "dev-sha-$expected_commit@sha256:" in text
@@ -259,7 +259,7 @@ def test_fresh_install_is_the_concise_operator_entry_point() -> None:
     )[0]
 
     for required in (
-        "docker-compose.yml",
+        "docker-compose.yaml",
         "secrets/",
         "scripts/dev-runtime-secrets.py",
         "scripts/dev-runtime-project",
@@ -289,7 +289,7 @@ def test_nas_runbooks_recommend_remote_publication_for_windows_and_wsl() -> None
     for text in (full, fresh):
         assert "scripts/dev-runtime-project-remote" in text
         assert "NAS's real Linux filesystem" in text
-        assert "`docker-compose.yml` plus `secrets/`" in text
+        assert "`docker-compose.yaml` plus `secrets/`" in text
         assert "`sudo -n`" in text
         assert "strict SSH host-key" in text
         assert "RAM-only" in text
