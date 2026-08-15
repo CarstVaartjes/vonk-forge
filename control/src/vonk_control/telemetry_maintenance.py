@@ -6,7 +6,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
-from sqlalchemy import delete, func, select, tuple_
+from sqlalchemy import delete, func, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session, sessionmaker
@@ -69,35 +69,153 @@ def _validated_limit(value: int, *, label: str) -> int:
     return value
 
 
-def _claim_dirty_statement(limit: int):
-    keys = (
+def _dirty_candidate_statement(
+    resolution_seconds: RollupResolution,
+    limit: int,
+):
+    return (
         select(
             NodeTelemetryRollupDirty.resolution_seconds,
             NodeTelemetryRollupDirty.node_id,
             NodeTelemetryRollupDirty.bucket_start,
         )
+        .where(NodeTelemetryRollupDirty.resolution_seconds == resolution_seconds)
         .order_by(
-            NodeTelemetryRollupDirty.resolution_seconds,
             NodeTelemetryRollupDirty.bucket_start,
             NodeTelemetryRollupDirty.node_id,
         )
         .limit(limit)
     )
+
+
+def _claim_dirty_identities_statement(
+    identities: list[tuple[int, str, datetime]],
+):
+    columns = (
+        NodeTelemetryRollupDirty.resolution_seconds,
+        NodeTelemetryRollupDirty.node_id,
+        NodeTelemetryRollupDirty.bucket_start,
+    )
     return (
         delete(NodeTelemetryRollupDirty)
-        .where(
-            tuple_(
-                NodeTelemetryRollupDirty.resolution_seconds,
-                NodeTelemetryRollupDirty.node_id,
-                NodeTelemetryRollupDirty.bucket_start,
-            ).in_(keys)
-        )
-        .returning(
-            NodeTelemetryRollupDirty.resolution_seconds,
-            NodeTelemetryRollupDirty.node_id,
-            NodeTelemetryRollupDirty.bucket_start,
-        )
+        .where(tuple_(*columns).in_(identities))
+        .returning(*columns)
     )
+
+
+def _lock_nodes(session: Session, node_ids: list[str]) -> None:
+    ordered = sorted(set(node_ids))
+    if session.connection().dialect.name == "sqlite":
+        for node_id in ordered:
+            session.execute(
+                update(AgentNode)
+                .where(AgentNode.node_id == node_id)
+                .values(node_id=AgentNode.node_id)
+            )
+        return
+    for chunk in TelemetryMaintenance._chunks(ordered):
+        session.scalars(
+            select(AgentNode.node_id)
+            .where(AgentNode.node_id.in_(chunk))
+            .order_by(AgentNode.node_id)
+            .with_for_update(of=AgentNode)
+        ).all()
+
+
+def _bucket_end(session: Session, column, seconds: int):
+    if session.connection().dialect.name == "sqlite":
+        return func.datetime(column, f"+{seconds} seconds")
+    return column + timedelta(seconds=seconds)
+
+
+def _raw_dirty_exists(session: Session):
+    return (
+        select(1)
+        .where(
+            NodeTelemetryRollupDirty.resolution_seconds == 60,
+            NodeTelemetryRollupDirty.node_id == NodeTelemetrySample.node_id,
+            NodeTelemetryRollupDirty.bucket_start <= NodeTelemetrySample.observed_at,
+            NodeTelemetrySample.observed_at
+            < _bucket_end(
+                session,
+                NodeTelemetryRollupDirty.bucket_start,
+                60,
+            ),
+        )
+        .correlate(NodeTelemetrySample)
+        .exists()
+    )
+
+
+def _raw_candidate_statement(
+    session: Session,
+    *,
+    cutoff: datetime,
+    limit: int,
+    sample_ids: list[str] | None = None,
+):
+    statement = select(
+        NodeTelemetrySample.id,
+        NodeTelemetrySample.node_id,
+        NodeTelemetrySample.observed_at,
+    ).where(
+        NodeTelemetrySample.observed_at < cutoff,
+        ~_raw_dirty_exists(session),
+    )
+    if sample_ids is not None:
+        statement = statement.where(NodeTelemetrySample.id.in_(sample_ids))
+    return statement.order_by(
+        NodeTelemetrySample.observed_at,
+        NodeTelemetrySample.node_id,
+        NodeTelemetrySample.id,
+    ).limit(limit)
+
+
+def _minute_parent_dirty_exists(session: Session):
+    return (
+        select(1)
+        .where(
+            NodeTelemetryRollupDirty.resolution_seconds == 900,
+            NodeTelemetryRollupDirty.node_id == NodeTelemetryRollupBucket.node_id,
+            NodeTelemetryRollupDirty.bucket_start
+            <= NodeTelemetryRollupBucket.bucket_start,
+            NodeTelemetryRollupBucket.bucket_start
+            < _bucket_end(
+                session,
+                NodeTelemetryRollupDirty.bucket_start,
+                900,
+            ),
+        )
+        .correlate(NodeTelemetryRollupBucket)
+        .exists()
+    )
+
+
+def _rollup_candidate_statement(
+    session: Session,
+    *,
+    resolution_seconds: RollupResolution,
+    cutoff: datetime,
+    limit: int,
+    identities: list[tuple[int, str, datetime]] | None = None,
+):
+    columns = (
+        NodeTelemetryRollupBucket.resolution_seconds,
+        NodeTelemetryRollupBucket.node_id,
+        NodeTelemetryRollupBucket.bucket_start,
+    )
+    statement = select(*columns).where(
+        NodeTelemetryRollupBucket.resolution_seconds == resolution_seconds,
+        NodeTelemetryRollupBucket.bucket_start < cutoff,
+    )
+    if resolution_seconds == 60:
+        statement = statement.where(~_minute_parent_dirty_exists(session))
+    if identities is not None:
+        statement = statement.where(tuple_(*columns).in_(identities))
+    return statement.order_by(
+        NodeTelemetryRollupBucket.bucket_start,
+        NodeTelemetryRollupBucket.node_id,
+    ).limit(limit)
 
 
 def bucket_start(value: datetime, resolution_seconds: RollupResolution) -> datetime:
@@ -144,6 +262,7 @@ class TelemetryMaintenance:
     ) -> None:
         self._sessions = sessions
         self._clock = clock
+        self._next_single_resolution: RollupResolution = 60
 
     def run_once(
         self,
@@ -153,25 +272,116 @@ class TelemetryMaintenance:
         dirty_limit = _validated_limit(dirty_limit, label="dirty limit")
         delete_limit = _validated_limit(delete_limit, label="delete limit")
         now = _aware_utc(self._clock(), label="telemetry maintenance clock")
+        self._run_rollups(dirty_limit)
+        self._run_retention(now, delete_limit)
+
+    def _run_retention(self, now: datetime, limit: int) -> None:
+        events = FleetEventRepository(self._sessions, clock=lambda: now)
+        with self._sessions() as session:
+            raw_candidates = session.execute(
+                _raw_candidate_statement(
+                    session,
+                    cutoff=now - timedelta(hours=24),
+                    limit=limit,
+                )
+            ).all()
         with self._sessions.begin() as session:
-            dirty = [
-                (resolution_seconds, node_id, _database_utc(start))
-                for resolution_seconds, node_id, start in session.execute(
-                    _claim_dirty_statement(dirty_limit)
-                ).all()
-            ]
+            self._prune_raw(
+                session,
+                cutoff=now - timedelta(hours=24),
+                limit=limit,
+                events=events,
+                candidates=raw_candidates,
+            )
+        minute_cutoff = bucket_start(now - timedelta(days=30), 60)
+        with self._sessions() as session:
+            minute_candidates = session.execute(
+                _rollup_candidate_statement(
+                    session,
+                    resolution_seconds=60,
+                    cutoff=minute_cutoff,
+                    limit=limit,
+                )
+            ).all()
+        with self._sessions.begin() as session:
+            self._prune_rollups(
+                session,
+                resolution_seconds=60,
+                cutoff=minute_cutoff,
+                limit=limit,
+                candidates=minute_candidates,
+            )
+        quarter_cutoff = bucket_start(now - timedelta(days=365), 900)
+        with self._sessions() as session:
+            quarter_candidates = session.execute(
+                _rollup_candidate_statement(
+                    session,
+                    resolution_seconds=900,
+                    cutoff=quarter_cutoff,
+                    limit=limit,
+                )
+            ).all()
+        with self._sessions.begin() as session:
+            self._prune_rollups(
+                session,
+                resolution_seconds=900,
+                cutoff=quarter_cutoff,
+                limit=limit,
+                candidates=quarter_candidates,
+            )
+        with self._sessions.begin() as session:
+            self._prune_events(session, now=now, limit=limit)
+
+    def _run_rollups(self, dirty_limit: int) -> None:
+        with self._sessions() as session:
+            candidates = self._select_dirty_candidates(session, dirty_limit)
+        claimed_resolution: RollupResolution | None = None
+        with self._sessions.begin() as session:
+            _lock_nodes(session, [identity[1] for identity in candidates])
+            dirty = (
+                [
+                    (resolution_seconds, node_id, _database_utc(start))
+                    for resolution_seconds, node_id, start in session.execute(
+                        _claim_dirty_identities_statement(candidates)
+                    ).all()
+                ]
+                if candidates
+                else []
+            )
             dirty.sort(key=lambda identity: (identity[0], identity[2], identity[1]))
+            if dirty_limit == 1 and dirty:
+                claimed_resolution = dirty[0][0]
             for resolution_seconds, node_id, start in dirty:
                 if resolution_seconds == 60:
                     self._recompute_minute(session, node_id, start)
                 else:
                     self._recompute_quarter_hour(session, node_id, start)
-            self._prune(
-                session,
-                now,
-                delete_limit,
-                FleetEventRepository(self._sessions, clock=lambda: now),
+        if claimed_resolution is not None:
+            self._next_single_resolution = 900 if claimed_resolution == 60 else 60
+
+    def _select_dirty_candidates(
+        self,
+        session: Session,
+        limit: int,
+    ) -> list[tuple[int, str, datetime]]:
+        if limit == 1:
+            other: RollupResolution = 900 if self._next_single_resolution == 60 else 60
+            quotas = ((self._next_single_resolution, 1), (other, 1))
+        else:
+            quotas = ((60, (limit + 1) // 2), (900, limit // 2))
+
+        candidates: list[tuple[int, str, datetime]] = []
+        for resolution_seconds, quota in quotas:
+            rows = session.execute(
+                _dirty_candidate_statement(resolution_seconds, quota)
+            ).all()
+            candidates.extend(
+                (resolution, node_id, _database_utc(start))
+                for resolution, node_id, start in rows
             )
+            if limit == 1 and candidates:
+                break
+        return candidates
 
     @staticmethod
     def _recompute_minute(
@@ -304,8 +514,7 @@ class TelemetryMaintenance:
         identity = (resolution_seconds, node_id, start)
         session.execute(
             delete(NodeTelemetryRollupMetric).where(
-                NodeTelemetryRollupMetric.resolution_seconds
-                == resolution_seconds,
+                NodeTelemetryRollupMetric.resolution_seconds == resolution_seconds,
                 NodeTelemetryRollupMetric.node_id == node_id,
                 NodeTelemetryRollupMetric.bucket_start == start,
             )
@@ -342,32 +551,7 @@ class TelemetryMaintenance:
         )
 
     @staticmethod
-    def _prune(
-        session: Session,
-        now: datetime,
-        limit: int,
-        events: FleetEventRepository,
-    ) -> None:
-        TelemetryMaintenance._prune_raw(
-            session,
-            cutoff=now - timedelta(hours=24),
-            limit=limit,
-            events=events,
-        )
-        TelemetryMaintenance._prune_rollups(
-            session,
-            resolution_seconds=60,
-            cutoff=bucket_start(now - timedelta(days=30), 60),
-            limit=limit,
-            protect_parent=True,
-        )
-        TelemetryMaintenance._prune_rollups(
-            session,
-            resolution_seconds=900,
-            cutoff=bucket_start(now - timedelta(days=365), 900),
-            limit=limit,
-            protect_parent=False,
-        )
+    def _prune_events(session: Session, *, now: datetime, limit: int) -> None:
         event_ids = list(
             session.scalars(
                 select(FleetStreamEvent.id)
@@ -390,80 +574,71 @@ class TelemetryMaintenance:
         cutoff: datetime,
         limit: int,
         events: FleetEventRepository,
+        candidates: list,
     ) -> None:
-        rows = session.execute(
-            select(
-                NodeTelemetrySample.id,
-                NodeTelemetrySample.node_id,
-                NodeTelemetrySample.observed_at,
-            )
-            .where(NodeTelemetrySample.observed_at < cutoff)
-            .order_by(
-                NodeTelemetrySample.observed_at,
-                NodeTelemetrySample.node_id,
-                NodeTelemetrySample.id,
-            )
-            .limit(limit)
-        ).all()
-        identities = [
-            (60, node_id, bucket_start(_database_utc(observed_at), 60))
-            for _sample_id, node_id, observed_at in rows
-        ]
-        protected = TelemetryMaintenance._dirty_identities(session, identities)
-        sample_ids = [
-            sample_id
-            for sample_id, node_id, observed_at in rows
-            if (
-                60,
-                node_id,
-                bucket_start(_database_utc(observed_at), 60),
-            )
-            not in protected
-        ]
-        if sample_ids:
-            sample_id_set = set(sample_ids)
-            node_ids = sorted(
-                {
-                    node_id
-                    for sample_id, node_id, _observed_at in rows
-                    if sample_id in sample_id_set
-                }
-            )
-            for chunk in TelemetryMaintenance._chunks(node_ids):
-                session.scalars(
-                    select(AgentNode.node_id)
-                    .where(AgentNode.node_id.in_(chunk))
-                    .order_by(AgentNode.node_id)
-                    .with_for_update(of=AgentNode)
+        sample_ids = [sample_id for sample_id, _node_id, _observed_at in candidates]
+        _lock_nodes(
+            session,
+            [node_id for _sample_id, node_id, _observed_at in candidates],
+        )
+
+        locked_rows = []
+        for chunk in TelemetryMaintenance._chunks(sample_ids):
+            locked_rows.extend(
+                session.execute(
+                    select(
+                        NodeTelemetrySample.id,
+                        NodeTelemetrySample.node_id,
+                        NodeTelemetrySample.observed_at,
+                    )
+                    .where(NodeTelemetrySample.id.in_(chunk))
+                    .order_by(
+                        NodeTelemetrySample.observed_at,
+                        NodeTelemetrySample.node_id,
+                        NodeTelemetrySample.id,
+                    )
+                    .with_for_update(of=NodeTelemetrySample)
                 ).all()
-            pointers: list[NodeTelemetryLatest] = []
-            for chunk in TelemetryMaintenance._chunks(sample_ids):
-                pointers.extend(
-                    session.scalars(
-                        select(NodeTelemetryLatest)
-                        .where(NodeTelemetryLatest.sample_id.in_(chunk))
-                        .order_by(NodeTelemetryLatest.node_id)
-                        .with_for_update(of=NodeTelemetryLatest)
-                    ).all()
-                )
-            pointers.sort(key=lambda pointer: pointer.node_id)
-            for pointer in pointers:
-                events.append_in_session(
-                    session,
-                    FleetEventDraft(
-                        event_type="node-telemetry",
-                        node_id=pointer.node_id,
-                        entity_kind="node-telemetry-latest",
-                        entity_id=pointer.node_id,
-                        payload={
-                            "schema_version": 1,
-                            "node_id": pointer.node_id,
-                            "sample_id": pointer.sample_id,
-                        },
-                    ),
-                )
-                session.delete(pointer)
-            session.flush()
+            )
+        locked_ids = [row.id for row in locked_rows]
+        rows = session.execute(
+            _raw_candidate_statement(
+                session,
+                cutoff=cutoff,
+                limit=limit,
+                sample_ids=locked_ids,
+            )
+        ).all()
+        sample_ids = [sample_id for sample_id, _node_id, _observed_at in rows]
+
+        pointers: list[NodeTelemetryLatest] = []
+        for chunk in TelemetryMaintenance._chunks(sample_ids):
+            pointers.extend(
+                session.scalars(
+                    select(NodeTelemetryLatest)
+                    .where(NodeTelemetryLatest.sample_id.in_(chunk))
+                    .order_by(NodeTelemetryLatest.node_id)
+                    .with_for_update(of=NodeTelemetryLatest)
+                ).all()
+            )
+        pointers.sort(key=lambda pointer: pointer.node_id)
+        for pointer in pointers:
+            events.append_in_session(
+                session,
+                FleetEventDraft(
+                    event_type="node-telemetry",
+                    node_id=pointer.node_id,
+                    entity_kind="node-telemetry-latest",
+                    entity_id=pointer.node_id,
+                    payload={
+                        "schema_version": 1,
+                        "node_id": pointer.node_id,
+                        "sample_id": pointer.sample_id,
+                    },
+                ),
+            )
+            session.delete(pointer)
+        session.flush()
         for chunk in TelemetryMaintenance._chunks(sample_ids):
             session.execute(
                 delete(NodeTelemetrySample)
@@ -478,42 +653,46 @@ class TelemetryMaintenance:
         resolution_seconds: RollupResolution,
         cutoff: datetime,
         limit: int,
-        protect_parent: bool,
+        candidates: list,
     ) -> None:
+        identities = [
+            (resolution, node_id, _database_utc(start))
+            for resolution, node_id, start in candidates
+        ]
+        _lock_nodes(session, [identity[1] for identity in identities])
+
+        columns = (
+            NodeTelemetryRollupBucket.resolution_seconds,
+            NodeTelemetryRollupBucket.node_id,
+            NodeTelemetryRollupBucket.bucket_start,
+        )
+        locked: list[tuple[int, str, datetime]] = []
+        for chunk in TelemetryMaintenance._chunks(identities):
+            locked.extend(
+                (resolution, node_id, _database_utc(start))
+                for resolution, node_id, start in session.execute(
+                    select(*columns)
+                    .where(tuple_(*columns).in_(chunk))
+                    .order_by(
+                        NodeTelemetryRollupBucket.bucket_start,
+                        NodeTelemetryRollupBucket.node_id,
+                    )
+                    .with_for_update(of=NodeTelemetryRollupBucket)
+                )
+            )
         rows = session.execute(
-            select(
-                NodeTelemetryRollupBucket.resolution_seconds,
-                NodeTelemetryRollupBucket.node_id,
-                NodeTelemetryRollupBucket.bucket_start,
+            _rollup_candidate_statement(
+                session,
+                resolution_seconds=resolution_seconds,
+                cutoff=cutoff,
+                limit=limit,
+                identities=locked,
             )
-            .where(
-                NodeTelemetryRollupBucket.resolution_seconds
-                == resolution_seconds,
-                NodeTelemetryRollupBucket.bucket_start < cutoff,
-            )
-            .order_by(
-                NodeTelemetryRollupBucket.bucket_start,
-                NodeTelemetryRollupBucket.node_id,
-            )
-            .limit(limit)
         ).all()
         identities = [
             (resolution, node_id, _database_utc(start))
             for resolution, node_id, start in rows
         ]
-        if protect_parent:
-            parent_by_identity = {
-                identity: (900, identity[1], bucket_start(identity[2], 900))
-                for identity in identities
-            }
-            protected_parents = TelemetryMaintenance._dirty_identities(
-                session, list(parent_by_identity.values())
-            )
-            identities = [
-                identity
-                for identity in identities
-                if parent_by_identity[identity] not in protected_parents
-            ]
         TelemetryMaintenance._delete_bucket_identities(session, identities)
 
     @staticmethod
@@ -542,28 +721,6 @@ class TelemetryMaintenance:
                 .where(tuple_(*columns).in_(chunk))
                 .execution_options(synchronize_session=False)
             )
-
-    @staticmethod
-    def _dirty_identities(
-        session: Session,
-        identities: list[tuple[int, str, datetime]],
-    ) -> set[tuple[int, str, datetime]]:
-        if not identities:
-            return set()
-        columns = (
-            NodeTelemetryRollupDirty.resolution_seconds,
-            NodeTelemetryRollupDirty.node_id,
-            NodeTelemetryRollupDirty.bucket_start,
-        )
-        found: set[tuple[int, str, datetime]] = set()
-        for chunk in TelemetryMaintenance._chunks(list(dict.fromkeys(identities))):
-            found.update(
-                (resolution, node_id, _database_utc(start))
-                for resolution, node_id, start in session.execute(
-                    select(*columns).where(tuple_(*columns).in_(chunk))
-                )
-            )
-        return found
 
     @staticmethod
     def _chunks(values: list, size: int = _SQL_KEY_CHUNK):

@@ -236,3 +236,108 @@ hard-fail when Docker is absent. The exact Task 9A scoped suite above passes.
    because this session exposes no subagent facility. A requirement-by-
    requirement self-review was completed; the controller's planned independent
    review remains appropriate.
+
+## Fix round 1 — 2026-08-15
+
+### Review findings addressed
+
+- The global lock order is now node-first. Rollup candidate reads complete
+  unlocked, then a fresh transaction locks affected `AgentNode` rows in stable
+  order before atomically deleting and returning the exact dirty identities.
+  Raw, 60-second, 900-second, and Fleet-event retention run in separate bounded
+  transactions, preventing retention locks from extending across categories.
+- Raw and minute retention candidate queries use correlated `NOT EXISTS`
+  exclusions before their ordered `LIMIT`. After candidate nodes and source
+  rows are locked, each transaction repeats the exact anti-join guard before
+  deletion. SQLite uses stable no-op `AgentNode` updates as writer authority;
+  PostgreSQL uses ordered `SELECT ... FOR UPDATE`.
+- Dirty scheduling is fair and bounded. Limits of at least two reserve
+  `(limit + 1) // 2` slots for 60-second work and `limit // 2` slots for
+  900-second work. A one-item limit alternates preferred resolutions after a
+  successful claim and falls back deterministically when the preferred queue
+  is empty.
+- Latest-pointer pruning remains authoritative. The reset regression now uses
+  the real `FleetProjection` and proves cursor advancement, reset reason,
+  retained node identity, and `telemetry: null`; it no longer projects an empty
+  fleet.
+
+The module-size Minor remains deferred as directed. No extraction was required
+for transaction correctness.
+
+### RED→GREEN evidence
+
+- The node-first statement-order test initially observed dirty deletion before
+  node authority. After the two-phase claim change it observes node authority
+  first and exact dirty deletion second.
+- Protected-prefix regressions initially left the later clean raw sample and
+  minute bucket undeleted because protected oldest rows consumed the limit.
+  Both pass with anti-join exclusion before `LIMIT`.
+- Deterministic SQLite marker races initially deleted raw/minute source despite
+  durable dirty work. An intermediate same-transaction candidate read also
+  demonstrated SQLite's shared-read-lock upgrade problem by blocking the marker
+  commit. Completing candidate discovery before the fresh node-first
+  transaction made both races pass without sleeps.
+- Continuous 60-second backlog initially prevented queued 900-second work from
+  running in two one-item passes, and an odd three-item limit allocated no
+  900-second work. Both fairness regressions pass with quotas and alternation.
+- The strengthened reset assertion initially received `nodes: []` from the old
+  projection double. It passes against the real projection with the retained
+  node and cleared telemetry.
+
+Focused final maintenance result after formatting and cleanup:
+`19 passed, 21 warnings in 1.02s`.
+
+### Final scoped verification
+
+Command:
+
+```text
+uv run --project control --frozen pytest \
+  control/tests/test_telemetry.py \
+  control/tests/test_telemetry_maintenance.py \
+  control/tests/test_telemetry_postgres.py \
+  control/tests/test_fleet_events.py \
+  control/tests/test_fleet_events_postgres.py \
+  control/tests/test_fleet_stream.py \
+  control/tests/test_fleet_projection.py \
+  control/tests/test_worker.py \
+  control/tests/test_production_worker.py \
+  control/tests/test_admission_migration.py \
+  control/tests/test_migrations.py -q -rs
+```
+
+Final result after Ruff formatting: `160 passed, 4 skipped, 21 warnings in
+5.83s`. The warnings are the pre-existing pytest temporary-directory cleanup
+warnings on this host.
+
+PostgreSQL-gated command:
+
+```text
+uv run --project control --frozen pytest \
+  control/tests/test_telemetry_postgres.py \
+  control/tests/test_fleet_events_postgres.py -q -rs
+```
+
+Result: `4 skipped in 0.17s`. Docker is unavailable, so the three telemetry
+PostgreSQL races—including the strengthened old-raw/same-node lock-order race—
+and the existing Fleet ordering race could not execute locally. Their
+collection succeeds; the live PostgreSQL race result remains the only
+Task 9A-specific verification limitation.
+
+### Static, compile, and scope evidence
+
+- `uvx --from ruff==0.16.1 ruff --version`: `ruff 0.16.1`.
+- Ruff 0.16.1 lint over all three changed Python files: `All checks passed!`.
+- Ruff 0.16.1 format check after applying the pinned formatter: `3 files
+  already formatted`.
+- Frozen control Python `compileall` over `control/src`, `control/migrations`,
+  and the two changed test modules: exit 0.
+- `git diff --check`: exit 0.
+- Forbidden-scope audit before this report update found exactly these code/test
+  files:
+  - `control/src/vonk_control/telemetry_maintenance.py`
+  - `control/tests/test_telemetry_maintenance.py`
+  - `control/tests/test_telemetry_postgres.py`
+
+No frontend, API, generated-client, Rust, MIA recipe, runtime, readiness, or
+live-system files were changed in fix round 1.

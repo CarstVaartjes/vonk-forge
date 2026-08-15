@@ -79,9 +79,7 @@ def postgres_engine() -> Engine:
         yield engine
         engine.dispose()
     finally:
-        subprocess.run(
-            ["docker", "stop", container], check=False, capture_output=True
-        )
+        subprocess.run(["docker", "stop", container], check=False, capture_output=True)
 
 
 def _repository(engine: Engine) -> tuple[TelemetryRepository, sessionmaker]:
@@ -157,7 +155,9 @@ def test_postgres_concurrent_replay_is_idempotent(postgres_engine: Engine) -> No
 
     assert results[0][0].id == results[1][0].id
     with sessions() as session:
-        assert session.scalar(select(func.count()).select_from(NodeTelemetrySample)) == 1
+        assert (
+            session.scalar(select(func.count()).select_from(NodeTelemetrySample)) == 1
+        )
 
 
 def test_postgres_out_of_order_commits_cannot_regress_latest(
@@ -195,10 +195,36 @@ def test_postgres_out_of_order_commits_cannot_regress_latest(
     assert latest.observed_at == newer.observed_at
 
 
-def test_postgres_late_dirty_insert_survives_claim_transaction(
+def test_postgres_node_first_maintenance_avoids_late_ingestion_deadlock(
     postgres_engine: Engine,
 ) -> None:
     repository, sessions = _repository(postgres_engine)
+    with sessions.begin() as session:
+        session.add(
+            NodeTelemetrySample(
+                id="00000000-0000-4000-8000-000000000099",
+                node_id=NODE_A,
+                boot_id=str(BOOT_B),
+                sequence=99,
+                observed_at=NOW - timedelta(hours=24, seconds=1),
+                received_at=NOW - timedelta(hours=24, seconds=1),
+                cpu_utilization_percent=None,
+                load_average_1m=None,
+                memory_total_bytes=None,
+                memory_available_bytes=None,
+                disk_total_bytes=None,
+                disk_free_bytes=None,
+                gpu_utilization_percent=None,
+                gpu_memory_total_bytes=None,
+                gpu_memory_free_bytes=None,
+                temperature_c=None,
+                power_watts=None,
+                network_receive_bytes_per_second=None,
+                network_transmit_bytes_per_second=None,
+                gap_samples=0,
+                details={},
+            )
+        )
     repository.record_batch(
         NODE_A,
         (
@@ -212,7 +238,7 @@ def test_postgres_late_dirty_insert_survives_claim_transaction(
     maintenance = TelemetryMaintenance(sessions, clock=lambda: NOW)
     claim_deleted = threading.Event()
     allow_maintenance = threading.Event()
-    late_dirty_started = threading.Event()
+    late_node_lock_started = threading.Event()
     role = threading.local()
     backend_pids: dict[str, int] = {}
 
@@ -225,19 +251,21 @@ def test_postgres_late_dirty_insert_survives_claim_transaction(
                 current_role,
                 connection.connection.driver_connection.info.backend_pid,
             )
-        if current_role == "late" and statement.lstrip().startswith(
-            "INSERT INTO node_telemetry_rollup_dirty"
+        normalized = " ".join(statement.lower().split())
+        if (
+            current_role == "late"
+            and "from agent_nodes" in normalized
+            and "for update" in normalized
         ):
-            late_dirty_started.set()
+            late_node_lock_started.set()
 
     def after_statement(
         _connection, _cursor, statement, _parameters, _context, _many
     ) -> None:
-        if (
-            getattr(role, "value", None) == "maintenance"
-            and statement.lstrip().startswith(
-                "DELETE FROM node_telemetry_rollup_dirty"
-            )
+        if getattr(
+            role, "value", None
+        ) == "maintenance" and statement.lstrip().startswith(
+            "DELETE FROM node_telemetry_rollup_dirty"
         ):
             claim_deleted.set()
             assert allow_maintenance.wait(timeout=10)
@@ -266,7 +294,7 @@ def test_postgres_late_dirty_insert_survives_claim_transaction(
             first = pool.submit(run_maintenance)
             assert claim_deleted.wait(timeout=10)
             second = pool.submit(record_late)
-            assert late_dirty_started.wait(timeout=10)
+            assert late_node_lock_started.wait(timeout=10)
 
             deadline = time.monotonic() + 10
             while True:
@@ -295,10 +323,13 @@ def test_postgres_late_dirty_insert_survives_claim_transaction(
 
     start = NOW.replace(second=0, microsecond=0)
     with sessions() as session:
-        assert session.get(
-            NodeTelemetryRollupDirty,
-            (60, NODE_A, start),
-        ) is not None
+        assert (
+            session.get(
+                NodeTelemetryRollupDirty,
+                (60, NODE_A, start),
+            )
+            is not None
+        )
 
     maintenance.run_once(dirty_limit=1)
     with sessions() as session:

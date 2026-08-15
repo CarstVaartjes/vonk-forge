@@ -6,14 +6,15 @@ import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import create_engine, event, select, update
+from sqlalchemy import create_engine, event, func, select, update
 from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.orm import sessionmaker
 from vonk_control import telemetry_maintenance
 from vonk_control.fleet_events import FleetEventRepository
-from vonk_control.fleet_projection import FleetSnapshot
+from vonk_control.fleet_projection import FleetProjection
 from vonk_control.fleet_stream import FleetStream
 from vonk_control.models import (
     AgentNode,
@@ -81,9 +82,7 @@ def _raw(
     )
 
 
-def _input(
-    *, sequence: int, observed_at: datetime, cpu: float
-) -> TelemetrySampleInput:
+def _input(*, sequence: int, observed_at: datetime, cpu: float) -> TelemetrySampleInput:
     return TelemetrySampleInput(
         boot_id=uuid.UUID(BOOT_A),
         sequence=sequence,
@@ -107,12 +106,26 @@ def _input(
 
 
 @pytest.mark.parametrize("dialect", [sqlite.dialect(), postgresql.dialect()])
-def test_dirty_claim_is_one_ordered_bounded_delete_returning(dialect) -> None:
-    statement = telemetry_maintenance._claim_dirty_statement(7)
-
-    sql = " ".join(
+def test_dirty_claim_is_bounded_candidate_then_exact_delete_returning(
+    dialect,
+) -> None:
+    candidate = telemetry_maintenance._dirty_candidate_statement(900, 7)
+    candidate_sql = " ".join(
         str(
-            statement.compile(
+            candidate.compile(
+                dialect=dialect,
+                compile_kwargs={"literal_binds": True},
+            )
+        )
+        .lower()
+        .split()
+    )
+    claim = telemetry_maintenance._claim_dirty_identities_statement(
+        [(900, NODE_A, NOW)]
+    )
+    claim_sql = " ".join(
+        str(
+            claim.compile(
                 dialect=dialect,
                 compile_kwargs={"literal_binds": True},
             )
@@ -121,13 +134,16 @@ def test_dirty_claim_is_one_ordered_bounded_delete_returning(dialect) -> None:
         .split()
     )
 
-    assert sql.startswith("delete from node_telemetry_rollup_dirty where")
-    assert "select node_telemetry_rollup_dirty.resolution_seconds" in sql
-    assert "order by node_telemetry_rollup_dirty.resolution_seconds" in sql
-    assert "node_telemetry_rollup_dirty.bucket_start" in sql
-    assert "node_telemetry_rollup_dirty.node_id" in sql
-    assert "limit 7" in sql
-    returning = sql.partition(" returning ")[2]
+    assert candidate_sql.startswith(
+        "select node_telemetry_rollup_dirty.resolution_seconds"
+    )
+    assert "node_telemetry_rollup_dirty.resolution_seconds = 900" in candidate_sql
+    assert "order by node_telemetry_rollup_dirty.bucket_start" in candidate_sql
+    assert "node_telemetry_rollup_dirty.node_id" in candidate_sql
+    assert "limit 7" in candidate_sql
+    assert claim_sql.startswith("delete from node_telemetry_rollup_dirty where")
+    assert "select " not in claim_sql
+    returning = claim_sql.partition(" returning ")[2]
     assert returning
     assert "resolution_seconds" in returning
     assert "node_id" in returning
@@ -160,41 +176,225 @@ def test_claimed_dirty_rows_are_recomputed_in_deterministic_key_order(
             return None
 
     class Sessions:
+        def __call__(self):
+            return Transaction()
+
         def begin(self):
             return Transaction()
 
     monkeypatch.setattr(
         telemetry_maintenance.TelemetryMaintenance,
+        "_select_dirty_candidates",
+        lambda _self, _session, _limit: [
+            (900, NODE_A, quarter_start),
+            (60, NODE_A, minute_start),
+        ],
+    )
+    monkeypatch.setattr(
+        telemetry_maintenance.TelemetryMaintenance,
         "_recompute_minute",
         staticmethod(
-            lambda _session, node_id, start: recomputed.append(
-                (60, node_id, start)
-            )
+            lambda _session, node_id, start: recomputed.append((60, node_id, start))
         ),
     )
     monkeypatch.setattr(
         telemetry_maintenance.TelemetryMaintenance,
         "_recompute_quarter_hour",
         staticmethod(
-            lambda _session, node_id, start: recomputed.append(
-                (900, node_id, start)
-            )
+            lambda _session, node_id, start: recomputed.append((900, node_id, start))
         ),
     )
     monkeypatch.setattr(
         telemetry_maintenance.TelemetryMaintenance,
-        "_prune",
-        staticmethod(lambda _session, _now, _limit, _events: None),
+        "_run_retention",
+        lambda _self, _now, _limit: None,
+    )
+    monkeypatch.setattr(
+        telemetry_maintenance,
+        "_lock_nodes",
+        lambda _session, _node_ids: None,
     )
 
-    telemetry_maintenance.TelemetryMaintenance(
-        Sessions(), clock=lambda: NOW
-    ).run_once()
+    telemetry_maintenance.TelemetryMaintenance(Sessions(), clock=lambda: NOW).run_once()
 
     assert recomputed == [
         (60, NODE_A, minute_start),
         (900, NODE_A, quarter_start),
     ]
+
+
+def test_rollup_claim_acquires_node_authority_before_deleting_dirty_key(
+    sessions,
+) -> None:
+    start = datetime(2026, 8, 15, 12, 3, tzinfo=UTC)
+    with sessions.begin() as session:
+        session.add_all(
+            (
+                _raw(
+                    "node-first-claim",
+                    start + timedelta(seconds=10),
+                    sequence=1,
+                    cpu=10,
+                ),
+                NodeTelemetryRollupDirty(
+                    resolution_seconds=60,
+                    node_id=NODE_A,
+                    bucket_start=start,
+                ),
+            )
+        )
+
+    statements: list[str] = []
+    engine = sessions.kw["bind"]
+
+    def record_statement(
+        _connection, _cursor, statement, _parameters, _context, _many
+    ) -> None:
+        normalized = " ".join(statement.lower().split())
+        if normalized.startswith("update agent_nodes"):
+            statements.append("node-lock")
+        elif normalized.startswith("delete from node_telemetry_rollup_dirty"):
+            statements.append("dirty-claim")
+
+    event.listen(engine, "before_cursor_execute", record_statement)
+    try:
+        telemetry_maintenance.TelemetryMaintenance(
+            sessions, clock=lambda: NOW
+        ).run_once(dirty_limit=1)
+    finally:
+        event.remove(engine, "before_cursor_execute", record_statement)
+
+    assert statements[:2] == ["node-lock", "dirty-claim"]
+
+
+def test_single_dirty_slot_alternates_resolutions_under_minute_backlog(
+    sessions,
+) -> None:
+    quarter_start = datetime(2026, 8, 15, 10, 0, tzinfo=UTC)
+    minute_starts = [
+        datetime(2026, 8, 15, 11, minute, tzinfo=UTC) for minute in range(3)
+    ]
+    with sessions.begin() as session:
+        session.add(
+            NodeTelemetryRollupBucket(
+                resolution_seconds=60,
+                node_id=NODE_A,
+                bucket_start=quarter_start,
+                source_sample_count=1,
+                gap_samples=0,
+            )
+        )
+        session.add_all(
+            _raw(
+                f"fair-single-{index}",
+                start,
+                sequence=index + 1,
+                cpu=float(index),
+            )
+            for index, start in enumerate(minute_starts)
+        )
+        session.add_all(
+            NodeTelemetryRollupDirty(
+                resolution_seconds=60,
+                node_id=NODE_A,
+                bucket_start=start,
+            )
+            for start in minute_starts
+        )
+        session.add(
+            NodeTelemetryRollupDirty(
+                resolution_seconds=900,
+                node_id=NODE_A,
+                bucket_start=quarter_start,
+            )
+        )
+
+    maintenance = telemetry_maintenance.TelemetryMaintenance(
+        sessions, clock=lambda: NOW
+    )
+    maintenance.run_once(dirty_limit=1)
+    maintenance.run_once(dirty_limit=1)
+
+    with sessions() as session:
+        assert (
+            session.get(
+                NodeTelemetryRollupBucket,
+                (900, NODE_A, quarter_start),
+            )
+            is not None
+        )
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(NodeTelemetryRollupDirty)
+                .where(NodeTelemetryRollupDirty.resolution_seconds == 60)
+            )
+            == 2
+        )
+
+
+def test_odd_dirty_limit_reserves_work_for_both_resolutions(sessions) -> None:
+    minute_starts = [
+        datetime(2026, 8, 15, 11, minute, tzinfo=UTC) for minute in range(3)
+    ]
+    quarter_starts = [datetime(2026, 8, 15, hour, 0, tzinfo=UTC) for hour in (9, 10)]
+    with sessions.begin() as session:
+        session.add_all(
+            _raw(
+                f"fair-odd-{index}",
+                start,
+                sequence=index + 1,
+                cpu=float(index),
+            )
+            for index, start in enumerate(minute_starts)
+        )
+        session.add_all(
+            NodeTelemetryRollupDirty(
+                resolution_seconds=60,
+                node_id=NODE_A,
+                bucket_start=start,
+            )
+            for start in minute_starts
+        )
+        for start in quarter_starts:
+            session.add_all(
+                (
+                    NodeTelemetryRollupBucket(
+                        resolution_seconds=60,
+                        node_id=NODE_A,
+                        bucket_start=start,
+                        source_sample_count=1,
+                        gap_samples=0,
+                    ),
+                    NodeTelemetryRollupDirty(
+                        resolution_seconds=900,
+                        node_id=NODE_A,
+                        bucket_start=start,
+                    ),
+                )
+            )
+
+    telemetry_maintenance.TelemetryMaintenance(sessions, clock=lambda: NOW).run_once(
+        dirty_limit=3
+    )
+
+    with sessions() as session:
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(NodeTelemetryRollupBucket)
+                .where(NodeTelemetryRollupBucket.resolution_seconds == 900)
+            )
+            == 1
+        )
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(NodeTelemetryRollupDirty)
+                .where(NodeTelemetryRollupDirty.resolution_seconds == 60)
+            )
+            == 1
+        )
 
 
 def test_minute_recompute_is_half_open_independent_and_idempotent(
@@ -305,19 +505,25 @@ def test_minute_recompute_is_half_open_independent_and_idempotent(
     maintenance.run_once(dirty_limit=1)
 
     with sessions() as session:
-        assert session.get(
-            NodeTelemetryRollupBucket,
-            (60, NODE_A, start),
-        ).source_sample_count == 3
-        assert len(
-            session.scalars(
-                select(NodeTelemetryRollupMetric).where(
-                    NodeTelemetryRollupMetric.resolution_seconds == 60,
-                    NodeTelemetryRollupMetric.node_id == NODE_A,
-                    NodeTelemetryRollupMetric.bucket_start == start,
-                )
-            ).all()
-        ) == 2
+        assert (
+            session.get(
+                NodeTelemetryRollupBucket,
+                (60, NODE_A, start),
+            ).source_sample_count
+            == 3
+        )
+        assert (
+            len(
+                session.scalars(
+                    select(NodeTelemetryRollupMetric).where(
+                        NodeTelemetryRollupMetric.resolution_seconds == 60,
+                        NodeTelemetryRollupMetric.node_id == NODE_A,
+                        NodeTelemetryRollupMetric.bucket_start == start,
+                    )
+                ).all()
+            )
+            == 2
+        )
         assert len(session.scalars(select(NodeTelemetryRollupDirty)).all()) == 1
 
 
@@ -353,27 +559,36 @@ def test_empty_minute_recompute_removes_stale_bucket_and_queues_parent(
             )
         )
 
-    telemetry_maintenance.TelemetryMaintenance(
-        sessions, clock=lambda: NOW
-    ).run_once(dirty_limit=1)
+    telemetry_maintenance.TelemetryMaintenance(sessions, clock=lambda: NOW).run_once(
+        dirty_limit=1
+    )
 
     with sessions() as session:
-        assert session.get(
-            NodeTelemetryRollupBucket,
-            (60, NODE_A, start),
-        ) is None
-        assert session.get(
-            NodeTelemetryRollupMetric,
-            (60, NODE_A, start, "cpu_utilization_percent"),
-        ) is None
-        assert session.get(
-            NodeTelemetryRollupDirty,
-            (
-                900,
-                NODE_A,
-                datetime(2026, 8, 15, 11, 45, tzinfo=UTC),
-            ),
-        ) is not None
+        assert (
+            session.get(
+                NodeTelemetryRollupBucket,
+                (60, NODE_A, start),
+            )
+            is None
+        )
+        assert (
+            session.get(
+                NodeTelemetryRollupMetric,
+                (60, NODE_A, start, "cpu_utilization_percent"),
+            )
+            is None
+        )
+        assert (
+            session.get(
+                NodeTelemetryRollupDirty,
+                (
+                    900,
+                    NODE_A,
+                    datetime(2026, 8, 15, 11, 45, tzinfo=UTC),
+                ),
+            )
+            is not None
+        )
 
 
 def test_run_once_captures_one_aware_clock_value_and_rejects_unbounded_limits(
@@ -386,9 +601,7 @@ def test_run_once_captures_one_aware_clock_value_and_rejects_unbounded_limits(
         calls += 1
         return NOW
 
-    maintenance = telemetry_maintenance.TelemetryMaintenance(
-        sessions, clock=clock
-    )
+    maintenance = telemetry_maintenance.TelemetryMaintenance(sessions, clock=clock)
     maintenance.run_once()
     assert calls == 1
 
@@ -578,16 +791,14 @@ def test_late_sample_reruns_minute_and_quarter_hour_rollups(sessions) -> None:
         minute = session.scalar(
             select(NodeTelemetryRollupMetric).where(
                 NodeTelemetryRollupMetric.resolution_seconds == 60,
-                NodeTelemetryRollupMetric.metric_name
-                == "cpu_utilization_percent",
+                NodeTelemetryRollupMetric.metric_name == "cpu_utilization_percent",
             )
         )
         quarter = session.scalar(
             select(NodeTelemetryRollupMetric).where(
                 NodeTelemetryRollupMetric.resolution_seconds == 900,
                 NodeTelemetryRollupMetric.bucket_start == quarter_start,
-                NodeTelemetryRollupMetric.metric_name
-                == "cpu_utilization_percent",
+                NodeTelemetryRollupMetric.metric_name == "cpu_utilization_percent",
             )
         )
 
@@ -599,12 +810,8 @@ def test_retention_boundaries_are_strict_ordered_and_repeatedly_bounded(
     sessions,
 ) -> None:
     raw_cutoff = NOW - timedelta(hours=24)
-    minute_cutoff = telemetry_maintenance.bucket_start(
-        NOW - timedelta(days=30), 60
-    )
-    quarter_cutoff = telemetry_maintenance.bucket_start(
-        NOW - timedelta(days=365), 900
-    )
+    minute_cutoff = telemetry_maintenance.bucket_start(NOW - timedelta(days=30), 60)
+    quarter_cutoff = telemetry_maintenance.bucket_start(NOW - timedelta(days=365), 900)
     with sessions.begin() as session:
         session.add_all(
             (
@@ -728,9 +935,7 @@ def test_retention_boundaries_are_strict_ordered_and_repeatedly_bounded(
     maintenance.run_once(dirty_limit=1, delete_limit=1)
 
     with sessions() as session:
-        assert session.scalars(select(NodeTelemetrySample.id)).all() == [
-            "raw-boundary"
-        ]
+        assert session.scalars(select(NodeTelemetrySample.id)).all() == ["raw-boundary"]
         assert session.scalars(
             select(NodeTelemetryRollupBucket.bucket_start).where(
                 NodeTelemetryRollupBucket.resolution_seconds == 60
@@ -750,13 +955,9 @@ def test_retention_keeps_sources_with_outstanding_rollup_work(sessions) -> None:
     protected_raw_start = telemetry_maintenance.bucket_start(
         raw_cutoff - timedelta(minutes=2), 60
     )
-    minute_cutoff = telemetry_maintenance.bucket_start(
-        NOW - timedelta(days=30), 60
-    )
+    minute_cutoff = telemetry_maintenance.bucket_start(NOW - timedelta(days=30), 60)
     protected_minute_start = minute_cutoff - timedelta(minutes=2)
-    protected_parent = telemetry_maintenance.bucket_start(
-        protected_minute_start, 900
-    )
+    protected_parent = telemetry_maintenance.bucket_start(protected_minute_start, 900)
     clean_minute_start = minute_cutoff - timedelta(minutes=16)
     with sessions.begin() as session:
         session.add_all(
@@ -803,22 +1004,292 @@ def test_retention_keeps_sources_with_outstanding_rollup_work(sessions) -> None:
             )
         )
 
-    telemetry_maintenance.TelemetryMaintenance(
-        sessions, clock=lambda: NOW
-    ).run_once(dirty_limit=1, delete_limit=100)
+    telemetry_maintenance.TelemetryMaintenance(sessions, clock=lambda: NOW).run_once(
+        dirty_limit=1, delete_limit=100
+    )
 
     with sessions() as session:
-        assert session.scalars(select(NodeTelemetrySample.id)).all() == [
-            "raw-dirty"
-        ]
-        assert session.get(
-            NodeTelemetryRollupBucket,
-            (60, NODE_A, protected_minute_start),
-        ) is not None
-        assert session.get(
-            NodeTelemetryRollupBucket,
-            (60, NODE_A, clean_minute_start),
-        ) is None
+        assert session.scalars(select(NodeTelemetrySample.id)).all() == ["raw-dirty"]
+        assert (
+            session.get(
+                NodeTelemetryRollupBucket,
+                (60, NODE_A, protected_minute_start),
+            )
+            is not None
+        )
+        assert (
+            session.get(
+                NodeTelemetryRollupBucket,
+                (60, NODE_A, clean_minute_start),
+            )
+            is None
+        )
+
+
+def test_raw_retention_filters_dirty_prefix_before_applying_limit(sessions) -> None:
+    raw_cutoff = NOW - timedelta(hours=24)
+    protected_at = raw_cutoff - timedelta(minutes=2)
+    clean_at = raw_cutoff - timedelta(minutes=1)
+    protected_start = telemetry_maintenance.bucket_start(protected_at, 60)
+    with sessions.begin() as session:
+        session.add_all(
+            (
+                _raw("raw-protected-prefix", protected_at, sequence=1),
+                _raw("raw-clean-after-prefix", clean_at, sequence=2),
+                NodeTelemetryRollupDirty(
+                    resolution_seconds=60,
+                    node_id=NODE_A,
+                    bucket_start=protected_start - timedelta(hours=1),
+                ),
+                NodeTelemetryRollupDirty(
+                    resolution_seconds=60,
+                    node_id=NODE_A,
+                    bucket_start=protected_start,
+                ),
+            )
+        )
+
+    telemetry_maintenance.TelemetryMaintenance(sessions, clock=lambda: NOW).run_once(
+        dirty_limit=1, delete_limit=1
+    )
+
+    with sessions() as session:
+        assert session.get(NodeTelemetrySample, "raw-protected-prefix") is not None
+        assert session.get(NodeTelemetrySample, "raw-clean-after-prefix") is None
+
+
+def test_minute_retention_filters_dirty_parent_prefix_before_limit(
+    sessions,
+) -> None:
+    minute_cutoff = telemetry_maintenance.bucket_start(NOW - timedelta(days=30), 60)
+    protected_start = minute_cutoff - timedelta(minutes=31)
+    clean_start = minute_cutoff - timedelta(minutes=16)
+    protected_parent = telemetry_maintenance.bucket_start(protected_start, 900)
+    with sessions.begin() as session:
+        session.add_all(
+            (
+                NodeTelemetryRollupBucket(
+                    resolution_seconds=60,
+                    node_id=NODE_A,
+                    bucket_start=protected_start,
+                    source_sample_count=1,
+                    gap_samples=0,
+                ),
+                NodeTelemetryRollupBucket(
+                    resolution_seconds=60,
+                    node_id=NODE_A,
+                    bucket_start=clean_start,
+                    source_sample_count=1,
+                    gap_samples=0,
+                ),
+                NodeTelemetryRollupDirty(
+                    resolution_seconds=60,
+                    node_id=NODE_A,
+                    bucket_start=protected_start - timedelta(hours=1),
+                ),
+                NodeTelemetryRollupDirty(
+                    resolution_seconds=900,
+                    node_id=NODE_A,
+                    bucket_start=protected_parent,
+                ),
+            )
+        )
+
+    telemetry_maintenance.TelemetryMaintenance(sessions, clock=lambda: NOW).run_once(
+        dirty_limit=1, delete_limit=1
+    )
+
+    with sessions() as session:
+        assert (
+            session.get(
+                NodeTelemetryRollupBucket,
+                (60, NODE_A, protected_start),
+            )
+            is not None
+        )
+        assert (
+            session.get(
+                NodeTelemetryRollupBucket,
+                (60, NODE_A, clean_start),
+            )
+            is None
+        )
+
+
+def test_sqlite_raw_dirty_guard_is_rechecked_after_node_authority(
+    tmp_path,
+) -> None:
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'raw-guard-race.sqlite'}",
+        connect_args={"check_same_thread": False, "timeout": 10},
+    )
+    Base.metadata.create_all(engine)
+    race_sessions = sessionmaker(engine, expire_on_commit=False)
+    observed_at = NOW - timedelta(hours=24, seconds=1)
+    with race_sessions.begin() as session:
+        session.add(AgentNode(node_id=NODE_A, state="active", capabilities=[]))
+        session.add(_raw("raw-guard-race", observed_at, sequence=1))
+
+    guard_read = threading.Event()
+    allow_maintenance = threading.Event()
+    role = threading.local()
+
+    candidate_read = threading.Event()
+
+    def after_statement(
+        _connection, _cursor, statement, _parameters, _context, _many
+    ) -> None:
+        normalized = " ".join(statement.lower().split())
+        if (
+            getattr(role, "value", None) == "maintenance"
+            and "from node_telemetry_samples" in normalized
+            and "exists" in normalized
+        ):
+            candidate_read.set()
+
+    def before_statement(
+        _connection, _cursor, statement, _parameters, _context, _many
+    ) -> None:
+        normalized = " ".join(statement.lower().split())
+        if (
+            getattr(role, "value", None) == "maintenance"
+            and candidate_read.is_set()
+            and normalized.startswith("update agent_nodes")
+        ):
+            guard_read.set()
+            assert allow_maintenance.wait(timeout=10)
+
+    maintenance = telemetry_maintenance.TelemetryMaintenance(
+        race_sessions, clock=lambda: NOW
+    )
+
+    def run_maintenance() -> None:
+        role.value = "maintenance"
+        maintenance.run_once(dirty_limit=1, delete_limit=1)
+
+    def mark_dirty() -> None:
+        role.value = "marker"
+        with race_sessions.begin() as session:
+            telemetry_maintenance._lock_nodes(session, [NODE_A])
+            telemetry_maintenance.mark_rollup_dirty(session, 60, NODE_A, observed_at)
+
+    event.listen(engine, "after_cursor_execute", after_statement)
+    event.listen(engine, "before_cursor_execute", before_statement)
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(run_maintenance)
+            assert guard_read.wait(timeout=10)
+            second = pool.submit(mark_dirty)
+            second.result(timeout=10)
+            allow_maintenance.set()
+            first.result(timeout=10)
+    finally:
+        allow_maintenance.set()
+        event.remove(engine, "after_cursor_execute", after_statement)
+        event.remove(engine, "before_cursor_execute", before_statement)
+
+    start = telemetry_maintenance.bucket_start(observed_at, 60)
+    with race_sessions() as session:
+        assert session.get(NodeTelemetrySample, "raw-guard-race") is not None
+        assert session.get(NodeTelemetryRollupDirty, (60, NODE_A, start)) is not None
+
+
+def test_sqlite_minute_parent_guard_is_rechecked_after_node_authority(
+    tmp_path,
+) -> None:
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'minute-guard-race.sqlite'}",
+        connect_args={"check_same_thread": False, "timeout": 10},
+    )
+    Base.metadata.create_all(engine)
+    race_sessions = sessionmaker(engine, expire_on_commit=False)
+    start = telemetry_maintenance.bucket_start(NOW - timedelta(days=30, minutes=1), 60)
+    parent = telemetry_maintenance.bucket_start(start, 900)
+    with race_sessions.begin() as session:
+        session.add(AgentNode(node_id=NODE_A, state="active", capabilities=[]))
+        session.add(
+            NodeTelemetryRollupBucket(
+                resolution_seconds=60,
+                node_id=NODE_A,
+                bucket_start=start,
+                source_sample_count=1,
+                gap_samples=0,
+            )
+        )
+
+    guard_read = threading.Event()
+    allow_maintenance = threading.Event()
+    role = threading.local()
+
+    candidate_read = threading.Event()
+
+    def after_statement(
+        _connection, _cursor, statement, _parameters, _context, _many
+    ) -> None:
+        normalized = " ".join(statement.lower().split())
+        if (
+            getattr(role, "value", None) == "maintenance"
+            and "from node_telemetry_rollup_buckets" in normalized
+            and "exists" in normalized
+        ):
+            candidate_read.set()
+
+    def before_statement(
+        _connection, _cursor, statement, _parameters, _context, _many
+    ) -> None:
+        normalized = " ".join(statement.lower().split())
+        if (
+            getattr(role, "value", None) == "maintenance"
+            and candidate_read.is_set()
+            and normalized.startswith("update agent_nodes")
+        ):
+            guard_read.set()
+            assert allow_maintenance.wait(timeout=10)
+
+    maintenance = telemetry_maintenance.TelemetryMaintenance(
+        race_sessions, clock=lambda: NOW
+    )
+
+    def run_maintenance() -> None:
+        role.value = "maintenance"
+        maintenance.run_once(dirty_limit=1, delete_limit=1)
+
+    def mark_parent_dirty() -> None:
+        role.value = "marker"
+        with race_sessions.begin() as session:
+            telemetry_maintenance._lock_nodes(session, [NODE_A])
+            telemetry_maintenance.mark_rollup_dirty(session, 900, NODE_A, parent)
+
+    event.listen(engine, "after_cursor_execute", after_statement)
+    event.listen(engine, "before_cursor_execute", before_statement)
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(run_maintenance)
+            assert guard_read.wait(timeout=10)
+            second = pool.submit(mark_parent_dirty)
+            second.result(timeout=10)
+            allow_maintenance.set()
+            first.result(timeout=10)
+    finally:
+        allow_maintenance.set()
+        event.remove(engine, "after_cursor_execute", after_statement)
+        event.remove(engine, "before_cursor_execute", before_statement)
+
+    with race_sessions() as session:
+        assert (
+            session.get(
+                NodeTelemetryRollupBucket,
+                (60, NODE_A, start),
+            )
+            is not None
+        )
+        assert (
+            session.get(
+                NodeTelemetryRollupDirty,
+                (900, NODE_A, parent),
+            )
+            is not None
+        )
 
 
 def test_latest_raw_pruning_appends_authoritative_missing_sample_reset(
@@ -836,9 +1307,9 @@ def test_latest_raw_pruning_appends_authoritative_missing_sample_reset(
         )
         session.add(NodeTelemetryLatest(node_id=NODE_A, sample_id=sample_id))
 
-    telemetry_maintenance.TelemetryMaintenance(
-        sessions, clock=lambda: NOW
-    ).run_once(delete_limit=1)
+    telemetry_maintenance.TelemetryMaintenance(sessions, clock=lambda: NOW).run_once(
+        delete_limit=1
+    )
 
     with sessions() as session:
         assert session.get(NodeTelemetryLatest, NODE_A) is None
@@ -867,19 +1338,42 @@ def test_latest_raw_pruning_appends_authoritative_missing_sample_reset(
         assert session.get(FleetEventCursor, 1).last_id == 1
     assert TelemetryRepository(sessions, clock=lambda: NOW).latest((NODE_A,)) == {}
 
-    class Projection:
-        def read_at(self, cursor: int) -> FleetSnapshot:
-            return FleetSnapshot(
-                event_cursor=cursor,
-                generated_at=NOW,
-                repository_commit="a" * 40,
-                nodes=[],
+    class Repository:
+        def head(self) -> str:
+            return "a" * 40
+
+        def read_document(self, commit: str, path: str) -> SimpleNamespace:
+            assert (commit, path) == (
+                "a" * 40,
+                "inventory/fleet.toml",
+            )
+            return SimpleNamespace(
+                parsed={
+                    "nodes": {
+                        NODE_A: {
+                            "display_name": "Alpha",
+                            "hostname": "alpha.internal",
+                            "lifecycle": "managed",
+                            "labels": {},
+                        }
+                    }
+                }
             )
 
+    events = FleetEventRepository(sessions, clock=lambda: NOW)
+    telemetry = TelemetryRepository(sessions, clock=lambda: NOW)
+    projection = FleetProjection(
+        Repository(),
+        sessions,
+        clock=lambda: NOW,
+        events=events,
+        telemetry=telemetry,
+    )
+
     stream = FleetStream(
-        FleetEventRepository(sessions, clock=lambda: NOW),
-        TelemetryRepository(sessions, clock=lambda: NOW),
-        Projection(),
+        events,
+        telemetry,
+        projection,
         clock=lambda: NOW,
     )
 
@@ -894,9 +1388,7 @@ def test_latest_raw_pruning_appends_authoritative_missing_sample_reset(
     fields = {
         key: value
         for key, value in (
-            line.split(": ", 1)
-            for line in frame.splitlines()
-            if ": " in line
+            line.split(": ", 1) for line in frame.splitlines() if ": " in line
         )
     }
     data = json.loads(fields["data"])
@@ -904,6 +1396,8 @@ def test_latest_raw_pruning_appends_authoritative_missing_sample_reset(
     assert fields["event"] == "fleet-snapshot"
     assert data["reset_reason"] == "missing-telemetry-sample"
     assert data["snapshot"]["event_cursor"] == 1
+    assert [node["id"] for node in data["snapshot"]["nodes"]] == [NODE_A]
+    assert data["snapshot"]["nodes"][0]["telemetry"] is None
 
 
 def test_sqlite_late_sample_dirty_marker_survives_claim_transaction(
@@ -937,11 +1431,10 @@ def test_sqlite_late_sample_dirty_marker_survives_claim_transaction(
     def observe_after(
         _connection, _cursor, statement, _parameters, _context, _many
     ) -> None:
-        if (
-            getattr(role, "value", None) == "maintenance"
-            and statement.lstrip().startswith(
-                "DELETE FROM node_telemetry_rollup_dirty"
-            )
+        if getattr(
+            role, "value", None
+        ) == "maintenance" and statement.lstrip().startswith(
+            "DELETE FROM node_telemetry_rollup_dirty"
         ):
             claimed.set()
             assert allow_maintenance.wait(timeout=10)
@@ -949,9 +1442,8 @@ def test_sqlite_late_sample_dirty_marker_survives_claim_transaction(
     def observe_before(
         _connection, _cursor, statement, _parameters, _context, _many
     ) -> None:
-        if (
-            getattr(role, "value", None) == "late"
-            and statement.lstrip().startswith("INSERT INTO node_telemetry_samples")
+        if getattr(role, "value", None) == "late" and statement.lstrip().startswith(
+            "INSERT INTO node_telemetry_samples"
         ):
             late_write_started.set()
 
@@ -996,6 +1488,7 @@ def test_sqlite_late_sample_dirty_marker_survives_claim_transaction(
     with race_sessions() as session:
         assert session.get(NodeTelemetryRollupDirty, (60, NODE_A, start)) is not None
 
+    maintenance.run_once(dirty_limit=1)
     maintenance.run_once(dirty_limit=1)
     with race_sessions() as session:
         metric = session.get(
