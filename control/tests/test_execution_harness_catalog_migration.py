@@ -3,7 +3,10 @@ import subprocess
 import time
 from collections.abc import Iterator
 from datetime import UTC, datetime
+from functools import cache
+from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 from alembic import command
@@ -115,6 +118,87 @@ def column_exists(connection: Connection, table_name: str, column_name: str) -> 
     return column_name in {
         column["name"] for column in inspect(connection).get_columns(table_name)
     }
+
+
+@cache
+def cutover_migration_module() -> ModuleType:
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "migrations/versions/0027_execution_harness_catalog.py"
+    )
+    spec = spec_from_file_location("execution_harness_catalog_cutover", path)
+    assert spec is not None and spec.loader is not None
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def seed_user_session_and_agent_operation_state(connection: Connection) -> None:
+    now = "2026-08-15 00:00:00"
+    connection.execute(
+        text(
+            "INSERT INTO users (id, subject, role, disabled_at, password_verifier) "
+            "VALUES ('admin', 'admin@example.test', 'admin', NULL, NULL)"
+        )
+    )
+    connection.execute(
+        text(
+            "INSERT INTO sessions (id, user_id, digest, expires_at, revoked_at) "
+            "VALUES ('session', 'admin', :digest, :expires_at, NULL)"
+        ),
+        {"digest": "b" * 64, "expires_at": now},
+    )
+    connection.execute(
+        text(
+            "INSERT INTO jobs "
+            "(id, request_id, kind, state, actor, base_commit, targets, "
+            "payload_digest, payload, current_attempt, created_at, updated_at) "
+            "VALUES ('job', 'request', 'reconcile', 'queued', 'admin', 'base', "
+            "'{}', :digest, '{}', 0, :created_at, :updated_at)"
+        ),
+        {"digest": "c" * 64, "created_at": now, "updated_at": now},
+    )
+    connection.execute(
+        text(
+            "INSERT INTO agent_nodes (node_id, state, capabilities) "
+            "VALUES ('node', 'active', '{}')"
+        )
+    )
+    connection.execute(
+        text(
+            "INSERT INTO agent_operations "
+            "(id, parent_job_id, node_id, kind, payload_digest, payload, base_commit, "
+            "state, current_attempt, created_at, updated_at) "
+            "VALUES ('operation', 'job', 'node', 'reconcile', :digest, '{}', 'base', "
+            "'queued', 0, :created_at, :updated_at)"
+        ),
+        {"digest": "d" * 64, "created_at": now, "updated_at": now},
+    )
+
+
+def assert_no_v1_ddl_has_run(connection: Connection) -> None:
+    assert not table_exists(connection, "catalog_entities")
+    assert not table_exists(connection, "catalog_entity_revisions")
+    assert column_exists(connection, "cluster_mappings", "profile_name")
+    assert not column_exists(connection, "cluster_mappings", "topology_name")
+
+
+def test_fence_covers_every_0026_mutable_application_table(
+    connection: Connection,
+) -> None:
+    upgrade_database_to(connection, "0026_telemetry_maintenance_state")
+    migration = cutover_migration_module()
+    seeded = set(getattr(migration, "_MIGRATION_OWNED_EMPTY_CHAIN_TABLES", ()))
+    mutable = set(migration._mutable_application_state_tables(connection))
+
+    assert seeded == {
+        "alembic_version",
+        "fleet_event_cursor",
+        "reconciliation_completion_generation",
+        "route_publication_owner",
+        "telemetry_maintenance_state",
+    }
+    assert mutable == set(inspect(connection).get_table_names()) - seeded
 
 
 def test_fresh_database_reaches_the_v1_catalog_head(connection: Connection) -> None:
@@ -293,6 +377,19 @@ def test_sqlite_fence_rejects_nonempty_prototype_mappings_before_v1_ddl(
     assert column_exists(connection, "cluster_mappings", "profile_name")
 
 
+def test_sqlite_fence_rejects_user_session_and_agent_operation_state_before_v1_ddl(
+    connection: Connection,
+) -> None:
+    upgrade_database_to(connection, "0026_telemetry_maintenance_state")
+    seed_user_session_and_agent_operation_state(connection)
+    connection.commit()
+
+    with pytest.raises(RuntimeError, match="agent_nodes"):
+        upgrade_fresh_database_to_head(connection)
+
+    assert_no_v1_ddl_has_run(connection)
+
+
 def test_fresh_postgresql_database_reaches_the_v1_catalog_head(
     postgres_engine: Engine,
 ) -> None:
@@ -335,6 +432,21 @@ def test_postgresql_fence_rejects_nonempty_prototype_recipe_state(
     with postgres_engine.connect() as connection:
         assert not table_exists(connection, "catalog_entities")
         assert column_exists(connection, "cluster_mappings", "profile_name")
+
+
+def test_postgresql_fence_rejects_user_session_and_agent_operation_state_before_v1_ddl(
+    postgres_engine: Engine,
+) -> None:
+    url = postgres_engine.url.render_as_string(hide_password=False)
+    command.upgrade(migration_config(url), "0026_telemetry_maintenance_state")
+    with postgres_engine.begin() as connection:
+        seed_user_session_and_agent_operation_state(connection)
+
+    with pytest.raises(RuntimeError, match="agent_nodes"):
+        command.upgrade(migration_config(url), "head")
+
+    with postgres_engine.connect() as connection:
+        assert_no_v1_ddl_has_run(connection)
 
 
 def _check_constraints(inspector: object, model_table: Table) -> dict[str, str]:

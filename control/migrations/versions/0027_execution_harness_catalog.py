@@ -9,25 +9,18 @@ branch_labels = None
 depends_on = None
 
 
-_PROTOTYPE_RECIPE_DOMAIN_TABLES = (
-    "cluster_mapping_nodes",
-    "run_nodes",
-    "installation_nodes",
-    "recipe_runs",
-    "recipe_installations",
-    "route_publications",
-    "cluster_mappings",
-    "recipe_builds",
-    "recipe_test_reports",
-    "recipe_global_links",
-    "recipe_import_items",
-    "recipe_imports",
-    "local_recipe_revisions",
-    "local_recipes",
-    "recipe_source_bundles",
-    "package_rollout_nodes",
-    "package_rollouts",
-)
+_MIGRATION_OWNED_EMPTY_CHAIN_TABLES = {
+    # Alembic's own revision marker is required to locate the 0026 starting point.
+    "alembic_version",
+    # Revision 0024 creates the stream cursor singleton at id 1.
+    "fleet_event_cursor",
+    # Revision 0008 creates the reconciliation-completion generation singleton.
+    "reconciliation_completion_generation",
+    # Revision 0009 creates the route-publication ownership singleton.
+    "route_publication_owner",
+    # Revision 0026 creates the telemetry-maintenance singleton at id 1.
+    "telemetry_maintenance_state",
+}
 
 
 def _lower_hex(column: str, length: int) -> str:
@@ -44,18 +37,27 @@ def _nullable_lower_hex(column: str, length: int) -> str:
     return f"{column} IS NULL OR ({_lower_hex(column, length)})"
 
 
-def _require_empty_prototype_recipe_domain() -> None:
+def _mutable_application_state_tables(bind: sa.Connection) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            set(sa.inspect(bind).get_table_names())
+            - _MIGRATION_OWNED_EMPTY_CHAIN_TABLES
+        )
+    )
+
+
+def _require_empty_mutable_application_state() -> None:
     bind = op.get_bind()
-    for table_name in _PROTOTYPE_RECIPE_DOMAIN_TABLES:
+    for table_name in _mutable_application_state_tables(bind):
         if bind.execute(sa.text(f"SELECT 1 FROM {table_name} LIMIT 1")).scalar():
             raise RuntimeError(
                 "0027_execution_harness_catalog requires a fresh pre-production "
-                f"database; prototype recipe-domain rows exist in {table_name}"
+                f"database; mutable control rows exist in {table_name}"
             )
 
 
 def upgrade() -> None:
-    _require_empty_prototype_recipe_domain()
+    _require_empty_mutable_application_state()
     op.create_table(
         "catalog_entities",
         sa.Column("id", sa.String(36), primary_key=True),

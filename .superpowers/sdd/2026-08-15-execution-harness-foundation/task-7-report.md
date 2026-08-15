@@ -237,3 +237,77 @@ No Library projection files were changed and the known native
 fence does not delete, translate, preserve, or otherwise convert any row: it
 raises before v1 DDL.  The supported production boundary remains an empty
 pre-production database.
+
+## Review fix round 2/5
+
+### Changes
+
+The 0027 pre-DDL fence now derives its checked table set from the actual 0026
+database schema, rather than maintaining a recipe-only list.  Every table is
+therefore treated as mutable application state unless it is one of exactly five
+documented, migration-owned empty-chain rows:
+
+- `alembic_version`: Alembic's required revision marker.
+- `fleet_event_cursor`: the revision-0024 stream cursor singleton.
+- `reconciliation_completion_generation`: the revision-0008 completion
+  generation singleton.
+- `route_publication_owner`: the revision-0009 route ownership singleton.
+- `telemetry_maintenance_state`: the revision-0026 maintenance singleton.
+
+The migration sorts the derived mutable table names, probes each with
+`SELECT 1 ... LIMIT 1`, and raises before any catalog-table creation or
+`cluster_mappings` DDL.  It never deletes, translates, or preserves data.
+
+### RED evidence
+
+```text
+$ uv run --project control --frozen python -m pytest \
+  control/tests/test_execution_harness_catalog_migration.py::test_fence_covers_every_0026_mutable_application_table \
+  control/tests/test_execution_harness_catalog_migration.py::test_sqlite_fence_rejects_user_session_and_agent_operation_state_before_v1_ddl \
+  control/tests/test_execution_harness_catalog_migration.py::test_postgresql_fence_rejects_user_session_and_agent_operation_state_before_v1_ddl -q
+FFF                                                                      [100%]
+3 failed in 3.34s
+```
+
+Before the fix, no seed allowlist or all-table fence existed, and both SQLite
+and disposable PostgreSQL allowed a populated user/session plus job,
+agent-node, and agent-operation chain to reach 0027.  The initial
+exhaustiveness assertion also showed the seed allowlist was empty.
+
+### GREEN evidence
+
+```text
+$ uv run --project control --frozen python -m pytest \
+  control/tests/test_execution_harness_catalog_migration.py::test_fence_covers_every_0026_mutable_application_table \
+  control/tests/test_execution_harness_catalog_migration.py::test_sqlite_fence_rejects_user_session_and_agent_operation_state_before_v1_ddl \
+  control/tests/test_execution_harness_catalog_migration.py::test_postgresql_fence_rejects_user_session_and_agent_operation_state_before_v1_ddl -q
+...                                                                      [100%]
+3 passed in 3.08s
+
+$ uv run --project control --frozen python -m pytest \
+  control/tests/test_execution_harness_catalog_migration.py \
+  control/tests/test_admission_migration.py \
+  control/tests/test_wheel_runtime_assets.py -q
+...................                                                      [100%]
+19 passed in 13.48s
+
+$ uvx ruff@0.16.1 check \
+  control/migrations/versions/0027_execution_harness_catalog.py \
+  control/tests/test_execution_harness_catalog_migration.py
+All checks passed!
+
+$ git diff --check
+```
+
+The representative SQLite and PostgreSQL tests seed users/sessions and a
+job-agent-operation chain, receive the clear `agent_nodes` pre-DDL rejection,
+and confirm that neither v1 catalog table exists and `profile_name` has not
+been renamed.  The exhaustiveness test upgrades to 0026 and proves the fence's
+derived mutable set is precisely the live table set minus the five-item system
+allowlist.  Existing fresh-empty-chain success and model metadata parity remain
+covered by the focused migration suite.
+
+### Review self-check
+
+No approved schema-version or seed behavior was changed.  No Library
+projection code or the known native 16,384-object test crash was touched.
