@@ -4,6 +4,7 @@ import {
   formatMetric,
   installationGroupLabel,
   nodeOperationalState,
+  nodeWarningsAt,
   offlineReasonLabel,
   runGroupLabel,
 } from "../lib/fleet";
@@ -44,21 +45,41 @@ function timestampLabel(value: string | null | undefined): string {
 }
 
 function RecipeGroups({node}: {node: VisualFleetNode}) {
+  const installed = node.installed.filter(installation => installation.complete);
+  const installationStates = node.installed.filter(installation => !installation.complete);
+  const loaded = node.loaded.filter(run => run.healthy);
+  const runStates = node.loaded.filter(run => !run.healthy);
   return <div className="node-recipe-groups">
     <section aria-label={`Loaded recipes on ${node.display_name}`}>
       <h4>Loaded now</h4>
-      {node.loaded.length === 0
-        ? <p className="empty-copy">No loaded recipes reported</p>
-        : <ul className="recipe-presence-list">{node.loaded.map(run => <li key={`${run.run_id}:${run.rank}`} className={run.healthy ? "is-healthy" : "is-degraded"}>
-          <strong>{run.title}</strong><span>{run.alias} · {run.role} rank {run.rank}</span><small>{runGroupLabel(run)}</small>
+      {loaded.length === 0
+        ? <p className="empty-copy">Nothing is loaded now</p>
+        : <ul className="recipe-presence-list">{loaded.map(run => <li key={`${run.run_id}:${run.rank}`} className="is-healthy">
+          <strong>{run.title}</strong><span>{run.alias} · {run.role} rank {run.rank}</span><small>Group {run.group_state} · Run {run.run_state} · Rank {run.rank_state} · Route {run.route_state}</small><small>{runGroupLabel(run)}</small>
         </li>)}</ul>}
     </section>
     <section aria-label={`Installed recipes on ${node.display_name}`}>
-      <h4>Installed recipes</h4>
-      {node.installed.length === 0
-        ? <p className="empty-copy">No installed recipes reported</p>
-        : <ul className="recipe-presence-list">{node.installed.map(installation => <li key={`${installation.installation_id}:${installation.rank}`} className={installation.complete ? "is-healthy" : "is-degraded"}>
-          <strong>{installation.title}</strong><span>{installation.profile_name} · {installation.role} rank {installation.rank}</span><small>{installationGroupLabel(installation)}</small>
+      <h4>Installed</h4>
+      {installed.length === 0
+        ? <p className="empty-copy">No complete installations reported</p>
+        : <ul className="recipe-presence-list">{installed.map(installation => <li key={`${installation.installation_id}:${installation.rank}`} className="is-healthy">
+          <strong>{installation.title}</strong><span>{installation.profile_name} · {installation.role} rank {installation.rank}</span><small>Group {installation.group_state} · Rank {installation.rank_state}</small><small>{installationGroupLabel(installation)}</small>
+        </li>)}</ul>}
+    </section>
+    <section aria-label={`Installation state on ${node.display_name}`}>
+      <h4>Installation state</h4>
+      {installationStates.length === 0
+        ? <p className="empty-copy">No incomplete installation states</p>
+        : <ul className="recipe-presence-list">{installationStates.map(installation => <li key={`${installation.installation_id}:${installation.rank}`} className="is-degraded">
+          <strong>{installation.title}</strong><span>{installation.profile_name} · {installation.role} rank {installation.rank}</span><small>Group {installation.group_state} · Rank {installation.rank_state}</small><small>{installationGroupLabel(installation)}</small>
+        </li>)}</ul>}
+    </section>
+    <section aria-label={`Run state on ${node.display_name}`}>
+      <h4>Run state</h4>
+      {runStates.length === 0
+        ? <p className="empty-copy">No inactive or degraded run states</p>
+        : <ul className="recipe-presence-list">{runStates.map(run => <li key={`${run.run_id}:${run.rank}`} className="is-degraded">
+          <strong>{run.title}</strong><span>{run.alias} · {run.role} rank {run.rank}</span><small>Group {run.group_state} · Run {run.run_state} · Rank {run.rank_state} · Route {run.route_state}</small><small>{runGroupLabel(run)}</small>
         </li>)}</ul>}
     </section>
   </div>;
@@ -94,6 +115,7 @@ export function NodeCard({
   const receive = formatMetric(sample?.network_receive_bytes_per_second, value => `${formatBytes(value)}/s`);
   const transmit = formatMetric(sample?.network_transmit_bytes_per_second, value => `${formatBytes(value)}/s`);
   const observedAt = sample?.observed_at;
+  const warnings = nodeWarningsAt(node, now);
 
   return <article className={`node-card state-${state}${selected ? " is-selected" : ""}`} aria-label={`${node.display_name} — ${label}`}>
     <header className="node-card-heading">
@@ -124,8 +146,8 @@ export function NodeCard({
     </dl>
 
     <RecipeGroups node={node}/>
-    {node.warnings.length > 0 && <ul className="node-warnings" aria-label={`Warnings for ${node.display_name}`}>
-      {node.warnings.map((warning, index) => <li key={`${warning.code}:${index}`} className={`severity-${warning.severity}`}><strong>{warning.severity}</strong> {warning.detail}</li>)}
+    {warnings.length > 0 && <ul className="node-warnings" aria-label={`Warnings for ${node.display_name}`}>
+      {warnings.map((warning, index) => <li key={`${warning.code}:${index}`} className={`severity-${warning.severity}`}><strong>{warning.severity}</strong> {warning.detail}</li>)}
     </ul>}
     <button type="button" className="node-detail-trigger" aria-expanded={selected} onClick={onSelect}>View {node.display_name} details</button>
   </article>;

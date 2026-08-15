@@ -1,6 +1,6 @@
 import {useEffect, useId, useRef, useState} from "react";
 import type {ControlApi, TelemetryHistory, VisualFleetNode} from "../api/types";
-import {formatBytes, installationGroupLabel, runGroupLabel} from "../lib/fleet";
+import {formatBytes, installationGroupLabel, nodeWarningsAt, runGroupLabel} from "../lib/fleet";
 import {Sparkline} from "./sparkline";
 import {StatusPill} from "./status-pill";
 
@@ -67,6 +67,11 @@ export function NodeDetail({
   }, [api, node.id, range, retryRevision]);
 
   const points = history?.points ?? [];
+  const installed = node.installed.filter(item => item.complete);
+  const installationStates = node.installed.filter(item => !item.complete);
+  const loaded = node.loaded.filter(run => run.healthy);
+  const runStates = node.loaded.filter(run => !run.healthy);
+  const warnings = nodeWarningsAt(node, now);
 
   return <aside className="node-detail" role="complementary" aria-labelledby={headingId}>
     <header className="node-detail-heading">
@@ -93,8 +98,10 @@ export function NodeDetail({
     <section aria-labelledby={`${headingId}-recipes`}>
       <h4 id={`${headingId}-recipes`}>Recipes</h4>
       <div className="detail-recipe-columns">
-        <div><h5>Loaded now</h5>{node.loaded.length === 0 ? <p>None reported</p> : <ul>{node.loaded.map(run => <li key={`${run.run_id}:${run.rank}`}><strong>{run.title}</strong><span>{runGroupLabel(run)}</span></li>)}</ul>}</div>
-        <div><h5>Installed</h5>{node.installed.length === 0 ? <p>None reported</p> : <ul>{node.installed.map(item => <li key={`${item.installation_id}:${item.rank}`}><strong>{item.title}</strong><span>{installationGroupLabel(item)}</span></li>)}</ul>}</div>
+        <section aria-label={`Loaded recipes in ${node.display_name} details`}><h5>Loaded now</h5>{loaded.length === 0 ? <p>Nothing is loaded now</p> : <ul>{loaded.map(run => <li key={`${run.run_id}:${run.rank}`}><strong>{run.title}</strong><small>{run.alias} · {run.role} rank {run.rank}</small><small>Group {run.group_state} · Run {run.run_state} · Rank {run.rank_state} · Route {run.route_state}</small><span>{runGroupLabel(run)}</span></li>)}</ul>}</section>
+        <section aria-label={`Installed recipes in ${node.display_name} details`}><h5>Installed</h5>{installed.length === 0 ? <p>No complete installations reported</p> : <ul>{installed.map(item => <li key={`${item.installation_id}:${item.rank}`}><strong>{item.title}</strong><small>{item.profile_name} · {item.role} rank {item.rank}</small><small>Group {item.group_state} · Rank {item.rank_state}</small><span>{installationGroupLabel(item)}</span></li>)}</ul>}</section>
+        <section aria-label={`Installation state in ${node.display_name} details`}><h5>Installation state</h5>{installationStates.length === 0 ? <p>No incomplete installation states</p> : <ul>{installationStates.map(item => <li key={`${item.installation_id}:${item.rank}`}><strong>{item.title}</strong><small>{item.profile_name} · {item.role} rank {item.rank}</small><small>Group {item.group_state} · Rank {item.rank_state}</small><span>{installationGroupLabel(item)}</span></li>)}</ul>}</section>
+        <section aria-label={`Run state in ${node.display_name} details`}><h5>Run state</h5>{runStates.length === 0 ? <p>No inactive or degraded run states</p> : <ul>{runStates.map(run => <li key={`${run.run_id}:${run.rank}`}><strong>{run.title}</strong><small>{run.alias} · {run.role} rank {run.rank}</small><small>Group {run.group_state} · Run {run.run_state} · Rank {run.rank_state} · Route {run.route_state}</small><span>{runGroupLabel(run)}</span></li>)}</ul>}</section>
       </div>
     </section>
 
@@ -116,7 +123,7 @@ export function NodeDetail({
 
     <section aria-labelledby={`${headingId}-events`}>
       <h4 id={`${headingId}-events`}>Events</h4>
-      {node.warnings.length === 0 ? <p>No active Fleet warnings.</p> : <ul>{node.warnings.map((warning, index) => <li key={`${warning.code}:${index}`}><strong>{warning.severity}</strong> {warning.detail}</li>)}</ul>}
+      {warnings.length === 0 ? <p>No active Fleet warnings.</p> : <ul>{warnings.map((warning, index) => <li key={`${warning.code}:${index}`}><strong>{warning.severity}</strong> {warning.detail}</li>)}</ul>}
     </section>
 
     <details className="technical-details">

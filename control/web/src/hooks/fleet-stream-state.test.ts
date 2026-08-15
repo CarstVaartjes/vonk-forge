@@ -83,6 +83,16 @@ test("accepts an authoritative cursor-ahead reset that moves backward", () => {
   expect(reset.lastResetReason).toBe("cursor-ahead");
 });
 
+test("keeps an outstanding sparse requirement across a backward cursor-ahead reset", () => {
+  const current = fleetStreamReducer(initialFleetStreamState, {type: "requested-snapshot", snapshot: snapshot(10)});
+  const required = fleetStreamReducer(current, {type: "projection-refresh", cursor: 12});
+
+  const reset = fleetStreamReducer(required, {type: "reset-snapshot", snapshot: snapshot(3), reason: "cursor-ahead"});
+
+  expect(reset.snapshot?.event_cursor).toBe(3);
+  expect(reset.requiredRefreshCursor).toBe(12);
+});
+
 test("patches one keyed node and ignores stale or duplicate telemetry increments", () => {
   const base = fleetStreamReducer(initialFleetStreamState, {type: "requested-snapshot", snapshot: snapshot(10)});
   const untouched = base.snapshot!.nodes[1];
@@ -96,17 +106,90 @@ test("patches one keyed node and ignores stale or duplicate telemetry increments
   expect(duplicate).toBe(patched);
 });
 
-test("turns sparse recipe and operation events into coalescible refresh revisions", () => {
+test("rejects telemetry whose sample identity does not match the event node", () => {
+  const base = fleetStreamReducer(initialFleetStreamState, {type: "requested-snapshot", snapshot: snapshot(10)});
+
+  const mismatched = fleetStreamReducer(base, {
+    type: "node-telemetry",
+    cursor: 11,
+    nodeId: "node-b",
+    sample: sample(73),
+    receivedAt: new Date("2026-08-15T12:00:00Z"),
+  });
+
+  expect(mismatched).toBe(base);
+  expect(mismatched.snapshot?.event_cursor).toBe(10);
+});
+
+test("reconciles only telemetry warnings when a valid sample changes freshness", () => {
+  const projected = snapshot(10);
+  projected.nodes[0].warnings = [
+    {code: "inventory.stale", detail: "Admission inventory is stale.", severity: "warning"},
+    {code: "telemetry.missing", detail: "No telemetry sample is available.", severity: "warning"},
+  ];
+  const base = fleetStreamReducer(initialFleetStreamState, {type: "requested-snapshot", snapshot: projected});
+
+  const delayed = fleetStreamReducer(base, {
+    type: "node-telemetry",
+    cursor: 11,
+    nodeId: "node-a",
+    sample: sample(73),
+    receivedAt: new Date("2026-08-15T12:00:10Z"),
+  });
+  const stale = fleetStreamReducer(delayed, {
+    type: "node-telemetry",
+    cursor: 12,
+    nodeId: "node-a",
+    sample: sample(74),
+    receivedAt: new Date("2026-08-15T12:00:30Z"),
+  });
+
+  expect(delayed.snapshot?.nodes[0].warnings).toEqual([
+    {code: "inventory.stale", detail: "Admission inventory is stale.", severity: "warning"},
+    {code: "telemetry.delayed", detail: "Telemetry delivery is delayed.", severity: "warning"},
+  ]);
+  expect(stale.snapshot?.nodes[0].warnings).toEqual([
+    {code: "inventory.stale", detail: "Admission inventory is stale.", severity: "warning"},
+    {code: "telemetry.stale", detail: "Telemetry is stale.", severity: "warning"},
+  ]);
+});
+
+test("keeps sparse refresh requirements separate from the applied event cursor", () => {
   const base = fleetStreamReducer(initialFleetStreamState, {type: "requested-snapshot", snapshot: snapshot(20)});
   const recipe = fleetStreamReducer(base, {type: "projection-refresh", cursor: 21});
   const staleOperation = fleetStreamReducer(recipe, {type: "projection-refresh", cursor: 20});
   const operation = fleetStreamReducer(staleOperation, {type: "projection-refresh", cursor: 22});
 
-  expect(recipe.snapshot?.event_cursor).toBe(21);
+  expect(recipe.snapshot?.event_cursor).toBe(20);
+  expect(recipe.requiredRefreshCursor).toBe(21);
   expect(recipe.refreshRevision).toBe(1);
   expect(staleOperation).toBe(recipe);
-  expect(operation.snapshot?.event_cursor).toBe(22);
+  expect(operation.snapshot?.event_cursor).toBe(20);
+  expect(operation.requiredRefreshCursor).toBe(22);
   expect(operation.refreshRevision).toBe(2);
+});
+
+test("only clears a sparse refresh requirement after a qualifying snapshot applies", () => {
+  const base = fleetStreamReducer(initialFleetStreamState, {type: "requested-snapshot", snapshot: snapshot(20)});
+  const required = fleetStreamReducer(base, {type: "projection-refresh", cursor: 22});
+  const insufficient = fleetStreamReducer(required, {type: "requested-snapshot", snapshot: snapshot(21)});
+  const telemetryAhead = fleetStreamReducer(insufficient, {
+    type: "node-telemetry",
+    cursor: 24,
+    nodeId: "node-a",
+    sample: sample(74),
+    receivedAt: new Date("2026-08-15T12:00:00Z"),
+  });
+  const staleRest = fleetStreamReducer(telemetryAhead, {type: "requested-snapshot", snapshot: snapshot(22, 22)});
+  const reconciled = fleetStreamReducer(staleRest, {type: "requested-snapshot", snapshot: snapshot(24, 84)});
+
+  expect(insufficient.snapshot?.event_cursor).toBe(21);
+  expect(insufficient.requiredRefreshCursor).toBe(22);
+  expect(staleRest).toBe(telemetryAhead);
+  expect(staleRest.requiredRefreshCursor).toBe(22);
+  expect(reconciled.snapshot?.event_cursor).toBe(24);
+  expect(reconciled.snapshot?.nodes[0].telemetry?.sample.cpu_utilization_percent).toBe(84);
+  expect(reconciled.requiredRefreshCursor).toBeNull();
 });
 
 test("exposes reconnect and recovery state without discarding the snapshot", () => {

@@ -135,10 +135,38 @@ test("uses same-origin EventSource and reconciles increments and backward resets
   expect(screen.getByTestId("cpu")).toHaveTextContent("73");
   act(() => stream.emit("node-telemetry", {schema_version: 1, node_id: "node-a", sample: point(99)}, "6"));
   expect(screen.getByTestId("cpu")).toHaveTextContent("73");
+  act(() => stream.emit("node-telemetry", {schema_version: 1, node_id: "node-b", sample: point(88)}, "7"));
+  expect(screen.getByTestId("cursor")).toHaveTextContent("6");
+  act(() => stream.emit("node-telemetry", {schema_version: 1, node_id: "node-a", sample: point(77)}, "7"));
+  expect(screen.getByTestId("cpu")).toHaveTextContent("77");
 
   act(() => stream.emit("fleet-snapshot", {schema_version: 1, reset_reason: "cursor-ahead", snapshot: snapshot(2, 22)}, "2"));
   expect(screen.getByTestId("cursor")).toHaveTextContent("2");
   expect(screen.getByTestId("cpu")).toHaveTextContent("22");
+});
+
+test("keeps one native EventSource across browser-managed Last-Event-ID reconnects", async () => {
+  render(<Probe control={api(async () => snapshot(5))}/>);
+  await flush();
+  const stream = FakeEventSource.instances[0];
+
+  act(() => {
+    stream.emit("open");
+    stream.emit("node-telemetry", {schema_version: 1, node_id: "node-a", sample: point(66)}, "6");
+    stream.emit("error");
+  });
+  expect(screen.getByTestId("connection")).toHaveTextContent("reconnecting");
+
+  act(() => {
+    stream.emit("open");
+    stream.emit("node-telemetry", {schema_version: 1, node_id: "node-a", sample: point(77)}, "7");
+  });
+
+  expect(FakeEventSource.instances).toHaveLength(1);
+  expect(stream.closed).toBe(false);
+  expect(screen.getByTestId("connection")).toHaveTextContent("live");
+  expect(screen.getByTestId("cursor")).toHaveTextContent("7");
+  expect(screen.getByTestId("cpu")).toHaveTextContent("77");
 });
 
 test("coalesces sparse recipe and operation refresh signals", async () => {
@@ -158,6 +186,62 @@ test("coalesces sparse recipe and operation refresh signals", async () => {
   await flush();
 
   expect(visualFleet).toHaveBeenCalledTimes(2);
+  expect(screen.getByTestId("cursor")).toHaveTextContent("7");
+  expect(screen.getByTestId("cpu")).toHaveTextContent("70");
+});
+
+test("retries a failed sparse refresh until the required cursor is reconciled", async () => {
+  vi.useFakeTimers();
+  const visualFleet = vi.fn()
+    .mockResolvedValueOnce(snapshot(5))
+    .mockRejectedValueOnce(new Error("temporary projection failure"))
+    .mockResolvedValueOnce(snapshot(6, 60));
+  render(<Probe control={api(visualFleet)}/>);
+  await flush();
+  const stream = FakeEventSource.instances[0];
+
+  act(() => {
+    stream.emit("recipe-state", {schema_version: 1, projection_refresh_required: true}, "6");
+    vi.advanceTimersByTime(100);
+  });
+  await flush();
+  expect(visualFleet).toHaveBeenCalledTimes(2);
+  expect(screen.getByTestId("cursor")).toHaveTextContent("5");
+
+  act(() => vi.advanceTimersByTime(1_000));
+  await flush();
+
+  expect(visualFleet).toHaveBeenCalledTimes(3);
+  expect(screen.getByTestId("cursor")).toHaveTextContent("6");
+  expect(screen.getByTestId("cpu")).toHaveTextContent("60");
+});
+
+test("retries when concurrent telemetry makes a sparse REST response stale", async () => {
+  vi.useFakeTimers();
+  let resolveRefresh!: (value: VisualFleetSnapshot) => void;
+  const pendingRefresh = new Promise<VisualFleetSnapshot>(resolve => { resolveRefresh = resolve; });
+  const visualFleet = vi.fn()
+    .mockResolvedValueOnce(snapshot(5))
+    .mockReturnValueOnce(pendingRefresh)
+    .mockResolvedValueOnce(snapshot(7, 70));
+  render(<Probe control={api(visualFleet)}/>);
+  await flush();
+  const stream = FakeEventSource.instances[0];
+
+  act(() => {
+    stream.emit("operation-state", {schema_version: 1, projection_refresh_required: true}, "6");
+    vi.advanceTimersByTime(100);
+  });
+  expect(visualFleet).toHaveBeenCalledTimes(2);
+  act(() => stream.emit("node-telemetry", {schema_version: 1, node_id: "node-a", sample: point(77)}, "7"));
+  await act(async () => resolveRefresh(snapshot(6, 66)));
+
+  expect(screen.getByTestId("cursor")).toHaveTextContent("7");
+  expect(screen.getByTestId("cpu")).toHaveTextContent("77");
+  act(() => vi.advanceTimersByTime(1_000));
+  await flush();
+
+  expect(visualFleet).toHaveBeenCalledTimes(3);
   expect(screen.getByTestId("cursor")).toHaveTextContent("7");
   expect(screen.getByTestId("cpu")).toHaveTextContent("70");
 });
@@ -183,6 +267,41 @@ test("polls once per ten seconds while reconnecting and stops on stream recovery
   act(() => vi.advanceTimersByTime(20_000));
   await flush();
   expect(visualFleet).toHaveBeenCalledTimes(2);
+});
+
+test("periodically reconciles server-derived state while the SSE connection stays live", async () => {
+  vi.useFakeTimers();
+  const visualFleet = vi.fn()
+    .mockResolvedValueOnce(snapshot(5))
+    .mockResolvedValueOnce(snapshot(6, 60));
+  render(<Probe control={api(visualFleet)}/>);
+  await flush();
+  const stream = FakeEventSource.instances[0];
+
+  act(() => stream.emit("open"));
+  act(() => vi.advanceTimersByTime(30_000));
+  await flush();
+
+  expect(visualFleet).toHaveBeenCalledTimes(2);
+  expect(screen.getByTestId("cursor")).toHaveTextContent("6");
+  expect(screen.getByTestId("connection")).toHaveTextContent("live");
+});
+
+test("does not overlap periodic live reconciliation requests", async () => {
+  vi.useFakeTimers();
+  const pending = new Promise<VisualFleetSnapshot>(() => undefined);
+  const visualFleet = vi.fn()
+    .mockResolvedValueOnce(snapshot(5))
+    .mockReturnValueOnce(pending);
+  render(<Probe control={api(visualFleet)}/>);
+  await flush();
+  const stream = FakeEventSource.instances[0];
+
+  act(() => stream.emit("open"));
+  act(() => vi.advanceTimersByTime(90_000));
+
+  expect(visualFleet).toHaveBeenCalledTimes(2);
+  expect(screen.getByTestId("connection")).toHaveTextContent("live");
 });
 
 test("uses polling fallback when EventSource is unavailable", async () => {
@@ -257,5 +376,31 @@ test("cleans EventSource listeners, timers, and in-flight requests on unmount", 
   expect(stream.closed).toBe(true);
   expect(stream.listenerCount()).toBe(0);
   expect(signal?.aborted).toBe(true);
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+test("aborts and stops an in-flight periodic live reconciliation on unmount", async () => {
+  vi.useFakeTimers();
+  let reconciliationSignal: AbortSignal | undefined;
+  const pending = new Promise<VisualFleetSnapshot>(() => undefined);
+  const visualFleet = vi.fn()
+    .mockResolvedValueOnce(snapshot(5))
+    .mockImplementationOnce(async candidate => {
+      reconciliationSignal = candidate;
+      return pending;
+    });
+  const view = render(<Probe control={api(visualFleet)}/>);
+  await flush();
+  const stream = FakeEventSource.instances[0];
+
+  act(() => stream.emit("open"));
+  act(() => vi.advanceTimersByTime(30_000));
+  expect(visualFleet).toHaveBeenCalledTimes(2);
+
+  view.unmount();
+  act(() => vi.advanceTimersByTime(90_000));
+
+  expect(reconciliationSignal?.aborted).toBe(true);
+  expect(visualFleet).toHaveBeenCalledTimes(2);
   expect(vi.getTimerCount()).toBe(0);
 });

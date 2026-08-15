@@ -60,7 +60,7 @@ export function FleetPage({api}: {api: ControlApi}) {
     [fleet.now, fleet.snapshot],
   );
   const announcementMessage = summary
-    ? `Fleet status: ${summary.live} live, ${summary.delayed} delayed, ${summary.stale} stale, ${summary.offline} offline; ${countLabel(summary.loadedRecipes, "loaded recipe")}; ${countLabel(summary.warnings, "warning")}.`
+    ? `Fleet status: ${summary.live} live, ${summary.delayed} delayed, ${summary.stale} stale, ${summary.offline} offline; ${countLabel(summary.installedRecipes, "installed recipe")}; ${countLabel(summary.loadedRecipes, "loaded recipe")}; ${countLabel(summary.warnings, "warning")}.`
     : "";
   const announcement = usePoliteAnnouncement(announcementMessage);
   const selectedNode = fleet.snapshot?.nodes.find(node => node.id === selectedNodeId);
@@ -108,14 +108,18 @@ export function FleetPage({api}: {api: ControlApi}) {
       <p>The NAS is running {bounded(skew.target.platform_version)} at <code>{bounded(skew.target.build_digest)}</code>. Review and explicitly confirm the signed rollout; this notice never updates a GPU node by itself.</p>
       <p>Affected GPU nodes: {skew.nodes.filter(node => skew.affected_nodes.includes(node.node_id)).slice(0, 1024).map(node => `${bounded(node.display_name)} (${bounded(node.node_id)})`).join(", ") || "none"}.</p>
       {skew.offline_pending.length > 0 && <p>Offline pending: {skew.offline_pending.map(bounded).join(", ")}.</p>}
-      <p><a href="/updates">Review platform update</a>{" "}<button type="button" onClick={dismissUpdate}>Dismiss this exact update notice</button></p>
+      <p className="update-actions"><a href="/updates">Review platform update</a><button type="button" onClick={dismissUpdate}>Dismiss this exact update notice</button></p>
     </section>}
 
     {summary && <section className="fleet-summary" aria-label="Fleet summary">
       <div className="fleet-capacity">
         <span>Live unified memory</span>
-        <strong>{formatBytes(summary.unifiedAvailableBytes)}</strong>
-        <small>Available on live nodes</small>
+        <strong>{summary.unifiedCapacity === "partial" ? `${formatBytes(summary.unifiedAvailableBytes)} known` : formatBytes(summary.unifiedAvailableBytes)}</strong>
+        <small>{summary.unifiedCapacity === "known"
+          ? `All ${countLabel(summary.live, "live node")} reporting`
+          : summary.unifiedCapacity === "partial"
+            ? `Partial · ${summary.unifiedReportingNodes} of ${summary.live} live nodes reporting`
+            : "No live node reports both host and GPU free memory"}</small>
       </div>
       <dl className="fleet-state-counts">
         {(["live", "delayed", "stale", "offline"] as const).map(state => <div key={state} className={`summary-${state}`}>
@@ -125,6 +129,7 @@ export function FleetPage({api}: {api: ControlApi}) {
       </dl>
       <div className="fleet-activity">
         <strong>{countLabel(summary.loadedRecipes, "loaded recipe")}</strong>
+        <span>{countLabel(summary.installedRecipes, "installed recipe")}</span>
         <span>{countLabel(summary.warnings, "active warning")}</span>
         <small>{countLabel(summary.total, "repository node")}</small>
       </div>

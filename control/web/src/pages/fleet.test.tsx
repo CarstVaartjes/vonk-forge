@@ -77,6 +77,10 @@ afterEach(() => {
 
 test("shows truthful cluster counts and live connection state", async () => {
   const live = node("node-a", "Alpha", "2026-08-15T11:59:58Z");
+  live.installed = [
+    {installation_id: "install-1", recipe_id: "recipe-1", recipe_revision_id: "revision-1", title: "Qwen", profile_name: "solo", expected_rank_count: 1, present_ranks: [0], member_node_ids: ["node-a"], rank: 0, role: "primary", rank_state: "installed", group_state: "installed", complete: true, degraded_reason: null},
+    {installation_id: "install-2", recipe_id: "recipe-2", recipe_revision_id: "revision-2", title: "Vision", profile_name: "solo", expected_rank_count: 1, present_ranks: [], member_node_ids: [], rank: 0, role: "primary", rank_state: "installing", group_state: "partial", complete: false, degraded_reason: "missing-ranks"},
+  ];
   live.loaded = [{run_id: "run-1", installation_id: "install-1", recipe_id: "recipe-1", recipe_revision_id: "revision-1", title: "Qwen", alias: "chat", expected_rank_count: 1, present_ranks: [0], member_node_ids: ["node-a"], rank: 0, role: "primary", rank_state: "running", rank_age_seconds: 2, rank_fresh: true, run_state: "running", route_state: "published", group_state: "healthy", healthy: true, degraded_reason: null}];
   render(<FleetPage api={control(async () => snapshot([
     live,
@@ -91,13 +95,38 @@ test("shows truthful cluster counts and live connection state", async () => {
     expect(within(within(summary).getByText(label).parentElement!).getByText("1")).toBeVisible();
   }
   expect(within(summary).getByText("70.0 GiB")).toBeVisible();
+  expect(within(summary).getByText("1 installed recipe")).toBeVisible();
   expect(within(summary).getByText("1 loaded recipe")).toBeVisible();
-  expect(within(summary).getByText("2 active warnings")).toBeVisible();
+  expect(within(summary).getByText("3 active warnings")).toBeVisible();
   expect(screen.getAllByRole("article")).toHaveLength(4);
 
   act(() => FakeEventSource.instances[0].emit("open"));
   expect(screen.getByText("Live connection")).toBeVisible();
-  expect(screen.getByText("Fleet status: 1 live, 1 delayed, 1 stale, 1 offline; 1 loaded recipe; 2 warnings.", {selector: "[aria-live='polite']"})).toBeInTheDocument();
+  expect(screen.getByText("Fleet status: 1 live, 1 delayed, 1 stale, 1 offline; 1 installed recipe; 1 loaded recipe; 3 warnings.", {selector: "[aria-live='polite']"})).toBeInTheDocument();
+});
+
+test("labels partial and unknown unified capacity instead of implying a measured zero", async () => {
+  const reporting = node("node-a", "Alpha", "2026-08-15T11:59:58Z");
+  const missing = node("node-b", "Beta", "2026-08-15T11:59:58Z");
+  missing.telemetry!.sample.gpu_memory_free_bytes = null;
+  const view = render(<FleetPage api={control(async () => snapshot([reporting, missing]))}/>);
+  await flush();
+
+  let summary = screen.getByRole("region", {name: "Fleet summary"});
+  expect(within(summary).getByText("70.0 GiB known")).toBeVisible();
+  expect(within(summary).getByText("Partial · 1 of 2 live nodes reporting")).toBeVisible();
+
+  view.unmount();
+  const unknown = node("node-c", "Gamma", "2026-08-15T11:59:58Z");
+  unknown.telemetry!.sample.memory_available_bytes = null;
+  unknown.telemetry!.sample.gpu_memory_free_bytes = null;
+  render(<FleetPage api={control(async () => snapshot([unknown]))}/>);
+  await flush();
+
+  summary = screen.getByRole("region", {name: "Fleet summary"});
+  expect(within(summary).getByText("Not reported")).toBeVisible();
+  expect(within(summary).getByText("No live node reports both host and GPU free memory")).toBeVisible();
+  expect(within(summary).queryByText("0 B")).not.toBeInTheDocument();
 });
 
 test("keeps selected detail and focus while a keyed node card updates", async () => {
@@ -117,13 +146,18 @@ test("keeps selected detail and focus while a keyed node card updates", async ()
 });
 
 test("turns a silent delayed node stale from its timestamp without an event", async () => {
-  render(<FleetPage api={control(async () => snapshot([node("node-a", "Alpha", "2026-08-15T11:59:40Z")]))}/>);
+  const aging = node("node-a", "Alpha", "2026-08-15T11:59:40Z");
+  aging.warnings = [{code: "telemetry.delayed", detail: "Telemetry delivery is delayed.", severity: "warning"}];
+  render(<FleetPage api={control(async () => snapshot([aging]))}/>);
   await flush();
   expect(screen.getByRole("article", {name: "Alpha — Delayed"})).toBeVisible();
+  expect(screen.getByText("Telemetry delivery is delayed.")).toBeVisible();
 
   act(() => vi.advanceTimersByTime(1_000));
 
   expect(screen.getByRole("article", {name: "Alpha — Stale"})).toBeVisible();
+  expect(screen.queryByText("Telemetry delivery is delayed.")).not.toBeInTheDocument();
+  expect(screen.getByText("Telemetry is stale.")).toBeVisible();
 });
 
 test("offers retry after an initial error and then shows the empty Fleet state", async () => {

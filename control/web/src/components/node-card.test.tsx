@@ -65,12 +65,19 @@ test("renders the complete node telemetry hierarchy and distinct recipe groups",
 
   const installed = within(card).getByRole("region", {name: "Installed recipes on Spark One"});
   const loaded = within(card).getByRole("region", {name: "Loaded recipes on Spark One"});
+  const installationState = within(card).getByRole("region", {name: "Installation state on Spark One"});
+  const runState = within(card).getByRole("region", {name: "Run state on Spark One"});
   expect(installed).toHaveTextContent("Qwen pair");
   expect(installed).toHaveTextContent("Complete · 2 of 2 ranks");
-  expect(installed).toHaveTextContent("Vision pair");
-  expect(installed).toHaveTextContent("Partial · 1 of 2 ranks · missing ranks");
+  expect(installed).not.toHaveTextContent("Vision pair");
+  expect(installationState).toHaveTextContent("Vision pair");
+  expect(installationState).toHaveTextContent("Partial · 1 of 2 ranks · missing ranks");
+  expect(installationState).toHaveTextContent("Group partial · Rank installed");
   expect(loaded).toHaveTextContent("Healthy · 2 of 2 ranks");
-  expect(loaded).toHaveTextContent("Degraded · 2 of 2 ranks · route not published");
+  expect(loaded).not.toHaveTextContent("Vision pair");
+  expect(runState).toHaveTextContent("Vision pair");
+  expect(runState).toHaveTextContent("Degraded · 2 of 2 ranks · route not published");
+  expect(runState).toHaveTextContent("Group degraded · Run running · Rank running · Route failed");
   expect(within(card).getByText("Vision pair route is not published.")).toBeVisible();
 });
 
@@ -89,6 +96,8 @@ test("renders offline certificate reasons and absent metrics honestly", () => {
   expect(within(card).getByText("Certificate expired")).toBeVisible();
   expect(within(card).getAllByText("Not reported").length).toBeGreaterThanOrEqual(8);
   expect(within(card).queryByText("0.0%")).not.toBeInTheDocument();
-  expect(within(card).getByText("No installed recipes reported")).toBeVisible();
-  expect(within(card).getByText("No loaded recipes reported")).toBeVisible();
+  expect(within(card).getByText("No complete installations reported")).toBeVisible();
+  expect(within(card).getByText("Nothing is loaded now")).toBeVisible();
+  expect(within(card).getByText("No incomplete installation states")).toBeVisible();
+  expect(within(card).getByText("No inactive or degraded run states")).toBeVisible();
 });

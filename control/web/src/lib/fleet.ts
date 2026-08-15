@@ -22,6 +22,31 @@ export function nodeOperationalState(node: VisualFleetNode, now: Date): NodeOper
   return telemetryFreshnessAt(node.telemetry?.sample.observed_at, now);
 }
 
+const TELEMETRY_WARNING_CODES = new Set<VisualFleetNode["warnings"][number]["code"]>([
+  "telemetry.missing",
+  "telemetry.delayed",
+  "telemetry.stale",
+]);
+
+export function reconcileTelemetryWarnings(
+  warnings: VisualFleetNode["warnings"],
+  freshness: TelemetryFreshness,
+): VisualFleetNode["warnings"] {
+  const insertionIndex = warnings.findIndex(warning => TELEMETRY_WARNING_CODES.has(warning.code));
+  const reconciled = warnings.filter(warning => !TELEMETRY_WARNING_CODES.has(warning.code));
+  if (freshness === "live") return reconciled;
+  const warning: VisualFleetNode["warnings"][number] = freshness === "delayed"
+    ? {code: "telemetry.delayed", detail: "Telemetry delivery is delayed.", severity: "warning"}
+    : {code: "telemetry.stale", detail: "Telemetry is stale.", severity: "warning"};
+  reconciled.splice(insertionIndex < 0 ? reconciled.length : Math.min(insertionIndex, reconciled.length), 0, warning);
+  return reconciled;
+}
+
+export function nodeWarningsAt(node: VisualFleetNode, now: Date): VisualFleetNode["warnings"] {
+  if (!node.telemetry?.sample) return node.warnings;
+  return reconcileTelemetryWarnings(node.warnings, telemetryFreshnessAt(node.telemetry.sample.observed_at, now));
+}
+
 const OFFLINE_REASON_LABELS: Record<NonNullable<VisualFleetNode["connection"]["offline_reason"]>, string> = {
   "unregistered": "Node is not registered",
   "agent-inactive": "Agent is inactive",
@@ -73,40 +98,73 @@ export function runGroupLabel(group: VisualFleetNode["loaded"][number]): string 
 
 export type FleetSummary = {
   delayed: number;
+  installedRecipes: number;
   live: number;
   loadedRecipes: number;
   offline: number;
   stale: number;
   total: number;
-  unifiedAvailableBytes: number;
+  unifiedAvailableBytes: number | null;
+  unifiedCapacity: "known" | "partial" | "unknown";
+  unifiedReportingNodes: number;
   warnings: number;
 };
+
+function warningConditionKey(nodeId: string, code: VisualFleetNode["warnings"][number]["code"]): string {
+  if (TELEMETRY_WARNING_CODES.has(code)) return `${nodeId}:telemetry`;
+  return `${nodeId}:${code}`;
+}
 
 export function summarizeFleet(snapshot: VisualFleetSnapshot, now: Date): FleetSummary {
   const summary: FleetSummary = {
     delayed: 0,
+    installedRecipes: 0,
     live: 0,
     loadedRecipes: 0,
     offline: 0,
     stale: 0,
     total: snapshot.nodes.length,
     unifiedAvailableBytes: 0,
+    unifiedCapacity: "unknown",
+    unifiedReportingNodes: 0,
     warnings: 0,
   };
+  const installed = new Set<string>();
   const loaded = new Set<string>();
+  const warningConditions = new Set<string>();
   for (const node of snapshot.nodes) {
     const state = nodeOperationalState(node, now);
     summary[state] += 1;
-    if (state === "stale" || state === "offline") summary.warnings += 1;
-    for (const run of node.loaded) loaded.add(run.run_id);
+    for (const warning of nodeWarningsAt(node, now)) {
+      warningConditions.add(warningConditionKey(node.id, warning.code));
+    }
+    if (state === "delayed" || state === "stale") warningConditions.add(`${node.id}:telemetry`);
+    if (state === "offline") warningConditions.add(`${node.id}:node.offline`);
+    for (const installation of node.installed) {
+      if (installation.complete) installed.add(installation.installation_id);
+    }
+    for (const run of node.loaded) {
+      if (run.healthy) loaded.add(run.run_id);
+    }
     if (state !== "live") continue;
     const hostFree = node.telemetry?.sample.memory_available_bytes;
     const gpuFree = node.telemetry?.sample.gpu_memory_free_bytes;
     if (typeof hostFree === "number" && Number.isFinite(hostFree)
         && typeof gpuFree === "number" && Number.isFinite(gpuFree)) {
-      summary.unifiedAvailableBytes += Math.min(hostFree, gpuFree);
+      summary.unifiedAvailableBytes! += Math.min(hostFree, gpuFree);
+      summary.unifiedReportingNodes += 1;
     }
   }
+  summary.installedRecipes = installed.size;
   summary.loadedRecipes = loaded.size;
+  summary.warnings = warningConditions.size;
+  if (summary.unifiedReportingNodes === 0) {
+    summary.unifiedAvailableBytes = null;
+    summary.unifiedCapacity = "unknown";
+  } else if (summary.unifiedReportingNodes < summary.live) {
+    summary.unifiedCapacity = "partial";
+  } else {
+    summary.unifiedCapacity = "known";
+  }
   return summary;
 }

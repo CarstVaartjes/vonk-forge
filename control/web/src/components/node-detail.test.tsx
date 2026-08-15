@@ -121,3 +121,34 @@ test("does not present the previous range as the newly selected history", async 
   resolveNext(history("2026-08-14T12:00:00.000Z"));
   expect(await screen.findByRole("img", {name: "Spark One GPU utilization history"})).toBeVisible();
 });
+
+test("separates complete and healthy recipe evidence from transitional group state", async () => {
+  const projected = node();
+  projected.installed = [{
+    installation_id: "install-complete", recipe_id: "recipe-1", recipe_revision_id: "revision-1", title: "Qwen pair", profile_name: "pair", expected_rank_count: 2, present_ranks: [0, 1], member_node_ids: [projected.id, "node-b"], rank: 0, role: "leader", rank_state: "installed", group_state: "installed", complete: true, degraded_reason: null,
+  }, {
+    installation_id: "install-partial", recipe_id: "recipe-2", recipe_revision_id: "revision-2", title: "Vision pair", profile_name: "pair", expected_rank_count: 2, present_ranks: [0], member_node_ids: [projected.id], rank: 0, role: "leader", rank_state: "installing", group_state: "partial", complete: false, degraded_reason: "missing-ranks",
+  }];
+  projected.loaded = [{
+    run_id: "run-healthy", installation_id: "install-complete", recipe_id: "recipe-1", recipe_revision_id: "revision-1", title: "Qwen pair", alias: "chat", expected_rank_count: 2, present_ranks: [0, 1], member_node_ids: [projected.id, "node-b"], rank: 0, role: "leader", rank_state: "running", rank_age_seconds: 2, rank_fresh: true, run_state: "running", route_state: "published", group_state: "healthy", healthy: true, degraded_reason: null,
+  }, {
+    run_id: "run-degraded", installation_id: "install-partial", recipe_id: "recipe-2", recipe_revision_id: "revision-2", title: "Vision pair", alias: "vision", expected_rank_count: 2, present_ranks: [0, 1], member_node_ids: [projected.id, "node-b"], rank: 0, role: "leader", rank_state: "stopping", rank_age_seconds: 2, rank_fresh: true, run_state: "stopping", route_state: "failed", group_state: "degraded", healthy: false, degraded_reason: "route-not-published",
+  }];
+  const control = {nodeTelemetryHistory: async () => history()} as unknown as ControlApi;
+
+  render(<NodeDetail api={control} node={projected} now={NOW} onClose={() => undefined}/>);
+  await screen.findByRole("img", {name: "Spark One GPU utilization history"});
+
+  const installed = screen.getByRole("region", {name: "Installed recipes in Spark One details"});
+  const installationState = screen.getByRole("region", {name: "Installation state in Spark One details"});
+  const loaded = screen.getByRole("region", {name: "Loaded recipes in Spark One details"});
+  const runState = screen.getByRole("region", {name: "Run state in Spark One details"});
+  expect(installed).toHaveTextContent("Qwen pair");
+  expect(installed).not.toHaveTextContent("Vision pair");
+  expect(installationState).toHaveTextContent("Partial · 1 of 2 ranks · missing ranks");
+  expect(installationState).toHaveTextContent("Group partial · Rank installing");
+  expect(loaded).toHaveTextContent("Healthy · 2 of 2 ranks");
+  expect(loaded).not.toHaveTextContent("Vision pair");
+  expect(runState).toHaveTextContent("Degraded · 2 of 2 ranks · route not published");
+  expect(runState).toHaveTextContent("Group degraded · Run stopping · Rank stopping · Route failed");
+});
