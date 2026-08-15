@@ -1525,10 +1525,18 @@ def install_agent_routes(
             parameters = mapping.parameters
             try:
                 resolved_entities = resolve_recipe_entities(session, document)
-            except RecipeRuntimeSpecError:
+            except RecipeRuntimeSpecError as error:
+                detail = {
+                    "runtime distribution does not implement harness": (
+                        "recipe specification distribution-harness binding is invalid"
+                    ),
+                    "patch bundle does not apply to distribution": (
+                        "recipe specification patch-distribution binding is invalid"
+                    ),
+                }.get(str(error), "recipe specification dependencies are stale")
                 raise HTTPException(
                     status_code=409,
-                    detail="recipe specification dependencies are stale",
+                    detail=detail,
                 ) from None
         validate_recipe(document)
         if recipe_content_sha256(document) != revision.content_sha256:

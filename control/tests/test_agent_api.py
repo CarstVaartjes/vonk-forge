@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import hashlib
 import io
 import json
@@ -21,7 +22,8 @@ from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import sessionmaker
-from test_catalog_service import _seed_recipe_dependencies
+from test_catalog_entities import execution_harness, patch_bundle, runtime_distribution
+from test_catalog_service import _resolve_entity, _seed_recipe_dependencies
 from vonk_agent_protocol import canonical_message
 from vonk_control.agent_api import (
     AgentApiServices,
@@ -1711,6 +1713,79 @@ def test_agent_rejects_recipe_spec_without_exact_resolved_dependencies(
     assert resolved.json()["identity"][
         "recipe_revision_sha256"
     ] == recipe_content_sha256(document)
+    incompatible_harness = _resolve_entity(
+        catalog, execution_harness("different-harness", source_sha256="c" * 64)
+    )
+    incompatible_distribution = _resolve_entity(
+        catalog,
+        runtime_distribution(
+            incompatible_harness.content_sha256,
+            slug="different-runtime",
+            harness_slug="different-harness",
+        ),
+    )
+    distribution_mismatch = copy.deepcopy(document)
+    distribution_mismatch["runtime"]["distribution"] = {
+        "kind": "runtime-distribution",
+        "publisher": "vonk-forge",
+        "slug": "different-runtime",
+        "content_sha256": incompatible_distribution.content_sha256,
+    }
+    with services.sessions.begin() as session:
+        session.execute(
+            update(LocalRecipeRevision)
+            .where(LocalRecipeRevision.id == revision_id)
+            .values(
+                document=distribution_mismatch,
+                content_sha256=recipe_content_sha256(distribution_mismatch),
+            )
+        )
+    rejected_distribution = client.get(
+        f"/agent/v1/recipe-installations/{installation_id}/spec",
+        headers=agent_headers(NODE_A, "serial-a"),
+    )
+    assert rejected_distribution.status_code == 409
+    assert (
+        rejected_distribution.json()["detail"]
+        == "recipe specification distribution-harness binding is invalid"
+    )
+    selected_distribution = document["runtime"]["distribution"]
+    assert isinstance(selected_distribution, dict)
+    other_distribution = _resolve_entity(
+        catalog,
+        runtime_distribution(
+            str(document["execution"]["harness"]["content_sha256"]),
+            slug="other-runtime",
+        ),
+    )
+    incompatible_patch = _resolve_entity(
+        catalog, patch_bundle("other-runtime", other_distribution.content_sha256)
+    )
+    patch_mismatch = copy.deepcopy(document)
+    patch_mismatch["execution"]["patch_bundle"] = {
+        "kind": "patch-bundle",
+        "publisher": "vonk-forge",
+        "slug": "vllm-fix",
+        "content_sha256": incompatible_patch.content_sha256,
+    }
+    with services.sessions.begin() as session:
+        session.execute(
+            update(LocalRecipeRevision)
+            .where(LocalRecipeRevision.id == revision_id)
+            .values(
+                document=patch_mismatch,
+                content_sha256=recipe_content_sha256(patch_mismatch),
+            )
+        )
+    rejected_patch = client.get(
+        f"/agent/v1/recipe-installations/{installation_id}/spec",
+        headers=agent_headers(NODE_A, "serial-a"),
+    )
+    assert rejected_patch.status_code == 409
+    assert (
+        rejected_patch.json()["detail"]
+        == "recipe specification patch-distribution binding is invalid"
+    )
     assert (
         client.get(
             f"/agent/v1/recipe-installations/{uuid.uuid4()}/spec",
