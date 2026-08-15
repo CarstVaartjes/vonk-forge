@@ -55,6 +55,7 @@ Normal administration uses the stable private Tailscale HTTPS
 - [Recipe and workload operations](runbooks/workload-packages.md)
 - [Global catalog import and publication](runbooks/global-catalog.md)
 - [Vonk Forge agent installation](operations/install-vonk-agent.md)
+- [Accepted development system evidence](audits/2026-08-15-development-system-acceptance.md)
 - [DGX Spark platform-alignment audit](audits/2026-08-12-dgx-spark-platform-alignment.md)
 - [Model switching](runbooks/model-switching.md)
 - [Platform updates](runbooks/platform-update.md)
