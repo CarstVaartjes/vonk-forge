@@ -6,7 +6,6 @@ from types import SimpleNamespace
 
 import pytest
 from vonk_control.catalog_contract import catalog_content_sha256
-from vonk_control.recipe_contract import recipe_content_sha256
 from vonk_control.recipe_runtime_specs import (
     RecipeRuntimeSpecError,
     compile_runtime_spec,
@@ -44,7 +43,6 @@ def _exact_builtin_inputs():
             "no_new_privileges": True,
             "capabilities": [],
         },
-        "sha256": "d" * 64,
     }
     distribution_digest = catalog_content_sha256(distribution)
     document["execution"]["harness"] = {
@@ -102,6 +100,17 @@ def test_runtime_spec_is_compiled_from_the_trusted_builtin_projection() -> None:
         image_digest="sha256:" + "d" * 64,
     )
 
+    assert set(spec) == {"runtime", "artifacts", "endpoint", "security", "lifecycle"}
+    assert set(spec["runtime"]) == {
+        "interface",
+        "adapter",
+        "adapter_version",
+        "image",
+        "architecture",
+        "entrypoint",
+        "arguments",
+        "environment",
+    }
     assert spec["runtime"]["image"] == (
         "localhost/vonk/recipe-build-00000000-0000-4000-8000-000000000001"
         "@sha256:" + "d" * 64
@@ -121,36 +130,35 @@ def test_runtime_spec_is_compiled_from_the_trusted_builtin_projection() -> None:
     ]
     assert spec["runtime"]["arguments"] == []
     assert spec["runtime"]["environment"] == []
+    assert spec["endpoint"] == {
+        "protocol": "openai",
+        "port": 8000,
+        "model_aliases": ["synthetic-tiny"],
+        "health_path": "/v1/models",
+    }
     assert spec["security"] == {
-        "network_mode": "none",
+        "devices": ["nvidia.com/gpu=all"],
         "user": "10001:10001",
-        "no_new_privileges": True,
         "capabilities": [],
         "privileged": False,
         "host_network": False,
         "mounts": [
             {
-                "source": "/run/vonk/models",
+                "source": "model",
                 "target": "/models",
                 "read_only": True,
-                "isolated": False,
             },
             {
-                "source": "/run/vonk/outputs",
-                "target": "/outputs",
+                "source": "state",
+                "target": "/state",
                 "read_only": False,
-                "isolated": True,
             },
         ],
     }
-    assert spec["identity"] == {
-        "recipe_revision_sha256": recipe_content_sha256(document),
-        "model_version_sha256": document["model"]["content_sha256"],
-        "harness_sha256": document["execution"]["harness"]["content_sha256"],
-        "runtime_distribution_sha256": document["runtime"]["distribution"][
-            "content_sha256"
-        ],
-        "patch_bundle_sha256": None,
+    assert spec["lifecycle"] == {
+        "pre_start": [],
+        "post_stop": [],
+        "stop_timeout_seconds": 30,
     }
 
 

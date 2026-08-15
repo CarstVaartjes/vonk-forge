@@ -237,6 +237,9 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
     ) -> Result<Vec<String>, OciError> {
         spec.validate()?;
         placement.validate()?;
+        if (placement.world_size > 1) != spec.runtime.placement_environment.is_some() {
+            return Err(OciError::Runtime);
+        }
         if spec.security.host_network
             && (placement.world_size < 2 || placement.port != spec.endpoint.port)
         {
@@ -325,20 +328,22 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                 },
             ]);
         }
-        if let Some(master) = placement.master_address {
-            arguments.extend(["--env".to_owned(), format!("VONK_MASTER_ADDR={master}")]);
-        }
-        if let Some(local) = placement.local_address {
-            arguments.extend(["--env".to_owned(), format!("VONK_LOCAL_ADDR={local}")]);
-        }
-        if let Some(master_port) = placement.master_port {
+        if let Some(binding) = &spec.runtime.placement_environment {
+            let master = placement.master_address.ok_or(OciError::Runtime)?;
+            let local = placement.local_address.ok_or(OciError::Runtime)?;
+            let master_port = placement.master_port.ok_or(OciError::Runtime)?;
             arguments.extend([
                 "--env".to_owned(),
-                format!("VONK_MASTER_PORT={master_port}"),
+                format!("{}={master}", binding.master_address),
+                "--env".to_owned(),
+                format!("{}={local}", binding.local_address),
+            ]);
+            arguments.extend([
+                "--env".to_owned(),
+                format!("{}={master_port}", binding.master_port),
             ]);
             if placement.rank == 0 && !spec.security.host_network {
-                let master_address = placement.master_address.ok_or(OciError::Runtime)?;
-                let publication = match master_address {
+                let publication = match master {
                     IpAddr::V4(address) => {
                         format!("{address}:{master_port}:{master_port}")
                     }

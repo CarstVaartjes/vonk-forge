@@ -1,288 +1,110 @@
-# MIA DeepSeek V4 Flash on two DGX Sparks
+# Mia DeepSeek V4 Flash on two DGX Sparks
 
-This is the reproducible development path for one tensor-parallel DeepSeek V4
-Flash service across exactly two DGX Sparks. It uses the public recipe from
-MiaAI-Lab, but every mutable upstream input is resolved to an immutable identity
-before Vonk accepts it.
+This runbook covers the native v1 two-node Mia recipe. It is genuine vLLM
+multiprocessing tensor parallelism with TP=2. It is not a claim that the generic
+vLLM harness supports arbitrary distributed execution.
+
+Physical ARM64/GPU acceptance remains Task 9. The commands below are the real
+executable qualification path, but `--level container` must be run on a
+linux/arm64 DGX Spark host with Docker, both GPUs, and the exact model snapshot
+already installed.
 
 ## Pinned release
 
-| Input | Accepted identity |
-|---|---|
-| MIA source | `f752cd04ab30f2cf42077dd8811a5e1e682d63e7` |
-| Model | `deepseek-ai/DeepSeek-V4-Flash-0731` |
-| Model revision | `9e165c30e2704aec5d9d593cce3eebd58bbef1cb` |
-| Model bytes per Spark | `166898660330` |
-| Runtime | `ghcr.io/anemll/dspark-vllm-gx10@sha256:a83948492cf13df455170fb42885f5ef4db54fefe0feff0f841ecbff464ac9d8` |
-| API port | `8888` |
+The authoritative identities are:
 
-The source bundle includes MIA's current reviewed hotfixes, including the
-GPU-resident per-request thinking budget, safe tool-call truncation, bounded
-decode service from issue 43, and suppress-stops-during-reasoning. The
-networkless image build applies them once and the runtime root filesystem
-remains read-only. Optional scheduler diagnostics stay off by default. Rank 1
-runs headless; rank 0 owns the OpenAI-compatible endpoint. Clients may omit
-`thinking_token_budget` for the normal fast path, use `0` to skip reasoning, or
-set a positive token limit; the server does not inject a hidden default.
+- Mia recipe source:
+  `https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark` at
+  `f752cd04ab30f2cf42077dd8811a5e1e682d63e7`.
+- Anemll distribution source: `https://github.com/Anemll/dspark-vllm-gx10`
+  at `47503f8e38dadd4dededca798150db2619594fce`.
+- Anemll linux/arm64 image:
+  `ghcr.io/anemll/dspark-vllm-gx10@sha256:a83948492cf13df455170fb42885f5ef4db54fefe0feff0f841ecbff464ac9d8`.
+- Official model snapshot: `deepseek-ai/DeepSeek-V4-Flash-DSpark` at
+  `62af8fffb2f7030cac4de2f0169f5b8d1101b646`, public and ungated, with 74
+  files totaling `166898666055` bytes (166,898,666,055-byte model checkpoint).
+- Patched vLLM source:
+  `https://github.com/vllm-project/vllm` at
+  `752a3a504485790a2e8491cacbb35c137339ad34`.
 
-No Hugging Face token is needed or accepted. The public model is downloaded as
-a separate content-addressed artifact on each Spark. No provider token, NAS
-secret, signing key, model weight, or Docker socket is copied into the source
-bundle or runtime image.
+The runtime image and the model checkpoint are separate immutable objects. An
+exact verified cache hit does not redownload either object. Every first install
+still requires full digest verification before an object can become trusted.
+
+The source and final image retain the Mia MIT license, vLLM Apache-2.0 license,
+and Vonk Forge notice. The image is labeled `MIT AND Apache-2.0`.
 
 ## Before the first run
 
-Complete the generic
-[development agent workload prerequisites](development-agent-workloads.md):
-the NAS stack must be healthy, both Rust agents must be paired and current,
-their selected 200 Gb/s direct-fabric addresses must be fresh, and the accepted
-development agent package must be installed.
+No Hugging Face token is required because the selected snapshot is public and
+ungated. Qualification performs no startup network fetch. Install every model
+file and all source/image inputs before qualification, preserving the contract
+paths and hashes.
 
-Budget at least 471,236,274,132 free bytes and 124,000,000,000 available memory
-on each Spark. A cold run downloads 166,898,660,330 model bytes to each node and
-pulls about 9.8 GB of compressed runtime layers on the builder. Keep the nodes
-on power and wired networking; rerunning the same accepted operation reuses
-verified immutable content.
+Mia upstream bind-mounts and applies patches at startup. The native v1 source
+bundle instead vendors and hashes those files, applies them while building the
+image, and verifies the installed result. There is no startup patching, source
+mutation, package installation, or network access.
 
-On both Sparks, add the host endpoint to the existing root-owned firewall site
-file:
+The distribution capability binds one exact topology: two linux/arm64 nodes,
+world size 2, tensor parallel size 2, one `entrypoint`, and one `worker`. The
+compiler refuses this topology unless a verified distribution explicitly
+implements it.
 
-```ini
-VONK_HOST_ENDPOINT_PORTS=8888
-```
+The controller and Rust runtime project the structured rendezvous values
+`VONK_LOCAL_ADDR`, `VONK_MASTER_ADDR`, and `VONK_MASTER_PORT` for each rank.
+The same verified capability projects the exact rank-specific fabric contract:
+`NCCL_IB_HCA`, `NCCL_SOCKET_IFNAME`, `NCCL_IB_GID_INDEX`,
+`GLOO_SOCKET_IFNAME`, and `TP_SOCKET_IFNAME`. The wrapper fails before launch
+when any placement or fabric value is missing or differs.
 
-Reload and verify the packaged policy:
-
-```bash
-sudo systemctl reload vonk-forge-docker-firewall.service
-sudo /usr/lib/vonk-forge/vonk-forge-docker-firewall \
-  --config /etc/vonk-forge-agent/docker-firewall.conf check
-sudo /usr/lib/vonk-forge/vonk-forge-docker-firewall \
-  --config /etc/vonk-forge-agent/docker-firewall.conf check-host-port 8888
-```
-
-The `VONK-FORGE-HOST` chain permits TCP 8888 only from loopback and the NAS
-management address. Spark peer TCP/UDP is accepted only on the selected fabric
-interface, from the declared peer, to the selected local fabric address. It
-also permits a process to reach its own selected fabric address over loopback;
-PyTorch rendezvous requires rank 0 to join its own store through that address.
-The exact peer-fabric acceptance must precede host-endpoint port drops so the
-headless worker can reach rank 0's readiness endpoint. Do not add a wildcard
-`INPUT` rule.
+Rank 1 runs headless. Rank 0 is the sole endpoint owner and may become ready
+only after both ranks are healthy.
 
 ## Qualify the exact inputs
 
-Create a private mode-`0600`
-`<EVIDENCE_DIRECTORY>/mia-qualification-input.json` from current read-only
-observations. It uses the same node and runtime-image fields documented in
-[Development agent workload acceptance](development-agent-workloads.md#real-single-node-model).
-For each node, the artifact evidence must be exactly:
-
-```json
-{
-  "id": "model",
-  "repository": "deepseek-ai/DeepSeek-V4-Flash-0731",
-  "revision": "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
-  "bytes": 166898660330
-}
-```
-
-The top-level `accepted_licenses` must contain `deepseek-model` and `mia-mit`.
-Qualify against the MIA sidecars rather than the older DS4
-defaults:
+Structural qualification works without GPU hardware and proves strict v1
+contract, reference, compiler, and adapter compatibility:
 
 ```bash
+cd '<REPOSITORY_CHECKOUT>'
 scripts/qualify-development-model \
-  --source config/recipes/development/mia-deepseek-v4-flash-source.json \
-  --artifacts config/recipes/development/mia-deepseek-v4-flash-artifacts.json \
-  --topology config/recipes/development/mia-deepseek-v4-flash-multinode.json \
-  --evidence '<EVIDENCE_DIRECTORY>/mia-qualification-input.json' \
-  --output '<EVIDENCE_DIRECTORY>/mia-qualification.json'
+  --recipe config/recipes/deepseek-v4-flash-0731-mia-dual.json \
+  --level structural \
+  --output '<EVIDENCE_DIRECTORY>/mia-structural.json'
 ```
 
-Qualification verifies public ARM64 image identity, the exact source and model
-revisions, accepted licenses, NVIDIA/Spark runtime facts, free memory/disk, and
-the common direct fabric. The agent later downloads every snapshot file itself,
-checks Git LFS SHA-256 metadata where supplied, verifies the exact aggregate
-byte count, and writes its own content manifest.
-
-## Build, install, and start
-
-Keep the existing private admin and LiteLLM token files and operator SSH tunnel.
-Run the normal acceptance driver with the MIA recipe explicitly selected:
+On a supported DGX Spark host, execute the complete path:
 
 ```bash
 scripts/run-development-slices \
-  --api-base 'http://127.0.0.1:<LOCAL_API_PORT>' \
-  --inference-base 'http://127.0.0.1:<LOCAL_INFERENCE_PORT>' \
-  --admin-token-file '<EVIDENCE_DIRECTORY>/admin-token' \
-  --inference-token-file '<LOCAL_SECRETS_DIR>/litellm-master-key' \
   --phase model-multinode \
-  --recipe config/recipes/development/mia-deepseek-v4-flash.json \
-  --qualification-file '<EVIDENCE_DIRECTORY>/mia-qualification.json' \
-  --builder-node '<SPARK_1_NODE_ID>' \
-  --target-node '<SPARK_1_NODE_ID>' \
-  --target-node '<SPARK_2_NODE_ID>' \
-  --failure-node '<SPARK_2_NODE_ID>' \
-  --evidence-file '<EVIDENCE_DIRECTORY>/mia-multinode.json' \
-  --timeout-seconds 21600 \
-  --stop-after inference-ok
+  --level container \
+  --engine docker \
+  --artifact-root '<MODEL_ARTIFACT_ROOT>' \
+  --evidence-file '<EVIDENCE_DIRECTORY>/mia-container.json' \
+  --timeout-seconds 3600
 ```
 
-The accepted path builds the image on Spark 1, distributes its exact OCI
-identity, installs the model independently on both nodes, starts both ranks,
-waits for `/v1/models`, publishes one NAS route, and requires a real chat
-response through LiteLLM. The MIA launcher selects only the model revision from
-the signed runtime contract and keeps Hugging Face and Transformers offline
-while serving. It derives the fabric interface directly from
-`/sys/class/infiniband` by matching the controller-selected IPv4 address to one
-unique RoCEv2 GID, so it does not depend on `iproute2` inside the runtime image.
-If that lookup fails, verify the selected direct-fabric address and the node's
-RoCEv2 GID configuration; do not add packages to a running container.
-
-The acceptance run publishes the stable client-facing model name
-`mia-deepseek-v4-flash`. The runtime itself serves the recipe's primary
-`runtime.endpoint.model_aliases` value, `deepseek-v4-flash-dspark`. The control
-worker binds those two names in the acknowledged LiteLLM generation; clients
-must use the public name and never depend on the runtime-local name. A missing
-or invalid primary runtime alias blocks route publication.
-
-Rank 1 remains a native vLLM headless worker, so it does not provide its own
-OpenAI API. A minimal runtime-local readiness proxy exposes only
-`/v1/models` on rank 1 and forwards that probe over the selected fabric to rank
-0. The proxy runs only while the headless vLLM process is alive. Rank 0 cannot
-serve that endpoint during the initial start until both tensor-parallel ranks
-have joined, so the normal local checks gate initial publication. After an
-established NCCL process group loses a rank, however, the surviving rank-0 HTTP
-process can continue answering `/v1/models` even though inference is no longer
-usable. The acceptance driver's real chat request is therefore the
-authoritative recovery check. Client traffic and the published route still
-terminate only at rank 0.
-
-After a long image import, authenticated inventory can briefly be older than
-the installation admission limit. The driver retries only previews whose sole
-blocker is `install.stale_inventory`, for at most two minutes and within the
-overall timeout. Every other blocker remains an immediate failure, and no
-installation is submitted until a fresh preview is allowed.
-
-Keep the two large data classes separate when judging that wait. The accepted
-wrapper is an 18,908,041,728-byte runtime image; the 155.43 GiB model checkpoint
-is an independently verified read-only cache object and is not baked into that
-image. Reusing a cache does not redownload either object, but a new installation
-still needs a new signed import receipt. Each target therefore performs full
-digest verification before Docker import rather than trusting a mutable local
-tag. In the 2026-08-15 two-Spark acceptance, the parallel image-import job took
-about 19 minutes and native checkpoint loading took 146 seconds before kernel
-and CUDA-graph warmup. Those values explain the observed phases; they are not a
-release SLA. Do not disable hashing or delete caches to make this gate appear
-faster.
-
-## Connect Pi
-
-Create a dedicated LiteLLM virtual key restricted to the stable
-`mia-deepseek-v4-flash` alias. Never copy `litellm-master-key` to a workstation.
-From the trusted local inference tunnel, with shell tracing disabled:
-
-```bash
-set +x
-umask 077
-master_key="$(< '<LOCAL_SECRETS_DIR>/litellm-master-key')"
-curl -fsS 'http://127.0.0.1:<LOCAL_INFERENCE_PORT>/key/generate' \
-  -H "Authorization: Bearer $master_key" \
-  -H 'Content-Type: application/json' \
-  --data '{"models":["mia-deepseek-v4-flash"],"allowed_routes":["openai_routes"],"key_alias":"pi-dev"}' \
-  | jq -er '.key' > '<LOCAL_SECRETS_DIR>/pi-litellm-key'
-unset master_key
-```
-
-The generated key is stored in LiteLLM's dedicated PostgreSQL database, so a
-normal NAS pull/redeploy preserves it. The `models` scope limits inference to
-the stable MIA alias and `allowed_routes` excludes LiteLLM management APIs.
-The Tailscale Caddy route exposes only OpenAI-compatible traffic; key creation,
-listing, and revocation remain on the trusted NAS loopback endpoint.
-
-Store that generated value in the operator's password manager as
-`Vonk Forge Pi/LiteLLM API Key`. On the Tailscale-connected workstation, save
-this provider in `~/.pi/agent/models.json`:
-
-```json
-{
-  "providers": {
-    "vonk-forge": {
-      "baseUrl": "https://vonk-forge.tail46101a.ts.net/v1",
-      "api": "openai-completions",
-      "apiKey": "$VONK_PI_API_KEY",
-      "authHeader": true,
-      "compat": {
-        "supportsStore": false,
-        "supportsDeveloperRole": false,
-        "supportsReasoningEffort": true,
-        "supportsUsageInStreaming": true,
-        "maxTokensField": "max_tokens"
-      },
-      "models": [
-        {
-          "id": "mia-deepseek-v4-flash",
-          "name": "Vonk Forge DeepSeek V4 Flash",
-          "reasoning": true,
-          "input": ["text"],
-          "contextWindow": 1048576,
-          "maxTokens": 32768,
-          "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          }
-        }
-      ]
-    }
-  }
-}
-```
-
-Load the scoped key without writing it into Pi's configuration, then select the
-provider and model:
-
-```powershell
-$env:VONK_PI_API_KEY = op read 'op://Private/Vonk Forge Pi/LiteLLM API Key/password'
-pi --provider vonk-forge --model mia-deepseek-v4-flash
-```
-
-The workstation must be connected to the same tailnet. If the workstation or
-password-manager item is compromised, use the same trusted loopback tunnel and
-the local master-key file to call LiteLLM `POST /key/delete` for that exact
-virtual key, then delete the password-manager item. Never rotate or distribute
-the master key merely to revoke one client.
+The qualifier resolves the digest-pinned base image, verifies the expected
+linux/arm64 manifest, builds offline from the retained context, starts worker
+then entrypoint, checks collective and endpoint-owner readiness, invokes the
+OpenAI-compatible endpoint, performs bounded stop/restart, and cleans up. It
+writes canonical evidence and fails closed on every incomplete phase.
 
 ## Failure, recovery, and cleanup
 
-Use the run ID in the private evidence file. Follow the generic
-[rank failure and recovery procedure](development-agent-workloads.md#real-multi-node-failure-and-recovery):
-inspect all Vonk management labels, stop only rank 1's exact managed container,
-and resume to `--stop-after route-withdrawn-after-failure`.
+The lifecycle consumer withdraws the route as soon as either rank is failed or
+stale. Recovery is bounded and ordered: stop the exact gang, start the worker,
+then start the endpoint owner. The route is republished only when both ranks
+provide fresh healthy start evidence and invocation succeeds again.
 
-MIA's native tensor-parallel vLLM engine does not support hot rank rejoin. Once
-the withdrawal is proven, stop rank 0's exact managed container as well, then
-start the same rank-0 container followed by the same rank-1 container. This is
-a coordinated restart of the existing gang, not a rebuild, reinstall, or cache
-mutation. Do not accept a republished `/v1/models` route as recovery by itself;
-resume to `--stop-after inference-recovered` and require the real chat request
-to pass.
+A failed installation is retried through one exact retry of the stored plan.
+That retry preserves the same installation identity and immutable model and
+image caches. It never re-plans against mutable inventory and never deletes
+shared content to hide a failure. A second failure requires operator diagnosis.
 
-Then perform the documented supervisor and NAS restart checkpoint and run the
-same command without `--stop-after`. It must prove fresh agents, healthy ranks,
-route persistence, and inference before it stops the run, withdraws the route,
-and uninstalls normally.
-
-An interrupted attempt is resumed with the identical command and evidence path.
-Do not delete model/image caches, agent state, or containers to make a retry
-pass. Rollback means stop and uninstall the accepted recipe revision; it never
-means changing a mutable tag or editing a running container.
-
-If artifact acquisition ends in a failed installation, rerun that identical
-command. The acceptance driver submits one exact retry of the stored install
-plan, retaining the same installation identity, node set, authority digest,
-and immutable model and image caches. A second terminal failure stops the
-driver for diagnosis; it does not trigger another retry or destructive cache
-cleanup.
+Qualification evidence is non-secret canonical JSON, written atomically with
+mode `0600`. Retain it with the exact recipe and environment inventory. Do not
+claim physical acceptance from the bounded fake-engine tests or an x86_64
+`environment-limited` result; that evidence belongs to Task 9.

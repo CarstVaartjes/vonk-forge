@@ -141,6 +141,7 @@ def test_ds4_distribution_and_build_are_immutable_and_runtime_is_offline() -> No
         {"name": "HF_HUB_OFFLINE", "value": "1"},
     ]
     assert recipe["build"]["context"] == {
+        "path": "adapters/deepseek/ds4",
         "sha256": bundle.sha256,
         "expected_bytes": len(bundle.archive),
         "media_type": "application/vnd.vonk-forge.source-bundle.v1+tar",

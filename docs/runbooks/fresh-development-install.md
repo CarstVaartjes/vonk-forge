@@ -283,18 +283,15 @@ do not re-pair the node or delete its state.
 
 ## 7. Prove the installation
 
-The commands below are deterministic acceptance, not normal browser access.
-Create a private admin token, configure the guide's
+The commands below are deterministic acceptance qualification, not normal
+browser access.
+Configure the guide's
 [restricted acceptance and break-glass loopback forwarding](development-nas-installation.md#restrict-acceptance-and-break-glass-loopback-forwarding),
-forward the NAS loopback API and inference ports, and run the synthetic
-lifecycle:
+forward the NAS loopback API and inference ports for independent control-plane
+inspection, and qualify the native v1 DS4 recipe on a linux/arm64 Spark host:
 
 ```bash
 install -d -m 0700 .state/development-acceptance
-scripts/dev-admin-token \
-  --output .state/development-acceptance/admin-token \
-  --signing-key-file '<LOCAL_STAGING_DIRECTORY>/secrets/token-signing-key' \
-  --ttl-seconds 21600
 
 # Keep this tunnel open in another terminal.
 ssh -N \
@@ -303,21 +300,18 @@ ssh -N \
   '<NAS_SSH_TARGET>'
 
 scripts/run-development-slices \
-  --api-base http://127.0.0.1:18080 \
-  --inference-base http://127.0.0.1:14000 \
-  --admin-token-file .state/development-acceptance/admin-token \
-  --inference-token-file '<LOCAL_STAGING_DIRECTORY>/secrets/litellm-master-key' \
-  --phase synthetic \
-  --builder-node '<NODE_ID>' \
-  --target-node '<NODE_ID>' \
-  --evidence-file .state/development-acceptance/synthetic.json
+  --phase model-single \
+  --level container \
+  --engine docker \
+  --artifact-root '<MODEL_ARTIFACT_ROOT>' \
+  --evidence-file .state/development-acceptance/ds4-container.json \
+  --timeout-seconds 1800
 ```
 
-Success proves source verification, isolated rootless image build, signed
-Docker import/start, install, route publication, inference, stop, route
-withdrawal, and uninstall.
-For real single-node and multi-node model qualification, restart persistence,
-and rank failure/recovery, continue with
+Successful recipe evidence proves the executable build, start, health,
+invocation, bounded stop/restart, and cleanup path. This does not replace the
+browser/fleet checks below. For multi-node model qualification and rank
+failure/recovery, continue with
 [Development agent workload acceptance](development-agent-workloads.md).
 
 Finish the supported installation in the browser: open the stable private

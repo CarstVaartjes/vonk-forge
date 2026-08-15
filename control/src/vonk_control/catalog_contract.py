@@ -239,6 +239,28 @@ def _validate_runtime_distribution(document: Mapping[str, object]) -> None:
             "capabilities.distributed_vllm",
             "distributed vLLM capability must bind vLLM and an exact rank topology",
         )
+    launch = distributed.get("launch")
+    rendezvous = launch.get("rendezvous") if isinstance(launch, Mapping) else None
+    profiles = launch.get("rank_profiles") if isinstance(launch, Mapping) else None
+    node_count = distributed.get("node_count")
+    endpoint_role = distributed.get("endpoint_role")
+    worker_role = distributed.get("worker_role")
+    if (
+        not isinstance(rendezvous, Mapping)
+        or rendezvous.get("master_role") != endpoint_role
+        or not isinstance(profiles, list)
+        or type(node_count) is not int
+        or len(profiles) != node_count
+        or any(not isinstance(profile, Mapping) for profile in profiles)
+        or [profile.get("rank") for profile in profiles] != list(range(node_count))
+        or profiles[0].get("role") != endpoint_role
+        or any(profile.get("role") != worker_role for profile in profiles[1:])
+    ):
+        raise CatalogContractError(
+            "catalog.distributed_vllm_launch",
+            "capabilities.distributed_vllm.launch",
+            "distributed vLLM launch profiles must bind every exact rank and rendezvous role",
+        )
 
 
 def _validate_patch_bundle(document: Mapping[str, object]) -> None:

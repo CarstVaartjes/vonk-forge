@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import base64
 import copy
+import json
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, delete, event
@@ -127,7 +129,6 @@ def runtime_distribution(
             "no_new_privileges": True,
             "capabilities": [],
         },
-        "sha256": "d" * 64,
     }
 
 
@@ -378,6 +379,13 @@ def test_harness_resolution_keeps_source_bundle_separate_from_catalog_entities(
         "expected_bytes": 2048,
         "media_type": "application/vnd.vonk-forge.source-bundle.v1+tar",
     }
+
+
+def test_runtime_distribution_identity_has_no_self_asserted_digest() -> None:
+    root = Path(__file__).resolve().parents[2]
+    for path in sorted((root / "config/runtime-distributions").glob("*.json")):
+        document = json.loads(path.read_text(encoding="utf-8"))
+        assert "sha256" not in document
 
 
 def test_distribution_resolution_requires_its_exact_implemented_harness(

@@ -156,7 +156,6 @@ def test_runtime_distribution_requires_one_exact_implemented_harness() -> None:
             "no_new_privileges": True,
             "capabilities": [],
         },
-        "sha256": "d" * 64,
     }
 
     validate_catalog_document(document)

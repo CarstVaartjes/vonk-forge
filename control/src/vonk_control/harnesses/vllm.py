@@ -110,6 +110,7 @@ class VllmHarnessCompiler:
         tensor = int(str(parsed.get("--tensor-parallel-size", "1")))
         pipeline = int(str(parsed.get("--pipeline-parallel-size", "1")))
         distributed: tuple[str, ...] = ()
+        rank_environment: tuple[tuple[str, str], ...] = ()
         if mode == "distributed":
             capability = distribution.get("capabilities")
             implementation = (
@@ -150,6 +151,53 @@ class VllmHarnessCompiler:
                 raise HarnessCompileError(
                     "vLLM arguments conflict with distributed parallelism"
                 )
+            launch = implementation.get("launch")
+            rendezvous = (
+                launch.get("rendezvous") if isinstance(launch, Mapping) else None
+            )
+            profiles = (
+                launch.get("rank_profiles") if isinstance(launch, Mapping) else None
+            )
+            profile = (
+                profiles[rank]
+                if isinstance(profiles, list) and 0 <= rank < len(profiles)
+                else None
+            )
+            fabric_environment = (
+                profile.get("environment") if isinstance(profile, Mapping) else None
+            )
+            expected_environment = {
+                "GLOO_SOCKET_IFNAME",
+                "NCCL_IB_GID_INDEX",
+                "NCCL_IB_HCA",
+                "NCCL_SOCKET_IFNAME",
+                "TP_SOCKET_IFNAME",
+            }
+            if (
+                not isinstance(rendezvous, Mapping)
+                or rendezvous
+                != {
+                    "local_address_environment": "VONK_LOCAL_ADDR",
+                    "master_address_environment": "VONK_MASTER_ADDR",
+                    "master_port_environment": "VONK_MASTER_PORT",
+                    "master_role": "entrypoint",
+                }
+                or not isinstance(profiles, list)
+                or len(profiles) != node_count
+                or not isinstance(profile, Mapping)
+                or profile.get("rank") != rank
+                or profile.get("role") != role
+                or not isinstance(fabric_environment, Mapping)
+                or set(fabric_environment) != expected_environment
+                or any(type(value) is not str or not value for value in fabric_environment.values())
+            ):
+                raise HarnessCompileError(
+                    "vLLM distributed topology requires a complete launch contract"
+                )
+            rank_environment = tuple(
+                (name, str(fabric_environment[name]))
+                for name in sorted(expected_environment)
+            )
             distributed = (
                 "--tensor-parallel-size",
                 str(parallelism["tensor"]),
@@ -200,6 +248,7 @@ class VllmHarnessCompiler:
                 }
             ),
         )
+        environment = (*environment, *rank_environment)
         return projection(
             slug=self.slug,
             command=(

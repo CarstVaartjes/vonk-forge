@@ -253,7 +253,6 @@ def _distribution(slug: str, harness: dict[str, object]) -> dict[str, object]:
             "no_new_privileges": True,
             "capabilities": [],
         },
-        "sha256": "d" * 64,
     }
 
 

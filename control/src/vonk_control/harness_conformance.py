@@ -499,7 +499,6 @@ def _documents(slug: str) -> tuple[dict[str, object], dict[str, object]]:
             "no_new_privileges": True,
             "capabilities": [],
         },
-        "sha256": "d" * 64,
     }
     return harness, distribution
 

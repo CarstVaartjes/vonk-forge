@@ -116,13 +116,11 @@ def test_mia_runbook_distinguishes_image_receipts_from_model_loading() -> None:
     text = _normalized_text(MIA_TWO_SPARK)
 
     for required in (
-        "18,908,041,728-byte runtime image",
-        "155.43 GiB model checkpoint",
+        "ghcr.io/anemll/dspark-vllm-gx10@sha256:a83948492cf13df455170fb42885f5ef4db54fefe0feff0f841ecbff464ac9d8",
+        "166,898,666,055-byte model checkpoint",
         "does not redownload",
-        "new signed import receipt",
         "full digest verification",
-        "not a release SLA",
-        "146 seconds",
+        "Task 9",
     ):
         assert required in text
 
@@ -394,15 +392,13 @@ def test_complete_development_workload_runbook_has_every_operator_phase() -> Non
     assert "docs/operations/agent-package-release.md#install-the-dev-channel" in text
     assert "vonk-agent pair" in text
     assert "scripts/qualify-development-model" in text
-    for phase in ("synthetic", "model-single", "model-multinode"):
+    for phase in ("model-single", "model-multinode"):
         assert f"--phase {phase}" in text
-    for checkpoint in (
-        "inference-ok",
-        "rank-failure-observed",
-        "route-withdrawn-after-failure",
-        "inference-recovered",
-    ):
-        assert f"--stop-after {checkpoint}" in text
+    assert "--level container" in text
+    assert "config/recipes/deepseek-v4-flash-0731-ds4-single.json" in text
+    assert "config/recipes/deepseek-v4-flash-0731-mia-dual.json" in text
+    assert "config/recipes/development" not in text
+    assert "--stop-after" not in text
 
 
 def test_multinode_rendezvous_firewall_is_direct_fabric_only() -> None:
@@ -423,16 +419,11 @@ def test_multinode_rendezvous_firewall_is_direct_fabric_only() -> None:
 def test_model_smoke_records_public_arm64_fabric_transport_identity() -> None:
     text = _normalized_text(DEVELOPMENT_MODEL_SMOKE)
 
-    assert "Public multi-architecture OCI index" in text
-    assert (
-        "sha256:fc6dddc4c44b1bfe37f41cae8e67d1693828e8f42a91862816d7953e2c9d3f23"
-        in text
-    )
-    assert "linux/arm64/v8" in text
-    assert (
-        "sha256:97d3fa0415c6749d4b27849c2bf251ac11fe2ec7d3178a2dae4bbf3bd30056fc"
-        in text
-    )
+    assert "linux/arm64" in text
+    assert "84cc882352757baf628a1776badf7cc54d584e28" in text
+    assert "e7f04037032990db0346398d249baf9fb9df1ccc" in text
+    assert "ca22ae2f838e14077c22bc1c1417b71b45b5e5a3687bd96c2ac6e17fdb6261c0" in text
+    assert "7e319924541db3f7a163ed7e11d7532a70d48228ab59d36cb81e1d4511885360" in text
 
 
 def test_model_commands_bind_private_qualification_and_runtime_evidence() -> None:
@@ -440,16 +431,14 @@ def test_model_commands_bind_private_qualification_and_runtime_evidence() -> Non
 
     for phase in ("model-single", "model-multinode"):
         command = next(block for block in blocks if f"--phase {phase}" in block)
-        assert (
-            "--qualification-file "
-            "'<EVIDENCE_DIRECTORY>/model-qualification.json'"
-        ) in command
+        assert "--level container" in command
+        assert "--evidence-file '<EVIDENCE_DIRECTORY>/" in command
 
     normalized = _normalized_text(DEV_WORKLOADS)
-    assert "private qualification SHA-256" in normalized
-    assert "build and distribution evidence" in normalized
-    assert "per-node runtime artifact evidence" in normalized
-    assert "retained by the acceptance runner" in normalized
+    assert "canonical qualification evidence" in normalized
+    assert "build, start, health, invocation, bounded stop, and restart" in normalized
+    assert "rank-loss route withdrawal" in normalized
+    assert "worker-first recovery" in normalized
 
 
 def test_latest_mia_runbook_is_exact_reproducible_and_secret_free() -> None:
@@ -458,14 +447,13 @@ def test_latest_mia_runbook_is_exact_reproducible_and_secret_free() -> None:
 
     for value in (
         "f752cd04ab30f2cf42077dd8811a5e1e682d63e7",
-        "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
-        "166898660330",
-        "mia-mit",
-        "VONK_HOST_ENDPOINT_PORTS=8888",
-        "check-host-port 8888",
-        "--recipe config/recipes/development/mia-deepseek-v4-flash.json",
+        "47503f8e38dadd4dededca798150db2619594fce",
+        "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
+        "166898666055",
+        "a83948492cf13df455170fb42885f5ef4db54fefe0feff0f841ecbff464ac9d8",
+        "--recipe config/recipes/deepseek-v4-flash-0731-mia-dual.json",
         "--phase model-multinode",
-        "--stop-after inference-ok",
+        "--level container",
     ):
         assert value in text
     assert "No Hugging Face token" in normalized
@@ -474,8 +462,9 @@ def test_latest_mia_runbook_is_exact_reproducible_and_secret_free() -> None:
     assert "one exact retry" in normalized.lower()
     assert "same installation identity" in normalized.lower()
     assert "immutable model and image caches" in normalized.lower()
-    assert "derives the fabric interface directly from `/sys/class/infiniband`" in normalized
-    assert "does not depend on `iproute2` inside the runtime image" in normalized
+    assert "VONK_MASTER_ADDR" in text
+    assert "NCCL_IB_HCA" in text
+    assert "no startup patching" in normalized.lower()
 
 
 def test_secret_docs_separate_local_backup_from_exact_nas_projection() -> None:
@@ -511,8 +500,9 @@ def test_complete_runbook_keeps_access_loopback_tokens_private_and_evidence_loca
 
     assert "-L <LOCAL_API_PORT>:127.0.0.1:8080" in text
     assert "-L <LOCAL_INFERENCE_PORT>:127.0.0.1:4000" in text
-    assert "--admin-token-file" in text
-    assert "--inference-token-file" in text
+    assert "scripts/dev-admin-token" in text
+    assert "<EVIDENCE_DIRECTORY>/admin-token" in text
+    assert "<LOCAL_SECRETS_DIR>/litellm-master-key" in text
     assert "mode `0600`" in normalized
     assert ".state/development-acceptance/" in text
     assert "must not be committed" in normalized

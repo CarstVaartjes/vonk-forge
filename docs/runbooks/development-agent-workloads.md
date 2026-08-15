@@ -425,27 +425,22 @@ starting a workload. Retain only bounded API output in the evidence directory.
 
 ## Synthetic lifecycle
 
-Run the deterministic source-only fixture through every public API stage:
+The deleted prototype acceptance catalog and its `synthetic` phase are no
+longer supported. Structural qualification now enters through the same native
+v1 recipe contract as container qualification. This command is architecture
+independent and does not contact a registry or model repository:
 
 ```bash
 cd '<REPOSITORY_CHECKOUT>'
-scripts/run-development-slices \
-  --api-base 'http://127.0.0.1:<LOCAL_API_PORT>' \
-  --inference-base 'http://127.0.0.1:<LOCAL_INFERENCE_PORT>' \
-  --admin-token-file '<EVIDENCE_DIRECTORY>/admin-token' \
-  --inference-token-file '<LOCAL_SECRETS_DIR>/litellm-master-key' \
-  --phase synthetic \
-  --builder-node '<SPARK_1_NODE_ID>' \
-  --target-node '<SPARK_1_NODE_ID>' \
-  --evidence-file '<EVIDENCE_DIRECTORY>/synthetic-1.json'
+scripts/qualify-development-model \
+  --recipe config/recipes/deepseek-v4-flash-0731-ds4-single.json \
+  --level structural \
+  --output '<EVIDENCE_DIRECTORY>/ds4-structural.json'
 ```
 
-The final states must include source verification, image build/distribution,
-install, run, route publication, exact deterministic inference, stop, route
-withdrawal, and uninstall. Restart the NAS stack and both agent supervisors,
-wait for fresh inventory, then run the same phase with
-`synthetic-2.json`. Existing immutable source/artifact content may be reused;
-the accepted receipts and final normal cleanup must still be complete.
+Structural evidence proves strict catalog references, immutable input
+identities, compiler compatibility, and adapter selection. It is not container
+or physical acceptance.
 
 Recipe image distribution uses bounded 8 MiB range requests from the
 controller's content-addressed store. The controller verifies the complete
@@ -468,16 +463,12 @@ model, or agent-state volumes to clear this state.
 
 ## Real single-node model
 
-Create `model-qualification-input.json` from fresh read-only observations. It
-contains no credentials: anonymous image platform/label/user/public-pull
-results; accepted license IDs; both certificate-bound node IDs; architecture,
-OS, GPU/compute/CUDA code, rootless Podman status, available memory/disk,
-successful Spark Docker/NVIDIA CDI runtime status (`docker_gpu_runtime: true`),
-management CIDRs, active fabric CIDRs/bandwidth; and the exact artifact
-IDs/revisions/SHA-256/byte counts from
-`config/recipes/development/model-smoke-artifacts.json`. The later agent install
-independently downloads within the byte budget and hashes every HTTP artifact;
-the qualification document is not a substitute for that receipt.
+The native DS4 recipe is
+`config/recipes/deepseek-v4-flash-0731-ds4-single.json`. It binds the canonical
+DS4 source, runtime distribution, imatrix target GGUF, and DSpark support GGUF
+by immutable revision and digest. Model artifacts must already exist beneath
+the selected artifact root; container qualification performs no network
+fetches.
 
 Fail closed unless the exact generic DS4 runtime above is anonymously public,
 the checked source runtime and the wrapper's sole `FROM` match it, and every
@@ -488,46 +479,37 @@ already provides `/opt/vonk/busybox`. Then qualify:
 ```bash
 cd '<REPOSITORY_CHECKOUT>'
 scripts/qualify-development-model \
-  --evidence '<EVIDENCE_DIRECTORY>/model-qualification-input.json' \
-  --output '<EVIDENCE_DIRECTORY>/model-qualification.json'
+  --recipe config/recipes/deepseek-v4-flash-0731-ds4-single.json \
+  --level structural \
+  --output '<EVIDENCE_DIRECTORY>/ds4-structural.json'
 ```
 
-Run to the first successful inference and pause:
+On a supported linux/arm64 Spark with Docker and the installed artifacts, run
+the full container path:
 
 ```bash
 scripts/run-development-slices \
-  --api-base 'http://127.0.0.1:<LOCAL_API_PORT>' \
-  --inference-base 'http://127.0.0.1:<LOCAL_INFERENCE_PORT>' \
-  --admin-token-file '<EVIDENCE_DIRECTORY>/admin-token' \
-  --inference-token-file '<LOCAL_SECRETS_DIR>/litellm-master-key' \
   --phase model-single \
-  --qualification-file '<EVIDENCE_DIRECTORY>/model-qualification.json' \
-  --builder-node '<SPARK_1_NODE_ID>' \
-  --target-node '<SPARK_1_NODE_ID>' \
+  --level container \
+  --engine docker \
+  --artifact-root '<MODEL_ARTIFACT_ROOT>' \
   --evidence-file '<EVIDENCE_DIRECTORY>/model-single.json' \
-  --timeout-seconds 1800 \
-  --stop-after inference-ok
+  --timeout-seconds 1800
 ```
 
-The timeout covers a cold 2,592,110,592-byte runtime-image build and transfer.
-It does not describe container size plus model size: the 86,720,111,488-byte
-base and 6,971,241,504-byte drafter remain separate immutable cache objects.
-An exact verified cache hit must not download either model again.
-
-Now perform the restart actions in the next section. Resume with the identical
-command and evidence path, omitting `--stop-after`; the runner proves route and
-inference persistence, then stops, withdraws, and uninstalls normally.
+The canonical qualification evidence records build, start, health, invocation,
+bounded stop, and restart. The 86,720,111,488-byte target and
+5,989,114,272-byte support model remain separate immutable cache objects. An
+exact verified cache hit must not download either model again.
 
 ## Real multi-node failure and recovery
 
-The `pair` profile is a replicated service gang, not distributed DS4 inference.
-Before either independent DS4 server starts, rank 0 opens the published
-`VONK_MASTER_ADDR:VONK_MASTER_PORT` coordinator and rank 1 sends a versioned
-HELLO containing its authenticated `VONK_LOCAL_ADDR`; rank 0 records the
-bounded message and returns a versioned acknowledgement. Both ranks fail
-closed if this real TCP exchange does not complete. The rank-0 coordinator
-remains available while its DS4 process runs so restarting rank 1 repeats the
-same pre-launch exchange. Only rank 0 owns the routed inference endpoint.
+The native Mia recipe is genuine vLLM multiprocessing tensor parallelism with
+world size 2, not a replicated DS4 service. The runtime compiler projects
+rank-specific local/master rendezvous addresses and the exact HCA, socket, and
+GID environment from the verified distribution capability. Rank 1 runs
+headless; only rank 0 owns the routed inference endpoint. The selected input is
+`config/recipes/deepseek-v4-flash-0731-mia-dual.json`.
 
 Accepted workloads use the Spark-provided Docker/NVIDIA runtime on an isolated
 Docker bridge. Only the endpoint-owning rank publishes its model endpoint on
@@ -578,23 +560,16 @@ An empty or partial client is intentionally rejected after the bounded
 `VONK_FABRIC_RENDEZVOUS_SECONDS` read timeout. It is not positive-path
 evidence and must not terminate the persistent coordinator.
 
-Start both ranks and pause after inference through the sole entrypoint:
+Run the complete two-rank path through the sole entrypoint:
 
 ```bash
 scripts/run-development-slices \
-  --api-base 'http://127.0.0.1:<LOCAL_API_PORT>' \
-  --inference-base 'http://127.0.0.1:<LOCAL_INFERENCE_PORT>' \
-  --admin-token-file '<EVIDENCE_DIRECTORY>/admin-token' \
-  --inference-token-file '<LOCAL_SECRETS_DIR>/litellm-master-key' \
   --phase model-multinode \
-  --qualification-file '<EVIDENCE_DIRECTORY>/model-qualification.json' \
-  --builder-node '<SPARK_1_NODE_ID>' \
-  --target-node '<SPARK_1_NODE_ID>' \
-  --target-node '<SPARK_2_NODE_ID>' \
-  --failure-node '<SPARK_2_NODE_ID>' \
+  --level container \
+  --engine docker \
+  --artifact-root '<MODEL_ARTIFACT_ROOT>' \
   --evidence-file '<EVIDENCE_DIRECTORY>/model-multinode.json' \
-  --timeout-seconds 1800 \
-  --stop-after inference-ok
+  --timeout-seconds 1800
 ```
 
 Read the non-secret run ID from the acceptance evidence and stop only the
@@ -613,14 +588,8 @@ ssh '<SPARK_2_SSH_TARGET>' sudo docker stop "vonk-$RUN_ID"
 ```
 
 The authenticated agent submits complete local run snapshots no more than ten
-seconds apart while a managed run exists. Resume the exact runner command with:
-
-```text
---stop-after route-withdrawn-after-failure
-```
-
-The resumed runner first records `--stop-after rank-failure-observed`, proves
-both agents remain healthy, and then requires the route to disappear. Recover
+seconds apart while a managed run exists. The distributed lifecycle consumer
+must observe the failed rank and withdraw the route before recovery. Recover
 the exact stopped rank without rebuilding or deleting its managed state:
 
 ```bash
@@ -632,22 +601,16 @@ coordinator. A recipe runbook may instead require a coordinated restart of all
 exact managed containers in the gang. Follow that recipe-specific rule while
 preserving the same run ID, containers, installation, and caches.
 
-Wait for its health endpoint and next authenticated snapshot, then resume with:
+The lifecycle consumer performs bounded worker-first recovery, starts the
+endpoint owner last, and republishes only after both ranks have fresh healthy
+evidence. Container qualification behaviorally verifies rank-loss route
+withdrawal and worker-first recovery. Do not stop an agent, remove a container,
+delete a cache/model directory, replace an identity, or delete a named volume
+to simulate rank failure outside the controlled qualification path.
 
-```text
---stop-after inference-recovered
-```
-
-This proves both ranks are fresh, the sole route is republished, and inference
-works again. Do not stop an agent, remove a container, delete a cache/model
-directory, replace an identity, or delete a named volume to simulate rank
-failure.
-
-For both model phases, the private qualification SHA-256, build and distribution
-evidence, and per-node runtime artifact evidence are retained by the acceptance
-runner in the phase evidence file. Keep the qualification document and phase
-evidence private even though their recorded public artifact identities are
-non-secret.
+For both model phases, canonical qualification evidence is written atomically
+with mode `0600`. Keep it private even though its recorded public artifact
+identities are non-secret.
 
 Managed model containers retain a read-only root filesystem. The signed host
 helper adds exactly one 1 GiB `/tmp` tmpfs with `rw,nosuid,nodev,mode=1777` for
@@ -682,11 +645,10 @@ already started. For the multi-node checkpoint, restart both supervisors and
 repeat the same NAS project durability action after recovered inference. Keep
 all named volumes and do not pull a different cohort during this gate.
 
-Wait until the same two `spk_` identities and fresh inventory return. Resume
-the identical runner command and evidence file without `--stop-after`. It must
-observe a changed fleet evidence digest, advanced agent freshness, the still
-published route, and successful inference without rebuilding or redownloading
-immutable content.
+Wait until the same two `spk_` identities and fresh inventory return. Rerun the
+same native recipe qualification with a new evidence filename. It must use the
+same immutable recipe, model, source, and image identities without rebuilding
+or redownloading immutable content.
 
 ## Normal stop and uninstall
 

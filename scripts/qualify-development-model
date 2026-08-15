@@ -1,363 +1,94 @@
 #!/usr/bin/env python3
-"""Qualify immutable development model inputs against two-node evidence."""
+"""Write canonical native-v1 recipe qualification evidence for development."""
 
 from __future__ import annotations
 
 import argparse
-import hashlib
-import ipaddress
 import json
 import os
-import re
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any
 
-SHA256 = re.compile(r"[0-9a-f]{64}\Z")
-COMMIT = re.compile(r"[0-9a-f]{40}\Z")
-NODE = re.compile(r"spk_[0-9a-f]{32}\Z")
-IMAGE = re.compile(r"ghcr\.io/[a-z0-9._/-]+@sha256:[0-9a-f]{64}\Z")
-HUGGING_FACE_REPOSITORY = re.compile(
-    r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}/[A-Za-z0-9][A-Za-z0-9._-]{0,95}\Z"
-)
-MAXIMUM_DOCUMENT_BYTES = 2 * 1024 * 1024
+ROOT = Path(__file__).resolve().parents[1]
+QUALIFIER = ROOT / "scripts/qualify-recipe"
+DEFAULT_RECIPE = ROOT / "config/recipes/deepseek-v4-flash-0731-ds4-single.json"
 
 
-class Refusal(RuntimeError):
-    """A stable, secret-free qualification refusal."""
+def _arguments() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--recipe", type=Path, default=DEFAULT_RECIPE)
+    parser.add_argument("--level", choices=("structural", "container"), default="container")
+    parser.add_argument("--engine", default="docker")
+    parser.add_argument("--endpoint-host", default="127.0.0.1")
+    parser.add_argument("--artifact-root", type=Path, default=Path("/var/lib/vonk/models"))
+    parser.add_argument("--timeout-seconds", type=float, default=300.0)
+    parser.add_argument("--output", type=Path, required=True)
+    return parser.parse_args()
 
 
-def _canonical(value: object) -> bytes:
-    return (
-        json.dumps(
-            value,
-            ensure_ascii=False,
-            allow_nan=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-        + "\n"
-    ).encode()
-
-
-def _load(path: Path, label: str) -> dict[str, Any]:
-    try:
-        if path.is_symlink() or path.stat().st_size > MAXIMUM_DOCUMENT_BYTES:
-            raise Refusal(f"{label}.document")
-        value = json.loads(path.read_bytes())
-    except Refusal:
-        raise
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise Refusal(f"{label}.document") from error
-    if not isinstance(value, dict) or value.get("schema_version") != 1:
-        raise Refusal(f"{label}.document")
-    return value
-
-
-def _lower_sha(value: object) -> bool:
-    return isinstance(value, str) and SHA256.fullmatch(value) is not None
-
-
-def _int(value: object, reason: str) -> int:
-    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
-        raise Refusal(reason)
-    return value
-
-
-def _artifacts(document: dict[str, Any]) -> list[dict[str, Any]]:
-    raw = document.get("artifacts")
-    if not isinstance(raw, list) or not raw:
-        raise Refusal("artifact.document")
-    result: list[dict[str, Any]] = []
-    identifiers: set[str] = set()
-    for item in raw:
-        if not isinstance(item, dict):
-            raise Refusal("artifact.document")
-        identifier = item.get("id")
-        repository = item.get("repository")
-        revision = item.get("revision")
-        if not isinstance(identifier, str) or identifier in identifiers:
-            raise Refusal("artifact.identity")
-        identifiers.add(identifier)
-        kind = item.get("kind")
-        if not isinstance(repository, str):
-            raise Refusal("artifact.source")
-        if kind == "http.file":
-            if (
-                not isinstance(revision, str)
-                or not revision.startswith("sha256:")
-                or not _lower_sha(revision.removeprefix("sha256:"))
-            ):
-                raise Refusal("artifact.revision")
-            if re.search(r"/resolve/[0-9a-f]{40}/", repository) is None:
-                raise Refusal("artifact.source")
-        elif kind == "huggingface.snapshot":
-            if (
-                HUGGING_FACE_REPOSITORY.fullmatch(repository) is None
-                or not isinstance(revision, str)
-                or COMMIT.fullmatch(revision) is None
-            ):
-                raise Refusal("artifact.revision")
-        else:
-            raise Refusal("artifact.source")
-        if _int(item.get("bytes"), "artifact.bytes") == 0:
-            raise Refusal("artifact.bytes")
-        result.append(item)
-    return result
-
-
-def _validate_source(source: dict[str, Any]) -> str:
-    if COMMIT.fullmatch(str(source.get("commit", ""))) is None:
-        raise Refusal("source.commit")
-    repository = source.get("repository")
-    if (
-        not isinstance(repository, str)
-        or not repository.startswith("https://github.com/")
-        or repository.count("/") < 4
-    ):
-        raise Refusal("source.repository")
-    archive = source.get("archive_sha256")
-    if archive is not None and not _lower_sha(archive):
-        raise Refusal("source.archive")
-    image = source.get("runtime_image")
-    if not isinstance(image, str) or IMAGE.fullmatch(image) is None:
-        raise Refusal("source.runtime_image")
-    if (
-        source.get("runtime_interface_label") != "v1"
-        or source.get("runtime_user") != "10001:10001"
-    ):
-        raise Refusal("source.runtime_contract")
-    return image
-
-
-def _address(value: object, reason: str) -> ipaddress.IPv4Interface | ipaddress.IPv6Interface:
-    if not isinstance(value, str) or "/" not in value:
-        raise Refusal(reason)
-    try:
-        address = ipaddress.ip_interface(value)
-    except ValueError as error:
-        raise Refusal(reason) from error
-    if address.ip.is_loopback or address.ip.is_unspecified or address.ip.is_multicast:
-        raise Refusal(reason)
-    return address
-
-
-def _observed_artifacts(
-    value: object, expected: list[dict[str, Any]]
-) -> None:
-    if not isinstance(value, list) or len(value) != len(expected):
-        raise Refusal("artifact.identity")
-    by_id = {
-        item.get("id"): item for item in value if isinstance(item, dict)
-    }
-    if len(by_id) != len(expected):
-        raise Refusal("artifact.identity")
-    for artifact in expected:
-        observed = by_id.get(artifact["id"])
-        expected_observation = {
-            "id": artifact["id"],
-            "revision": artifact["revision"],
-            "bytes": artifact["bytes"],
-        }
-        if artifact["kind"] == "http.file":
-            expected_observation["sha256"] = artifact["revision"].removeprefix(
-                "sha256:"
-            )
-        elif artifact["kind"] == "huggingface.snapshot":
-            expected_observation["repository"] = artifact["repository"]
-        if not isinstance(observed, dict) or observed != expected_observation:
-            raise Refusal("artifact.identity")
-
-
-def _validate_node(
-    node: object,
-    topology: dict[str, Any],
-    image: str,
-    artifacts: list[dict[str, Any]],
-) -> tuple[str, str, frozenset[str], frozenset[str]]:
-    if not isinstance(node, dict):
-        raise Refusal("node.document")
-    node_id = node.get("node_id")
-    hostname = node.get("hostname")
-    if NODE.fullmatch(str(node_id)) is None or not isinstance(hostname, str) or not hostname:
-        raise Refusal("node.identity")
-    for field, reason in [
-        ("architecture", "node.architecture"),
-        ("os_id", "node.os"),
-        ("os_version", "node.os"),
-        ("gpu", "node.gpu"),
-        ("compute_capability", "node.compute_capability"),
-    ]:
-        if node.get(field) != topology.get(field):
-            raise Refusal(reason)
-    codes = node.get("cuda_codes")
-    if not isinstance(codes, list) or topology.get("cuda_code") not in codes:
-        raise Refusal("node.cuda_code")
-    if node.get("podman_rootless") is not True:
-        raise Refusal("node.rootless_podman")
-    if node.get("docker_gpu_runtime") is not True:
-        raise Refusal("node.spark_docker_nvidia")
-    if _int(node.get("memory_available_bytes"), "node.memory") < _int(
-        topology.get("minimum_memory_available_bytes"), "topology.memory"
-    ):
-        raise Refusal("node.memory")
-    if _int(node.get("disk_available_bytes"), "node.disk") < _int(
-        topology.get("minimum_disk_available_bytes"), "topology.disk"
-    ):
-        raise Refusal("node.disk")
-    if node.get("runtime_image") != image:
-        raise Refusal("image.identity")
-    _observed_artifacts(node.get("artifacts"), artifacts)
-    management = _address(node.get("management_address"), "node.management")
-    raw_fabric = node.get("fabric")
-    if not isinstance(raw_fabric, list) or not raw_fabric:
-        raise Refusal("node.fabric")
-    valid_fabric = False
-    fabric_networks: set[str] = set()
-    fabric_addresses: set[str] = set()
-    for link in raw_fabric:
-        if not isinstance(link, dict):
-            raise Refusal("node.fabric")
-        fabric = _address(link.get("address"), "node.fabric")
-        if fabric.network.overlaps(management.network):
-            raise Refusal("node.fabric_overlap")
-        if (
-            link.get("state") == "active"
-            and _int(link.get("bandwidth_mbps"), "node.fabric")
-            >= _int(
-                topology.get("minimum_fabric_bandwidth_mbps"), "topology.fabric"
-            )
-        ):
-            valid_fabric = True
-            fabric_networks.add(str(fabric.network))
-            fabric_addresses.add(str(fabric.ip))
-    if not valid_fabric:
-        raise Refusal("node.fabric")
-    return (
-        str(node_id),
-        hostname,
-        frozenset(fabric_networks),
-        frozenset(fabric_addresses),
+def _atomic_write(path: Path, payload: bytes) -> None:
+    destination = path.resolve()
+    if destination.exists() and destination.is_symlink():
+        raise OSError("output path is a symlink")
+    destination.parent.mkdir(parents=False, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{destination.name}.", dir=destination.parent
     )
-
-
-def qualify(
-    source: dict[str, Any],
-    artifact_document: dict[str, Any],
-    topology: dict[str, Any],
-    evidence: dict[str, Any],
-) -> dict[str, object]:
-    image = _validate_source(source)
-    artifacts = _artifacts(artifact_document)
-    image_evidence = evidence.get("runtime_image")
-    if not isinstance(image_evidence, dict):
-        raise Refusal("image.evidence")
-    if image_evidence.get("reference") != image:
-        raise Refusal("image.identity")
-    platforms = image_evidence.get("platforms")
-    if not isinstance(platforms, list) or "linux/arm64" not in platforms:
-        raise Refusal("image.arm64_manifest")
-    if image_evidence.get("public_pull") is not True:
-        raise Refusal("image.public_pull")
-    if (
-        image_evidence.get("runtime_interface_label")
-        != source.get("runtime_interface_label")
-        or image_evidence.get("user") != source.get("runtime_user")
-    ):
-        raise Refusal("image.runtime_contract")
-    required_licenses = artifact_document.get("license_ids")
-    accepted_licenses = evidence.get("accepted_licenses")
-    if (
-        not isinstance(required_licenses, list)
-        or source.get("license_id") not in required_licenses
-        or not isinstance(accepted_licenses, list)
-        or not set(required_licenses).issubset(set(accepted_licenses))
-    ):
-        raise Refusal("license.acknowledgement")
-    nodes = evidence.get("nodes")
-    required_nodes = _int(topology.get("multinode_nodes"), "topology.nodes")
-    if not isinstance(nodes, list) or len(nodes) != required_nodes:
-        raise Refusal("node.count")
-    identities = [
-        _validate_node(node, topology, image, artifacts) for node in nodes
-    ]
-    node_ids = [identity[0] for identity in identities]
-    hostnames = [identity[1] for identity in identities]
-    if len(set(node_ids)) != len(node_ids) or len(set(hostnames)) != len(hostnames):
-        raise Refusal("node.identity")
-    common_fabric = set(identities[0][2]).intersection(
-        *(identity[2] for identity in identities[1:])
-    )
-    fabric_addresses = [
-        address for identity in identities for address in identity[3]
-    ]
-    if not common_fabric or len(fabric_addresses) != len(set(fabric_addresses)):
-        raise Refusal("node.fabric_identity")
-    if topology.get("single_nodes") not in (0, 1) or required_nodes != 2:
-        raise Refusal("topology.nodes")
-    return {
-        "schema_version": 1,
-        "status": "qualified",
-        "runtime_image": image,
-        "source_sha256": hashlib.sha256(_canonical(source)).hexdigest(),
-        "artifact_set_sha256": hashlib.sha256(_canonical(artifacts)).hexdigest(),
-        "topology_sha256": hashlib.sha256(_canonical(topology)).hexdigest(),
-        "evidence_sha256": hashlib.sha256(_canonical(evidence)).hexdigest(),
-        "single_node": node_ids[0],
-        "multinode_nodes": node_ids,
-    }
-
-
-def _write(path: Path, document: dict[str, object]) -> None:
-    if not path.is_absolute() or path.is_symlink():
-        raise Refusal("output.path")
-    path.parent.mkdir(parents=False, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     temporary = Path(temporary_name)
     try:
         os.fchmod(descriptor, 0o600)
         with os.fdopen(descriptor, "wb", closefd=True) as stream:
             descriptor = -1
-            stream.write(_canonical(document))
+            stream.write(payload)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, path)
+        os.replace(temporary, destination)
     finally:
         if descriptor >= 0:
             os.close(descriptor)
         temporary.unlink(missing_ok=True)
 
 
-def _parser() -> argparse.ArgumentParser:
-    root = Path(__file__).resolve().parents[1]
-    config = root / "config/recipes/development"
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source", type=Path, default=config / "model-smoke-source.json")
-    parser.add_argument("--artifacts", type=Path, default=config / "model-smoke-artifacts.json")
-    parser.add_argument("--topology", type=Path, default=config / "model-smoke-multinode.json")
-    parser.add_argument("--evidence", type=Path, required=True)
-    parser.add_argument("--output", type=Path, required=True)
-    return parser
-
-
 def main() -> int:
-    args = _parser().parse_args()
+    args = _arguments()
+    command = [
+        str(QUALIFIER),
+        "--recipe",
+        str(args.recipe),
+        "--level",
+        args.level,
+        "--engine",
+        args.engine,
+        "--endpoint-host",
+        args.endpoint_host,
+        "--artifact-root",
+        str(args.artifact_root),
+        "--timeout-seconds",
+        str(args.timeout_seconds),
+    ]
+    result = subprocess.run(
+        command,
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=args.timeout_seconds + 30,
+    )
     try:
-        result = qualify(
-            _load(args.source, "source"),
-            _load(args.artifacts, "artifact"),
-            _load(args.topology, "topology"),
-            _load(args.evidence, "evidence"),
-        )
-        _write(args.output, result)
-    except Refusal as error:
-        print(f"qualification refused: {error}", file=sys.stderr)
-        return 2
-    except OSError:
-        print("qualification refused: output.path", file=sys.stderr)
-        return 2
-    return 0
+        document = json.loads(result.stdout)
+        payload = (
+            json.dumps(document, allow_nan=False, sort_keys=True, separators=(",", ":"))
+            + "\n"
+        ).encode()
+        _atomic_write(args.output, payload)
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        print(f"native recipe qualification evidence failed: {error}", file=sys.stderr)
+        return 1
+    if result.stderr:
+        print(result.stderr.rstrip(), file=sys.stderr)
+    return result.returncode
 
 
 if __name__ == "__main__":

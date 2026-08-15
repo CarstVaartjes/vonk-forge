@@ -100,7 +100,39 @@
       "fabric": "nccl-roce",
       "endpoint_role": "entrypoint",
       "worker_role": "worker",
-      "rank_loss_withdraws_endpoint": true
+      "rank_loss_withdraws_endpoint": true,
+      "launch": {
+        "rendezvous": {
+          "local_address_environment": "VONK_LOCAL_ADDR",
+          "master_address_environment": "VONK_MASTER_ADDR",
+          "master_port_environment": "VONK_MASTER_PORT",
+          "master_role": "entrypoint"
+        },
+        "rank_profiles": [
+          {
+            "rank": 0,
+            "role": "entrypoint",
+            "environment": {
+              "GLOO_SOCKET_IFNAME": "enp1s0f1np1,enP2p1s0f1np1",
+              "NCCL_IB_GID_INDEX": "3",
+              "NCCL_IB_HCA": "=rocep1s0f1:1,roceP2p1s0f1:1",
+              "NCCL_SOCKET_IFNAME": "=enp1s0f1np1,enP2p1s0f1np1",
+              "TP_SOCKET_IFNAME": "enp1s0f1np1,enP2p1s0f1np1"
+            }
+          },
+          {
+            "rank": 1,
+            "role": "worker",
+            "environment": {
+              "GLOO_SOCKET_IFNAME": "enp1s0f1np1,enP2p1s0f1np1",
+              "NCCL_IB_GID_INDEX": "3",
+              "NCCL_IB_HCA": "=rocep1s0f1:1,roceP2p1s0f1:1",
+              "NCCL_SOCKET_IFNAME": "=enp1s0f1np1,enP2p1s0f1np1",
+              "TP_SOCKET_IFNAME": "enp1s0f1np1,enP2p1s0f1np1"
+            }
+          }
+        ]
+      }
     }
   },
   "security": {
@@ -108,6 +140,5 @@
     "user": "10001:10001",
     "no_new_privileges": true,
     "capabilities": []
-  },
-  "sha256": "a83948492cf13df455170fb42885f5ef4db54fefe0feff0f841ecbff464ac9d8"
+  }
 }

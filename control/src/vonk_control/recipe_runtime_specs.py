@@ -19,7 +19,6 @@ from .harnesses import HarnessRegistry
 from .harnesses.common import HarnessCompileError
 from .models import CatalogEntity, CatalogEntityRevision
 from .recipe_contract import (
-    recipe_content_sha256,
     recipe_references,
     recipe_topology,
     validate_recipe,
@@ -49,7 +48,6 @@ def compile_runtime_spec(
         raise RecipeRuntimeSpecError("mapped rank is invalid")
     references = recipe_references(document)
     model_version = references[0]
-    patch = references[3] if len(references) == 4 else None
     _require_resolved_entity(resolved_entities, "model_version", model_version)
     topology = recipe_topology(document)
     try:
@@ -69,12 +67,10 @@ def compile_runtime_spec(
     if binding is None:
         raise RecipeRuntimeSpecError("harness projection binding is missing")
     runtime = document["runtime"]
-    execution = document["execution"]
     interfaces = document["interfaces"]
     artifacts = document["artifacts"]
     if (
         not isinstance(runtime, Mapping)
-        or not isinstance(execution, Mapping)
         or not isinstance(interfaces, list)
         or not isinstance(artifacts, list)
     ):
@@ -91,53 +87,84 @@ def compile_runtime_spec(
     ]
     if not role_artifacts:
         raise RecipeRuntimeSpecError("mapped role has no runtime artifacts")
-    compiled_runtime = {
-        "execution_harness": copy.deepcopy(execution["harness"]),
-        "distribution": copy.deepcopy(runtime["distribution"]),
+    compiled_runtime: dict[str, object] = {
+        "interface": "vonk.runtime.v1",
+        "adapter": projection.slug,
+        "adapter_version": projection.contract_version,
         "image": (f"localhost/vonk/recipe-build-{recipe_build_id}@{image_digest}"),
         "architecture": projection.architecture,
         "entrypoint": list(projection.command),
         "arguments": [],
         "environment": [
-            {"name": name, "value": value} for name, value in projection.environment
+            {"name": name, "value": value, "secret": None}
+            for name, value in projection.environment
         ],
     }
-    mounts = [
-        {
-            "source": mount.source,
-            "target": mount.target,
-            "read_only": mount.read_only,
-            "isolated": mount.isolated,
+    if topology.get("mode") == "distributed":
+        distribution_document = getattr(
+            resolved_entities.get("runtime_distribution"), "document", None
+        )
+        capabilities = (
+            distribution_document.get("capabilities")
+            if isinstance(distribution_document, Mapping)
+            else None
+        )
+        implementation = (
+            capabilities.get("distributed_vllm")
+            if isinstance(capabilities, Mapping)
+            else None
+        )
+        launch = (
+            implementation.get("launch")
+            if isinstance(implementation, Mapping)
+            else None
+        )
+        rendezvous = launch.get("rendezvous") if isinstance(launch, Mapping) else None
+        if not isinstance(rendezvous, Mapping):
+            raise RecipeRuntimeSpecError("distributed launch contract is missing")
+        compiled_runtime["placement_environment"] = {
+            "local_address": rendezvous["local_address_environment"],
+            "master_address": rendezvous["master_address_environment"],
+            "master_port": rendezvous["master_port_environment"],
         }
-        for mount in (*projection.model_mounts, projection.output_mount)
-    ]
+    endpoint = next(
+        (
+            item
+            for item in interfaces
+            if isinstance(item, Mapping) and item.get("adapter") == "openai"
+        ),
+        None,
+    )
+    if not isinstance(endpoint, Mapping):
+        raise RecipeRuntimeSpecError("recipe endpoint is invalid")
+    lifecycle = runtime.get("lifecycle")
+    if not isinstance(lifecycle, Mapping):
+        raise RecipeRuntimeSpecError("recipe lifecycle is invalid")
     return {
-        "identity": {
-            "recipe_revision_sha256": recipe_content_sha256(document),
-            "model_version_sha256": model_version.content_sha256,
-            "harness_sha256": binding.harness_content_sha256,
-            "runtime_distribution_sha256": binding.distribution_content_sha256,
-            "patch_bundle_sha256": patch.content_sha256 if patch else None,
-        },
-        "topology": {
-            "name": topology["name"],
-            "node_count": topology["node_count"],
-            "rank": rank,
-            "role": role,
-        },
         "runtime": compiled_runtime,
         "artifacts": role_artifacts,
-        "interfaces": copy.deepcopy(interfaces),
+        "endpoint": {
+            "protocol": endpoint["adapter"],
+            "port": endpoint["port"],
+            "model_aliases": copy.deepcopy(endpoint["model_aliases"]),
+            "health_path": endpoint["health_path"],
+        },
         "security": {
-            "network_mode": projection.network_mode,
+            "devices": copy.deepcopy(runtime_security["devices"]),
             "user": projection.user,
-            "no_new_privileges": projection.no_new_privileges,
             "capabilities": list(projection.capabilities),
             "privileged": False,
             "host_network": runtime_security.get("host_network") is True,
-            "mounts": mounts,
+            "mounts": [
+                {"source": "model", "target": "/models", "read_only": True},
+                {"source": "state", "target": "/state", "read_only": False},
+            ],
         },
-        "lifecycle": copy.deepcopy(runtime["lifecycle"]),
+        "lifecycle": {
+            "pre_start": copy.deepcopy(lifecycle["pre_start"]),
+            "post_stop": copy.deepcopy(lifecycle["post_stop"]),
+            "stop_timeout_seconds": lifecycle["stop_timeout_seconds"],
+        },
     }
 
 

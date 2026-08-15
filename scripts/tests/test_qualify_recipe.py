@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -24,6 +27,96 @@ def _fake_engine(path: Path, architecture: str) -> Path:
     )
     engine.chmod(0o755)
     return engine
+
+
+def _behavioral_engine(path: Path, architecture: str = "arm64") -> tuple[Path, Path, Path]:
+    engine = path / "docker"
+    state = path / "engine-state.json"
+    log = path / "engine-log.jsonl"
+    state.write_text('{"running":[]}', encoding="utf-8")
+    engine.write_text(
+        f"""#!{sys.executable}
+import json
+import os
+import pathlib
+import sys
+
+state_path = pathlib.Path(os.environ["VONK_FAKE_ENGINE_STATE"])
+log_path = pathlib.Path(os.environ["VONK_FAKE_ENGINE_LOG"])
+arguments = sys.argv[1:]
+with log_path.open("a", encoding="utf-8") as stream:
+    stream.write(json.dumps(arguments, separators=(",", ":")) + "\\n")
+state = json.loads(state_path.read_text(encoding="utf-8"))
+running = set(state["running"])
+if arguments[:1] == ["info"]:
+    print({architecture!r})
+elif arguments[:1] == ["build"]:
+    print("qualified-image")
+elif arguments[:1] == ["run"]:
+    name = arguments[arguments.index("--name") + 1]
+    running.add(name)
+    print(name)
+elif arguments[:1] == ["inspect"]:
+    name = arguments[-1]
+    if name not in running:
+        raise SystemExit(1)
+    print("true")
+elif arguments[:1] in (["stop"], ["start"], ["rm"]):
+    name = arguments[-1]
+    if arguments[0] == "start":
+        running.add(name)
+    else:
+        running.discard(name)
+else:
+    raise SystemExit(97)
+state_path.write_text(json.dumps({{"running": sorted(running)}}), encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
+    engine.chmod(0o755)
+    return engine, state, log
+
+
+class _QualificationHandler(BaseHTTPRequestHandler):
+    state_path: Path
+    required_ranks: int
+
+    def log_message(self, _format: str, *_arguments: object) -> None:
+        pass
+
+    def _healthy(self) -> bool:
+        state = json.loads(self.state_path.read_text(encoding="utf-8"))
+        return len(state["running"]) == self.required_ranks
+
+    def _json(self, status: int, value: object) -> None:
+        body = json.dumps(value, separators=(",", ":")).encode()
+        self.send_response(status)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self) -> None:
+        if not self._healthy():
+            self._json(503, {"detail": "collective unavailable"})
+            return
+        self._json(200, {"data": [{"id": "deepseek-v4-flash-dspark"}]})
+
+    def do_POST(self) -> None:
+        if not self._healthy():
+            self._json(503, {"detail": "collective unavailable"})
+            return
+        length = int(self.headers.get("content-length", "0"))
+        request = json.loads(self.rfile.read(length))
+        assert request["max_tokens"] == 64
+        self._json(
+            200,
+            {
+                "choices": [
+                    {"message": {"role": "assistant", "content": "qualified"}}
+                ]
+            },
+        )
 
 
 def test_container_qualification_reports_non_arm64_as_limitation(
@@ -70,3 +163,149 @@ def test_structural_qualification_validates_both_native_recipes() -> None:
         assert payload["status"] == "passed"
         assert payload["passed"] is True
         assert payload["recipe"] == recipe.name
+
+
+def test_container_qualification_executes_generic_distributed_lifecycle(
+    tmp_path: Path,
+) -> None:
+    engine, state, log = _behavioral_engine(tmp_path)
+    artifacts = tmp_path / "models"
+    artifacts.mkdir()
+    recipe = json.loads(MIA.read_text(encoding="utf-8"))
+    recipe["identity"]["slug"] = "user-authored-vllm-two-node"
+    recipe["build"]["context"]["path"] = "adapters/deepseek/mia-vllm"
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _QualificationHandler)
+    _QualificationHandler.state_path = state
+    _QualificationHandler.required_ranks = 2
+    recipe["interfaces"][0]["port"] = server.server_port
+    recipe_path = tmp_path / "user-recipe.json"
+    recipe_path.write_text(json.dumps(recipe), encoding="utf-8")
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        result = subprocess.run(
+            [
+                str(SCRIPT),
+                "--recipe",
+                str(recipe_path),
+                "--level",
+                "container",
+                "--engine",
+                str(engine),
+                "--endpoint-host",
+                "127.0.0.1",
+                "--artifact-root",
+                str(artifacts),
+                "--timeout-seconds",
+                "5",
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+            env={
+                **os.environ,
+                "VONK_FAKE_ENGINE_STATE": str(state),
+                "VONK_FAKE_ENGINE_LOG": str(log),
+                "PYTHONDONTWRITEBYTECODE": "1",
+            },
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    evidence = json.loads(result.stdout)
+    assert evidence["passed"] is True
+    assert evidence["recipe"] == "user-authored-vllm-two-node"
+    assert [step["check"] for step in evidence["steps"]] == [
+        "image.build",
+        "runtime.start",
+        "collective.two-ranks",
+        "endpoint-owner.ready",
+        "chat.invoke",
+        "runtime.stop",
+        "runtime.restart",
+        "rank-loss.withdrawal",
+        "rank-recovery.healthy",
+        "chat.recovered",
+        "runtime.cleanup",
+    ]
+    calls = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+    starts = [call for call in calls if call[:1] == ["run"]]
+    assert len(starts) == 6
+    assert all(
+        sum("dst=/models" in value for value in call) == 1 for call in starts
+    )
+    assert "worker" in starts[0][starts[0].index("--name") + 1]
+    assert "entrypoint" in starts[1][starts[1].index("--name") + 1]
+    rank_loss_stop = next(
+        index
+        for index, call in enumerate(calls)
+        if call[:1] == ["stop"] and "worker" in call[-1]
+    )
+    recovery_worker = next(
+        index
+        for index, call in enumerate(calls[rank_loss_stop + 1 :], rank_loss_stop + 1)
+        if call[:1] == ["run"] and "worker" in call[call.index("--name") + 1]
+    )
+    recovery_owner = next(
+        index
+        for index, call in enumerate(calls[recovery_worker + 1 :], recovery_worker + 1)
+        if call[:1] == ["run"] and "entrypoint" in call[call.index("--name") + 1]
+    )
+    assert recovery_worker < recovery_owner
+    assert json.loads(state.read_text(encoding="utf-8")) == {"running": []}
+
+
+def test_container_qualification_is_fail_closed_on_failed_invocation(
+    tmp_path: Path,
+) -> None:
+    engine, state, log = _behavioral_engine(tmp_path)
+    artifacts = tmp_path / "models"
+    artifacts.mkdir()
+    recipe = json.loads(DS4.read_text(encoding="utf-8"))
+    recipe["build"]["context"]["path"] = "adapters/deepseek/ds4"
+    recipe["interfaces"][0]["port"] = 65432
+    recipe_path = tmp_path / "unhealthy.json"
+    recipe_path.write_text(json.dumps(recipe), encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            str(SCRIPT),
+            "--recipe",
+            str(recipe_path),
+            "--level",
+            "container",
+            "--engine",
+            str(engine),
+            "--endpoint-host",
+            "127.0.0.1",
+            "--artifact-root",
+            str(artifacts),
+            "--timeout-seconds",
+            "1",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+        env={
+            **os.environ,
+            "VONK_FAKE_ENGINE_STATE": str(state),
+            "VONK_FAKE_ENGINE_LOG": str(log),
+            "PYTHONDONTWRITEBYTECODE": "1",
+        },
+    )
+
+    assert result.returncode == 1
+    evidence = json.loads(result.stdout)
+    assert evidence["passed"] is False
+    assert evidence["status"] == "failed"
+    assert json.loads(state.read_text(encoding="utf-8")) == {"running": []}
+    calls = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+    start = next(call for call in calls if call[:1] == ["run"])
+    assert sum("dst=/models" in value for value in start) == 1

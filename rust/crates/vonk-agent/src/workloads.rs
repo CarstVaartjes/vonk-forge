@@ -30,6 +30,16 @@ pub struct RuntimeSpec {
     pub entrypoint: Vec<String>,
     pub arguments: Vec<RuntimeArgument>,
     pub environment: Vec<RuntimeEnvironment>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placement_environment: Option<PlacementEnvironmentSpec>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PlacementEnvironmentSpec {
+    pub local_address: String,
+    pub master_address: String,
+    pub master_port: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -217,6 +227,13 @@ impl RuntimeSpec {
             {
                 return Err(WorkloadError::Invalid("runtime environment"));
             }
+        }
+        if self.placement_environment.as_ref().is_some_and(|binding| {
+            binding.local_address != "VONK_LOCAL_ADDR"
+                || binding.master_address != "VONK_MASTER_ADDR"
+                || binding.master_port != "VONK_MASTER_PORT"
+        }) {
+            return Err(WorkloadError::Invalid("runtime placement environment"));
         }
         Ok(())
     }

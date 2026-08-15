@@ -17,6 +17,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
 
 from .cluster_mappings import ClusterMappingPlan, ClusterMappingService
+from .distributed_lifecycle import DistributedLifecycleError
+from .distributed_recovery import recovery_start_plan
 from .install_admission import InstallAdmissionService, InstallPlan
 from .models import (
     AgentOperation,
@@ -747,6 +749,7 @@ class RecipeOperationService:
                             )
                             for node in admitted.nodes
                         ),
+                        include_role=False,
                     ),
                     authority_digest=admitted.authority_digest,
                     now=now,
@@ -1391,6 +1394,7 @@ class RecipeOperationService:
                                     )
                                     for run_node in stop_nodes
                                 ),
+                                include_role=False,
                             ),
                             authority_digest=run.plan_digest,
                             now=now,
@@ -1404,11 +1408,62 @@ class RecipeOperationService:
             elif job.kind == "recipe.stop":
                 run = session.get(RecipeRun, owner_id)
                 assert run is not None
-                run.state = "failed" if failed else "stopped"
-                run.stopped_at = now if not failed else None
-                run.updated_at = now
-                if not failed:
-                    self._release(session, "run", owner_id, now)
+                recovery = None
+                recovery_error: DistributedLifecycleError | None = None
+                try:
+                    recovery = recovery_start_plan(job.payload, now=now)
+                except DistributedLifecycleError as error:
+                    recovery_error = error
+                if recovery is not None and not failed:
+                    phases, marker = recovery
+                    installation = session.get(
+                        RecipeInstallation, run.installation_id
+                    )
+                    revision = (
+                        session.get(
+                            LocalRecipeRevision, installation.recipe_revision_id
+                        )
+                        if installation is not None
+                        else None
+                    )
+                    if revision is None or revision.content_sha256 is None:
+                        raise RecipeOperationConflict(
+                            "distributed recovery authority is unavailable"
+                        )
+                    flattened = tuple(item for phase in phases for item in phase)
+                    self._queue_in_session(
+                        session,
+                        kind="recipe.start",
+                        owner_kind="run",
+                        owner_id=owner_id,
+                        plan_digest=run.plan_digest,
+                        actor=job.actor,
+                        request_id=str(
+                            uuid.uuid5(
+                                uuid.NAMESPACE_URL,
+                                f"vonk:distributed-recovery-start:{job.id}",
+                            )
+                        ),
+                        node_payloads=flattened,
+                        phases=phases,
+                        authority_digest=revision.content_sha256,
+                        now=now,
+                        job_context={"recovery": marker},
+                    )
+                    run.state = "starting"
+                    run.route_state = "withdrawn"
+                    run.route_error = "distributed recovery restarting"
+                    run.updated_at = now
+                    cleanup_queued = True
+                else:
+                    run.state = "failed" if failed or recovery_error else "stopped"
+                    run.stopped_at = now if not failed else None
+                    run.route_state = "withdrawn"
+                    if recovery_error is not None:
+                        run.route_error = str(recovery_error)[:512]
+                    run.updated_at = now
+                    if not failed:
+                        self._release(session, "run", owner_id, now)
             elif job.kind == "recipe.uninstall":
                 installation = session.get(RecipeInstallation, owner_id)
                 assert installation is not None
@@ -1800,6 +1855,7 @@ class RecipeOperationService:
         authority_digest: str,
         now: datetime,
         phases: Sequence[Sequence[tuple[str, Mapping[str, object]]]] | None = None,
+        job_context: Mapping[str, object] | None = None,
     ) -> Job:
         if not node_payloads:
             raise RecipeOperationConflict("operation group has no target nodes")
@@ -1833,6 +1889,10 @@ class RecipeOperationService:
                 ]
                 for group in phase_groups
             ]
+        if job_context is not None:
+            if set(job_context) & set(job_payload):
+                raise RecipeOperationConflict("operation context is invalid")
+            job_payload.update(json.loads(canonical_message(job_context)))
         job = Job(
             id=job_id,
             request_id=request_id,
@@ -1905,14 +1965,20 @@ def _topology_order(document: Mapping[str, object], key: str) -> tuple[str, ...]
 
 
 def _role_phases(
-    order: Sequence[str], node_payloads: Sequence[tuple[str, Mapping[str, object]]]
+    order: Sequence[str],
+    node_payloads: Sequence[tuple[str, Mapping[str, object]]],
+    *,
+    include_role: bool = True,
 ) -> tuple[tuple[tuple[str, Mapping[str, object]], ...], ...]:
     by_role: dict[str, list[tuple[str, Mapping[str, object]]]] = {}
     for node_id, payload in node_payloads:
         role = payload.get("role")
         if not isinstance(role, str):
             raise RecipeOperationConflict("operation role is invalid")
-        by_role.setdefault(role, []).append((node_id, payload))
+        projected = dict(payload)
+        if not include_role:
+            projected.pop("role")
+        by_role.setdefault(role, []).append((node_id, projected))
     if set(by_role) != set(order) or len(set(order)) != len(order):
         raise RecipeOperationConflict("operation topology order is invalid")
     return tuple(

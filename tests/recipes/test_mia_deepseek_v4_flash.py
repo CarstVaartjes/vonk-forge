@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import copy
+import importlib.util
 import json
+import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -142,7 +144,7 @@ def test_anemll_distribution_is_immutable_and_explicitly_verifies_tp2() -> None:
         "compressed_layers_bytes": 9_787_494_235,
     }
     capability = distribution["capabilities"]["distributed_vllm"]
-    assert capability == {
+    assert {key: value for key, value in capability.items() if key != "launch"} == {
         "verified": True,
         "mechanism": "vllm-mp",
         "topology_mode": "distributed",
@@ -155,6 +157,38 @@ def test_anemll_distribution_is_immutable_and_explicitly_verifies_tp2() -> None:
         "endpoint_role": "entrypoint",
         "worker_role": "worker",
         "rank_loss_withdraws_endpoint": True,
+    }
+    assert capability["launch"] == {
+        "rendezvous": {
+            "local_address_environment": "VONK_LOCAL_ADDR",
+            "master_address_environment": "VONK_MASTER_ADDR",
+            "master_port_environment": "VONK_MASTER_PORT",
+            "master_role": "entrypoint",
+        },
+        "rank_profiles": [
+            {
+                "rank": 0,
+                "role": "entrypoint",
+                "environment": {
+                    "GLOO_SOCKET_IFNAME": "enp1s0f1np1,enP2p1s0f1np1",
+                    "NCCL_IB_GID_INDEX": "3",
+                    "NCCL_IB_HCA": "=rocep1s0f1:1,roceP2p1s0f1:1",
+                    "NCCL_SOCKET_IFNAME": "=enp1s0f1np1,enP2p1s0f1np1",
+                    "TP_SOCKET_IFNAME": "enp1s0f1np1,enP2p1s0f1np1",
+                },
+            },
+            {
+                "rank": 1,
+                "role": "worker",
+                "environment": {
+                    "GLOO_SOCKET_IFNAME": "enp1s0f1np1,enP2p1s0f1np1",
+                    "NCCL_IB_GID_INDEX": "3",
+                    "NCCL_IB_HCA": "=rocep1s0f1:1,roceP2p1s0f1:1",
+                    "NCCL_SOCKET_IFNAME": "=enp1s0f1np1,enP2p1s0f1np1",
+                    "TP_SOCKET_IFNAME": "enp1s0f1np1,enP2p1s0f1np1",
+                },
+            },
+        ],
     }
 
 
@@ -185,6 +219,11 @@ def test_mia_patch_bundle_is_ordered_hashed_and_build_time_only() -> None:
     assert "ARG PATCHED_" not in dockerfile
     assert "apply-build-patches.py" in dockerfile
     assert "verify-patched-tree.py" in dockerfile
+    assert 'org.opencontainers.image.licenses="MIT AND Apache-2.0"' in dockerfile
+    assert "COPY licenses /opt/vonk/licenses" in dockerfile
+    assert {
+        path.name for path in (context / "licenses").iterdir() if path.is_file()
+    } == {"MiaAI-Lab-LICENSE", "vLLM-LICENSE", "vLLM-NOTICE"}
     assert dockerfile.rstrip().endswith("USER 10001:10001\nENTRYPOINT []")
     patcher = (context / "apply-build-patches.py").read_text(encoding="utf-8")
     for filename, digest in PATCH_SHA256.items():
@@ -294,6 +333,19 @@ def test_only_verified_distribution_owned_vllm_tp2_compiles() -> None:
             1,
         )
 
+    missing_launch = copy.deepcopy(distribution)
+    missing_launch["capabilities"]["distributed_vllm"].pop("launch", None)
+    with pytest.raises(HarnessCompileError, match="launch contract"):
+        VllmHarnessCompiler().compile(
+            recipe,
+            missing_launch,
+            patch,
+            {},
+            recipe["topology"],
+            "worker",
+            1,
+        )
+
 
 def test_mia_runtime_spec_preserves_verified_host_fabric_authority() -> None:
     recipe = _recipe()
@@ -326,11 +378,106 @@ def test_mia_runtime_spec_preserves_verified_host_fabric_authority() -> None:
         image_digest="sha256:" + "d" * 64,
     )
 
-    assert spec["security"]["network_mode"] == "none"
     assert spec["security"]["host_network"] is True
-    assert spec["topology"] == {
-        "name": "dual",
-        "node_count": 2,
-        "rank": 1,
-        "role": "worker",
+    assert spec["runtime"]["placement_environment"] == {
+        "local_address": "VONK_LOCAL_ADDR",
+        "master_address": "VONK_MASTER_ADDR",
+        "master_port": "VONK_MASTER_PORT",
     }
+    environment = {
+        item["name"]: item["value"] for item in spec["runtime"]["environment"]
+    }
+    projected = environment | {
+        "VONK_LOCAL_ADDR": "192.168.100.11",
+        "VONK_MASTER_ADDR": "192.168.100.10",
+        "VONK_MASTER_PORT": "25000",
+    }
+    expected_fabric = {
+        "GLOO_SOCKET_IFNAME": "enp1s0f1np1,enP2p1s0f1np1",
+        "NCCL_IB_GID_INDEX": "3",
+        "NCCL_IB_HCA": "=rocep1s0f1:1,roceP2p1s0f1:1",
+        "NCCL_SOCKET_IFNAME": "=enp1s0f1np1,enP2p1s0f1np1",
+        "TP_SOCKET_IFNAME": "enp1s0f1np1,enP2p1s0f1np1",
+    }
+    assert all(projected.get(name) == value for name, value in expected_fabric.items())
+
+
+def test_mia_wrapper_consumes_complete_placement_and_fabric_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wrapper = ROOT / "adapters/deepseek/mia-vllm/vllm-wrapper.py"
+    module_spec = importlib.util.spec_from_file_location("mia_vllm_wrapper", wrapper)
+    assert module_spec is not None and module_spec.loader is not None
+    observed: list[tuple[str, tuple[str, ...]]] = []
+    monkeypatch.setattr(sys, "dont_write_bytecode", True)
+    environment = {
+        "VONK_LOCAL_ADDR": "192.168.100.11",
+        "VONK_MASTER_ADDR": "192.168.100.10",
+        "VONK_MASTER_PORT": "25000",
+        "NCCL_SOCKET_IFNAME": "=enp1s0f1np1,enP2p1s0f1np1",
+        "NCCL_IB_HCA": "=rocep1s0f1:1,roceP2p1s0f1:1",
+        "NCCL_IB_GID_INDEX": "3",
+        "TP_SOCKET_IFNAME": "enp1s0f1np1,enP2p1s0f1np1",
+        "GLOO_SOCKET_IFNAME": "enp1s0f1np1,enP2p1s0f1np1",
+    }
+    for name, value in environment.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(sys, "argv", [str(wrapper), "serve", "/models", "--nnodes", "2"])
+
+    def capture(executable: str, arguments: tuple[str, ...]) -> None:
+        observed.append((executable, arguments))
+        raise RuntimeError("exec captured")
+
+    monkeypatch.setattr(os, "execv", capture)
+    module = importlib.util.module_from_spec(module_spec)
+    with pytest.raises(RuntimeError, match="exec captured"):
+        module_spec.loader.exec_module(module)
+
+    assert os.environ["VLLM_HOST_IP"] == "192.168.100.11"
+    assert observed[0][1][-4:] == (
+        "--master-addr",
+        "192.168.100.10",
+        "--master-port",
+        "25000",
+    )
+
+
+@pytest.mark.parametrize(
+    "missing",
+    [
+        "VONK_LOCAL_ADDR",
+        "VONK_MASTER_ADDR",
+        "VONK_MASTER_PORT",
+        "NCCL_SOCKET_IFNAME",
+        "NCCL_IB_HCA",
+        "NCCL_IB_GID_INDEX",
+        "TP_SOCKET_IFNAME",
+        "GLOO_SOCKET_IFNAME",
+    ],
+)
+def test_mia_wrapper_refuses_incomplete_distributed_launch(
+    monkeypatch: pytest.MonkeyPatch, missing: str
+) -> None:
+    wrapper = ROOT / "adapters/deepseek/mia-vllm/vllm-wrapper.py"
+    module_spec = importlib.util.spec_from_file_location(
+        f"mia_vllm_wrapper_missing_{missing}", wrapper
+    )
+    assert module_spec is not None and module_spec.loader is not None
+    monkeypatch.setattr(sys, "dont_write_bytecode", True)
+    for name in (
+        "VONK_LOCAL_ADDR",
+        "VONK_MASTER_ADDR",
+        "VONK_MASTER_PORT",
+        "NCCL_SOCKET_IFNAME",
+        "NCCL_IB_HCA",
+        "NCCL_IB_GID_INDEX",
+        "TP_SOCKET_IFNAME",
+        "GLOO_SOCKET_IFNAME",
+    ):
+        monkeypatch.setenv(name, "3" if name == "NCCL_IB_GID_INDEX" else "test")
+    monkeypatch.delenv(missing)
+    monkeypatch.setattr(sys, "argv", [str(wrapper), "serve", "/models", "--nnodes", "2"])
+    module = importlib.util.module_from_spec(module_spec)
+
+    with pytest.raises(SystemExit, match="distributed vLLM requires"):
+        module_spec.loader.exec_module(module)

@@ -23,6 +23,7 @@ from vonk_control.artifact_sizes import ArtifactSize, StaticArtifactSizeResolver
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog_service import CatalogService, RecipeDraftInput
 from vonk_control.cluster_mappings import ClusterMappingService
+from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
 from vonk_control.install_admission import InstallAdmissionService
 from vonk_control.inventory_repository import (
     InventoryRepository,
@@ -154,6 +155,7 @@ def setup_services(
     *,
     nodes: int = 1,
     endpoint_owner_rank_one: bool = False,
+    distributed_lifecycle: bool = False,
     engine=None,
     route_withdrawer=None,
 ):
@@ -263,6 +265,23 @@ def setup_services(
             "stop_order": ["entrypoint", "worker"],
         }
         document["artifacts"][0]["roles"] = ["entrypoint", "worker"]
+        if distributed_lifecycle:
+            document["topology"]["mode"] = "distributed"
+            document["topology"]["parallelism"]["backend"] = "mp"
+            document["runtime"]["lifecycle"] = {
+                "pre_start": [],
+                "post_stop": [],
+                "stop_timeout_seconds": 30,
+                "readiness": {
+                    "strategy": "endpoint-owner-after-all-ranks",
+                    "path": "/v1/models",
+                    "timeout_seconds": 60,
+                },
+                "failure": {
+                    "rank_loss": "withdraw-endpoint",
+                    "recovery": "restart-worker-then-entrypoint",
+                },
+            }
     catalog = CatalogService(
         sessions, clock=lambda: NOW, cursors=TokenCodec(b"c" * 32).cursor_codec()
     )
@@ -689,7 +708,12 @@ def test_multirank_role_phases_persist_recover_and_stop_in_reverse_order(
                 select(AgentOperation).where(AgentOperation.parent_job_id == stop.id)
             )
         )
-        assert {item.payload["role"] for item in first_stop} == {"entrypoint"}
+        assert [item.node_id for item in first_stop] == [nodes[0]]
+        assert set(first_stop[0].payload) == {
+            "schema_version",
+            "run_id",
+            "plan_digest",
+        }
     recovered.record_node_result(
         stop.id, first_stop[0].node_id, succeeded=True, evidence={"stopped": True}
     )
@@ -699,9 +723,7 @@ def test_multirank_role_phases_persist_recover_and_stop_in_reverse_order(
                 select(AgentOperation).where(AgentOperation.parent_job_id == stop.id)
             )
         )
-        second_stop = tuple(
-            item for item in all_stop if item.payload["role"] == "worker"
-        )
+        second_stop = tuple(item for item in all_stop if item.node_id != nodes[0])
         assert len(second_stop) == 2
     for operation in second_stop:
         recovered.record_node_result(
@@ -1315,7 +1337,12 @@ def test_stop_replay_is_bound_to_selected_run_kind_and_action_digest(
             )
         )
         assert len(children) == 1
-        assert children[0].payload["role"] == "entrypoint"
+        assert children[0].node_id == nodes[0]
+        assert set(children[0].payload) == {
+            "schema_version",
+            "run_id",
+            "plan_digest",
+        }
         assert {child.base_commit for child in children} == {first_run.plan_digest[:40]}
         assert {child.payload["plan_digest"] for child in children} == {
             first_run.plan_digest
@@ -2198,6 +2225,168 @@ def test_authenticated_run_observations_project_failure_recovery_and_missing_ran
     assert recovered.healthy is True
 
 
+def test_distributed_rank_loss_queues_bounded_worker_first_recovery(
+    tmp_path: Path,
+) -> None:
+    sessions, service, queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2, distributed_lifecycle=True
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="i" * 36
+    )
+    start = started_recipe(
+        sessions,
+        service,
+        installation.owner_id,
+        nodes,
+        request_id="r" * 36,
+        alias="recovering-gang",
+    )
+    publisher = ConcurrentPublisher()
+    service, routes = bind_route_publications(sessions, service, publisher)
+    routes.publish_run(start.owner_id)
+    record_recipe_run_observations(sessions, nodes[1], NOW, ())
+    recovery = DistributedRecoveryCoordinator(
+        sessions, routes=routes, agent_jobs=queue, clock=lambda: NOW
+    )
+
+    assert recovery.tick() is True
+    with sessions() as session:
+        run = session.get(RecipeRun, start.owner_id)
+        stop_job = session.scalar(
+            select(Job).where(
+                Job.kind == "recipe.stop",
+                Job.payload["owner_id"].as_string() == start.owner_id,
+            )
+        )
+        stop_children = tuple(
+            session.scalars(
+                select(AgentOperation).where(
+                    AgentOperation.parent_job_id == stop_job.id
+                )
+            )
+        )
+        assert run.route_state == "withdrawn"
+        assert stop_job.payload["recovery"]["failed_rank"] == 1
+        assert [child.node_id for child in stop_children] == [nodes[0]]
+        assert set(stop_children[0].payload) == {
+            "schema_version",
+            "run_id",
+            "plan_digest",
+        }
+    assert publisher.aliases[-1] == ()
+
+    service.record_node_result(stop_job.id, nodes[0], succeeded=True, evidence={})
+    with sessions() as session:
+        worker_stop = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == stop_job.id,
+                AgentOperation.node_id == nodes[1],
+            )
+        )
+        assert worker_stop is not None
+    service.record_node_result(stop_job.id, nodes[1], succeeded=True, evidence={})
+
+    with sessions() as session:
+        restart = session.scalar(
+            select(Job).where(
+                Job.kind == "recipe.start",
+                Job.payload["owner_id"].as_string() == start.owner_id,
+                Job.id != start.id,
+            )
+        )
+        restart_children = tuple(
+            session.scalars(
+                select(AgentOperation).where(
+                    AgentOperation.parent_job_id == restart.id
+                )
+            )
+        )
+        assert [child.node_id for child in restart_children] == [nodes[1]]
+        worker_start = restart_children[0]
+        assert session.get(RecipeRun, start.owner_id).route_state == "withdrawn"
+
+    service.record_node_result(
+        restart.id,
+        nodes[1],
+        succeeded=True,
+        evidence=start_evidence(worker_start.payload),
+    )
+    with pytest.raises(RuntimeError, match="not ready|absent"):
+        routes.publish_run(start.owner_id)
+    with sessions() as session:
+        owner_start = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == restart.id,
+                AgentOperation.node_id == nodes[0],
+            )
+        )
+    service.record_node_result(
+        restart.id,
+        nodes[0],
+        succeeded=True,
+        evidence=start_evidence(owner_start.payload),
+    )
+    routes.publish_run(start.owner_id)
+
+    with sessions() as session:
+        run = session.get(RecipeRun, start.owner_id)
+        assert run.state == "running"
+        assert run.route_state == "published"
+        assert [
+            node.state
+            for node in session.scalars(
+                select(RunNode)
+                .where(RunNode.run_id == start.owner_id)
+                .order_by(RunNode.rank)
+            )
+        ] == ["running", "running"]
+
+
+def test_distributed_rank_loss_withdraws_route_when_recovery_authority_is_missing(
+    tmp_path: Path,
+) -> None:
+    sessions, service, queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2, distributed_lifecycle=True
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="m" * 36
+    )
+    start = started_recipe(
+        sessions,
+        service,
+        installation.owner_id,
+        nodes,
+        request_id="n" * 36,
+        alias="failed-authority-gang",
+    )
+    publisher = ConcurrentPublisher()
+    _service, routes = bind_route_publications(sessions, service, publisher)
+    routes.publish_run(start.owner_id)
+    record_recipe_run_observations(sessions, nodes[1], NOW, ())
+    with sessions.begin() as session:
+        for presence in session.scalars(select(AgentPresence)):
+            session.delete(presence)
+    recovery = DistributedRecoveryCoordinator(
+        sessions, routes=routes, agent_jobs=queue, clock=lambda: NOW
+    )
+
+    assert recovery.tick() is True
+
+    with sessions() as session:
+        run = session.get(RecipeRun, start.owner_id)
+        assert run.state == "failed"
+        assert run.route_state == "withdrawn"
+        assert "endpoint evidence is missing" in run.route_error
+        assert not session.scalar(
+            select(Job.id).where(
+                Job.kind == "recipe.stop",
+                Job.payload["owner_id"].as_string() == start.owner_id,
+            )
+        )
+    assert publisher.aliases[-1] == ()
+
+
 def test_run_observation_snapshot_rejects_duplicate_and_naive_evidence(
     tmp_path: Path,
 ) -> None:
@@ -2338,12 +2527,17 @@ def test_failed_multinode_start_queues_idempotent_stop_for_every_rank(
         )
         assert cleanup is not None
         assert set(cleanup.targets) == set(nodes)
-        assert {
-            child.payload["role"]
-            for child in session.scalars(
+        cleanup_children = tuple(
+            session.scalars(
                 select(AgentOperation).where(AgentOperation.parent_job_id == cleanup.id)
             )
-        } == {"entrypoint"}
+        )
+        assert [child.node_id for child in cleanup_children] == [nodes[0]]
+        assert set(cleanup_children[0].payload) == {
+            "schema_version",
+            "run_id",
+            "plan_digest",
+        }
         assert session.get(RecipeRun, start.owner_id).state == "stopping"
 
 

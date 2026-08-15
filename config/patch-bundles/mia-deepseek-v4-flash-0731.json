@@ -11,7 +11,7 @@
     "kind": "runtime-distribution",
     "publisher": "anemll",
     "slug": "anemll-vllm-mia",
-    "content_sha256": "52746e9df3ea563e55941f88f43e275fb2eee76dea0bee8e54e1b8d34474a7b6"
+    "content_sha256": "af3b10b9abe842bfcd0e952225ae8881a5286f858b7cb47c4850bc05608ef6ec"
   },
   "source": {
     "repository": "https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark",
@@ -174,8 +174,8 @@
     "attribution": ["MiaAI-Lab", "vLLM contributors"]
   },
   "source_bundle": {
-    "sha256": "f836e0bb5241e877321e607bcf057afee5610a1ad43421f03b0995210b534c7e",
-    "expected_bytes": 215040,
+    "sha256": "1db8274206e65ccf2f58b5e744c5b4e7f96c14f916bce2b4a0429630eda6256f",
+    "expected_bytes": 235520,
     "media_type": "application/vnd.vonk-forge.source-bundle.v1+tar"
   },
   "sha256": "3f239f783ee872ce90ef9ae345027ddd66ae36a8943f2095b352438b050287f2"

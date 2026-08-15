@@ -85,7 +85,6 @@ def distribution_document(harness_slug: str = "vllm") -> dict[str, object]:
             "no_new_privileges": True,
             "capabilities": [],
         },
-        "sha256": "d" * 64,
     }
 
 

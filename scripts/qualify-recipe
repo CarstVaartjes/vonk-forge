@@ -1,19 +1,34 @@
 #!/usr/bin/env python3
+"""Execute structural or bounded container qualification for one exact v1 recipe."""
+
 from __future__ import annotations
 
 import argparse
 import json
 import subprocess
 import sys
+import tempfile
+import time
+import urllib.error
+import urllib.request
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "control/src"))
+sys.path.insert(0, str(ROOT / "agent_protocol/src"))
 
 from vonk_control.catalog_contract import (
     catalog_content_sha256,
     validate_catalog_document,
 )
+from vonk_control.distributed_lifecycle import (
+    DistributedLifecycleError,
+    recover_distributed_runtime,
+)
+from vonk_control.harnesses import HarnessRegistry
+from vonk_control.harnesses.common import HarnessCompileError
 from vonk_control.recipe_contract import validate_recipe
 from vonk_control.source_bundles import generate_source_bundle
 from vonk_control.source_policy import enforce_build_source_policy
@@ -26,139 +41,544 @@ KIND_ROOT = {
     "runtime-distribution": "runtime-distributions",
     "patch-bundle": "patch-bundles",
 }
-CONTEXTS = {
-    "deepseek-v4-flash-0731-ds4-single": ROOT / "adapters/deepseek/ds4",
-    "deepseek-v4-flash-0731-mia-dual": ROOT / "adapters/deepseek/mia-vllm",
-}
+SUPPORTED_CHECKS = frozenset(
+    {
+        "chat.max-output-64",
+        "chat.nonempty",
+        "collective.two-ranks",
+        "container.started",
+        "endpoint.healthy",
+        "inference.completed",
+        "rank-loss.withdrawal",
+        "rank-recovery.healthy",
+    }
+)
+
+
+class QualificationError(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class QualificationInputs:
+    recipe: dict[str, object]
+    harness: dict[str, object]
+    distribution: dict[str, object]
+    patch: dict[str, object] | None
+    context: Path
 
 
 def _arguments() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Qualify one exact v1 recipe.")
+    parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--recipe", required=True, type=Path)
     parser.add_argument("--level", choices=("structural", "container"), required=True)
     parser.add_argument("--engine", default="docker")
-    return parser.parse_args()
+    parser.add_argument("--endpoint-host", default="127.0.0.1")
+    parser.add_argument("--artifact-root", type=Path, default=Path("/var/lib/vonk/models"))
+    parser.add_argument("--timeout-seconds", type=float, default=300.0)
+    args = parser.parse_args()
+    if not 0 < args.timeout_seconds <= 3600:
+        parser.error("--timeout-seconds must be between 0 and 3600")
+    return args
 
 
 def _load(path: Path) -> dict[str, object]:
-    return json.loads(path.read_text(encoding="utf-8"))
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise QualificationError("document must be an object")
+    return value
 
 
-def _resolve(reference: dict[str, object]) -> dict[str, object]:
-    document = _load(
-        ROOT
-        / "config"
-        / KIND_ROOT[str(reference["kind"])]
-        / f"{reference['slug']}.json"
-    )
+def _resolve(reference: Mapping[str, object]) -> dict[str, object]:
+    kind = str(reference.get("kind"))
+    slug = str(reference.get("slug"))
+    root = KIND_ROOT.get(kind)
+    if root is None:
+        raise QualificationError("catalog reference kind is invalid")
+    document = _load(ROOT / "config" / root / f"{slug}.json")
     validate_catalog_document(document)
-    if catalog_content_sha256(document) != reference["content_sha256"]:
-        raise ValueError("catalog reference digest mismatch")
+    identity = document.get("identity")
+    if (
+        not isinstance(identity, Mapping)
+        or identity.get("publisher") != reference.get("publisher")
+        or identity.get("slug") != reference.get("slug")
+        or catalog_content_sha256(document) != reference.get("content_sha256")
+    ):
+        raise QualificationError("catalog reference digest mismatch")
     return document
 
 
-def _structural(path: Path) -> dict[str, object]:
+def _context_files(context: Path) -> dict[str, bytes]:
+    files: dict[str, bytes] = {}
+    for source in sorted(context.rglob("*"), key=lambda item: item.as_posix().encode()):
+        relative = source.relative_to(context).as_posix()
+        if source.is_symlink():
+            raise QualificationError(f"source context symlink is forbidden: {relative}")
+        if source.is_dir():
+            continue
+        if not source.is_file() or "__pycache__" in source.parts or source.suffix == ".pyc":
+            raise QualificationError(f"source context entry is forbidden: {relative}")
+        files[relative] = source.read_bytes()
+    return files
+
+
+def _structural(path: Path) -> QualificationInputs:
     recipe = _load(path)
     validate_recipe(recipe)
     version = _resolve(recipe["model"])
     model = _resolve(version["model"])
     _resolve(model["model_group"])
-    _resolve(recipe["execution"]["harness"])
-    _resolve(recipe["runtime"]["distribution"])
-    patch = recipe["execution"]["patch_bundle"]
-    if patch is not None:
-        _resolve(patch)
-    slug = str(recipe["identity"]["slug"])
-    context = CONTEXTS.get(slug)
-    if context is None:
-        raise ValueError("recipe has no curated qualification context")
-    bundle = generate_source_bundle(
-        {
-            source.relative_to(context).as_posix(): source.read_bytes()
-            for source in sorted(context.rglob("*"))
-            if source.is_file()
-        }
+    execution = recipe["execution"]
+    runtime = recipe["runtime"]
+    build = recipe["build"]
+    assert isinstance(execution, Mapping)
+    assert isinstance(runtime, Mapping)
+    assert isinstance(build, Mapping)
+    harness = _resolve(execution["harness"])
+    distribution = _resolve(runtime["distribution"])
+    patch_reference = execution.get("patch_bundle")
+    patch = _resolve(patch_reference) if isinstance(patch_reference, Mapping) else None
+    context_contract = build.get("context")
+    context_value = (
+        context_contract.get("path") if isinstance(context_contract, Mapping) else None
     )
+    if not isinstance(context_value, str):
+        raise QualificationError("recipe build context path is missing")
+    context = (ROOT / context_value).resolve()
+    try:
+        context.relative_to(ROOT)
+    except ValueError as error:
+        raise QualificationError("recipe build context escapes the workspace") from error
+    if not context.is_dir():
+        raise QualificationError("recipe build context is unavailable")
+    bundle = generate_source_bundle(_context_files(context))
     enforce_build_source_policy(recipe, bundle)
-    return recipe
+    if (
+        not isinstance(context_contract, Mapping)
+        or context_contract.get("expected_bytes") != len(bundle.archive)
+    ):
+        raise QualificationError("recipe source bundle size mismatch")
+    validators = recipe.get("validation")
+    raw_validators = validators.get("validators") if isinstance(validators, Mapping) else None
+    checks = {
+        check
+        for validator in raw_validators or ()
+        if isinstance(validator, Mapping)
+        for check in validator.get("checks", ())
+        if isinstance(check, str)
+    }
+    if not checks or not checks <= SUPPORTED_CHECKS:
+        raise QualificationError("recipe declares an unsupported qualification check")
+    topology = recipe.get("topology")
+    if isinstance(topology, Mapping) and topology.get("mode") == "distributed":
+        required = {
+            "collective.two-ranks",
+            "endpoint.healthy",
+            "rank-loss.withdrawal",
+            "rank-recovery.healthy",
+        }
+        if not required <= checks:
+            raise QualificationError("distributed qualification checks are incomplete")
+    return QualificationInputs(recipe, harness, distribution, patch, context)
 
 
-def _architecture(engine: str) -> str:
-    result = subprocess.run(
-        [engine, "info", "--format", "{{.Architecture}}"],
-        check=True,
+def _run(
+    command: list[str], *, timeout: float, check: bool = True
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        command,
+        check=check,
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=timeout,
     )
-    return result.stdout.strip()
+
+
+def _architecture(engine: str, timeout: float) -> str:
+    return _run(
+        [engine, "info", "--format", "{{.Architecture}}"], timeout=timeout
+    ).stdout.strip()
+
+
+def _request(url: str, *, body: dict[str, object] | None, timeout: float) -> object:
+    encoded = (
+        json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
+        if body is not None
+        else None
+    )
+    request = urllib.request.Request(
+        url,
+        data=encoded,
+        method="POST" if body is not None else "GET",
+        headers={"content-type": "application/json"} if body is not None else {},
+    )
+    with urllib.request.urlopen(request, timeout=min(timeout, 5.0)) as response:
+        if response.status != 200:
+            raise QualificationError("qualification endpoint returned a failure")
+        payload = response.read(64 * 1024 + 1)
+    if len(payload) > 64 * 1024:
+        raise QualificationError("qualification endpoint response is too large")
+    try:
+        return json.loads(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise QualificationError("qualification endpoint response is invalid") from error
+
+
+def _await_health(url: str, *, healthy: bool, timeout: float) -> None:
+    deadline = time.monotonic() + timeout
+    while True:
+        observed = False
+        try:
+            _request(url, body=None, timeout=timeout)
+            observed = True
+        except (OSError, QualificationError, urllib.error.URLError):
+            observed = False
+        if observed is healthy:
+            return
+        if time.monotonic() >= deadline:
+            state = "ready" if healthy else "withdrawn"
+            raise QualificationError(f"endpoint did not become {state} before deadline")
+        time.sleep(0.1)
+
+
+class ContainerQualification:
+    def __init__(self, inputs: QualificationInputs, args: argparse.Namespace) -> None:
+        self.inputs = inputs
+        self.args = args
+        self.recipe = inputs.recipe
+        identity = self.recipe["identity"]
+        assert isinstance(identity, Mapping)
+        self.slug = str(identity["slug"])
+        self.image = f"localhost/vonk/qualification:{catalog_content_sha256(inputs.distribution)[:16]}"
+        self.steps: list[dict[str, object]] = []
+        self.containers: dict[int, str] = {}
+        interfaces = self.recipe["interfaces"]
+        assert isinstance(interfaces, list) and interfaces
+        interface = interfaces[0]
+        assert isinstance(interface, Mapping)
+        self.port = int(interface["port"])
+        self.health_url = (
+            f"http://{self.args.endpoint_host}:{self.port}{interface['health_path']}"
+        )
+        self.chat_url = f"http://{self.args.endpoint_host}:{self.port}/v1/chat/completions"
+        self.roles = self._roles()
+        lifecycle = self.recipe["runtime"]
+        assert isinstance(lifecycle, Mapping)
+        self.lifecycle = lifecycle["lifecycle"]
+        assert isinstance(self.lifecycle, Mapping)
+        self.timeout = min(
+            self.args.timeout_seconds,
+            float(self.lifecycle.get("readiness", {}).get("timeout_seconds", 300))
+            if isinstance(self.lifecycle.get("readiness"), Mapping)
+            else self.args.timeout_seconds,
+        )
+
+    def _roles(self) -> dict[int, str]:
+        topology = self.recipe["topology"]
+        assert isinstance(topology, Mapping)
+        roles = topology["roles"]
+        assert isinstance(roles, list)
+        result: dict[int, str] = {}
+        rank = 0
+        for item in roles:
+            assert isinstance(item, Mapping)
+            for _ in range(int(item["count"])):
+                result[rank] = str(item["name"])
+                rank += 1
+        return result
+
+    def _record(self, check: str, **evidence: object) -> None:
+        self.steps.append({"check": check, "passed": True, **evidence})
+
+    def _engine(self, *arguments: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+        return _run(
+            [self.args.engine, *arguments],
+            timeout=min(self.args.timeout_seconds, 600.0),
+            check=check,
+        )
+
+    def _parameters(self) -> dict[str, object]:
+        parameters = self.recipe.get("parameters")
+        return {
+            str(item["name"]): item["default"]
+            for item in parameters or ()
+            if isinstance(item, Mapping)
+        }
+
+    def _projection(self, rank: int):
+        return HarnessRegistry.with_builtins().compile(
+            self.inputs.harness,
+            self.recipe,
+            self.inputs.distribution,
+            self.inputs.patch,
+            self._parameters(),
+            self.recipe["topology"],
+            self.roles[rank],
+            rank,
+        )
+
+    def build(self) -> None:
+        build = self.recipe["build"]
+        assert isinstance(build, Mapping)
+        network = build["network"]
+        assert isinstance(network, Mapping)
+        command = [
+            "build",
+            "--platform",
+            "linux/arm64",
+            "--network",
+            "none" if network["mode"] == "none" else "default",
+            "--file",
+            str(self.inputs.context / str(build["dockerfile"])),
+            "--tag",
+            self.image,
+        ]
+        target = build.get("target")
+        if isinstance(target, str):
+            command.extend(("--target", target))
+        for argument in build["arguments"]:
+            assert isinstance(argument, Mapping)
+            command.extend(("--build-arg", f"{argument['name']}={argument['value']}"))
+        command.append(str(self.inputs.context))
+        self._engine(*command)
+        self._record("image.build", network=network["mode"], platform="linux/arm64")
+
+    def start(self, rank: int, outputs: Path) -> None:
+        projection = self._projection(rank)
+        role = self.roles[rank]
+        name = f"vonk-q-{catalog_content_sha256(self.inputs.distribution)[:12]}-{rank}-{role}"
+        command = [
+            "run",
+            "--detach",
+            "--name",
+            name,
+            "--pull",
+            "never",
+            "--read-only",
+            "--cap-drop=ALL",
+            "--security-opt=no-new-privileges",
+            "--user",
+            projection.user,
+            "--network",
+            "host" if self.recipe["runtime"]["security"]["host_network"] else "bridge",
+        ]
+        if "nvidia.com/gpu=all" in self.recipe["runtime"]["security"]["devices"]:
+            command.extend(("--gpus", "all"))
+        command.extend(("--env", f"VONK_RANK={rank}"))
+        command.extend(("--env", f"VONK_WORLD_SIZE={len(self.roles)}"))
+        if len(self.roles) > 1:
+            command.extend(("--env", "VONK_LOCAL_ADDR=127.0.0.1"))
+            command.extend(("--env", "VONK_MASTER_ADDR=127.0.0.1"))
+            command.extend(("--env", f"VONK_MASTER_PORT={self.port + 1}"))
+        for name_value, value in projection.environment:
+            command.extend(("--env", f"{name_value}={value}"))
+        command.extend(("--mount", f"type=bind,src={outputs},dst=/outputs"))
+        command.extend(
+            (
+                "--mount",
+                f"type=bind,src={self.args.artifact_root.resolve()},dst=/models,readonly",
+            )
+        )
+        command.extend((self.image, *projection.command))
+        self._engine(*command)
+        self.containers[rank] = name
+
+    def running(self, rank: int) -> bool:
+        name = self.containers.get(rank)
+        if name is None:
+            return False
+        result = self._engine(
+            "inspect", "--format", "{{.State.Running}}", name, check=False
+        )
+        return result.returncode == 0 and result.stdout.strip() == "true"
+
+    def stop(self, rank: int) -> None:
+        name = self.containers.get(rank)
+        if name is None:
+            return
+        if self.running(rank):
+            self._engine("stop", "--time", str(self.lifecycle["stop_timeout_seconds"]), name)
+        self._engine("rm", "-f", name, check=False)
+        self.containers.pop(rank, None)
+
+    def start_all(self, outputs: Path) -> None:
+        topology = self.recipe["topology"]
+        assert isinstance(topology, Mapping)
+        order = topology["start_order"]
+        for role in order:
+            for rank, mapped_role in self.roles.items():
+                if role == mapped_role:
+                    self.start(rank, outputs)
+
+    def stop_all(self) -> None:
+        topology = self.recipe["topology"]
+        assert isinstance(topology, Mapping)
+        order = topology["stop_order"]
+        for role in order:
+            for rank, mapped_role in self.roles.items():
+                if role == mapped_role:
+                    self.stop(rank)
+
+    def invoke(self) -> object:
+        interfaces = self.recipe["interfaces"]
+        assert isinstance(interfaces, list) and isinstance(interfaces[0], Mapping)
+        aliases = interfaces[0]["model_aliases"]
+        result = _request(
+            self.chat_url,
+            body={
+                "model": aliases[0],
+                "messages": [{"role": "user", "content": "Reply with one word."}],
+                "max_tokens": 64,
+                "stream": False,
+            },
+            timeout=self.timeout,
+        )
+        choices = result.get("choices") if isinstance(result, Mapping) else None
+        message = (
+            choices[0].get("message")
+            if isinstance(choices, list)
+            and len(choices) == 1
+            and isinstance(choices[0], Mapping)
+            else None
+        )
+        if not isinstance(message, Mapping) or not str(message.get("content", "")).strip():
+            raise QualificationError("qualification invocation returned no content")
+        return result
+
+    def execute(self) -> list[dict[str, object]]:
+        if self.args.artifact_root.is_symlink() or not self.args.artifact_root.is_dir():
+            raise QualificationError("installed artifact root is unavailable")
+        with tempfile.TemporaryDirectory(prefix="vonk-qualify-") as output_directory:
+            outputs = Path(output_directory)
+            self.build()
+            self.start_all(outputs)
+            self._record("runtime.start", ranks=sorted(self.roles))
+            if len(self.roles) > 1:
+                if not all(self.running(rank) for rank in self.roles):
+                    raise QualificationError("distributed ranks did not start")
+                self._record("collective.two-ranks", ranks=sorted(self.roles))
+            _await_health(self.health_url, healthy=True, timeout=self.timeout)
+            self._record("endpoint-owner.ready", rank=0)
+            self.invoke()
+            self._record("chat.invoke", max_tokens=64)
+            self.stop_all()
+            self._record("runtime.stop", bounded=True)
+            self.start_all(outputs)
+            _await_health(self.health_url, healthy=True, timeout=self.timeout)
+            self._record("runtime.restart", healthy=True)
+            if len(self.roles) > 1:
+                failed_rank = max(self.roles)
+                self.stop(failed_rank)
+                _await_health(self.health_url, healthy=False, timeout=self.timeout)
+                self._record("rank-loss.withdrawal", failed_rank=failed_rank)
+                recover_distributed_runtime(
+                    lifecycle=self.lifecycle,
+                    roles=self.roles,
+                    failed_rank=failed_rank,
+                    withdraw=lambda: _await_health(
+                        self.health_url, healthy=False, timeout=self.timeout
+                    ),
+                    stop=self.stop,
+                    start=lambda rank: self.start(rank, outputs),
+                    ready=self.running,
+                    publish=lambda: _await_health(
+                        self.health_url, healthy=True, timeout=self.timeout
+                    ),
+                    monotonic=time.monotonic,
+                    sleep=time.sleep,
+                )
+                self._record("rank-recovery.healthy", ranks=sorted(self.roles))
+                self.invoke()
+                self._record("chat.recovered", max_tokens=64)
+        return self.steps
+
+    def cleanup(self) -> None:
+        for rank in sorted(self.containers, reverse=True):
+            self.stop(rank)
+        self._record("runtime.cleanup", containers=0)
+
+
+def _print(value: Mapping[str, object]) -> None:
+    print(json.dumps(value, allow_nan=False, sort_keys=True, separators=(",", ":")))
 
 
 def main() -> int:
     args = _arguments()
     try:
-        _structural(args.recipe.resolve())
+        inputs = _structural(args.recipe.resolve())
     except (OSError, ValueError, subprocess.SubprocessError) as error:
-        print(json.dumps({"passed": False, "status": "failed", "error": str(error)}))
+        _print({"error": str(error), "passed": False, "status": "failed"})
         return 1
     if args.level == "structural":
-        print(
-            json.dumps(
-                {
-                    "passed": True,
-                    "recipe": args.recipe.name,
-                    "status": "passed",
-                },
-                sort_keys=True,
-            )
+        _print(
+            {
+                "passed": True,
+                "recipe": args.recipe.name,
+                "status": "passed",
+            }
         )
         return 0
     try:
-        architecture = _architecture(args.engine)
+        architecture = _architecture(args.engine, min(args.timeout_seconds, 30.0))
     except (OSError, subprocess.SubprocessError) as error:
-        print(
-            json.dumps(
-                {
-                    "detected_architecture": None,
-                    "detail": f"container engine unavailable: {error}",
-                    "passed": False,
-                    "required_architecture": "arm64",
-                    "status": "environment-limited",
-                },
-                sort_keys=True,
-            )
-        )
-        return 3
-    if architecture not in {"arm64", "aarch64"}:
-        print(
-            json.dumps(
-                {
-                    "detected_architecture": architecture,
-                    "detail": "container qualification requires a native linux/arm64 host",
-                    "passed": False,
-                    "required_architecture": "arm64",
-                    "status": "environment-limited",
-                },
-                sort_keys=True,
-            )
-        )
-        return 3
-    print(
-        json.dumps(
+        _print(
             {
-                "detected_architecture": architecture,
-                "detail": (
-                    "native ARM64 is available, but this host still requires DGX Spark GPUs, "
-                    "the exact installed model inventory, and two-node fabric for full qualification"
-                ),
+                "detected_architecture": None,
+                "detail": f"container engine unavailable: {error}",
                 "passed": False,
                 "required_architecture": "arm64",
                 "status": "environment-limited",
-            },
-            sort_keys=True,
+            }
         )
+        return 3
+    if architecture not in {"arm64", "aarch64"}:
+        _print(
+            {
+                "detected_architecture": architecture,
+                "detail": "container qualification requires a native linux/arm64 host",
+                "passed": False,
+                "required_architecture": "arm64",
+                "status": "environment-limited",
+            }
+        )
+        return 3
+    qualifier = ContainerQualification(inputs, args)
+    try:
+        steps = qualifier.execute()
+        qualifier.cleanup()
+    except (
+        DistributedLifecycleError,
+        HarnessCompileError,
+        OSError,
+        QualificationError,
+        subprocess.SubprocessError,
+        urllib.error.URLError,
+    ) as error:
+        try:
+            qualifier.cleanup()
+        except (OSError, subprocess.SubprocessError):
+            pass
+        _print(
+            {
+                "detected_architecture": architecture,
+                "error": str(error),
+                "passed": False,
+                "recipe": qualifier.slug,
+                "status": "failed",
+                "steps": qualifier.steps,
+            }
+        )
+        return 1
+    _print(
+        {
+            "detected_architecture": architecture,
+            "passed": True,
+            "recipe": qualifier.slug,
+            "status": "passed",
+            "steps": steps,
+        }
     )
-    return 3
+    return 0
 
 
 if __name__ == "__main__":

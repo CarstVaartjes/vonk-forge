@@ -23,6 +23,7 @@
   },
   "build": {
     "context": {
+      "path": "adapters/deepseek/ds4",
       "sha256": "228fede9f501c71514aba8ced8058b05e73ad606c47a2ba32ff257d695177de6",
       "expected_bytes": 10240,
       "media_type": "application/vnd.vonk-forge.source-bundle.v1+tar"
@@ -66,7 +67,7 @@
       "kind": "runtime-distribution",
       "publisher": "antirez",
       "slug": "ds4-spark",
-      "content_sha256": "00c2a17548a549333dab8af8b31ec0b4d9af53ee80838f3a83c65faafebc1f22"
+      "content_sha256": "25bb4fd479d179169bafbc82662bb8bd66e73b9f9dbd3012da915216601bd26a"
     },
     "entrypoint": ["/opt/vonk/bin/ds4-serve"],
     "arguments": [

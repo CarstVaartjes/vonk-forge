@@ -2035,9 +2035,13 @@ def test_agent_runtime_spec_requires_exact_dependencies_and_registry_projection(
         headers=agent_headers(NODE_A, "serial-a"),
     )
     assert resolved.status_code == 200
-    assert resolved.json()["identity"][
-        "recipe_revision_sha256"
-    ] == recipe_content_sha256(document)
+    assert set(resolved.json()) == {
+        "runtime",
+        "artifacts",
+        "endpoint",
+        "security",
+        "lifecycle",
+    }
     assert resolved.json()["runtime"]["entrypoint"] == [
         "/opt/vonk/bin/vllm",
         "serve",

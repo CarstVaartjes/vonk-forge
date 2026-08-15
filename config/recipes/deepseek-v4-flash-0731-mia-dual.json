@@ -23,13 +23,14 @@
       "kind": "patch-bundle",
       "publisher": "miaai-lab",
       "slug": "mia-deepseek-v4-flash-0731",
-      "content_sha256": "23b84b8e50bd381f356715db76460934ade4199237fcd9ee5dac5d246feefb68"
+      "content_sha256": "6acbd45a8cb986a90e378d074f19722407315e30d3e3885b2f82342477241076"
     }
   },
   "build": {
     "context": {
-      "sha256": "f836e0bb5241e877321e607bcf057afee5610a1ad43421f03b0995210b534c7e",
-      "expected_bytes": 215040,
+      "path": "adapters/deepseek/mia-vllm",
+      "sha256": "1db8274206e65ccf2f58b5e744c5b4e7f96c14f916bce2b4a0429630eda6256f",
+      "expected_bytes": 235520,
       "media_type": "application/vnd.vonk-forge.source-bundle.v1+tar"
     },
     "dockerfile": "Dockerfile",
@@ -61,7 +62,7 @@
       "kind": "runtime-distribution",
       "publisher": "anemll",
       "slug": "anemll-vllm-mia",
-      "content_sha256": "52746e9df3ea563e55941f88f43e275fb2eee76dea0bee8e54e1b8d34474a7b6"
+      "content_sha256": "af3b10b9abe842bfcd0e952225ae8881a5286f858b7cb47c4850bc05608ef6ec"
     },
     "entrypoint": ["/opt/vonk/bin/vllm", "serve", "/models"],
     "arguments": [

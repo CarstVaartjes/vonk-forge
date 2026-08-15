@@ -45,6 +45,5 @@
     "user": "10001:10001",
     "no_new_privileges": true,
     "capabilities": []
-  },
-  "sha256": "36050649ad1acc5d3de2c26620191c25850fb12a5771b6c22996033003d952e4"
+  }
 }
