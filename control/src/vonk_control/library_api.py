@@ -6,7 +6,7 @@ from typing import Annotated, Any
 
 from fastapi import FastAPI, HTTPException, Path, Query
 
-from .library_projection import LibraryRecipeDetail, LibrarySnapshot
+from .library_contract import LibraryRecipeDetail, LibrarySnapshot
 from .operation_api import bounded_error_responses
 
 LIBRARY_OPERATION_IDS = {

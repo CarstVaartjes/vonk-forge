@@ -5,15 +5,96 @@ from __future__ import annotations
 import itertools
 import math
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Literal
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .auth import CursorCodec
+from .library_contract import (
+    _MAX_AGENT_ROWS,
+    _MAX_CANDIDATE_NODES,
+    _MAX_EXAMINED_GROUPS,
+    _MAX_NODE_ARTIFACTS_PER_NODE,
+    _MAX_OPERATIONAL_MEMBERS,
+    _MAX_OPERATIONAL_ROWS,
+    _MAX_PAGE_RECIPES,
+    _MAX_PROJECTED_CAPABILITIES,
+    _MAX_PROJECTED_PROFILES,
+    _MAX_RECOMMENDATIONS,
+    _MAX_REJECTED_GROUPS,
+    _MAX_REJECTED_NODES,
+    FreshnessPolicy,
+    InstallPreviewInput,
+    InstallPreviewTarget,
+    LibraryInstallationSummary,
+    LibraryModel,
+    LibraryRecipeDetail,
+    LibraryRecipeIdentity,
+    LibraryRecipeSummary,
+    LibraryRunSummary,
+    LibrarySnapshot,
+    MappingPreviewInput,
+    MappingPreviewTarget,
+    OperationalBuild,
+    OperationalInstallation,
+    OperationalMapping,
+    OperationalMappingNode,
+    OperationalRun,
+    OperationalState,
+    PlacementEvidenceCounts,
+    PlacementLimits,
+    PlacementNode,
+    PlacementRecommendation,
+    PlacementScore,
+    PreviewTarget,
+    ProfilePlacement,
+    ProjectionReason,
+    RecipeDiskRequirements,
+    RecipeFabric,
+    RecipeMemoryRequirements,
+    RecipeParallelism,
+    RecipeProfile,
+    RecipeProfileSummary,
+    RecipeRevisionSummary,
+    RecipeRole,
+    RejectedNode,
+    RunPreviewInput,
+    RunPreviewTarget,
+    VisualArtifact,
+    VisualBuild,
+    VisualBuildContext,
+    VisualIdentity,
+    VisualMetadata,
+    VisualProvenance,
+    VisualRecipeDocument,
+    VisualRuntime,
+    VisualValidation,
+    VisualWorkload,
+    _bounded_display_scalar,
+    _bounded_reasons,
+    _bounded_text,
+    _display_scalar_truncation_count,
+    _numeric_truncation_count,
+    _reason,
+    _saturating_headroom,
+    _saturating_nonnegative,
+    _saturating_nonnegative_sum,
+    _utc,
+)
+from .library_operational import (
+    _ACTIVE_RUN_STATES,
+    _group_rows,
+    _installation_coverage,
+    _member_evidence,
+    _MemberEvidence,
+    _members_are_exact,
+    _OperationalRows,
+    _PlacementOperationalEvidence,
+    _run_health,
+    load_placement_operational_evidence,
+)
 from .models import (
     AgentNode,
     ClusterMapping,
@@ -34,770 +115,8 @@ from .models import (
 from .recipe_contract import RecipeContractError, validate_recipe
 from .topology import Placement, TopologyError, validate_topology
 
-_UUID_PATTERN = (
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
-    r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-)
-_NODE_PATTERN = r"^spk_[0-9a-f]{32}$"
-_DIGEST_PATTERN = r"^[0-9a-f]{64}$"
-_IMAGE_DIGEST_PATTERN = r"^sha256:[0-9a-f]{64}$"
 _LIBRARY_CURSOR_RESOURCE = "library-recipes"
 _LIBRARY_CURSOR_ORDER = "slug-asc/id-asc/v1"
-_MAX_PAGE_RECIPES = 100
-_MAX_OPERATIONAL_ROWS = 512
-_MAX_OPERATIONAL_MEMBERS = 16_384
-_MAX_AGENT_ROWS = 500
-_MAX_CANDIDATE_NODES = 32
-_MAX_EXAMINED_GROUPS = 512
-_MAX_RECOMMENDATIONS = 16
-_MAX_REJECTED_NODES = 32
-_MAX_REJECTED_GROUPS = 16
-_MAX_NODE_ARTIFACTS_PER_NODE = 512
-_MAX_PROJECTED_PROFILES = 32
-_MAX_PROJECTED_CAPABILITIES = 64
-_RUN_RANK_FRESH_SECONDS = 300
-_MAX_SIGNED_BIGINT = 9_223_372_036_854_775_807
-_ACTIVE_RUN_STATES = frozenset({"planned", "starting", "running", "stopping"})
-
-UuidId = Annotated[str, StringConstraints(pattern=_UUID_PATTERN)]
-NodeId = Annotated[str, StringConstraints(pattern=_NODE_PATTERN)]
-Digest = Annotated[str, StringConstraints(pattern=_DIGEST_PATTERN)]
-ImageDigest = Annotated[str, StringConstraints(pattern=_IMAGE_DIGEST_PATTERN)]
-Text32 = Annotated[str, StringConstraints(min_length=1, max_length=32)]
-Text64 = Annotated[str, StringConstraints(min_length=1, max_length=64)]
-Text80 = Annotated[str, StringConstraints(min_length=1, max_length=80)]
-Text128 = Annotated[str, StringConstraints(min_length=1, max_length=128)]
-Text200 = Annotated[str, StringConstraints(min_length=1, max_length=200)]
-Text256 = Annotated[str, StringConstraints(min_length=1, max_length=256)]
-Text512 = Annotated[str, StringConstraints(min_length=1, max_length=512)]
-Scalar = str | int | bool
-DisplayScalar = (
-    Annotated[str, StringConstraints(max_length=512)]
-    | Annotated[int, Field(ge=-_MAX_SIGNED_BIGINT, le=_MAX_SIGNED_BIGINT)]
-    | bool
-    | None
-)
-
-
-class _StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
-
-
-class ProjectionReason(_StrictModel):
-    code: Text80
-    detail: Text256
-    severity: Literal["info", "warning", "error"]
-
-
-class FreshnessPolicy(_StrictModel):
-    inventory_fresh_seconds: int = Field(default=300, ge=1, le=3_600)
-    telemetry_live_seconds: int = Field(default=6, ge=1, le=60)
-    telemetry_delayed_seconds: int = Field(default=20, ge=1, le=300)
-
-
-class RecipeRevisionSummary(_StrictModel):
-    id: UuidId
-    revision_number: int = Field(ge=1, le=2_147_483_647)
-    lifecycle: Literal["draft", "blocked", "resolved", "deprecated"]
-    schema_version: int = Field(ge=1, le=2_147_483_647)
-    content_sha256: Digest | None
-    created_at: datetime
-
-
-class RecipeProfileSummary(_StrictModel):
-    name: Text64
-    description: Text512
-    node_count: int = Field(ge=1, le=_MAX_SIGNED_BIGINT)
-    roles: list[Text64] = Field(max_length=64)
-    fabric_connectivity: Literal["none", "connected", "full_mesh", "switch"]
-    minimum_bandwidth_mbps: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-
-
-class LibraryRecipeIdentity(_StrictModel):
-    recipe_id: UuidId
-    slug: Text128
-    title: Text200
-    description: Annotated[str, StringConstraints(max_length=4_096)]
-    source_kind: Literal["local", "workload_run", "global"]
-
-
-class LibraryInstallationSummary(_StrictModel):
-    installation_id: UuidId
-    recipe_revision_id: UuidId
-    state: Literal["planned", "installing", "installed", "partial", "failed"]
-    installed_rank_count: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    expected_rank_count: int = Field(ge=1, le=_MAX_SIGNED_BIGINT)
-    complete: bool
-
-
-class LibraryRunSummary(_StrictModel):
-    run_id: UuidId
-    installation_id: UuidId
-    recipe_revision_id: UuidId
-    state: Literal["planned", "starting", "running", "stopping"]
-    route_state: Literal["withdrawn", "pending", "published", "failed"]
-    healthy_rank_count: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    expected_rank_count: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    healthy: bool
-
-
-class LibraryRecipeSummary(LibraryRecipeIdentity):
-    selected_revision: RecipeRevisionSummary | None
-    capabilities: list[Text64] = Field(max_length=64)
-    profiles: list[RecipeProfileSummary] = Field(max_length=32)
-    installations: list[LibraryInstallationSummary] = Field(max_length=64)
-    installation_total_count: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    installation_returned_count: int = Field(ge=0, le=64)
-    installations_truncated: bool
-    runs: list[LibraryRunSummary] = Field(max_length=64)
-    run_total_count: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    run_returned_count: int = Field(ge=0, le=64)
-    runs_truncated: bool
-    reasons: list[ProjectionReason] = Field(max_length=16)
-
-
-class LibraryModel(_StrictModel):
-    family: Text128
-    display_name: Text128
-    page_local: Literal[True] = True
-    recipes: list[LibraryRecipeSummary] = Field(min_length=1, max_length=100)
-
-
-class LibrarySnapshot(_StrictModel):
-    schema_version: Literal[1] = 1
-    generated_at: datetime
-    models: list[LibraryModel] = Field(max_length=100)
-    unlinked_recipes: list[LibraryRecipeSummary] = Field(max_length=100)
-    next_cursor: Annotated[str, StringConstraints(max_length=1024)] | None
-    freshness_policy: FreshnessPolicy
-
-
-class VisualIdentity(_StrictModel):
-    publisher: Text128
-    slug: Text128
-
-
-class VisualMetadata(_StrictModel):
-    title: Text200
-    description: Text512
-    tags: list[Text64] = Field(max_length=64)
-
-
-class VisualWorkload(_StrictModel):
-    family: Text128
-    capabilities: list[Text64] = Field(max_length=64)
-
-
-class VisualBuildContext(_StrictModel):
-    sha256: Digest
-    expected_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    media_type: Text128
-
-
-class VisualBuild(_StrictModel):
-    context: VisualBuildContext
-    dockerfile: Text256
-    platform: Text64
-    network_mode: Text32
-    network_hosts: list[Text256] = Field(max_length=64)
-    download_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    temporary_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    memory_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    timeout_seconds: int = Field(ge=1, le=86_400)
-
-
-class VisualArtifact(_StrictModel):
-    id: Text64
-    kind: Text64
-    repository: Text256
-    revision: Text128
-    download_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    installed_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    roles: list[Text64] = Field(max_length=64)
-
-
-class VisualRuntime(_StrictModel):
-    interface: Text64
-    adapter: Text64
-    adapter_version: int = Field(ge=1, le=_MAX_SIGNED_BIGINT)
-    endpoint_protocol: Text64
-    endpoint_port: int = Field(ge=1, le=65_535)
-    model_aliases: list[Text128] = Field(max_length=64)
-    health_path: Annotated[str, StringConstraints(min_length=1, max_length=512)]
-
-
-class VisualValidation(_StrictModel):
-    checks: list[Text80] = Field(min_length=1, max_length=64)
-    benchmark_count: int = Field(ge=0, le=32)
-
-
-class VisualProvenance(_StrictModel):
-    source_kind: Literal["local", "workload_run", "global", "fork"]
-    source_reference: Annotated[str, StringConstraints(max_length=2_048)] | None
-    attribution: list[Text512] = Field(max_length=32)
-
-
-class VisualRecipeDocument(_StrictModel):
-    schema_version: Literal[1]
-    identity: VisualIdentity
-    metadata: VisualMetadata
-    workload: VisualWorkload
-    build: VisualBuild
-    artifacts: list[VisualArtifact] = Field(max_length=128)
-    runtime: VisualRuntime
-    validation: VisualValidation
-    provenance: VisualProvenance
-
-
-class RecipeDiskRequirements(_StrictModel):
-    image_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    artifact_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    staging_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    cache_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    rollback_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    safety_margin_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-
-
-class RecipeMemoryRequirements(_StrictModel):
-    kind: Literal["unified", "host", "accelerator"]
-    startup_peak_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    steady_state_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    runtime_growth_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    system_reserve_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-
-
-class RecipeRole(_StrictModel):
-    name: Text64
-    count: int = Field(ge=1, le=_MAX_SIGNED_BIGINT)
-    endpoint_owner: bool
-    artifacts: list[Text64] = Field(max_length=128)
-    disk: RecipeDiskRequirements
-    memory: RecipeMemoryRequirements
-
-
-class RecipeFabric(_StrictModel):
-    connectivity: Literal["none", "connected", "full_mesh", "switch"]
-    minimum_bandwidth_mbps: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-
-
-class RecipeParallelism(_StrictModel):
-    tensor: int = Field(ge=1, le=_MAX_SIGNED_BIGINT)
-    pipeline: int = Field(ge=1, le=_MAX_SIGNED_BIGINT)
-    data: int = Field(ge=1, le=_MAX_SIGNED_BIGINT)
-    backend: Text64
-
-
-class RecipeProfile(_StrictModel):
-    name: Text64
-    description: Text512
-    node_count: int = Field(ge=1, le=_MAX_SIGNED_BIGINT)
-    strategy: Text64
-    parallelism: RecipeParallelism
-    roles: list[RecipeRole] = Field(min_length=1, max_length=32)
-    fabric: RecipeFabric
-    parameter_overrides: dict[Text64, DisplayScalar] = Field(max_length=128)
-    measurement: Literal["declared", "derived", "measured"]
-
-
-class OperationalBuild(_StrictModel):
-    recipe_build_id: UuidId
-    recipe_revision_id: UuidId
-    state: Literal["planned", "building", "succeeded", "failed"]
-    image_digest: ImageDigest | None
-    image_bytes: int | None = Field(default=None, ge=1, le=_MAX_SIGNED_BIGINT)
-
-
-class OperationalMappingNode(_StrictModel):
-    node_id: NodeId
-    rank: int = Field(ge=0, le=_MAX_CANDIDATE_NODES - 1)
-    role: Text64
-    endpoint_owner: bool
-
-
-class OperationalMapping(_StrictModel):
-    mapping_id: UuidId
-    recipe_revision_id: UuidId
-    profile_name: Text64
-    generation: int = Field(ge=1, le=2_147_483_647)
-    state: Literal["planned", "ready", "stale"]
-    nodes: list[OperationalMappingNode] = Field(max_length=32)
-
-
-class OperationalInstallation(_StrictModel):
-    installation_id: UuidId
-    recipe_revision_id: UuidId
-    mapping_id: UuidId
-    recipe_build_id: UuidId
-    state: Literal[
-        "planned", "installing", "installed", "partial", "failed", "uninstalled"
-    ]
-    node_ids: list[NodeId] = Field(max_length=32)
-
-
-class OperationalRun(_StrictModel):
-    run_id: UuidId
-    installation_id: UuidId
-    mapping_id: UuidId
-    recipe_revision_id: UuidId
-    state: Literal[
-        "planned", "starting", "running", "stopping", "stopped", "failed", "lost"
-    ]
-    route_state: Literal["withdrawn", "pending", "published", "failed"]
-    node_ids: list[NodeId] = Field(max_length=32)
-
-
-class OperationalState(_StrictModel):
-    builds: list[OperationalBuild] = Field(max_length=_MAX_OPERATIONAL_ROWS)
-    mappings: list[OperationalMapping] = Field(max_length=_MAX_OPERATIONAL_ROWS)
-    installations: list[OperationalInstallation] = Field(
-        max_length=_MAX_OPERATIONAL_ROWS
-    )
-    runs: list[OperationalRun] = Field(max_length=_MAX_OPERATIONAL_ROWS)
-
-
-class MappingPreviewInput(_StrictModel):
-    recipe_revision_id: UuidId
-    profile_name: Text64
-    node_ids: list[NodeId] = Field(min_length=1, max_length=32)
-    parameters: dict[Text64, Scalar] = Field(max_length=128)
-
-
-class InstallPreviewInput(_StrictModel):
-    mapping_id: UuidId
-    recipe_build_id: UuidId
-
-
-class RunPreviewInput(_StrictModel):
-    installation_id: UuidId
-
-
-class MappingPreviewTarget(_StrictModel):
-    kind: Literal["mapping"] = "mapping"
-    input: MappingPreviewInput
-
-
-class InstallPreviewTarget(_StrictModel):
-    kind: Literal["install"] = "install"
-    input: InstallPreviewInput
-
-
-class RunPreviewTarget(_StrictModel):
-    kind: Literal["run"] = "run"
-    input: RunPreviewInput
-
-
-PreviewTarget = Annotated[
-    MappingPreviewTarget | InstallPreviewTarget | RunPreviewTarget,
-    Field(discriminator="kind"),
-]
-
-
-class PlacementLimits(_StrictModel):
-    candidate_node_limit: Literal[32] = _MAX_CANDIDATE_NODES
-    examined_group_limit: Literal[512] = _MAX_EXAMINED_GROUPS
-    recommendation_limit: Literal[16] = _MAX_RECOMMENDATIONS
-    rejected_node_evidence_limit: Literal[32] = _MAX_REJECTED_NODES
-    rejected_group_evidence_limit: Literal[16] = _MAX_REJECTED_GROUPS
-    artifact_evidence_per_node_limit: Literal[512] = _MAX_NODE_ARTIFACTS_PER_NODE
-    operational_row_evidence_limit: Literal[512] = _MAX_OPERATIONAL_ROWS
-    operational_member_evidence_limit: Literal[16384] = _MAX_OPERATIONAL_MEMBERS
-
-
-EvidenceCollection = Literal[
-    "builds",
-    "mappings",
-    "mapping_members",
-    "installations",
-    "installation_members",
-    "runs",
-    "run_members",
-]
-
-
-class PlacementEvidenceCounts(_StrictModel):
-    builds: int = Field(ge=0, le=_MAX_OPERATIONAL_ROWS + 1)
-    mappings: int = Field(ge=0, le=_MAX_OPERATIONAL_ROWS + 1)
-    mapping_members: int = Field(ge=0, le=_MAX_OPERATIONAL_MEMBERS + 1)
-    installations: int = Field(ge=0, le=_MAX_OPERATIONAL_ROWS + 1)
-    installation_members: int = Field(ge=0, le=_MAX_OPERATIONAL_MEMBERS + 1)
-    runs: int = Field(ge=0, le=_MAX_OPERATIONAL_ROWS + 1)
-    run_members: int = Field(ge=0, le=_MAX_OPERATIONAL_MEMBERS + 1)
-    truncated_collections: list[EvidenceCollection] = Field(max_length=7)
-
-
-class PlacementNode(_StrictModel):
-    node_id: NodeId
-    rank: int = Field(ge=0, le=_MAX_CANDIDATE_NODES - 1)
-    role: Text64
-    endpoint_owner: bool
-    inventory_observed_at: datetime
-    telemetry_observed_at: datetime
-    inventory_age_seconds: float = Field(ge=0, le=float(_MAX_SIGNED_BIGINT))
-    telemetry_age_seconds: float = Field(ge=0, le=float(_MAX_SIGNED_BIGINT))
-    disk_free_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    disk_reserved_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    disk_required_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    disk_free_after_bytes: int = Field(ge=-_MAX_SIGNED_BIGINT, le=_MAX_SIGNED_BIGINT)
-    memory_kind: Literal["unified", "host", "accelerator"]
-    memory_available_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    memory_reserved_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    memory_required_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    memory_free_after_bytes: int = Field(ge=-_MAX_SIGNED_BIGINT, le=_MAX_SIGNED_BIGINT)
-    artifact_reuse_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    fabric_address: Annotated[str, StringConstraints(max_length=45)] | None
-    fabric_bandwidth_mbps: int | None = Field(default=None, ge=1, le=_MAX_SIGNED_BIGINT)
-
-
-class PlacementScore(_StrictModel):
-    exact_install_complete: bool
-    exact_install_partial: bool
-    active_run_count: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    artifact_reuse_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    minimum_disk_headroom_bytes: int = Field(
-        ge=-_MAX_SIGNED_BIGINT, le=_MAX_SIGNED_BIGINT
-    )
-    minimum_memory_headroom_bytes: int = Field(
-        ge=-_MAX_SIGNED_BIGINT, le=_MAX_SIGNED_BIGINT
-    )
-    maximum_telemetry_age_seconds: float = Field(ge=0, le=float(_MAX_SIGNED_BIGINT))
-
-
-class PlacementRecommendation(_StrictModel):
-    recipe_revision_id: UuidId
-    profile_name: Text64
-    node_ids: list[NodeId] = Field(min_length=1, max_length=32)
-    nodes: list[PlacementNode] = Field(min_length=1, max_length=32)
-    group_complete: Literal[True] = True
-    eligible: bool
-    ranking_scope: Literal["bounded-advisory"] = "bounded-advisory"
-    score: PlacementScore
-    install_state: Literal["complete", "partial", "not_present", "unknown"]
-    load_state: Literal["loaded", "not_loaded", "unknown"]
-    mapping_id: UuidId | None
-    recipe_build_id: UuidId | None
-    installation_ids: list[UuidId] = Field(max_length=16)
-    run_ids: list[UuidId] = Field(max_length=16)
-    preview_targets: list[PreviewTarget] = Field(max_length=3)
-    reasons: list[ProjectionReason] = Field(max_length=64)
-
-
-class RejectedNode(_StrictModel):
-    node_id: NodeId
-    reasons: list[ProjectionReason] = Field(min_length=1, max_length=16)
-
-
-class ProfilePlacement(_StrictModel):
-    profile_name: Text64
-    node_count: int = Field(ge=1, le=_MAX_SIGNED_BIGINT)
-    candidate_node_ids: list[NodeId] = Field(max_length=32)
-    recommendations: list[PlacementRecommendation] = Field(max_length=16)
-    rejected_nodes: list[RejectedNode] = Field(max_length=32)
-    rejected_groups: list[PlacementRecommendation] = Field(max_length=16)
-    evaluated_group_count: int = Field(ge=0, le=512)
-    search_complete: bool
-    rejected_evidence_truncated: bool
-    limits: PlacementLimits
-    evidence_counts: PlacementEvidenceCounts
-    reasons: list[ProjectionReason] = Field(max_length=16)
-
-
-class LibraryRecipeDetail(_StrictModel):
-    schema_version: Literal[1] = 1
-    generated_at: datetime
-    recipe: LibraryRecipeIdentity
-    selected_revision: RecipeRevisionSummary | None
-    visual_recipe: VisualRecipeDocument | None
-    profiles: list[RecipeProfile] = Field(max_length=32)
-    operational_state: OperationalState
-    placement: list[ProfilePlacement] = Field(max_length=32)
-    reasons: list[ProjectionReason] = Field(max_length=16)
-
-
-def _utc(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        return value.replace(tzinfo=UTC)
-    return value.astimezone(UTC)
-
-
-def _bounded_detail(value: object) -> str:
-    detail = " ".join(str(value).split())
-    return (detail or "Projection evidence is unavailable.")[:256]
-
-
-def _bounded_text(value: object, maximum_length: int) -> str:
-    """Return deterministic response copy without rejecting valid stored text."""
-
-    return str(value)[:maximum_length]
-
-
-def _saturating_nonnegative(value: object) -> int:
-    """Project a schema-valid nonnegative integer into signed-bigint DTO space."""
-
-    return min(max(int(value), 0), _MAX_SIGNED_BIGINT)
-
-
-def _saturating_nonnegative_sum(*values: object) -> int:
-    """Add nonnegative inputs without allowing a bounded DTO overflow."""
-
-    total = 0
-    for value in values:
-        total = min(
-            _MAX_SIGNED_BIGINT,
-            total + _saturating_nonnegative(value),
-        )
-    return total
-
-
-def _saturating_headroom(available: object, *required: object) -> int:
-    """Subtract bounded capacity evidence and clamp to signed-bigint DTO space."""
-
-    value = _saturating_nonnegative(available) - sum(
-        _saturating_nonnegative(item) for item in required
-    )
-    return max(-_MAX_SIGNED_BIGINT, min(value, _MAX_SIGNED_BIGINT))
-
-
-def _numeric_truncation_count(value: object) -> int:
-    """Count integers outside the public signed-bigint display bound."""
-
-    if isinstance(value, bool):
-        return 0
-    if isinstance(value, int):
-        return int(not -_MAX_SIGNED_BIGINT <= value <= _MAX_SIGNED_BIGINT)
-    if isinstance(value, Mapping):
-        return sum(_numeric_truncation_count(item) for item in value.values())
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
-        return sum(_numeric_truncation_count(item) for item in value)
-    return 0
-
-
-def _display_scalar_truncation_count(value: object) -> int:
-    if isinstance(value, str):
-        return int(len(value) > 512)
-    if isinstance(value, Mapping):
-        return sum(_display_scalar_truncation_count(item) for item in value.values())
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
-        return sum(_display_scalar_truncation_count(item) for item in value)
-    return 0
-
-
-def _bounded_display_scalar(value: Scalar | None) -> DisplayScalar:
-    """Bound display-only scalars without feeding them back into actions."""
-
-    if value is None or isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        return value[:512]
-    return max(-_MAX_SIGNED_BIGINT, min(value, _MAX_SIGNED_BIGINT))
-
-
-@dataclass(frozen=True, slots=True)
-class _MemberEvidence:
-    node_id: str
-    rank: int
-    role: str
-    state: str | None = None
-    updated_at: datetime | None = None
-
-    @property
-    def identity(self) -> tuple[str, int, str]:
-        return (self.node_id, self.rank, self.role)
-
-
-@dataclass(frozen=True, slots=True)
-class _InstallationCoverage:
-    expected_rank_count: int
-    installed_rank_count: int
-    complete: bool
-
-
-@dataclass(frozen=True, slots=True)
-class _RunHealth:
-    expected_rank_count: int
-    healthy_rank_count: int
-    healthy: bool
-    evidence_code: str | None = None
-    evidence_detail: str | None = None
-
-
-def _members_are_exact(
-    expected: Sequence[_MemberEvidence], actual: Sequence[_MemberEvidence]
-) -> bool:
-    expected_identities = [item.identity for item in expected]
-    actual_identities = [item.identity for item in actual]
-    return (
-        bool(expected_identities)
-        and len(expected_identities) == len(set(expected_identities))
-        and len(actual_identities) == len(set(actual_identities))
-        and len(expected_identities) == len(actual_identities)
-        and set(expected_identities) == set(actual_identities)
-    )
-
-
-def _installation_coverage(
-    installation_state: str,
-    mapping_state: str | None,
-    mapping_generation: int | None,
-    installation_mapping_generation: int,
-    expected: Sequence[_MemberEvidence],
-    actual: Sequence[_MemberEvidence],
-    *,
-    declared_expected_count: int,
-) -> _InstallationCoverage:
-    """Match RunAdmission's exact installed-membership gate; bytes are informational."""
-
-    expected_identities = {item.identity for item in expected}
-    installed_identities = {
-        item.identity
-        for item in actual
-        if item.state == "installed" and item.identity in expected_identities
-    }
-    complete = (
-        installation_state == "installed"
-        and mapping_state == "ready"
-        and mapping_generation == installation_mapping_generation
-        and len(expected) == declared_expected_count
-        and _members_are_exact(expected, actual)
-        and all(item.state == "installed" for item in actual)
-    )
-    return _InstallationCoverage(
-        expected_rank_count=declared_expected_count,
-        installed_rank_count=len(installed_identities),
-        complete=complete,
-    )
-
-
-def _run_health(
-    plan: object,
-    actual: Sequence[_MemberEvidence],
-    *,
-    current: datetime,
-) -> _RunHealth:
-    """Match run_status using bounded immutable plan membership evidence."""
-
-    raw_expected = plan.get("nodes") if isinstance(plan, Mapping) else None
-    if not isinstance(raw_expected, list):
-        return _RunHealth(
-            expected_rank_count=0,
-            healthy_rank_count=0,
-            healthy=False,
-            evidence_code="run.plan_invalid",
-            evidence_detail="The persisted run plan does not contain a valid nodes list; rank health fails closed.",
-        )
-    expected_count = len(raw_expected)
-    if expected_count > _MAX_CANDIDATE_NODES:
-        return _RunHealth(
-            expected_rank_count=expected_count,
-            healthy_rank_count=0,
-            healthy=False,
-            evidence_code="projection.evidence_truncated",
-            evidence_detail=f"The persisted run plan has {expected_count} members, above the active {_MAX_CANDIDATE_NODES}-member evidence limit; rank health fails closed.",
-        )
-    expected: list[_MemberEvidence] = []
-    for item in raw_expected:
-        if not isinstance(item, Mapping):
-            expected = []
-            break
-        node_id = item.get("node_id")
-        rank = item.get("rank")
-        role = item.get("role")
-        if (
-            not isinstance(node_id, str)
-            or len(node_id) > 36
-            or type(rank) is not int
-            or not 0 <= rank < _MAX_CANDIDATE_NODES
-            or not isinstance(role, str)
-            or not role
-            or len(role) > 64
-        ):
-            expected = []
-            break
-        expected.append(_MemberEvidence(node_id=node_id, rank=rank, role=role))
-    if not expected or len({item.identity for item in expected}) != len(expected):
-        return _RunHealth(
-            expected_rank_count=expected_count,
-            healthy_rank_count=0,
-            healthy=False,
-            evidence_code="run.plan_invalid",
-            evidence_detail="The persisted run plan has malformed or duplicate member evidence; rank health fails closed.",
-        )
-
-    expected_identities = {item.identity for item in expected}
-    healthy_identities = {
-        item.identity
-        for item in actual
-        if item.identity in expected_identities
-        and item.state == "running"
-        and item.updated_at is not None
-        and timedelta(0)
-        <= current - _utc(item.updated_at)
-        < timedelta(seconds=_RUN_RANK_FRESH_SECONDS)
-    }
-    healthy = (
-        _members_are_exact(expected, actual)
-        and len(healthy_identities) == expected_count
-    )
-    return _RunHealth(
-        expected_rank_count=expected_count,
-        healthy_rank_count=len(healthy_identities),
-        healthy=healthy,
-    )
-
-
-def _reason(code: str, detail: str, severity: str = "warning") -> ProjectionReason:
-    return ProjectionReason(
-        code=code, detail=_bounded_detail(detail), severity=severity
-    )
-
-
-def _bounded_reasons(
-    reasons: Sequence[ProjectionReason], maximum: int
-) -> list[ProjectionReason]:
-    """Dedupe, severity-sort, and cap evidence with an observable marker."""
-
-    severity_order = {"error": 0, "warning": 1, "info": 2}
-    unique = {
-        (reason.severity, reason.code, reason.detail): reason for reason in reasons
-    }
-    ordered = sorted(
-        unique.values(),
-        key=lambda reason: (
-            severity_order[reason.severity],
-            reason.code,
-            reason.detail,
-        ),
-    )
-    if len(ordered) <= maximum:
-        return ordered
-    marker = _reason(
-        "projection.reasons_truncated",
-        f"Projection produced {len(ordered)} distinct reasons; returning {maximum}, including this truncation marker.",
-        "warning",
-    )
-    available = maximum - 1
-    representatives: dict[tuple[str, str], ProjectionReason] = {}
-    for reason in ordered:
-        representatives.setdefault((reason.severity, reason.code), reason)
-    selected = list(representatives.values())[:available]
-    selected_keys = {
-        (reason.severity, reason.code, reason.detail) for reason in selected
-    }
-    for reason in ordered:
-        key = (reason.severity, reason.code, reason.detail)
-        if len(selected) == available:
-            break
-        if key not in selected_keys:
-            selected.append(reason)
-            selected_keys.add(key)
-    selected.append(marker)
-    return sorted(
-        selected,
-        key=lambda reason: (
-            severity_order[reason.severity],
-            reason.code,
-            reason.detail,
-        ),
-    )
 
 
 def _cap_operational_rows[Row](
@@ -1146,75 +465,6 @@ class _NodeEvidence:
         self.agent = agent
         self.inventory = inventory
         self.telemetry = telemetry
-
-
-def _group_rows[Row](rows: Sequence[Row], field: str) -> dict[str, list[Row]]:
-    grouped: dict[str, list[Row]] = {}
-    for row in rows:
-        grouped.setdefault(str(getattr(row, field)), []).append(row)
-    return grouped
-
-
-def _member_evidence(rows: Sequence[object]) -> list[_MemberEvidence]:
-    return [
-        _MemberEvidence(
-            node_id=str(row.node_id),  # type: ignore[attr-defined]
-            rank=int(row.rank),  # type: ignore[attr-defined]
-            role=str(row.role),  # type: ignore[attr-defined]
-            state=getattr(row, "state", None),
-            updated_at=getattr(row, "updated_at", None),
-        )
-        for row in rows
-    ]
-
-
-@dataclass(frozen=True)
-class _OperationalRows:
-    builds: Sequence[RecipeBuild]
-    mappings: Sequence[ClusterMapping]
-    mapping_nodes: Sequence[ClusterMappingNode]
-    installations: Sequence[RecipeInstallation]
-    installation_nodes: Sequence[InstallationNode]
-    runs: Sequence[RecipeRun]
-    run_nodes: Sequence[RunNode]
-    mapping_members: Mapping[str, Sequence[ClusterMappingNode]]
-    installation_members: Mapping[str, Sequence[InstallationNode]]
-    run_members: Mapping[str, Sequence[RunNode]]
-
-    @classmethod
-    def collect(
-        cls,
-        *,
-        builds: Sequence[RecipeBuild],
-        mappings: Sequence[ClusterMapping],
-        mapping_nodes: Sequence[ClusterMappingNode],
-        installations: Sequence[RecipeInstallation],
-        installation_nodes: Sequence[InstallationNode],
-        runs: Sequence[RecipeRun],
-        run_nodes: Sequence[RunNode],
-    ) -> _OperationalRows:
-        return cls(
-            builds=builds,
-            mappings=mappings,
-            mapping_nodes=mapping_nodes,
-            installations=installations,
-            installation_nodes=installation_nodes,
-            runs=runs,
-            run_nodes=run_nodes,
-            mapping_members=_group_rows(mapping_nodes, "mapping_id"),
-            installation_members=_group_rows(installation_nodes, "installation_id"),
-            run_members=_group_rows(run_nodes, "run_id"),
-        )
-
-
-@dataclass(frozen=True)
-class _PlacementOperationalEvidence:
-    operational: _OperationalRows
-    counts: PlacementEvidenceCounts
-
-    @property
-    def truncated(self) -> bool:
-        return bool(self.counts.truncated_collections)
 
 
 class LibraryProjection:
@@ -1856,7 +1106,7 @@ class LibraryProjection:
                 )
             )
             if document is not None and revision is not None:
-                placement_evidence = self._placement_operational_evidence(
+                placement_evidence = load_placement_operational_evidence(
                     session,
                     revision.id,
                 )
@@ -2000,177 +1250,6 @@ class LibraryProjection:
             operational_state=operational,
             placement=placement,
             reasons=_bounded_reasons(reasons, 16),
-        )
-
-    @staticmethod
-    def _placement_operational_evidence(
-        session: Session,
-        recipe_revision_id: str,
-    ) -> _PlacementOperationalEvidence:
-        """Load fail-closed current placement evidence apart from display history."""
-
-        run_rows = list(
-            session.scalars(
-                select(RecipeRun)
-                .join(
-                    RecipeInstallation,
-                    RecipeInstallation.id == RecipeRun.installation_id,
-                )
-                .where(
-                    RecipeInstallation.recipe_revision_id == recipe_revision_id,
-                    RecipeRun.state.in_(_ACTIVE_RUN_STATES),
-                )
-                .order_by(RecipeRun.updated_at.desc(), RecipeRun.id.desc())
-                .limit(_MAX_OPERATIONAL_ROWS + 1)
-            )
-        )
-        runs = run_rows[:_MAX_OPERATIONAL_ROWS]
-        referenced_installation_ids = {item.installation_id for item in runs}
-        installation_rows = list(
-            session.scalars(
-                select(RecipeInstallation)
-                .where(
-                    RecipeInstallation.recipe_revision_id == recipe_revision_id,
-                    RecipeInstallation.state != "uninstalled",
-                )
-                .order_by(
-                    case(
-                        (
-                            RecipeInstallation.id.in_(referenced_installation_ids),
-                            0,
-                        ),
-                        (RecipeInstallation.state == "installed", 1),
-                        else_=2,
-                    ),
-                    RecipeInstallation.updated_at.desc(),
-                    RecipeInstallation.id.desc(),
-                )
-                .limit(_MAX_OPERATIONAL_ROWS + 1)
-            )
-        )
-        installations = installation_rows[:_MAX_OPERATIONAL_ROWS]
-        referenced_mapping_ids = {
-            *(item.mapping_id for item in runs),
-            *(item.mapping_id for item in installations),
-        }
-        mapping_rows = list(
-            session.scalars(
-                select(ClusterMapping)
-                .where(
-                    ClusterMapping.recipe_revision_id == recipe_revision_id,
-                    ClusterMapping.state == "ready",
-                )
-                .order_by(
-                    case(
-                        (ClusterMapping.id.in_(referenced_mapping_ids), 0),
-                        else_=1,
-                    ),
-                    ClusterMapping.updated_at.desc(),
-                    ClusterMapping.id.desc(),
-                )
-                .limit(_MAX_OPERATIONAL_ROWS + 1)
-            )
-        )
-        mappings = mapping_rows[:_MAX_OPERATIONAL_ROWS]
-        referenced_build_ids = {item.recipe_build_id for item in installations}
-        build_rows = list(
-            session.scalars(
-                select(RecipeBuild)
-                .where(
-                    RecipeBuild.recipe_revision_id == recipe_revision_id,
-                    or_(
-                        RecipeBuild.id.in_(referenced_build_ids),
-                        RecipeBuild.state == "succeeded",
-                    ),
-                )
-                .order_by(
-                    case(
-                        (RecipeBuild.id.in_(referenced_build_ids), 0),
-                        else_=1,
-                    ),
-                    RecipeBuild.updated_at.desc(),
-                    RecipeBuild.id.desc(),
-                )
-                .limit(_MAX_OPERATIONAL_ROWS + 1)
-            )
-        )
-        builds = build_rows[:_MAX_OPERATIONAL_ROWS]
-        mapping_node_rows = list(
-            session.scalars(
-                select(ClusterMappingNode)
-                .where(
-                    ClusterMappingNode.mapping_id.in_([item.id for item in mappings])
-                )
-                .order_by(ClusterMappingNode.mapping_id, ClusterMappingNode.rank)
-                .limit(_MAX_OPERATIONAL_MEMBERS + 1)
-            )
-        )
-        installation_node_rows = list(
-            session.scalars(
-                select(InstallationNode)
-                .where(
-                    InstallationNode.installation_id.in_(
-                        [item.id for item in installations]
-                    )
-                )
-                .order_by(InstallationNode.installation_id, InstallationNode.rank)
-                .limit(_MAX_OPERATIONAL_MEMBERS + 1)
-            )
-        )
-        run_node_rows = list(
-            session.scalars(
-                select(RunNode)
-                .where(RunNode.run_id.in_([item.id for item in runs]))
-                .order_by(RunNode.run_id, RunNode.rank)
-                .limit(_MAX_OPERATIONAL_MEMBERS + 1)
-            )
-        )
-        observed_counts = {
-            "builds": len(build_rows),
-            "mappings": len(mapping_rows),
-            "mapping_members": len(mapping_node_rows),
-            "installations": len(installation_rows),
-            "installation_members": len(installation_node_rows),
-            "runs": len(run_rows),
-            "run_members": len(run_node_rows),
-        }
-        limits = {
-            "builds": _MAX_OPERATIONAL_ROWS,
-            "mappings": _MAX_OPERATIONAL_ROWS,
-            "mapping_members": _MAX_OPERATIONAL_MEMBERS,
-            "installations": _MAX_OPERATIONAL_ROWS,
-            "installation_members": _MAX_OPERATIONAL_MEMBERS,
-            "runs": _MAX_OPERATIONAL_ROWS,
-            "run_members": _MAX_OPERATIONAL_MEMBERS,
-        }
-        truncated_collections = [
-            name
-            for name in (
-                "builds",
-                "mappings",
-                "mapping_members",
-                "installations",
-                "installation_members",
-                "runs",
-                "run_members",
-            )
-            if observed_counts[name] > limits[name]
-        ]
-        counts = PlacementEvidenceCounts(
-            **observed_counts,
-            truncated_collections=truncated_collections,
-        )
-        return _PlacementOperationalEvidence(
-            operational=_OperationalRows.collect(
-                builds=builds,
-                mappings=mappings,
-                mapping_nodes=mapping_node_rows[:_MAX_OPERATIONAL_MEMBERS],
-                installations=installations,
-                installation_nodes=installation_node_rows[:_MAX_OPERATIONAL_MEMBERS],
-                runs=runs,
-                run_nodes=run_node_rows[:_MAX_OPERATIONAL_MEMBERS],
-            ),
-            counts=counts,
         )
 
     @staticmethod
