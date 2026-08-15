@@ -15,7 +15,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Annotated, Any, Protocol
 
 from fastapi import (
     Body,
@@ -39,7 +39,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from starlette.responses import FileResponse
+from starlette.responses import FileResponse, StreamingResponse
 from vonk_agent_protocol import canonical_message
 
 from .agent_api import (
@@ -62,6 +62,8 @@ from .browser_auth import BrowserAuthenticationError, BrowserAuthService
 from .catalog_api import install_catalog_routes
 from .catalog_service import CatalogService
 from .cluster_mappings import ClusterMappingService
+from .fleet_projection import FleetSnapshot, TelemetryHistoryResponse
+from .fleet_stream import parse_last_event_id
 from .global_catalog import GlobalCatalogClient
 from .metrics import MetricsRegistry
 from .operation_api import (
@@ -964,6 +966,8 @@ def create_app(
     tokens: TokenCodec,
     audits: AuditSink,
     fleet: Callable[[], Mapping[str, object]],
+    fleet_projection: Any | None = None,
+    fleet_stream: Any | None = None,
     now: Callable[[], int] = lambda: int(time.time()),
     admin: AdminServices | None = None,
     metrics: MetricsRegistry | None = None,
@@ -1167,6 +1171,19 @@ def create_app(
         if authenticated.role not in MUTATION_ROLES[("POST", path)]:
             raise HTTPException(status_code=403, detail="insufficient role")
 
+    def browser_session_actor(request: Request) -> Actor:
+        encoded = request.cookies.get("vonk_session", "")
+        if not encoded:
+            raise HTTPException(status_code=401, detail="authentication required")
+        if browser_auth is None:
+            raise HTTPException(status_code=401, detail="authentication failed")
+        try:
+            return browser_auth.resolve(encoded).actor
+        except BrowserAuthenticationError:
+            raise HTTPException(
+                status_code=401, detail="authentication failed"
+            ) from None
+
     install_agent_routes(
         app,
         actor_dependency=actor,
@@ -1184,6 +1201,7 @@ def create_app(
             update_grants=updates,
         )
     authenticated_actor = Depends(actor)
+    authenticated_browser_actor = Depends(browser_session_actor)
 
     if browser_auth is not None:
         from .auth_api import install_auth_routes
@@ -1237,12 +1255,54 @@ def create_app(
 
     @app.get(
         "/api/v1/fleet",
-        response_model=FleetStatusResponse,
-        responses=bounded_error_responses(401),
+        response_model=FleetSnapshot,
+        responses=bounded_error_responses(401, 503),
         operation_id="getFleetStatus",
     )
-    def fleet_view(_actor: Actor = authenticated_actor) -> FleetStatusResponse:
-        return fleet_response(fleet())
+    def fleet_view(_actor: Actor = authenticated_actor) -> FleetSnapshot:
+        if fleet_projection is None:
+            raise HTTPException(status_code=503, detail="Fleet projection unavailable")
+        try:
+            return fleet_projection.read()
+        except (OSError, RuntimeError, TypeError, ValueError):
+            raise HTTPException(
+                status_code=503, detail="Fleet projection unavailable"
+            ) from None
+
+    @app.get(
+        "/api/v1/fleet/stream",
+        response_class=StreamingResponse,
+        responses={
+            200: {
+                "content": {
+                    "text/event-stream": {"schema": {"type": "string"}}
+                },
+                "description": "Durable Fleet event stream",
+            },
+            **bounded_error_responses(400, 401, 503),
+        },
+        operation_id="streamFleetEvents",
+    )
+    async def fleet_event_stream(
+        request: Request,
+        _actor: Actor = authenticated_browser_actor,
+    ) -> StreamingResponse:
+        try:
+            last_event_id = parse_last_event_id(
+                request.headers.getlist("last-event-id")
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from None
+        if fleet_stream is None:
+            raise HTTPException(status_code=503, detail="Fleet stream unavailable")
+        return StreamingResponse(
+            fleet_stream.events(last_event_id),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-transform",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     @app.get(
         "/api/v1/nodes/status",
@@ -1252,6 +1312,39 @@ def create_app(
     )
     def node_status_view(_actor: Actor = authenticated_actor) -> FleetStatusResponse:
         return fleet_response(fleet())
+
+    @app.get(
+        "/api/v1/nodes/{node_id}/telemetry",
+        response_model=TelemetryHistoryResponse,
+        responses=bounded_error_responses(401, 404, 422, 503),
+        operation_id="getNodeTelemetryHistory",
+    )
+    def node_telemetry_history(
+        node_id: Annotated[str, ApiPath(pattern=r"^spk_[0-9a-f]{32}$")],
+        start: Annotated[datetime, Query()],
+        end: Annotated[datetime, Query()],
+        maximum_points: Annotated[int, Query(ge=1, le=1_500)] = 1_500,
+        _actor: Actor = authenticated_actor,
+    ) -> TelemetryHistoryResponse:
+        if fleet_projection is None:
+            raise HTTPException(status_code=503, detail="Fleet projection unavailable")
+        try:
+            return fleet_projection.telemetry_history(
+                node_id,
+                start=start,
+                end=end,
+                maximum_points=maximum_points,
+            )
+        except KeyError:
+            raise HTTPException(
+                status_code=404, detail="Fleet node not found"
+            ) from None
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from None
+        except (OSError, RuntimeError, TypeError):
+            raise HTTPException(
+                status_code=503, detail="Telemetry history unavailable"
+            ) from None
 
     @app.get(
         "/api/v1/endpoints/{alias}",
@@ -1932,6 +2025,9 @@ def production_app() -> FastAPI:
         DesiredStateResolver,
         durable_desired_state_observations,
     )
+    from .fleet_events import FleetEventRepository
+    from .fleet_projection import FleetProjection
+    from .fleet_stream import FleetStream
     from .git_policy import GitPolicy, PolicyStore
     from .hermes_routes import RepositoryHermesRoutePolicy
     from .host_state import HostGenerationStore
@@ -1954,6 +2050,7 @@ def production_app() -> FastAPI:
     from .route_runtime import AtomicRouteBundlePublisher, FileSupervisorAcknowledger
     from .run_admission import RunAdmissionService
     from .settings import GenerationStartupSettings, Settings
+    from .telemetry import TelemetryRepository
     from .update_admin import (
         DurableUpdateGrantRefresher,
         PlatformUpdateAdminService,
@@ -2046,6 +2143,21 @@ def production_app() -> FastAPI:
         sessions,
         protocol_minimum=generation.protocol_minimum,
         protocol_maximum=generation.protocol_maximum,
+    )
+    telemetry_repository = TelemetryRepository(sessions, clock=clock)
+    fleet_event_repository = FleetEventRepository(sessions, clock=clock)
+    visual_fleet = FleetProjection(
+        repository,
+        sessions,
+        clock=clock,
+        events=fleet_event_repository,
+        telemetry=telemetry_repository,
+    )
+    visual_fleet_stream = FleetStream(
+        fleet_event_repository,
+        telemetry_repository,
+        visual_fleet,
+        clock=clock,
     )
     metrics = MetricsRegistry()
     operational_metrics = OperationalMetricsCollector(
@@ -2253,6 +2365,8 @@ def production_app() -> FastAPI:
         tokens=token_codec,
         audits=SqlAuditStore(sessions, clock),
         fleet=dashboard.fleet,
+        fleet_projection=visual_fleet,
+        fleet_stream=visual_fleet_stream,
         admin=AdminServices(
             repository,
             proposals,

@@ -421,15 +421,43 @@ class TelemetryRepository:
         if not identities:
             return {}
         with self._sessions() as session:
+            return self.latest_in_session(session, identities)
+
+    def latest_in_session(
+        self, session: Session, node_ids: Sequence[str]
+    ) -> dict[str, TelemetrySampleView]:
+        """Read latest pointers in a caller-owned bounded read transaction."""
+
+        identities = tuple(dict.fromkeys(node_ids))
+        if not identities:
+            return {}
+        rows = session.scalars(
+            select(NodeTelemetrySample)
+            .join(
+                NodeTelemetryLatest,
+                NodeTelemetryLatest.sample_id == NodeTelemetrySample.id,
+            )
+            .where(NodeTelemetryLatest.node_id.in_(identities))
+        ).all()
+        return {row.node_id: _view(row) for row in rows}
+
+    def by_ids(
+        self, sample_ids: Sequence[str]
+    ) -> dict[str, TelemetrySampleView]:
+        """Hydrate one bounded stream batch without per-event reads."""
+
+        identities = tuple(dict.fromkeys(sample_ids))
+        if not identities:
+            return {}
+        if len(identities) > 128:
+            raise ValueError("telemetry hydration batch exceeds 128 samples")
+        with self._sessions() as session:
             rows = session.scalars(
-                select(NodeTelemetrySample)
-                .join(
-                    NodeTelemetryLatest,
-                    NodeTelemetryLatest.sample_id == NodeTelemetrySample.id,
+                select(NodeTelemetrySample).where(
+                    NodeTelemetrySample.id.in_(identities)
                 )
-                .where(NodeTelemetryLatest.node_id.in_(identities))
             ).all()
-            return {row.node_id: _view(row) for row in rows}
+        return {row.id: _view(row) for row in rows}
 
     def history(
         self,

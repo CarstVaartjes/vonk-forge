@@ -44,7 +44,12 @@ _ADMIN_OPERATION_IDS = {
     ("post", "/api/v1/agents/enrollments/{enrollment_id}/reject"): "rejectAgentEnrollment",
     ("post", "/api/v1/agents/nodes/{node_id}/revoke"): "revokeAgentNode",
     ("get", "/api/v1/fleet"): "getFleetStatus",
+    ("get", "/api/v1/fleet/stream"): "streamFleetEvents",
     ("get", "/api/v1/nodes/status"): "getNodeStatuses",
+    (
+        "get",
+        "/api/v1/nodes/{node_id}/telemetry",
+    ): "getNodeTelemetryHistory",
     ("get", "/api/v1/endpoints/{alias}"): "getPublishedEndpoint",
     ("get", "/api/v1/agents"): "listAgents",
     ("get", "/api/v1/repository"): "getRepository",
@@ -844,6 +849,7 @@ def admin_openapi_schema(app: Any) -> dict[str, object]:
         "/api/v1/auth/login",
         "/api/v1/auth/logout",
         "/api/v1/auth/session",
+        "/api/v1/fleet/stream",
     }
     includes_browser_auth = any(
         path in source.get("paths", {}) for path in browser_auth_paths
