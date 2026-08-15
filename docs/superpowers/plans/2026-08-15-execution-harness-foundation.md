@@ -625,7 +625,8 @@ def test_ds4_recipe_is_one_node_and_uses_ds4_harness() -> None:
     assert recipe["topology"]["mode"] == "single"
     assert recipe["topology"]["node_count"] == 1
     assert resolve(recipe["execution"]["harness"])["compiler"] == "ds4"
-    assert resolve_primary(recipe)["format"]["quantization"] == "nvfp4"
+    assert resolve_primary(recipe)["format"]["container"] == "gguf"
+    assert resolve_primary(recipe)["format"]["quantization"] == "iq2_xxs-q2_k-mixed"
 ```
 
 - [ ] **Step 2: Write failing Mia decomposition tests**
@@ -649,7 +650,12 @@ Expected: FAIL because the new entity documents and recipes do not exist.
 
 - [ ] **Step 4: Author DS4 exact entities, source bundle, and recipe**
 
-Use the researched immutable DS4 source and DeepSeek weight revisions. Record every artifact hash and size, source URL, derivation, format, NVFP4 facts, license/access facts, one-node resources, no-fabric topology, build host allowlist, offline runtime, and bounded OpenAI validation. No `ds4_smoke` identity remains.
+Use the researched immutable DS4 source and DeepSeek weight revisions. The current
+128-GB Spark default is the imatrix GGUF with routed expert gate/up tensors at
+`IQ2_XXS` and down tensors at `Q2_K`; do not mislabel it as NVFP4. Record every
+artifact hash and size, source URL, derivation, exact mixed quantization, license/access
+facts, one-node resources, no-fabric topology, build host allowlist, offline runtime,
+and bounded OpenAI validation. No `ds4_smoke` identity remains.
 
 - [ ] **Step 5: Author Mia exact model, distribution, patch, and recipe**
 
