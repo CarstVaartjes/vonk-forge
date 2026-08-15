@@ -6,12 +6,18 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_control.api import create_app
+from starlette.responses import JSONResponse
+from test_catalog_entities import model_group
+from test_catalog_service import _seed_recipe_dependencies
 from vonk_control.audit import MemoryAuditStore
-from vonk_control.auth import Actor, TokenCodec
+from vonk_control.auth import Actor, AuthError, TokenCodec
+from vonk_control.catalog_api import install_catalog_routes
 from vonk_control.catalog_service import CatalogService
 from vonk_control.global_catalog import GlobalRecipeRevision
 from vonk_control.models import Base
@@ -30,6 +36,57 @@ class Jobs:
         return [], None, 0
 
 
+def _catalog_app(codec, audits, service, global_catalog=None) -> FastAPI:
+    app = FastAPI()
+
+    @app.middleware("http")
+    async def request_boundary(request: Request, call_next):
+        request.state.request_id = request.headers.get(
+            "x-request-id", "00000000-0000-4000-8000-000000000001"
+        )
+        return await call_next(request)
+
+    @app.exception_handler(RequestValidationError)
+    async def invalid_catalog_request(request: Request, error: RequestValidationError):
+        if request.url.path.startswith("/api/v1/catalog/"):
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "code": "catalog.invalid_request",
+                    "detail": "catalog request is invalid",
+                    "request_id": request.state.request_id,
+                },
+            )
+        return await request_validation_exception_handler(request, error)
+
+    def actor(request: Request) -> Actor:
+        authorization = request.headers.get("authorization", "")
+        if not authorization.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="authentication required")
+        try:
+            return codec.verify(authorization[7:], now=10)
+        except AuthError:
+            raise HTTPException(
+                status_code=401, detail="authentication failed"
+            ) from None
+
+    install_catalog_routes(
+        app,
+        actor_dependency=Depends(actor),
+        audits=audits,
+        service=service,
+        global_catalog=global_catalog,
+    )
+    return app
+
+
+def _api_model_group() -> dict[str, object]:
+    document = model_group()
+    document["identity"]["slug"] = "api-synthetic"
+    document["family"] = "api-synthetic"
+    return document
+
+
 @pytest.fixture
 def recipe_document() -> dict[str, object]:
     path = Path(__file__).parent / "fixtures/global/recipe-v1-minimal.json"
@@ -37,7 +94,7 @@ def recipe_document() -> dict[str, object]:
 
 
 @pytest.fixture
-def api(tmp_path: Path):
+def api(tmp_path: Path, recipe_document):
     engine = create_engine(
         f"sqlite:///{tmp_path / 'api.sqlite'}",
         connect_args={"check_same_thread": False},
@@ -49,16 +106,10 @@ def api(tmp_path: Path):
         clock=lambda: datetime(2026, 8, 7, 12, 0, tzinfo=UTC),
         source_bundles=SourceBundleStore(tmp_path / "source-bundles"),
     )
+    _seed_recipe_dependencies(service, recipe_document)
     codec = TokenCodec(b"c" * 32)
     audits = MemoryAuditStore()
-    app = create_app(
-        jobs=Jobs(),
-        tokens=codec,
-        audits=audits,
-        fleet=lambda: {"nodes": []},
-        now=lambda: 10,
-        catalog=service,
-    )
+    app = _catalog_app(codec, audits, service)
 
     def headers(role: str) -> dict[str, str]:
         token = codec.issue(Actor(role, role), ttl_seconds=100, now=0)
@@ -84,10 +135,11 @@ def bridge_api(tmp_path: Path, recipe_document):
     recipe_document = copy.deepcopy(recipe_document)
     recipe_document["build"]["context"]["sha256"] = bundle.sha256
     recipe_document["build"]["context"]["expected_bytes"] = len(bundle.archive)
+    _seed_recipe_dependencies(service, recipe_document)
     digest = recipe_content_sha256(recipe_document)
     remote = GlobalRecipeRevision(
-        publisher="vonk",
-        slug="qwen3-vllm",
+        publisher="vonk-forge",
+        slug="synthetic-tiny-openai",
         recipe_id="00000000-0000-4000-8000-000000000001",
         revision_number=1,
         revision_id="10000000-0000-4000-8000-000000000001",
@@ -107,15 +159,7 @@ def bridge_api(tmp_path: Path, recipe_document):
 
     codec = TokenCodec(b"b" * 32)
     audits = MemoryAuditStore()
-    app = create_app(
-        jobs=Jobs(),
-        tokens=codec,
-        audits=audits,
-        fleet=lambda: {"nodes": []},
-        now=lambda: 10,
-        catalog=service,
-        global_catalog=Global(),
-    )
+    app = _catalog_app(codec, audits, service, Global())
 
     def headers(role: str) -> dict[str, str]:
         token = codec.issue(Actor(role, role), ttl_seconds=100, now=0)
@@ -129,7 +173,7 @@ def test_operator_cannot_author_recipe(api, recipe_document) -> None:
     response = client.post(
         "/api/v1/catalog/recipes",
         headers=headers("operator"),
-        json={"slug": "qwen3-vllm", "document": recipe_document},
+        json={"slug": "synthetic-tiny-openai", "document": recipe_document},
     )
 
     assert response.status_code == 403
@@ -141,7 +185,7 @@ def test_create_list_get_and_resolve_recipe(api, recipe_document) -> None:
     created = client.post(
         "/api/v1/catalog/recipes",
         headers={**headers("administrator"), "x-request-id": request_id},
-        json={"slug": "qwen3-vllm", "document": recipe_document},
+        json={"slug": "synthetic-tiny-openai", "document": recipe_document},
     )
     assert created.status_code == 201
     recipe_id = created.json()["recipe_id"]
@@ -158,8 +202,12 @@ def test_create_list_get_and_resolve_recipe(api, recipe_document) -> None:
 
     assert listed.status_code == detail.status_code == resolved.status_code == 200
     assert listed.json()["recipes"][0]["origin"] == "local"
-    assert listed.json()["recipes"][0]["source_bundle_sha256"] == "a" * 64
-    assert listed.json()["recipes"][0]["profile_node_counts"] == [1]
+    assert listed.json()["recipes"][0]["source_bundle_sha256"] == "c" * 64
+    assert listed.json()["recipes"][0]["execution_harness"] == "vllm-openai"
+    assert listed.json()["recipes"][0]["runtime_distribution"] == "python-312-cuda"
+    assert listed.json()["recipes"][0]["topology_name"] == "solo"
+    assert listed.json()["recipes"][0]["topology_mode"] == "single"
+    assert listed.json()["recipes"][0]["node_count"] == 1
     assert "runtime_image" not in listed.json()["recipes"][0]
     assert detail.json()["document"] == recipe_document
     assert resolved.json()["lifecycle"] == "resolved"
@@ -174,7 +222,7 @@ def test_stale_draft_returns_stable_problem(api, recipe_document) -> None:
     created = client.post(
         "/api/v1/catalog/recipes",
         headers=headers("administrator"),
-        json={"slug": "qwen3-vllm", "document": recipe_document},
+        json={"slug": "synthetic-tiny-openai", "document": recipe_document},
     ).json()
     recipe_document["metadata"]["title"] = "Updated"
     first = client.put(
@@ -199,7 +247,7 @@ def test_resolved_recipe_accepts_a_new_draft_revision(api, recipe_document) -> N
     created = client.post(
         "/api/v1/catalog/recipes",
         headers=headers("administrator"),
-        json={"slug": "qwen3-vllm", "document": recipe_document},
+        json={"slug": "synthetic-tiny-openai", "document": recipe_document},
     ).json()
     resolved = client.post(
         f"/api/v1/catalog/recipes/{created['recipe_id']}/resolve",
@@ -232,7 +280,7 @@ def test_recipe_body_is_bounded_and_unknown_fields_are_rejected(
         "/api/v1/catalog/recipes",
         headers=headers("administrator"),
         json={
-            "slug": "qwen3-vllm",
+            "slug": "synthetic-tiny-openai",
             "document": recipe_document,
             "authorization": "Bearer never-reflect-me",
         },
@@ -276,6 +324,93 @@ def test_catalog_operation_ids_are_stable(api) -> None:
         paths["/api/v1/catalog/source-bundles/{sha256}"]["put"]["operationId"]
         == "uploadLocalRecipeSourceBundle"
     )
+    assert (
+        paths["/api/v1/catalog/entities"]["get"]["operationId"] == "listCatalogEntities"
+    )
+    assert (
+        paths["/api/v1/catalog/entities"]["post"]["operationId"]
+        == "createCatalogEntityDraft"
+    )
+    assert (
+        paths["/api/v1/catalog/entities/{entity_id}"]["get"]["operationId"]
+        == "getCatalogEntity"
+    )
+    assert (
+        paths["/api/v1/catalog/entities/{entity_id}/draft"]["put"]["operationId"]
+        == "reviseCatalogEntity"
+    )
+    assert (
+        paths["/api/v1/catalog/entities/{entity_id}/resolve"]["post"]["operationId"]
+        == "resolveCatalogEntity"
+    )
+
+
+def test_administrator_authors_and_resolves_a_catalog_entity(api) -> None:
+    client, headers, audits = api
+    denied = client.post(
+        "/api/v1/catalog/entities",
+        headers=headers("operator"),
+        json={"document": _api_model_group()},
+    )
+    assert denied.status_code == 403
+
+    created = client.post(
+        "/api/v1/catalog/entities",
+        headers=headers("administrator"),
+        json={"document": _api_model_group()},
+    )
+    assert created.status_code == 201
+    entity_id = created.json()["entity_id"]
+    assert created.json()["lifecycle"] == "draft"
+
+    listed = client.get(
+        "/api/v1/catalog/entities?kind=model-group", headers=headers("viewer")
+    )
+    detail = client.get(
+        f"/api/v1/catalog/entities/{entity_id}", headers=headers("viewer")
+    )
+    resolved = client.post(
+        f"/api/v1/catalog/entities/{entity_id}/resolve",
+        headers=headers("administrator"),
+        json={"expected_revision": 1},
+    )
+
+    assert listed.status_code == detail.status_code == resolved.status_code == 200
+    assert entity_id in {item["entity_id"] for item in listed.json()["entities"]}
+    assert detail.json()["revision_id"] == created.json()["revision_id"]
+    assert resolved.json()["revision_number"] == 2
+    assert resolved.json()["lifecycle"] == "resolved"
+    assert len(resolved.json()["content_sha256"]) == 64
+    assert any(event.action == "catalog.entity.resolve" for event in audits.list())
+
+
+def test_catalog_entity_revision_preserves_identity_and_rejects_secrets(api) -> None:
+    client, headers, _audits = api
+    created = client.post(
+        "/api/v1/catalog/entities",
+        headers=headers("administrator"),
+        json={"document": _api_model_group()},
+    ).json()
+    changed = _api_model_group()
+    changed["metadata"]["title"] = "Synthetic Updated"
+    revised = client.put(
+        f"/api/v1/catalog/entities/{created['entity_id']}/draft",
+        headers=headers("administrator"),
+        json={"expected_revision": 1, "document": changed},
+    )
+    assert revised.status_code == 200
+    assert revised.json()["revision_number"] == 2
+
+    secret = _api_model_group()
+    secret["metadata"]["credential"] = "never-reflect-me"
+    rejected = client.post(
+        "/api/v1/catalog/entities",
+        headers=headers("administrator"),
+        json={"document": secret},
+    )
+    assert rejected.status_code == 422
+    assert rejected.json()["code"] == "catalog.sensitive_field"
+    assert "never-reflect-me" not in rejected.text
 
 
 def test_administrator_uploads_a_digest_verified_source_bundle(api) -> None:
@@ -353,7 +488,7 @@ def test_preview_and_explicit_global_import_are_separate(bridge_api) -> None:
         headers=headers("administrator"),
         json={"uri": remote.uri, "expected_content_sha256": remote.content_sha256},
     )
-    assert imported.status_code == 201
+    assert imported.status_code == 201, imported.text
     assert imported.json()["origin"] == "global"
     assert imported.json()["lifecycle"] == "resolved"
     assert any(event.action == "catalog.global.import" for event in audits.list())
@@ -362,16 +497,15 @@ def test_preview_and_explicit_global_import_are_separate(bridge_api) -> None:
 def test_publication_report_and_export_are_local_json_only(
     bridge_api, recipe_document
 ) -> None:
-    client, headers, _audits, _service, _remote = bridge_api
+    client, headers, _audits, _service, remote = bridge_api
+    local_document = copy.deepcopy(remote.document)
+    local_document["identity"] = {"publisher": "local", "slug": "local-copy"}
     created = client.post(
         "/api/v1/catalog/recipes",
         headers=headers("administrator"),
         json={
             "slug": "local-copy",
-            "document": {
-                **recipe_document,
-                "identity": {"publisher": "local", "slug": "local-copy"},
-            },
+            "document": local_document,
         },
     ).json()
     resolved = client.post(
@@ -382,7 +516,7 @@ def test_publication_report_and_export_are_local_json_only(
     report = {
         "schema_version": 1,
         "recipe_sha256": resolved["content_sha256"],
-        "source_bundle_sha256": recipe_document["build"]["context"]["sha256"],
+        "source_bundle_sha256": local_document["build"]["context"]["sha256"],
         "build_input_sha256": "b" * 64,
         "image_digest": "sha256:" + "c" * 64,
         "deployment_profile": "solo",

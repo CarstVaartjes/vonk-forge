@@ -9,13 +9,23 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from test_catalog_entities import (
+    execution_harness,
+    model,
+    model_group,
+    model_version,
+    patch_bundle,
+    runtime_distribution,
+)
 from vonk_control.catalog_service import (
     CatalogConflict,
     CatalogService,
     CatalogValidationError,
     RecipeDraftInput,
 )
+from vonk_control.global_catalog import GlobalRecipeRevision
 from vonk_control.models import Base, RecipeSourceBundle
+from vonk_control.recipe_contract import recipe_content_sha256
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 
 
@@ -35,6 +45,40 @@ def service(tmp_path: Path) -> CatalogService:
         clock=lambda: datetime(2026, 8, 7, tzinfo=UTC),
         source_bundles=SourceBundleStore(tmp_path / "source-bundles"),
     )
+
+
+def _resolve_entity(service: CatalogService, document: dict[str, object]):
+    draft = service.entities.create_draft(document, actor="admin")
+    return service.entities.resolve(draft.id, actor="admin")
+
+
+def _seed_recipe_dependencies(
+    service: CatalogService, recipe_document: dict[str, object]
+) -> dict[str, object]:
+    group = _resolve_entity(service, model_group())
+    model_revision = _resolve_entity(service, model(group.content_sha256))
+    version = _resolve_entity(service, model_version(model_revision.content_sha256))
+    distribution = _resolve_entity(service, runtime_distribution())
+    harness = _resolve_entity(service, execution_harness(distribution.content_sha256))
+    recipe_document["model"] = {
+        "kind": "model-version",
+        "publisher": "vonk-forge",
+        "slug": "synthetic-tiny-fp16",
+        "content_sha256": version.content_sha256,
+    }
+    recipe_document["execution"] = {
+        "kind": "execution-harness",
+        "publisher": "vonk-forge",
+        "slug": "vllm-openai",
+        "content_sha256": harness.content_sha256,
+    }
+    recipe_document["runtime"]["distribution"] = {
+        "kind": "runtime-distribution",
+        "publisher": "vonk-forge",
+        "slug": "python-312-cuda",
+        "content_sha256": distribution.content_sha256,
+    }
+    return recipe_document
 
 
 def test_uploaded_source_bundle_is_verified_and_recorded(
@@ -62,8 +106,10 @@ def test_uploaded_source_bundle_is_verified_and_recorded(
 def test_resolve_creates_immutable_revision_and_repeated_resolve_is_idempotent(
     service: CatalogService, recipe_document: dict[str, object]
 ) -> None:
+    _seed_recipe_dependencies(service, recipe_document)
     draft = service.create_recipe(
-        "admin", RecipeDraftInput(slug="qwen3-vllm", document=recipe_document)
+        "admin",
+        RecipeDraftInput(slug="synthetic-tiny-openai", document=recipe_document),
     )
 
     resolved = service.resolve(draft.recipe_id, draft.revision_number, "admin")
@@ -78,8 +124,10 @@ def test_resolve_creates_immutable_revision_and_repeated_resolve_is_idempotent(
 def test_resolved_recipe_can_start_a_new_draft_without_mutating_the_resolution(
     service: CatalogService, recipe_document: dict[str, object]
 ) -> None:
+    _seed_recipe_dependencies(service, recipe_document)
     initial = service.create_recipe(
-        "admin", RecipeDraftInput(slug="qwen3-vllm", document=recipe_document)
+        "admin",
+        RecipeDraftInput(slug="synthetic-tiny-openai", document=recipe_document),
     )
     resolved = service.resolve(initial.recipe_id, initial.revision_number, "admin")
     changed = copy.deepcopy(recipe_document)
@@ -106,7 +154,8 @@ def test_stale_draft_update_has_stable_conflict_code(
     service: CatalogService, recipe_document: dict[str, object]
 ) -> None:
     draft = service.create_recipe(
-        "admin", RecipeDraftInput(slug="qwen3-vllm", document=recipe_document)
+        "admin",
+        RecipeDraftInput(slug="synthetic-tiny-openai", document=recipe_document),
     )
     changed = copy.deepcopy(recipe_document)
     changed["metadata"]["title"] = "Changed title"
@@ -140,7 +189,8 @@ def test_sensitive_keys_are_rejected_at_any_depth(
 
     with pytest.raises(CatalogValidationError) as caught:
         service.create_recipe(
-            "admin", RecipeDraftInput(slug="qwen3-vllm", document=document)
+            "admin",
+            RecipeDraftInput(slug="synthetic-tiny-openai", document=document),
         )
 
     assert caught.value.code == "catalog.sensitive_field"
@@ -150,8 +200,10 @@ def test_sensitive_keys_are_rejected_at_any_depth(
 def test_fork_records_attribution_and_changes_identity(
     service: CatalogService, recipe_document: dict[str, object]
 ) -> None:
+    _seed_recipe_dependencies(service, recipe_document)
     original = service.create_recipe(
-        "admin", RecipeDraftInput(slug="qwen3-vllm", document=recipe_document)
+        "admin",
+        RecipeDraftInput(slug="synthetic-tiny-openai", document=recipe_document),
     )
     resolved = service.resolve(original.recipe_id, original.revision_number, "admin")
 
@@ -171,7 +223,8 @@ def test_mutable_external_revision_is_rejected(
 
     with pytest.raises(CatalogValidationError) as caught:
         service.create_recipe(
-            "admin", RecipeDraftInput(slug="qwen3-vllm", document=recipe_document)
+            "admin",
+            RecipeDraftInput(slug="synthetic-tiny-openai", document=recipe_document),
         )
 
     assert caught.value.code == "catalog.mutable_artifact"
@@ -184,20 +237,106 @@ def test_short_opaque_artifact_revision_is_not_treated_as_immutable(
 
     with pytest.raises(CatalogValidationError):
         service.create_recipe(
-            "admin", RecipeDraftInput(slug="qwen3-vllm", document=recipe_document)
+            "admin",
+            RecipeDraftInput(slug="synthetic-tiny-openai", document=recipe_document),
         )
 
 
-def test_summary_uses_source_bundle_and_exact_profile_counts(
+def test_summary_uses_source_bundle_and_exact_topology(
     service: CatalogService, recipe_document: dict[str, object]
 ) -> None:
     service.create_recipe(
-        "admin", RecipeDraftInput(slug="qwen3-vllm", document=recipe_document)
+        "admin",
+        RecipeDraftInput(slug="synthetic-tiny-openai", document=recipe_document),
     )
 
     summaries, _ = service.list_recipes()
 
-    assert summaries[0].source_bundle_sha256 == "a" * 64
-    assert summaries[0].profile_node_counts == (1,)
-    assert summaries[0].maximum_installed_bytes_per_node == 68_000_000_000
+    assert summaries[0].source_bundle_sha256 == "c" * 64
+    assert summaries[0].execution_harness == "vllm-openai"
+    assert summaries[0].runtime_distribution == "python-312-cuda"
+    assert summaries[0].topology_name == "solo"
+    assert summaries[0].topology_mode == "single"
+    assert summaries[0].node_count == 1
+    assert summaries[0].maximum_installed_bytes_per_node == 7_000_001_024
     assert summaries[0].maximum_runtime_memory_bytes_per_node == 88_000_000_000
+
+
+def test_recipe_resolution_never_falls_back_to_latest(
+    service: CatalogService, recipe_document: dict[str, object]
+) -> None:
+    _seed_recipe_dependencies(service, recipe_document)
+    recipe_document["model"]["content_sha256"] = "f" * 64
+
+    with pytest.raises(CatalogConflict, match="exact model-version"):
+        service.resolve_recipe_revision(recipe_document, actor="admin")
+
+
+def test_recipe_resolution_rejects_a_distribution_not_bound_to_the_harness(
+    service: CatalogService, recipe_document: dict[str, object]
+) -> None:
+    _seed_recipe_dependencies(service, recipe_document)
+    other = _resolve_entity(service, runtime_distribution("other-distribution"))
+    recipe_document["runtime"]["distribution"] = {
+        "kind": "runtime-distribution",
+        "publisher": "vonk-forge",
+        "slug": "other-distribution",
+        "content_sha256": other.content_sha256,
+    }
+
+    with pytest.raises(CatalogConflict, match="does not support the exact harness"):
+        service.resolve_recipe_revision(recipe_document, actor="admin")
+
+
+def test_recipe_resolution_rejects_patch_for_another_distribution(
+    service: CatalogService, recipe_document: dict[str, object]
+) -> None:
+    _seed_recipe_dependencies(service, recipe_document)
+    other = _resolve_entity(service, runtime_distribution("other-distribution"))
+    patch = _resolve_entity(
+        service,
+        patch_bundle("other-distribution", other.content_sha256),
+    )
+    reference = {
+        "kind": "patch-bundle",
+        "publisher": "vonk-forge",
+        "slug": "vllm-fix",
+        "content_sha256": patch.content_sha256,
+    }
+
+    with pytest.raises(CatalogConflict, match="exact distribution"):
+        service.resolve_recipe_revision(
+            recipe_document, actor="admin", patch_reference=reference
+        )
+
+
+def test_recipe_resolution_returns_the_canonical_digest(
+    service: CatalogService, recipe_document: dict[str, object]
+) -> None:
+    _seed_recipe_dependencies(service, recipe_document)
+
+    digest = service.resolve_recipe_revision(recipe_document, actor="admin")
+
+    assert digest == service.resolve_recipe_revision(recipe_document, actor="admin")
+    assert len(digest) == 64
+
+
+def test_global_import_rejects_an_unresolved_exact_dependency(
+    service: CatalogService, recipe_document: dict[str, object]
+) -> None:
+    _seed_recipe_dependencies(service, recipe_document)
+    recipe_document["model"]["content_sha256"] = "f" * 64
+    digest = recipe_content_sha256(recipe_document)
+    remote = GlobalRecipeRevision(
+        publisher="vonk-forge",
+        slug="synthetic-tiny-openai",
+        recipe_id="00000000-0000-4000-8000-000000000001",
+        revision_number=1,
+        revision_id="10000000-0000-4000-8000-000000000001",
+        content_sha256=digest,
+        published_at="2026-08-15T10:00:00+00:00",
+        document=recipe_document,
+    )
+
+    with pytest.raises(CatalogConflict, match="exact model-version"):
+        service.import_global("admin", remote)

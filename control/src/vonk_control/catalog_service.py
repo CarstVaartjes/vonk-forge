@@ -17,6 +17,18 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
+from .catalog_contract import (
+    CatalogContractError,
+    CatalogKind,
+    CatalogReference,
+    parse_catalog_reference,
+)
+from .catalog_entities import (
+    CatalogConflict,
+    CatalogEntityService,
+    CatalogError,
+    CatalogValidationError,
+)
 from .catalog_repository import CatalogRepository, sensitive_document_path
 from .global_catalog import GlobalRecipeRevision
 from .models import (
@@ -30,8 +42,9 @@ from .models import (
 )
 from .recipe_contract import (
     RecipeContractError,
-    deployment_profile,
     recipe_content_sha256,
+    recipe_references,
+    recipe_topology,
     validate_recipe,
 )
 from .schema_resources import read_runtime_schema
@@ -44,21 +57,6 @@ _MUTABLE_REVISIONS = frozenset(
 _REQUIRED_TEST_CHECKS = frozenset(
     {"container.started", "endpoint.healthy", "inference.completed"}
 )
-
-
-class CatalogError(RuntimeError):
-    def __init__(self, code: str, detail: str) -> None:
-        self.code = code
-        self.detail = detail
-        super().__init__(detail)
-
-
-class CatalogConflict(CatalogError):
-    pass
-
-
-class CatalogValidationError(CatalogError):
-    pass
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,11 +92,14 @@ class RecipeSummary:
     revision_number: int
     lifecycle: str
     content_sha256: str | None
-    runtime_family: str
+    execution_harness: str
+    runtime_distribution: str
     source_bundle_sha256: str
     artifact_count: int
     expected_download_bytes: int
-    profile_node_counts: tuple[int, ...]
+    topology_name: str
+    topology_mode: str
+    node_count: int
     maximum_installed_bytes_per_node: int
     maximum_runtime_memory_bytes_per_node: int
 
@@ -125,6 +126,7 @@ class CatalogService:
         self._clock = clock
         self._repository = repository or CatalogRepository()
         self._source_bundles = source_bundles
+        self.entities = CatalogEntityService(sessions, clock=clock)
 
     def store_source_bundle(
         self, expected_sha256: str, payload: BinaryIO, actor: str
@@ -380,7 +382,9 @@ class CatalogService:
                         "import report must be resolved before this recipe can run",
                     )
             clean = self._validated_document(latest.document, slug=recipe.slug)
-            digest = recipe_content_sha256(clean)
+            digest = self._resolve_recipe_revision(
+                session, clean, actor=actor, patch_reference=None
+            )
             revision = LocalRecipeRevision(
                 recipe_id=recipe.id,
                 revision_number=self._repository.next_revision_number(
@@ -396,6 +400,80 @@ class CatalogService:
             session.add(revision)
             session.flush()
             return _view(recipe, revision)
+
+    def resolve_recipe_revision(
+        self,
+        document: Mapping[str, object],
+        *,
+        actor: str,
+        patch_reference: Mapping[str, object] | CatalogReference | None = None,
+    ) -> str:
+        """Validate every exact entity binding before returning the recipe digest."""
+
+        clean = copy.deepcopy(dict(document))
+        try:
+            validate_recipe(clean)
+        except RecipeContractError as error:
+            raise CatalogValidationError(
+                error.code, f"{error.path}: {error.detail}"
+            ) from error
+        with self._sessions() as session:
+            return self._resolve_recipe_revision(
+                session, clean, actor=actor, patch_reference=patch_reference
+            )
+
+    def _resolve_recipe_revision(
+        self,
+        session: Session,
+        document: Mapping[str, object],
+        *,
+        actor: str,
+        patch_reference: Mapping[str, object] | CatalogReference | None,
+    ) -> str:
+        _actor(actor)
+        entity_service = CatalogEntityService(session, clock=self._clock)
+        model_version_ref, harness_ref, distribution_ref = recipe_references(document)
+        model_version = entity_service.lookup_exact(
+            *model_version_ref.portable_identity
+        )
+        model_ref = _catalog_reference(
+            model_version.document, "model", CatalogKind.MODEL
+        )
+        model = entity_service.lookup_exact(*model_ref.portable_identity)
+        group_ref = _catalog_reference(
+            model.document, "model_group", CatalogKind.MODEL_GROUP
+        )
+        entity_service.lookup_exact(*group_ref.portable_identity)
+        harness = entity_service.lookup_exact(*harness_ref.portable_identity)
+        entity_service.lookup_exact(*distribution_ref.portable_identity)
+        supported_distribution = _catalog_reference(
+            harness.document, "source_bundle", CatalogKind.RUNTIME_DISTRIBUTION
+        )
+        if supported_distribution != distribution_ref:
+            raise CatalogConflict(
+                "catalog.harness_distribution_mismatch",
+                "runtime distribution does not support the exact harness",
+            )
+        if patch_reference is not None:
+            if isinstance(patch_reference, CatalogReference):
+                patch_ref = patch_reference
+            else:
+                try:
+                    patch_ref = parse_catalog_reference(
+                        patch_reference, expected_kind=CatalogKind.PATCH_BUNDLE
+                    )
+                except CatalogContractError as error:
+                    raise CatalogValidationError(error.code, error.detail) from error
+            patch = entity_service.lookup_exact(*patch_ref.portable_identity)
+            applies_to = _catalog_reference(
+                patch.document, "applies_to", CatalogKind.RUNTIME_DISTRIBUTION
+            )
+            if applies_to != distribution_ref:
+                raise CatalogConflict(
+                    "catalog.patch_distribution_mismatch",
+                    "patch bundle does not declare the recipe's exact distribution",
+                )
+        return recipe_content_sha256(document)
 
     def fork(
         self,
@@ -442,6 +520,9 @@ class CatalogService:
                 "global.identity_mismatch", "global recipe identity is inconsistent"
             )
         with self._sessions.begin() as session:
+            self._resolve_recipe_revision(
+                session, clean, actor=actor, patch_reference=None
+            )
             imported = session.scalar(
                 select(RecipeImport).where(
                     RecipeImport.source_kind == "global",
@@ -589,13 +670,11 @@ class CatalogService:
             build = _mapping(revision.document["build"])
             context = _mapping(build["context"])
             try:
-                profile = deployment_profile(
-                    revision.document, str(clean["deployment_profile"])
-                )
+                topology = recipe_topology(revision.document)
             except RecipeContractError as error:
                 raise CatalogValidationError(
                     "catalog.test_report_profile_mismatch",
-                    "test report deployment profile is not declared by this recipe",
+                    "test report topology is not declared by this recipe",
                 ) from error
             by_name = {
                 str(item.get("name")): item.get("passed")
@@ -612,10 +691,13 @@ class CatalogService:
                     "catalog.test_report_source_bundle_mismatch",
                     "test report does not match this recipe source bundle",
                 )
-            if clean.get("node_count") != profile["node_count"]:
+            if (
+                clean.get("deployment_profile") != topology["name"]
+                or clean.get("node_count") != topology["node_count"]
+            ):
                 raise CatalogValidationError(
                     "catalog.test_report_profile_mismatch",
-                    "test report node count does not match its deployment profile",
+                    "test report does not match the recipe topology",
                 )
             if any(by_name.get(name) is not True for name in _REQUIRED_TEST_CHECKS):
                 raise CatalogValidationError(
@@ -813,47 +895,60 @@ def _summary(recipe: LocalRecipe, revision: LocalRecipeRevision) -> RecipeSummar
 
 def _document_summary(document: Mapping[str, object]) -> dict[str, Any]:
     runtime = _mapping(document["runtime"])
+    execution = _mapping(document["execution"])
+    distribution = _mapping(runtime["distribution"])
     build = _mapping(document["build"])
     context = _mapping(build["context"])
     artifacts = document["artifacts"]
-    profiles = document["deployment_profiles"]
+    topology = _mapping(document["topology"])
     assert isinstance(artifacts, list)
-    assert isinstance(profiles, list)
     installed: list[int] = []
     runtime_memory: list[int] = []
-    node_counts: set[int] = set()
-    for profile_value in profiles:
-        profile = _mapping(profile_value)
-        node_counts.add(int(profile["node_count"]))
-        roles = profile["roles"]
-        assert isinstance(roles, list)
-        for role_value in roles:
-            role = _mapping(role_value)
-            resources = _mapping(role["resources"])
-            disk = _mapping(resources["disk"])
-            memory = _mapping(resources["memory"])
-            installed.append(
-                int(disk["image_bytes"])
-                + int(disk["artifact_bytes"])
-                + int(disk["cache_bytes"])
-                + int(disk["rollback_bytes"])
+    roles = topology["roles"]
+    assert isinstance(roles, list)
+    for role_value in roles:
+        role = _mapping(role_value)
+        resources = _mapping(role["resources"])
+        disk = _mapping(resources["disk"])
+        memory = _mapping(resources["memory"])
+        installed.append(
+            int(disk["image_bytes"])
+            + int(disk["artifact_bytes"])
+            + int(disk["cache_bytes"])
+            + int(disk["rollback_bytes"])
+        )
+        runtime_memory.append(
+            max(
+                int(memory["startup_peak_bytes"]),
+                int(memory["steady_state_bytes"]) + int(memory["runtime_growth_bytes"]),
             )
-            runtime_memory.append(
-                max(
-                    int(memory["startup_peak_bytes"]),
-                    int(memory["steady_state_bytes"])
-                    + int(memory["runtime_growth_bytes"]),
-                )
-                + int(memory["system_reserve_bytes"])
-            )
+            + int(memory["system_reserve_bytes"])
+        )
     return {
-        "runtime_family": str(runtime["adapter"]),
+        "execution_harness": str(execution["slug"]),
+        "runtime_distribution": str(distribution["slug"]),
         "source_bundle_sha256": str(context["sha256"]),
         "artifact_count": len(artifacts),
         "expected_download_bytes": sum(
             int(_mapping(artifact)["download_bytes"]) for artifact in artifacts
         ),
-        "profile_node_counts": tuple(sorted(node_counts)),
+        "topology_name": str(topology["name"]),
+        "topology_mode": str(topology["mode"]),
+        "node_count": int(topology["node_count"]),
         "maximum_installed_bytes_per_node": max(installed),
         "maximum_runtime_memory_bytes_per_node": max(runtime_memory),
     }
+
+
+def _catalog_reference(
+    document: Mapping[str, object], field: str, expected_kind: CatalogKind
+) -> CatalogReference:
+    value = document.get(field)
+    if not isinstance(value, Mapping):
+        raise CatalogValidationError(
+            "catalog.reference", f"catalog {field} reference is invalid"
+        )
+    try:
+        return parse_catalog_reference(value, expected_kind=expected_kind)
+    except CatalogContractError as error:
+        raise CatalogValidationError(error.code, error.detail) from error

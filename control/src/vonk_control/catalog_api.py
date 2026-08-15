@@ -25,12 +25,24 @@ from .catalog_service import (
     _document_summary,
 )
 from .global_catalog import GlobalCatalogError, GlobalRecipeRevision
+from .models import CatalogEntityRevision
 
 _UUID = r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 _SLUG = r"^[a-z0-9][a-z0-9-]{1,62}$"
 _MAX_DOCUMENT_BYTES = 256 * 1024
 
 CATALOG_OPERATION_IDS = {
+    ("get", "/api/v1/catalog/entities"): "listCatalogEntities",
+    ("post", "/api/v1/catalog/entities"): "createCatalogEntityDraft",
+    ("get", "/api/v1/catalog/entities/{entity_id}"): "getCatalogEntity",
+    (
+        "put",
+        "/api/v1/catalog/entities/{entity_id}/draft",
+    ): "reviseCatalogEntity",
+    (
+        "post",
+        "/api/v1/catalog/entities/{entity_id}/resolve",
+    ): "resolveCatalogEntity",
     ("get", "/api/v1/catalog/recipes"): "listLocalRecipes",
     ("post", "/api/v1/catalog/recipes"): "createLocalRecipe",
     ("get", "/api/v1/catalog/recipes/{recipe_id}"): "getLocalRecipe",
@@ -91,6 +103,18 @@ class ResolveRecipeRequest(StrictModel):
     expected_revision: int = Field(ge=1, strict=True)
 
 
+class CreateCatalogEntityRequest(StrictModel):
+    document: dict[str, object]
+
+
+class ReviseCatalogEntityRequest(CreateCatalogEntityRequest):
+    expected_revision: int = Field(ge=1, strict=True)
+
+
+class ResolveCatalogEntityRequest(StrictModel):
+    expected_revision: int = Field(ge=1, strict=True)
+
+
 class ForkRecipeRequest(StrictModel):
     revision: int = Field(ge=1, strict=True)
     slug: str = Field(pattern=_SLUG)
@@ -131,11 +155,14 @@ class RecipeSummaryResponse(StrictModel):
     revision_number: int = Field(ge=1)
     lifecycle: Literal["draft", "blocked", "resolved", "deprecated"]
     content_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
-    runtime_family: str = Field(min_length=1, max_length=64)
+    execution_harness: str = Field(pattern=_SLUG)
+    runtime_distribution: str = Field(pattern=_SLUG)
     source_bundle_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     artifact_count: int = Field(ge=0, le=32)
     expected_download_bytes: int = Field(ge=1)
-    profile_node_counts: list[int] = Field(min_length=1)
+    topology_name: str = Field(min_length=1, max_length=64)
+    topology_mode: str = Field(min_length=1, max_length=32)
+    node_count: int = Field(ge=1)
     maximum_installed_bytes_per_node: int = Field(ge=1)
     maximum_runtime_memory_bytes_per_node: int = Field(ge=1)
 
@@ -162,6 +189,33 @@ class SourceBundleResponse(StrictModel):
     files: list[str] = Field(min_length=1, max_length=4096)
 
 
+class CatalogEntityRevisionResponse(StrictModel):
+    entity_id: str = Field(pattern=_UUID)
+    kind: Literal[
+        "model-group",
+        "model",
+        "model-version",
+        "execution-harness",
+        "runtime-distribution",
+        "patch-bundle",
+    ]
+    publisher: str = Field(pattern=_SLUG)
+    slug: str = Field(pattern=_SLUG)
+    title: str = Field(min_length=1, max_length=120)
+    revision_id: str = Field(pattern=_UUID)
+    revision_number: int = Field(ge=1)
+    lifecycle: Literal["draft", "blocked", "resolved", "deprecated"]
+    schema_version: Literal[1]
+    document: dict[str, object]
+    content_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    created_by: str = Field(min_length=1, max_length=200)
+    created_at: str
+
+
+class CatalogEntityListResponse(StrictModel):
+    entities: list[CatalogEntityRevisionResponse] = Field(max_length=100)
+
+
 def _problem(request: Request, error: CatalogError) -> JSONResponse:
     status_code = 409 if isinstance(error, CatalogConflict) else 422
     return JSONResponse(
@@ -183,11 +237,14 @@ def _summary(value: RecipeSummary) -> dict[str, object]:
         "revision_number": value.revision_number,
         "lifecycle": value.lifecycle,
         "content_sha256": value.content_sha256,
-        "runtime_family": value.runtime_family,
+        "execution_harness": value.execution_harness,
+        "runtime_distribution": value.runtime_distribution,
         "source_bundle_sha256": value.source_bundle_sha256,
         "artifact_count": value.artifact_count,
         "expected_download_bytes": value.expected_download_bytes,
-        "profile_node_counts": list(value.profile_node_counts),
+        "topology_name": value.topology_name,
+        "topology_mode": value.topology_mode,
+        "node_count": value.node_count,
         "maximum_installed_bytes_per_node": value.maximum_installed_bytes_per_node,
         "maximum_runtime_memory_bytes_per_node": value.maximum_runtime_memory_bytes_per_node,
     }
@@ -210,6 +267,24 @@ def _revision(value: RecipeRevisionView) -> dict[str, object]:
         "description": value.description,
         "schema_version": value.schema_version,
         "document": value.document,
+        "created_by": value.created_by,
+        "created_at": value.created_at.isoformat(),
+    }
+
+
+def _entity_revision(value: CatalogEntityRevision) -> dict[str, object]:
+    return {
+        "entity_id": value.entity_id,
+        "kind": value.entity.kind,
+        "publisher": value.entity.publisher,
+        "slug": value.entity.slug,
+        "title": value.entity.title,
+        "revision_id": value.id,
+        "revision_number": value.revision_number,
+        "lifecycle": value.lifecycle,
+        "schema_version": value.schema_version,
+        "document": value.document,
+        "content_sha256": value.content_sha256,
         "created_by": value.created_by,
         "created_at": value.created_at.isoformat(),
     }
@@ -251,6 +326,167 @@ def install_catalog_routes(
                 "global.unavailable", "global catalog is not configured"
             )
         return global_catalog.fetch(uri)
+
+    @app.get(
+        "/api/v1/catalog/entities",
+        response_model=CatalogEntityListResponse,
+        responses={401: {"model": CatalogProblem}, 422: {"model": CatalogProblem}},
+        operation_id="listCatalogEntities",
+    )
+    def list_entities(
+        request: Request,
+        kind: str | None = Query(default=None, max_length=32),
+        publisher: str | None = Query(default=None, pattern=_SLUG),
+        _actor: Actor = authenticated,
+    ):
+        try:
+            values = catalog().entities.list_entities(kind=kind, publisher=publisher)
+        except (CatalogError, ValueError) as error:
+            problem = (
+                error
+                if isinstance(error, CatalogError)
+                else CatalogValidationError("catalog.kind", "catalog kind is invalid")
+            )
+            return _problem(request, problem)
+        return {"entities": [_entity_revision(value) for value in values]}
+
+    @app.post(
+        "/api/v1/catalog/entities",
+        response_model=CatalogEntityRevisionResponse,
+        responses={
+            401: {"model": CatalogProblem},
+            403: {"model": CatalogProblem},
+            409: {"model": CatalogProblem},
+            422: {"model": CatalogProblem},
+        },
+        status_code=status.HTTP_201_CREATED,
+        operation_id="createCatalogEntityDraft",
+    )
+    def create_entity(
+        body: CreateCatalogEntityRequest,
+        request: Request,
+        actor: Actor = authenticated,
+    ):
+        administrator(actor)
+        try:
+            _bounded(body.document)
+            result = catalog().entities.create_draft(body.document, actor=actor.subject)
+        except CatalogError as error:
+            return _problem(request, error)
+        audits.append(
+            AuditRecord(
+                request.state.request_id,
+                actor.subject,
+                "catalog.entity.create",
+                None,
+                (result.entity_id, result.id),
+            )
+        )
+        return _entity_revision(result)
+
+    @app.get(
+        "/api/v1/catalog/entities/{entity_id}",
+        response_model=CatalogEntityRevisionResponse,
+        responses={401: {"model": CatalogProblem}, 404: {"model": CatalogProblem}},
+        operation_id="getCatalogEntity",
+    )
+    def get_entity(
+        entity_id: str = Path(pattern=_UUID),
+        _actor: Actor = authenticated,
+    ):
+        try:
+            return _entity_revision(catalog().entities.get_entity(entity_id))
+        except KeyError:
+            raise HTTPException(
+                status_code=404, detail="catalog entity not found"
+            ) from None
+
+    @app.put(
+        "/api/v1/catalog/entities/{entity_id}/draft",
+        response_model=CatalogEntityRevisionResponse,
+        responses={
+            401: {"model": CatalogProblem},
+            403: {"model": CatalogProblem},
+            404: {"model": CatalogProblem},
+            409: {"model": CatalogProblem},
+            422: {"model": CatalogProblem},
+        },
+        operation_id="reviseCatalogEntity",
+    )
+    def revise_entity(
+        body: ReviseCatalogEntityRequest,
+        request: Request,
+        entity_id: str = Path(pattern=_UUID),
+        actor: Actor = authenticated,
+    ):
+        administrator(actor)
+        try:
+            _bounded(body.document)
+            result = catalog().entities.revise(
+                entity_id,
+                body.document,
+                actor=actor.subject,
+                expected_revision=body.expected_revision,
+            )
+        except KeyError:
+            raise HTTPException(
+                status_code=404, detail="catalog entity not found"
+            ) from None
+        except CatalogError as error:
+            return _problem(request, error)
+        audits.append(
+            AuditRecord(
+                request.state.request_id,
+                actor.subject,
+                "catalog.entity.revise",
+                None,
+                (entity_id, result.id),
+            )
+        )
+        return _entity_revision(result)
+
+    @app.post(
+        "/api/v1/catalog/entities/{entity_id}/resolve",
+        response_model=CatalogEntityRevisionResponse,
+        responses={
+            401: {"model": CatalogProblem},
+            403: {"model": CatalogProblem},
+            404: {"model": CatalogProblem},
+            409: {"model": CatalogProblem},
+            422: {"model": CatalogProblem},
+        },
+        operation_id="resolveCatalogEntity",
+    )
+    def resolve_entity(
+        body: ResolveCatalogEntityRequest,
+        request: Request,
+        entity_id: str = Path(pattern=_UUID),
+        actor: Actor = authenticated,
+    ):
+        administrator(actor)
+        try:
+            latest = catalog().entities.get_entity(entity_id)
+            if latest.revision_number != body.expected_revision:
+                raise CatalogConflict(
+                    "catalog.stale_entity_revision", "catalog entity revision changed"
+                )
+            result = catalog().entities.resolve(latest.id, actor=actor.subject)
+        except KeyError:
+            raise HTTPException(
+                status_code=404, detail="catalog entity not found"
+            ) from None
+        except CatalogError as error:
+            return _problem(request, error)
+        audits.append(
+            AuditRecord(
+                request.state.request_id,
+                actor.subject,
+                "catalog.entity.resolve",
+                None,
+                (entity_id, result.id, result.content_sha256 or ""),
+            )
+        )
+        return _entity_revision(result)
 
     @app.get(
         "/api/v1/catalog/source-bundles/{sha256}",
