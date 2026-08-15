@@ -153,3 +153,17 @@ Round-2 TDD and verification evidence:
 | Compile and diff checks | Exit 0 with no output. |
 
 The existing whole-file Ruff format debt remains in `api.py`, `operation_api.py`, and `test_operation_api.py`; this round did not rewrite unrelated lines. The two skipped tests are existing environment-gated PostgreSQL/Docker coverage. No generated client, frontend, Rust, MIA/runtime/readiness, dependency, migration, live-system, push, or PR action occurred.
+
+Final independent re-review APPROVED the exact round-2 code range through
+`c3764dd1ff712418ab9993e91a1c0b32681e561b` with no Critical or Important
+findings. The reviewer additionally compiled all 27 exercised SELECT statements
+for PostgreSQL while executing them on SQLite, verified fresh acyclic imports of
+all four Library modules, and independently observed 46 projection tests, 67
+focused tests, and 266 broader tests passing with two environment-gated skips.
+
+Non-blocking maintainability note: `library_operational.py` now centralizes the
+Library predicates, but constants and policies still mirror authority services
+rather than importing one shared authority package. Cross-service parity tests
+protect the current behavior; future admission-policy changes must update those
+tests and both consumers together until a broader authority extraction is
+deliberately scheduled.
