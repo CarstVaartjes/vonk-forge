@@ -120,3 +120,36 @@ Review-round RED/GREEN and final verification:
 | Compile and diff checks | Exit 0 with no output. |
 
 The two skips are existing environment-gated PostgreSQL/Docker tests. No live infrastructure was contacted, and no generated client, frontend, Rust, MIA/runtime/readiness, dependency, migration, push, or PR action occurred.
+
+## Independent review fix round 2
+
+Correctness commit `006c5a9fda1c42557060bab6a5be4114d79280a9` (`fix(control): align library operational truth`) addresses the four round-2 Important findings from exact review base `6a375727b0328543f7c93ac070a5ad9f58163a83`.
+
+1. Root summaries, detail placement, and staged run targets now use one installation-coverage predicate requiring an installed installation group, a ready mapping, exact mapping-generation equality, duplicate-free exact mapping membership, and installed state for every corresponding installation rank. Stale-generation and non-ready mapping tests compare Library behavior directly with `RunAdmissionService.plan_run()`.
+2. Root and detail rank health now parse immutable `RecipeRun.plan.nodes` under the active 32-member evidence bound, then apply the same exact identity/running/<300-second semantics as `RecipeOperationService.run_status()`. Changed roles, missing/invalid lists, malformed members, duplicate identities, and oversized plans fail closed; malformed evidence emits `run.plan_invalid`, while bounded truncation emits `projection.evidence_truncated`.
+3. Pending, failed, and withdrawn route warnings state only route publication status and explicitly say rank health is projected separately. Healthy ranks do not become degraded because of route or aggregate state, while degraded ranks remain degraded when route publication is pending.
+4. The typed placement contract adds `install_state=unknown` and `load_state=unknown`. Capped current evidence no longer becomes a false absence claim: affected groups are ineligible, search is incomplete, exact IDs and install/run targets are suppressed, and only an independently safe mapping-preview target remains.
+
+Separate behavior-preserving maintainability commit `c3764dd1ff712418ab9993e91a1c0b32681e561b` (`refactor(control): split library projection concerns`) adds:
+
+- `control/src/vonk_control/library_contract.py` for strict bounded DTOs plus deterministic scalar/reason helpers;
+- `control/src/vonk_control/library_operational.py` for pure installation/run truth and the seven-query bounded current-evidence loader.
+
+`LibraryProjection` remains query/orchestration/ranking code and is reduced from 3,281 to 2,360 lines. Root/detail truth predicates and the current-evidence loader are not duplicated. The root/detail query bounds remain exactly 6 and 21 SELECTs.
+
+Round-2 TDD and verification evidence:
+
+| Command / phase | Exact result |
+|---|---|
+| New review regressions before production edits | `9 failed, 37 deselected in 1.09s`. |
+| New review regressions after the correctness fix | `9 passed, 37 deselected in 0.88s`. |
+| Full projection suite | `46 passed in 3.04s`. |
+| Final focused Library projection/API/operation suite | `67 passed, 15 warnings in 5.10s`. |
+| Broader Library/API/catalog/recipe/admission/mapping/Fleet slice | `224 passed, 2 skipped, 15 warnings in 12.69s`. |
+| Explicit in-memory OpenAPI parity | `3 passed in 0.99s`. |
+| Explicit root/detail/older-lineage query-bound slice | `3 passed in 0.55s`; assertions retain 6 root and 21 detail SELECTs. |
+| Pinned Ruff 0.16.1 lint on all nine Task 7 backend/test files | All checks passed. |
+| Pinned Ruff 0.16.1 format check on the four changed Library modules | 4 files already formatted. |
+| Compile and diff checks | Exit 0 with no output. |
+
+The existing whole-file Ruff format debt remains in `api.py`, `operation_api.py`, and `test_operation_api.py`; this round did not rewrite unrelated lines. The two skipped tests are existing environment-gated PostgreSQL/Docker coverage. No generated client, frontend, Rust, MIA/runtime/readiness, dependency, migration, live-system, push, or PR action occurred.
