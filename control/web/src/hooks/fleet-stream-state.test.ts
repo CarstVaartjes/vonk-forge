@@ -83,14 +83,23 @@ test("accepts an authoritative cursor-ahead reset that moves backward", () => {
   expect(reset.lastResetReason).toBe("cursor-ahead");
 });
 
-test("keeps an outstanding sparse requirement across a backward cursor-ahead reset", () => {
+test("authoritative cursor-ahead reset clears the old sparse timeline", () => {
   const current = fleetStreamReducer(initialFleetStreamState, {type: "requested-snapshot", snapshot: snapshot(10)});
-  const required = fleetStreamReducer(current, {type: "projection-refresh", cursor: 12});
+  const required = fleetStreamReducer(current, {type: "projection-refresh", cursor: 100});
 
-  const reset = fleetStreamReducer(required, {type: "reset-snapshot", snapshot: snapshot(3), reason: "cursor-ahead"});
+  const reset = fleetStreamReducer(required, {type: "reset-snapshot", snapshot: snapshot(20, 20), reason: "cursor-ahead"});
+  const nextTimeline = fleetStreamReducer(reset, {
+    type: "node-telemetry",
+    cursor: 21,
+    nodeId: "node-a",
+    sample: sample(77),
+    receivedAt: new Date("2026-08-15T12:00:00Z"),
+  });
 
-  expect(reset.snapshot?.event_cursor).toBe(3);
-  expect(reset.requiredRefreshCursor).toBe(12);
+  expect(reset.snapshot?.event_cursor).toBe(20);
+  expect(reset.requiredRefreshCursor).toBeNull();
+  expect(nextTimeline.snapshot?.event_cursor).toBe(21);
+  expect(nextTimeline.snapshot?.nodes[0].telemetry?.sample.cpu_utilization_percent).toBe(77);
 });
 
 test("patches one keyed node and ignores stale or duplicate telemetry increments", () => {

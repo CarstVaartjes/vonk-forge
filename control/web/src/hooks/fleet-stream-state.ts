@@ -57,10 +57,7 @@ export function fleetStreamReducer(state: FleetStreamState, action: FleetStreamA
         error: "",
         lastResetReason: action.reason,
         loading: false,
-        requiredRefreshCursor: state.requiredRefreshCursor !== null
-          && action.snapshot.event_cursor >= state.requiredRefreshCursor
-          ? null
-          : state.requiredRefreshCursor,
+        requiredRefreshCursor: null,
         snapshot: action.snapshot,
       };
     case "node-telemetry": {

@@ -162,11 +162,12 @@ export function useFleetStream(api: ControlApi) {
           || typeof data.snapshot !== "object" || data.snapshot === null
           || data.snapshot.event_cursor !== cursor) return;
       appliedCursor = cursor;
-      if (requiredRefreshCursor !== null && cursor >= requiredRefreshCursor) {
-        requiredRefreshCursor = null;
-        refreshAttempt = 0;
-      } else if (requiredRefreshCursor !== null) {
-        scheduleRefresh();
+      requiredRefreshCursor = null;
+      refreshAttempt = 0;
+      refreshQueued = false;
+      if (sparseRefreshTimer !== undefined) {
+        clearTimeout(sparseRefreshTimer);
+        sparseRefreshTimer = undefined;
       }
       dispatch({type: "reset-snapshot", snapshot: data.snapshot, reason: data.reset_reason});
     }

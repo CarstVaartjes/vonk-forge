@@ -190,6 +190,28 @@ test("coalesces sparse recipe and operation refresh signals", async () => {
   expect(screen.getByTestId("cpu")).toHaveTextContent("70");
 });
 
+test("authoritative cursor-ahead reset cancels old sparse retries and starts a new timeline", async () => {
+  vi.useFakeTimers();
+  const visualFleet = vi.fn()
+    .mockResolvedValueOnce(snapshot(10))
+    .mockResolvedValueOnce(snapshot(100, 100));
+  render(<Probe control={api(visualFleet)}/>);
+  await flush();
+  const stream = FakeEventSource.instances[0];
+
+  act(() => {
+    stream.emit("recipe-state", {schema_version: 1, projection_refresh_required: true}, "100");
+    stream.emit("fleet-snapshot", {schema_version: 1, reset_reason: "cursor-ahead", snapshot: snapshot(20, 20)}, "20");
+    stream.emit("node-telemetry", {schema_version: 1, node_id: "node-a", sample: point(77)}, "21");
+    vi.advanceTimersByTime(10_000);
+  });
+  await flush();
+
+  expect(visualFleet).toHaveBeenCalledTimes(1);
+  expect(screen.getByTestId("cursor")).toHaveTextContent("21");
+  expect(screen.getByTestId("cpu")).toHaveTextContent("77");
+});
+
 test("retries a failed sparse refresh until the required cursor is reconciled", async () => {
   vi.useFakeTimers();
   const visualFleet = vi.fn()
