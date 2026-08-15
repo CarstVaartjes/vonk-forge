@@ -101,6 +101,24 @@ export type SourcePolicyReport = {passed: boolean; source_bundle_sha256: string;
 export type RecipeMappingPlan = {recipe_revision_id: string; recipe_content_sha256: string; profile_name: string; generation: number; parameters: Record<string, unknown>; nodes: Array<{node_id: string; rank: number; role: string; endpoint_owner: boolean}>; placement_digest: string};
 export type RecipeBuildPlan = {build_id: string; recipe_revision_id: string; recipe_content_sha256: string; builder_node_id: string; source_bundle_sha256: string; build_input_sha256: string};
 export type RecipeOperation = {id: string; kind: string; owner_id: string; state: string; plan_digest: string; nodes: string[]; result: Record<string, unknown> | null};
+export type LibrarySnapshot = components["schemas"]["LibrarySnapshot"];
+export type LibraryRecipeDetail = components["schemas"]["LibraryRecipeDetail"];
+export type LibraryRecipeSummary = components["schemas"]["LibraryRecipeSummary"];
+export type LibraryModel = components["schemas"]["LibraryModel"];
+export type LibraryMappingPreviewInput = components["schemas"]["MappingPreviewRequest"];
+export type LibraryMappingPlan = components["schemas"]["MappingPlanResponse"];
+export type LibraryMappingApplyInput = Omit<components["schemas"]["MappingRequest"], "request_key">;
+export type LibraryMappingResult = components["schemas"]["MappingResponse"];
+export type LibraryInstallPreviewInput = components["schemas"]["InstallPreviewRequest"];
+export type LibraryInstallPlan = components["schemas"]["InstallPlanResponse"];
+export type LibraryInstallApplyInput = Omit<components["schemas"]["InstallRequest"], "request_key">;
+export type LibraryLoadPreviewInput = components["schemas"]["RunPreviewRequest"];
+export type LibraryLoadPlan = components["schemas"]["RunPlanResponse"];
+export type LibraryLoadApplyInput = Omit<components["schemas"]["RunRequest"], "request_key">;
+export type LibraryStopPlan = components["schemas"]["StopPlanResponse"];
+export type LibraryUninstallPlan = components["schemas"]["UninstallPlanResponse"];
+export type LibraryOperation = components["schemas"]["OperationResponse"];
+export type LibraryRunStatus = components["schemas"]["RunStatusResponse"];
 export type GlobalRecipeRevision = {
   publisher: string; slug: string; recipe_id: string; revision_number: number; revision_id: string;
   content_sha256: string; published_at: string; document: Record<string, unknown>;
@@ -131,7 +149,25 @@ export interface WorkloadRunApi {
   previewWorkloadRun(sourceYaml: string): Promise<WorkloadRunPreview>;
   applyWorkloadRun(sourceYaml: string, sourceSha256: string, reportDigest: string): Promise<WorkloadRunApplied>;
 }
-export interface ControlApi {
+export interface LibraryApi {
+  librarySnapshot(cursor?: string, signal?: AbortSignal): Promise<LibrarySnapshot>;
+  libraryRecipe(recipeId: string, signal?: AbortSignal): Promise<LibraryRecipeDetail>;
+  previewLibraryMapping(input: LibraryMappingPreviewInput): Promise<LibraryMappingPlan>;
+  applyLibraryMapping(input: LibraryMappingApplyInput): Promise<LibraryMappingResult>;
+  previewLibraryInstall(input: LibraryInstallPreviewInput): Promise<LibraryInstallPlan>;
+  applyLibraryInstall(input: LibraryInstallApplyInput): Promise<LibraryOperation>;
+  previewLibraryLoad(input: LibraryLoadPreviewInput): Promise<LibraryLoadPlan>;
+  applyLibraryLoad(input: LibraryLoadApplyInput): Promise<LibraryOperation>;
+  previewLibraryStop(runId: string): Promise<LibraryStopPlan>;
+  applyLibraryStop(runId: string, planDigest: string): Promise<LibraryOperation>;
+  previewLibraryUninstall(installationId: string): Promise<LibraryUninstallPlan>;
+  applyLibraryUninstall(installationId: string, planDigest: string): Promise<LibraryOperation>;
+  libraryOperation(operationId: string): Promise<LibraryOperation>;
+  retryLibraryOperation(operationId: string): Promise<LibraryOperation>;
+  libraryRunStatus(runId: string): Promise<LibraryRunStatus>;
+  libraryJobProgress(jobId: string): Promise<JobDetail>;
+}
+export interface ControlApi extends LibraryApi {
   visualFleet(signal?: AbortSignal): Promise<VisualFleetSnapshot>;
   fleetEvidence(signal?: AbortSignal): Promise<FleetEvidenceResponse>;
   nodeStatuses(signal?: AbortSignal): Promise<FleetEvidenceResponse>;

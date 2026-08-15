@@ -1,0 +1,118 @@
+import {useCallback, useRef, useState} from "react";
+import type {LibraryRecipeDetail, LibrarySnapshot} from "../api/types";
+import type {LibraryApi, LibraryOperation} from "../api/types";
+import {formatBytes} from "../lib/fleet";
+import {StatusPill} from "./status-pill";
+import {LibraryPlacement} from "./library-placement";
+import {LibraryReasons} from "./library-reasons";
+import {LibraryActionDialog} from "./library-action-dialog";
+import type {LibraryActionName, LibraryActionTarget} from "./library-action-types";
+import {LibraryOperationProgress, operationSettled} from "./library-operation-progress";
+
+type Profile = LibraryRecipeDetail["profiles"][number];
+
+const diskFields = ["image_bytes", "artifact_bytes", "staging_bytes", "cache_bytes", "rollback_bytes", "safety_margin_bytes"] as const;
+
+function profileRanks(profile: Profile) {
+  let rank = 0;
+  return profile.roles.flatMap(role => Array.from({length: role.count}, () => ({...role, rank: rank++})));
+}
+
+function profileDisk(profile: Profile): number {
+  return profile.roles.reduce((total, role) => total + role.count * diskFields.reduce((subtotal, field) => subtotal + role.disk[field], 0), 0);
+}
+
+function profileMemory(profile: Profile): number {
+  return profile.roles.reduce((total, role) => total + role.count * role.memory.startup_peak_bytes, 0);
+}
+
+function operationTone(state: string) {
+  if (["succeeded", "installed", "ready", "running", "published"].includes(state)) return "healthy" as const;
+  if (["failed", "lost", "partial", "stale"].includes(state)) return "danger" as const;
+  return "warning" as const;
+}
+
+function operationLabel(kind: string, state: string): string {
+  return `${kind} ${state}`.replace(/^./, letter => letter.toUpperCase());
+}
+
+export function LibraryRecipeAuthority({api, detail, onRefresh, policy}: {
+  api: LibraryApi;
+  detail: LibraryRecipeDetail;
+  onRefresh(): Promise<void>;
+  policy: LibrarySnapshot["freshness_policy"];
+}) {
+  const [review, setReview] = useState<LibraryActionTarget>();
+  const [operation, setOperation] = useState<LibraryOperation>();
+  const [operationName, setOperationName] = useState<LibraryActionName>("Load");
+  const trigger = useRef<HTMLButtonElement | null>(null);
+  const visual = detail.visual_recipe;
+  const revision = detail.selected_revision;
+  const alias = visual?.runtime.model_aliases[0] ?? detail.recipe.slug;
+  const closeReview = useCallback(() => {
+    setReview(undefined);
+    const returnTo = trigger.current;
+    queueMicrotask(() => returnTo?.focus());
+  }, []);
+  const openReview = useCallback((target: LibraryActionTarget, returnTo: HTMLButtonElement) => {
+    trigger.current = returnTo;
+    setReview(target);
+  }, []);
+  const onApplied = useCallback((next: LibraryOperation, name: LibraryActionName) => {
+    setOperationName(name);
+    setOperation(next);
+  }, []);
+  const actionBlocked = operation !== undefined && (!operationSettled(operation.state) || ["partial", "failed", "cancelled", "canceled", "lost"].includes(operation.state));
+  return <div className="recipe-authority" role="region" aria-label={`${detail.recipe.title} recipe authority`}>
+    <header className="recipe-authority-hero">
+      <div><p className="fleet-kicker">{detail.recipe.source_kind} recipe</p><strong className="recipe-authority-title">{detail.recipe.title}</strong><p>{detail.recipe.description}</p></div>
+      <StatusPill tone={revision?.lifecycle === "resolved" ? "healthy" : "warning"}>{revision ? `${revision.lifecycle === "resolved" ? "Immutable" : revision.lifecycle} revision ${revision.revision_number}` : "No valid revision"}</StatusPill>
+    </header>
+    {visual && <>
+      <section className="library-section recipe-essentials" aria-label="Model and runtime">
+        <div><span>Model family</span><strong>{visual.workload.family}</strong></div>
+        <div><span>Capabilities</span><strong className="capability-chips">{visual.workload.capabilities.length > 0 ? visual.workload.capabilities.map(capability => <span key={capability}>{capability}</span>) : "Not declared"}</strong></div>
+        <div><span>Runtime</span><strong>{visual.runtime.adapter} v{visual.runtime.adapter_version}</strong></div>
+        <div><span>Endpoint</span><strong>{visual.runtime.endpoint_protocol} · {visual.runtime.endpoint_port}</strong></div>
+      </section>
+      <section className="library-section" aria-label="Topology and resources">
+        <div className="section-heading"><div><p className="fleet-kicker">Declared topology</p><h4>Profiles and ranks</h4></div></div>
+        {detail.profiles.map(profile => <article className="topology-card" key={profile.name}>
+          <h5>{profile.name}</h5><p>{profile.node_count} nodes · {profile.strategy} · {profile.measurement}</p>
+          <div className="resource-totals"><strong>{formatBytes(profileMemory(profile))} startup memory total</strong><strong>{formatBytes(profileDisk(profile))} disk envelope total</strong></div>
+          <ol>{profileRanks(profile).map(role => <li key={`${role.rank}:${role.name}`}><strong>Rank {role.rank} · {role.name}{role.endpoint_owner ? " · endpoint owner" : ""}</strong><span>{formatBytes(role.memory.startup_peak_bytes)} startup memory · {formatBytes(diskFields.reduce((total, field) => total + role.disk[field], 0))} disk envelope</span></li>)}</ol>
+          <p className="topology-fabric">{profile.fabric.connectivity} fabric · {profile.fabric.minimum_bandwidth_mbps.toLocaleString()} Mbps minimum · {profile.parallelism.backend}</p>
+        </article>)}
+      </section>
+      <section className="library-section evidence-columns" aria-label="Provenance and validation">
+        <div><h4>Provenance</h4><p>{visual.provenance.source_kind} · {visual.provenance.source_reference ?? "No external reference"}</p><p>{visual.provenance.attribution.join(" · ") || "No attribution declared"}</p><code>sha256:{visual.build.context.sha256}</code></div>
+        <div><h4>Validation</h4><p>{visual.validation.checks.join(" · ")}</p><p>{visual.validation.benchmark_count} benchmarks</p></div>
+      </section>
+    </>}
+    <section className="library-section" aria-label="Recent operation state">
+      <div className="section-heading"><h4>Recent operation state</h4></div>
+      <div className="operation-summary">
+        {detail.operational_state.builds.map(build => <StatusPill key={build.recipe_build_id} tone={operationTone(build.state)}>{operationLabel("build", build.state)}</StatusPill>)}
+        {detail.operational_state.mappings.map(mapping => <StatusPill key={mapping.mapping_id} tone={operationTone(mapping.state)}>{operationLabel("mapping", mapping.state)}</StatusPill>)}
+        {detail.operational_state.installations.map(installation => <div className="operation-item" key={installation.installation_id}>
+          <StatusPill tone={operationTone(installation.state)}>{operationLabel("installation", installation.state)}</StatusPill>
+          {installation.state !== "uninstalled" && <button type="button" disabled={actionBlocked} onClick={event => openReview({kind: "uninstall", installationId: installation.installation_id}, event.currentTarget)}>Review Remove installation {installation.installation_id}</button>}
+        </div>)}
+        {detail.operational_state.runs.map(run => <div className="operation-item" key={run.run_id}>
+          <StatusPill tone={operationTone(run.state)}>{operationLabel("run", run.state)}</StatusPill>
+          {!['stopped'].includes(run.state) && <button type="button" disabled={actionBlocked} onClick={event => openReview({kind: "stop", runId: run.run_id}, event.currentTarget)}>Review Stop run {run.run_id}</button>}
+        </div>)}
+        {Object.values(detail.operational_state).every(items => items.length === 0) && <p>No operation history for this revision.</p>}
+      </div>
+    </section>
+    {operation && <LibraryOperationProgress api={api} name={operationName} onChange={setOperation} onRefresh={onRefresh} operation={operation}/>}
+    <LibraryReasons reasons={detail.reasons}/>
+    <LibraryPlacement actionsDisabled={actionBlocked} detail={detail} onReview={openReview} policy={policy}/>
+    <nav className="advanced-workflows" aria-label="Advanced recipe workflows">
+      <a href={`/catalog/${encodeURIComponent(detail.recipe.recipe_id)}/source`}>Source and build</a>
+      <a href={`/catalog/${encodeURIComponent(detail.recipe.recipe_id)}/map`}>Cluster mapping</a>
+      <a href={`/catalog/${encodeURIComponent(detail.recipe.recipe_id)}`}>Raw editor</a>
+    </nav>
+    {review && <LibraryActionDialog alias={alias} api={api} onApplied={onApplied} onClose={closeReview} onRefresh={onRefresh} target={review}/>}
+  </div>;
+}

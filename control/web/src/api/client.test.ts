@@ -51,6 +51,70 @@ it("keeps visual Fleet snapshots separate from reconciliation evidence", async (
   expect(captured.every(request => request.credentials === "same-origin")).toBe(true);
 });
 
+it("uses distinct digest-bound Library action operations", async () => {
+  // Break caught: the visual Library falls back to legacy evidence routes,
+  // action apply bypasses its server preview digest, or one selected owner is
+  // replaced by a browser-invented group.
+  const requests: Request[] = [];
+  vi.spyOn(crypto, "randomUUID").mockReturnValue("00000000-0000-4000-8000-000000000001");
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = input instanceof Request ? input : new Request(new URL(String(input), location.origin), init);
+    requests.push(request);
+    const path = new URL(request.url).pathname;
+    if (path === "/api/v1/library") return new Response(JSON.stringify({schema_version: 1, generated_at: "2026-08-15T12:00:00Z", freshness_policy: {inventory_fresh_seconds: 300, telemetry_live_seconds: 6, telemetry_delayed_seconds: 20}, models: [], unlinked_recipes: [], next_cursor: null}), {status: 200});
+    if (path === "/api/v1/library/recipes/recipe%2Fone") return new Response(JSON.stringify({schema_version: 1, generated_at: "2026-08-15T12:00:00Z", recipe: {recipe_id: "recipe/one", slug: "one", title: "One", description: "", source_kind: "local"}, selected_revision: null, visual_recipe: null, profiles: [], operational_state: {builds: [], mappings: [], installations: [], runs: []}, placement: [], reasons: []}), {status: 200});
+    if (path.startsWith("/api/v1/jobs/")) return new Response(JSON.stringify({id: "job-1", kind: "recipe.install", state: "running", base_commit: "a".repeat(40), current_attempt: 1, operations: [], operation_total: 0, targets: [], target_total: 0, progress: {completed: 0, failed: 0, running: 1, total: 1}}), {status: 200});
+    return new Response(JSON.stringify({
+      id: "operation-1", kind: "recipe.install", owner_id: "owner-1", state: "queued",
+      plan_digest: "plan-1", nodes: ["node-a", "node-b"], result: null,
+      allowed: true, blockers: [], warnings: [],
+    }), {status: request.method === "GET" ? 200 : request.url.includes("preview") ? 200 : 202});
+  });
+  const api = new ApiClient();
+
+  await api.librarySnapshot("cursor-1");
+  await api.libraryRecipe("recipe/one");
+  await api.previewLibraryMapping({recipe_revision_id: "revision-1", profile_name: "pair", node_ids: ["node-a", "node-b"], parameters: {tensor: 2}});
+  await api.applyLibraryMapping({recipe_revision_id: "revision-1", profile_name: "pair", node_ids: ["node-a", "node-b"], parameters: {tensor: 2}, placement_digest: "map-plan"});
+  await api.previewLibraryInstall({recipe_build_id: "build-1", mapping_id: "mapping-1"});
+  await api.applyLibraryInstall({recipe_build_id: "build-1", mapping_id: "mapping-1", plan_digest: "install-plan"});
+  await api.previewLibraryLoad({installation_id: "installation-1"});
+  await api.applyLibraryLoad({installation_id: "installation-1", alias: "chat", plan_digest: "load-plan"});
+  await api.previewLibraryStop("run-1");
+  await api.applyLibraryStop("run-1", "stop-plan");
+  await api.previewLibraryUninstall("installation-1");
+  await api.applyLibraryUninstall("installation-1", "remove-plan");
+  await api.libraryOperation("operation-1");
+  await api.retryLibraryOperation("operation-1");
+  await api.libraryRunStatus("run-1");
+  await api.libraryJobProgress("job-1");
+
+  expect(requests.map(request => [request.method, new URL(request.url).pathname])).toEqual([
+    ["GET", "/api/v1/library"],
+    ["GET", "/api/v1/library/recipes/recipe%2Fone"],
+    ["POST", "/api/v1/recipes/mapping-plans/preview"],
+    ["POST", "/api/v1/recipes/mappings"],
+    ["POST", "/api/v1/recipes/install-plans/preview"],
+    ["POST", "/api/v1/recipes/installations"],
+    ["POST", "/api/v1/recipes/run-plans/preview"],
+    ["POST", "/api/v1/recipes/runs"],
+    ["POST", "/api/v1/recipes/stop-plans/preview"],
+    ["POST", "/api/v1/recipes/runs/run-1/stop"],
+    ["POST", "/api/v1/recipes/uninstall-plans/preview"],
+    ["POST", "/api/v1/recipes/installations/installation-1/uninstall"],
+    ["GET", "/api/v1/recipes/operations/operation-1"],
+    ["POST", "/api/v1/recipes/operations/operation-1/retry"],
+    ["GET", "/api/v1/recipes/runs/run-1"],
+    ["GET", "/api/v1/jobs/job-1"],
+  ]);
+  expect(Object.fromEntries(new URL(requests[0].url).searchParams)).toEqual({cursor: "cursor-1", limit: "100"});
+  expect(await requests[3].clone().json()).toEqual({recipe_revision_id: "revision-1", profile_name: "pair", node_ids: ["node-a", "node-b"], parameters: {tensor: 2}, placement_digest: "map-plan", request_key: "00000000-0000-4000-8000-000000000001"});
+  expect(await requests[5].clone().json()).toEqual({recipe_build_id: "build-1", mapping_id: "mapping-1", plan_digest: "install-plan", request_key: "00000000-0000-4000-8000-000000000001"});
+  expect(await requests[7].clone().json()).toEqual({installation_id: "installation-1", alias: "chat", plan_digest: "load-plan", request_key: "00000000-0000-4000-8000-000000000001"});
+  expect(await requests[9].clone().json()).toEqual({plan_digest: "stop-plan", request_key: "00000000-0000-4000-8000-000000000001"});
+  expect(await requests[11].clone().json()).toEqual({plan_digest: "remove-plan", request_key: "00000000-0000-4000-8000-000000000001"});
+});
+
 it("requests bounded node telemetry history through the generated operation", async () => {
   let captured: Request | undefined;
   vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {

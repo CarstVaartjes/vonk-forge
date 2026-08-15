@@ -2,7 +2,7 @@ import {useEffect, useRef, useState} from "react";
 import type {MouseEvent, ReactNode} from "react";
 import {ActivityIcon, ChevronIcon, CloseIcon, FleetIcon, LibraryIcon, MenuIcon, SystemIcon} from "./icons";
 
-export type AppRoute = "fleet" | "agents" | "profiles" | "models" | "catalog" | "packages" | "deployments" | "updates" | "jobs" | "audit";
+export type AppRoute = "fleet" | "library" | "agents" | "profiles" | "models" | "catalog" | "packages" | "deployments" | "updates" | "jobs" | "audit";
 
 type Operator = {
   environment: string;
@@ -76,7 +76,7 @@ export function AppShell({activeRoute, children, onNavigate, operator}: AppShell
         <nav aria-label="Primary">
           <p className="nav-label">Workspace</p>
           <a href="/fleet" className="nav-link nav-link-primary" aria-current={activeRoute === "fleet" ? "page" : undefined} onClick={event => navigate(event, "fleet")}><FleetIcon/><span>Fleet</span></a>
-          <a href="/catalog" className="nav-link nav-link-primary" aria-current={activeRoute === "catalog" ? "page" : undefined} onClick={event => navigate(event, "catalog")}><LibraryIcon/><span>Library</span></a>
+          <a href="/library" className="nav-link nav-link-primary" aria-current={activeRoute === "library" ? "page" : undefined} onClick={event => navigate(event, "library")}><LibraryIcon/><span>Library</span></a>
           <NavGroup activeRoute={activeRoute} icon={<ActivityIcon/>} label="Activity" onNavigate={navigate} routes={activityRoutes}/>
           <NavGroup activeRoute={activeRoute} icon={<SystemIcon/>} label="System" onNavigate={navigate} routes={systemRoutes}/>
         </nav>

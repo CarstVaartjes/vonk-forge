@@ -27,6 +27,7 @@ const apiFixture = {
     },
   }),
   catalogRecipes: async () => ({recipes: []}),
+  librarySnapshot: async () => ({schema_version: 1, generated_at: "2026-08-15T12:00:00Z", freshness_policy: {inventory_fresh_seconds: 300, telemetry_live_seconds: 6, telemetry_delayed_seconds: 20}, models: [], unlinked_recipes: [], next_cursor: null}),
 } as unknown as ControlApi & CatalogApi;
 
 afterEach(() => {
@@ -67,7 +68,7 @@ test("groups primary tasks without hiding administrative routes", async () => {
 
   expect(screen.getByRole("link", {name: "Fleet"})).toHaveAttribute("aria-current", "page");
   const library = screen.getByRole("link", {name: "Library"});
-  expect(library).toHaveAttribute("href", "/catalog");
+  expect(library).toHaveAttribute("href", "/library");
   expect(library).toBeVisible();
 
   const navigationToggle = screen.getByRole("button", {name: "Open system navigation"});
@@ -82,7 +83,7 @@ test("groups primary tasks without hiding administrative routes", async () => {
   const primary = screen.getByRole("navigation", {name: "Primary"});
   const routes = new Map([
     ["Fleet", "/fleet"],
-    ["Library", "/catalog"],
+    ["Library", "/library"],
     ["Deployments", "/deployments"],
     ["Updates", "/updates"],
     ["Jobs", "/jobs"],
@@ -100,17 +101,22 @@ test("groups primary tasks without hiding administrative routes", async () => {
   }
 });
 
-test("opens Library on meaningful existing catalog content", async () => {
-  // Break caught: Library falls back to Fleet, renders blank, or becomes a
-  // label-only destination instead of resolving the current catalog slice.
+test("opens the visual Library while preserving the catalog URL as an advanced workflow", async () => {
+  // Break caught: Library falls back to the raw catalog/editor workflow or
+  // the existing catalog URL is silently redirected away.
   render(<App api={apiFixture}/>);
   const user = userEvent.setup();
 
   await user.click(screen.getByRole("link", {name: "Library"}));
 
+  expect(await screen.findByRole("heading", {name: "Library"})).toBeVisible();
+  expect(location.pathname).toBe("/library");
+  expect(screen.getByRole("link", {name: "Library"})).toHaveAttribute("aria-current", "page");
+
+  history.pushState(null, "", "/catalog");
+  dispatchEvent(new PopStateEvent("popstate"));
   expect(await screen.findByRole("heading", {name: "Recipe catalog"})).toBeVisible();
   expect(location.pathname).toBe("/catalog");
-  expect(screen.getByRole("link", {name: "Library"})).toHaveAttribute("aria-current", "page");
 });
 
 test("moves focus to main content after mobile route activation", async () => {
@@ -125,8 +131,8 @@ test("moves focus to main content after mobile route activation", async () => {
   expect(library).toHaveFocus();
   await user.click(library);
 
-  expect(await screen.findByRole("heading", {name: "Recipe catalog"})).toBeVisible();
-  await waitFor(() => expect(screen.getByRole("main")).toHaveFocus());
+  const heading = await screen.findByRole("heading", {name: "Library"});
+  await waitFor(() => expect(heading).toHaveFocus());
   expect(screen.getByRole("button", {name: "Open system navigation"})).toHaveAttribute("aria-expanded", "false");
 });
 

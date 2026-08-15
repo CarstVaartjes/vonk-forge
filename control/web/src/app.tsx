@@ -19,8 +19,9 @@ import {RecipeEditorPage} from "./pages/recipe-editor";
 import {WorkloadRunImportPage} from "./pages/workload-run-import";
 import {RecipeSourcePage} from "./pages/recipe-source";
 import {ClusterMappingPage} from "./pages/cluster-mapping";
+import {LibraryPage} from "./pages/library";
 
-const pages: AppRoute[] = ["fleet", "agents", "profiles", "models", "catalog", "packages", "deployments", "updates", "jobs", "audit"];
+const pages: AppRoute[] = ["fleet", "library", "agents", "profiles", "models", "catalog", "packages", "deployments", "updates", "jobs", "audit"];
 
 function candidateId(): string | undefined {
   const match = /^\/packages\/([^/]+)$/.exec(location.pathname);
@@ -34,8 +35,9 @@ function recipeId(): string | undefined {
   try { return decodeURIComponent(match[1]); } catch { return undefined; }
 }
 
-function currentPage(): AppRoute {
-  const value = location.pathname.replace(/^\//, "");
+function currentPage(pathname = location.pathname): AppRoute {
+  const value = pathname.replace(/^\//, "");
+  if (/^library(?:\/|$)/.test(value)) return "library";
   if (candidateId() || value === "packages") return "packages";
   if (value === "catalog/new" || value === "catalog/import/workload_run" || recipeId()) return "catalog";
   return pages.includes(value as AppRoute) ? value as AppRoute : "fleet";
@@ -43,17 +45,25 @@ function currentPage(): AppRoute {
 
 export function App({api}: {api: ControlApi}) {
   const auth = useOptionalAuth();
-  const [page, setPage] = useState<AppRoute>(currentPage());
+  const [path, setPath] = useState(location.pathname);
+  const page = currentPage(path);
   useEffect(() => {
-    const listener = () => setPage(currentPage());
+    const listener = () => setPath(location.pathname);
     addEventListener("popstate", listener);
     return () => removeEventListener("popstate", listener);
   }, []);
 
   function navigate(event: React.MouseEvent<HTMLAnchorElement>, target: AppRoute) {
     event.preventDefault();
-    history.pushState(null, "", `/${target}`);
-    setPage(target);
+    const nextPath = `/${target}`;
+    history.pushState(null, "", nextPath);
+    setPath(nextPath);
+  }
+
+  function navigatePath(event: React.MouseEvent<HTMLAnchorElement>, nextPath: string) {
+    event.preventDefault();
+    history.pushState(null, "", nextPath);
+    setPath(nextPath);
   }
 
   // W15's generated client supplies these package methods. This narrow cast
@@ -78,6 +88,7 @@ export function App({api}: {api: ControlApi}) {
     ? <PackageCandidatePage api={packageApi} candidateId={selectedCandidate}/>
     : {
       fleet: <FleetPage api={api}/>,
+      library: <LibraryPage api={api} path={path} onNavigate={navigatePath}/>,
       agents: <AgentsPage api={api}/>,
       profiles: <ProfilesPage api={api}/>,
       models: <ModelsPage api={api}/>,

@@ -39,6 +39,12 @@ import type {
   RecipeBuildPlan,
   RecipeMappingPlan,
   RecipeOperation,
+  LibraryInstallApplyInput,
+  LibraryInstallPreviewInput,
+  LibraryLoadApplyInput,
+  LibraryLoadPreviewInput,
+  LibraryMappingApplyInput,
+  LibraryMappingPreviewInput,
 } from "./types";
 import type {
   PackageCandidate,
@@ -316,6 +322,97 @@ export class ApiClient implements ControlApi {
 
   async visualFleet(signal?: AbortSignal): Promise<VisualFleetSnapshot> {
     return resultData(await this.generated.GET("/api/v1/fleet", {signal}));
+  }
+
+  async librarySnapshot(cursor?: string, signal?: AbortSignal) {
+    return resultData(await this.generated.GET("/api/v1/library", {
+      params: {query: {cursor, limit: 100}},
+      signal,
+    }));
+  }
+
+  async libraryRecipe(recipeId: string, signal?: AbortSignal) {
+    return resultData(await this.generated.GET("/api/v1/library/recipes/{recipe_id}", {
+      params: {path: {recipe_id: recipeId}},
+      signal,
+    }));
+  }
+
+  async previewLibraryMapping(input: LibraryMappingPreviewInput) {
+    return resultData(await this.generated.POST("/api/v1/recipes/mapping-plans/preview", {body: input}));
+  }
+
+  async applyLibraryMapping(input: LibraryMappingApplyInput) {
+    return resultData(await this.generated.POST("/api/v1/recipes/mappings", {
+      body: {...input, request_key: crypto.randomUUID()},
+    }));
+  }
+
+  async previewLibraryInstall(input: LibraryInstallPreviewInput) {
+    return resultData(await this.generated.POST("/api/v1/recipes/install-plans/preview", {body: input}));
+  }
+
+  async applyLibraryInstall(input: LibraryInstallApplyInput) {
+    return resultData(await this.generated.POST("/api/v1/recipes/installations", {
+      body: {...input, request_key: crypto.randomUUID()},
+    }));
+  }
+
+  async previewLibraryLoad(input: LibraryLoadPreviewInput) {
+    return resultData(await this.generated.POST("/api/v1/recipes/run-plans/preview", {body: input}));
+  }
+
+  async applyLibraryLoad(input: LibraryLoadApplyInput) {
+    return resultData(await this.generated.POST("/api/v1/recipes/runs", {
+      body: {...input, request_key: crypto.randomUUID()},
+    }));
+  }
+
+  async previewLibraryStop(runId: string) {
+    return resultData(await this.generated.POST("/api/v1/recipes/stop-plans/preview", {body: {run_id: runId}}));
+  }
+
+  async applyLibraryStop(runId: string, planDigest: string) {
+    return resultData(await this.generated.POST("/api/v1/recipes/runs/{run_id}/stop", {
+      params: {path: {run_id: runId}},
+      body: {plan_digest: planDigest, request_key: crypto.randomUUID()},
+    }));
+  }
+
+  async previewLibraryUninstall(installationId: string) {
+    return resultData(await this.generated.POST("/api/v1/recipes/uninstall-plans/preview", {
+      body: {installation_id: installationId},
+    }));
+  }
+
+  async applyLibraryUninstall(installationId: string, planDigest: string) {
+    return resultData(await this.generated.POST("/api/v1/recipes/installations/{installation_id}/uninstall", {
+      params: {path: {installation_id: installationId}},
+      body: {plan_digest: planDigest, request_key: crypto.randomUUID()},
+    }));
+  }
+
+  async libraryOperation(operationId: string) {
+    return resultData(await this.generated.GET("/api/v1/recipes/operations/{operation_id}", {
+      params: {path: {operation_id: operationId}},
+    }));
+  }
+
+  async retryLibraryOperation(operationId: string) {
+    return resultData(await this.generated.POST("/api/v1/recipes/operations/{operation_id}/retry", {
+      params: {path: {operation_id: operationId}},
+      body: {request_key: crypto.randomUUID()},
+    }));
+  }
+
+  async libraryRunStatus(runId: string) {
+    return resultData(await this.generated.GET("/api/v1/recipes/runs/{run_id}", {
+      params: {path: {run_id: runId}},
+    }));
+  }
+
+  async libraryJobProgress(jobId: string) {
+    return this.job(jobId);
   }
 
   async nodeStatuses(signal?: AbortSignal): Promise<FleetEvidenceResponse> {
