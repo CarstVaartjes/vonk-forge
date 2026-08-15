@@ -56,6 +56,7 @@ def setup(
     clock=None,
     run_alias="qwen",
     runtime_model_aliases=("qwen",),
+    interfaces=None,
 ):
     tmp_path.mkdir(parents=True, exist_ok=True)
     engine = create_engine(f"sqlite:///{tmp_path / 'routes.sqlite'}")
@@ -89,7 +90,9 @@ def setup(
             lifecycle="resolved",
             schema_version=1,
             document={
-                "interfaces": [
+                "interfaces": interfaces
+                if interfaces is not None
+                else [
                     {
                         "adapter": "openai",
                         "model_aliases": list(runtime_model_aliases),
@@ -313,6 +316,17 @@ def test_public_alias_routes_to_primary_runtime_model_alias(tmp_path: Path) -> N
     model = json.loads(applied[-1])["model_list"][0]
     assert model["model_name"] == "public-qwen"
     assert model["litellm_params"]["model"] == "openai/internal-qwen"
+
+
+def test_artifact_interface_never_publishes_a_litellm_route(tmp_path: Path) -> None:
+    service, _publisher, applied, run_id = setup(
+        tmp_path, interfaces=[{"adapter": "video-job"}]
+    )
+
+    with pytest.raises(RecipeRouteError, match="LiteLLM interface"):
+        service.publish_run(run_id)
+
+    assert applied == []
 
 
 def test_missing_runtime_model_authority_blocks_route_publication(

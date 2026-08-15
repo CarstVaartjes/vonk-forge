@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from .interface_adapters import InterfaceAdapterError, interface_adapter
 from .litellm import LiteLlmGeneration, LiteLlmPolicy, LiteLlmPublisher
 from .models import (
     LocalRecipeRevision,
@@ -662,18 +663,25 @@ def _primary_model_alias(session: Session, run: RecipeRun) -> str:
         else None
     )
     interfaces = revision.document.get("interfaces") if revision is not None else None
-    interface = (
-        next(
-            (
-                value
-                for value in interfaces
-                if isinstance(value, Mapping) and value.get("adapter") == "openai"
-            ),
-            None,
+    interface = None
+    if isinstance(interfaces, list):
+        for value in interfaces:
+            name = value.get("adapter") if isinstance(value, Mapping) else None
+            if not isinstance(name, str):
+                continue
+            try:
+                adapter = interface_adapter(name)
+            except InterfaceAdapterError as error:
+                raise RecipeRouteError(
+                    "recipe runtime interface authority is invalid", run_id=run.id
+                ) from error
+            if adapter.publication == "litellm":
+                interface = value
+                break
+    if interface is None:
+        raise RecipeRouteError(
+            "recipe run does not declare a LiteLLM interface", run_id=run.id
         )
-        if isinstance(interfaces, list)
-        else None
-    )
     model_aliases = (
         interface.get("model_aliases") if isinstance(interface, Mapping) else None
     )
