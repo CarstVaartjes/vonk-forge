@@ -439,8 +439,9 @@ def test_secret_docs_separate_local_backup_from_exact_nas_projection() -> None:
     runbook = _normalized_text(DEV_WORKLOADS)
     design = _normalized_text(DEV_WORKLOADS_DESIGN)
 
-    assert "exactly 21 local source files" in runbook
-    assert "exactly 17 deployment files" in runbook
+    assert "exactly 22 local source files" in runbook
+    assert "exactly 18 deployment files" in runbook
+    assert "`--upgrade-litellm-key-management`" in runbook
     assert "four local-only files" in runbook
     assert "15-file" in runbook
     assert "add-only" in runbook
@@ -498,8 +499,9 @@ def test_complete_runbook_uses_current_browser_secret_generation_contract() -> N
 
     assert "--tailscale-oauth-client-id-file" in text
     assert "--tailscale-oauth-client-secret-file" in text
-    assert "exactly 21 local source files" in normalized
-    assert "exactly 17 deployment files" in normalized
+    assert "exactly 22 local source files" in normalized
+    assert "exactly 18 deployment files" in normalized
+    assert "litellm-database-password" in normalized
     for local_only in (
         "`admin-password`",
         "`controller-ca-key`",
@@ -508,6 +510,7 @@ def test_complete_runbook_uses_current_browser_secret_generation_contract() -> N
     ):
         assert local_only in text
     assert "--upgrade-browser-access" in text
+    assert "--upgrade-litellm-key-management" in text
     assert "Pull** then **Redeploy" in text
 
 

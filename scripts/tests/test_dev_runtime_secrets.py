@@ -49,6 +49,7 @@ DEPLOYMENT_SECRET_NAMES = {
     "database-url",
     "git-signing-key",
     "host-runtime-grant-private-key",
+    "litellm-database-password",
     "litellm-master-key",
     "litellm-upstream-key",
     "management-cidrs",
@@ -840,8 +841,8 @@ def test_declares_local_source_and_deployment_secret_boundaries() -> None:
     assert module.LOCAL_SOURCE_SECRET_NAMES == LOCAL_SOURCE_SECRET_NAMES
     assert module.DEPLOYMENT_SECRET_NAMES == DEPLOYMENT_SECRET_NAMES
     assert module.RUNTIME_SECRET_NAMES == LOCAL_SOURCE_SECRET_NAMES
-    assert len(module.LOCAL_SOURCE_SECRET_NAMES) == 21
-    assert len(module.DEPLOYMENT_SECRET_NAMES) == 17
+    assert len(module.LOCAL_SOURCE_SECRET_NAMES) == 22
+    assert len(module.DEPLOYMENT_SECRET_NAMES) == 18
     assert module.LOCAL_SOURCE_SECRET_NAMES - module.DEPLOYMENT_SECRET_NAMES == {
         "admin-password",
         "controller-ca-key",
@@ -879,6 +880,10 @@ def test_generates_idempotent_local_runtime_secret_store_without_leaking_values(
     assert stat.S_IMODE(secrets_dir.stat().st_mode) == 0o700
     for name in LOCAL_SOURCE_SECRET_NAMES:
         _assert_regular_private_file(secrets_dir / name)
+    assert re.fullmatch(
+        r"[0-9a-f]{64}\n",
+        (secrets_dir / "litellm-database-password").read_text(encoding="ascii"),
+    )
 
     agent_ca = _certificate(secrets_dir / "agent-ca-certificate")
     controller_ca = _certificate(secrets_dir / "controller-ca")
@@ -1204,6 +1209,43 @@ def test_explicit_upgrade_adds_only_host_runtime_authority_to_legacy_store(
         refused.stdout + refused.stderr + upgraded.stdout + upgraded.stderr,
         secrets_dir,
         {"host-runtime-grant-private-key"},
+    )
+
+
+def test_explicit_upgrade_adds_only_litellm_database_password(
+    tmp_path: Path,
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    created = _run_generator(secrets_dir)
+    assert created.returncode == 0, created.stderr
+    (secrets_dir / "litellm-database-password").unlink()
+    prior_names = LOCAL_SOURCE_SECRET_NAMES - {"litellm-database-password"}
+    before = _secret_state(secrets_dir, prior_names)
+
+    refused = _run_generator(secrets_dir)
+    upgraded = _run_generator(
+        secrets_dir, "--upgrade-litellm-key-management"
+    )
+    retried = _run_generator(
+        secrets_dir, "--upgrade-litellm-key-management"
+    )
+
+    assert refused.returncode == 1
+    assert refused.stdout == ""
+    assert upgraded.returncode == 0, upgraded.stderr
+    assert retried.returncode == 0, retried.stderr
+    assert _secret_state(secrets_dir, prior_names) == before
+    password = (secrets_dir / "litellm-database-password").read_text(
+        encoding="ascii"
+    )
+    assert re.fullmatch(r"[0-9a-f]{64}\n", password)
+    _assert_regular_private_file(secrets_dir / "litellm-database-password")
+    _assert_no_sensitive_output(
+        refused.stdout + refused.stderr + upgraded.stdout + upgraded.stderr,
+        secrets_dir,
+        {"litellm-database-password"},
     )
 
 

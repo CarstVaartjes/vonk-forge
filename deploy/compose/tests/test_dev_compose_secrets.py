@@ -66,6 +66,7 @@ def test_image_template_stages_exact_disjoint_runtime_secret_volumes() -> None:
         "VONK_DEV_API_SECRET_ROOT": "/api-secrets",
         "VONK_DEV_CADDY_SECRET_ROOT": "/caddy-secrets",
         "VONK_DEV_LITELLM_SECRET_ROOT": "/litellm-secrets",
+        "VONK_DEV_LITELLM_DATABASE_SECRET_ROOT": "/litellm-database-secrets",
         "VONK_DEV_MIGRATE_SECRET_ROOT": "/migrate-secrets",
         "VONK_DEV_RUNTIME_CONFIG_ROOT": "/runtime-config",
         "VONK_DEV_TAILSCALE_SECRET_ROOT": "/tailscale-secrets",
@@ -78,6 +79,7 @@ def test_image_template_stages_exact_disjoint_runtime_secret_volumes() -> None:
         "/api-secrets": "dev-api-secrets",
         "/caddy-secrets": "dev-caddy-secrets",
         "/litellm-secrets": "dev-litellm-secrets",
+        "/litellm-database-secrets": "dev-litellm-database-secrets",
         "/migrate-secrets": "dev-migrate-secrets",
         "/runtime-config": "dev-runtime-config",
         "/tailscale-secrets": "dev-tailscale-secrets",
@@ -112,6 +114,7 @@ def test_image_template_stages_exact_disjoint_runtime_secret_volumes() -> None:
                 "git-signing-key",
                 "host-runtime-grant-private-key",
             "litellm-master-key",
+            "litellm-database-password",
             "litellm-upstream-key",
             "management-cidrs",
             "tailscale-oauth-client-id",
@@ -140,6 +143,10 @@ def test_image_template_keeps_private_authority_with_its_exact_service() -> None
     assert volume_consumers["dev-migrate-secrets"] == {"dev-init", "migrate"}
     assert volume_consumers["dev-caddy-secrets"] == {"caddy", "dev-init"}
     assert volume_consumers["dev-litellm-secrets"] == {"dev-init", "litellm"}
+    assert volume_consumers["dev-litellm-database-secrets"] == {
+        "dev-init",
+        "dev-litellm-database-init",
+    }
     assert volume_consumers["dev-tailscale-secrets"] == {
         "dev-init",
         "tailscale-gateway",
@@ -147,6 +154,7 @@ def test_image_template_keeps_private_authority_with_its_exact_service() -> None
     assert secret_consumers["agent-ca-key"] == {"dev-init"}
     assert secret_consumers["controller-server-key"] == {"dev-init"}
     assert secret_consumers["litellm-master-key"] == {"dev-init"}
+    assert secret_consumers["litellm-database-password"] == {"dev-init"}
     assert secret_consumers["litellm-upstream-key"] == {"dev-init"}
     assert secret_consumers["management-cidrs"] == {"dev-init"}
     assert secret_consumers["token-signing-key"] == {"dev-init"}
@@ -191,6 +199,7 @@ def test_image_template_preserves_existing_state_and_identity_volumes() -> None:
         "dev-control-state",
         "dev-image-cohort",
         "dev-litellm-secrets",
+        "dev-litellm-database-secrets",
         "dev-migrate-secrets",
         "dev-postgres-data",
         "dev-repository",

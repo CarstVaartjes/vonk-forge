@@ -23,8 +23,8 @@ CADDY_IMAGE = (
     "844f60b64e4724a5aa8245e019dace0d3f199f7433ce6c57676cb30a920dbad9"
 )
 LITELLM_IMAGE = (
-    "ghcr.io/berriai/litellm:v1.81.14-stable@sha256:"
-    "a3ce130137752e6b085de521b773eacbb641c8b6322c6f538453e860e7b9cf43"
+    "ghcr.io/berriai/litellm:v1.96.2@sha256:"
+    "154e23bb5f31b1f10e16392a8ef299bd2cde08de3a64a6849002cfcc25ce3c63"
 )
 OAUTH_CLIENT_ID = "synthetic-tailscale-client-id\n"
 OAUTH_CLIENT_SECRET = "synthetic-tailscale-client-secret\n"
@@ -368,15 +368,20 @@ def test_image_template_runs_litellm_on_application_and_loopback_ingress() -> No
     assert litellm["read_only"] is True
     assert litellm["cap_drop"] == ["ALL"]
     assert litellm["security_opt"] == ["no-new-privileges:true"]
-    assert litellm["tmpfs"] == ["/tmp"]
+    assert set(litellm["tmpfs"]) == {
+        "/tmp:rw,noexec,nosuid,nodev,mode=1777",
+        "/run/vonk-litellm:rw,exec,nosuid,nodev,mode=0700,uid=10002,gid=10001",
+    }
     assert litellm["entrypoint"] == ["/run/vonk-runtime/litellm-entrypoint.sh"]
     assert litellm["environment"] == {
         "DISABLE_ADMIN_UI": "True",
-        "HOME": "/tmp",
+        "HOME": "/run/vonk-litellm",
+        "LITELLM_MIGRATION_DIR": "/run/vonk-litellm/migrations",
         "SERVER_ROOT_PATH": "/litellm",
         "STORE_MODEL_IN_DB": "False",
+        "XDG_CACHE_HOME": "/run/vonk-litellm/cache",
     }
-    assert set(litellm["networks"]) == {"application", "ingress"}
+    assert set(litellm["networks"]) == {"application", "data", "ingress"}
     assert rendered["networks"]["application"]["internal"] is True
     assert rendered["networks"]["data"]["internal"] is True
     assert litellm["ports"] == [
@@ -400,6 +405,10 @@ def test_image_template_runs_litellm_on_application_and_loopback_ingress() -> No
         "retries": 10,
     }
     assert litellm["depends_on"] == {
+        "dev-litellm-database-init": {
+            "condition": "service_completed_successfully",
+            "required": True,
+        },
         "dev-init": {
             "condition": "service_completed_successfully",
             "required": True,
@@ -436,7 +445,27 @@ def test_image_template_runs_litellm_on_application_and_loopback_ingress() -> No
     assert volumes["/supervisor"]["source"].endswith("dev-supervisor-state")
     assert volumes["/supervisor"].get("read_only", False) is False
     assert "dev-litellm-cache-init" not in services
-    assert "dev-litellm-database-init" not in services
+    database_init = services["dev-litellm-database-init"]
+    assert database_init["image"] == services["control-api"]["image"]
+    assert database_init["user"] == "10001:10001"
+    assert database_init["read_only"] is True
+    assert database_init["cap_drop"] == ["ALL"]
+    assert database_init["security_opt"] == ["no-new-privileges:true"]
+    assert database_init["command"] == [
+        "python",
+        "-m",
+        "vonk_control.dev_litellm_database",
+    ]
+    assert set(database_init["networks"]) == {"data"}
+    assert database_init.get("ports", []) == []
+    assert database_init.get("secrets", []) == []
+    assert database_init["restart"] == "no"
+    database_init_volumes = _volumes_by_target(database_init)
+    assert set(database_init_volumes) == {"/run/secrets"}
+    assert database_init_volumes["/run/secrets"]["source"].endswith(
+        "dev-litellm-database-secrets"
+    )
+    assert database_init_volumes["/run/secrets"]["read_only"] is True
 
 
 def test_image_template_enables_only_the_explicit_builtin_agent_authority() -> None:
@@ -502,6 +531,7 @@ def test_dev_compose_runs_packaged_initializer_with_disjoint_runtime_authority(
         "VONK_DEV_EXPECTED_COMMIT": EXPECTED_COMMIT,
         "VONK_DEV_LOCAL_ACCEPTANCE": "1",
         "VONK_DEV_MIGRATE_SECRET_ROOT": "/migrate-secrets",
+        "VONK_DEV_LITELLM_DATABASE_SECRET_ROOT": "/litellm-database-secrets",
         "VONK_DEV_REPOSITORY_URL": "file:///source-origin",
         "VONK_DEV_SECRET_SOURCE_ROOT": "/host-secrets",
         "VONK_DEV_WORKER_SECRET_ROOT": "/worker-secrets",
@@ -521,12 +551,19 @@ def test_dev_compose_runs_packaged_initializer_with_disjoint_runtime_authority(
     assert init_volumes["/repository"]["type"] == "volume"
     assert init_volumes["/api-secrets"]["type"] == "volume"
     assert init_volumes["/migrate-secrets"]["source"].endswith("dev-migrate-secrets")
+    assert init_volumes["/litellm-database-secrets"]["source"].endswith(
+        "dev-litellm-database-secrets"
+    )
     assert init_volumes["/worker-secrets"]["type"] == "volume"
     assert {
         (secret["source"], secret["target"]) for secret in initializer["secrets"]
     } == {
         ("database-url", "/host-secrets/database-url"),
         ("git-signing-key", "/host-secrets/git-signing-key"),
+        (
+            "litellm-database-password",
+            "/host-secrets/litellm-database-password",
+        ),
     }
     assert "postgres-password" not in {
         secret["source"] for secret in initializer["secrets"]
@@ -1319,7 +1356,7 @@ def test_dev_compose_uses_the_python_runtime_generator_without_ssh_keygen(
     assert (capture / "environment").exists()
     assert (secrets / "git-signing-key").is_file()
     assert (secrets / "git-signing-key.pub").is_file()
-    assert len(tuple(secrets.iterdir())) == 21
+    assert len(tuple(secrets.iterdir())) == 22
     assert OAUTH_CLIENT_ID not in result.stdout + result.stderr
     assert OAUTH_CLIENT_SECRET not in result.stdout + result.stderr
 

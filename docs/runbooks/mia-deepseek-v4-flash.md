@@ -178,10 +178,16 @@ master_key="$(< '<LOCAL_SECRETS_DIR>/litellm-master-key')"
 curl -fsS 'http://127.0.0.1:<LOCAL_INFERENCE_PORT>/key/generate' \
   -H "Authorization: Bearer $master_key" \
   -H 'Content-Type: application/json' \
-  --data '{"models":["mia-deepseek-v4-flash"],"key_alias":"pi-dev"}' \
+  --data '{"models":["mia-deepseek-v4-flash"],"allowed_routes":["openai_routes"],"key_alias":"pi-dev"}' \
   | jq -er '.key' > '<LOCAL_SECRETS_DIR>/pi-litellm-key'
 unset master_key
 ```
+
+The generated key is stored in LiteLLM's dedicated PostgreSQL database, so a
+normal NAS pull/redeploy preserves it. The `models` scope limits inference to
+the stable MIA alias and `allowed_routes` excludes LiteLLM management APIs.
+The Tailscale Caddy route exposes only OpenAI-compatible traffic; key creation,
+listing, and revocation remain on the trusted NAS loopback endpoint.
 
 Store that generated value in the operator's password manager as
 `Vonk Forge Pi/LiteLLM API Key`. On the Tailscale-connected workstation, save
@@ -231,8 +237,11 @@ $env:VONK_PI_API_KEY = op read 'op://Private/Vonk Forge Pi/LiteLLM API Key/passw
 pi --provider vonk-forge --model mia-deepseek-v4-flash
 ```
 
-The workstation must be connected to the same tailnet. Revoke this virtual key
-in LiteLLM if the workstation or password-manager item is compromised.
+The workstation must be connected to the same tailnet. If the workstation or
+password-manager item is compromised, use the same trusted loopback tunnel and
+the local master-key file to call LiteLLM `POST /key/delete` for that exact
+virtual key, then delete the password-manager item. Never rotate or distribute
+the master key merely to revoke one client.
 
 ## Failure, recovery, and cleanup
 

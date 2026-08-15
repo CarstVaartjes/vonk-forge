@@ -26,6 +26,7 @@ vonk-forge/
     ├── database-url
     ├── git-signing-key
     ├── host-runtime-grant-private-key
+    ├── litellm-database-password
     ├── litellm-master-key
     ├── litellm-upstream-key
     ├── management-cidrs
@@ -127,7 +128,8 @@ The operator-owned bundle has narrow service projections:
 | `host-runtime-grant-private-key` | initializer, then API projection only | Signs short-lived, operation-bound grants for the root helper on enrolled GPU nodes. Its matching public key is installed on nodes and is not copied to the NAS. |
 | `agent-ca-certificate`, `agent-ca-key`, `agent-proxy-auth` | initializer, then separated API/Caddy projections | Agent certificate issuance and authenticated proxy boundary. |
 | `controller-ca`, `controller-server-certificate`, `controller-server-key` | operator backup plus Caddy projection | Server trust for the two agent hostnames. |
-| `litellm-master-key`, `litellm-upstream-key` | initializer, then LiteLLM-only projection | User-facing development inference and internal upstream authentication. |
+| `litellm-database-password` | initializer, then separate database-initializer and LiteLLM projections | Dedicated password for the `litellm` role and database; it is not the control database credential. |
+| `litellm-master-key`, `litellm-upstream-key` | initializer, then LiteLLM-only projection | Local LiteLLM administration and internal upstream authentication. Workstations receive restricted virtual keys instead. |
 | `management-cidrs` | initializer, API, worker, and Caddy projections | Exact management networks allowed to use agent ingress. |
 | `token-signing-key` | initializer, then API projection only | Random authority used to sign short-lived development administrator tokens. |
 | `tailscale-oauth-client-id`, `tailscale-oauth-client-secret` | initializer, then Tailscale-only projection | Scoped unattended gateway enrollment; no API, worker, Caddy, or GPU-node consumer. |
@@ -136,10 +138,12 @@ On first start, the networked `dev-repository-init` service fetches and verifies
 the public repository without receiving any runtime secret. The separate
 `network_mode: none` `dev-init` service generates an admin-grant private key and
 a worker API token without mounting the repository. It projects authority into distinct API, migration, worker,
-Caddy, and LiteLLM named volumes: API gets its signing and enrollment
+Caddy, LiteLLM-database-initializer, and LiteLLM named volumes: API gets its signing and enrollment
 authority; migration gets only the database URL; worker gets the database URL,
-management CIDRs, and worker token; Caddy gets only TLS/proxy material; and
-LiteLLM gets only its two keys. The authentication initializer gets only the
+management CIDRs, and worker token; Caddy gets only TLS/proxy material; the
+database initializer gets the control database URL plus the dedicated
+LiteLLM password; and LiteLLM gets only its two keys plus its generated
+dedicated database URL. The authentication initializer gets only the
 database URL and administrator verifier. The Tailscale gateway gets only its
 OAuth pair and persistent node state. The worker cannot read the verifier,
 session authority, OAuth pair, or Git signing key. Those values
@@ -268,35 +272,33 @@ and expiry dates. It never prints secret values. It creates regular files with
 mode `0600` in an operator-owned mode `0700` directory and refuses an
 incomplete, unknown, symlinked, or inconsistent existing bundle.
 
-A fresh generation contains exactly 21 local source files. Before publication,
+A fresh generation contains exactly 22 local source files. Before publication,
 create a 1Password Password item named **Vonk Forge NAS Development
 Administrator**, set its username to exact `admin`, and transfer the local
 `admin-password` into its password field through the 1Password application.
 Do not put the password in a CLI argument, terminal output, note field, or
-browser storage. Keep the complete 21-file generation as an encrypted backup;
+browser storage. Keep the complete 22-file generation as an encrypted backup;
 the 1Password item is the normal login copy, not a replacement for the
 generation backup.
 
-The publisher copies exactly 17 files into the NAS `secrets/` directory. The
+The publisher copies exactly 18 files into the NAS `secrets/` directory. The
 four local-only files are `admin-password`, `controller-ca-key`,
 `git-signing-key.pub`, and `host-runtime-grant-public-key`. In particular, the
 plaintext administrator password is never published to the NAS. The publisher
 and `dev-init` then enforce the disjoint service ownership boundaries described
 above; a read-only mount is not used as a substitute for separating secrets.
 
-For an existing valid pre-browser 17-file local source generation, repeat the
-same command with `--upgrade-browser-access`. This add-only operation preserves
-every existing secret byte and key relationship and creates only
-`admin-password`, `admin-password-verifier`, `tailscale-oauth-client-id`, and
-`tailscale-oauth-client-secret`. Back up the resulting 21-file generation
-before publication. If the source is the older valid 15-file generation, first
-run the separately documented `--upgrade-host-runtime-authority` transition,
-then run `--upgrade-browser-access`. Neither switch repairs partial, unknown,
+For an existing valid 21-file browser-access generation, repeat the same
+command with `--upgrade-litellm-key-management`. This add-only operation
+creates only `litellm-database-password`, preserves every existing secret byte,
+and validates an already-completed retry. Back up the resulting 22-file
+generation before publication. A valid pre-browser 17-file generation first
+needs `--upgrade-browser-access`; an older valid 15-file generation first needs
+`--upgrade-host-runtime-authority`. Neither switch repairs partial, unknown,
 symlinked, or inconsistent state created outside its own transaction. If power
 or the workstation process is lost during the browser upgrade, leave the hidden
 `.browser-access-upgrade-*` transaction untouched and rerun the identical
-command with the same OAuth inputs. The generator verifies the digest journal
-and safely finishes or rolls back its own interrupted add-only transaction.
+command with the same OAuth inputs.
 
 Publish the accepted Compose and that exact bundle to the mounted NAS share:
 
@@ -343,6 +345,7 @@ The content classes are:
 |---|---|
 | `postgres-password` | 64 lowercase hexadecimal characters followed by one newline. |
 | `database-url` | `postgresql+psycopg://control:<postgres-password>@postgres:5432/control` followed by one newline, where `<postgres-password>` is the exact value in `postgres-password`. |
+| `litellm-database-password` | Independent 64-character lowercase hexadecimal password followed by one newline; startup derives the dedicated `litellm` database URL inside service projections. |
 | `admin-password` | Local-only 43-character unpadded base64url administrator password; store it in the named 1Password item and encrypted backup. |
 | `admin-password-verifier` | Argon2id PHC verifier published to the authentication projection; it is not a login credential. |
 | `git-signing-key` | One unencrypted Ed25519 OpenSSH private key followed by one newline; the initializer has no interactive passphrase input. |
@@ -355,7 +358,7 @@ The content classes are:
 
 Do not overwrite existing secret files during a normal redeploy. If you copied
 them through an SMB share or NAS file manager, safely eject/disconnect the
-share after copying and use the NAS file manager to confirm only the 17
+share after copying and use the NAS file manager to confirm only the 18
 expected names appear.
 Back up that exact host bundle before first start and after every rotation, but
 confirm the backup by filename, size, and timestamp only; never reveal the
@@ -430,7 +433,7 @@ In a generic NAS Docker UI (UGREEN calls this a Docker Project):
 
 1. Create or import a project from the NAS-local `vonk-forge/` directory.
 2. Select `docker-compose.yml`; retain its relative `./secrets/...` paths.
-3. Verify that `secrets/` contains exactly the 17 names in the project tree
+3. Verify that `secrets/` contains exactly the 18 names in the project tree
    above, without opening their contents in the UI.
 4. Choose **Pull** then **Redeploy** for the project. Do not choose build or
    restart; there is no build context and restart cannot fetch a moved `:dev`
@@ -442,7 +445,9 @@ After the UI reports the deployment, follow the two prerequisite lanes in the
 job and container status: the cohort reset, API and worker cohort reporters,
 and cohort verifier complete in one lane while PostgreSQL becomes healthy in
 the other. Only then may `dev-repository-init`, the offline `dev-init`, and
-`migrate` complete. The isolated `dev-auth-init` then installs the exact
+`migrate` complete. The isolated `dev-litellm-database-init` creates or
+reconciles the dedicated `litellm` role and database without exposing its
+password to the control API or worker. The isolated `dev-auth-init` then installs the exact
 administrator verifier before the long-running API and worker can become
 healthy. A one-shot service that exits
 successfully is complete, not failed. The API remains bound to NAS loopback for
@@ -664,7 +669,7 @@ as a substitute for restoring PostgreSQL or generated-secret state.
   record it with the replacement OAuth item, and pass it as
   `--tailscale-oauth-rotation-id <uuid>` on the first attempt and every retry.
   The generator keeps a mode-`0600`, fixed-length, hash-only receipt history
-  beside the 21-file generation; include that receipt and the rotation ID in
+  beside the 22-file generation; include that receipt and the rotation ID in
   the encrypted source backup. The history rejects a stale operation ID or any
   previously used credential pair, so an old retry cannot roll back a newer
   rotation. The locked transaction validates the existing
@@ -673,7 +678,7 @@ as a substitute for restoring PostgreSQL or generated-secret state.
   with its mode and ownership, and rolls back an interrupted install before a
   retry. A retry with the same UUID is idempotent even after final transaction
   cleanup; a different UUID cannot authorize an unchanged pair. Back up the
-  completed 21-file generation and its receipt, republish it with
+  completed 22-file generation and its receipt, republish it with
   `scripts/dev-runtime-project`, then choose **Pull** then **Redeploy** while
   preserving every named volume. Rotate the
   administrator password and revoke browser sessions separately if application

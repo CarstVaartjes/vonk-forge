@@ -24,6 +24,9 @@ GENERATIONS = ROOT / "generations"
 BOOTSTRAP = Path("/run/vonk-runtime/litellm-bootstrap.json")
 EFFECTIVE_CONFIG = Path("/tmp/vonk-litellm-effective.json")
 SECRET_FILES = {
+    "os.environ/LITELLM_DATABASE_URL": Path(
+        "/run/secrets/litellm-database-url"
+    ),
     "os.environ/LITELLM_MASTER_KEY": Path("/run/secrets/litellm-master-key"),
     "os.environ/LITELLM_UPSTREAM_KEY": Path("/run/secrets/litellm-upstream-key"),
 }
@@ -325,7 +328,7 @@ def _materialize_config(
     models = document["model_list"]
     assert isinstance(general, dict) and isinstance(models, list)
     general["master_key"] = secret_values[_MASTER_MARKER]
-    del general["database_url"]
+    general["database_url"] = secret_values[_DATABASE_MARKER]
     general["disable_admin_ui"] = True
     for model in models:
         assert isinstance(model, dict)
@@ -581,6 +584,19 @@ def _await_healthy(child: subprocess.Popen[bytes]) -> bool:
     return False
 
 
+def _litellm_command(effective_config: Path) -> list[str]:
+    return [
+        "litellm",
+        "--config",
+        str(effective_config),
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "4000",
+        "--use_v2_migration_resolver",
+    ]
+
+
 def main() -> int:
     stopping = False
     child: subprocess.Popen[bytes] | None = None
@@ -599,16 +615,7 @@ def main() -> int:
         active_digest = _digest(selected)
         effective_config = _materialize_config(selected)
         child = subprocess.Popen(
-            [
-                "litellm",
-                "--config",
-                str(effective_config),
-                "--host",
-                "0.0.0.0",
-                "--port",
-                "4000",
-            ],
-            stdin=subprocess.DEVNULL,
+            _litellm_command(effective_config), stdin=subprocess.DEVNULL
         )
         if not _await_healthy(child):
             _clear_ack()
