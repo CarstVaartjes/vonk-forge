@@ -616,21 +616,20 @@ def install_recipe_operation_routes(
     def start(body: RunRequest, request: Request, actor: Actor = authenticated):
         administrator(actor)
         try:
-            replayed = recipes().replay_start(
+            value = recipes().replay_start(
                 body.installation_id,
                 body.alias,
                 plan_digest=body.plan_digest,
                 request_id=body.request_key,
             )
-            if replayed is not None:
-                return operation(replayed)
-            plan = recipes().preview_run(body.installation_id, body.alias)
-            value = recipes().start(
-                plan,
-                plan_digest=body.plan_digest,
-                actor=actor.subject,
-                request_id=body.request_key,
-            )
+            if value is None:
+                plan = recipes().preview_run(body.installation_id, body.alias)
+                value = recipes().start(
+                    plan,
+                    plan_digest=body.plan_digest,
+                    actor=actor.subject,
+                    request_id=body.request_key,
+                )
         except RecipeOperationConflict as error:
             return conflict(request, error)
         audits.append(

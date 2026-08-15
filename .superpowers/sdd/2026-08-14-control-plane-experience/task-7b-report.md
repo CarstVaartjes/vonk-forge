@@ -153,3 +153,45 @@ The new tests were run before implementation and failed for the reviewed gaps:
 The pytest runs retained the previously documented macOS temporary-directory
 cleanup warnings; all test processes exited successfully. No generated
 contracts changed in this review round, and no excluded scope was touched.
+
+## Fix round 2 — replay audit path
+
+Round 2 review found that the exact-replay API branch returned before the shared
+successful-start audit block. The replay still returned the original operation
+without mutation, but the accepted replay request lost its own request/actor
+audit trace.
+
+The replay preflight result is now assigned to the common operation value. A
+missing replay still performs preview and start; an exact replay skips only
+those steps. Both accepted paths continue through the existing audit and
+response block. No service, authority, persistence, route, caller, or generated
+contract behavior changed.
+
+### Round 2 RED evidence
+
+`test_identical_start_api_replay_audits_without_repreview_or_mutation` was
+updated first to submit distinct API request IDs, require an administrator
+`recipe.start` audit with identical operation targets for each accepted request,
+and retain the one-preview/one-start call sequence. Before the production change:
+
+- both requests returned HTTP 202 and the same operation;
+- only one start mutation occurred;
+- lookup of the replay request ID in the audit store raised `KeyError`;
+- focused result: 1 failed.
+
+### Round 2 GREEN and verification evidence
+
+- Focused replay audit regression — 1 passed.
+- `uv run --project control --frozen --with-editable . pytest control/tests/test_recipe_api.py -q`
+  — 7 passed.
+- Existing real-service exact replay/no-additional-side-effects regression — 1
+  passed, confirming one run, two run reservations, one start job, one agent
+  operation, and no replay mutation.
+- Pinned Ruff 0.16.1 over `recipe_api.py` and `test_recipe_api.py` — all checks
+  passed.
+- Python built-in compilation over both changed Python files — passed.
+- `git diff --check` — passed with no whitespace errors.
+
+The real-service pytest run emitted only the previously documented macOS
+temporary-directory cleanup warnings and exited successfully. No push or live
+system interaction was performed.

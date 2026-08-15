@@ -561,7 +561,7 @@ def test_start_progress_stop_retry_and_uninstall_routes_are_stable() -> None:
     )
 
 
-def test_identical_start_api_replay_returns_original_without_repreview_or_audit() -> None:
+def test_identical_start_api_replay_audits_without_repreview_or_mutation() -> None:
     client, headers, recipes, audits = setup()
     body = {
         "installation_id": INSTALLATION,
@@ -569,9 +569,19 @@ def test_identical_start_api_replay_returns_original_without_repreview_or_audit(
         "plan_digest": "c" * 64,
         "request_key": "10000000-0000-4000-8000-000000000009",
     }
+    first_request_id = "20000000-0000-4000-8000-000000000009"
+    replay_request_id = "20000000-0000-4000-8000-000000000010"
 
-    first = client.post("/api/v1/recipes/runs", headers=headers(), json=body)
-    replayed = client.post("/api/v1/recipes/runs", headers=headers(), json=body)
+    first = client.post(
+        "/api/v1/recipes/runs",
+        headers={**headers(), "x-request-id": first_request_id},
+        json=body,
+    )
+    replayed = client.post(
+        "/api/v1/recipes/runs",
+        headers={**headers(), "x-request-id": replay_request_id},
+        json=body,
+    )
 
     assert first.status_code == replayed.status_code == 202
     assert replayed.json() == first.json()
@@ -581,7 +591,17 @@ def test_identical_start_api_replay_returns_original_without_repreview_or_audit(
         "start",
         "replay_start",
     ]
-    assert [event.action for event in audits.list()] == ["recipe.start"]
+    assert [
+        (
+            audits.for_request(request_id).actor,
+            audits.for_request(request_id).action,
+            audits.for_request(request_id).targets,
+        )
+        for request_id in (first_request_id, replay_request_id)
+    ] == [
+        ("administrator", "recipe.start", (RUN, "c" * 64, NODE)),
+        ("administrator", "recipe.start", (RUN, "c" * 64, NODE)),
+    ]
 
 
 def test_stop_and_uninstall_contracts_are_admin_only_strict_and_digest_bound() -> None:
