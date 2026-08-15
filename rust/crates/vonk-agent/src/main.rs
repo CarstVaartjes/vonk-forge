@@ -243,7 +243,7 @@ async fn run_telemetry_lane(
             }
         }
     };
-    let mut collector = TelemetryCollector::new(
+    let collector = TelemetryCollector::new(
         SystemProcessRunner,
         SystemFileSystemProvider,
         TelemetryPaths {
@@ -254,8 +254,14 @@ async fn run_telemetry_lane(
             store: data_dir,
         },
         boot_id,
-    )
-    .expect("validated non-nil kernel boot ID");
+    );
+    let mut collector = match collector {
+        Ok(collector) => collector,
+        Err(error) => {
+            eprintln!("telemetry durable state unavailable: {error}");
+            return;
+        }
+    };
     let mut previous = None;
     let mut queue = TelemetryQueue::new();
     let mut schedule = TelemetrySchedule::new(tokio::time::Instant::now());
@@ -263,6 +269,7 @@ async fn run_telemetry_lane(
 
     loop {
         tokio::time::sleep_until(schedule.next_collection()).await;
+        let collection_started = tokio::time::Instant::now();
         let prior = previous.take();
         let collection = tokio::task::spawn_blocking(move || {
             let result = collector.sample(prior.as_ref());
@@ -285,7 +292,7 @@ async fn run_telemetry_lane(
             }
         }
         let now = tokio::time::Instant::now();
-        schedule.collected(now);
+        schedule.collected(collection_started, now);
 
         if !schedule.send_due(now, !queue.is_empty()) {
             continue;
@@ -305,15 +312,31 @@ async fn run_telemetry_lane(
                 let entropy = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .map_or(0, |duration| duration.subsec_nanos() as u64);
-                let retry_after = if error.retryable() {
-                    backoff_delay(send_failures, entropy, poll_min_seconds, poll_max_seconds)
-                } else {
-                    std::time::Duration::from_secs(60)
-                };
+                let retry_after = telemetry_retry_after(
+                    &error,
+                    send_failures,
+                    entropy,
+                    poll_min_seconds,
+                    poll_max_seconds,
+                );
                 schedule.send_failed(tokio::time::Instant::now(), retry_after);
                 eprintln!("telemetry report deferred: {error}");
             }
         }
+    }
+}
+
+fn telemetry_retry_after(
+    error: &ClientError,
+    failures: u32,
+    entropy: u64,
+    poll_min_seconds: u64,
+    poll_max_seconds: u64,
+) -> std::time::Duration {
+    if error.retryable() {
+        backoff_delay(failures, entropy, poll_min_seconds, poll_max_seconds)
+    } else {
+        std::time::Duration::from_secs(60)
     }
 }
 
@@ -373,7 +396,7 @@ fn claim_wait_seconds(configured_maximum: u64, managed_run_count: usize) -> u64 
 mod tests {
     use super::{
         LaneExit, ObservationFailureAction, claim_wait_seconds, observation_failure_action,
-        supervise_lanes,
+        supervise_lanes, telemetry_retry_after,
     };
     use std::future;
     use vonk_agent::client::ClientError;
@@ -407,19 +430,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn telemetry_retry_wait_cannot_delay_the_claim_lane() {
-        let (telemetry_failed, claim_may_start) = tokio::sync::oneshot::channel();
-        let telemetry_lane = async {
-            telemetry_failed.send(()).unwrap();
-            future::pending::<()>().await;
+    async fn retryable_telemetry_failure_schedules_retry_without_delaying_claim_lane() {
+        let retry_after = telemetry_retry_after(&ClientError::Retryable, 1, 0, 5, 60);
+        assert!(retry_after >= std::time::Duration::from_secs(5));
+        let telemetry_lane = async move {
+            tokio::time::sleep(retry_after).await;
         };
-        let claim_lane = async {
-            claim_may_start.await.unwrap();
-            "claim attempted"
-        };
+        let claim_lane = future::ready("claim attempted");
 
         let outcome = tokio::time::timeout(
-            std::time::Duration::from_secs(1),
+            std::time::Duration::from_millis(100),
             supervise_lanes(claim_lane, telemetry_lane, future::pending::<()>()),
         )
         .await

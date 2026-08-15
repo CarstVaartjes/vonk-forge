@@ -2,6 +2,7 @@
 
 use std::{
     fs,
+    os::unix::fs::symlink,
     path::Path,
     sync::{Arc, Mutex},
     time::Duration,
@@ -12,6 +13,7 @@ use tempfile::tempdir;
 use uuid::Uuid;
 use vonk_agent::{
     process::{ProcessError, ProcessOutput, ProcessRunner, Program},
+    state::StateStore,
     telemetry::{
         FileSystemCapacity, FileSystemProvider, TelemetryCollector, TelemetryPaths, TelemetryQueue,
         TelemetrySchedule,
@@ -61,6 +63,11 @@ struct Fixtures {
 impl Fixtures {
     fn new() -> Self {
         let directory = tempdir().unwrap();
+        StateStore::open(
+            &directory.path().join("state.sqlite"),
+            "spk_0123456789abcdef0123456789abcdef",
+        )
+        .unwrap();
         let stat = directory.path().join("stat");
         let loadavg = directory.path().join("loadavg");
         let meminfo = directory.path().join("meminfo");
@@ -110,6 +117,10 @@ fn runner(output: &[u8]) -> FakeRunner {
 
 fn boot_id() -> Uuid {
     Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap()
+}
+
+fn next_boot_id() -> Uuid {
+    Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap()
 }
 
 #[test]
@@ -212,6 +223,162 @@ fn counter_resets_and_missing_sources_remain_unknown() {
 }
 
 #[test]
+fn cpu_total_excludes_guest_counters_already_in_user_and_nice() {
+    let fixtures = Fixtures::new();
+    fs::write(&fixtures.stat, "cpu  100 20 50 800 10 5 5 10 40 10\n").unwrap();
+    let mut collector = TelemetryCollector::new(
+        runner(b"NVIDIA H100, [N/A], 100, 90, [N/A], [N/A], [N/A]\n"),
+        FakeFileSystem {
+            capacity: FileSystemCapacity {
+                total_bytes: 10_000,
+                free_bytes: 4_000,
+            },
+        },
+        fixtures.paths(),
+        boot_id(),
+    )
+    .unwrap();
+    let first_at = Utc.with_ymd_and_hms(2026, 8, 15, 12, 0, 0).unwrap();
+    let first = collector.sample_at(None, first_at).unwrap();
+
+    fs::write(&fixtures.stat, "cpu  140 30 70 840 10 5 5 10 90 40\n").unwrap();
+    let second = collector
+        .sample_at(Some(&first), first_at + chrono::Duration::seconds(2))
+        .unwrap();
+
+    let utilization = second.cpu_utilization_percent.unwrap();
+    assert!((utilization - 63.636_363).abs() < 0.000_001);
+}
+
+#[test]
+fn sequence_reservation_survives_same_boot_process_restart() {
+    let fixtures = Fixtures::new();
+    let filesystem = FakeFileSystem {
+        capacity: FileSystemCapacity {
+            total_bytes: 10_000,
+            free_bytes: 4_000,
+        },
+    };
+    let mut first_collector = TelemetryCollector::new(
+        runner(b"NVIDIA H100, [N/A], 100, 90, [N/A], [N/A], [N/A]\n"),
+        filesystem,
+        fixtures.paths(),
+        boot_id(),
+    )
+    .unwrap();
+    let first = first_collector
+        .sample_at(None, Utc.with_ymd_and_hms(2026, 8, 15, 12, 0, 0).unwrap())
+        .unwrap();
+    assert_eq!(first.sequence, 0);
+    drop(first_collector);
+
+    let mut restarted = TelemetryCollector::new(
+        runner(b"NVIDIA H100, [N/A], 100, 90, [N/A], [N/A], [N/A]\n"),
+        filesystem,
+        fixtures.paths(),
+        boot_id(),
+    )
+    .unwrap();
+    let after_restart = restarted
+        .sample_at(None, Utc.with_ymd_and_hms(2026, 8, 15, 12, 0, 2).unwrap())
+        .unwrap();
+
+    assert_eq!(after_restart.sequence, 64);
+}
+
+#[test]
+fn sequence_reservation_resets_only_for_a_new_boot() {
+    let fixtures = Fixtures::new();
+    let filesystem = FakeFileSystem {
+        capacity: FileSystemCapacity {
+            total_bytes: 10_000,
+            free_bytes: 4_000,
+        },
+    };
+    let mut first_collector = TelemetryCollector::new(
+        runner(b"NVIDIA H100, [N/A], 100, 90, [N/A], [N/A], [N/A]\n"),
+        filesystem,
+        fixtures.paths(),
+        boot_id(),
+    )
+    .unwrap();
+    first_collector
+        .sample_at(None, Utc.with_ymd_and_hms(2026, 8, 15, 12, 0, 0).unwrap())
+        .unwrap();
+    drop(first_collector);
+
+    let mut rebooted = TelemetryCollector::new(
+        runner(b"NVIDIA H100, [N/A], 100, 90, [N/A], [N/A], [N/A]\n"),
+        filesystem,
+        fixtures.paths(),
+        next_boot_id(),
+    )
+    .unwrap();
+    let after_reboot = rebooted
+        .sample_at(None, Utc.with_ymd_and_hms(2026, 8, 15, 12, 0, 2).unwrap())
+        .unwrap();
+
+    assert_eq!(after_reboot.sequence, 0);
+}
+
+#[test]
+fn corrupt_sequence_metadata_fails_closed() {
+    let fixtures = Fixtures::new();
+    let connection =
+        rusqlite::Connection::open(fixtures.directory.path().join("state.sqlite")).unwrap();
+    connection
+        .execute(
+            "INSERT INTO metadata(key, value) VALUES ('telemetry_sequence_v1', 'corrupt')",
+            [],
+        )
+        .unwrap();
+    drop(connection);
+
+    let result = TelemetryCollector::new(
+        runner(b"NVIDIA H100, [N/A], 100, 90, [N/A], [N/A], [N/A]\n"),
+        FakeFileSystem {
+            capacity: FileSystemCapacity {
+                total_bytes: 10_000,
+                free_bytes: 4_000,
+            },
+        },
+        fixtures.paths(),
+        boot_id(),
+    );
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn symlinked_sequence_database_fails_closed() {
+    let target = tempdir().unwrap();
+    let target_path = target.path().join("state.sqlite");
+    StateStore::open(&target_path, "spk_0123456789abcdef0123456789abcdef").unwrap();
+    let store = tempdir().unwrap();
+    symlink(&target_path, store.path().join("state.sqlite")).unwrap();
+
+    let result = TelemetryCollector::new(
+        runner(b"NVIDIA H100, [N/A], 100, 90, [N/A], [N/A], [N/A]\n"),
+        FakeFileSystem {
+            capacity: FileSystemCapacity {
+                total_bytes: 10_000,
+                free_bytes: 4_000,
+            },
+        },
+        TelemetryPaths {
+            stat: store.path().join("stat"),
+            loadavg: store.path().join("loadavg"),
+            meminfo: store.path().join("meminfo"),
+            net_dev: store.path().join("net-dev"),
+            store: store.path().to_path_buf(),
+        },
+        boot_id(),
+    );
+
+    assert!(result.is_err());
+}
+
+#[test]
 fn malformed_or_oversized_optional_evidence_is_bounded_to_null_metrics() {
     let fixtures = Fixtures::new();
     fs::write(&fixtures.stat, vec![b'x'; 65 * 1024]).unwrap();
@@ -279,21 +446,23 @@ fn scheduler_targets_two_seconds_without_artificial_catch_up() {
     let started = tokio::time::Instant::now();
     let mut schedule = TelemetrySchedule::new(started);
     assert!(schedule.collection_due(started));
-    schedule.collected(started);
+    schedule.collected(started, started + Duration::from_millis(500));
     assert!(!schedule.collection_due(started + Duration::from_millis(1_999)));
     assert!(schedule.collection_due(started + Duration::from_secs(2)));
 
-    let delayed = started + Duration::from_secs(11);
-    schedule.collected(delayed);
-    assert!(!schedule.collection_due(delayed));
-    assert!(schedule.collection_due(delayed + Duration::from_secs(2)));
+    let slow_started = started + Duration::from_secs(2);
+    let slow_finished = slow_started + Duration::from_secs(5);
+    schedule.collected(slow_started, slow_finished);
+    assert!(!schedule.collection_due(slow_finished));
+    assert!(!schedule.collection_due(started + Duration::from_millis(7_999)));
+    assert!(schedule.collection_due(started + Duration::from_secs(8)));
 }
 
 #[test]
 fn reporting_backoff_is_independent_and_success_removes_only_acknowledged_prefix() {
     let started = tokio::time::Instant::now();
     let mut schedule = TelemetrySchedule::new(started);
-    schedule.collected(started);
+    schedule.collected(started, started);
     schedule.send_failed(started, Duration::from_secs(30));
 
     assert!(schedule.collection_due(started + Duration::from_secs(2)));

@@ -1,12 +1,13 @@
 use std::{
     collections::VecDeque,
-    fs::File,
+    fs::{self, File},
     io::Read,
     path::{Path, PathBuf},
     time::Duration,
 };
 
 use chrono::{DateTime, Utc};
+use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
@@ -16,6 +17,9 @@ use crate::process::{ProcessRunner, Program};
 const SOURCE_TEXT_LIMIT: u64 = 64 * 1024;
 const MAX_CAPACITY_BYTES: u64 = 16 * 1024_u64.pow(4);
 const MAX_QUEUE_SAMPLES: usize = 15;
+const SEQUENCE_RESERVATION_SIZE: u64 = 64;
+const SEQUENCE_STATE_KEY: &str = "telemetry_sequence_v1";
+const SEQUENCE_LIMIT_EXCLUSIVE: u64 = i64::MAX as u64 + 1;
 pub const MAX_REPORT_SAMPLES: usize = 16;
 pub const COLLECTION_INTERVAL: Duration = Duration::from_secs(2);
 
@@ -25,6 +29,12 @@ pub enum TelemetryError {
     InvalidBootId,
     #[error("telemetry sequence is exhausted")]
     SequenceExhausted,
+    #[error("telemetry sequence state is invalid")]
+    InvalidSequenceState,
+    #[error("telemetry sequence state database failed")]
+    Database(#[from] rusqlite::Error),
+    #[error("telemetry sequence state file is unsafe")]
+    Io(#[from] std::io::Error),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -108,7 +118,110 @@ pub struct TelemetryCollector<R, F> {
     filesystem: F,
     paths: TelemetryPaths,
     boot_id: Uuid,
+    sequences: DurableSequenceAllocator,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StoredSequenceReservation {
+    boot_id: String,
+    next_unreserved_sequence: u64,
+}
+
+struct DurableSequenceAllocator {
+    connection: Connection,
+    boot_id: Uuid,
     next_sequence: u64,
+    reserved_until: u64,
+}
+
+impl DurableSequenceAllocator {
+    fn open(path: &Path, boot_id: Uuid) -> Result<Self, TelemetryError> {
+        let metadata = fs::symlink_metadata(path)?;
+        if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+            return Err(TelemetryError::InvalidSequenceState);
+        }
+        let mut connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+        connection.busy_timeout(Duration::from_secs(1))?;
+        connection.execute_batch(
+            "PRAGMA synchronous=FULL;
+             PRAGMA foreign_keys=ON;
+             PRAGMA trusted_schema=OFF;",
+        )?;
+        let (next_sequence, reserved_until) = reserve_sequence_block(&mut connection, boot_id)?;
+        Ok(Self {
+            connection,
+            boot_id,
+            next_sequence,
+            reserved_until,
+        })
+    }
+
+    fn next(&mut self) -> Result<i64, TelemetryError> {
+        if self.next_sequence >= self.reserved_until {
+            (self.next_sequence, self.reserved_until) =
+                reserve_sequence_block(&mut self.connection, self.boot_id)?;
+        }
+        let sequence =
+            i64::try_from(self.next_sequence).map_err(|_| TelemetryError::SequenceExhausted)?;
+        self.next_sequence = self
+            .next_sequence
+            .checked_add(1)
+            .ok_or(TelemetryError::SequenceExhausted)?;
+        Ok(sequence)
+    }
+}
+
+fn reserve_sequence_block(
+    connection: &mut Connection,
+    boot_id: Uuid,
+) -> Result<(u64, u64), TelemetryError> {
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let stored: Option<String> = transaction
+        .query_row(
+            "SELECT value FROM metadata WHERE key = ?1",
+            [SEQUENCE_STATE_KEY],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let next_sequence = match stored {
+        None => 0,
+        Some(value) => {
+            let state: StoredSequenceReservation =
+                serde_json::from_str(&value).map_err(|_| TelemetryError::InvalidSequenceState)?;
+            let stored_boot_id = Uuid::parse_str(&state.boot_id)
+                .map_err(|_| TelemetryError::InvalidSequenceState)?;
+            if stored_boot_id.is_nil()
+                || stored_boot_id.to_string() != state.boot_id
+                || state.next_unreserved_sequence > SEQUENCE_LIMIT_EXCLUSIVE
+            {
+                return Err(TelemetryError::InvalidSequenceState);
+            }
+            if stored_boot_id == boot_id {
+                state.next_unreserved_sequence
+            } else {
+                0
+            }
+        }
+    };
+    if next_sequence >= SEQUENCE_LIMIT_EXCLUSIVE {
+        return Err(TelemetryError::SequenceExhausted);
+    }
+    let reserved_until = next_sequence
+        .saturating_add(SEQUENCE_RESERVATION_SIZE)
+        .min(SEQUENCE_LIMIT_EXCLUSIVE);
+    let stored = serde_json::to_string(&StoredSequenceReservation {
+        boot_id: boot_id.to_string(),
+        next_unreserved_sequence: reserved_until,
+    })
+    .map_err(|_| TelemetryError::InvalidSequenceState)?;
+    transaction.execute(
+        "INSERT INTO metadata(key, value) VALUES (?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![SEQUENCE_STATE_KEY, stored],
+    )?;
+    transaction.commit()?;
+    Ok((next_sequence, reserved_until))
 }
 
 impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
@@ -121,12 +234,13 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
         if boot_id.is_nil() || boot_id.to_string() != boot_id.hyphenated().to_string() {
             return Err(TelemetryError::InvalidBootId);
         }
+        let sequences = DurableSequenceAllocator::open(&paths.store.join("state.sqlite"), boot_id)?;
         Ok(Self {
             runner,
             filesystem,
             paths,
             boot_id,
-            next_sequence: 0,
+            sequences,
         })
     }
 
@@ -142,9 +256,7 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
         previous: Option<&TelemetrySample>,
         observed_at: DateTime<Utc>,
     ) -> Result<TelemetrySample, TelemetryError> {
-        let sequence =
-            i64::try_from(self.next_sequence).map_err(|_| TelemetryError::SequenceExhausted)?;
-        self.next_sequence = self.next_sequence.saturating_add(1);
+        let sequence = self.sequences.next()?;
 
         let cpu_counters = read_bounded_text(&self.paths.stat)
             .as_deref()
@@ -278,8 +390,16 @@ impl TelemetrySchedule {
         now >= self.next_collection
     }
 
-    pub fn collected(&mut self, now: tokio::time::Instant) {
-        self.next_collection = now + COLLECTION_INTERVAL;
+    pub fn collected(
+        &mut self,
+        collection_started: tokio::time::Instant,
+        collection_finished: tokio::time::Instant,
+    ) {
+        let mut next_collection = collection_started + COLLECTION_INTERVAL;
+        while next_collection <= collection_finished {
+            next_collection += COLLECTION_INTERVAL;
+        }
+        self.next_collection = next_collection;
     }
 
     pub fn send_due(&self, now: tokio::time::Instant, has_samples: bool) -> bool {
@@ -399,8 +519,11 @@ fn parse_cpu_counters(value: &str) -> Option<CpuCounters> {
     if fields.len() < 4 {
         return None;
     }
+    // Linux reports guest and guest_nice inside user and nice already. Summing
+    // only the first eight counters avoids counting guest CPU time twice.
     let total = fields
         .iter()
+        .take(8)
         .try_fold(0_u64, |total, value| total.checked_add(*value))?;
     let idle = fields[3].checked_add(fields.get(4).copied().unwrap_or(0))?;
     (idle <= total).then_some(CpuCounters { total, idle })
