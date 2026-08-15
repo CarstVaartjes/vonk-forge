@@ -71,9 +71,9 @@ The broader command covered the three focused files plus `test_api.py`, catalog 
 
 ## Fixed query-bound proof
 
-`test_root_operational_summaries_are_exact_bounded_and_fair_per_recipe` records exactly 3 root SELECTs. It asserts both installation and run coverage SQL contain the current page recipe-ID predicate in the outer window and the coverage aggregation, and proves 65 history rows for one recipe cannot hide another recipe's current state.
+`test_root_operational_summaries_are_exact_bounded_and_fair_per_recipe` records exactly 6 root SELECTs after review fix round 1. The installation and run windows are restricted to current page recipe IDs, then three set membership queries feed the shared pure coverage/health predicates. The test proves 65 history rows for one recipe cannot hide another recipe's current state.
 
-`test_detail_uses_a_fixed_set_query_count_instead_of_candidate_services` records exactly 14 detail SELECTs before and after increasing the candidate pool from 2 to 12 nodes. It asserts one set query for artifacts and one for reservations, plus the bounded recipe, operational lineage, membership, inventory, telemetry, and active-run phases. The older-lineage and per-node artifact regressions remain within the same 14-query bound.
+`test_detail_uses_a_fixed_set_query_count_instead_of_candidate_services` records exactly 21 detail SELECTs before and after increasing the candidate pool from 2 to 12 nodes. Seven added set queries load fail-closed current operational evidence separately from bounded displayed history. Artifact, reservation, older-lineage, and operational evidence regressions remain within the same 21-query bound.
 
 ## Static and contract verification
 
@@ -93,3 +93,30 @@ The broader command covered the three focused files plus `test_api.py`, catalog 
 2. Root summaries cap each recipe independently at 64 installations and 64 active runs. Detail operational collections cap at 512 rows while prioritizing active and complete exact lineage; truncation counts/reasons remain explicit.
 3. No generated OpenAPI document or clients were produced. That remains a controller action after contract approval.
 4. The implementation commit used the workstation's existing automatically configured Git committer identity; no Git configuration was changed.
+
+## Independent review fix round 1
+
+The independent review reported four Important findings. Implementation commit `6753fd1b0ea45ad7a81488b6000dc393a7505c87` (`fix(control): align Library operational parity`) addresses all four without expanding Task 7 scope.
+
+1. Root and detail now call one pure installation-coverage predicate. It requires installation state `installed`, declared mapping cardinality, duplicate-free exact node/rank/role membership, and every corresponding installation-node state `installed`. `installed_bytes` remains informational. Parity tests exercise low byte evidence plus duplicate and missing ranks against `RunAdmissionService.plan_run()` and staged run targets.
+2. Root and detail now call one pure rank-health predicate with exact declared mapping membership, every rank `running`, and evidence age strictly below 300 seconds. Aggregate run and route states remain separately projected. Pending, failed, and withdrawn routes use separate warning codes and do not produce `run.degraded` when rank health matches `RecipeOperationService.run_status()`.
+3. Placement now has a separate seven-query current-evidence phase with 512-row and 16,384-member limits plus typed observed counts. Any relevant truncation makes search incomplete and affected/all possibly affected groups ineligible, suppresses install/load claims and install/run targets, and emits `projection.evidence_truncated`. A 513-active-run exact-lineage regression proves fail-closed behavior.
+4. Display-only parameter scalar strings are capped at 512 characters and signed integers at signed-bigint bounds; booleans/null remain typed. Truncation is observable through `recipe.display_scalar_truncated` and `recipe.numeric_truncated`. Default-profile mapping targets submit `parameters={}`, allowing `ClusterMappingService` to apply immutable declared overrides exactly rather than receiving bounded display copies.
+
+The fixtures now persist realistic run plan membership. Additional coverage proves one family across recipe pages and signed compound cursor stability, tamper rejection, and query binding.
+
+Review-round RED/GREEN and final verification:
+
+| Command / phase | Exact result |
+|---|---|
+| New projection regressions before production fixes | 8 failed, 30 passed in 2.74s. |
+| First implementation attempt | 2 failed, 36 passed in 2.82s; failures isolated to the old query-count assertion and missing declared mapping cardinality. |
+| Final projection suite | 38 passed in 2.68s. |
+| Focused Library projection/API/operation suite | 59 passed, 15 warnings in 4.64s. |
+| Broader Library/API/catalog/recipe/admission/mapping/Fleet slice | 212 passed, 2 skipped, 15 warnings in 12.39s. |
+| Explicit in-memory OpenAPI parity | 3 passed in 1.01s. |
+| `uvx ruff@0.16.1 check` on all six Task 7 Python files | All checks passed. |
+| Pinned Ruff format check on the four Task 7-owned files | 4 files already formatted. |
+| Compile and diff checks | Exit 0 with no output. |
+
+The two skips are existing environment-gated PostgreSQL/Docker tests. No live infrastructure was contacted, and no generated client, frontend, Rust, MIA/runtime/readiness, dependency, migration, push, or PR action occurred.
