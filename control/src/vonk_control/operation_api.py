@@ -783,6 +783,12 @@ class _DurableOperationProjection:
 
     def resume_job(self, job_id: str) -> None:
         with self._sessions.begin() as session:
+            job = session.get(Job, job_id)
+            if job is None:
+                raise KeyError(job_id)
+            if job.state != "waiting-for-operator":
+                raise ValueError("job is not waiting for operator")
+            now = self._clock()
             result = session.execute(
                 update(Job)
                 .where(
@@ -792,13 +798,15 @@ class _DurableOperationProjection:
                 .values(
                     state="queued",
                     status_reason=None,
-                    updated_at=self._clock(),
+                    updated_at=now,
                 )
+                .execution_options(synchronize_session=False)
             )
             if result.rowcount == 1:
+                job.state = "queued"
+                job.status_reason = None
+                job.updated_at = now
                 return
-            if session.get(Job, job_id) is None:
-                raise KeyError(job_id)
             raise ValueError("job is not waiting for operator")
 
 

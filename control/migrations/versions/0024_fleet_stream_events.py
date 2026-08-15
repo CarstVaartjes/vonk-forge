@@ -10,6 +10,11 @@ depends_on = None
 
 
 def upgrade() -> None:
+    payload_byte_length = (
+        "length(CAST(payload AS BLOB))"
+        if op.get_bind().dialect.name == "sqlite"
+        else "octet_length(CAST(payload AS TEXT))"
+    )
     cursor = op.create_table(
         "fleet_event_cursor",
         sa.Column("singleton_id", sa.SmallInteger, primary_key=True),
@@ -38,7 +43,7 @@ def upgrade() -> None:
             "expires_at > occurred_at", name="ck_fleet_stream_events_expiry"
         ),
         sa.CheckConstraint(
-            "length(CAST(payload AS TEXT)) BETWEEN 2 AND 8192",
+            f"{payload_byte_length} BETWEEN 2 AND 8192",
             name="ck_fleet_stream_events_payload_size",
         ),
     )

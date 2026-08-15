@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import create_engine, event, select
+from sqlalchemy import create_engine, event, select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
@@ -102,8 +102,8 @@ def test_postgres_cursor_lock_makes_ids_follow_commit_order(
     first_allocated = threading.Event()
     allow_first_commit = threading.Event()
     second_lock_select_started = threading.Event()
-    second_allocated = threading.Event()
     writer_role = threading.local()
+    backend_pids: dict[str, int] = {}
 
     def observe_lock_select(
         _connection, _cursor, statement, _parameters, _context, _many
@@ -116,6 +116,7 @@ def test_postgres_cursor_lock_makes_ids_follow_commit_order(
 
     def first_writer() -> int:
         with sessions.begin() as session:
+            backend_pids["first"] = session.scalar(text("SELECT pg_backend_pid()"))
             event = repository.append_in_session(session, _draft("job-first"))
             first_allocated.set()
             assert allow_first_commit.wait(timeout=10)
@@ -125,9 +126,29 @@ def test_postgres_cursor_lock_makes_ids_follow_commit_order(
         assert first_allocated.wait(timeout=10)
         writer_role.value = "second"
         with sessions.begin() as session:
+            backend_pids["second"] = session.scalar(text("SELECT pg_backend_pid()"))
             event = repository.append_in_session(session, _draft("job-second"))
-            second_allocated.set()
         return event.id
+
+    def wait_for_database_block() -> tuple[list[int], str | None]:
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            with postgres_engine.connect() as connection:
+                row = connection.execute(
+                    text(
+                        """
+                        SELECT pg_blocking_pids(pid), wait_event_type
+                        FROM pg_stat_activity
+                        WHERE pid = :pid
+                        """
+                    ),
+                    {"pid": backend_pids["second"]},
+                ).one()
+            blockers = list(row[0])
+            if blockers:
+                return blockers, row[1]
+            time.sleep(0.05)
+        pytest.fail("second allocator never became database-lock blocked")
 
     event.listen(postgres_engine, "before_cursor_execute", observe_lock_select)
     try:
@@ -136,8 +157,12 @@ def test_postgres_cursor_lock_makes_ids_follow_commit_order(
             assert first_allocated.wait(timeout=10)
             second = pool.submit(second_writer)
             assert second_lock_select_started.wait(timeout=10)
-            assert not second_allocated.wait(timeout=0.25)
-            allow_first_commit.set()
+            try:
+                blocking_pids, wait_event_type = wait_for_database_block()
+                assert backend_pids["first"] in blocking_pids
+                assert wait_event_type == "Lock"
+            finally:
+                allow_first_commit.set()
             assert (first.result(timeout=10), second.result(timeout=10)) == (1, 2)
     finally:
         event.remove(postgres_engine, "before_cursor_execute", observe_lock_select)

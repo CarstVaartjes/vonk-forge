@@ -164,6 +164,15 @@ def _cursor_lock_statement() -> Any:
     )
 
 
+def _sqlite_cursor_allocation_statement() -> Any:
+    return (
+        update(FleetEventCursor)
+        .where(FleetEventCursor.singleton_id == 1)
+        .values(last_id=FleetEventCursor.last_id + 1)
+        .returning(FleetEventCursor.last_id)
+    )
+
+
 class FleetEventRepository:
     def __init__(
         self,
@@ -184,17 +193,24 @@ class FleetEventRepository:
         occurred_at = occurred_at.astimezone(UTC)
         expires_at = occurred_at + REPLAY_RETENTION
         connection = session.connection()
-        last_id = connection.execute(
-            _cursor_lock_statement()
-        ).scalar_one_or_none()
-        if last_id is None:
-            raise RuntimeError("fleet event cursor singleton is not initialized")
-        event_id = last_id + 1
-        connection.execute(
-            update(FleetEventCursor)
-            .where(FleetEventCursor.singleton_id == 1)
-            .values(last_id=event_id)
-        )
+        if connection.dialect.name == "sqlite":
+            event_id = connection.execute(
+                _sqlite_cursor_allocation_statement()
+            ).scalar_one_or_none()
+            if event_id is None:
+                raise RuntimeError("fleet event cursor singleton is not initialized")
+        else:
+            last_id = connection.execute(
+                _cursor_lock_statement()
+            ).scalar_one_or_none()
+            if last_id is None:
+                raise RuntimeError("fleet event cursor singleton is not initialized")
+            event_id = last_id + 1
+            connection.execute(
+                update(FleetEventCursor)
+                .where(FleetEventCursor.singleton_id == 1)
+                .values(last_id=event_id)
+            )
         values = {
             "id": event_id,
             "event_type": draft.event_type,

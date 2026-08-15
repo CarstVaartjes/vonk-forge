@@ -1,9 +1,11 @@
 from pathlib import Path
 
+import pytest
 from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.exc import IntegrityError
 from vonk_control.models import FleetEventCursor, FleetStreamEvent
 
 
@@ -163,6 +165,35 @@ def test_fleet_event_tables_upgrade_seed_and_downgrade_at_0024(
     )
 
 
+def test_0024_rejects_payload_over_8192_utf8_bytes(tmp_path: Path) -> None:
+    url = f"sqlite:///{tmp_path / 'fleet-events-byte-bound.sqlite'}"
+    command.upgrade(config(url), "0024_fleet_stream_events")
+    engine = create_engine(url)
+    payload = '{"value":"' + "\N{GRINNING FACE}" * 3000 + '"}'
+    assert len(payload) < 8192
+    assert len(payload.encode("utf-8")) > 8192
+
+    with pytest.raises(IntegrityError), engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO fleet_stream_events (
+                    id, event_type, node_id, entity_kind, entity_id,
+                    payload, occurred_at, expires_at
+                ) VALUES (
+                    1, 'operation-state', NULL, 'job', 'job-multibyte',
+                    :payload, :occurred_at, :expires_at
+                )
+                """
+            ),
+            {
+                "payload": payload,
+                "occurred_at": "2026-08-15T12:00:00+00:00",
+                "expires_at": "2026-08-16T12:00:00+00:00",
+            },
+        )
+
+
 def test_fleet_event_migration_and_model_metadata_have_exact_schema_parity(
     tmp_path: Path,
 ) -> None:
@@ -195,7 +226,14 @@ def test_fleet_event_migration_and_model_metadata_have_exact_schema_parity(
             constraint["name"]: " ".join(constraint["sqltext"].split())
             for constraint in inspector.get_check_constraints(model_table.name)
         } == {
-            constraint.name: " ".join(str(constraint.sqltext).split())
+            constraint.name: " ".join(
+                str(
+                    constraint.sqltext.compile(
+                        dialect=engine.dialect,
+                        compile_kwargs={"literal_binds": True},
+                    )
+                ).split()
+            )
             for constraint in model_table.constraints
             if constraint.name is not None
         }

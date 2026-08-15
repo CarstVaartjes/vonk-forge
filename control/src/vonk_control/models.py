@@ -28,13 +28,33 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     event,
+    literal_column,
     text,
 )
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.sql.functions import FunctionElement
 
 
 class Base(DeclarativeBase):
     pass
+
+
+class _Utf8ByteLength(FunctionElement[int]):
+    type = Integer()
+    inherit_cache = True
+
+
+@compiles(_Utf8ByteLength, "sqlite")
+def _compile_sqlite_utf8_byte_length(element, compiler, **kwargs) -> str:
+    value = compiler.process(next(iter(element.clauses)), **kwargs)
+    return f"length(CAST({value} AS BLOB))"
+
+
+@compiles(_Utf8ByteLength)
+def _compile_utf8_byte_length(element, compiler, **kwargs) -> str:
+    value = compiler.process(next(iter(element.clauses)), **kwargs)
+    return f"octet_length(CAST({value} AS TEXT))"
 
 
 def _lower_hex(column: str, length: int) -> str:
@@ -2259,7 +2279,7 @@ class FleetStreamEvent(Base):
             "expires_at > occurred_at", name="ck_fleet_stream_events_expiry"
         ),
         CheckConstraint(
-            "length(CAST(payload AS TEXT)) BETWEEN 2 AND 8192",
+            _Utf8ByteLength(literal_column("payload")).between(2, 8192),
             name="ck_fleet_stream_events_payload_size",
         ),
         Index("ix_fleet_stream_events_expires_id", "expires_at", "id"),

@@ -1,19 +1,25 @@
 import json
+import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import create_engine, event, func, select
+from sqlalchemy import create_engine, event, func, select, text
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from vonk_control import fleet_events as fleet_event_module
 from vonk_control import models
+from vonk_control.auth import TokenCodec
 from vonk_control.db import session_factory
 from vonk_control.fleet_events import (
     FleetEventDraft,
     FleetEventRecorder,
     FleetEventRepository,
 )
+from vonk_control.jobs import JobService
+from vonk_control.operation_api import durable_operation_services
 from vonk_control.telemetry import (
     TelemetryDetailsInput,
     TelemetryRepository,
@@ -227,6 +233,53 @@ def test_fleet_event_models_match_the_0024_schema_contract() -> None:
     }
 
 
+def test_database_rejects_payload_over_8192_utf8_bytes(sessions) -> None:
+    payload = json.dumps(
+        {"value": "\N{GRINNING FACE}" * 3000},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    assert len(payload) < 8192
+    assert len(payload.encode("utf-8")) > 8192
+
+    with pytest.raises(IntegrityError), sessions.begin() as session:
+        session.execute(
+            text(
+                """
+                INSERT INTO fleet_stream_events (
+                    id, event_type, node_id, entity_kind, entity_id,
+                    payload, occurred_at, expires_at
+                ) VALUES (
+                    1, 'operation-state', NULL, 'job', 'job-multibyte',
+                    :payload, :occurred_at, :expires_at
+                )
+                """
+            ),
+            {
+                "payload": payload,
+                "occurred_at": NOW.isoformat(),
+                "expires_at": (NOW + timedelta(hours=24)).isoformat(),
+            },
+        )
+
+
+def test_payload_constraint_compiles_to_postgresql_utf8_byte_length() -> None:
+    constraint = next(
+        constraint
+        for constraint in models.FleetStreamEvent.__table__.constraints
+        if constraint.name == "ck_fleet_stream_events_payload_size"
+    )
+
+    compiled = str(
+        constraint.sqltext.compile(
+            dialect=postgresql.dialect(),
+            compile_kwargs={"literal_binds": True},
+        )
+    )
+
+    assert compiled == "octet_length(CAST(payload AS TEXT)) BETWEEN 2 AND 8192"
+
+
 def test_repository_allocates_increasing_ids_and_exact_semantic_expiry(
     sessions,
 ) -> None:
@@ -239,6 +292,60 @@ def test_repository_allocates_increasing_ids_and_exact_semantic_expiry(
     assert (first.id, second.id) == (1, 2)
     assert first.occurred_at == NOW
     assert first.expires_at == NOW + timedelta(hours=24)
+    assert repository.high_watermark() == 2
+
+
+def test_sqlite_concurrent_allocations_are_unique_and_monotonic(tmp_path) -> None:
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'fleet-events-concurrent.sqlite'}",
+        connect_args={"check_same_thread": False, "timeout": 1},
+    )
+    models.Base.metadata.create_all(engine)
+    concurrent_sessions = sessionmaker(engine, expire_on_commit=False)
+    repository = FleetEventRepository(concurrent_sessions, clock=lambda: NOW)
+    first_appended = threading.Event()
+    second_update_started = threading.Event()
+    writer_role = threading.local()
+
+    def observe_second_update(
+        _connection, _cursor, statement, _parameters, _context, _many
+    ) -> None:
+        if (
+            getattr(writer_role, "value", None) == "second"
+            and statement.lstrip().upper().startswith("UPDATE FLEET_EVENT_CURSOR")
+        ):
+            second_update_started.set()
+
+    def first_writer() -> int:
+        with concurrent_sessions.begin() as session:
+            allocated = repository.append_in_session(
+                session, _draft(entity_id="job-first")
+            )
+            first_appended.set()
+            assert second_update_started.wait(timeout=10)
+        return allocated.id
+
+    def second_writer() -> int:
+        assert first_appended.wait(timeout=10)
+        writer_role.value = "second"
+        with concurrent_sessions.begin() as session:
+            return repository.append_in_session(
+                session, _draft(entity_id="job-second")
+            ).id
+
+    event.listen(engine, "before_cursor_execute", observe_second_update)
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(first_writer)
+            second = pool.submit(second_writer)
+            assert (first.result(timeout=10), second.result(timeout=10)) == (1, 2)
+    finally:
+        event.remove(engine, "before_cursor_execute", observe_second_update)
+
+    assert [(row.id, row.entity_id) for row in _event_rows(concurrent_sessions)] == [
+        (1, "job-first"),
+        (2, "job-second"),
+    ]
     assert repository.high_watermark() == 2
 
 
@@ -652,4 +759,50 @@ def test_production_session_factory_installs_the_recorder(tmp_path) -> None:
     rows = _event_rows(production_sessions)
     assert [(row.id, row.entity_kind, row.entity_id) for row in rows] == [
         (1, "job", "job-production")
+    ]
+
+
+def test_durable_job_service_resume_records_waiting_then_queued(tmp_path) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'job-resume-events.sqlite'}")
+    models.Base.metadata.create_all(engine)
+    production_sessions = session_factory(engine)
+    job = _job("job-service-resume")
+    job.state = "waiting-for-operator"
+    with production_sessions.begin() as session:
+        session.add(job)
+
+    JobService(production_sessions, clock=lambda: NOW).resume(job.id)
+
+    rows = _event_rows(production_sessions)
+    assert [(row.id, row.event_type, row.payload["state"]) for row in rows] == [
+        (1, "operation-state", "waiting-for-operator"),
+        (2, "operation-state", "queued"),
+    ]
+
+
+def test_durable_operation_projection_resume_records_waiting_then_queued(
+    tmp_path,
+) -> None:
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'operation-resume-events.sqlite'}"
+    )
+    models.Base.metadata.create_all(engine)
+    production_sessions = session_factory(engine)
+    job = _job("operation-projection-resume")
+    job.state = "waiting-for-operator"
+    with production_sessions.begin() as session:
+        session.add(job)
+    services = durable_operation_services(
+        production_sessions,
+        tmp_path / "routes",
+        clock=lambda: NOW,
+        cursors=TokenCodec(b"k" * 32).cursor_codec(),
+    )
+
+    services.resume_job(job.id)
+
+    rows = _event_rows(production_sessions)
+    assert [(row.id, row.event_type, row.payload["state"]) for row in rows] == [
+        (1, "operation-state", "waiting-for-operator"),
+        (2, "operation-state", "queued"),
     ]
