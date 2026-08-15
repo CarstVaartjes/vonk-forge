@@ -286,6 +286,10 @@ def assemble_production_worker(
     from .package_validation_runner import PackageValidationRunner
     from .recipe_operation_worker import RecipeOperationWorker
     from .recipe_routes import AtomicRecipeRoutePublisher, RecipeRouteService
+    from .telemetry_maintenance import (
+        TelemetryMaintenance,
+        TelemetryMaintenanceCadence,
+    )
     from .update_routes import (
         ProductionUpdateRouteBoundary,
         load_authoritative_route_request,
@@ -348,10 +352,15 @@ def assemble_production_worker(
     recipe_operations = RecipeOperationWorker(
         sessions, recipe_routes, clock=clock
     )
+    telemetry_maintenance = TelemetryMaintenance(sessions, clock=clock)
     return Worker(
         jobs,
         worker_id,
         {},
+        housekeeping=TelemetryMaintenanceCadence(
+            telemetry_maintenance,
+            clock=clock,
+        ),
         reconciliations=reconciliations,
         updates=updates,
         packages=package_rollouts,

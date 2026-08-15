@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .models import AgentNode, NodeTelemetryLatest, NodeTelemetrySample
+from .telemetry_maintenance import mark_rollup_dirty
 
 _NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
 _MAX_SIGNED_BIGINT = 9_223_372_036_854_775_807
@@ -395,6 +396,12 @@ class TelemetryRepository:
                 )
                 session.add(row)
                 session.flush()
+                mark_rollup_dirty(
+                    session,
+                    60,
+                    node_id,
+                    value.observed_at,
+                )
                 stored.append(row)
                 boot_heads[value.boot_id] = row
                 if latest is None:

@@ -2249,6 +2249,120 @@ class NodeTelemetryLatest(Base):
     )
 
 
+class NodeTelemetryRollupBucket(Base):
+    __tablename__ = "node_telemetry_rollup_buckets"
+    __table_args__ = (
+        CheckConstraint(
+            "resolution_seconds IN (60, 900)",
+            name="ck_telemetry_rollup_buckets_resolution",
+        ),
+        CheckConstraint(
+            "source_sample_count BETWEEN 0 AND 9223372036854775807 AND "
+            "gap_samples BETWEEN 0 AND 9223372036854775807",
+            name="ck_telemetry_rollup_buckets_counts",
+        ),
+        Index(
+            "ix_telemetry_rollup_buckets_resolution_start",
+            "resolution_seconds",
+            "bucket_start",
+            "node_id",
+        ),
+    )
+    resolution_seconds: Mapped[int] = mapped_column(
+        SmallInteger, primary_key=True
+    )
+    node_id: Mapped[str] = mapped_column(
+        ForeignKey(
+            "agent_nodes.node_id",
+            name="fk_telemetry_rollup_buckets_node",
+            ondelete="CASCADE",
+        ),
+        primary_key=True,
+    )
+    bucket_start: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), primary_key=True
+    )
+    source_sample_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    gap_samples: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+
+class NodeTelemetryRollupMetric(Base):
+    __tablename__ = "node_telemetry_rollup_metrics"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ("resolution_seconds", "node_id", "bucket_start"),
+            (
+                "node_telemetry_rollup_buckets.resolution_seconds",
+                "node_telemetry_rollup_buckets.node_id",
+                "node_telemetry_rollup_buckets.bucket_start",
+            ),
+            name="fk_telemetry_rollup_metrics_bucket",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint(
+            "resolution_seconds IN (60, 900)",
+            name="ck_telemetry_rollup_metrics_resolution",
+        ),
+        CheckConstraint(
+            "length(metric_name) BETWEEN 1 AND 64",
+            name="ck_telemetry_rollup_metrics_name",
+        ),
+        CheckConstraint(
+            "sample_count BETWEEN 0 AND 9223372036854775807",
+            name="ck_telemetry_rollup_metrics_count",
+        ),
+        CheckConstraint(
+            "minimum BETWEEN -1e308 AND 1e308 AND "
+            "mean BETWEEN -1e308 AND 1e308 AND "
+            "maximum BETWEEN -1e308 AND 1e308 AND "
+            "minimum <= mean AND mean <= maximum",
+            name="ck_telemetry_rollup_metrics_values",
+        ),
+    )
+    resolution_seconds: Mapped[int] = mapped_column(
+        SmallInteger, primary_key=True
+    )
+    node_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    bucket_start: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), primary_key=True
+    )
+    metric_name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    sample_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    minimum: Mapped[float] = mapped_column(Float, nullable=False)
+    mean: Mapped[float] = mapped_column(Float, nullable=False)
+    maximum: Mapped[float] = mapped_column(Float, nullable=False)
+
+
+class NodeTelemetryRollupDirty(Base):
+    __tablename__ = "node_telemetry_rollup_dirty"
+    __table_args__ = (
+        CheckConstraint(
+            "resolution_seconds IN (60, 900)",
+            name="ck_telemetry_rollup_dirty_resolution",
+        ),
+        Index(
+            "ix_telemetry_rollup_dirty_resolution_start",
+            "resolution_seconds",
+            "bucket_start",
+            "node_id",
+        ),
+    )
+    resolution_seconds: Mapped[int] = mapped_column(
+        SmallInteger, primary_key=True
+    )
+    node_id: Mapped[str] = mapped_column(
+        ForeignKey(
+            "agent_nodes.node_id",
+            name="fk_telemetry_rollup_dirty_node",
+            ondelete="CASCADE",
+        ),
+        primary_key=True,
+    )
+    bucket_start: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), primary_key=True
+    )
+
+
 class FleetEventCursor(Base):
     __tablename__ = "fleet_event_cursor"
     __table_args__ = (

@@ -10,10 +10,12 @@ from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
+from vonk_control import telemetry_maintenance
 from vonk_control.models import (
     AgentNode,
     Base,
     NodeTelemetryLatest,
+    NodeTelemetryRollupDirty,
     NodeTelemetrySample,
 )
 from vonk_control.telemetry import (
@@ -97,6 +99,75 @@ def test_newer_telemetry_replaces_latest_and_replay_does_not(telemetry) -> None:
     assert [
         item.sequence for item in repository.history(NODE_A, START, NOW, 1_500)
     ] == [4, 5]
+
+
+def test_new_samples_mark_exact_utc_minute_buckets_dirty(telemetry) -> None:
+    repository, sessions, _, _ = telemetry
+    repository.record_batch(
+        NODE_A,
+        (
+            sample(sequence=1, observed_at=START + timedelta(seconds=59)),
+            sample(sequence=2, observed_at=START + timedelta(minutes=1)),
+        ),
+    )
+
+    with sessions() as session:
+        rows = session.scalars(
+            select(NodeTelemetryRollupDirty).order_by(
+                NodeTelemetryRollupDirty.bucket_start
+            )
+        ).all()
+
+    assert [
+        (
+            row.resolution_seconds,
+            row.node_id,
+            row.bucket_start.replace(tzinfo=UTC),
+        )
+        for row in rows
+    ] == [
+        (60, NODE_A, datetime(2026, 8, 3, 11, 55, tzinfo=UTC)),
+        (60, NODE_A, datetime(2026, 8, 3, 11, 56, tzinfo=UTC)),
+    ]
+
+
+def test_exact_replay_does_not_requeue_clean_rollup_bucket(telemetry) -> None:
+    repository, sessions, _, _ = telemetry
+    value = sample(sequence=1, observed_at=START + timedelta(seconds=1))
+    repository.record_batch(NODE_A, (value,))
+    with sessions.begin() as session:
+        session.query(NodeTelemetryRollupDirty).delete()
+
+    repository.record_batch(NODE_A, (value,))
+
+    with sessions() as session:
+        assert session.scalar(
+            select(func.count()).select_from(NodeTelemetryRollupDirty)
+        ) == 0
+
+
+def test_rollup_bucket_flooring_is_utc_aware_and_exact() -> None:
+    value = datetime(
+        2026,
+        8,
+        3,
+        14,
+        29,
+        59,
+        999999,
+        tzinfo=UTC,
+    )
+
+    assert telemetry_maintenance.bucket_start(value, 60) == datetime(
+        2026, 8, 3, 14, 29, tzinfo=UTC
+    )
+    assert telemetry_maintenance.bucket_start(value, 900) == datetime(
+        2026, 8, 3, 14, 15, tzinfo=UTC
+    )
+    with pytest.raises(ValueError, match="timezone-aware"):
+        telemetry_maintenance.bucket_start(value.replace(tzinfo=None), 60)
+    with pytest.raises(ValueError, match="resolution"):
+        telemetry_maintenance.bucket_start(value, 300)
 
 
 def test_new_boot_resets_sequence_but_only_newer_observation_advances_latest(
@@ -437,4 +508,10 @@ def test_history_and_latest_writes_are_one_transaction(telemetry) -> None:
         )
         assert (
             session.scalar(select(func.count()).select_from(NodeTelemetryLatest)) == 0
+        )
+        assert (
+            session.scalar(
+                select(func.count()).select_from(NodeTelemetryRollupDirty)
+            )
+            == 0
         )
