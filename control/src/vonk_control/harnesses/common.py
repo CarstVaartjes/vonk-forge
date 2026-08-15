@@ -36,7 +36,7 @@ def structured_command(value: object) -> tuple[str, ...]:
 
 def validate_projection(projection: HarnessProjection) -> None:
     structured_command(projection.command)
-    if projection.contract_version != 1:
+    if type(projection.contract_version) is not int or projection.contract_version != 1:
         raise HarnessCompileError("harness contract version is invalid")
     if _IMAGE.fullmatch(projection.image) is None:
         raise HarnessCompileError("harness image must be digest-pinned")
@@ -48,15 +48,24 @@ def validate_projection(projection: HarnessProjection) -> None:
         raise HarnessCompileError(
             "harness projection user must be numeric and non-root"
         )
-    if not projection.no_new_privileges:
+    if (
+        type(projection.no_new_privileges) is not bool
+        or not projection.no_new_privileges
+    ):
         raise HarnessCompileError("harness projection must set no-new-privileges")
     if projection.capabilities:
         raise HarnessCompileError("harness projection must drop all capabilities")
     if not projection.model_mounts or any(
-        not mount.read_only for mount in projection.model_mounts
+        type(mount.read_only) is not bool or not mount.read_only
+        for mount in projection.model_mounts
     ):
         raise HarnessCompileError("harness model mounts must be read-only")
-    if projection.output_mount.read_only or not projection.output_mount.isolated:
+    if (
+        type(projection.output_mount.read_only) is not bool
+        or projection.output_mount.read_only
+        or type(projection.output_mount.isolated) is not bool
+        or not projection.output_mount.isolated
+    ):
         raise HarnessCompileError("harness outputs must be isolated and writable")
     mounts = (*projection.model_mounts, projection.output_mount)
     for mount in mounts:
@@ -75,13 +84,11 @@ def validate_projection(projection: HarnessProjection) -> None:
         or not isinstance(binding.distribution_content_sha256, str)
         or not re.fullmatch(r"[a-f0-9]{64}", binding.harness_content_sha256)
         or not re.fullmatch(r"[a-f0-9]{64}", binding.distribution_content_sha256)
-        or not isinstance(binding.topology_node_count, int)
-        or isinstance(binding.topology_node_count, bool)
+        or type(binding.topology_node_count) is not int
         or binding.topology_node_count < 1
         or not isinstance(binding.role, str)
         or not binding.role
-        or not isinstance(binding.rank, int)
-        or isinstance(binding.rank, bool)
+        or type(binding.rank) is not int
         or not 0 <= binding.rank < binding.topology_node_count
     ):
         raise HarnessCompileError("harness projection binding is invalid")

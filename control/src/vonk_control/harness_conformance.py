@@ -90,12 +90,34 @@ class HarnessEvidence:
 
     @property
     def recovery_phases(self) -> tuple[str, ...]:
-        return tuple(
-            observation.operation
-            for observation in self.observations
-            if observation.result.get("interrupted") is True
-            or observation.operation == "inspect"
-        )
+        phases: list[str] = []
+        for operation, recovered_state in (("start", "running"), ("stop", "stopped")):
+            interrupted = next(
+                (
+                    index
+                    for index, observation in enumerate(self.observations)
+                    if observation.operation == operation
+                    and observation.result.get("interrupted") is True
+                ),
+                None,
+            )
+            if interrupted is None:
+                continue
+            phases.append(f"{operation}-interrupted")
+            after = self.observations[interrupted + 1 :]
+            if (
+                len(after) >= 2
+                and after[0].operation == after[1].operation == "inspect"
+                and after[0].result == after[1].result
+            ):
+                phases.append("inspect-idempotent")
+            if any(
+                observation.operation == operation
+                and observation.result.get("state") == recovered_state
+                for observation in after
+            ):
+                phases.append(f"{operation}-recovered")
+        return tuple(phases)
 
 
 class DeterministicClock:

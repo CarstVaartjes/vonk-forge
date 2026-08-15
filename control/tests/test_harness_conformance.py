@@ -43,6 +43,14 @@ def test_harness_completes_observed_synthetic_lifecycle(slug: str) -> None:
     assert evidence.interrupted_start_recovered is True
     assert evidence.interrupted_stop_recovered is True
     assert evidence.stop_bounded is True
+    assert evidence.recovery_phases == (
+        "start-interrupted",
+        "inspect-idempotent",
+        "start-recovered",
+        "stop-interrupted",
+        "inspect-idempotent",
+        "stop-recovered",
+    )
     assert evidence.document["schema_version"] == 1
 
 
