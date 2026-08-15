@@ -42,7 +42,7 @@ Regression coverage includes stable and changed action digests, exact selected-o
 | Command/scope | Result |
 | --- | --- |
 | Focused operations/routes/API/OpenAPI/auth matrix | `84 passed, 3 skipped, 15 warnings` |
-| Relevant broader recipe/admission/library/catalog/API suite | `213 passed, 4 skipped, 15 warnings` |
+| Relevant broader recipe/admission/library/catalog/API suite | `213 passed, 4 skipped, 21 warnings` on the final post-commit run |
 | PostgreSQL recipe concurrency collection | Three clean skips: Docker required for final-rank serialization, disjoint Stop serialization, and duplicate Stop request tests |
 | `uvx --from ruff==0.16.1 ruff check` on all ten implementation/test Python files | All checks passed |
 | Pinned Ruff format check on eight owned/formatted files | Eight files already formatted |
