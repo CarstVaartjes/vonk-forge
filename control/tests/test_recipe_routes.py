@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import sessionmaker
+from vonk_control import recipe_routes
 from vonk_control.auth import TokenCodec
 from vonk_control.litellm import LiteLlmPolicyError, LiteLlmPublisher
 from vonk_control.models import (
@@ -44,6 +48,42 @@ class MutableClock:
 
     def __call__(self) -> datetime:
         return self.now
+
+
+class OverlapPublisher:
+    """Expose crossed candidates without deadlocking a serialized publisher."""
+
+    def __init__(self, generation: int) -> None:
+        self._generation = generation
+        self._guard = threading.Lock()
+        self._second_publish = threading.Event()
+        self.aliases: list[tuple[str, ...]] = []
+
+    def publish(self, state, _policy):
+        with self._guard:
+            self._generation += 1
+            generation = self._generation
+            publish_index = len(self.aliases)
+            self.aliases.append(tuple(sorted(state.aliases)))
+            if publish_index == 1:
+                self._second_publish.set()
+        if publish_index == 0:
+            self._second_publish.wait(timeout=0.25)
+        return type(
+            "Generation",
+            (),
+            {
+                "generation": generation,
+                "route_digest": state.digest,
+                "config_sha256": state.digest,
+                "path": "memory",
+            },
+        )()
+
+    def publish_empty(self, route_digest):
+        return self.publish(
+            type("State", (), {"aliases": {}, "digest": route_digest})(), None
+        )
 
 
 def setup(
@@ -401,6 +441,56 @@ def test_withdraw_publishes_empty_generation_before_workload_stop(
     assert empty.generation == 2
     assert json.loads(applied[-1])["model_list"] == []
     assert publisher.active() == empty
+
+
+def test_disjoint_sqlite_withdrawals_serialize_one_global_candidate(
+    tmp_path: Path,
+) -> None:
+    service, _publisher, _applied, first_run = setup(tmp_path)
+    second_run = add_running_run(
+        service,
+        first_run,
+        alias="second",
+        route_state="pending",
+        identity=3,
+    )
+    service.publish_run(first_run)
+    second_generation = service.publish_run(second_run)
+    overlap = OverlapPublisher(second_generation.generation)
+    service._publisher = overlap
+    start = threading.Barrier(2)
+
+    def withdraw(run_id: str) -> None:
+        start.wait()
+        service.withdraw_run(run_id)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(withdraw, run_id) for run_id in (first_run, second_run)]
+        for future in futures:
+            future.result(timeout=5)
+
+    with service.sessions() as session:
+        assert [
+            session.get(RecipeRun, run_id).route_state
+            for run_id in (first_run, second_run)
+        ] == ["withdrawn", "withdrawn"]
+    assert overlap.aliases[-1] == ()
+
+
+def test_route_publication_owner_lock_compiles_for_postgresql() -> None:
+    statement_factory = getattr(
+        recipe_routes, "route_publication_owner_lock_statement", None
+    )
+    assert callable(statement_factory)
+
+    sql = str(
+        statement_factory().compile(
+            dialect=postgresql.dialect(),
+            compile_kwargs={"literal_binds": True},
+        )
+    )
+
+    assert "FOR UPDATE OF route_publication_owner" in sql
 
 
 def test_candidate_contains_published_runs_and_explicit_pending_run_only(

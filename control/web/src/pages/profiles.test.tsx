@@ -19,7 +19,7 @@ it("loads the profile-scoped server plan and fleet gates without local planning"
   const planned: string[] = [];
   const api = {
     documents: async () => ({commit: plan.commit, documents: []}),
-    fleet: async () => ({commit: plan.commit, evidence_digest: plan.fleet_evidence_digest, nodes: []}),
+    fleetEvidence: async () => ({commit: plan.commit, evidence_digest: plan.fleet_evidence_digest, nodes: []}),
     planProfile: async (id: string) => { planned.push(id); return plan; },
   } as unknown as ControlApi;
   render(<ProfilesPage api={api}/>);
@@ -36,7 +36,7 @@ it("reports plan errors accessibly and does not retain a prior digest", async ()
   let fail = false;
   const api = {
     documents: async () => ({commit: plan.commit, documents: []}),
-    fleet: async () => ({commit: plan.commit, evidence_digest: plan.fleet_evidence_digest, nodes: []}),
+    fleetEvidence: async () => ({commit: plan.commit, evidence_digest: plan.fleet_evidence_digest, nodes: []}),
     planProfile: async () => {
       if (fail) throw new Error("Control API returned 409: reconciliation plan digest is stale");
       return plan;

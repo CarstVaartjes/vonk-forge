@@ -1131,7 +1131,10 @@ class Runner:
         )
 
     def running(self) -> None:
-        request = {"installation_id": self.outputs["installation_id"]}
+        request = {
+            "installation_id": self.outputs["installation_id"],
+            "alias": self.slug,
+        }
 
         response = self._create_run(request, purpose="start")
         failed_start: dict[str, str] = {}
@@ -1239,7 +1242,6 @@ class Runner:
             "/api/v1/recipes/runs",
             {
                 **request,
-                "alias": self.slug,
                 "plan_digest": plan_digest,
                 "request_key": request_key,
             },
@@ -1267,7 +1269,6 @@ class Runner:
                 "/api/v1/recipes/runs",
                 {
                     **request,
-                    "alias": self.slug,
                     "plan_digest": plan_digest,
                     "request_key": request_key,
                 },
@@ -1494,10 +1495,21 @@ class Runner:
         )
 
     def stopped(self) -> None:
+        run_id = self.outputs["run_id"]
+        _, preview_payload = self.control.request(
+            "POST", "/api/v1/recipes/stop-plans/preview", {"run_id": run_id}
+        )
+        preview = _object(preview_payload, "recipe stop preview")
+        plan_digest = preview.get("plan_digest")
+        if preview.get("allowed") is not True or not isinstance(plan_digest, str) or not plan_digest:
+            raise SliceError("recipe stop is not admitted")
         _, response = self.control.request(
             "POST",
-            f"/api/v1/recipes/runs/{self.outputs['run_id']}/stop",
-            {"request_key": self.request_key("stopped", "stop")},
+            f"/api/v1/recipes/runs/{run_id}/stop",
+            {
+                "plan_digest": plan_digest,
+                "request_key": self.request_key("stopped", "stop"),
+            },
         )
         operation_id, _owner, _result = self.operation(
             response, "recipe stop", expected_nodes=self.targets
@@ -1509,10 +1521,23 @@ class Runner:
         self.complete("route-withdrawn")
 
     def uninstalled(self) -> None:
+        installation_id = self.outputs["installation_id"]
+        _, preview_payload = self.control.request(
+            "POST",
+            "/api/v1/recipes/uninstall-plans/preview",
+            {"installation_id": installation_id},
+        )
+        preview = _object(preview_payload, "recipe uninstall preview")
+        plan_digest = preview.get("plan_digest")
+        if preview.get("allowed") is not True or not isinstance(plan_digest, str) or not plan_digest:
+            raise SliceError("recipe uninstall is not admitted")
         _, response = self.control.request(
             "POST",
-            f"/api/v1/recipes/installations/{self.outputs['installation_id']}/uninstall",
-            {"request_key": self.request_key("uninstalled", "uninstall")},
+            f"/api/v1/recipes/installations/{installation_id}/uninstall",
+            {
+                "plan_digest": plan_digest,
+                "request_key": self.request_key("uninstalled", "uninstall"),
+            },
         )
         operation_id, _owner, _result = self.operation(
             response, "recipe uninstall", expected_nodes=self.targets

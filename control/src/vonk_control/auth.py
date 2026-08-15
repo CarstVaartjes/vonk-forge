@@ -105,7 +105,9 @@ MUTATION_ROLES = {
         {"administrator"}
     ),
     ("POST", "/api/v1/catalog/recipes/{recipe_id}/fork"): frozenset({"administrator"}),
-    ("POST", "/api/v1/catalog/imports/workload_run/preview"): frozenset({"administrator"}),
+    ("POST", "/api/v1/catalog/imports/workload_run/preview"): frozenset(
+        {"administrator"}
+    ),
     ("POST", "/api/v1/catalog/imports/workload_run"): frozenset({"administrator"}),
     ("POST", "/api/v1/catalog/imports/global/preview"): frozenset({"administrator"}),
     ("POST", "/api/v1/catalog/imports/global"): frozenset({"administrator"}),
@@ -129,6 +131,8 @@ MUTATION_ROLES = {
     ("POST", "/api/v1/recipes/installations"): frozenset({"administrator"}),
     ("POST", "/api/v1/recipes/run-plans/preview"): frozenset({"administrator"}),
     ("POST", "/api/v1/recipes/runs"): frozenset({"administrator"}),
+    ("POST", "/api/v1/recipes/stop-plans/preview"): frozenset({"administrator"}),
+    ("POST", "/api/v1/recipes/uninstall-plans/preview"): frozenset({"administrator"}),
     ("POST", "/api/v1/recipes/operations/{operation_id}/retry"): frozenset(
         {"administrator"}
     ),

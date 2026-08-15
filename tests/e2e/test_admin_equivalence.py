@@ -140,6 +140,51 @@ def _fleet() -> dict[str, object]:
     }
 
 
+class FleetProjection:
+    def read(self):
+        from datetime import UTC, datetime
+
+        from vonk_control.fleet_projection import FleetSnapshot
+
+        return FleetSnapshot.model_validate(
+            {
+                "schema_version": 1,
+                "event_cursor": 0,
+                "generated_at": datetime(1970, 1, 1, 0, 0, 10, tzinfo=UTC),
+                "repository_commit": COMMIT,
+                "nodes": [
+                    {
+                        "id": NODE_ID,
+                        "display_name": "Unavailable Compute",
+                        "hostname": "unavailable.invalid",
+                        "lifecycle": "managed",
+                        "labels": {},
+                        "connection": {
+                            "agent_state": "active",
+                            "certificate_state": "missing",
+                            "online_state": "offline",
+                            "offline_reason": "never-seen",
+                            "last_seen_at": None,
+                            "last_seen_age_seconds": None,
+                        },
+                        "inventory": None,
+                        "telemetry": None,
+                        "installed": [],
+                        "loaded": [],
+                        "reservations": {
+                            "disk_bytes": 0,
+                            "unified_memory_bytes": 0,
+                            "host_memory_bytes": 0,
+                            "gpu_memory_bytes": 0,
+                            "port_count": 0,
+                        },
+                        "warnings": [],
+                    }
+                ],
+            }
+        )
+
+
 def _live_check(token_directory: Path) -> dict[str, object]:
     from fastapi.testclient import TestClient
     from vonk_control.api import AdminServices, create_app
@@ -157,6 +202,7 @@ def _live_check(token_directory: Path) -> dict[str, object]:
             audits=MemoryAuditStore(),
             fleet=_fleet,
             now=lambda: 10,
+            fleet_projection=FleetProjection(),
             admin=AdminServices(
                 repository=Repository(),
                 proposals=None,
@@ -234,10 +280,10 @@ def _live_check(token_directory: Path) -> dict[str, object]:
     assert stale.status_code == 409
     assert stale.json() == {"detail": "reconciliation plan digest is stale"}
     assert accepted.status_code == 202
-    assert unavailable["healthy"] is False
-    assert unavailable["stale"] is True
-    assert unavailable["agent_online"] is False
-    assert unavailable["compatibility"] == "incompatible"
+    assert unavailable["connection"]["online_state"] == "offline"
+    assert unavailable["connection"]["offline_reason"] == "never-seen"
+    assert unavailable["inventory"] is None
+    assert unavailable["telemetry"] is None
     return {
         "accepted_job": accepted.json()["job_id"],
         "commit": web_plan["commit"],

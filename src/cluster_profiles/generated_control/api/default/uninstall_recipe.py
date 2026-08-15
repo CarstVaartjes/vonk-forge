@@ -9,7 +9,7 @@ from ... import errors
 
 from ...models.http_validation_error import HTTPValidationError
 from ...models.operation_response import OperationResponse
-from ...models.request_key import RequestKey
+from ...models.uninstall_request import UninstallRequest
 from typing import cast
 
 
@@ -17,7 +17,7 @@ from typing import cast
 def _get_kwargs(
     installation_id: str,
     *,
-    body: RequestKey,
+    body: UninstallRequest,
 
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
@@ -76,14 +76,14 @@ def sync_detailed(
     installation_id: str,
     *,
     client: AuthenticatedClient,
-    body: RequestKey,
+    body: UninstallRequest,
 
 ) -> Response[Union[HTTPValidationError, OperationResponse]]:
     """ Uninstall
 
     Args:
         installation_id (str):
-        body (RequestKey):
+        body (UninstallRequest):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -110,14 +110,14 @@ def sync(
     installation_id: str,
     *,
     client: AuthenticatedClient,
-    body: RequestKey,
+    body: UninstallRequest,
 
 ) -> Optional[Union[HTTPValidationError, OperationResponse]]:
     """ Uninstall
 
     Args:
         installation_id (str):
-        body (RequestKey):
+        body (UninstallRequest):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -139,14 +139,14 @@ async def asyncio_detailed(
     installation_id: str,
     *,
     client: AuthenticatedClient,
-    body: RequestKey,
+    body: UninstallRequest,
 
 ) -> Response[Union[HTTPValidationError, OperationResponse]]:
     """ Uninstall
 
     Args:
         installation_id (str):
-        body (RequestKey):
+        body (UninstallRequest):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -173,14 +173,14 @@ async def asyncio(
     installation_id: str,
     *,
     client: AuthenticatedClient,
-    body: RequestKey,
+    body: UninstallRequest,
 
 ) -> Optional[Union[HTTPValidationError, OperationResponse]]:
     """ Uninstall
 
     Args:
         installation_id (str):
-        body (RequestKey):
+        body (UninstallRequest):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.

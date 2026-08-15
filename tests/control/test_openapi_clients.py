@@ -121,10 +121,12 @@ def test_generator_is_idempotent_and_admin_schema_is_secret_free() -> None:
         "/api/v1/agents",
         "/api/v1/endpoints/{alias}",
         "/api/v1/fleet",
+        "/api/v1/fleet/stream",
         "/api/v1/jobs/{job_id}",
         "/api/v1/jobs/{job_id}/logs",
         "/api/v1/jobs/{job_id}/resume",
         "/api/v1/nodes/status",
+        "/api/v1/nodes/{node_id}/telemetry",
         "/api/v1/profiles/{profile_id}/plan",
         "/api/v1/reconciliations",
         "/api/v1/reconciliations/plan",
@@ -147,11 +149,20 @@ def test_generator_is_idempotent_and_admin_schema_is_secret_free() -> None:
             "type": "apiKey",
         },
     }
+    operations = _operations(schema)
+    assert operations["streamFleetEvents"]["security"] == [
+        {"BrowserSession": []}
+    ]
     assert all(
         operation["security"] == [{"BearerAuth": []}]
-        for operation_id, operation in _operations(schema).items()
+        for operation_id, operation in operations.items()
         if operation_id
-        not in {"getBrowserSession", "loginBrowser", "logoutBrowser"}
+        not in {
+            "getBrowserSession",
+            "loginBrowser",
+            "logoutBrowser",
+            "streamFleetEvents",
+        }
     )
 
     assert {
@@ -169,6 +180,7 @@ def test_generator_is_idempotent_and_admin_schema_is_secret_free() -> None:
         "getFleetStatus",
         "getJob",
         "getNodeStatuses",
+        "getNodeTelemetryHistory",
         "getPublishedEndpoint",
         "listAgents",
         "listJobLogs",
@@ -185,6 +197,13 @@ def test_generator_is_idempotent_and_admin_schema_is_secret_free() -> None:
         reference = response_schema["$ref"]
         component = schema["components"]["schemas"][reference.rsplit("/", 1)[-1]]
         assert component["additionalProperties"] is False
+
+    assert by_id["getFleetStatus"]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/FleetSnapshot"}
+    assert by_id["getNodeStatuses"]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/FleetStatusResponse"}
 
     serialized = json.dumps(schema, sort_keys=True).lower()
     for forbidden in (
@@ -257,6 +276,28 @@ def test_generated_python_models_compile() -> None:
     assert set(PYTHON_CLIENT.rglob("*.pyc")) == bytecode_before
 
 
+def test_generated_run_preview_contracts_require_digest_bound_alias() -> None:
+    schema = json.loads(OPENAPI.read_text())["components"]["schemas"]
+    assert "alias" in schema["RunPreviewRequest"]["required"]
+    assert "alias" in schema["RunPlanResponse"]["required"]
+
+    from cluster_profiles.generated_control.models.run_preview_request import (
+        RunPreviewRequest,
+    )
+
+    request = RunPreviewRequest(
+        installation_id="00000000-0000-4000-8000-000000000001",
+        alias="qwen",
+    )
+    assert request.to_dict()["alias"] == "qwen"
+
+    typescript = TYPESCRIPT_CLIENT.read_text()
+    request_contract = typescript.split("RunPreviewRequest: {", 1)[1].split("};", 1)[0]
+    response_contract = typescript.split("RunPlanResponse: {", 1)[1].split("};", 1)[0]
+    assert "alias: string;" in request_contract
+    assert "alias: string;" in response_contract
+
+
 def test_generated_python_client_imports_in_the_root_locked_environment() -> None:
     result = subprocess.run(
         [
@@ -274,6 +315,71 @@ def test_generated_python_client_imports_in_the_root_locked_environment() -> Non
         check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_stream_resume_header_is_in_openapi_python_and_typescript_clients() -> None:
+    schema = json.loads(OPENAPI.read_text())
+    operation = schema["paths"]["/api/v1/fleet/stream"]["get"]
+    assert operation["parameters"] == [
+        {
+            "description": (
+                "Optional durable Fleet cursor; duplicate and numeric validity "
+                "are checked from the raw header list."
+            ),
+            "in": "header",
+            "name": "Last-Event-ID",
+            "required": False,
+            "schema": {
+                "anyOf": [{"type": "string"}, {"type": "null"}],
+                "description": (
+                    "Optional durable Fleet cursor; duplicate and numeric validity "
+                    "are checked from the raw header list."
+                ),
+                "title": "Last-Event-Id",
+            },
+        }
+    ]
+
+    from cluster_profiles.generated_control.api.default import stream_fleet_events
+
+    assert stream_fleet_events._get_kwargs(last_event_id="17")["headers"] == {
+        "Last-Event-ID": "17"
+    }
+    typescript = TYPESCRIPT_CLIENT.read_text()
+    assert '"Last-Event-ID"?: string | null;' in typescript
+
+
+def test_generated_fleet_projection_vocabulary_is_finite() -> None:
+    schema = json.loads(OPENAPI.read_text())["components"]["schemas"]
+    assert schema["NodeConnection"]["properties"]["certificate_state"]["enum"] == [
+        "valid",
+        "missing",
+        "not-yet-valid",
+        "expired",
+        "revoked",
+        "inactive",
+    ]
+    offline = schema["NodeConnection"]["properties"]["offline_reason"]
+    assert offline["anyOf"][0]["enum"] == [
+        "unregistered",
+        "agent-inactive",
+        "agent-revoked",
+        "never-seen",
+        "last-seen-in-future",
+        "stale",
+        "certificate-missing",
+        "certificate-not-yet-valid",
+        "certificate-expired",
+        "certificate-revoked",
+        "certificate-inactive",
+    ]
+    assert schema["TelemetryPoint"]["properties"]["boot_id"]["pattern"] == (
+        "^(?!00000000-0000-0000-0000-000000000000$)"
+        "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    )
+    typescript = TYPESCRIPT_CLIENT.read_text()
+    assert 'certificate_state: "valid" | "missing" | "not-yet-valid"' in typescript
+    assert 'degraded_reason?: ("external-member" | "mapping-incomplete"' in typescript
 
 
 def test_generated_python_client_parses_documented_operation_errors() -> None:

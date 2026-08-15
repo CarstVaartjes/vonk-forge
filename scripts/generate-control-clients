@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
@@ -101,8 +102,12 @@ def _normalize_generated_text(path: Path) -> None:
         lines = generated_file.read_text(encoding="utf-8").splitlines()
         while lines and not lines[-1].strip():
             lines.pop()
+        normalized = [
+            re.sub(r"(?<=[0-9'\"])and(?= not\b)", " and", line.rstrip())
+            for line in lines
+        ]
         generated_file.write_text(
-            "\n".join(line.rstrip() for line in lines) + "\n",
+            "\n".join(normalized) + "\n",
             encoding="utf-8",
             newline="\n",
         )

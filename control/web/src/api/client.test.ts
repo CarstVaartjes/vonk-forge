@@ -8,21 +8,149 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it("uses the generated fleet operation with same-origin credentials", async () => {
-  let captured: Request | undefined;
+it("keeps visual Fleet snapshots separate from reconciliation evidence", async () => {
+  const captured: Request[] = [];
   vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
-    captured = input as Request;
-    return new Response(JSON.stringify({commit: "a".repeat(40), nodes: []}), {
+    const request = input as Request;
+    captured.push(request);
+    const pathname = new URL(request.url).pathname;
+    const body = pathname === "/api/v1/fleet"
+      ? {
+        schema_version: 1,
+        event_cursor: 7,
+        generated_at: "2026-08-15T12:00:00Z",
+        repository_commit: "a".repeat(40),
+        nodes: [],
+      }
+      : {commit: "a".repeat(40), evidence_digest: "e".repeat(64), nodes: []};
+    return new Response(JSON.stringify(body), {
       headers: {"Content-Type": "application/json"},
       status: 200,
     });
   });
+  const api = new ApiClient();
 
-  const fleet = await new ApiClient().fleet();
+  const visual = await api.visualFleet();
+  const evidence = await api.fleetEvidence();
+  const statuses = await api.nodeStatuses();
 
-  expect(fleet).toEqual({commit: "a".repeat(40), nodes: []});
-  expect(new URL(captured!.url).pathname).toBe("/api/v1/fleet");
-  expect(captured!.credentials).toBe("same-origin");
+  expect(visual).toEqual({
+    schema_version: 1,
+    event_cursor: 7,
+    generated_at: "2026-08-15T12:00:00Z",
+    repository_commit: "a".repeat(40),
+    nodes: [],
+  });
+  expect(evidence.evidence_digest).toBe("e".repeat(64));
+  expect(statuses.evidence_digest).toBe("e".repeat(64));
+  expect(captured.map(request => new URL(request.url).pathname)).toEqual([
+    "/api/v1/fleet",
+    "/api/v1/nodes/status",
+    "/api/v1/nodes/status",
+  ]);
+  expect(captured.every(request => request.credentials === "same-origin")).toBe(true);
+});
+
+it("uses distinct digest-bound Library action operations", async () => {
+  // Break caught: the visual Library falls back to legacy evidence routes,
+  // action apply bypasses its server preview digest, or one selected owner is
+  // replaced by a browser-invented group.
+  const requests: Request[] = [];
+  vi.spyOn(crypto, "randomUUID").mockReturnValue("00000000-0000-4000-8000-000000000001");
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = input instanceof Request ? input : new Request(new URL(String(input), location.origin), init);
+    requests.push(request);
+    const path = new URL(request.url).pathname;
+    if (path === "/api/v1/library") return new Response(JSON.stringify({schema_version: 1, generated_at: "2026-08-15T12:00:00Z", freshness_policy: {inventory_fresh_seconds: 300, telemetry_live_seconds: 6, telemetry_delayed_seconds: 20}, models: [], unlinked_recipes: [], next_cursor: null}), {status: 200});
+    if (path === "/api/v1/library/recipes/recipe%2Fone") return new Response(JSON.stringify({schema_version: 1, generated_at: "2026-08-15T12:00:00Z", recipe: {recipe_id: "recipe/one", slug: "one", title: "One", description: "", source_kind: "local"}, selected_revision: null, visual_recipe: null, profiles: [], operational_state: {builds: [], mappings: [], installations: [], runs: []}, placement: [], reasons: []}), {status: 200});
+    if (path.startsWith("/api/v1/jobs/")) return new Response(JSON.stringify({id: "job-1", kind: "recipe.install", state: "running", base_commit: "a".repeat(40), current_attempt: 1, operations: [], operation_total: 0, targets: [], target_total: 0, progress: {completed: 0, failed: 0, running: 1, total: 1}}), {status: 200});
+    return new Response(JSON.stringify({
+      id: "operation-1", kind: "recipe.install", owner_id: "owner-1", state: "queued",
+      plan_digest: "plan-1", nodes: ["node-a", "node-b"], result: null,
+      allowed: true, blockers: [], warnings: [],
+    }), {status: request.method === "GET" ? 200 : request.url.includes("preview") ? 200 : 202});
+  });
+  const api = new ApiClient();
+  const controller = new AbortController();
+
+  await api.librarySnapshot("cursor-1");
+  await api.libraryRecipe("recipe/one");
+  await api.previewLibraryMapping({recipe_revision_id: "revision-1", profile_name: "pair", node_ids: ["node-a", "node-b"], parameters: {tensor: 2}}, controller.signal);
+  await api.applyLibraryMapping({recipe_revision_id: "revision-1", profile_name: "pair", node_ids: ["node-a", "node-b"], parameters: {tensor: 2}, placement_digest: "map-plan", request_key: "00000000-0000-4000-8000-000000000001"});
+  await api.previewLibraryInstall({recipe_build_id: "build-1", mapping_id: "mapping-1"});
+  await api.applyLibraryInstall({recipe_build_id: "build-1", mapping_id: "mapping-1", plan_digest: "install-plan", request_key: "00000000-0000-4000-8000-000000000001"});
+  await api.previewLibraryLoad({installation_id: "installation-1", alias: "chat"});
+  await api.applyLibraryLoad({installation_id: "installation-1", alias: "chat", plan_digest: "load-plan", request_key: "00000000-0000-4000-8000-000000000001"});
+  await api.previewLibraryStop("run-1");
+  await api.applyLibraryStop("run-1", {plan_digest: "stop-plan", request_key: "00000000-0000-4000-8000-000000000001"});
+  await api.previewLibraryUninstall("installation-1");
+  await api.applyLibraryUninstall("installation-1", {plan_digest: "remove-plan", request_key: "00000000-0000-4000-8000-000000000001"});
+  await api.libraryOperation("operation-1", controller.signal);
+  await api.retryLibraryOperation("operation-1");
+  await api.libraryRunStatus("run-1");
+  await api.libraryJobProgress("job-1", controller.signal);
+  controller.abort();
+
+  expect(requests.map(request => [request.method, new URL(request.url).pathname])).toEqual([
+    ["GET", "/api/v1/library"],
+    ["GET", "/api/v1/library/recipes/recipe%2Fone"],
+    ["POST", "/api/v1/recipes/mapping-plans/preview"],
+    ["POST", "/api/v1/recipes/mappings"],
+    ["POST", "/api/v1/recipes/install-plans/preview"],
+    ["POST", "/api/v1/recipes/installations"],
+    ["POST", "/api/v1/recipes/run-plans/preview"],
+    ["POST", "/api/v1/recipes/runs"],
+    ["POST", "/api/v1/recipes/stop-plans/preview"],
+    ["POST", "/api/v1/recipes/runs/run-1/stop"],
+    ["POST", "/api/v1/recipes/uninstall-plans/preview"],
+    ["POST", "/api/v1/recipes/installations/installation-1/uninstall"],
+    ["GET", "/api/v1/recipes/operations/operation-1"],
+    ["POST", "/api/v1/recipes/operations/operation-1/retry"],
+    ["GET", "/api/v1/recipes/runs/run-1"],
+    ["GET", "/api/v1/jobs/job-1"],
+  ]);
+  expect(Object.fromEntries(new URL(requests[0].url).searchParams)).toEqual({cursor: "cursor-1", limit: "100"});
+  expect(await requests[3].clone().json()).toEqual({recipe_revision_id: "revision-1", profile_name: "pair", node_ids: ["node-a", "node-b"], parameters: {tensor: 2}, placement_digest: "map-plan", request_key: "00000000-0000-4000-8000-000000000001"});
+  expect(await requests[5].clone().json()).toEqual({recipe_build_id: "build-1", mapping_id: "mapping-1", plan_digest: "install-plan", request_key: "00000000-0000-4000-8000-000000000001"});
+  expect(await requests[6].clone().json()).toEqual({installation_id: "installation-1", alias: "chat"});
+  expect(await requests[7].clone().json()).toEqual({installation_id: "installation-1", alias: "chat", plan_digest: "load-plan", request_key: "00000000-0000-4000-8000-000000000001"});
+  expect(await requests[9].clone().json()).toEqual({plan_digest: "stop-plan", request_key: "00000000-0000-4000-8000-000000000001"});
+  expect(await requests[11].clone().json()).toEqual({plan_digest: "remove-plan", request_key: "00000000-0000-4000-8000-000000000001"});
+  expect(requests[2].signal.aborted).toBe(true);
+  expect(requests[12].signal.aborted).toBe(true);
+  expect(requests[15].signal.aborted).toBe(true);
+});
+
+it("requests bounded node telemetry history through the generated operation", async () => {
+  let captured: Request | undefined;
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+    captured = input as Request;
+    return new Response(JSON.stringify({
+      schema_version: 1,
+      node_id: "spk_0123456789abcdef0123456789abcdef",
+      start: "2026-08-15T11:00:00.000Z",
+      end: "2026-08-15T12:00:00.000Z",
+      maximum_points: 360,
+      points: [],
+    }), {headers: {"Content-Type": "application/json"}, status: 200});
+  });
+
+  await new ApiClient().nodeTelemetryHistory(
+    "spk_0123456789abcdef0123456789abcdef",
+    "2026-08-15T11:00:00.000Z",
+    "2026-08-15T12:00:00.000Z",
+    "raw",
+    360,
+  );
+
+  const url = new URL(captured!.url);
+  expect(url.pathname).toBe("/api/v1/nodes/spk_0123456789abcdef0123456789abcdef/telemetry");
+  expect(Object.fromEntries(url.searchParams)).toEqual({
+    end: "2026-08-15T12:00:00.000Z",
+    maximum_points: "360",
+    resolution: "raw",
+    start: "2026-08-15T11:00:00.000Z",
+  });
 });
 
 it("uses exact browser-auth documents and the CSRF cookie for server logout", async () => {
@@ -63,7 +191,7 @@ it("throws and emits one centralized authentication signal for an API 401", asyn
   let signals = 0;
   api.onAuthenticationRequired(() => { signals += 1; });
 
-  await expect(api.fleet()).rejects.toBeInstanceOf(AuthenticationRequired);
+  await expect(api.visualFleet()).rejects.toBeInstanceOf(AuthenticationRequired);
   expect(signals).toBe(1);
 });
 

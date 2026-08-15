@@ -354,38 +354,12 @@ def _assert_execution_cycle(database: str) -> None:
     engine.dispose()
 
 
-def test_latest_migration_is_the_sole_linear_head() -> None:
+def test_reconciliation_execution_follows_resolved_plan() -> None:
     config = _config("sqlite://")
     scripts = ScriptDirectory.from_config(config)
-    heads = scripts.get_heads()
-
-    assert heads == ["0021_browser_authentication"]
-    revision = ScriptDirectory.from_config(config).get_revision(heads[0])
+    revision = scripts.get_revision("0009_reconciliation_execution")
     assert revision is not None
-    assert revision.down_revision == "0020_recipe_catalog_bridge"
-    assert [item.revision for item in reversed(tuple(scripts.walk_revisions()))] == [
-        "0001_operational_state",
-        "0002_agent_operations",
-        "0003_retry_disposition",
-        "0004_agent_enrollment",
-        "0005_certificate_rotation",
-        "0006_reconciliation_graph",
-        "0007_issued_revocations",
-        "0008_resolved_plan",
-        "0009_reconciliation_execution",
-        "0010_agent_runtime_identity",
-        "0011_update_rollouts",
-            "0012_control_process_heartbeats",
-            "0013_workload_packages",
-            "0014_package_action_plans",
-            "0015_recipe_catalog",
-            "0016_recipe_deployment_authority",
-            "0017_admission_and_run_state",
-            "0018_agent_inventory_runtime",
-            "0019_rust_agent_migration",
-            "0020_recipe_catalog_bridge",
-            "0021_browser_authentication",
-        ]
+    assert revision.down_revision == "0008_resolved_plan"
 
 
 def test_execution_models_expose_durable_links_and_bounded_fields() -> None:

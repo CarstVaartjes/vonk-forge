@@ -1,7 +1,7 @@
 import {useState} from "react";
 import type {
   ControlApi,
-  FleetResponse,
+  FleetEvidenceResponse,
   NodeSummary,
   ReconciliationPlan as ReconciliationPlanModel,
 } from "../api/types";
@@ -55,7 +55,7 @@ function targetGate(node: NodeSummary | undefined, fleetCommit: string, planComm
 
 function planIntegrityReasons(
   plan: ReconciliationPlanModel,
-  fleet: FleetResponse,
+  fleet: FleetEvidenceResponse,
 ): string[] {
   const reasons: string[] = [];
   if (fleet.commit !== plan.commit) reasons.push("fleet commit does not match plan");
@@ -96,7 +96,7 @@ export function ReconciliationPlan({
   plan,
 }: {
   api: ControlApi;
-  fleet: FleetResponse;
+  fleet: FleetEvidenceResponse;
   plan: ReconciliationPlanModel;
 }) {
   const [confirmation, setConfirmation] = useState("");
@@ -122,7 +122,7 @@ export function ReconciliationPlan({
     setError("");
     setStatus("");
     try {
-      const latestFleet = await api.fleet();
+      const latestFleet = await api.fleetEvidence();
       if (latestFleet.evidence_digest !== plan.fleet_evidence_digest
           || planIntegrityReasons(plan, latestFleet).length > 0) {
         setConfirmation("");

@@ -17,4 +17,5 @@ pub mod rotation;
 pub mod source_policy;
 pub mod state;
 pub mod supervisor_readiness;
+pub mod telemetry;
 pub mod workloads;

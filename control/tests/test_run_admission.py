@@ -26,6 +26,7 @@ from vonk_control.models import (
     LocalRecipeRevision,
     RecipeBuild,
     RecipeInstallation,
+    RecipeRun,
     ResourceReservation,
 )
 from vonk_control.run_admission import RunAdmissionService, RunPlanConflict
@@ -214,19 +215,28 @@ def postgres_engine():
         subprocess.run(["docker", "stop", name], check=False, capture_output=True)
 
 
-def test_run_plan_accounts_for_memory_floor_and_persists_reservations(tmp_path) -> None:
+def test_run_alias_is_digest_bound_and_persisted_with_plan_authority(tmp_path) -> None:
     sessions, now, _node, installation = setup(tmp_path, free_memory=300)
     service = RunAdmissionService(
         sessions, inventory_max_age=300, memory_floor_bytes=50
     )
-    plan = service.plan_run(installation, now=now)
+    plan = service.plan_run(installation, alias="qwen", now=now)
+    alternate = service.plan_run(installation, alias="qwen-alt", now=now)
     assert (
         plan.allowed is True
         and plan.nodes[0].required_memory_bytes == 225
         and plan.nodes[0].free_after_bytes == 75
     )
-    run_id = service.accept_run(plan, alias="qwen", actor="admin", now=now)
-    assert run_id
+    assert plan.alias == "qwen"
+    assert alternate.alias == "qwen-alt"
+    assert alternate.plan_digest != plan.plan_digest
+
+    run_id = service.accept_run(plan, actor="admin", now=now)
+
+    with sessions() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        assert run.alias == plan.alias == run.plan["alias"]
 
 
 def test_memory_capability_and_port_conflicts_are_explained(tmp_path) -> None:
@@ -238,7 +248,7 @@ def test_memory_capability_and_port_conflicts_are_explained(tmp_path) -> None:
     )
     plan = RunAdmissionService(
         sessions, inventory_max_age=300, memory_floor_bytes=50
-    ).plan_run(installation, now=now)
+    ).plan_run(installation, "qwen", now=now)
     codes = {reason.code for reason in plan.nodes[0].blockers}
     assert {
         "run.insufficient_memory",
@@ -252,7 +262,7 @@ def test_accept_rechecks_memory_reservations_while_holding_node_lock(tmp_path) -
     service = RunAdmissionService(
         sessions, inventory_max_age=300, memory_floor_bytes=50
     )
-    plan = service.plan_run(installation, now=now)
+    plan = service.plan_run(installation, "qwen", now=now)
     with sessions.begin() as session:
         session.add_all(
             [
@@ -273,7 +283,7 @@ def test_accept_rechecks_memory_reservations_while_holding_node_lock(tmp_path) -
     service.plan_run = lambda *args, **kwargs: plan
 
     with pytest.raises(RunPlanConflict, match="memory capacity changed"):
-        service.accept_run(plan, alias="qwen", actor="admin", now=now)
+        service.accept_run(plan, actor="admin", now=now)
 
 
 def test_postgres_competing_admissions_have_one_capacity_winner(
@@ -286,13 +296,16 @@ def test_postgres_competing_admissions_have_one_capacity_winner(
     service = RunAdmissionService(
         sessions, inventory_max_age=300, memory_floor_bytes=50
     )
-    plan = service.plan_run(installation, now=now)
+    plans = {
+        alias: service.plan_run(installation, alias, now=now)
+        for alias in ("qwen-a", "qwen-b")
+    }
     barrier = threading.Barrier(2)
 
     def accept(alias: str) -> bool:
         barrier.wait()
         try:
-            service.accept_run(plan, alias=alias, actor="admin", now=now)
+            service.accept_run(plans[alias], actor="admin", now=now)
         except RunPlanConflict:
             return False
         return True

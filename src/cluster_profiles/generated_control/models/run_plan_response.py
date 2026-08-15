@@ -23,6 +23,7 @@ T = TypeVar("T", bound="RunPlanResponse")
 class RunPlanResponse:
     """
         Attributes:
+            alias (str):
             allowed (bool):
             installation_id (str):
             mapping_generation (int):
@@ -32,6 +33,7 @@ class RunPlanResponse:
             recipe_revision_id (str):
      """
 
+    alias: str
     allowed: bool
     installation_id: str
     mapping_generation: int
@@ -46,6 +48,8 @@ class RunPlanResponse:
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.run_node_plan_response import RunNodePlanResponse
+        alias = self.alias
+
         allowed = self.allowed
 
         installation_id = self.installation_id
@@ -69,6 +73,7 @@ class RunPlanResponse:
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
+            "alias": alias,
             "allowed": allowed,
             "installation_id": installation_id,
             "mapping_generation": mapping_generation,
@@ -86,6 +91,8 @@ class RunPlanResponse:
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.run_node_plan_response import RunNodePlanResponse
         d = dict(src_dict)
+        alias = d.pop("alias")
+
         allowed = d.pop("allowed")
 
         installation_id = d.pop("installation_id")
@@ -109,6 +116,7 @@ class RunPlanResponse:
         recipe_revision_id = d.pop("recipe_revision_id")
 
         run_plan_response = cls(
+            alias=alias,
             allowed=allowed,
             installation_id=installation_id,
             mapping_generation=mapping_generation,

@@ -8,7 +8,7 @@ from ...types import Response, UNSET
 from ... import errors
 
 from ...models.bounded_error_response import BoundedErrorResponse
-from ...models.fleet_status_response import FleetStatusResponse
+from ...models.fleet_snapshot import FleetSnapshot
 from typing import cast
 
 
@@ -32,9 +32,9 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, FleetStatusResponse]]:
+def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, FleetSnapshot]]:
     if response.status_code == 200:
-        response_200 = FleetStatusResponse.from_dict(response.json())
+        response_200 = FleetSnapshot.from_dict(response.json())
 
 
 
@@ -47,13 +47,20 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
 
         return response_401
 
+    if response.status_code == 503:
+        response_503 = BoundedErrorResponse.from_dict(response.json())
+
+
+
+        return response_503
+
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
     else:
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, FleetStatusResponse]]:
+def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, FleetSnapshot]]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -66,7 +73,7 @@ def sync_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[Union[BoundedErrorResponse, FleetStatusResponse]]:
+) -> Response[Union[BoundedErrorResponse, FleetSnapshot]]:
     """ Fleet View
 
     Raises:
@@ -74,7 +81,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, FleetStatusResponse]]
+        Response[Union[BoundedErrorResponse, FleetSnapshot]]
      """
 
 
@@ -92,7 +99,7 @@ def sync(
     *,
     client: AuthenticatedClient,
 
-) -> Optional[Union[BoundedErrorResponse, FleetStatusResponse]]:
+) -> Optional[Union[BoundedErrorResponse, FleetSnapshot]]:
     """ Fleet View
 
     Raises:
@@ -100,7 +107,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, FleetStatusResponse]
+        Union[BoundedErrorResponse, FleetSnapshot]
      """
 
 
@@ -113,7 +120,7 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[Union[BoundedErrorResponse, FleetStatusResponse]]:
+) -> Response[Union[BoundedErrorResponse, FleetSnapshot]]:
     """ Fleet View
 
     Raises:
@@ -121,7 +128,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, FleetStatusResponse]]
+        Response[Union[BoundedErrorResponse, FleetSnapshot]]
      """
 
 
@@ -139,7 +146,7 @@ async def asyncio(
     *,
     client: AuthenticatedClient,
 
-) -> Optional[Union[BoundedErrorResponse, FleetStatusResponse]]:
+) -> Optional[Union[BoundedErrorResponse, FleetSnapshot]]:
     """ Fleet View
 
     Raises:
@@ -147,7 +154,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, FleetStatusResponse]
+        Union[BoundedErrorResponse, FleetSnapshot]
      """
 
 

@@ -635,6 +635,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/fleet/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Fleet Event Stream */
+        get: operations["streamFleetEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/jobs": {
         parameters: {
             query?: never;
@@ -720,6 +737,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/library": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Library */
+        get: operations["listLibrary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/library/recipes/{recipe_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Library Recipe */
+        get: operations["getLibraryRecipe"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/nodes/status": {
         parameters: {
             query?: never;
@@ -729,6 +780,23 @@ export interface paths {
         };
         /** Node Status View */
         get: operations["getNodeStatuses"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nodes/{node_id}/telemetry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Node Telemetry History */
+        get: operations["getNodeTelemetryHistory"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1281,6 +1349,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/recipes/stop-plans/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Stop */
+        post: operations["previewRecipeStop"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/recipes/uninstall-plans/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Uninstall */
+        post: operations["previewRecipeUninstall"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/reconciliations": {
         parameters: {
             query?: never;
@@ -1538,6 +1640,19 @@ export interface components {
             /** Request Key */
             request_key: string;
         };
+        /** CapacityReservations */
+        CapacityReservations: {
+            /** Disk Bytes */
+            disk_bytes: number;
+            /** Gpu Memory Bytes */
+            gpu_memory_bytes: number;
+            /** Host Memory Bytes */
+            host_memory_bytes: number;
+            /** Port Count */
+            port_count: number;
+            /** Unified Memory Bytes */
+            unified_memory_bytes: number;
+        };
         /** CatalogProblem */
         CatalogProblem: {
             /** Code */
@@ -1670,6 +1785,51 @@ export interface components {
             /** State */
             state: string;
         };
+        /** FleetNode */
+        FleetNode: {
+            connection: components["schemas"]["NodeConnection"];
+            /** Display Name */
+            display_name: string;
+            /** Hostname */
+            hostname: string;
+            /** Id */
+            id: string;
+            /** Installed */
+            installed: components["schemas"]["RecipePresence"][];
+            inventory: components["schemas"]["InventoryState"] | null;
+            /** Labels */
+            labels: {
+                [key: string]: string;
+            };
+            /** Lifecycle */
+            lifecycle: string;
+            /** Loaded */
+            loaded: components["schemas"]["RunPresence"][];
+            reservations: components["schemas"]["CapacityReservations"];
+            telemetry: components["schemas"]["TelemetryState"] | null;
+            /** Warnings */
+            warnings: components["schemas"]["vonk_control__fleet_projection__ProjectionReason"][];
+        };
+        /** FleetSnapshot */
+        FleetSnapshot: {
+            /** Event Cursor */
+            event_cursor: number;
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /** Nodes */
+            nodes: components["schemas"]["FleetNode"][];
+            /** Repository Commit */
+            repository_commit: string;
+            /**
+             * Schema Version
+             * @default 1
+             * @constant
+             */
+            schema_version: 1;
+        };
         /** FleetStatusResponse */
         FleetStatusResponse: {
             /** Commit */
@@ -1685,6 +1845,24 @@ export interface components {
             revision: number;
             /** Slug */
             slug: string;
+        };
+        /** FreshnessPolicy */
+        FreshnessPolicy: {
+            /**
+             * Inventory Fresh Seconds
+             * @default 300
+             */
+            inventory_fresh_seconds: number;
+            /**
+             * Telemetry Delayed Seconds
+             * @default 20
+             */
+            telemetry_delayed_seconds: number;
+            /**
+             * Telemetry Live Seconds
+             * @default 6
+             */
+            telemetry_live_seconds: number;
         };
         /** GlobalImportPreviewRequest */
         GlobalImportPreviewRequest: {
@@ -1794,12 +1972,28 @@ export interface components {
             /** Recipe Revision Id */
             recipe_revision_id: string;
         };
+        /** InstallPreviewInput */
+        InstallPreviewInput: {
+            /** Mapping Id */
+            mapping_id: string;
+            /** Recipe Build Id */
+            recipe_build_id: string;
+        };
         /** InstallPreviewRequest */
         InstallPreviewRequest: {
             /** Mapping Id */
             mapping_id: string;
             /** Recipe Build Id */
             recipe_build_id: string;
+        };
+        /** InstallPreviewTarget */
+        InstallPreviewTarget: {
+            input: components["schemas"]["InstallPreviewInput"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "install";
         };
         /** InstallRequest */
         InstallRequest: {
@@ -1811,6 +2005,52 @@ export interface components {
             recipe_build_id: string;
             /** Request Key */
             request_key: string;
+        };
+        /** InventoryState */
+        InventoryState: {
+            /** Age Seconds */
+            age_seconds: number;
+            /** Artifact Store Read Only */
+            artifact_store_read_only: boolean;
+            /** Capabilities */
+            capabilities: string[];
+            /** Container Runtime Version */
+            container_runtime_version: string;
+            /** Disk Free Bytes */
+            disk_free_bytes: number;
+            /** Disk Total Bytes */
+            disk_total_bytes: number;
+            /** Fabric Address */
+            fabric_address?: string | null;
+            /** Fabric Bandwidth Mbps */
+            fabric_bandwidth_mbps?: number | null;
+            /**
+             * Freshness
+             * @enum {string}
+             */
+            freshness: "fresh" | "stale";
+            /** Gpu Count */
+            gpu_count: number;
+            /** Gpu Memory Free Bytes */
+            gpu_memory_free_bytes: number;
+            /** Gpu Memory Total Bytes */
+            gpu_memory_total_bytes: number;
+            /** Host Memory Free Bytes */
+            host_memory_free_bytes: number;
+            /** Host Memory Total Bytes */
+            host_memory_total_bytes: number;
+            /** Nvidia Driver Version */
+            nvidia_driver_version: string;
+            /**
+             * Observed At
+             * Format: date-time
+             */
+            observed_at: string;
+            /**
+             * Received At
+             * Format: date-time
+             */
+            received_at: string;
         };
         /** JobDetailResponse */
         JobDetailResponse: {
@@ -1908,6 +2148,164 @@ export interface components {
             /** Total */
             total: number;
         };
+        /** LibraryInstallationSummary */
+        LibraryInstallationSummary: {
+            /** Complete */
+            complete: boolean;
+            /** Expected Rank Count */
+            expected_rank_count: number;
+            /** Installation Id */
+            installation_id: string;
+            /** Installed Rank Count */
+            installed_rank_count: number;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "planned" | "installing" | "installed" | "partial" | "failed";
+        };
+        /** LibraryModel */
+        LibraryModel: {
+            /** Display Name */
+            display_name: string;
+            /** Family */
+            family: string;
+            /**
+             * Page Local
+             * @default true
+             * @constant
+             */
+            page_local: true;
+            /** Recipes */
+            recipes: components["schemas"]["LibraryRecipeSummary"][];
+        };
+        /** LibraryRecipeDetail */
+        LibraryRecipeDetail: {
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            operational_state: components["schemas"]["OperationalState"];
+            /** Placement */
+            placement: components["schemas"]["ProfilePlacement"][];
+            /** Profiles */
+            profiles: components["schemas"]["RecipeProfile"][];
+            /** Reasons */
+            reasons: components["schemas"]["vonk_control__library_contract__ProjectionReason"][];
+            recipe: components["schemas"]["LibraryRecipeIdentity"];
+            /**
+             * Schema Version
+             * @default 1
+             * @constant
+             */
+            schema_version: 1;
+            selected_revision: components["schemas"]["RecipeRevisionSummary"] | null;
+            visual_recipe: components["schemas"]["VisualRecipeDocument"] | null;
+        };
+        /** LibraryRecipeIdentity */
+        LibraryRecipeIdentity: {
+            /** Description */
+            description: string;
+            /** Recipe Id */
+            recipe_id: string;
+            /** Slug */
+            slug: string;
+            /**
+             * Source Kind
+             * @enum {string}
+             */
+            source_kind: "local" | "workload_run" | "global";
+            /** Title */
+            title: string;
+        };
+        /** LibraryRecipeSummary */
+        LibraryRecipeSummary: {
+            /** Capabilities */
+            capabilities: string[];
+            /** Description */
+            description: string;
+            /** Installation Returned Count */
+            installation_returned_count: number;
+            /** Installation Total Count */
+            installation_total_count: number;
+            /** Installations */
+            installations: components["schemas"]["LibraryInstallationSummary"][];
+            /** Installations Truncated */
+            installations_truncated: boolean;
+            /** Profiles */
+            profiles: components["schemas"]["RecipeProfileSummary"][];
+            /** Reasons */
+            reasons: components["schemas"]["vonk_control__library_contract__ProjectionReason"][];
+            /** Recipe Id */
+            recipe_id: string;
+            /** Run Returned Count */
+            run_returned_count: number;
+            /** Run Total Count */
+            run_total_count: number;
+            /** Runs */
+            runs: components["schemas"]["LibraryRunSummary"][];
+            /** Runs Truncated */
+            runs_truncated: boolean;
+            selected_revision: components["schemas"]["RecipeRevisionSummary"] | null;
+            /** Slug */
+            slug: string;
+            /**
+             * Source Kind
+             * @enum {string}
+             */
+            source_kind: "local" | "workload_run" | "global";
+            /** Title */
+            title: string;
+        };
+        /** LibraryRunSummary */
+        LibraryRunSummary: {
+            /** Expected Rank Count */
+            expected_rank_count: number;
+            /** Healthy */
+            healthy: boolean;
+            /** Healthy Rank Count */
+            healthy_rank_count: number;
+            /** Installation Id */
+            installation_id: string;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /**
+             * Route State
+             * @enum {string}
+             */
+            route_state: "withdrawn" | "pending" | "published" | "failed";
+            /** Run Id */
+            run_id: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "planned" | "starting" | "running" | "stopping";
+        };
+        /** LibrarySnapshot */
+        LibrarySnapshot: {
+            freshness_policy: components["schemas"]["FreshnessPolicy"];
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /** Models */
+            models: components["schemas"]["LibraryModel"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+            /**
+             * Schema Version
+             * @default 1
+             * @constant
+             */
+            schema_version: 1;
+            /** Unlinked Recipes */
+            unlinked_recipes: components["schemas"]["LibraryRecipeSummary"][];
+        };
         /** LoginRequest */
         LoginRequest: {
             /** Password */
@@ -1956,6 +2354,19 @@ export interface components {
             /** Recipe Revision Id */
             recipe_revision_id: string;
         };
+        /** MappingPreviewInput */
+        MappingPreviewInput: {
+            /** Node Ids */
+            node_ids: string[];
+            /** Parameters */
+            parameters: {
+                [key: string]: string | number | boolean;
+            };
+            /** Profile Name */
+            profile_name: string;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+        };
         /** MappingPreviewRequest */
         MappingPreviewRequest: {
             /** Node Ids */
@@ -1968,6 +2379,15 @@ export interface components {
             profile_name: string;
             /** Recipe Revision Id */
             recipe_revision_id: string;
+        };
+        /** MappingPreviewTarget */
+        MappingPreviewTarget: {
+            input: components["schemas"]["MappingPreviewInput"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "mapping";
         };
         /** MappingRequest */
         MappingRequest: {
@@ -2002,6 +2422,30 @@ export interface components {
              * @default 600
              */
             ttl_seconds: number;
+        };
+        /** NodeConnection */
+        NodeConnection: {
+            /**
+             * Agent State
+             * @enum {string}
+             */
+            agent_state: "unregistered" | "pending" | "active" | "retired" | "revoked";
+            /**
+             * Certificate State
+             * @enum {string}
+             */
+            certificate_state: "valid" | "missing" | "not-yet-valid" | "expired" | "revoked" | "inactive";
+            /** Last Seen Age Seconds */
+            last_seen_age_seconds: number | null;
+            /** Last Seen At */
+            last_seen_at: string | null;
+            /** Offline Reason */
+            offline_reason: ("unregistered" | "agent-inactive" | "agent-revoked" | "never-seen" | "last-seen-in-future" | "stale" | "certificate-missing" | "certificate-not-yet-valid" | "certificate-expired" | "certificate-revoked" | "certificate-inactive") | null;
+            /**
+             * Online State
+             * @enum {string}
+             */
+            online_state: "online" | "offline" | "unregistered";
         };
         /** NodeStatus */
         NodeStatus: {
@@ -2098,6 +2542,103 @@ export interface components {
             } | null;
             /** State */
             state: string;
+        };
+        /** OperationalBuild */
+        OperationalBuild: {
+            /** Image Bytes */
+            image_bytes?: number | null;
+            /** Image Digest */
+            image_digest: string | null;
+            /** Recipe Build Id */
+            recipe_build_id: string;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "planned" | "building" | "succeeded" | "failed";
+        };
+        /** OperationalInstallation */
+        OperationalInstallation: {
+            /** Installation Id */
+            installation_id: string;
+            /** Mapping Id */
+            mapping_id: string;
+            /** Node Ids */
+            node_ids: string[];
+            /** Recipe Build Id */
+            recipe_build_id: string;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "planned" | "installing" | "installed" | "partial" | "failed" | "uninstalled";
+        };
+        /** OperationalMapping */
+        OperationalMapping: {
+            /** Generation */
+            generation: number;
+            /** Mapping Id */
+            mapping_id: string;
+            /** Nodes */
+            nodes: components["schemas"]["OperationalMappingNode"][];
+            /** Profile Name */
+            profile_name: string;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "planned" | "ready" | "stale";
+        };
+        /** OperationalMappingNode */
+        OperationalMappingNode: {
+            /** Endpoint Owner */
+            endpoint_owner: boolean;
+            /** Node Id */
+            node_id: string;
+            /** Rank */
+            rank: number;
+            /** Role */
+            role: string;
+        };
+        /** OperationalRun */
+        OperationalRun: {
+            /** Installation Id */
+            installation_id: string;
+            /** Mapping Id */
+            mapping_id: string;
+            /** Node Ids */
+            node_ids: string[];
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /**
+             * Route State
+             * @enum {string}
+             */
+            route_state: "withdrawn" | "pending" | "published" | "failed";
+            /** Run Id */
+            run_id: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "planned" | "starting" | "running" | "stopping" | "stopped" | "failed" | "lost";
+        };
+        /** OperationalState */
+        OperationalState: {
+            /** Builds */
+            builds: components["schemas"]["OperationalBuild"][];
+            /** Installations */
+            installations: components["schemas"]["OperationalInstallation"][];
+            /** Mappings */
+            mappings: components["schemas"]["OperationalMapping"][];
+            /** Runs */
+            runs: components["schemas"]["OperationalRun"][];
         };
         /** PackageCandidateResponse */
         PackageCandidateResponse: {
@@ -2539,6 +3080,193 @@ export interface components {
             /** World Size */
             world_size: number;
         };
+        /** PlacementEvidenceCounts */
+        PlacementEvidenceCounts: {
+            /** Builds */
+            builds: number;
+            /** Installation Members */
+            installation_members: number;
+            /** Installations */
+            installations: number;
+            /** Mapping Members */
+            mapping_members: number;
+            /** Mappings */
+            mappings: number;
+            /** Run Members */
+            run_members: number;
+            /** Runs */
+            runs: number;
+            /** Truncated Collections */
+            truncated_collections: ("builds" | "mappings" | "mapping_members" | "installations" | "installation_members" | "runs" | "run_members")[];
+        };
+        /** PlacementLimits */
+        PlacementLimits: {
+            /**
+             * Artifact Evidence Per Node Limit
+             * @default 512
+             * @constant
+             */
+            artifact_evidence_per_node_limit: 512;
+            /**
+             * Candidate Node Limit
+             * @default 32
+             * @constant
+             */
+            candidate_node_limit: 32;
+            /**
+             * Examined Group Limit
+             * @default 512
+             * @constant
+             */
+            examined_group_limit: 512;
+            /**
+             * Operational Member Evidence Limit
+             * @default 16384
+             * @constant
+             */
+            operational_member_evidence_limit: 16384;
+            /**
+             * Operational Row Evidence Limit
+             * @default 512
+             * @constant
+             */
+            operational_row_evidence_limit: 512;
+            /**
+             * Recommendation Limit
+             * @default 16
+             * @constant
+             */
+            recommendation_limit: 16;
+            /**
+             * Rejected Group Evidence Limit
+             * @default 16
+             * @constant
+             */
+            rejected_group_evidence_limit: 16;
+            /**
+             * Rejected Node Evidence Limit
+             * @default 32
+             * @constant
+             */
+            rejected_node_evidence_limit: 32;
+        };
+        /** PlacementNode */
+        PlacementNode: {
+            /** Artifact Reuse Bytes */
+            artifact_reuse_bytes: number;
+            /** Disk Free After Bytes */
+            disk_free_after_bytes: number;
+            /** Disk Free Bytes */
+            disk_free_bytes: number;
+            /** Disk Required Bytes */
+            disk_required_bytes: number;
+            /** Disk Reserved Bytes */
+            disk_reserved_bytes: number;
+            /** Endpoint Owner */
+            endpoint_owner: boolean;
+            /** Fabric Address */
+            fabric_address: string | null;
+            /** Fabric Bandwidth Mbps */
+            fabric_bandwidth_mbps?: number | null;
+            /** Inventory Age Seconds */
+            inventory_age_seconds: number;
+            /**
+             * Inventory Observed At
+             * Format: date-time
+             */
+            inventory_observed_at: string;
+            /** Memory Available Bytes */
+            memory_available_bytes: number;
+            /** Memory Free After Bytes */
+            memory_free_after_bytes: number;
+            /**
+             * Memory Kind
+             * @enum {string}
+             */
+            memory_kind: "unified" | "host" | "accelerator";
+            /** Memory Required Bytes */
+            memory_required_bytes: number;
+            /** Memory Reserved Bytes */
+            memory_reserved_bytes: number;
+            /** Node Id */
+            node_id: string;
+            /** Rank */
+            rank: number;
+            /** Role */
+            role: string;
+            /** Telemetry Age Seconds */
+            telemetry_age_seconds: number;
+            /**
+             * Telemetry Observed At
+             * Format: date-time
+             */
+            telemetry_observed_at: string;
+        };
+        /** PlacementRecommendation */
+        PlacementRecommendation: {
+            /** Eligible */
+            eligible: boolean;
+            /**
+             * Group Complete
+             * @default true
+             * @constant
+             */
+            group_complete: true;
+            /**
+             * Install State
+             * @enum {string}
+             */
+            install_state: "complete" | "partial" | "not_present" | "unknown";
+            /** Installation Ids */
+            installation_ids: string[];
+            /**
+             * Load State
+             * @enum {string}
+             */
+            load_state: "loaded" | "not_loaded" | "unknown";
+            /** Mapping Id */
+            mapping_id: string | null;
+            /** Node Ids */
+            node_ids: string[];
+            /** Nodes */
+            nodes: components["schemas"]["PlacementNode"][];
+            /** Preview Targets */
+            preview_targets: (components["schemas"]["MappingPreviewTarget"] | components["schemas"]["InstallPreviewTarget"] | components["schemas"]["RunPreviewTarget"])[];
+            /** Profile Name */
+            profile_name: string;
+            /**
+             * Ranking Scope
+             * @default bounded-advisory
+             * @constant
+             */
+            ranking_scope: "bounded-advisory";
+            /** Reasons */
+            reasons: components["schemas"]["vonk_control__library_contract__ProjectionReason"][];
+            /** Recipe Build Id */
+            recipe_build_id: string | null;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /** Run Ids */
+            run_ids: string[];
+            score: components["schemas"]["PlacementScore"];
+        };
+        /** PlacementScore */
+        PlacementScore: {
+            /** Active Run Count */
+            active_run_count: number;
+            /** Artifact Reuse Bytes */
+            artifact_reuse_bytes: number;
+            /** Exact Install Complete */
+            exact_install_complete: boolean;
+            /** Exact Install Partial */
+            exact_install_partial: boolean;
+            /** Maximum Telemetry Age Seconds */
+            maximum_telemetry_age_seconds: number;
+            /** Minimum Disk Headroom Bytes */
+            minimum_disk_headroom_bytes: number;
+            /** Minimum Memory Headroom Bytes */
+            minimum_memory_headroom_bytes: number;
+        };
         /** PlanEndpoint */
         PlanEndpoint: {
             /** Path */
@@ -2738,6 +3466,31 @@ export interface components {
             /** Source Yaml */
             source_yaml: string;
         };
+        /** ProfilePlacement */
+        ProfilePlacement: {
+            /** Candidate Node Ids */
+            candidate_node_ids: string[];
+            /** Evaluated Group Count */
+            evaluated_group_count: number;
+            evidence_counts: components["schemas"]["PlacementEvidenceCounts"];
+            limits: components["schemas"]["PlacementLimits"];
+            /** Node Count */
+            node_count: number;
+            /** Profile Name */
+            profile_name: string;
+            /** Reasons */
+            reasons: components["schemas"]["vonk_control__library_contract__ProjectionReason"][];
+            /** Recommendations */
+            recommendations: components["schemas"]["PlacementRecommendation"][];
+            /** Rejected Evidence Truncated */
+            rejected_evidence_truncated: boolean;
+            /** Rejected Groups */
+            rejected_groups: components["schemas"]["PlacementRecommendation"][];
+            /** Rejected Nodes */
+            rejected_nodes: components["schemas"]["RejectedNode"][];
+            /** Search Complete */
+            search_complete: boolean;
+        };
         /** ProposalChangeRequest */
         ProposalChangeRequest: {
             /** Document */
@@ -2759,12 +3512,143 @@ export interface components {
             /** Publisher */
             publisher: string;
         };
+        /** RecipeDiskRequirements */
+        RecipeDiskRequirements: {
+            /** Artifact Bytes */
+            artifact_bytes: number;
+            /** Cache Bytes */
+            cache_bytes: number;
+            /** Image Bytes */
+            image_bytes: number;
+            /** Rollback Bytes */
+            rollback_bytes: number;
+            /** Safety Margin Bytes */
+            safety_margin_bytes: number;
+            /** Staging Bytes */
+            staging_bytes: number;
+        };
+        /** RecipeFabric */
+        RecipeFabric: {
+            /**
+             * Connectivity
+             * @enum {string}
+             */
+            connectivity: "none" | "connected" | "full_mesh" | "switch";
+            /** Minimum Bandwidth Mbps */
+            minimum_bandwidth_mbps: number;
+        };
         /** RecipeListResponse */
         RecipeListResponse: {
             /** Next Cursor */
             next_cursor?: string | null;
             /** Recipes */
             recipes: components["schemas"]["RecipeSummaryResponse"][];
+        };
+        /** RecipeMemoryRequirements */
+        RecipeMemoryRequirements: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "unified" | "host" | "accelerator";
+            /** Runtime Growth Bytes */
+            runtime_growth_bytes: number;
+            /** Startup Peak Bytes */
+            startup_peak_bytes: number;
+            /** Steady State Bytes */
+            steady_state_bytes: number;
+            /** System Reserve Bytes */
+            system_reserve_bytes: number;
+        };
+        /** RecipeParallelism */
+        RecipeParallelism: {
+            /** Backend */
+            backend: string;
+            /** Data */
+            data: number;
+            /** Pipeline */
+            pipeline: number;
+            /** Tensor */
+            tensor: number;
+        };
+        /** RecipePresence */
+        RecipePresence: {
+            /** Complete */
+            complete: boolean;
+            /** Degraded Reason */
+            degraded_reason?: ("external-member" | "mapping-incomplete" | "missing-ranks" | "unexpected-ranks" | "rank-membership-mismatch" | "installation-not-installed" | "rank-not-installed" | "rank-incomplete-bytes") | null;
+            /** Expected Rank Count */
+            expected_rank_count: number;
+            /**
+             * Group State
+             * @enum {string}
+             */
+            group_state: "planned" | "installing" | "installed" | "partial" | "failed" | "uninstalled";
+            /** Installation Id */
+            installation_id: string;
+            /** Member Node Ids */
+            member_node_ids: string[];
+            /** Present Ranks */
+            present_ranks: number[];
+            /** Profile Name */
+            profile_name: string;
+            /** Rank */
+            rank: number;
+            /**
+             * Rank State
+             * @enum {string}
+             */
+            rank_state: "planned" | "installing" | "installed" | "partial" | "failed" | "uninstalled";
+            /** Recipe Id */
+            recipe_id: string;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /** Role */
+            role: string;
+            /** Title */
+            title: string;
+        };
+        /** RecipeProfile */
+        RecipeProfile: {
+            /** Description */
+            description: string;
+            fabric: components["schemas"]["RecipeFabric"];
+            /**
+             * Measurement
+             * @enum {string}
+             */
+            measurement: "declared" | "derived" | "measured";
+            /** Name */
+            name: string;
+            /** Node Count */
+            node_count: number;
+            parallelism: components["schemas"]["RecipeParallelism"];
+            /** Parameter Overrides */
+            parameter_overrides: {
+                [key: string]: string | number | boolean | null;
+            };
+            /** Roles */
+            roles: components["schemas"]["RecipeRole"][];
+            /** Strategy */
+            strategy: string;
+        };
+        /** RecipeProfileSummary */
+        RecipeProfileSummary: {
+            /** Description */
+            description: string;
+            /**
+             * Fabric Connectivity
+             * @enum {string}
+             */
+            fabric_connectivity: "none" | "connected" | "full_mesh" | "switch";
+            /** Minimum Bandwidth Mbps */
+            minimum_bandwidth_mbps: number;
+            /** Name */
+            name: string;
+            /** Node Count */
+            node_count: number;
+            /** Roles */
+            roles: string[];
         };
         /** RecipeRevisionResponse */
         RecipeRevisionResponse: {
@@ -2819,6 +3703,40 @@ export interface components {
             source_bundle_sha256: string;
             /** Title */
             title: string;
+        };
+        /** RecipeRevisionSummary */
+        RecipeRevisionSummary: {
+            /** Content Sha256 */
+            content_sha256: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: string;
+            /**
+             * Lifecycle
+             * @enum {string}
+             */
+            lifecycle: "draft" | "blocked" | "resolved" | "deprecated";
+            /** Revision Number */
+            revision_number: number;
+            /** Schema Version */
+            schema_version: number;
+        };
+        /** RecipeRole */
+        RecipeRole: {
+            /** Artifacts */
+            artifacts: string[];
+            /** Count */
+            count: number;
+            disk: components["schemas"]["RecipeDiskRequirements"];
+            /** Endpoint Owner */
+            endpoint_owner: boolean;
+            memory: components["schemas"]["RecipeMemoryRequirements"];
+            /** Name */
+            name: string;
         };
         /** RecipeSummaryResponse */
         RecipeSummaryResponse: {
@@ -2912,6 +3830,13 @@ export interface components {
             /** Reason */
             reason: string;
         };
+        /** RejectedNode */
+        RejectedNode: {
+            /** Node Id */
+            node_id: string;
+            /** Reasons */
+            reasons: components["schemas"]["vonk_control__library_contract__ProjectionReason"][];
+        };
         /** RequestKey */
         RequestKey: {
             /** Request Key */
@@ -2972,6 +3897,8 @@ export interface components {
         };
         /** RunPlanResponse */
         RunPlanResponse: {
+            /** Alias */
+            alias: string;
             /** Allowed */
             allowed: boolean;
             /** Installation Id */
@@ -2987,10 +3914,79 @@ export interface components {
             /** Recipe Revision Id */
             recipe_revision_id: string;
         };
-        /** RunPreviewRequest */
-        RunPreviewRequest: {
+        /** RunPresence */
+        RunPresence: {
+            /** Alias */
+            alias: string;
+            /** Degraded Reason */
+            degraded_reason?: ("external-member" | "mapping-incomplete" | "missing-ranks" | "unexpected-ranks" | "rank-membership-mismatch" | "run-not-running" | "rank-not-running" | "rank-stale" | "route-not-published") | null;
+            /** Expected Rank Count */
+            expected_rank_count: number;
+            /**
+             * Group State
+             * @enum {string}
+             */
+            group_state: "healthy" | "degraded";
+            /** Healthy */
+            healthy: boolean;
             /** Installation Id */
             installation_id: string;
+            /** Member Node Ids */
+            member_node_ids: string[];
+            /** Present Ranks */
+            present_ranks: number[];
+            /** Rank */
+            rank: number;
+            /** Rank Age Seconds */
+            rank_age_seconds: number;
+            /** Rank Fresh */
+            rank_fresh: boolean;
+            /**
+             * Rank State
+             * @enum {string}
+             */
+            rank_state: "planned" | "starting" | "running" | "stopping" | "stopped" | "failed" | "lost";
+            /** Recipe Id */
+            recipe_id: string;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /** Role */
+            role: string;
+            /**
+             * Route State
+             * @enum {string}
+             */
+            route_state: "withdrawn" | "pending" | "published" | "failed";
+            /** Run Id */
+            run_id: string;
+            /**
+             * Run State
+             * @enum {string}
+             */
+            run_state: "planned" | "starting" | "running" | "stopping" | "stopped" | "failed" | "lost";
+            /** Title */
+            title: string;
+        };
+        /** RunPreviewInput */
+        RunPreviewInput: {
+            /** Installation Id */
+            installation_id: string;
+        };
+        /** RunPreviewRequest */
+        RunPreviewRequest: {
+            /** Alias */
+            alias: string;
+            /** Installation Id */
+            installation_id: string;
+        };
+        /** RunPreviewTarget */
+        RunPreviewTarget: {
+            input: components["schemas"]["RunPreviewInput"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "run";
         };
         /** RunRankStatusResponse */
         RunRankStatusResponse: {
@@ -3078,12 +4074,296 @@ export interface components {
             /** Source Bundle Sha256 */
             source_bundle_sha256: string;
         };
+        /** StopNodeImpactResponse */
+        StopNodeImpactResponse: {
+            /** Active Memory Reservation Bytes */
+            active_memory_reservation_bytes: number;
+            /** Node Id */
+            node_id: string;
+            /** Rank */
+            rank: number;
+            /** Reserved Memory Bytes */
+            reserved_memory_bytes: number;
+            /** Role */
+            role: string;
+            /** State */
+            state: string;
+        };
+        /** StopPlanResponse */
+        StopPlanResponse: {
+            /** Alias */
+            alias: string;
+            /** Allowed */
+            allowed: boolean;
+            /** Authority Digest */
+            authority_digest: string;
+            /** Blockers */
+            blockers: components["schemas"]["PlanReason"][];
+            /** Installation Id */
+            installation_id: string;
+            /** Nodes */
+            nodes: components["schemas"]["StopNodeImpactResponse"][];
+            /** Plan Digest */
+            plan_digest: string;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /** Route Digest */
+            route_digest?: string | null;
+            /** Route Generation */
+            route_generation?: number | null;
+            /** Route State */
+            route_state: string;
+            /** Route Withdrawal */
+            route_withdrawal: boolean;
+            /** Run Id */
+            run_id: string;
+            /** Run State */
+            run_state: string;
+            /** Total Active Memory Reservation Bytes */
+            total_active_memory_reservation_bytes: number;
+            /** Warnings */
+            warnings: components["schemas"]["PlanReason"][];
+        };
+        /** StopPreviewRequest */
+        StopPreviewRequest: {
+            /** Run Id */
+            run_id: string;
+        };
+        /** StopRequest */
+        StopRequest: {
+            /** Plan Digest */
+            plan_digest: string;
+            /** Request Key */
+            request_key: string;
+        };
+        /** TelemetryDetails */
+        TelemetryDetails: {
+            /** Accelerator Name */
+            accelerator_name?: string | null;
+            /** Accelerator Performance State */
+            accelerator_performance_state?: string | null;
+        };
+        /** TelemetryHistoryResponse */
+        TelemetryHistoryResponse: {
+            /**
+             * End
+             * Format: date-time
+             */
+            end: string;
+            /** Maximum Points */
+            maximum_points: number;
+            /** Node Id */
+            node_id: string;
+            /** Points */
+            points: (components["schemas"]["TelemetryPoint"] | components["schemas"]["TelemetryRollupPoint"])[];
+            /**
+             * Resolution
+             * @enum {string}
+             */
+            resolution: "raw" | "minute" | "fifteen-minute";
+            /**
+             * Schema Version
+             * @default 1
+             * @constant
+             */
+            schema_version: 1;
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+        };
+        /** TelemetryMetricSummary */
+        TelemetryMetricSummary: {
+            /** Count */
+            count: number;
+            /** Maximum */
+            maximum: number;
+            /** Mean */
+            mean: number;
+            /** Minimum */
+            minimum: number;
+        };
+        /** TelemetryPoint */
+        TelemetryPoint: {
+            /** Boot Id */
+            boot_id: string;
+            /** Cpu Utilization Percent */
+            cpu_utilization_percent?: number | null;
+            details: components["schemas"]["TelemetryDetails"];
+            /** Disk Free Bytes */
+            disk_free_bytes?: number | null;
+            /** Disk Total Bytes */
+            disk_total_bytes?: number | null;
+            /** Gap Samples */
+            gap_samples: number;
+            /** Gpu Memory Free Bytes */
+            gpu_memory_free_bytes?: number | null;
+            /** Gpu Memory Total Bytes */
+            gpu_memory_total_bytes?: number | null;
+            /** Gpu Utilization Percent */
+            gpu_utilization_percent?: number | null;
+            /** Id */
+            id: string;
+            /** Load Average 1M */
+            load_average_1m?: number | null;
+            /** Memory Available Bytes */
+            memory_available_bytes?: number | null;
+            /** Memory Total Bytes */
+            memory_total_bytes?: number | null;
+            /** Network Receive Bytes Per Second */
+            network_receive_bytes_per_second?: number | null;
+            /** Network Transmit Bytes Per Second */
+            network_transmit_bytes_per_second?: number | null;
+            /** Node Id */
+            node_id: string;
+            /**
+             * Observed At
+             * Format: date-time
+             */
+            observed_at: string;
+            /** Power Watts */
+            power_watts?: number | null;
+            /**
+             * Received At
+             * Format: date-time
+             */
+            received_at: string;
+            /** Sequence */
+            sequence: number;
+            /** Temperature C */
+            temperature_c?: number | null;
+        };
+        /** TelemetryRollupPoint */
+        TelemetryRollupPoint: {
+            /**
+             * Bucket End
+             * Format: date-time
+             */
+            bucket_end: string;
+            /**
+             * Bucket Start
+             * Format: date-time
+             */
+            bucket_start: string;
+            /** Gap Samples */
+            gap_samples: number;
+            /** Metrics */
+            metrics: {
+                [key: string]: components["schemas"]["TelemetryMetricSummary"];
+            };
+            /** Node Id */
+            node_id: string;
+            /**
+             * Resolution
+             * @enum {string}
+             */
+            resolution: "minute" | "fifteen-minute";
+            /** Source Sample Count */
+            source_sample_count: number;
+        };
+        /** TelemetryState */
+        TelemetryState: {
+            /** Age Seconds */
+            age_seconds: number;
+            /**
+             * Freshness
+             * @enum {string}
+             */
+            freshness: "live" | "delayed" | "stale";
+            sample: components["schemas"]["TelemetryPoint"];
+        };
         /** TestReportRequest */
         TestReportRequest: {
             /** Report */
             report: {
                 [key: string]: unknown;
             };
+        };
+        /** UninstallActiveRunResponse */
+        UninstallActiveRunResponse: {
+            /** Alias */
+            alias: string;
+            /** Route State */
+            route_state: string;
+            /** Run Id */
+            run_id: string;
+            /** State */
+            state: string;
+        };
+        /** UninstallConsequencesResponse */
+        UninstallConsequencesResponse: {
+            /** Automatic Stop */
+            automatic_stop: boolean;
+            /** Catalog Retained */
+            catalog_retained: boolean;
+            /** Reinstall Required */
+            reinstall_required: boolean;
+        };
+        /** UninstallNodeImpactResponse */
+        UninstallNodeImpactResponse: {
+            /** Installed Bytes */
+            installed_bytes?: number | null;
+            /** Node Id */
+            node_id: string;
+            /** Rank */
+            rank: number;
+            /** Role */
+            role: string;
+            /** State */
+            state: string;
+        };
+        /** UninstallPlanResponse */
+        UninstallPlanResponse: {
+            /** Active Run Count */
+            active_run_count: number;
+            /** Active Runs */
+            active_runs: components["schemas"]["UninstallActiveRunResponse"][];
+            /** Active Runs Truncated */
+            active_runs_truncated: boolean;
+            /** Allowed */
+            allowed: boolean;
+            /** Blockers */
+            blockers: components["schemas"]["PlanReason"][];
+            /** Bytes Removed */
+            bytes_removed?: number | null;
+            consequences: components["schemas"]["UninstallConsequencesResponse"];
+            /** Installation Authority Digest */
+            installation_authority_digest: string;
+            /** Installation Id */
+            installation_id: string;
+            /** Installation State */
+            installation_state: string;
+            /** Nodes */
+            nodes: components["schemas"]["UninstallNodeImpactResponse"][];
+            /** Original Plan Digest */
+            original_plan_digest: string;
+            /** Plan Digest */
+            plan_digest: string;
+            /** Recipe Content */
+            recipe_content: {
+                [key: string]: unknown;
+            };
+            /** Recipe Content Sha256 */
+            recipe_content_sha256: string;
+            /** Recipe Id */
+            recipe_id: string;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /** Warnings */
+            warnings: components["schemas"]["PlanReason"][];
+        };
+        /** UninstallPreviewRequest */
+        UninstallPreviewRequest: {
+            /** Installation Id */
+            installation_id: string;
+        };
+        /** UninstallRequest */
+        UninstallRequest: {
+            /** Plan Digest */
+            plan_digest: string;
+            /** Request Key */
+            request_key: string;
         };
         /** UpdateApplyRequest */
         UpdateApplyRequest: {
@@ -3120,6 +4400,155 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+        };
+        /** VisualArtifact */
+        VisualArtifact: {
+            /** Download Bytes */
+            download_bytes: number;
+            /** Id */
+            id: string;
+            /** Installed Bytes */
+            installed_bytes: number;
+            /** Kind */
+            kind: string;
+            /** Repository */
+            repository: string;
+            /** Revision */
+            revision: string;
+            /** Roles */
+            roles: string[];
+        };
+        /** VisualBuild */
+        VisualBuild: {
+            context: components["schemas"]["VisualBuildContext"];
+            /** Dockerfile */
+            dockerfile: string;
+            /** Download Bytes */
+            download_bytes: number;
+            /** Memory Bytes */
+            memory_bytes: number;
+            /** Network Hosts */
+            network_hosts: string[];
+            /** Network Mode */
+            network_mode: string;
+            /** Platform */
+            platform: string;
+            /** Temporary Bytes */
+            temporary_bytes: number;
+            /** Timeout Seconds */
+            timeout_seconds: number;
+        };
+        /** VisualBuildContext */
+        VisualBuildContext: {
+            /** Expected Bytes */
+            expected_bytes: number;
+            /** Media Type */
+            media_type: string;
+            /** Sha256 */
+            sha256: string;
+        };
+        /** VisualIdentity */
+        VisualIdentity: {
+            /** Publisher */
+            publisher: string;
+            /** Slug */
+            slug: string;
+        };
+        /** VisualMetadata */
+        VisualMetadata: {
+            /** Description */
+            description: string;
+            /** Tags */
+            tags: string[];
+            /** Title */
+            title: string;
+        };
+        /** VisualProvenance */
+        VisualProvenance: {
+            /** Attribution */
+            attribution: string[];
+            /**
+             * Source Kind
+             * @enum {string}
+             */
+            source_kind: "local" | "workload_run" | "global" | "fork";
+            /** Source Reference */
+            source_reference: string | null;
+        };
+        /** VisualRecipeDocument */
+        VisualRecipeDocument: {
+            /** Artifacts */
+            artifacts: components["schemas"]["VisualArtifact"][];
+            build: components["schemas"]["VisualBuild"];
+            identity: components["schemas"]["VisualIdentity"];
+            metadata: components["schemas"]["VisualMetadata"];
+            provenance: components["schemas"]["VisualProvenance"];
+            runtime: components["schemas"]["VisualRuntime"];
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 1;
+            validation: components["schemas"]["VisualValidation"];
+            workload: components["schemas"]["VisualWorkload"];
+        };
+        /** VisualRuntime */
+        VisualRuntime: {
+            /** Adapter */
+            adapter: string;
+            /** Adapter Version */
+            adapter_version: number;
+            /** Endpoint Port */
+            endpoint_port: number;
+            /** Endpoint Protocol */
+            endpoint_protocol: string;
+            /** Health Path */
+            health_path: string;
+            /** Interface */
+            interface: string;
+            /** Model Aliases */
+            model_aliases: string[];
+        };
+        /** VisualValidation */
+        VisualValidation: {
+            /** Benchmark Count */
+            benchmark_count: number;
+            /** Checks */
+            checks: string[];
+        };
+        /** VisualWorkload */
+        VisualWorkload: {
+            /** Capabilities */
+            capabilities: string[];
+            /** Family */
+            family: string;
+        };
+        /** ProjectionReason */
+        vonk_control__fleet_projection__ProjectionReason: {
+            /**
+             * Code
+             * @enum {string}
+             */
+            code: "node.offline" | "inventory.missing" | "inventory.stale" | "telemetry.missing" | "telemetry.delayed" | "telemetry.stale" | "install.partial" | "run.degraded";
+            /** Detail */
+            detail: string;
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "info" | "warning" | "error";
+        };
+        /** LibraryProjectionReason */
+        vonk_control__library_contract__ProjectionReason: {
+            /** Code */
+            code: string;
+            /** Detail */
+            detail: string;
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "info" | "warning" | "error";
         };
     };
     responses: never;
@@ -5146,11 +6575,79 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["FleetStatusResponse"];
+                    "application/json": components["schemas"]["FleetSnapshot"];
                 };
             };
             /** @description Unauthorized */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    streamFleetEvents: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Optional durable Fleet cursor; duplicate and numeric validity are checked from the raw header list. */
+                "Last-Event-ID"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Durable Fleet event stream */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5471,6 +6968,114 @@ export interface operations {
             };
         };
     };
+    listLibrary: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibrarySnapshot"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    getLibraryRecipe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recipe_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryRecipeDetail"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
     getNodeStatuses: {
         parameters: {
             query?: never;
@@ -5491,6 +7096,69 @@ export interface operations {
             };
             /** @description Unauthorized */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    getNodeTelemetryHistory: {
+        parameters: {
+            query: {
+                start: string;
+                end: string;
+                resolution: "raw" | "minute" | "fifteen-minute";
+                maximum_points?: number;
+            };
+            header?: never;
+            path: {
+                node_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TelemetryHistoryResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6769,7 +8437,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["RequestKey"];
+                "application/json": components["schemas"]["UninstallRequest"];
             };
         };
         responses: {
@@ -7033,7 +8701,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["RequestKey"];
+                "application/json": components["schemas"]["StopRequest"];
             };
         };
         responses: {
@@ -7077,6 +8745,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SourcePolicyResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    previewRecipeStop: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StopPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StopPlanResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    previewRecipeUninstall: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UninstallPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UninstallPlanResponse"];
                 };
             };
             /** @description Validation Error */

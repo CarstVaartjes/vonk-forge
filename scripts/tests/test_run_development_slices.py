@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -12,6 +13,8 @@ import threading
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 
 import pytest
 
@@ -74,6 +77,12 @@ class SliceServer(ThreadingHTTPServer):
         self.distribution_operation_state = "succeeded"
         self.install_operation_state = "succeeded"
         self.install_preview_blockers: list[str] = []
+        self.stop_preview_blockers: list[str] = []
+        self.stop_plan_digest = "a" * 64
+        self.stop_preview_issued = False
+        self.uninstall_preview_blockers: list[str] = []
+        self.uninstall_plan_digest = "b" * 64
+        self.uninstall_preview_issued = False
         self.retry_operation_state = "succeeded"
         self.start_operation_states: list[str] = []
         self.run_plan_digest = "f" * 64
@@ -82,6 +91,8 @@ class SliceServer(ThreadingHTTPServer):
         self.interrupt_run_creation_number: int | None = None
         self.commit_interrupted_run_creation = False
         self.run_operations_by_request_key: dict[str, dict[str, object]] = {}
+        self.run_authority_by_request_key: dict[str, tuple[str, str, str]] = {}
+        self.run_preview_authority_by_digest: dict[str, tuple[str, str]] = {}
         self.run_states: dict[str, tuple[str, str]] = {}
         self.add_empty_provider_metadata = False
         self.nodes = [NODE]
@@ -430,7 +441,7 @@ class SliceHandler(BaseHTTPRequestHandler):
                 200,
                 {"build_input_sha256": "e" * 64, "source_bundle_sha256": "f" * 64},
             )
-        elif path.endswith("install-plans/preview"):
+        elif path == "/api/v1/recipes/install-plans/preview":
             blocker = (
                 self.server.install_preview_blockers.pop(0)
                 if self.server.install_preview_blockers
@@ -457,7 +468,66 @@ class SliceHandler(BaseHTTPRequestHandler):
             )
         elif path.endswith("run-plans/preview"):
             plan_digest = self.server.run_plan_digest
-            self._json(200, {"allowed": True, "plan_digest": plan_digest, "nodes": []})
+            installation_id = payload.get("installation_id")
+            alias = payload.get("alias")
+            if not isinstance(installation_id, str) or not isinstance(alias, str):
+                self._json(422, {"detail": "run preview alias is required"})
+                return
+            self.server.run_preview_authority_by_digest[plan_digest] = (
+                installation_id,
+                alias,
+            )
+            self._json(
+                200,
+                {
+                    "alias": alias,
+                    "allowed": True,
+                    "plan_digest": plan_digest,
+                    "nodes": [],
+                },
+            )
+        elif path == "/api/v1/recipes/stop-plans/preview":
+            blocker = (
+                self.server.stop_preview_blockers.pop(0)
+                if self.server.stop_preview_blockers
+                else None
+            )
+            self.server.stop_preview_issued = blocker is None
+            self._json(
+                200,
+                {
+                    "allowed": blocker is None,
+                    "plan_digest": self.server.stop_plan_digest,
+                    "nodes": [],
+                    "blockers": (
+                        []
+                        if blocker is None
+                        else [{"code": blocker, "detail": "test blocker"}]
+                    ),
+                    "warnings": [],
+                },
+            )
+        elif path == "/api/v1/recipes/uninstall-plans/preview":
+            blocker = (
+                self.server.uninstall_preview_blockers.pop(0)
+                if self.server.uninstall_preview_blockers
+                else None
+            )
+            self.server.uninstall_preview_issued = blocker is None
+            self._json(
+                200,
+                {
+                    "allowed": blocker is None,
+                    "plan_digest": self.server.uninstall_plan_digest,
+                    "nodes": [],
+                    "blockers": (
+                        []
+                        if blocker is None
+                        else [{"code": blocker, "detail": "test blocker"}]
+                    ),
+                    "warnings": [],
+                },
+            )
         elif path == "/v1/chat/completions":
             if payload.get("model") == "dev-http-smoke":
                 response = json.loads(
@@ -489,11 +559,29 @@ class SliceHandler(BaseHTTPRequestHandler):
                 }
             self._json(200, response)
         elif path.endswith("/stop"):
+            if (
+                not self.server.stop_preview_issued
+                or payload.get("plan_digest") != self.server.stop_plan_digest
+            ):
+                self._json(
+                    409,
+                    {"detail": "submitted stop plan digest does not match preview"},
+                )
+                return
             self.server.route_published = False
             run_id = path.rsplit("/", 2)[-2]
             self.server.run_states[run_id] = ("stopped", "withdrawn")
             self._operation("20000000-0000-4000-8000-000000000004", self.server.nodes)
         elif path.endswith("/uninstall"):
+            if (
+                not self.server.uninstall_preview_issued
+                or payload.get("plan_digest") != self.server.uninstall_plan_digest
+            ):
+                self._json(
+                    409,
+                    {"detail": "submitted uninstall plan digest does not match preview"},
+                )
+                return
             self._operation("20000000-0000-4000-8000-000000000005", self.server.nodes)
         elif path.startswith("/api/v1/recipes/operations/") and path.endswith("/retry"):
             original_operation_id = self.path.rsplit("/", 2)[-2]
@@ -519,19 +607,35 @@ class SliceHandler(BaseHTTPRequestHandler):
             if path == "/api/v1/recipes/runs":
                 request_key = payload["request_key"]
                 existing = self.server.run_operations_by_request_key.get(request_key)
-                if existing is not None:
-                    if existing["plan_digest"] != payload["plan_digest"]:
-                        self._json(
-                            409,
-                            {"detail": "request key was already used differently"},
-                        )
-                    else:
-                        self._json(202, existing)
+                submitted_authority = (
+                    payload.get("installation_id"),
+                    payload.get("alias"),
+                    payload.get("plan_digest"),
+                )
+                if (
+                    existing is not None
+                    and self.server.run_authority_by_request_key.get(request_key)
+                    == submitted_authority
+                ):
+                    self._json(202, existing)
                     return
-                if payload["plan_digest"] != self.server.run_plan_digest:
+                preview_authority = self.server.run_preview_authority_by_digest.get(
+                    payload.get("plan_digest")
+                )
+                if (
+                    payload.get("plan_digest") != self.server.run_plan_digest
+                    or preview_authority
+                    != (payload.get("installation_id"), payload.get("alias"))
+                ):
                     self._json(
                         409,
                         {"detail": "submitted plan digest does not match preview"},
+                    )
+                    return
+                if existing is not None:
+                    self._json(
+                        409,
+                        {"detail": "request key was already used differently"},
                     )
                     return
                 self.server.run_creation_attempts += 1
@@ -579,6 +683,11 @@ class SliceHandler(BaseHTTPRequestHandler):
             if path == "/api/v1/recipes/runs":
                 self.server.run_operations_by_request_key[payload["request_key"]] = (
                     operation
+                )
+                self.server.run_authority_by_request_key[payload["request_key"]] = (
+                    payload["installation_id"],
+                    payload["alias"],
+                    payload["plan_digest"],
                 )
                 if interrupt:
                     self.server.interrupt_run_creation_number = None
@@ -691,6 +800,17 @@ def _qualification(path: Path) -> Path:
     return path
 
 
+def _synthetic_source_context(tmp_path: Path) -> Path:
+    context = tmp_path / "source-context"
+    if not context.exists():
+        shutil.copytree(
+            ROOT / "control/tests/fixtures/recipes/dev-http-smoke/context",
+            context,
+            ignore=shutil.ignore_patterns("__pycache__"),
+        )
+    return context
+
+
 def _run(tmp_path: Path, server: SliceServer, *extra: str):
     admin = _token(tmp_path / "admin-token", ADMIN_TOKEN)
     inference = _token(tmp_path / "inference-token", INFERENCE_TOKEN)
@@ -711,6 +831,8 @@ def _run(tmp_path: Path, server: SliceServer, *extra: str):
             NODE,
             "--target-node",
             NODE,
+            "--source-context",
+            str(_synthetic_source_context(tmp_path)),
             "--evidence-file",
             str(evidence),
             "--timeout-seconds",
@@ -825,6 +947,222 @@ def test_runner_completes_exact_public_lifecycle_without_secret_leaks(
     )
 
 
+@pytest.mark.parametrize(
+    ("phase", "preview_path", "apply_path", "identifier", "digest"),
+    (
+        (
+            "stopped",
+            "/api/v1/recipes/stop-plans/preview",
+            "/api/v1/recipes/runs/{identifier}/stop",
+            "run_id",
+            "a" * 64,
+        ),
+        (
+            "uninstalled",
+            "/api/v1/recipes/uninstall-plans/preview",
+            "/api/v1/recipes/installations/{identifier}/uninstall",
+            "installation_id",
+            "b" * 64,
+        ),
+    ),
+)
+def test_runner_previews_lifecycle_action_before_applying_exact_digest(
+    tmp_path: Path,
+    server: SliceServer,
+    phase: str,
+    preview_path: str,
+    apply_path: str,
+    identifier: str,
+    digest: str,
+) -> None:
+    result, evidence_path = _run(tmp_path, server, "--stop-after", phase)
+
+    assert result.returncode == 0, result.stderr
+    evidence = json.loads(evidence_path.read_text())
+    selected_id = evidence["outputs"][identifier]
+    requests = [
+        (path, json.loads(body))
+        for method, path, body in server.request_bodies
+        if method == "POST" and path in {preview_path, apply_path.format(identifier=selected_id)}
+    ]
+    assert requests == [
+        (preview_path, {identifier: selected_id}),
+        (
+            apply_path.format(identifier=selected_id),
+            {
+                "plan_digest": digest,
+                "request_key": str(
+                    uuid.uuid5(
+                        uuid.UUID(evidence["acceptance_id"]),
+                        f"{phase}:{'stop' if phase == 'stopped' else 'uninstall'}",
+                    )
+                ),
+            },
+        ),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("phase", "blockers", "preview_path", "apply_suffix", "message"),
+    (
+        (
+            "stopped",
+            "stop_preview_blockers",
+            "/api/v1/recipes/stop-plans/preview",
+            "/stop",
+            "recipe stop is not admitted",
+        ),
+        (
+            "uninstalled",
+            "uninstall_preview_blockers",
+            "/api/v1/recipes/uninstall-plans/preview",
+            "/uninstall",
+            "recipe uninstall is not admitted",
+        ),
+    ),
+)
+def test_runner_rejects_blocked_lifecycle_action_preview_before_apply(
+    tmp_path: Path,
+    server: SliceServer,
+    phase: str,
+    blockers: str,
+    preview_path: str,
+    apply_suffix: str,
+    message: str,
+) -> None:
+    setattr(server, blockers, ["recipe.action_blocked"])
+
+    result, _evidence_path = _run(tmp_path, server, "--stop-after", phase)
+
+    assert result.returncode == 1
+    assert message in result.stderr
+    assert any(
+        method == "POST" and path == preview_path
+        for method, path, _body in server.request_bodies
+    )
+    assert not any(
+        method == "POST" and path.endswith(apply_suffix)
+        for method, path, _body in server.request_bodies
+    )
+
+
+@pytest.mark.parametrize(
+    ("preview_path", "preview_body", "apply_path", "expected_digest"),
+    (
+        (
+            "/api/v1/recipes/stop-plans/preview",
+            {"run_id": "20000000-0000-4000-8001-000000000001"},
+            "/api/v1/recipes/runs/20000000-0000-4000-8001-000000000001/stop",
+            "a" * 64,
+        ),
+        (
+            "/api/v1/recipes/uninstall-plans/preview",
+            {"installation_id": "20000000-0000-4000-8000-000000000003"},
+            "/api/v1/recipes/installations/20000000-0000-4000-8000-000000000003/uninstall",
+            "b" * 64,
+        ),
+    ),
+)
+def test_fake_authority_rejects_wrong_lifecycle_action_digest(
+    server: SliceServer,
+    preview_path: str,
+    preview_body: dict[str, str],
+    apply_path: str,
+    expected_digest: str,
+) -> None:
+    base = f"http://127.0.0.1:{server.server_port}"
+    preview = Request(
+        f"{base}{preview_path}",
+        data=json.dumps(preview_body).encode(),
+        method="POST",
+    )
+    with urlopen(preview) as response:
+        assert response.status == 200
+        assert json.loads(response.read())["plan_digest"] == expected_digest
+
+    apply = Request(
+        f"{base}{apply_path}",
+        data=json.dumps(
+            {
+                "plan_digest": "c" * 64,
+                "request_key": "30000000-0000-4000-8000-000000000001",
+            }
+        ).encode(),
+        method="POST",
+    )
+    with pytest.raises(HTTPError) as error:
+        urlopen(apply)
+
+    assert error.value.code == 409
+    assert expected_digest != "c" * 64
+    assert "does not match preview" in json.loads(error.value.read())["detail"]
+
+
+def test_fake_run_authority_replays_only_exact_previewed_alias_and_digest(
+    server: SliceServer,
+) -> None:
+    base = f"http://127.0.0.1:{server.server_port}"
+    installation_id = "20000000-0000-4000-8000-000000000003"
+    request_key = "30000000-0000-4000-8000-000000000009"
+
+    def post(path: str, body: dict[str, object]) -> tuple[int, dict[str, object]]:
+        request = Request(
+            f"{base}{path}",
+            data=json.dumps(body).encode(),
+            method="POST",
+        )
+        try:
+            with urlopen(request) as response:
+                return response.status, json.loads(response.read())
+        except HTTPError as error:
+            return error.code, json.loads(error.read())
+
+    status, preview_a = post(
+        "/api/v1/recipes/run-plans/preview",
+        {"installation_id": installation_id, "alias": server.slug},
+    )
+    assert status == 200
+    body_a = {
+        "installation_id": installation_id,
+        "alias": server.slug,
+        "plan_digest": preview_a["plan_digest"],
+        "request_key": request_key,
+    }
+    first_status, first = post("/api/v1/recipes/runs", body_a)
+    replay_status, replayed = post("/api/v1/recipes/runs", body_a)
+
+    assert first_status == replay_status == 202
+    assert replayed == first
+    assert server.run_creation_attempts == 1
+
+    mismatched_status, mismatched = post(
+        "/api/v1/recipes/runs",
+        {**body_a, "alias": "different-alias"},
+    )
+    assert mismatched_status == 409
+    assert mismatched["detail"] == "submitted plan digest does not match preview"
+    assert server.run_creation_attempts == 1
+
+    server.run_plan_digest = "e" * 64
+    status, preview_b = post(
+        "/api/v1/recipes/run-plans/preview",
+        {"installation_id": installation_id, "alias": "different-alias"},
+    )
+    assert status == 200
+    conflict_status, conflict = post(
+        "/api/v1/recipes/runs",
+        {
+            "installation_id": installation_id,
+            "alias": "different-alias",
+            "plan_digest": preview_b["plan_digest"],
+            "request_key": request_key,
+        },
+    )
+    assert conflict_status == 409
+    assert conflict["detail"] == "request key was already used differently"
+    assert server.run_creation_attempts == 1
+
+
 def test_runner_accepts_litellm_empty_provider_metadata(
     tmp_path: Path, server: SliceServer
 ) -> None:
@@ -911,7 +1249,20 @@ def test_runner_recovers_once_after_cleaned_failed_start(
         for method, path, body in server.request_bodies
         if method == "POST" and path == "/api/v1/recipes/runs"
     ]
+    run_previews = [
+        json.loads(body)
+        for method, path, body in server.request_bodies
+        if method == "POST" and path == "/api/v1/recipes/run-plans/preview"
+    ]
     assert len(run_creations) == 2
+    assert [
+        (request["installation_id"], request["alias"])
+        for request in run_previews
+    ] == [
+        (request["installation_id"], request["alias"])
+        for request in run_creations
+    ]
+    assert {request["alias"] for request in run_creations} == {server.slug}
     expected_retry_key = str(
         uuid.uuid5(uuid.UUID(evidence["acceptance_id"]), "running:start-retry")
     )
@@ -1002,7 +1353,7 @@ def test_runner_resumes_checkpointed_starts_without_repreviewing(
     evidence = json.loads(evidence_path.read_text())
     assert evidence["completed_states"] == STATES[:9]
     run_previews = [
-        body
+        json.loads(body)
         for method, path, body in server.request_bodies
         if method == "POST" and path == "/api/v1/recipes/run-plans/preview"
     ]
@@ -1012,6 +1363,8 @@ def test_runner_resumes_checkpointed_starts_without_repreviewing(
         if method == "POST" and path == "/api/v1/recipes/runs"
     ]
     assert len(run_previews) == 2
+    assert [request["alias"] for request in run_previews] == [server.slug] * 2
+    assert [request["alias"] for request in run_creations] == [server.slug] * 2
     assert [creation["plan_digest"] for creation in run_creations] == [
         "f" * 64,
         "e" * 64,
@@ -1052,12 +1405,13 @@ def test_runner_recovers_interrupted_start_creation(
     expected_digest = "f" * 64 if committed else "e" * 64
     assert evidence["outputs"][f"{prefix}_plan_digest"] == expected_digest
     run_previews = [
-        body
+        json.loads(body)
         for method, path, body in server.request_bodies
         if method == "POST" and path == "/api/v1/recipes/run-plans/preview"
     ]
     baseline_previews = 1 if purpose == "start" else 2
     assert len(run_previews) == baseline_previews + (0 if committed else 1)
+    assert {request["alias"] for request in run_previews} == {server.slug}
     request_key = str(
         uuid.uuid5(uuid.UUID(evidence["acceptance_id"]), f"running:{purpose}")
     )
@@ -1068,6 +1422,7 @@ def test_runner_recovers_interrupted_start_creation(
         and path == "/api/v1/recipes/runs"
         and json.loads(body)["request_key"] == request_key
     ]
+    assert {creation["alias"] for creation in matching_creations} == {server.slug}
     assert [creation["plan_digest"] for creation in matching_creations] == (
         ["f" * 64, "f" * 64] if committed else ["f" * 64, "f" * 64, "e" * 64]
     )

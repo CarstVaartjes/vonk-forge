@@ -1,0 +1,375 @@
+.recipe-authority {
+  min-width: 0;
+  padding: 0 1rem 1rem;
+}
+
+.recipe-authority-hero,
+.section-heading,
+.placement-profile-heading,
+.placement-node-heading {
+  align-items: start;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.recipe-authority-hero > div,
+.section-heading > div {
+  min-width: 0;
+}
+
+.recipe-authority-statuses {
+  align-items: flex-end;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.recipe-authority-title {
+  display: block;
+  font-size: 1.15rem;
+}
+
+.recipe-authority-hero p:last-child,
+.placement-profile-heading span,
+.placement-node-heading span,
+.topology-card > p,
+.advanced-workflows {
+  color: var(--text-muted);
+}
+
+.recipe-metadata-tags {
+  font-size: 0.82rem;
+}
+
+.library-section,
+.library-operation,
+.library-advanced,
+.advanced-workflows {
+  border-top: 1px solid var(--border);
+  margin-top: 1rem;
+  padding-top: 1rem;
+}
+
+.section-heading h4,
+.placement-profile-heading h5,
+.topology-card h5 {
+  margin: 0;
+}
+
+.operation-summary,
+.operation-item,
+.resource-totals,
+.advanced-workflows {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.operation-summary {
+  margin-top: 0.8rem;
+}
+
+.library-operation,
+.bounded-search-notice,
+.topology-card,
+.evidence-columns > div {
+  border: 1px solid var(--border);
+  border-radius: 0.7rem;
+  padding: 0.8rem;
+}
+
+.library-operation > div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.library-operation p {
+  margin: 0.65rem 0;
+}
+
+.placement-profile {
+  min-width: 0;
+  padding-top: 1rem;
+}
+
+.bounded-search-notice {
+  background: #46381d55;
+  border-color: #6c5627;
+  margin: 0.8rem 0;
+}
+
+.bounded-search-notice p {
+  color: var(--text-muted);
+  margin: 0.35rem 0 0;
+}
+
+.library-reasons {
+  display: grid;
+  gap: 0.5rem;
+  list-style: none;
+  margin: 0.75rem 0;
+  padding: 0;
+}
+
+.library-reasons li {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+  padding: 0.55rem 0.65rem;
+  border-left: 2px solid var(--info);
+  background: #ffffff05;
+}
+
+.library-reasons li span {
+  color: var(--text-muted);
+}
+
+.library-reasons .reason-warning {
+  border-left-color: var(--warning);
+}
+
+.library-reasons .reason-error {
+  border-left-color: var(--danger);
+}
+
+.placement-groups {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.placement-group {
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.placement-group.is-selected {
+  border-color: var(--mint);
+}
+
+.placement-selector {
+  border-radius: 0;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+  text-align: left;
+  width: 100%;
+}
+
+.placement-selector small {
+  color: inherit;
+}
+
+.placement-evidence {
+  padding: 0.85rem;
+}
+
+.placement-state {
+  margin-top: 0;
+}
+
+.placement-nodes {
+  display: grid;
+  gap: 0.75rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.placement-nodes > li {
+  min-width: 0;
+  padding: 0.75rem;
+  border-radius: 0.65rem;
+  background: #07110e8c;
+}
+
+.placement-nodes dl {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0.7rem 0 0;
+}
+
+.placement-nodes dl > div {
+  min-width: 0;
+}
+
+.placement-nodes dt {
+  color: var(--text-subtle);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+}
+
+.placement-nodes dd {
+  margin: 0.15rem 0 0;
+}
+
+.placement-rejections {
+  margin-top: 0.8rem;
+}
+
+.placement-rejections > summary,
+.library-advanced > summary {
+  color: var(--mint-strong);
+  cursor: pointer;
+  font-weight: 700;
+  min-height: 44px;
+  padding: 0.7rem 0;
+}
+
+.recipe-essentials,
+.evidence-columns {
+  display: grid;
+  gap: 0.7rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.recipe-essentials > div {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+  padding: 0.7rem;
+  border-radius: 0.65rem;
+  background: #07110e8c;
+}
+
+.recipe-essentials > div > span {
+  color: var(--text-subtle);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+}
+
+.capability-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.topology-card {
+  margin-top: 0.8rem;
+}
+
+.resource-totals {
+  margin: 0.7rem 0;
+}
+
+.topology-card ol {
+  display: grid;
+  gap: 0.55rem;
+  padding-left: 1.25rem;
+}
+
+.topology-card li {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.topology-card li span,
+.topology-fabric,
+.evidence-columns p {
+  color: var(--text-muted);
+}
+
+.evidence-columns code {
+  overflow-wrap: anywhere;
+}
+
+.visual-field-grid {
+  display: grid;
+  gap: 0.55rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0.8rem 0 0;
+}
+
+.visual-field-grid > div {
+  background: #07110e8c;
+  border-radius: 0.55rem;
+  min-width: 0;
+  padding: 0.6rem;
+}
+
+.visual-field-grid dt,
+.visual-digest span {
+  color: var(--text-subtle);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+}
+
+.visual-field-grid dd {
+  margin: 0.2rem 0 0;
+}
+
+.visual-digest {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.visual-artifacts {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.visual-artifacts article {
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  padding: 0.7rem;
+}
+
+.library-advanced-content {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+  padding-bottom: 0.5rem;
+}
+
+.library-advanced-content > p:first-child {
+  color: var(--text-muted);
+}
+
+.library-advanced textarea {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  max-width: 100%;
+  min-height: 14rem;
+  resize: vertical;
+  width: 100%;
+}
+
+.library-upload {
+  align-items: start;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.library-upload input {
+  max-width: 100%;
+  min-height: 44px;
+}
+
+.library-document-error {
+  color: var(--danger);
+  margin: 0;
+}
+
+@media (max-width: 520px) {
+  .recipe-authority-hero,
+  .section-heading,
+  .placement-profile-heading,
+  .placement-node-heading {
+    align-items: start;
+    display: grid;
+  }
+
+  .recipe-essentials,
+  .evidence-columns,
+  .visual-field-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .recipe-authority-statuses {
+    align-items: flex-start;
+  }
+}

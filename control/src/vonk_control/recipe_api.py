@@ -33,6 +33,11 @@ RECIPE_OPERATION_IDS = {
     ("post", "/api/v1/recipes/installations"): "installRecipe",
     ("post", "/api/v1/recipes/run-plans/preview"): "previewRecipeRun",
     ("post", "/api/v1/recipes/runs"): "startRecipeRun",
+    ("post", "/api/v1/recipes/stop-plans/preview"): "previewRecipeStop",
+    (
+        "post",
+        "/api/v1/recipes/uninstall-plans/preview",
+    ): "previewRecipeUninstall",
     ("get", "/api/v1/recipes/runs/{run_id}"): "getRecipeRunStatus",
     ("get", "/api/v1/recipes/operations/{operation_id}"): "getRecipeOperation",
     ("post", "/api/v1/recipes/operations/{operation_id}/retry"): "retryRecipeOperation",
@@ -155,12 +160,83 @@ class RunNodePlanResponse(StrictModel):
 
 class RunPlanResponse(StrictModel):
     installation_id: str
+    alias: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]{0,62}$")
     mapping_id: str
     mapping_generation: int
     recipe_revision_id: str
     allowed: bool
     nodes: list[RunNodePlanResponse]
     plan_digest: str
+
+
+class StopNodeImpactResponse(StrictModel):
+    node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
+    rank: int = Field(ge=0)
+    role: str = Field(min_length=1, max_length=64)
+    state: str = Field(min_length=1, max_length=24)
+    reserved_memory_bytes: int = Field(ge=0)
+    active_memory_reservation_bytes: int = Field(ge=0)
+
+
+class StopPlanResponse(StrictModel):
+    run_id: str = Field(pattern=_UUID)
+    installation_id: str = Field(pattern=_UUID)
+    recipe_revision_id: str = Field(pattern=_UUID)
+    alias: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]{0,62}$")
+    run_state: str = Field(min_length=1, max_length=24)
+    route_state: str = Field(pattern=r"^(withdrawn|pending|published|failed)$")
+    route_generation: int | None = Field(default=None, ge=1)
+    route_digest: str | None = Field(default=None, pattern=_DIGEST)
+    authority_digest: str = Field(pattern=_DIGEST)
+    allowed: bool
+    route_withdrawal: bool
+    nodes: list[StopNodeImpactResponse] = Field(max_length=1024)
+    total_active_memory_reservation_bytes: int = Field(ge=0)
+    blockers: list[PlanReason] = Field(max_length=32)
+    warnings: list[PlanReason] = Field(max_length=32)
+    plan_digest: str = Field(pattern=_DIGEST)
+
+
+class UninstallNodeImpactResponse(StrictModel):
+    node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
+    rank: int = Field(ge=0)
+    role: str = Field(min_length=1, max_length=64)
+    state: str = Field(min_length=1, max_length=24)
+    installed_bytes: int | None = Field(default=None, ge=0)
+
+
+class UninstallActiveRunResponse(StrictModel):
+    run_id: str = Field(pattern=_UUID)
+    alias: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]{0,62}$")
+    state: str = Field(min_length=1, max_length=24)
+    route_state: str = Field(pattern=r"^(withdrawn|pending|published|failed)$")
+
+
+class UninstallConsequencesResponse(StrictModel):
+    catalog_retained: bool
+    automatic_stop: bool
+    reinstall_required: bool
+
+
+class UninstallPlanResponse(StrictModel):
+    installation_id: str = Field(pattern=_UUID)
+    recipe_id: str = Field(pattern=_UUID)
+    recipe_revision_id: str = Field(pattern=_UUID)
+    recipe_content_sha256: str = Field(pattern=_DIGEST)
+    recipe_content: dict[str, object]
+    installation_authority_digest: str = Field(pattern=_DIGEST)
+    original_plan_digest: str = Field(pattern=_DIGEST)
+    installation_state: str = Field(min_length=1, max_length=24)
+    allowed: bool
+    nodes: list[UninstallNodeImpactResponse] = Field(max_length=1024)
+    bytes_removed: int | None = Field(default=None, ge=0)
+    active_runs: list[UninstallActiveRunResponse] = Field(max_length=128)
+    active_run_count: int = Field(ge=0)
+    active_runs_truncated: bool
+    blockers: list[PlanReason] = Field(max_length=32)
+    warnings: list[PlanReason] = Field(max_length=32)
+    consequences: UninstallConsequencesResponse
+    plan_digest: str = Field(pattern=_DIGEST)
 
 
 class OperationResponse(StrictModel):
@@ -237,10 +313,28 @@ class InstallRequest(InstallPreviewRequest):
 
 class RunPreviewRequest(StrictModel):
     installation_id: str = Field(pattern=_UUID)
+    alias: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]{0,62}$")
 
 
 class RunRequest(RunPreviewRequest):
-    alias: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]{0,62}$")
+    plan_digest: str = Field(pattern=_DIGEST)
+    request_key: str = Field(pattern=_UUID)
+
+
+class StopPreviewRequest(StrictModel):
+    run_id: str = Field(pattern=_UUID)
+
+
+class StopRequest(StrictModel):
+    plan_digest: str = Field(pattern=_DIGEST)
+    request_key: str = Field(pattern=_UUID)
+
+
+class UninstallPreviewRequest(StrictModel):
+    installation_id: str = Field(pattern=_UUID)
+
+
+class UninstallRequest(StrictModel):
     plan_digest: str = Field(pattern=_DIGEST)
     request_key: str = Field(pattern=_UUID)
 
@@ -487,7 +581,31 @@ def install_recipe_operation_routes(
     )
     def preview_run(body: RunPreviewRequest, actor: Actor = authenticated):
         administrator(actor)
-        return asdict(recipes().preview_run(body.installation_id))
+        return asdict(recipes().preview_run(body.installation_id, body.alias))
+
+    @app.post(
+        "/api/v1/recipes/stop-plans/preview",
+        response_model=StopPlanResponse,
+        operation_id="previewRecipeStop",
+    )
+    def preview_stop(body: StopPreviewRequest, actor: Actor = authenticated):
+        administrator(actor)
+        try:
+            return asdict(recipes().preview_stop(body.run_id))
+        except RecipeOperationConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)[:256]) from None
+
+    @app.post(
+        "/api/v1/recipes/uninstall-plans/preview",
+        response_model=UninstallPlanResponse,
+        operation_id="previewRecipeUninstall",
+    )
+    def preview_uninstall(body: UninstallPreviewRequest, actor: Actor = authenticated):
+        administrator(actor)
+        try:
+            return asdict(recipes().preview_uninstall(body.installation_id))
+        except RecipeOperationConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)[:256]) from None
 
     @app.post(
         "/api/v1/recipes/runs",
@@ -498,14 +616,20 @@ def install_recipe_operation_routes(
     def start(body: RunRequest, request: Request, actor: Actor = authenticated):
         administrator(actor)
         try:
-            plan = recipes().preview_run(body.installation_id)
-            value = recipes().start(
-                plan,
+            value = recipes().replay_start(
+                body.installation_id,
+                body.alias,
                 plan_digest=body.plan_digest,
-                alias=body.alias,
-                actor=actor.subject,
                 request_id=body.request_key,
             )
+            if value is None:
+                plan = recipes().preview_run(body.installation_id, body.alias)
+                value = recipes().start(
+                    plan,
+                    plan_digest=body.plan_digest,
+                    actor=actor.subject,
+                    request_id=body.request_key,
+                )
         except RecipeOperationConflict as error:
             return conflict(request, error)
         audits.append(
@@ -588,7 +712,7 @@ def install_recipe_operation_routes(
         operation_id="stopRecipeRun",
     )
     def stop(
-        body: RequestKey,
+        body: StopRequest,
         request: Request,
         run_id: str = Path(pattern=_UUID),
         actor: Actor = authenticated,
@@ -596,7 +720,10 @@ def install_recipe_operation_routes(
         administrator(actor)
         try:
             value = recipes().stop(
-                run_id, actor=actor.subject, request_id=body.request_key
+                run_id,
+                plan_digest=body.plan_digest,
+                actor=actor.subject,
+                request_id=body.request_key,
             )
         except RecipeOperationConflict as error:
             return conflict(request, error)
@@ -618,7 +745,7 @@ def install_recipe_operation_routes(
         operation_id="uninstallRecipe",
     )
     def uninstall(
-        body: RequestKey,
+        body: UninstallRequest,
         request: Request,
         installation_id: str = Path(pattern=_UUID),
         actor: Actor = authenticated,
@@ -626,7 +753,10 @@ def install_recipe_operation_routes(
         administrator(actor)
         try:
             value = recipes().uninstall(
-                installation_id, actor=actor.subject, request_id=body.request_key
+                installation_id,
+                plan_digest=body.plan_digest,
+                actor=actor.subject,
+                request_id=body.request_key,
             )
         except RecipeOperationConflict as error:
             return conflict(request, error)

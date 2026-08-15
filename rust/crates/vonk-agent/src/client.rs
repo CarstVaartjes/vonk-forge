@@ -18,6 +18,7 @@ use crate::{
     oci::{MAX_MANAGED_RECIPE_RUNS, RecipeRunObservation},
     pair::{IssuedResponse, verify_ca_pin},
     supervisor_readiness::AgentRuntimeIdentity,
+    telemetry::{TelemetrySample, valid_report_batch},
     workloads::WorkloadSpec,
 };
 
@@ -76,6 +77,13 @@ struct RecipeRunObservationsRequest<'a> {
     schema_version: u8,
     observed_at: chrono::DateTime<chrono::Utc>,
     runs: &'a [RecipeRunObservation],
+}
+
+#[derive(Serialize)]
+#[serde(deny_unknown_fields)]
+struct TelemetryRequest<'a> {
+    schema_version: u8,
+    samples: &'a [TelemetrySample],
 }
 
 #[derive(Serialize)]
@@ -450,6 +458,28 @@ impl AgentHttpClient {
         }
     }
 
+    pub async fn report_telemetry(&self, samples: &[TelemetrySample]) -> Result<(), ClientError> {
+        if !valid_report_batch(samples) {
+            return Err(ClientError::Protocol);
+        }
+        let response = self
+            .client
+            .post(self.endpoint("/agent/v1/telemetry")?)
+            .timeout(Duration::from_secs(1))
+            .json(&TelemetryRequest {
+                schema_version: 1,
+                samples,
+            })
+            .send()
+            .await?;
+        if response.status() == StatusCode::NO_CONTENT {
+            Ok(())
+        } else {
+            classify_status(response.status())?;
+            Err(ClientError::Protocol)
+        }
+    }
+
     pub async fn renew(&self, csr: &[u8]) -> Result<IssuedResponse, ClientError> {
         let csr = std::str::from_utf8(csr).map_err(|_| ClientError::Protocol)?;
         if csr.is_empty() || csr.len() > 16 * 1024 {
@@ -562,7 +592,7 @@ fn valid_oci_digest(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{AgentHttpClient, ClientError};
-    use crate::oci::RecipeRunObservation;
+    use crate::{oci::RecipeRunObservation, telemetry::TelemetrySample};
     use chrono::{DateTime, Utc};
     use std::{
         io::{Read, Write},
@@ -641,6 +671,33 @@ mod tests {
 
     fn observation_client(status: u16) -> (AgentHttpClient, thread::JoinHandle<Vec<u8>>) {
         request_capture_client(status, Vec::new(), Vec::new(), None)
+    }
+
+    fn telemetry_sample(sequence: i64) -> TelemetrySample {
+        serde_json::from_value(serde_json::json!({
+            "boot_id": "00000000-0000-4000-8000-000000000001",
+            "sequence": sequence,
+            "observed_at": format!("2026-08-15T12:00:{sequence:02}Z"),
+            "cpu_utilization_percent": 12.5,
+            "load_average_1m": 1.25,
+            "memory_total_bytes": 128000000000_u64,
+            "memory_available_bytes": 64000000000_u64,
+            "disk_total_bytes": 1000000000000_u64,
+            "disk_free_bytes": 750000000000_u64,
+            "gpu_utilization_percent": null,
+            "gpu_memory_total_bytes": 128000000000_u64,
+            "gpu_memory_free_bytes": 63000000000_u64,
+            "temperature_c": 41.5,
+            "power_watts": 17.25,
+            "network_receive_bytes_per_second": 1024.5,
+            "network_transmit_bytes_per_second": 512.25,
+            "gap_samples": 0,
+            "details": {
+                "accelerator_name": "NVIDIA GB10",
+                "accelerator_performance_state": null
+            }
+        }))
+        .unwrap()
     }
 
     fn heartbeat_client(
@@ -863,6 +920,115 @@ mod tests {
                 Err(ClientError::Authentication)
             ));
             server.join().unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn telemetry_posts_exact_task_three_shape_without_node_identity() {
+        let sample = telemetry_sample(1);
+        let (client, server) = observation_client(204);
+
+        client
+            .report_telemetry(std::slice::from_ref(&sample))
+            .await
+            .unwrap();
+
+        let request = server.join().unwrap();
+        let (headers, body) = request
+            .windows(4)
+            .position(|value| value == b"\r\n\r\n")
+            .map(|index| (&request[..index], &request[index + 4..]))
+            .unwrap();
+        let headers = std::str::from_utf8(headers).unwrap().to_ascii_lowercase();
+        assert!(headers.starts_with("post /agent/v1/telemetry http/1.1\r\n"));
+        assert!(headers.contains("content-type: application/json"));
+
+        let body: serde_json::Value = serde_json::from_slice(body).unwrap();
+        assert_eq!(
+            body.as_object()
+                .unwrap()
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>(),
+            ["schema_version", "samples"]
+        );
+        assert_eq!(body["schema_version"], 1);
+        assert_eq!(body["samples"].as_array().unwrap().len(), 1);
+        let sample = body["samples"][0].as_object().unwrap();
+        let mut keys = sample.keys().cloned().collect::<Vec<_>>();
+        keys.sort();
+        assert_eq!(
+            keys,
+            [
+                "boot_id",
+                "cpu_utilization_percent",
+                "details",
+                "disk_free_bytes",
+                "disk_total_bytes",
+                "gap_samples",
+                "gpu_memory_free_bytes",
+                "gpu_memory_total_bytes",
+                "gpu_utilization_percent",
+                "load_average_1m",
+                "memory_available_bytes",
+                "memory_total_bytes",
+                "network_receive_bytes_per_second",
+                "network_transmit_bytes_per_second",
+                "observed_at",
+                "power_watts",
+                "sequence",
+                "temperature_c",
+            ]
+        );
+        assert!(!body.to_string().contains("node_id"));
+        assert_eq!(sample["gpu_utilization_percent"], serde_json::Value::Null);
+        assert_eq!(
+            sample["details"],
+            serde_json::json!({
+                "accelerator_name": "NVIDIA GB10",
+                "accelerator_performance_state": null
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn telemetry_rejects_empty_or_more_than_sixteen_samples_before_transport() {
+        let client = AgentHttpClient {
+            client: reqwest::Client::new(),
+            controller: Url::parse("http://127.0.0.1:9/").unwrap(),
+            node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
+        };
+        assert!(matches!(
+            client.report_telemetry(&[]).await,
+            Err(ClientError::Protocol)
+        ));
+        let samples = (0..17).map(telemetry_sample).collect::<Vec<_>>();
+        assert!(matches!(
+            client.report_telemetry(&samples).await,
+            Err(ClientError::Protocol)
+        ));
+    }
+
+    #[tokio::test]
+    async fn telemetry_accepts_only_204_and_preserves_status_classification() {
+        let samples = [telemetry_sample(1)];
+        for (status, expected) in [
+            (200, "protocol"),
+            (401, "authentication"),
+            (429, "retryable"),
+        ] {
+            let (client, server) = observation_client(status);
+            let error = client.report_telemetry(&samples).await.unwrap_err();
+            server.join().unwrap();
+            assert!(
+                matches!(
+                    (&error, expected),
+                    (ClientError::Protocol, "protocol")
+                        | (ClientError::Authentication, "authentication")
+                        | (ClientError::Retryable, "retryable")
+                ),
+                "status {status} classified as {error:?}"
+            );
         }
     }
 
