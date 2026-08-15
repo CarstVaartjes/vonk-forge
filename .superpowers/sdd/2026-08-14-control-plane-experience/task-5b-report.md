@@ -102,6 +102,70 @@ handwritten frontend behavior was changed. The optional combined production
 recorder resume-contention proof was not added; the six required independent
 findings were completed without expanding scope.
 
+## Fix Round 2 (2026-08-15)
+
+Fix Round 2 was implemented on requested HEAD
+`fff1ed83c2f7df1c88dd9b28947cc8d38fa91176` and resolves both re-review
+findings.
+
+- Source/tests commit: `4092795e0f7a8bbcdde44fcc7b7747439c5215f1`
+  (`fix(control): align fleet boot IDs and cancellation proof`).
+- Generated schema commit: `d27890bb2002b026ff0bdbd6306b7a339efc8e20`
+  (`chore(control): regenerate fleet boot ID schema`).
+- This report update is committed separately; its hash is returned in the final
+  handoff.
+
+Fleet `TelemetryPoint.boot_id` now matches Task 3: canonical lowercase
+hyphenated UUID text, non-nil, with no UUID version or RFC variant-bit
+restriction. The Fleet model uses a dedicated boot-ID pattern, leaving UUID
+constraints for other identifiers unchanged. The accepted
+`00000000-0000-0000-0000-000000000001` value is exercised through Task 3
+recording, Fleet snapshot projection, Fleet telemetry history, fake batch SSE
+hydration, and production-repository 128-event hydration. Literal DTO tests
+still reject the nil UUID, uppercase text, and compact non-hyphenated text at
+the Fleet boundary; Task 3's existing ingestion test still rejects a nil
+`uuid.UUID`.
+
+The production stream lifecycle coverage now distinguishes orderly generator
+`aclose()` from actual task cancellation. The new test uses the production
+`session_factory` and `FleetEventRepository`, blocks the consumer inside the
+injected poll sleep await, cancels the consuming task, and asserts propagated
+`CancelledError`. Engine instrumentation proves zero checked-out connections
+and zero open transactions while suspended and after cancellation. Releasing
+the blocked sleep after cancellation produces no further reads, and the event
+loop contains no continuing stream task. This was a missing-proof finding: the
+test passed against the existing no-producer-task stream implementation, so no
+production stream change was necessary.
+
+### Fix Round 2 TDD and verification
+
+- RED: the accepted non-RFC boot ID caused `TelemetryPoint.boot_id` validation
+  failures in both fake and production SSE hydration before the projection
+  change.
+- GREEN: splitting `BootId` from versioned `UuidId` and applying canonical,
+  non-nil shape validation made projection, history, and SSE paths pass while
+  retaining nil/noncanonical rejection.
+- RED/GREEN generated drift: the committed OpenAPI still exposed the old
+  version/variant-restricted pattern and the literal client test failed; after
+  regeneration it exposes the Task 3-compatible pattern and the complete
+  client suite passes.
+- Cancellation was a test-coverage gap rather than a failing implementation;
+  the real blocked-await characterization passed without a production stream
+  mutation.
+
+| Command | Result |
+|---|---|
+| `control/.venv/bin/pytest -q control/tests/test_fleet_projection.py control/tests/test_fleet_events.py control/tests/test_fleet_stream.py control/tests/test_operation_api.py` | `86 passed`; the prior 81-test slice plus five Fix Round 2 cases. |
+| Same command plus `control/tests/test_telemetry.py` | `128 passed`; includes Task 3 accepted/non-nil ingestion coverage. |
+| `control/.venv/bin/pytest -q tests/control/test_openapi_clients.py` | `9 passed`; generator idempotence/drift passed. Two pre-existing generated-Python `1and` syntax warnings remain. |
+| `scripts/generate-control-clients` | Exit 0. Only `control/openapi.json` changed; generated Python and TypeScript remained byte-identical. |
+| `uvx ruff==0.16.1 check <Fix Round 2 changed Python>` | `All checks passed!` |
+| `control/.venv/bin/python -m compileall -q <Fix Round 2 Python>` | Exit 0. |
+| `git diff --check` | Exit 0. |
+
+No live network, MIA, Rust, handwritten frontend, NAS, Sparks, or unrelated
+behavior was changed.
+
 ## Exact implementation scope
 
 The source/tests commit contains exactly these eight files:
