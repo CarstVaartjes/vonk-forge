@@ -706,7 +706,7 @@ as a substitute for restoring PostgreSQL or generated-secret state.
   a blind file-by-file replacement causes an outage. Follow the complete
   rotation window in [Development agent workloads](development-agent-workloads.md#rollback-and-secret-rotation).
 
-Back up all 17 host secret files and every named volume needed for continuity
+Back up all 18 host secret files and every named volume needed for continuity
 to encrypted, access-controlled storage. The repository volume can be cloned
 again from public GitHub, but local `deploy` history, `main`,
 `refs/vonk/deploy-base`, other local refs, and signed changes exist only in its
@@ -742,6 +742,13 @@ volume and matching password/URL pair from the same recovery point.
 - Loopback API unavailable during bounded acceptance or recovery: verify the
   NAS-local listener and the restricted SSH forwarding boundary above. This is
   not a substitute for repairing the normal Tailscale browser route.
+- First LiteLLM start can spend up to two minutes applying its dedicated
+  database migrations. Leave the container running during that startup grace;
+  an interrupted Prisma migration can be recorded as failed. If `P3009` follows
+  an interruption of a brand-new database that has never stored a virtual key,
+  recreate only the dedicated `litellm` database and redeploy. Once any virtual
+  key exists, treat that database as stateful: restore or repair it instead of
+  deleting it.
 - Migration failure: preserve the PostgreSQL volume and diagnose the migration.
   Deleting data is not a migration repair.
 

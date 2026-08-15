@@ -392,6 +392,7 @@ services:
       interval: 15s
       timeout: 5s
       retries: 10
+      start_period: 120s
 
   caddy:
     image: caddy:2.11.4@sha256:844f60b64e4724a5aa8245e019dace0d3f199f7433ce6c57676cb30a920dbad9
