@@ -485,7 +485,11 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         );
                     }
                 }
-                if self.runtime.uninstall(&installation_id).is_err() {
+                if self
+                    .runtime
+                    .uninstall(&installation_id, &request.recipe_content_sha256)
+                    .is_err()
+                {
                     failed("installed recipe could not be safely removed")
                 } else {
                     ExecutionResult {
