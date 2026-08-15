@@ -1,7 +1,8 @@
 use std::{
     collections::VecDeque,
-    fs::{self, File},
+    fs::{self, File, OpenOptions},
     io::Read,
+    os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -20,6 +21,7 @@ const MAX_QUEUE_SAMPLES: usize = 15;
 const SEQUENCE_RESERVATION_SIZE: u64 = 64;
 const SEQUENCE_STATE_KEY: &str = "telemetry_sequence_v1";
 const SEQUENCE_LIMIT_EXCLUSIVE: u64 = i64::MAX as u64 + 1;
+pub const TELEMETRY_STATE_FILENAME: &str = "telemetry-state.sqlite";
 pub const MAX_REPORT_SAMPLES: usize = 16;
 pub const COLLECTION_INTERVAL: Duration = Duration::from_secs(2);
 
@@ -137,16 +139,39 @@ struct DurableSequenceAllocator {
 
 impl DurableSequenceAllocator {
     fn open(path: &Path, boot_id: Uuid) -> Result<Self, TelemetryError> {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        match OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(path)
+        {
+            Ok(file) => drop(file),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error.into()),
+        }
         let metadata = fs::symlink_metadata(path)?;
-        if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+        if metadata.file_type().is_symlink()
+            || !metadata.file_type().is_file()
+            || metadata.nlink() != 1
+        {
             return Err(TelemetryError::InvalidSequenceState);
         }
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
         let mut connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
         connection.busy_timeout(Duration::from_secs(1))?;
         connection.execute_batch(
-            "PRAGMA synchronous=FULL;
+            "PRAGMA journal_mode=WAL;
+             PRAGMA synchronous=FULL;
              PRAGMA foreign_keys=ON;
-             PRAGMA trusted_schema=OFF;",
+             PRAGMA trusted_schema=OFF;
+             CREATE TABLE IF NOT EXISTS metadata (
+               key TEXT PRIMARY KEY NOT NULL,
+               value TEXT NOT NULL
+             ) STRICT;",
         )?;
         let (next_sequence, reserved_until) = reserve_sequence_block(&mut connection, boot_id)?;
         Ok(Self {
@@ -234,7 +259,8 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
         if boot_id.is_nil() || boot_id.to_string() != boot_id.hyphenated().to_string() {
             return Err(TelemetryError::InvalidBootId);
         }
-        let sequences = DurableSequenceAllocator::open(&paths.store.join("state.sqlite"), boot_id)?;
+        let sequences =
+            DurableSequenceAllocator::open(&paths.store.join(TELEMETRY_STATE_FILENAME), boot_id)?;
         Ok(Self {
             runner,
             filesystem,

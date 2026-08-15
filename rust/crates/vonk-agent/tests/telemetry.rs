@@ -2,23 +2,27 @@
 
 use std::{
     fs,
-    os::unix::fs::symlink,
+    os::unix::fs::{PermissionsExt, symlink},
     path::Path,
     sync::{Arc, Mutex},
-    time::Duration,
+    time::{Duration, Instant as StdInstant},
 };
 
-use chrono::{TimeZone, Utc};
+use chrono::{DateTime, FixedOffset, TimeZone, Utc};
+use serde_json::json;
 use tempfile::tempdir;
 use uuid::Uuid;
 use vonk_agent::{
     process::{ProcessError, ProcessOutput, ProcessRunner, Program},
-    state::StateStore,
+    state::{BeginDecision, StateStore},
     telemetry::{
-        FileSystemCapacity, FileSystemProvider, TelemetryCollector, TelemetryPaths, TelemetryQueue,
-        TelemetrySchedule,
+        FileSystemCapacity, FileSystemProvider, TELEMETRY_STATE_FILENAME, TelemetryCollector,
+        TelemetryError, TelemetryPaths, TelemetryQueue, TelemetrySchedule,
     },
 };
+use vonk_agent_protocol::{AgentClaim, canonical_json, hex_sha256};
+
+const NODE_ID: &str = "spk_0123456789abcdef0123456789abcdef";
 
 #[derive(Clone)]
 struct FakeRunner {
@@ -63,11 +67,7 @@ struct Fixtures {
 impl Fixtures {
     fn new() -> Self {
         let directory = tempdir().unwrap();
-        StateStore::open(
-            &directory.path().join("state.sqlite"),
-            "spk_0123456789abcdef0123456789abcdef",
-        )
-        .unwrap();
+        StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
         let stat = directory.path().join("stat");
         let loadavg = directory.path().join("loadavg");
         let meminfo = directory.path().join("meminfo");
@@ -121,6 +121,58 @@ fn boot_id() -> Uuid {
 
 fn next_boot_id() -> Uuid {
     Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap()
+}
+
+fn claim() -> AgentClaim {
+    let payload = json!({"run_id": "telemetry-lock-isolation"});
+    AgentClaim {
+        attempt: 1,
+        base_commit: "b".repeat(40),
+        deadline: DateTime::<FixedOffset>::parse_from_rfc3339("2099-01-01T00:00:00+00:00").unwrap(),
+        fence: Uuid::parse_str("44d4e914-34df-4962-a802-d1f7dcd928aa").unwrap(),
+        job_id: Uuid::parse_str("84ddf214-f067-4bbf-917e-95df32a07fd8").unwrap(),
+        node_id: NODE_ID.to_owned(),
+        operation: "recipe.install".to_owned(),
+        operation_id: Uuid::parse_str("f450b5ac-5a78-4af5-9670-e874f735e3ee").unwrap(),
+        payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
+        payload,
+        schema_version: 1,
+    }
+}
+
+fn basic_collector(
+    fixtures: &Fixtures,
+    boot_id: Uuid,
+) -> TelemetryCollector<FakeRunner, FakeFileSystem> {
+    TelemetryCollector::new(
+        runner(b"NVIDIA H100, [N/A], 100, 90, [N/A], [N/A], [N/A]\n"),
+        FakeFileSystem {
+            capacity: FileSystemCapacity {
+                total_bytes: 10_000,
+                free_bytes: 4_000,
+            },
+        },
+        fixtures.paths(),
+        boot_id,
+    )
+    .unwrap()
+}
+
+fn set_next_unreserved_sequence(fixtures: &Fixtures, next: u64) {
+    drop(basic_collector(fixtures, boot_id()));
+    let connection =
+        rusqlite::Connection::open(fixtures.directory.path().join(TELEMETRY_STATE_FILENAME))
+            .unwrap();
+    connection
+        .execute(
+            "UPDATE metadata SET value = ?1 WHERE key = 'telemetry_sequence_v1'",
+            [json!({
+                "boot_id": boot_id().to_string(),
+                "next_unreserved_sequence": next,
+            })
+            .to_string()],
+        )
+        .unwrap();
 }
 
 #[test]
@@ -287,6 +339,60 @@ fn sequence_reservation_survives_same_boot_process_restart() {
 }
 
 #[test]
+fn sequence_reservation_crosses_from_63_to_64() {
+    let fixtures = Fixtures::new();
+    let mut collector = basic_collector(&fixtures, boot_id());
+    let observed_at = Utc.with_ymd_and_hms(2026, 8, 15, 12, 0, 0).unwrap();
+
+    for expected in 0..=64 {
+        let sample = collector
+            .sample_at(None, observed_at + chrono::Duration::milliseconds(expected))
+            .unwrap();
+        assert_eq!(sample.sequence, expected);
+    }
+}
+
+#[test]
+fn final_sequence_reservation_uses_a_partial_block() {
+    let fixtures = Fixtures::new();
+    let first = i64::MAX as u64 - 31;
+    set_next_unreserved_sequence(&fixtures, first);
+    let mut collector = basic_collector(&fixtures, boot_id());
+    let observed_at = Utc.with_ymd_and_hms(2026, 8, 15, 12, 0, 0).unwrap();
+
+    for offset in 0..32_u64 {
+        let sample = collector
+            .sample_at(
+                None,
+                observed_at + chrono::Duration::milliseconds(offset as i64),
+            )
+            .unwrap();
+        assert_eq!(sample.sequence, (first + offset) as i64);
+    }
+    assert!(matches!(
+        collector.sample_at(None, observed_at),
+        Err(TelemetryError::SequenceExhausted)
+    ));
+}
+
+#[test]
+fn maximum_signed_sequence_is_emitted_once_then_exhausted() {
+    let fixtures = Fixtures::new();
+    set_next_unreserved_sequence(&fixtures, i64::MAX as u64);
+    let mut collector = basic_collector(&fixtures, boot_id());
+    let observed_at = Utc.with_ymd_and_hms(2026, 8, 15, 12, 0, 0).unwrap();
+
+    assert_eq!(
+        collector.sample_at(None, observed_at).unwrap().sequence,
+        i64::MAX
+    );
+    assert!(matches!(
+        collector.sample_at(None, observed_at),
+        Err(TelemetryError::SequenceExhausted)
+    ));
+}
+
+#[test]
 fn sequence_reservation_resets_only_for_a_new_boot() {
     let fixtures = Fixtures::new();
     let filesystem = FakeFileSystem {
@@ -324,11 +430,13 @@ fn sequence_reservation_resets_only_for_a_new_boot() {
 #[test]
 fn corrupt_sequence_metadata_fails_closed() {
     let fixtures = Fixtures::new();
+    drop(basic_collector(&fixtures, boot_id()));
     let connection =
-        rusqlite::Connection::open(fixtures.directory.path().join("state.sqlite")).unwrap();
+        rusqlite::Connection::open(fixtures.directory.path().join(TELEMETRY_STATE_FILENAME))
+            .unwrap();
     connection
         .execute(
-            "INSERT INTO metadata(key, value) VALUES ('telemetry_sequence_v1', 'corrupt')",
+            "UPDATE metadata SET value = 'corrupt' WHERE key = 'telemetry_sequence_v1'",
             [],
         )
         .unwrap();
@@ -351,11 +459,15 @@ fn corrupt_sequence_metadata_fails_closed() {
 
 #[test]
 fn symlinked_sequence_database_fails_closed() {
-    let target = tempdir().unwrap();
-    let target_path = target.path().join("state.sqlite");
-    StateStore::open(&target_path, "spk_0123456789abcdef0123456789abcdef").unwrap();
-    let store = tempdir().unwrap();
-    symlink(&target_path, store.path().join("state.sqlite")).unwrap();
+    let target = Fixtures::new();
+    drop(basic_collector(&target, boot_id()));
+    let target_path = target.directory.path().join(TELEMETRY_STATE_FILENAME);
+    let store = Fixtures::new();
+    symlink(
+        &target_path,
+        store.directory.path().join(TELEMETRY_STATE_FILENAME),
+    )
+    .unwrap();
 
     let result = TelemetryCollector::new(
         runner(b"NVIDIA H100, [N/A], 100, 90, [N/A], [N/A], [N/A]\n"),
@@ -366,16 +478,70 @@ fn symlinked_sequence_database_fails_closed() {
             },
         },
         TelemetryPaths {
-            stat: store.path().join("stat"),
-            loadavg: store.path().join("loadavg"),
-            meminfo: store.path().join("meminfo"),
-            net_dev: store.path().join("net-dev"),
-            store: store.path().to_path_buf(),
+            stat: store.stat.clone(),
+            loadavg: store.loadavg.clone(),
+            meminfo: store.meminfo.clone(),
+            net_dev: store.net_dev.clone(),
+            store: store.directory.path().to_path_buf(),
         },
         boot_id(),
     );
 
     assert!(result.is_err());
+}
+
+#[test]
+fn hardlinked_control_database_fails_closed() {
+    let fixtures = Fixtures::new();
+    fs::hard_link(
+        fixtures.directory.path().join("state.sqlite"),
+        fixtures.directory.path().join(TELEMETRY_STATE_FILENAME),
+    )
+    .unwrap();
+
+    let result = TelemetryCollector::new(
+        runner(b"NVIDIA H100, [N/A], 100, 90, [N/A], [N/A], [N/A]\n"),
+        FakeFileSystem {
+            capacity: FileSystemCapacity {
+                total_bytes: 10_000,
+                free_bytes: 4_000,
+            },
+        },
+        fixtures.paths(),
+        boot_id(),
+    );
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn telemetry_state_database_is_owner_only() {
+    let fixtures = Fixtures::new();
+    drop(basic_collector(&fixtures, boot_id()));
+
+    let metadata = fs::metadata(fixtures.directory.path().join(TELEMETRY_STATE_FILENAME)).unwrap();
+    assert_eq!(metadata.permissions().mode() & 0o777, 0o600);
+}
+
+#[test]
+fn held_telemetry_write_lock_does_not_delay_control_state_transaction() {
+    let fixtures = Fixtures::new();
+    drop(basic_collector(&fixtures, boot_id()));
+    let telemetry =
+        rusqlite::Connection::open(fixtures.directory.path().join(TELEMETRY_STATE_FILENAME))
+            .unwrap();
+    telemetry.execute_batch("BEGIN IMMEDIATE").unwrap();
+
+    let mut control =
+        StateStore::open(&fixtures.directory.path().join("state.sqlite"), NODE_ID).unwrap();
+    let started = StdInstant::now();
+    assert_eq!(
+        control.begin(&claim(), Utc::now()).unwrap(),
+        BeginDecision::Execute
+    );
+    assert!(started.elapsed() < Duration::from_millis(500));
+
+    telemetry.execute_batch("ROLLBACK").unwrap();
 }
 
 #[test]
