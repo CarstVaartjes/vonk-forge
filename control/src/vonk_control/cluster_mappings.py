@@ -47,13 +47,14 @@ class ClusterMappingService:
     def __init__(self, sessions: sessionmaker[Session]) -> None:
         self._sessions = sessions
 
-    def plan(
+    def preview(
         self,
         recipe_revision_id: str,
         node_ids: tuple[str, ...],
-        *,
         parameters: Mapping[str, object],
+        actor: str,
     ) -> ClusterMappingPlan:
+        _mapping_actor(actor)
         with self._sessions() as session:
             revision = session.get(LocalRecipeRevision, recipe_revision_id)
             if revision is None:
@@ -134,9 +135,7 @@ class ClusterMappingService:
     def materialize(
         self, plan: ClusterMappingPlan, *, actor: str, now: datetime
     ) -> str:
-        actor = actor.strip()
-        if not actor:
-            raise ClusterMappingError("mapping.actor", "mapping actor is invalid")
+        actor = _mapping_actor(actor)
         with self._sessions.begin() as session:
             revision = session.get(
                 LocalRecipeRevision, plan.recipe_revision_id, with_for_update=True
@@ -253,6 +252,15 @@ def _active_nodes(
             "a selected GPU node is inactive or incompatible",
         )
     return rows
+
+
+def _mapping_actor(actor: str) -> str:
+    if not isinstance(actor, str):
+        raise ClusterMappingError("mapping.actor", "mapping actor is invalid")
+    actor = actor.strip()
+    if not actor or len(actor) > 200:
+        raise ClusterMappingError("mapping.actor", "mapping actor is invalid")
+    return actor
 
 
 def _plan_identity(

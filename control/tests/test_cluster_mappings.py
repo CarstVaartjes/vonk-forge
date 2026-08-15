@@ -81,10 +81,11 @@ def test_three_node_topology_maps_deterministic_ranks(tmp_path: Path) -> None:
     sessions, now, node_ids, revision = setup(tmp_path)
     service = ClusterMappingService(sessions)
 
-    plan = service.plan(
+    plan = service.preview(
         revision.id,
         tuple(reversed(node_ids)),
-        parameters={},
+        {},
+        "admin",
     )
 
     assert [(node.rank, node.role) for node in plan.nodes] == [
@@ -111,14 +112,40 @@ def test_three_node_topology_maps_deterministic_ranks(tmp_path: Path) -> None:
 def test_mapping_plan_binds_effective_parameters(tmp_path: Path) -> None:
     sessions, _now, node_ids, revision = setup(tmp_path)
 
-    plan = ClusterMappingService(sessions).plan(
+    plan = ClusterMappingService(sessions).preview(
         revision.id,
         node_ids,
-        parameters={"max_model_len": 65536},
+        {"max_model_len": 65536},
+        "admin",
     )
 
     assert plan.parameters["max_model_len"] == 65536
     assert len(plan.placement_digest) == 64
+
+
+def test_mapping_preview_is_actor_bound_and_ready_nodes_are_immutable(
+    tmp_path: Path,
+) -> None:
+    sessions, now, node_ids, revision = setup(tmp_path)
+    service = ClusterMappingService(sessions)
+    assert not hasattr(service, "plan")
+    with pytest.raises(ClusterMappingError) as caught:
+        service.preview(revision.id, node_ids, {}, " " * 201)
+    assert caught.value.code == "mapping.actor"
+    mapping_id = service.materialize(
+        service.preview(revision.id, node_ids, {}, "admin"), actor="admin", now=now
+    )
+    with (
+        pytest.raises(ValueError, match="mapping.ready_immutable"),
+        sessions.begin() as session,
+    ):
+        node = session.scalar(
+            select(ClusterMappingNode).where(
+                ClusterMappingNode.mapping_id == mapping_id
+            )
+        )
+        assert node is not None
+        node.role = "tampered"
 
 
 def test_mapping_rejects_wrong_node_count_and_missing_required_fabric(
@@ -128,7 +155,7 @@ def test_mapping_rejects_wrong_node_count_and_missing_required_fabric(
     service = ClusterMappingService(sessions)
 
     with pytest.raises(ClusterMappingError) as caught:
-        service.plan(revision.id, node_ids[:2], parameters={})
+        service.preview(revision.id, node_ids[:2], {}, "admin")
     assert caught.value.code == "mapping.node_count"
 
     with sessions.begin() as session:
@@ -137,14 +164,14 @@ def test_mapping_rejects_wrong_node_count_and_missing_required_fabric(
         node.capabilities = ["runtime.vonk.v1"]
 
     with pytest.raises(ClusterMappingError) as caught:
-        service.plan(revision.id, node_ids, parameters={})
+        service.preview(revision.id, node_ids, {}, "admin")
     assert caught.value.code == "topology.fabric_insufficient"
 
 
 def test_mapping_rejects_forged_role_rank_and_endpoint_owner(tmp_path: Path) -> None:
     sessions, now, node_ids, revision = setup(tmp_path)
     service = ClusterMappingService(sessions)
-    plan = service.plan(revision.id, node_ids, parameters={})
+    plan = service.preview(revision.id, node_ids, {}, "admin")
     forged_nodes = list(plan.nodes)
     forged_nodes[0] = replace(forged_nodes[0], role="worker", endpoint_owner=False)
     forged_nodes[1] = replace(forged_nodes[1], role="entrypoint", endpoint_owner=True)

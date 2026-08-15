@@ -303,6 +303,7 @@ def install_recipe_operation_routes(
                     body.recipe_revision_id,
                     tuple(body.node_ids),
                     parameters=body.parameters,
+                    actor=actor.subject,
                 )
             )
         except (KeyError, RecipeOperationConflict, ValueError) as error:
@@ -323,6 +324,7 @@ def install_recipe_operation_routes(
                 body.recipe_revision_id,
                 tuple(body.node_ids),
                 parameters=body.parameters,
+                actor=actor.subject,
             )
             if plan.placement_digest != body.placement_digest:
                 raise RecipeOperationConflict(

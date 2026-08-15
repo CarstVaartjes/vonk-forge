@@ -349,6 +349,27 @@ class RecipeBuildService:
         self, session: Session, plan: RecipeBuildPlan, *, now: datetime
     ) -> None:
         build = session.get(RecipeBuild, plan.build_id, with_for_update=True)
+        revision = (
+            session.get(
+                LocalRecipeRevision, plan.recipe_revision_id, with_for_update=True
+            )
+            if build is not None
+            else None
+        )
+        if (
+            revision is None
+            or revision.lifecycle != "resolved"
+            or revision.content_sha256 != plan.recipe_content_sha256
+        ):
+            raise RecipeBuildError(
+                "build.dependencies_stale", "exact recipe dependencies changed"
+            )
+        try:
+            resolve_recipe_entities(session, revision.document)
+        except RecipeRuntimeSpecError as error:
+            raise RecipeBuildError(
+                "build.dependencies_stale", "exact recipe dependencies are unavailable"
+            ) from error
         expected_agent = (
             build.policy_report.get("builder_agent_sha256")
             if build is not None and isinstance(build.policy_report, dict)

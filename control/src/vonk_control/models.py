@@ -2176,6 +2176,20 @@ class ClusterMappingNode(Base):
     )
 
 
+def _reject_ready_mapping_node_mutation(
+    _mapper: object, connection: object, target: ClusterMappingNode
+) -> None:
+    state = connection.execute(
+        select(ClusterMapping.state).where(ClusterMapping.id == target.mapping_id)
+    ).scalar_one_or_none()
+    if state == "ready":
+        raise ValueError("mapping.ready_immutable")
+
+
+event.listen(ClusterMappingNode, "before_update", _reject_ready_mapping_node_mutation)
+event.listen(ClusterMappingNode, "before_delete", _reject_ready_mapping_node_mutation)
+
+
 class NodeInventorySnapshot(Base):
     __tablename__ = "node_inventory_snapshots"
     __table_args__ = (

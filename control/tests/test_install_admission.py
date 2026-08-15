@@ -82,7 +82,7 @@ def setup(tmp_path, *, free=200, read_only=False, observed_age=0):
     draft = catalog.create_recipe("admin", RecipeDraftInput("qwen3-vllm", document))
     resolved = catalog.resolve(draft.recipe_id, 1, "admin")
     mappings = ClusterMappingService(sessions)
-    mapping_plan = mappings.plan(resolved.id, (node_id,), parameters={})
+    mapping_plan = mappings.preview(resolved.id, (node_id,), {}, "admin")
     mapping_id = mappings.materialize(mapping_plan, actor="admin", now=now)
     with sessions.begin() as session:
         build = RecipeBuild(
@@ -213,15 +213,13 @@ def test_database_rejects_mutable_built_image_identity(tmp_path) -> None:
 
 
 def test_install_rejects_mapping_with_wrong_endpoint_owner(tmp_path) -> None:
-    sessions, now, _node, mapping, build, sizes = setup(tmp_path, free=200)
-    with sessions.begin() as session:
+    sessions, _now, _node, mapping, _build, _sizes = setup(tmp_path, free=200)
+    with (
+        pytest.raises(ValueError, match="mapping.ready_immutable"),
+        sessions.begin() as session,
+    ):
         node = session.scalar(
             select(ClusterMappingNode).where(ClusterMappingNode.mapping_id == mapping)
         )
         assert node is not None
         node.endpoint_owner = False
-
-    with pytest.raises(ValueError, match="mapping topology"):
-        InstallAdmissionService(
-            sessions, sizes=sizes, inventory_max_age=300, disk_floor_bytes=10
-        ).plan_install(mapping, build, now=now)

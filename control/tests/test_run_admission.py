@@ -97,7 +97,7 @@ def setup(
         session.flush()
         revision_id = revision.id
     mappings = ClusterMappingService(sessions)
-    mapping_plan = mappings.plan(revision_id, (node,), parameters={})
+    mapping_plan = mappings.preview(revision_id, (node,), {}, "admin")
     mapping_id = mappings.materialize(mapping_plan, actor="admin", now=now)
     with sessions.begin() as session:
         build = RecipeBuild(

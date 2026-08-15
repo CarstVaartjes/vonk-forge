@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from datetime import datetime
 
@@ -90,8 +91,11 @@ class InstallAdmissionService:
         recipe_build_id: str,
         *,
         now: datetime,
+        _session: Session | None = None,
     ) -> InstallPlan:
-        with self._sessions() as session:
+        with (
+            nullcontext(_session) if _session is not None else self._sessions()
+        ) as session:
             mapping = session.get(ClusterMapping, mapping_id)
             build = session.get(RecipeBuild, recipe_build_id)
             if mapping is None:
@@ -367,7 +371,9 @@ class InstallAdmissionService:
         actor: str,
         now: datetime,
     ) -> str:
-        fresh = self.plan_install(plan.mapping_id, plan.recipe_build_id, now=now)
+        fresh = self.plan_install(
+            plan.mapping_id, plan.recipe_build_id, now=now, _session=session
+        )
         if (
             not fresh.allowed
             or fresh.plan_digest != plan.plan_digest
@@ -385,6 +391,47 @@ class InstallAdmissionService:
             or build.image_digest != plan.image_digest
         ):
             raise InstallPlanConflict("mapping or build changed while reserving")
+        revision = session.get(
+            LocalRecipeRevision, plan.recipe_revision_id, with_for_update=True
+        )
+        mapping_nodes = tuple(
+            session.scalars(
+                select(ClusterMappingNode)
+                .where(ClusterMappingNode.mapping_id == plan.mapping_id)
+                .order_by(ClusterMappingNode.rank)
+                .with_for_update()
+            )
+        )
+        if (
+            revision is None
+            or revision.lifecycle != "resolved"
+            or revision.content_sha256 != plan.recipe_content_sha256
+            or tuple((node.node_id, node.rank, node.role) for node in mapping_nodes)
+            != tuple((node.node_id, node.rank, node.role) for node in plan.nodes)
+        ):
+            raise InstallPlanConflict("install.plan_stale")
+        try:
+            resolve_recipe_entities(session, revision.document)
+        except RecipeRuntimeSpecError as error:
+            raise InstallPlanConflict("install.dependencies_stale") from error
+        nodes = tuple(
+            session.scalars(
+                select(AgentNode)
+                .where(AgentNode.node_id.in_([node.node_id for node in mapping_nodes]))
+                .with_for_update()
+            )
+        )
+        try:
+            validate_topology(
+                revision.document,
+                tuple(
+                    Placement(node.node_id, node.rank, node.role, node.endpoint_owner)
+                    for node in mapping_nodes
+                ),
+                {node.node_id: tuple(node.capabilities) for node in nodes},
+            )
+        except TopologyError as error:
+            raise InstallPlanConflict("install.topology_stale") from error
         installation = RecipeInstallation(
             recipe_revision_id=plan.recipe_revision_id,
             mapping_id=plan.mapping_id,

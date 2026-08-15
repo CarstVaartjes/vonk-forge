@@ -115,8 +115,8 @@ class Recipes:
             agent_payload={"operation": "recipe.build.v1"},
         )
 
-    def preview_mapping(self, revision, nodes, *, parameters):
-        self.calls.append(("preview_mapping", (revision, nodes, parameters)))
+    def preview_mapping(self, revision, nodes, *, parameters, actor):
+        self.calls.append(("preview_mapping", (revision, nodes, parameters, actor)))
         return self.mapping_plan
 
     def create_mapping(self, plan, **kwargs):

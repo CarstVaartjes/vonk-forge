@@ -113,7 +113,13 @@ def start_evidence(payload: dict[str, object]) -> dict[str, object]:
     }
 
 
-def setup_services(tmp_path: Path, *, nodes: int = 1, engine=None):
+def setup_services(
+    tmp_path: Path,
+    *,
+    nodes: int = 1,
+    endpoint_owner_rank_one: bool = False,
+    engine=None,
+):
     engine = engine or create_engine(
         f"sqlite:///{tmp_path / 'operations.sqlite'}",
         connect_args={"check_same_thread": False},
@@ -199,6 +205,9 @@ def setup_services(tmp_path: Path, *, nodes: int = 1, engine=None):
     if nodes > 1:
         worker = json.loads(json.dumps(role))
         worker.update({"name": "worker", "count": nodes - 1, "endpoint_owner": False})
+        roles = [role, worker]
+        if endpoint_owner_rank_one:
+            roles = [worker, role]
         document["topology"] = {
             **document["topology"],
             "name": f"nodes_{nodes}",
@@ -210,7 +219,7 @@ def setup_services(tmp_path: Path, *, nodes: int = 1, engine=None):
                 "data": 1,
                 "backend": "tcp",
             },
-            "roles": [role, worker],
+            "roles": roles,
             "fabric": {"connectivity": "connected", "minimum_bandwidth_mbps": 1},
             "start_order": ["worker", "entrypoint"],
             "stop_order": ["entrypoint", "worker"],
@@ -223,7 +232,7 @@ def setup_services(tmp_path: Path, *, nodes: int = 1, engine=None):
     draft = catalog.create_recipe("admin", RecipeDraftInput("qwen3-vllm", document))
     revision = catalog.resolve(draft.recipe_id, 1, "admin")
     mappings = ClusterMappingService(sessions)
-    mapping_plan = mappings.plan(revision.id, node_ids, parameters={})
+    mapping_plan = mappings.preview(revision.id, node_ids, {}, "admin")
     mapping_id = mappings.materialize(mapping_plan, actor="admin", now=NOW)
     with sessions.begin() as session:
         build = RecipeBuild(
@@ -371,6 +380,178 @@ def test_install_is_digest_bound_idempotent_and_gang_complete(tmp_path: Path) ->
     }
     with sessions() as session:
         assert session.get(RecipeInstallation, operation.owner_id).state == "installed"
+
+
+def test_multirank_role_phases_persist_recover_and_stop_in_reverse_order(
+    tmp_path: Path,
+) -> None:
+    sessions, service, queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=3
+    )
+    install_plan = service.preview_install(mapping_id, build_id)
+    install = service.install(
+        install_plan,
+        plan_digest=install_plan.plan_digest,
+        actor="admin",
+        request_id="0" * 36,
+    )
+    for node_id in nodes:
+        service.record_node_result(
+            install.id, node_id, succeeded=True, evidence={"installed_bytes": 120}
+        )
+    run_plan = service.preview_run(install.owner_id)
+    start = service.start(
+        run_plan,
+        plan_digest=run_plan.plan_digest,
+        alias="phased",
+        actor="admin",
+        request_id="1" * 36,
+    )
+    with sessions() as session:
+        first = tuple(
+            session.scalars(
+                select(AgentOperation).where(AgentOperation.parent_job_id == start.id)
+            )
+        )
+        assert {item.payload["role"] for item in first} == {"worker"}
+        assert len(first) == 2
+        stored = session.get(Job, start.id)
+        assert stored is not None and len(stored.payload["phases"]) == 2
+    for operation in first:
+        service.record_node_result(
+            start.id,
+            operation.node_id,
+            succeeded=True,
+            evidence=start_evidence(operation.payload),
+        )
+    recovered = RecipeOperationService(
+        sessions,
+        install_admission=service._install_admission,
+        run_admission=service._run_admission,
+        agent_jobs=queue,
+        clock=lambda: NOW,
+    )
+    with sessions() as session:
+        all_children = tuple(
+            session.scalars(
+                select(AgentOperation).where(AgentOperation.parent_job_id == start.id)
+            )
+        )
+        second = tuple(
+            item for item in all_children if item.payload["role"] == "entrypoint"
+        )
+        assert len(second) == 1
+    recovered.record_node_result(
+        start.id,
+        second[0].node_id,
+        succeeded=True,
+        evidence=start_evidence(second[0].payload),
+    )
+    assert recovered.get(start.id).state == "succeeded"
+
+    stop = recovered.stop(start.owner_id, actor="admin", request_id="2" * 36)
+    with sessions() as session:
+        first_stop = tuple(
+            session.scalars(
+                select(AgentOperation).where(AgentOperation.parent_job_id == stop.id)
+            )
+        )
+        assert {item.payload["role"] for item in first_stop} == {"entrypoint"}
+    recovered.record_node_result(
+        stop.id, first_stop[0].node_id, succeeded=True, evidence={"stopped": True}
+    )
+    with sessions() as session:
+        all_stop = tuple(
+            session.scalars(
+                select(AgentOperation).where(AgentOperation.parent_job_id == stop.id)
+            )
+        )
+        second_stop = tuple(
+            item for item in all_stop if item.payload["role"] == "worker"
+        )
+        assert len(second_stop) == 2
+    for operation in second_stop:
+        recovered.record_node_result(
+            stop.id, operation.node_id, succeeded=True, evidence={"stopped": True}
+        )
+    assert recovered.get(stop.id).state == "succeeded"
+
+
+def test_failed_start_phase_never_enqueues_dependent_role(tmp_path: Path) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2
+    )
+    install_plan = service.preview_install(mapping_id, build_id)
+    install = service.install(
+        install_plan,
+        plan_digest=install_plan.plan_digest,
+        actor="admin",
+        request_id="3" * 36,
+    )
+    for node_id in nodes:
+        service.record_node_result(
+            install.id, node_id, succeeded=True, evidence={"installed_bytes": 120}
+        )
+    run_plan = service.preview_run(install.owner_id)
+    start = service.start(
+        run_plan,
+        plan_digest=run_plan.plan_digest,
+        alias="blocked",
+        actor="admin",
+        request_id="4" * 36,
+    )
+    with sessions() as session:
+        worker = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == start.id)
+        )
+        assert worker is not None and worker.payload["role"] == "worker"
+    service.record_node_result(
+        start.id, worker.node_id, succeeded=False, evidence={"reason": "nope"}
+    )
+    with sessions() as session:
+        starts = tuple(
+            session.scalars(
+                select(AgentOperation).where(AgentOperation.parent_job_id == start.id)
+            )
+        )
+        assert {item.payload["role"] for item in starts} == {"worker"}
+    assert service.get(start.id).state == "failed"
+
+
+def test_nonzero_endpoint_owner_controls_rendezvous_for_every_rank(
+    tmp_path: Path,
+) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2, endpoint_owner_rank_one=True
+    )
+    install_plan = service.preview_install(mapping_id, build_id)
+    install = service.install(
+        install_plan,
+        plan_digest=install_plan.plan_digest,
+        actor="admin",
+        request_id="5" * 36,
+    )
+    for node_id in nodes:
+        service.record_node_result(
+            install.id, node_id, succeeded=True, evidence={"installed_bytes": 120}
+        )
+    run_plan = service.preview_run(install.owner_id)
+    assert next(node for node in run_plan.nodes if node.endpoint_owner).rank == 1
+    start = service.start(
+        run_plan,
+        plan_digest=run_plan.plan_digest,
+        alias="nonzero",
+        actor="admin",
+        request_id="6" * 36,
+    )
+    with sessions() as session:
+        job = session.get(Job, start.id)
+        assert job is not None
+        payloads = [
+            entry["payload"] for phase in job.payload["phases"] for entry in phase
+        ]
+    assert {payload["master_address"] for payload in payloads} == {"192.168.100.3"}
+    assert {payload["master_port"] for payload in payloads} == {29500}
 
 
 def test_install_admission_and_queue_creation_roll_back_together(
@@ -858,21 +1039,23 @@ def test_authenticated_run_observations_project_failure_recovery_and_missing_ran
         actor="admin",
         request_id="c" * 36,
     )
-    with sessions() as session:
-        operations = tuple(
-            session.scalars(
-                select(AgentOperation)
-                .where(AgentOperation.parent_job_id == start.id)
-                .order_by(AgentOperation.node_id)
+    while service.get(start.id).state == "running":
+        with sessions() as session:
+            operations = tuple(
+                session.scalars(
+                    select(AgentOperation).where(
+                        AgentOperation.parent_job_id == start.id,
+                        AgentOperation.state == "queued",
+                    )
+                )
             )
-        )
-    for operation in operations:
-        service.record_node_result(
-            start.id,
-            operation.node_id,
-            succeeded=True,
-            evidence=start_evidence(operation.payload),
-        )
+        for operation in operations:
+            service.record_node_result(
+                start.id,
+                operation.node_id,
+                succeeded=True,
+                evidence=start_evidence(operation.payload),
+            )
 
     record_recipe_run_observations(
         sessions,
@@ -939,25 +1122,21 @@ def test_multinode_start_is_bound_to_authenticated_fabric_rendezvous(
     )
 
     with sessions() as session:
-        children = list(
-            session.scalars(
-                select(AgentOperation)
-                .where(AgentOperation.parent_job_id == start.id)
-                .order_by(AgentOperation.node_id)
-            )
-        )
-        assert [child.payload["local_address"] for child in children] == [
-            "192.168.100.2",
-            "192.168.100.3",
+        job = session.get(Job, start.id)
+        assert job is not None
+        children = [
+            entry["payload"] for phase in job.payload["phases"] for entry in phase
         ]
-        assert {child.payload["master_address"] for child in children} == {
-            "192.168.100.2"
-        }
-        assert {child.payload["master_port"] for child in children} == {29500}
-        assert {child.payload["world_size"] for child in children} == {2}
-        assert [child.payload["endpoint_address"] for child in children] == [
-            "192.168.1.211",
+        assert [child["local_address"] for child in children] == [
             "192.168.100.3",
+            "192.168.100.2",
+        ]
+        assert {child["master_address"] for child in children} == {"192.168.100.2"}
+        assert {child["master_port"] for child in children} == {29500}
+        assert {child["world_size"] for child in children} == {2}
+        assert [child["endpoint_address"] for child in children] == [
+            "192.168.100.3",
+            "192.168.1.211",
         ]
 
 
@@ -989,15 +1168,16 @@ def test_multinode_worker_endpoint_is_never_published_on_management_lan(
     )
 
     with sessions() as session:
+        job = session.get(Job, start.id)
+        assert job is not None
         children = {
-            child.node_id: child
-            for child in session.scalars(
-                select(AgentOperation).where(AgentOperation.parent_job_id == start.id)
-            )
+            entry["node_id"]: entry["payload"]
+            for phase in job.payload["phases"]
+            for entry in phase
         }
-    assert children[nodes[0]].payload["endpoint_address"] == "192.168.1.211"
-    assert children[nodes[1]].payload["endpoint_address"] == "192.168.100.3"
-    assert children[nodes[1]].payload["endpoint_address"] != "192.168.1.212"
+    assert children[nodes[0]]["endpoint_address"] == "192.168.1.211"
+    assert children[nodes[1]]["endpoint_address"] == "192.168.100.3"
+    assert children[nodes[1]]["endpoint_address"] != "192.168.1.212"
 
 
 def test_failed_multinode_start_queues_idempotent_stop_for_every_rank(
@@ -1026,18 +1206,12 @@ def test_failed_multinode_start_queues_idempotent_stop_for_every_rank(
         request_id="f" * 35 + "1",
     )
     with sessions() as session:
-        children = {
-            child.node_id: child
-            for child in session.scalars(
-                select(AgentOperation).where(AgentOperation.parent_job_id == start.id)
-            )
-        }
-        successful_evidence = start_evidence(children[nodes[0]].payload)
+        worker = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == start.id)
+        )
+        assert worker is not None
     service.record_node_result(
-        start.id, nodes[0], succeeded=True, evidence=successful_evidence
-    )
-    service.record_node_result(
-        start.id, nodes[1], succeeded=False, evidence={"code": "start.failed"}
+        start.id, worker.node_id, succeeded=False, evidence={"code": "start.failed"}
     )
 
     with sessions() as session:
@@ -1048,14 +1222,13 @@ def test_failed_multinode_start_queues_idempotent_stop_for_every_rank(
             )
         )
         assert cleanup is not None
-        cleanup_nodes = set(
-            session.scalars(
-                select(AgentOperation.node_id).where(
-                    AgentOperation.parent_job_id == cleanup.id
-                )
+        assert set(cleanup.targets) == set(nodes)
+        assert {
+            child.payload["role"]
+            for child in session.scalars(
+                select(AgentOperation).where(AgentOperation.parent_job_id == cleanup.id)
             )
-        )
-        assert cleanup_nodes == set(nodes)
+        } == {"entrypoint"}
         assert session.get(RecipeRun, start.owner_id).state == "stopping"
 
 
@@ -1064,7 +1237,7 @@ def test_concurrent_final_rank_results_serialize_gang_cleanup(
 ) -> None:
     Base.metadata.drop_all(postgres_engine)
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
-        tmp_path, nodes=2, engine=postgres_engine
+        tmp_path, nodes=3, engine=postgres_engine
     )
     install_plan = service.preview_install(mapping_id, build_id)
     install = service.install(
@@ -1089,7 +1262,7 @@ def test_concurrent_final_rank_results_serialize_gang_cleanup(
         child = session.scalar(
             select(AgentOperation).where(
                 AgentOperation.parent_job_id == start.id,
-                AgentOperation.node_id == nodes[0],
+                AgentOperation.node_id == nodes[1],
             )
         )
         assert child is not None
@@ -1107,8 +1280,8 @@ def test_concurrent_final_rank_results_serialize_gang_cleanup(
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         futures = [
-            pool.submit(result, nodes[0], True),
-            pool.submit(result, nodes[1], False),
+            pool.submit(result, nodes[1], True),
+            pool.submit(result, nodes[2], False),
         ]
         for future in futures:
             future.result(timeout=10)
@@ -1122,13 +1295,7 @@ def test_concurrent_final_rank_results_serialize_gang_cleanup(
         )
         assert cleanup is not None
         assert session.get(RecipeRun, start.owner_id).state == "stopping"
-        assert set(
-            session.scalars(
-                select(AgentOperation.node_id).where(
-                    AgentOperation.parent_job_id == cleanup.id
-                )
-            )
-        ) == set(nodes)
+        assert set(cleanup.targets) == set(nodes)
 
 
 def test_changed_plan_or_reused_request_key_is_rejected(tmp_path: Path) -> None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from contextlib import nullcontext
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 
@@ -79,8 +80,12 @@ class RunAdmissionService:
         self._max_age = inventory_max_age
         self._floor = memory_floor_bytes
 
-    def plan_run(self, installation_id: str, *, now: datetime) -> RunPlan:
-        with self._sessions() as session:
+    def plan_run(
+        self, installation_id: str, *, now: datetime, _session: Session | None = None
+    ) -> RunPlan:
+        with (
+            nullcontext(_session) if _session is not None else self._sessions()
+        ) as session:
             installation = session.get(RecipeInstallation, installation_id)
             if installation is None:
                 raise KeyError(installation_id)
@@ -365,7 +370,7 @@ class RunAdmissionService:
         actor: str,
         now: datetime,
     ) -> str:
-        fresh = self.plan_run(plan.installation_id, now=now)
+        fresh = self.plan_run(plan.installation_id, now=now, _session=session)
         if (
             not fresh.allowed
             or fresh.plan_digest != plan.plan_digest
@@ -379,6 +384,40 @@ class RunAdmissionService:
             or mapping.generation != plan.mapping_generation
         ):
             raise RunPlanConflict("mapping generation changed while reserving")
+        installation = session.get(
+            RecipeInstallation, plan.installation_id, with_for_update=True
+        )
+        revision = session.get(
+            LocalRecipeRevision, plan.recipe_revision_id, with_for_update=True
+        )
+        mapping_nodes = tuple(
+            session.scalars(
+                select(ClusterMappingNode)
+                .where(ClusterMappingNode.mapping_id == plan.mapping_id)
+                .order_by(ClusterMappingNode.rank)
+                .with_for_update()
+            )
+        )
+        if (
+            installation is None
+            or installation.mapping_id != plan.mapping_id
+            or installation.mapping_generation != plan.mapping_generation
+            or revision is None
+            or revision.lifecycle != "resolved"
+            or tuple(
+                (node.node_id, node.rank, node.role, node.endpoint_owner)
+                for node in mapping_nodes
+            )
+            != tuple(
+                (node.node_id, node.rank, node.role, node.endpoint_owner)
+                for node in plan.nodes
+            )
+        ):
+            raise RunPlanConflict("run.plan_stale")
+        try:
+            resolve_recipe_entities(session, revision.document)
+        except RecipeRuntimeSpecError as error:
+            raise RunPlanConflict("run.dependencies_stale") from error
         run = RecipeRun(
             installation_id=plan.installation_id,
             mapping_id=plan.mapping_id,

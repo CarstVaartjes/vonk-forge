@@ -99,11 +99,12 @@ def test_resolved_recipe_maps_without_git_remote(tmp_path: Path) -> None:
     resolved = catalog.resolve(draft.recipe_id, draft.revision_number, "admin")
     service = ClusterMappingService(sessions)
 
-    plan = service.plan(
+    plan = service.preview(
         resolved.id,
         "solo",
         (node_id,),
-        parameters={},
+        {},
+        "admin",
     )
     mapping_id = service.materialize(plan, actor="admin", now=clock())
 
