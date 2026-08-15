@@ -141,10 +141,13 @@ def stop_plan(
         "recipe_revision_id": recipe_revision_id,
         "authority_digest": authority_digest,
         "run_state": run_state,
+        # Route generation and digest are descriptive publication metadata.
+        # They change for every route candidate, including one that withdraws
+        # a different run. Keep the route state itself in the authority so a
+        # real state change remains stale, while independent stop operations
+        # can serialize without invalidating one another's previews.
         "route": {
             "state": route_state,
-            "generation": route_generation,
-            "digest": route_digest,
         },
         "nodes": [
             {

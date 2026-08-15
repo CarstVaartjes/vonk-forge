@@ -23,10 +23,11 @@ use vonk_agent::{
 use vonk_agent_protocol::{AgentClaim, canonical_json, hex_sha256};
 
 const NODE_ID: &str = "spk_0123456789abcdef0123456789abcdef";
+type ProcessCall = (Program, Vec<String>, Duration);
 
 #[derive(Clone)]
 struct FakeRunner {
-    calls: Arc<Mutex<Vec<(Program, Vec<String>, Duration)>>>,
+    calls: Arc<Mutex<Vec<ProcessCall>>>,
     output: Arc<Mutex<ProcessOutput>>,
 }
 

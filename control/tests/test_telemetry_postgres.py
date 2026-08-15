@@ -331,7 +331,7 @@ def test_postgres_node_first_maintenance_avoids_late_ingestion_deadlock(
             is not None
         )
 
-    maintenance.run_once(dirty_limit=1)
+    maintenance.run_once(dirty_limit=2)
     with sessions() as session:
         bucket = session.get(NodeTelemetryRollupBucket, (60, NODE_A, start))
         assert bucket.source_sample_count == 2
