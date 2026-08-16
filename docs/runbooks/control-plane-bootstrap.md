@@ -67,14 +67,18 @@ and that is the `10.0.0.2:8443` GPU node backend. The Tailscale gateway publishe
 no Docker port and advertises separate `vonk-forge`, Hermes dashboard, and Hermes
 API Services.
 
-Caddy receives tailnet web traffic on the private `tailnet-web-edge` network.
-It sends `/v1/*` to `litellm:4000` on the existing internal `ingress` network.
-LiteLLM then reaches only the accepted, fresh agent-derived GPU node endpoint via
+Caddy receives tailnet web traffic on the private `tailnet-web-edge` network
+and authorizes inference against the current route-serving lease. It reaches
+LiteLLM only over the dedicated internal `litellm-edge` network. LiteLLM then
+reaches only the accepted, fresh agent-derived GPU node endpoint via
 `cluster-egress`; Docker routes that connection out through the NAS LAN. Model
-and tensor runtimes remain on the Vonk Forge GPU nodes, and direct-fabric traffic never
-passes through the NAS.
+and tensor runtimes remain on the Vonk Forge GPU nodes, and direct-fabric
+traffic never passes through the NAS.
 
-Hermes reaches LiteLLM only through `hermes-inference` and uses the fixed
+Hermes reaches `caddy:8081/v1` over `hermes-inference`; Caddy applies the same
+lease check and then proxies to LiteLLM over `litellm-edge`. Only Caddy and
+LiteLLM share `litellm-edge`, so Hermes cannot resolve or dial LiteLLM directly
+and no ingress-network direct path is supported. Hermes uses the fixed
 `hermes-agent` alias. Apply and verify `bin/harden-hermes-egress` after Docker
 creates the bridge so terminal tools cannot connect directly to GPU node
 management/fabric networks or sibling control-plane networks.

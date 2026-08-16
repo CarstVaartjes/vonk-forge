@@ -25,6 +25,8 @@ CADDY_IMAGE = (
     "caddy:2.11.4@sha256:"
     "844f60b64e4724a5aa8245e019dace0d3f199f7433ce6c57676cb30a920dbad9"
 )
+PRE_EXPIRY_ASSERTION_WINDOW = timedelta(seconds=5)
+POST_RENEWAL_ASSERTION_WINDOW = timedelta(seconds=10)
 
 
 def _supervisor_module():
@@ -317,7 +319,7 @@ def test_real_caddy_forwards_bootstrap_request_to_live_upstream(
 def test_real_caddy_denies_at_expiry_without_contacting_live_upstream(
     real_lease_edge: _RealLeaseEdge,
 ) -> None:
-    expires_at = datetime.now(UTC) + timedelta(milliseconds=300)
+    expires_at = datetime.now(UTC) + PRE_EXPIRY_ASSERTION_WINDOW
     real_lease_edge.authority.activate(
         _active_request(generation=1, expires_at=expires_at)
     )
@@ -347,8 +349,8 @@ def test_real_caddy_honors_same_config_renewal_until_renewed_deadline(
     real_lease_edge: _RealLeaseEdge,
 ) -> None:
     now = datetime.now(UTC)
-    old_deadline = now + timedelta(milliseconds=300)
-    renewed_deadline = now + timedelta(milliseconds=900)
+    old_deadline = now + PRE_EXPIRY_ASSERTION_WINDOW
+    renewed_deadline = old_deadline + POST_RENEWAL_ASSERTION_WINDOW
     real_lease_edge.authority.activate(
         _active_request(generation=1, expires_at=old_deadline)
     )

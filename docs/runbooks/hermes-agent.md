@@ -104,10 +104,16 @@ file, profile, entrypoint, mount, environment file, or service.
 Configure the provider/model prompts as:
 
 ```text
-OpenAI-compatible base URL: http://litellm:4000/v1
+OpenAI-compatible base URL: http://caddy:8081/v1
 Model: hermes-agent
 API key: the dedicated Hermes LiteLLM client key
 ```
+
+Hermes reaches `caddy:8081/v1` over `hermes-inference`. Caddy authorizes every
+inference request against the current route-serving lease, then reaches LiteLLM
+over the dedicated internal `litellm-edge` network. Only Caddy and LiteLLM
+share `litellm-edge`; Hermes cannot resolve or dial LiteLLM directly. Do not
+configure a direct LiteLLM address or an ingress-network path.
 
 Do not configure Nous Portal, OpenRouter, OpenAI, Anthropic, or another remote
 model provider as a fallback. Repository policy is `local_only = true`. The
