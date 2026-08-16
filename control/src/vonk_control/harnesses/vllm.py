@@ -80,7 +80,7 @@ _ARGUMENTS = {
     "moe-backend": ArgumentSpec("--moe-backend", validate=one_of("flashinfer_b12x")),
     "reasoning-parser": ArgumentSpec(
         "--reasoning-parser",
-        validate=one_of("deepseek_v4", "nemotron_v3", "qwen3"),
+        validate=one_of("deepseek_v4", "nemotron_v3", "poolside_v1", "qwen3"),
     ),
     "reasoning-config": ArgumentSpec("--reasoning-config"),
     "default-chat-template-kwargs": ArgumentSpec("--default-chat-template-kwargs"),
