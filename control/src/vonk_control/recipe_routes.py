@@ -9,7 +9,7 @@ import re
 import threading
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import AbstractContextManager, contextmanager, nullcontext
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlsplit
 
@@ -104,6 +104,12 @@ class _RecipeWithdrawal:
 @dataclass(frozen=True)
 class _AtomicRecipeGeneration(LiteLlmGeneration):
     activation_marker: ActivationMarker
+
+
+@dataclass(frozen=True)
+class _RecoveryPublication:
+    job: Job
+    deadline: datetime
 
 
 def route_publication_owner_lock_statement():
@@ -315,25 +321,71 @@ class RecipeRouteService:
         )
         if run_id not in candidate.included:
             raise RecipeRouteError("recipe run is absent from route candidate")
-        recovery_job = self._enforce_recovery_publication_deadline(session, run)
+        recovery = self._enforce_recovery_publication_deadline(session, run)
+        if recovery is not None:
+            candidate = replace(
+                candidate,
+                expires_at=min(candidate.expires_at, recovery.deadline),
+            )
         generation = self._publish(candidate)
-        if recovery_job is not None:
+        if recovery is not None:
             try:
                 # External activation can cross the bounded recovery window.
                 # Recheck before projecting success or recording the marker.
                 self._enforce_recovery_publication_deadline(session, run)
-            except RecipeRecoveryDeadlineError:
-                self._withdraw_runs_in_session(session, frozenset({run_id}))
+            except RecipeRecoveryDeadlineError as deadline_error:
+                # The routing authority enforces the recovery deadline on the
+                # just-activated generation. Persist that expired generation
+                # and retry intent before attempting best-effort cleanup so a
+                # cleanup error cannot roll the safety state back.
+                self.projection_in_session(
+                    session, generation, state="withdrawal-pending"
+                )
+                recovery_result = (
+                    dict(recovery.job.result)
+                    if isinstance(recovery.job.result, Mapping)
+                    else {}
+                )
+                recovery.job.state = "failed"
+                recovery.job.result = {
+                    **recovery_result,
+                    "recovery_error": str(deadline_error),
+                }
+                recovery.job.updated_at = self._clock()
+                cleanup_error: Exception | None = None
+                try:
+                    self._withdraw_runs_in_session(session, frozenset({run_id}))
+                # External publishers are plug-ins and may fail with any
+                # ordinary exception; every such failure must leave retry
+                # intent committed instead of masking the deadline failure.
+                except Exception as error:  # noqa: BLE001
+                    cleanup_error = error
+                run.state = "failed"
+                run.route_state = "withdrawn"
+                run.route_error = str(deadline_error)[:512]
+                if cleanup_error is not None:
+                    run.route_generation = generation.generation
+                    run.route_digest = generation.route_digest
+                    publication = session.get(
+                        RoutePublication, RECIPE_ROUTE_AUTHORITY_ID
+                    )
+                    if publication is not None:
+                        publication.state = "withdrawal-pending"
+                    run.route_error = (
+                        f"{deadline_error}; route withdrawal retry pending: "
+                        f"{type(cleanup_error).__name__}"
+                    )[:512]
+                run.updated_at = self._clock()
                 raise
         self.projection_in_session(session, generation, state="completed")
-        if recovery_job is not None:
+        if recovery is not None:
             result = (
-                dict(recovery_job.result)
-                if isinstance(recovery_job.result, Mapping)
+                dict(recovery.job.result)
+                if isinstance(recovery.job.result, Mapping)
                 else {}
             )
-            recovery_job.result = {**result, "recovery_route_published": True}
-            recovery_job.updated_at = self._clock()
+            recovery.job.result = {**result, "recovery_route_published": True}
+            recovery.job.updated_at = self._clock()
         for included_id in sorted(candidate.included):
             included = session.get(RecipeRun, included_id)
             if included is None or included.state != "running":
@@ -347,7 +399,7 @@ class RecipeRouteService:
 
     def _enforce_recovery_publication_deadline(
         self, session: Session, run: RecipeRun
-    ) -> Job | None:
+    ) -> _RecoveryPublication | None:
         jobs = session.scalars(
             select(Job)
             .where(Job.kind == "recipe.start")
@@ -378,7 +430,10 @@ class RecipeRouteService:
             run.route_error = str(error)[:512]
             run.updated_at = self._clock()
             raise RecipeRecoveryDeadlineError(str(error), run_id=run.id) from error
-        return recovery_job
+        recovery = recovery_job.payload["recovery"]
+        assert isinstance(recovery, Mapping)
+        deadline = datetime.fromisoformat(str(recovery["deadline"]))
+        return _RecoveryPublication(recovery_job, _aware(deadline))
 
     def withdraw_run(self, run_id: str) -> LiteLlmGeneration:
         with self.publication_transaction() as session:
@@ -469,6 +524,11 @@ class RecipeRouteService:
         if not 1 <= renew_before_seconds < self._maximum_age_seconds:
             raise ValueError("recipe route renewal window is invalid")
         with self.publication_transaction() as session:
+            pending = session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)
+            if pending is not None and pending.state == "withdrawal-pending":
+                withdrawal = self.prepare_withdrawal_in_session(session, frozenset())
+                self._publish_withdrawal_in_session(session, withdrawal)
+                return True
             published = tuple(
                 session.scalars(
                     select(RecipeRun)

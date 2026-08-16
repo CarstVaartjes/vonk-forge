@@ -93,7 +93,10 @@ impl AgentClaim {
             return Err(ProtocolError::Identity("claim operation"));
         }
         let payload = canonical_json(&self.payload)?;
-        if hex_sha256(&payload) != self.payload_digest {
+        if !self.payload.is_object()
+            || payload.len() > 64 * 1024
+            || hex_sha256(&payload) != self.payload_digest
+        {
             return Err(ProtocolError::Identity("claim payload digest"));
         }
         Ok(())
@@ -357,7 +360,10 @@ impl RecipeOperationRequest {
     pub fn parse(claim: &AgentClaim) -> Result<Self, ProtocolError> {
         claim.validate()?;
         let request = match claim.operation.as_str() {
-            "recipe.build.v1" => Self::Build(serde_json::from_value(claim.payload.clone())?),
+            "recipe.build.v1" => {
+                validate_build_wire(&claim.payload)?;
+                Self::Build(serde_json::from_value(claim.payload.clone())?)
+            }
             "recipe.image.import.v1" => {
                 Self::ImageImport(serde_json::from_value(claim.payload.clone())?)
             }
@@ -431,6 +437,20 @@ impl RecipeOperationRequest {
             Err(ProtocolError::Identity("recipe payload"))
         }
     }
+}
+
+fn validate_build_wire(value: &Value) -> Result<(), ProtocolError> {
+    let canonical_uuid = |field: &str| {
+        value
+            .get(field)
+            .and_then(Value::as_str)
+            .and_then(|raw| Uuid::parse_str(raw).ok().map(|parsed| (raw, parsed)))
+            .is_some_and(|(raw, parsed)| parsed.to_string() == raw)
+    };
+    if !canonical_uuid("build_id") || !canonical_uuid("recipe_revision_id") {
+        return Err(ProtocolError::Identity("recipe payload"));
+    }
+    Ok(())
 }
 
 fn validate_build(value: &RecipeBuildRequest) -> bool {
@@ -566,6 +586,10 @@ fn valid_pinned_image(reference: &str, manifest_digest: &str) -> bool {
     };
     !name.is_empty()
         && name.len() <= 512
+        && name
+            .as_bytes()
+            .first()
+            .is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
         && name.bytes().all(|byte| {
             byte.is_ascii_lowercase()
                 || byte.is_ascii_digit()
@@ -614,6 +638,7 @@ fn valid_bundle_path(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 512
         && !value.starts_with('/')
+        && !value.contains('\\')
         && !value.contains('\0')
         && value
             .split('/')

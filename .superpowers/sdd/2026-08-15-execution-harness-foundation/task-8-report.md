@@ -1331,3 +1331,275 @@ and `fb7e6314de7649871f080d9dc0c63dbb1ea827eaf5b47d24291c34f26b49ec35`.
 1. This x86_64 environment cannot provide physical linux/arm64, GPU,
    two-DGX-Spark, RoCE, or performance acceptance. No such acceptance is
    claimed; Task 9 retains it.
+
+## Fix round 4 — 2026-08-16
+
+Round 4 started from immutable base commit
+`003b841249b7ed257a253d4834a8753602d92a09` and implements only the four
+residuals in `# Task 8 re-review — fix round 4`. The catalog remains an exact
+clean-schema fence; no compatibility path, data migration, or accepted external
+identity changed.
+
+### Implementation
+
+1. Recovery publication is now fail-closed across the external activation
+   window. A recovery route generation is issued with an expiry no later than
+   the signed recovery deadline, so the routing authority rejects it once that
+   deadline passes even if compensating withdrawal fails. After a crossing,
+   the run and recovery job are durably failed/withdrawn, the expired
+   generation is projected as `withdrawal-pending`, the original deadline error
+   survives an arbitrary ordinary cleanup exception, and maintenance retries
+   the withdrawal from durable publication state. A successful immediate
+   withdrawal records its actual withdrawal generation.
+2. The Rust agent now has a complete exact-digest base-image producer/consumer
+   path. On a fresh node it resolves only the declared untagged
+   `repository@sha256:<digest>` through HTTPS with explicit ORAS auth and a
+   DNS-pinned `--resolve`, fetches the exact manifest and each declared
+   config/layer blob, validates all digest/size/platform relationships, and
+   constructs a deterministic, structurally valid OCI layout archive. Declared
+   archive size is checked before blob fetch, each transfer is streamed into a
+   bounded pre-opened file, and the verified archive is atomically installed.
+   The consumer passes the held verified descriptor to an operation-private
+   Podman graphroot through stdin, verifies the imported digest and
+   `linux/arm64` platform, and retains `--pull=never --network=none` for the
+   build. No mutable tag, ambient image store, or Podman build pull is used.
+3. Base-image storage is rooted in held descriptors below the canonical
+   `data_root`. `openat2` uses `RESOLVE_BENEATH`, `NO_MAGICLINKS`, and
+   `NO_SYMLINKS`; every created/opened authority directory is private and
+   owner-controlled. Existing archives must be regular, single-link,
+   owner-owned, non-group/world-writable files. Tests reject a symlinked data
+   root, supply root, digest directory, archive, digest path escape, blob
+   substitution, and path replacement; the consumer continues from the held
+   verified inode across replacement.
+4. Python now validates the complete closed `recipe.build.v1` claim shape with
+   the same exact identities, platform, uniqueness, canonicality, scalar, byte,
+   storage, network, and privilege bounds as Rust. Both implementations execute
+   `vonk_agent_protocol/vectors/recipe-build-claim-v1.json`, including positive
+   no-base/public-network cases and 25 negative mutations. The vector is
+   packaged in the protocol wheel, and the wheel, both consuming locks, three
+   affected SBOMs, and supply manifest were regenerated.
+
+The controller's Task 9 Step 7 clean-start correction is preserved in
+`docs/superpowers/plans/2026-08-15-execution-harness-foundation.md`: the reset
+removes users, sessions, and enrollments, after which the administrator is
+recreated and both Sparks are re-enrolled.
+
+### RED evidence
+
+The fail-closed route reproduction was added before the production change:
+
+```text
+uv run --project control --frozen python -m pytest -q \
+  control/tests/test_recipe_operations.py::test_expired_recovery_route_is_unusable_when_compensating_withdrawal_fails
+
+FAILED: RuntimeError: synthetic route withdrawal failure
+```
+
+The cleanup exception masked the recovery deadline and caused the surrounding
+transaction to roll back. Strengthening the existing crossing regression also
+produced two expected audit REDs before the final projection fix:
+
+```text
+test_recovery_publication_crossing_deadline_is_immediately_withdrawn
+FAILED: route_generation was 1, expected withdrawal generation 2
+
+test_expired_recovery_route_is_unusable_when_compensating_withdrawal_fails
+FAILED: recovery job state was "succeeded", expected "failed"
+```
+
+The fresh-node OCI and descriptor authority tests failed against the old
+consumer-only implementation:
+
+```text
+cargo test -p vonk-agent --test recipe_builder \
+  fresh_node_produces_verified_exact_digest_oci_archive_before_offline_build -- --exact
+
+FAILED: Io(NotFound)
+
+cargo test -p vonk-agent --test recipe_builder \
+  base_image_storage_rejects_symlinked_data_and_supply_roots -- --exact
+
+FAILED: build returned Ok for a symlinked data root
+```
+
+The bounded producer audit was added before prefetch accounting and proved that
+all blobs were fetched before the signed final-archive bound was enforced:
+
+```text
+cargo test -p vonk-agent --test recipe_builder \
+  base_image_producer_rejects_declared_archive_above_bound_before_blob_fetch -- --exact
+
+FAILED: observed 3 ORAS calls, expected only the manifest fetch
+```
+
+Shared claim vectors were then run against each language before parity was
+implemented:
+
+```text
+uv run --project agent_protocol --frozen python -m pytest -q \
+  agent_protocol/tests/test_contracts.py::test_recipe_build_claim_matches_shared_python_rust_vectors
+
+FAILED: an invalid vector did not raise AgentProtocolError
+
+cargo test -p vonk-agent-protocol --test recipe_builds \
+  build_claim_matches_shared_python_rust_vectors -- --exact
+
+FAILED: Rust accepted "noncanonical base reference"
+```
+
+These were requirement-focused REDs. No production implementation was written
+before its corresponding failing regression.
+
+### GREEN evidence
+
+The final retained controller batch covers route recovery/publication,
+build/source authority, the strict built-in catalog, development fixtures,
+qualifier/source tools, native entrypoints, distributed lifecycle, and both
+DS4/Mia recipe contracts:
+
+```text
+uv run --project control --frozen python -m pytest -q \
+  control/tests/test_recipe_operations.py control/tests/test_recipe_routes.py \
+  control/tests/test_recipe_builds.py control/tests/test_source_policy.py \
+  control/tests/test_development_recipe_fixture.py \
+  control/tests/test_builtin_harnesses.py \
+  control/tests/test_recipe_runtime_specs.py \
+  control/tests/test_distributed_lifecycle.py \
+  control/tests/test_development_catalog.py \
+  scripts/tests/test_qualify_recipe.py \
+  scripts/tests/test_recipe_source_bundle.py \
+  scripts/tests/test_native_development_entrypoints.py \
+  tests/recipes/test_deepseek_v4_flash_ds4.py \
+  tests/recipes/test_mia_deepseek_v4_flash.py
+
+293 passed in 32.40s
+```
+
+The final all-target Rust run includes the faithful registry/OCI producer,
+manifest/config/layer digest validation, exact private-store load, offline
+build, all descriptor/symlink/race failures, the shared protocol vectors, and
+all retained helper/protocol/agent tests:
+
+```text
+cargo test -p vonk-agent-protocol -p vonk-agent \
+  -p vonk-agent-helper --all-targets
+
+164 passed; 0 failed
+```
+
+Additional retained and supply-chain suites:
+
+```text
+uv run --project agent_protocol --frozen python -m pytest -q agent_protocol/tests
+451 passed in 0.44s
+
+uv run --project control --frozen python -m pytest -q \
+  scripts/tests/test_run_development_slices.py
+59 passed in 35.66s
+
+uv run --project control --frozen python -m pytest -q \
+  tests/runbooks/test_development_nas_installation.py tests/test_docs_contract.py
+53 passed in 0.04s
+
+uv run --project control --frozen python -m pytest -q \
+  control/tests/security/test_agent_protocol.py \
+  tests/scripts/test_verify_supply_chain.py
+61 passed in 22.68s
+```
+
+One parallel verification attempt made the Docker wheel-install test contend
+with the development Docker suite and failed inside the pinned Python base
+image with `ValueError: bad marshal data (invalid reference)`. The isolated
+test immediately passed (`1 passed in 13.88s`), and the complete isolated
+security/supply suite then produced the 61/61 result above. No source or
+generated artifact changed between those runs.
+
+Final formatting, lint, lock, JSON, and supply gates:
+
+```text
+uvx --from ruff==0.16.1 ruff check <4 changed Python files>
+uvx --from ruff==0.16.1 ruff format --check <4 changed Python files>
+cargo clippy -p vonk-agent-protocol -p vonk-agent \
+  -p vonk-agent-helper --tests -- -D warnings
+cargo fmt --all -- --check
+uv lock --project agent --check
+uv lock --project control --check
+jq empty <shared vector and all changed SBOM JSON documents>
+git diff --check
+
+All exited 0; Ruff reported all checks passed and all 4 files formatted.
+
+scripts/verify-supply-chain --json
+{"errors":[],"images":7,"manifest_sha256":"1e81fd31110e10b130f23a35bf9ca7dae3a2f823dad39635cfd8e824bab5e9b8","ok":true,...}
+```
+
+Generated artifact identities:
+
+- protocol wheel SHA-256:
+  `cef491fb57d9df773664607bdb940e1da8de9cb1d5474d544f42216693daeb83`;
+  both consuming lockfiles bind this exact wheel;
+- shared vector SHA-256:
+  `87ecc469559f466bc14aa9856ef906ea062b95ebdefa018f3ae4ce0b819fb043`;
+- supply manifest SHA-256:
+  `1e81fd31110e10b130f23a35bf9ca7dae3a2f823dad39635cfd8e824bab5e9b8`;
+- wheel inspection contains both
+  `vonk_agent_protocol/contracts.py` and
+  `vonk_agent_protocol/vectors/recipe-build-claim-v1.json`.
+
+### Physical qualification boundary
+
+Both real qualifier commands still stop at the intended native architecture
+gate on this host:
+
+```text
+scripts/qualify-recipe --recipe config/recipes/deepseek-v4-flash-0731-ds4-single.json --level container
+scripts/qualify-recipe --recipe config/recipes/deepseek-v4-flash-0731-mia-dual.json --level container
+
+{"detail":"container qualification requires a native linux/arm64 host","detected_architecture":"x86_64","passed":false,"required_architecture":"arm64","status":"environment-limited"}
+ds4_exit=3; mia_exit=3
+```
+
+No physical ARM64 base import/build, GPU inference, two-Spark collective, RoCE,
+performance, or physical acceptance result is claimed. Those remain Task 9.
+
+### Files changed in fix round 4
+
+- Route protocol and regression:
+  `control/src/vonk_control/recipe_routes.py` and
+  `control/tests/test_recipe_operations.py`.
+- Exact OCI producer, descriptor authority, and offline consumer:
+  `rust/crates/vonk-agent/src/{base_images,lib,process,recipe_builder}.rs` and
+  `rust/crates/vonk-agent/tests/recipe_builder.rs`.
+- Shared signed-claim parity:
+  `agent_protocol/src/vonk_agent_protocol/contracts.py`,
+  `agent_protocol/src/vonk_agent_protocol/vectors/recipe-build-claim-v1.json`,
+  `agent_protocol/{pyproject.toml,tests/test_contracts.py}`, and
+  `rust/crates/vonk-agent-protocol/{src/lib.rs,tests/recipe_builds.rs}`.
+- Regenerated supply evidence:
+  `agent/uv.lock`, `control/uv.lock`, the protocol wheel, the affected
+  agent-protocol/agent-Python/control-Python SBOMs, and
+  `inventory/sbom/manifest.json`.
+- Preserved controller correction:
+  `docs/superpowers/plans/2026-08-15-execution-harness-foundation.md`.
+
+### Final self-review and concerns
+
+- The published recovery lease is the external fail-closed boundary; durable
+  retry state does not depend on successful compensating cleanup.
+- The OCI path resolves and verifies actual manifest/config/layer content,
+  predicts the complete archive bound before blob fetch, atomically installs
+  only a verified layout, and loads from the same held inode it verified.
+- Python and Rust consume the same packaged vector and agree on every valid and
+  invalid case. Closed nested shapes and canonical wire identities are checked
+  independently at each language boundary.
+- Accepted recipe/source/model/container identities and the required-eight
+  production catalog are unchanged. No legacy reader, alias, migration,
+  mutable image tag, ambient image store, or build-network escape was added.
+- No independent subagent dispatcher was exposed in this session. The full
+  diff, generated binary contents, immutable identities, route failure window,
+  filesystem descriptors, exact OCI graph, and language parity were audited
+  locally; no unresolved critical or important finding remains.
+
+Concern: this x86_64 environment cannot provide the physical linux/arm64, GPU,
+two-DGX-Spark, RoCE, or performance evidence reserved for Task 9. No such
+acceptance is claimed here.

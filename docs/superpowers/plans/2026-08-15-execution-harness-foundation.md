@@ -754,7 +754,10 @@ Expected: PASS for architecture, driver, native NVIDIA container runtime, disk, 
 
 Run: `scripts/reset-development-recipe-domain --environment development --confirm-destructive-preproduction-reset`
 
-Expected: supported v1 catalog seeded, both agents still enrolled, browser login still valid, and prototype recipe state absent.
+Expected: supported v1 catalog seeded, prototype recipe state absent, and all
+pre-production users, sessions, and agent enrollments removed. Recreate the
+development administrator and re-enroll both Sparks before physical acceptance;
+no pre-reset browser login or enrollment is treated as valid.
 
 - [ ] **Step 8: Run fresh physical acceptance**
 

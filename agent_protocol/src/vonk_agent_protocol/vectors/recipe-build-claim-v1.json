@@ -1,0 +1,256 @@
+{
+  "schema_version": 1,
+  "base_payload": {
+    "schema_version": 1,
+    "kind": "recipe.build.v1",
+    "build_id": "00000000-0000-4000-8000-000000000009",
+    "recipe_revision_id": "00000000-0000-4000-8000-000000000001",
+    "recipe_content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "source_bundle_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "source_bundle_bytes": 4096,
+    "build_input_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "base_images": [
+      {
+        "reference": "ghcr.io/vonkforge/runtime@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "manifest_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      }
+    ],
+    "base_image_storage_bytes": 68719476736,
+    "dockerfile": "containers/runtime/Dockerfile",
+    "platform": "linux/arm64",
+    "arguments": [
+      {
+        "name": "runtime-version",
+        "value": "1"
+      }
+    ],
+    "network": {
+      "mode": "none",
+      "hosts": []
+    },
+    "limits": {
+      "cpu_cores": 8,
+      "memory_bytes": 8589934592,
+      "temporary_bytes": 68719476736,
+      "processes": 4096,
+      "timeout_seconds": 3600,
+      "output_bytes": 67108864,
+      "gpu": 0,
+      "privileged": false,
+      "host_mounts": false,
+      "container_socket": false
+    }
+  },
+  "cases": [
+    {
+      "name": "valid exact one-base claim",
+      "valid": true,
+      "changes": []
+    },
+    {
+      "name": "valid exact no-base claim",
+      "valid": true,
+      "changes": [
+        {"op": "set", "path": ["base_images"], "value": []},
+        {"op": "set", "path": ["base_image_storage_bytes"], "value": 0}
+      ]
+    },
+    {
+      "name": "valid public network claim",
+      "valid": true,
+      "changes": [
+        {"op": "set", "path": ["network", "mode"], "value": "public"},
+        {"op": "set", "path": ["network", "hosts"], "value": ["pypi.org"]}
+      ]
+    },
+    {
+      "name": "unknown top-level field",
+      "valid": false,
+      "changes": [
+        {"op": "set", "path": ["ambient_store"], "value": true}
+      ]
+    },
+    {
+      "name": "missing top-level field",
+      "valid": false,
+      "changes": [
+        {"op": "remove", "path": ["source_bundle_bytes"]}
+      ]
+    },
+    {
+      "name": "unknown base-image field",
+      "valid": false,
+      "changes": [
+        {"op": "set", "path": ["base_images", 0, "ambient_store"], "value": true}
+      ]
+    },
+    {
+      "name": "unknown limits field",
+      "valid": false,
+      "changes": [
+        {"op": "set", "path": ["limits", "swap_bytes"], "value": 1}
+      ]
+    },
+    {
+      "name": "manifest digest differs from reference",
+      "valid": false,
+      "changes": [
+        {"op": "set", "path": ["base_images", 0, "manifest_digest"], "value": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}
+      ]
+    },
+    {
+      "name": "duplicate exact base reference",
+      "valid": false,
+      "changes": [
+        {
+          "op": "set",
+          "path": ["base_images"],
+          "value": [
+            {
+              "reference": "ghcr.io/vonkforge/runtime@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+              "manifest_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+            },
+            {
+              "reference": "ghcr.io/vonkforge/runtime@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+              "manifest_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "noncanonical base reference",
+      "valid": false,
+      "changes": [
+        {"op": "set", "path": ["base_images", 0, "reference"], "value": "-ghcr.io/vonkforge/runtime@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}
+      ]
+    },
+    {
+      "name": "mutable base reference",
+      "valid": false,
+      "changes": [
+        {"op": "set", "path": ["base_images", 0, "reference"], "value": "ghcr.io/vonkforge/runtime:latest"}
+      ]
+    },
+    {
+      "name": "noncanonical build UUID",
+      "valid": false,
+      "changes": [
+        {"op": "set", "path": ["build_id"], "value": "00000000-0000-4000-8000-00000000000A"}
+      ]
+    },
+    {
+      "name": "unsupported platform",
+      "valid": false,
+      "changes": [
+        {"op": "set", "path": ["platform"], "value": "linux/amd64"}
+      ]
+    },
+    {
+      "name": "zero source bundle bytes",
+      "valid": false,
+      "changes": [
+        {"op": "set", "path": ["source_bundle_bytes"], "value": 0}
+      ]
+    },
+    {
+      "name": "source bundle above maximum",
+      "valid": false,
+      "changes": [
+        {"op": "set", "path": ["source_bundle_bytes"], "value": 67108865}
+      ]
+    },
+    {
+      "name": "boolean source bundle bytes",
+      "valid": false,
+      "changes": [
+        {"op": "set", "path": ["source_bundle_bytes"], "value": true}
+      ]
+    },
+    {
+      "name": "zero base storage with declared base",
+      "valid": false,
+      "changes": [
+        {"op": "set", "path": ["base_image_storage_bytes"], "value": 0}
+      ]
+    },
+    {
+      "name": "base storage above maximum",
+      "valid": false,
+      "changes": [
+        {"op": "set", "path": ["base_image_storage_bytes"], "value": 17592186044417}
+      ]
+    },
+    {
+      "name": "nonzero base storage without bases",
+      "valid": false,
+      "changes": [
+        {"op": "set", "path": ["base_images"], "value": []}
+      ]
+    },
+    {
+      "name": "zero memory bound",
+      "valid": false,
+      "changes": [
+        {"op": "set", "path": ["limits", "memory_bytes"], "value": 0}
+      ]
+    },
+    {
+      "name": "temporary storage above maximum",
+      "valid": false,
+      "changes": [
+        {"op": "set", "path": ["limits", "temporary_bytes"], "value": 17592186044417}
+      ]
+    },
+    {
+      "name": "zero output bound",
+      "valid": false,
+      "changes": [
+        {"op": "set", "path": ["limits", "output_bytes"], "value": 0}
+      ]
+    },
+    {
+      "name": "output bound above maximum",
+      "valid": false,
+      "changes": [
+        {"op": "set", "path": ["limits", "output_bytes"], "value": 17592186044417}
+      ]
+    },
+    {
+      "name": "unsafe build privilege",
+      "valid": false,
+      "changes": [
+        {"op": "set", "path": ["limits", "privileged"], "value": true}
+      ]
+    },
+    {
+      "name": "inconsistent none network",
+      "valid": false,
+      "changes": [
+        {"op": "set", "path": ["network", "hosts"], "value": ["pypi.org"]}
+      ]
+    },
+    {
+      "name": "private public-network host",
+      "valid": false,
+      "changes": [
+        {"op": "set", "path": ["network", "mode"], "value": "public"},
+        {"op": "set", "path": ["network", "hosts"], "value": ["169.254.169.254"]}
+      ]
+    },
+    {
+      "name": "non-scalar argument",
+      "valid": false,
+      "changes": [
+        {"op": "set", "path": ["arguments", 0, "value"], "value": ["1"]}
+      ]
+    },
+    {
+      "name": "argument integer outside signed range",
+      "valid": false,
+      "changes": [
+        {"op": "set", "path": ["arguments", 0, "value"], "value": 9223372036854775808}
+      ]
+    }
+  ]
+}

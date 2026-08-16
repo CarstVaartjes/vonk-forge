@@ -45,6 +45,7 @@ from vonk_control.models import (
     RecipeInstallation,
     RecipeRun,
     ResourceReservation,
+    RoutePublication,
     RoutePublicationOwner,
     RunNode,
 )
@@ -55,7 +56,13 @@ from vonk_control.recipe_operations import (
     RecipeRunObservation,
     record_recipe_run_observations,
 )
-from vonk_control.recipe_routes import RecipeRouteService
+from vonk_control.recipe_routes import AtomicRecipeRoutePublisher, RecipeRouteService
+from vonk_control.route_runtime import (
+    RECIPE_ROUTE_AUTHORITY_ID,
+    AtomicRouteBundlePublisher,
+    RouteRuntimeError,
+    verify_active_route_bundle,
+)
 from vonk_control.run_admission import RunAdmissionService
 
 
@@ -478,9 +485,7 @@ def clone_running_run(sessions, source_run_id: str, *, alias: str) -> str:
                         "running test endpoint must include a host and port"
                     )
                 netloc = f"[{host}]" if ":" in host else host
-                endpoint["url"] = urlunsplit(
-                    parsed._replace(netloc=f"{netloc}:{port}")
-                )
+                endpoint["url"] = urlunsplit(parsed._replace(netloc=f"{netloc}:{port}"))
             cloned_nodes.append(
                 RunNode(
                     run_id=run_id,
@@ -887,19 +892,27 @@ def test_start_rejects_alias_mismatched_digest_before_side_effects_and_replays_e
 
     with sessions() as session:
         assert tuple(session.scalars(select(RecipeRun))) == ()
-        assert tuple(
-            session.scalars(
-                select(ResourceReservation).where(
-                    ResourceReservation.owner_kind == "run"
+        assert (
+            tuple(
+                session.scalars(
+                    select(ResourceReservation).where(
+                        ResourceReservation.owner_kind == "run"
+                    )
                 )
             )
-        ) == ()
-        assert tuple(session.scalars(select(Job).where(Job.kind == "recipe.start"))) == ()
-        assert tuple(
-            session.scalars(
-                select(AgentOperation).where(AgentOperation.kind == "recipe.start")
+            == ()
+        )
+        assert (
+            tuple(session.scalars(select(Job).where(Job.kind == "recipe.start"))) == ()
+        )
+        assert (
+            tuple(
+                session.scalars(
+                    select(AgentOperation).where(AgentOperation.kind == "recipe.start")
+                )
             )
-        ) == ()
+            == ()
+        )
     assert queue.available == 1
 
     started = service.start(
@@ -2297,9 +2310,7 @@ def test_distributed_rank_loss_queues_bounded_worker_first_recovery(
         )
         restart_children = tuple(
             session.scalars(
-                select(AgentOperation).where(
-                    AgentOperation.parent_job_id == restart.id
-                )
+                select(AgentOperation).where(AgentOperation.parent_job_id == restart.id)
             )
         )
         assert [child.node_id for child in restart_children] == [nodes[1]]
@@ -2582,12 +2593,15 @@ def test_recovery_phase_deadline_is_resampled_after_waiting_for_job_lock(
         event.remove(postgres_engine, "before_cursor_execute", before_lock)
 
     with sessions() as session:
-        assert session.scalar(
-            select(AgentOperation).where(
-                AgentOperation.parent_job_id == restart.id,
-                AgentOperation.node_id == nodes[0],
+        assert (
+            session.scalar(
+                select(AgentOperation).where(
+                    AgentOperation.parent_job_id == restart.id,
+                    AgentOperation.node_id == nodes[0],
+                )
             )
-        ) is None
+            is None
+        )
         assert session.get(Job, restart.id).state == "failed"  # type: ignore[union-attr]
         assert session.get(RecipeRun, started.owner_id).state == "stopping"  # type: ignore[union-attr]
 
@@ -2645,7 +2659,104 @@ def test_recovery_publication_crossing_deadline_is_immediately_withdrawn(
         recovery = session.get(Job, restart.id)
         assert run.state == "failed"
         assert run.route_state == "withdrawn"
+        assert run.route_generation == 2
+        assert recovery.state == "failed"
+        assert "deadline" in recovery.result["recovery_error"]
         assert recovery.result.get("recovery_route_published") is not True
+
+
+def test_expired_recovery_route_is_unusable_when_compensating_withdrawal_fails(
+    tmp_path: Path,
+) -> None:
+    (
+        sessions,
+        service,
+        routes,
+        _publisher,
+        started,
+        restart,
+        worker_start,
+        nodes,
+    ) = _queued_distributed_recovery_restart(tmp_path)
+    service.record_node_result(
+        restart.id,
+        nodes[1],
+        succeeded=True,
+        evidence=start_evidence(worker_start.payload),
+    )
+    with sessions() as session:
+        owner_start = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == restart.id,
+                AgentOperation.node_id == nodes[0],
+            )
+        )
+    service.record_node_result(
+        restart.id,
+        nodes[0],
+        succeeded=True,
+        evidence=start_evidence(owner_start.payload),
+    )
+
+    current = {"now": NOW}
+    live_root = tmp_path / "live-routes"
+    runtime = AtomicRouteBundlePublisher(
+        live_root,
+        management_policy=ManagementAddressPolicy.parse("192.168.1.0/24"),
+        clock=lambda: current["now"],
+    )
+    atomic = AtomicRecipeRoutePublisher(runtime, clock=lambda: current["now"])
+
+    class DeadlineCrossingWithdrawalFailure:
+        def __init__(self) -> None:
+            self.withdrawal_attempts = 0
+            self.fail_withdrawal = True
+
+        def publish_recipe(self, candidate):
+            generation = atomic.publish_recipe(candidate)
+            current["now"] = NOW + timedelta(seconds=31)
+            return generation
+
+        def publish_empty(self, route_digest):
+            self.withdrawal_attempts += 1
+            if self.fail_withdrawal:
+                raise RuntimeError("synthetic route withdrawal failure")
+            return atomic.publish_empty(
+                route_digest,
+                expires_at=current["now"] + timedelta(seconds=300),
+            )
+
+    failing = DeadlineCrossingWithdrawalFailure()
+    routes._publisher = failing
+    routes._clock = lambda: current["now"]
+
+    with pytest.raises(RuntimeError, match="deadline"):
+        routes.publish_run(started.owner_id)
+
+    with pytest.raises(RouteRuntimeError, match="expired"):
+        verify_active_route_bundle(live_root, clock=lambda: current["now"])
+    with sessions() as session:
+        run = session.get(RecipeRun, started.owner_id)
+        recovery = session.get(Job, restart.id)
+        publication = session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)
+        assert run.state == "failed"
+        assert run.route_state == "withdrawn"
+        assert recovery.state == "failed"
+        assert "deadline" in recovery.result["recovery_error"]
+        assert recovery.result.get("recovery_route_published") is not True
+        assert publication is not None
+        assert publication.state == "withdrawal-pending"
+        assert publication.lease_expires_at.replace(tzinfo=UTC) == (
+            NOW + timedelta(seconds=30)
+        )
+    assert failing.withdrawal_attempts == 1
+
+    failing.fail_withdrawal = False
+    assert routes.maintain() is True
+    with sessions() as session:
+        publication = session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)
+        assert publication is not None
+        assert publication.state == "routes-withdrawn"
 
 
 def test_distributed_rank_loss_withdraws_route_when_recovery_authority_is_missing(

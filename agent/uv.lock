@@ -630,7 +630,7 @@ dependencies = [
     { name = "jsonschema" },
 ]
 wheels = [
-    { filename = "vonk_agent_protocol-2.1.0-py3-none-any.whl", hash = "sha256:17f8de6fd41b35572343d48d82fb28d329862af4baa5063a9cb96168ef11ef23" },
+    { filename = "vonk_agent_protocol-2.1.0-py3-none-any.whl", hash = "sha256:cef491fb57d9df773664607bdb940e1da8de9cb1d5474d544f42216693daeb83" },
 ]
 
 [package.metadata]

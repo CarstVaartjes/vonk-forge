@@ -35,9 +35,9 @@ MODEL_REPOSITORY = re.compile(
     r"(?:/[A-Za-z0-9][A-Za-z0-9._-]{0,127}){1,7}\Z"
 )
 MODEL_QUERY_COMPONENT = re.compile(r"[A-Za-z0-9._~-]{1,128}\Z")
-PINNED_OCI_IMAGE = re.compile(
-    r"[a-z0-9][a-z0-9._:/-]{0,511}@sha256:[0-9a-f]{64}\Z"
-)
+PINNED_OCI_IMAGE = re.compile(r"[a-z0-9][a-z0-9._:/-]{0,511}@sha256:[0-9a-f]{64}\Z")
+RECIPE_BUILD_NAME = re.compile(r"[a-z][a-z0-9._-]{0,63}\Z")
+MAX_RECIPE_BUILD_STORAGE_BYTES = 16 * 1024**4
 
 
 def _ascii_case_pattern(token: str, *, initial_upper: bool = False) -> str:
@@ -202,7 +202,8 @@ def _validate_safe_keys(
             if VERSIONED_PLATFORM_TARGET.fullmatch(value) is None:
                 raise AgentProtocolError("platform target identifier is not canonical")
         elif (
-            operation is AgentOperation.RECIPE_BUILD and _typed_build_string(path, value)
+            operation is AgentOperation.RECIPE_BUILD
+            and _typed_build_string(path, value)
         ) or (
             typed_result_strings
             and ("/" in value or "\\" in value)
@@ -351,6 +352,209 @@ def _validate_bounded_document(
     return copied
 
 
+def _validate_recipe_build_payload(value: Mapping[str, Any]) -> None:
+    _fields(
+        value,
+        required={
+            "arguments",
+            "base_image_storage_bytes",
+            "base_images",
+            "build_id",
+            "build_input_sha256",
+            "dockerfile",
+            "kind",
+            "limits",
+            "network",
+            "platform",
+            "recipe_content_sha256",
+            "recipe_revision_id",
+            "schema_version",
+            "source_bundle_bytes",
+            "source_bundle_sha256",
+        },
+    )
+    _version(value["schema_version"])
+    if value["kind"] != "recipe.build.v1":
+        raise AgentProtocolError("recipe build kind is not supported")
+    _uuid(value["build_id"], name="build_id")
+    _uuid(value["recipe_revision_id"], name="recipe_revision_id")
+    for name in (
+        "recipe_content_sha256",
+        "source_bundle_sha256",
+        "build_input_sha256",
+    ):
+        if not isinstance(value[name], str) or DIGEST.fullmatch(value[name]) is None:
+            raise AgentProtocolError(f"{name} must be a lowercase SHA-256")
+    _bounded_build_integer(
+        value["source_bundle_bytes"],
+        name="source_bundle_bytes",
+        minimum=1,
+        maximum=64 * 1024 * 1024,
+    )
+    if value["platform"] != "linux/arm64":
+        raise AgentProtocolError("recipe build platform must be linux/arm64")
+    dockerfile = value["dockerfile"]
+    if not isinstance(dockerfile, str) or not _typed_build_string(
+        ("dockerfile",), dockerfile
+    ):
+        raise AgentProtocolError("recipe build Dockerfile is not canonical")
+
+    arguments = _build_sequence(value["arguments"], name="arguments", maximum=64)
+    for argument in arguments:
+        item = _mapping(argument)
+        _fields(item, required={"name", "value"})
+        name = item["name"]
+        if not isinstance(name, str) or RECIPE_BUILD_NAME.fullmatch(name) is None:
+            raise AgentProtocolError("recipe build argument name is not canonical")
+        if not _valid_build_scalar(item["value"]):
+            raise AgentProtocolError("recipe build argument value is not scalar")
+
+    base_images = _build_sequence(value["base_images"], name="base_images", maximum=8)
+    references: set[str] = set()
+    for image in base_images:
+        item = _mapping(image)
+        _fields(item, required={"manifest_digest", "reference"})
+        manifest_digest = item["manifest_digest"]
+        reference = item["reference"]
+        if (
+            not isinstance(manifest_digest, str)
+            or not isinstance(reference, str)
+            or PINNED_OCI_IMAGE.fullmatch(reference) is None
+            or reference.rpartition("@")[2] != manifest_digest
+        ):
+            raise AgentProtocolError("recipe build base image is not exact")
+        if reference in references:
+            raise AgentProtocolError("recipe build base image is duplicated")
+        references.add(reference)
+
+    storage = _bounded_build_integer(
+        value["base_image_storage_bytes"],
+        name="base_image_storage_bytes",
+        minimum=0 if not base_images else 1,
+        maximum=MAX_RECIPE_BUILD_STORAGE_BYTES,
+    )
+    if not base_images and storage != 0:
+        raise AgentProtocolError("base image storage requires a declared base")
+
+    network = _mapping(value["network"])
+    _fields(network, required={"hosts", "mode"})
+    mode = network["mode"]
+    if mode not in {"none", "public"}:
+        raise AgentProtocolError("recipe build network mode is not supported")
+    hosts = _build_sequence(network["hosts"], name="network hosts", maximum=64)
+    if (mode == "none" and hosts) or (mode == "public" and not hosts):
+        raise AgentProtocolError("recipe build network declaration is inconsistent")
+    if any(
+        not isinstance(host, str) or not _valid_public_build_host(host)
+        for host in hosts
+    ):
+        raise AgentProtocolError("recipe build network host is not public")
+
+    limits = _mapping(value["limits"])
+    _fields(
+        limits,
+        required={
+            "container_socket",
+            "cpu_cores",
+            "gpu",
+            "host_mounts",
+            "memory_bytes",
+            "output_bytes",
+            "privileged",
+            "processes",
+            "temporary_bytes",
+            "timeout_seconds",
+        },
+    )
+    for name, maximum in (
+        ("cpu_cores", 256),
+        ("processes", 65_536),
+        ("timeout_seconds", 86_400),
+    ):
+        _bounded_build_integer(limits[name], name=name, minimum=1, maximum=maximum)
+    for name in ("memory_bytes", "temporary_bytes", "output_bytes"):
+        _bounded_build_integer(
+            limits[name],
+            name=name,
+            minimum=1,
+            maximum=MAX_RECIPE_BUILD_STORAGE_BYTES,
+        )
+    if limits["gpu"] != 0 or isinstance(limits["gpu"], bool):
+        raise AgentProtocolError("recipe build GPU authority must be zero")
+    if any(
+        limits[name] is not False
+        for name in ("privileged", "host_mounts", "container_socket")
+    ):
+        raise AgentProtocolError("recipe build privilege authority must be false")
+
+
+def _bounded_build_integer(value: Any, *, name: str, minimum: int, maximum: int) -> int:
+    if (
+        not isinstance(value, int)
+        or isinstance(value, bool)
+        or not minimum <= value <= maximum
+    ):
+        raise AgentProtocolError(f"{name} is outside its signed bound")
+    return value
+
+
+def _build_sequence(value: Any, *, name: str, maximum: int) -> tuple[Any, ...]:
+    if not isinstance(value, (list, tuple)) or len(value) > maximum:
+        raise AgentProtocolError(f"{name} is not a bounded array")
+    return tuple(value)
+
+
+def _valid_build_scalar(value: Any) -> bool:
+    if isinstance(value, bool):
+        return True
+    if isinstance(value, int):
+        return -(2**63) <= value <= 2**63 - 1
+    return (
+        isinstance(value, str)
+        and len(value.encode("utf-8")) <= 1024
+        and "\x00" not in value
+    )
+
+
+def _valid_public_build_host(value: str) -> bool:
+    lowered = value.lower()
+    if (
+        not value
+        or len(value.encode("utf-8")) > 253
+        or value.startswith(".")
+        or value.endswith(".")
+        or lowered
+        in {
+            "localhost",
+            "localhost.localdomain",
+            "metadata",
+            "metadata.google.internal",
+            "instance-data.ec2.internal",
+        }
+        or lowered.endswith((".localhost", ".localdomain", ".internal"))
+        or any(
+            not character.isascii() or not (character.isalnum() or character in ".-")
+            for character in value
+        )
+    ):
+        return False
+    if not all(character.isdigit() or character == "." for character in value):
+        return True
+    try:
+        first, second, _third, _fourth = ipaddress.IPv4Address(value).packed
+    except ipaddress.AddressValueError:
+        return False
+    return bool(
+        first not in {0, 10, 127}
+        and not (first == 100 and 64 <= second <= 127)
+        and not (first == 169 and second == 254)
+        and not (first == 172 and 16 <= second <= 31)
+        and not (first == 192 and second == 168)
+        and not (first == 198 and 18 <= second <= 19)
+        and first < 224
+    )
+
+
 def _mapping(value: Any) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
         raise AgentProtocolError("message must be a JSON object")
@@ -473,6 +677,8 @@ class AgentClaim:
             != self.payload_digest
         ):
             raise AgentProtocolError("payload digest does not match payload")
+        if self.operation is AgentOperation.RECIPE_BUILD:
+            _validate_recipe_build_payload(payload)
         object.__setattr__(self, "payload", payload)
         object.__setattr__(self, "deadline", _deadline(self.deadline))
 

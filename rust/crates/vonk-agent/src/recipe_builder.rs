@@ -2,6 +2,7 @@
 
 use std::{
     fs,
+    io::{Seek, SeekFrom},
     os::unix::{ffi::OsStrExt, fs::PermissionsExt},
     path::Path,
     time::Duration,
@@ -15,6 +16,7 @@ use uuid::Uuid;
 use vonk_agent_protocol::RecipeBuildRequest;
 
 use crate::{
+    base_images::{BaseImageError, BaseImageStore},
     build_source::{BuildSourceError, materialize_source_bundle},
     process::{ProcessError, ProcessRunner, Program},
     source_policy::{SourcePolicyReport, dockerfile_base_images, inspect_build_source},
@@ -262,42 +264,36 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
         if request.base_images.is_empty() {
             return Ok(());
         }
-        let supply_root = self.data_root.join("base-images");
-        let canonical_supply_root = supply_root.canonicalize()?;
+        let store = BaseImageStore::open(self.data_root).map_err(recipe_base_image_error)?;
         let mut archive_bytes = 0_u64;
         for image in &request.base_images {
-            let digest = image
-                .manifest_digest
-                .strip_prefix("sha256:")
-                .ok_or(RecipeBuildError::Evidence)?;
-            let archive = supply_root
-                .join("sha256")
-                .join(digest)
-                .join("image.oci.tar");
-            let metadata = fs::symlink_metadata(&archive)?;
-            if metadata.file_type().is_symlink()
-                || !metadata.is_file()
-                || metadata.len() == 0
-                || !archive.canonicalize()?.starts_with(&canonical_supply_root)
-            {
-                return Err(RecipeBuildError::Evidence);
-            }
+            let remaining = request
+                .base_image_storage_bytes
+                .checked_sub(archive_bytes)
+                .ok_or(RecipeBuildError::OutputLimit)?;
+            let mut archive = store
+                .materialize(
+                    self.runner,
+                    image,
+                    &request.platform,
+                    remaining,
+                    request.limits.temporary_bytes,
+                )
+                .map_err(recipe_base_image_error)?;
             archive_bytes = archive_bytes
-                .checked_add(metadata.len())
+                .checked_add(archive.bytes)
                 .ok_or(RecipeBuildError::Evidence)?;
             if archive_bytes > request.base_image_storage_bytes {
                 return Err(RecipeBuildError::OutputLimit);
             }
+            archive.file.seek(SeekFrom::Start(0))?;
             let mut load_arguments = podman_storage_arguments(storage, runroot);
-            load_arguments.extend([
-                "load".to_owned(),
-                "--input".to_owned(),
-                archive.display().to_string(),
-            ]);
-            let loaded = self.runner.run_bounded_directory(
+            load_arguments.push("load".to_owned());
+            let loaded = self.runner.run_bounded_directory_with_input(
                 Program::Podman,
                 &load_arguments,
                 Duration::from_secs(600),
+                &archive.file,
                 storage,
                 request.base_image_storage_bytes,
             )?;
@@ -318,6 +314,15 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
             inspect_base_image(&inspected, &image.manifest_digest)?;
         }
         Ok(())
+    }
+}
+
+fn recipe_base_image_error(error: BaseImageError) -> RecipeBuildError {
+    match error {
+        BaseImageError::Invalid => RecipeBuildError::Evidence,
+        BaseImageError::Limit => RecipeBuildError::OutputLimit,
+        BaseImageError::Io(error) => RecipeBuildError::Io(error),
+        BaseImageError::Process(error) => RecipeBuildError::Process(error),
     }
 }
 
