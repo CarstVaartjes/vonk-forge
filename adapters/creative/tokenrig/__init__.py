@@ -1,1 +1,0 @@
-"""TokenRig/SkinTokens adapter package."""
