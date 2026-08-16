@@ -16,9 +16,11 @@ sys.path.insert(0, str(ROOT / "control" / "src"))
 
 from vonk_control.catalog_contract import (  # noqa: E402
     CatalogContractError,
+    CatalogKind,
     CatalogReference,
     catalog_content_sha256,
     parse_catalog_json,
+    parse_catalog_reference,
     validate_catalog_document,
 )
 from vonk_control.recipe_contract import (  # noqa: E402
@@ -127,11 +129,72 @@ def _catalog_map(
             raise LibraryValidationError(f"{path}: duplicate exact catalog entity")
         entities[key] = document
         count += 1
+    _validate_entity_dependencies(entities)
     return entities, count
 
 
 def _reference_key(reference: CatalogReference) -> tuple[str, str, str, str]:
     return reference.portable_identity
+
+
+def _entity_references(document: Mapping[str, object]) -> tuple[CatalogReference, ...]:
+    kind = document.get("kind")
+    references: list[CatalogReference] = []
+    if kind == "model":
+        references.append(
+            parse_catalog_reference(
+                document["model_group"], expected_kind=CatalogKind.MODEL_GROUP
+            )
+        )
+    elif kind == "model-version":
+        references.append(
+            parse_catalog_reference(document["model"], expected_kind=CatalogKind.MODEL)
+        )
+        lineage = document.get("lineage")
+        if isinstance(lineage, Mapping):
+            references.append(
+                parse_catalog_reference(
+                    lineage["source_model"], expected_kind=CatalogKind.MODEL
+                )
+            )
+    elif kind == "runtime-distribution":
+        references.append(
+            parse_catalog_reference(
+                document["implements_harness"],
+                expected_kind=CatalogKind.EXECUTION_HARNESS,
+            )
+        )
+    elif kind == "patch-bundle":
+        references.append(
+            parse_catalog_reference(
+                document["applies_to"],
+                expected_kind=CatalogKind.RUNTIME_DISTRIBUTION,
+            )
+        )
+        for version in document.get("compatible_model_versions", ()):
+            references.append(
+                parse_catalog_reference(
+                    version, expected_kind=CatalogKind.MODEL_VERSION
+                )
+            )
+    return tuple(references)
+
+
+def _validate_entity_dependencies(
+    entities: Mapping[tuple[str, str, str, str], Mapping[str, object]],
+) -> None:
+    for document in entities.values():
+        try:
+            references = _entity_references(document)
+        except (KeyError, TypeError, ValueError) as error:
+            raise LibraryValidationError(
+                "catalog entity dependency reference is invalid"
+            ) from error
+        for reference in references:
+            if _reference_key(reference) not in entities:
+                raise LibraryValidationError(
+                    f"missing exact catalog dependency {reference.portable_identity}"
+                )
 
 
 def _validate_recipe(

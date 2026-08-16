@@ -69,6 +69,45 @@ def test_library_validation_rejects_a_missing_exact_recipe_dependency(tmp_path: 
     assert "missing exact catalog dependency" in result.stderr
 
 
+def test_library_validation_rejects_a_missing_exact_model_parent(tmp_path: Path) -> None:
+    library = tmp_path / "library"
+    for directory in (
+        "model-groups",
+        "models",
+        "model-versions",
+        "runtime-distributions",
+        "patch-bundles",
+        "recipes",
+    ):
+        (library / directory).mkdir(parents=True)
+    for directory in (
+        "model-groups",
+        "models",
+        "model-versions",
+        "runtime-distributions",
+        "patch-bundles",
+    ):
+        for source in (ROOT / "config" / directory).glob("*.json"):
+            shutil.copy2(source, library / directory / source.name)
+    shutil.copytree(ROOT / "adapters", library / "adapters")
+
+    model = json.loads(
+        (ROOT / "config/models/deepseek-v4-flash-0731.json").read_text()
+    )
+    model["model_group"]["content_sha256"] = "0" * 64
+    (library / "models/broken-parent.json").write_text(json.dumps(model))
+
+    result = _run(
+        "--library-root",
+        str(library),
+        "--platform-root",
+        str(ROOT),
+    )
+
+    assert result.returncode != 0
+    assert "missing exact catalog dependency" in result.stderr
+
+
 def test_structural_qualification_accepts_a_recipe_checked_out_separately(
     tmp_path: Path,
 ) -> None:
