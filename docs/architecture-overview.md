@@ -78,10 +78,11 @@ API.
 
 Vonk Forge has an explicit authority split. PostgreSQL is authoritative for the
 local recipe catalog: package families, authored and imported revisions,
-WorkloadRun import reports, installations, placements, and runs. A recipe can be
-created, imported, resolved, installed, and run while the operator is offline;
-the optional global catalog is a source of immutable revisions, never a remote
-dependency for local execution. Git/TUF remains authoritative for platform
+WorkloadRun import reports, installations, placements, and runs. The public
+`vonk-forge-recipes` repository is the standard source of reviewed immutable
+recipe revisions; once imported, a snapshot can be resolved, installed, and run
+while the operator is offline. A hosted catalog is optional discovery, never a
+remote dependency for local execution. Git/TUF remains authoritative for platform
 source, fleet/topology policy, and the existing workload-release projection
 until that projection is migrated to catalog revisions.
 

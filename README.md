@@ -42,8 +42,10 @@ not treated as production-ready until its evidence gates are accepted.
 - Validate and reconcile the existing content-addressed platform and cluster
   definitions from Git/TUF.
 - Author recipes locally, import WorkloadRun profiles with a field-by-field report,
-  or download immutable revisions from the optional global catalog. Local
-  PostgreSQL remains usable when the global service or Git remote is unavailable.
+  or import immutable revisions from the public
+  [`vonk-forge-recipes`](https://github.com/CarstVaartjes/vonk-forge-recipes)
+  standard library. Local PostgreSQL remains usable when the library remote is
+  unavailable after an exact snapshot has been imported.
 - Execute routine lifecycle and probe operations through outbound, fenced,
   mutually authenticated GPU node agents; the control worker never SSHes to a
   GPU node.
@@ -174,7 +176,9 @@ the repository-less worker.
 - `bin/` — repository-local command launchers
 - `src/cluster_profiles/` — current control client, typed contracts, node tooling, and CLI
 - `adapters/` — model-specific runtime definitions and lifecycle tooling
-- `config/` — current catalog recipes, execution harnesses, runtimes, and package authority
+- `config/` — platform contracts, execution harnesses, runtime fixtures, and
+  package authority; reviewed model recipes and target research live in the
+  separate standard recipe library
 - `nodes/` — node bootstrap, health, fabric, and recovery utilities
 - `schemas/` — JSON contracts for profiles, workloads, and health evidence
 - `tests/` — Python and shell test suites

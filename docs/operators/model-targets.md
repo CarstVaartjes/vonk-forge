@@ -5,8 +5,10 @@ recipes that are currently runnable on the enrolled Sparks: a target can be an
 accepted recipe, a candidate awaiting exact artifacts and Spark evidence, or a
 blocked upstream that must remain out of the normal catalog.
 
-The machine-readable ledger lives in
-[`config/model-targets/`](../../config/model-targets/). Each entry names the
+The machine-readable ledger lives in the public
+[`vonk-forge-recipes/model-targets/`](https://github.com/CarstVaartjes/vonk-forge-recipes/tree/main/model-targets/).
+The platform repository keeps a synchronized fixture for contract tests, but
+the recipe repository is the source of truth. Each entry names the
 **model group**, **model**, and exact **version** conceptually, then records the
 candidate harnesses, supported topology shape, upstream starting point, and
 readiness state. A precision or checkpoint variant is a separate version; it is
