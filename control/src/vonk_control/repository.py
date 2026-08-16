@@ -21,9 +21,7 @@ _ROOTS = (
     # repository boundary as the existing model/profile documents; they must
     # never be read from a mutable checkout path.
     "config/package-families/",
-    "config/cluster-profiles/",
     "config/workload-deployments/",
-    "config/workloads/",
     "locks/",
     "manifests/",
     "docs/audits/",

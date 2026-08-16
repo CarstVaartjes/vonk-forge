@@ -60,8 +60,8 @@ test("provides browser-equivalent local storage semantics", () => {
   expect(localStorage.key(0)).toBeNull();
 });
 
-test("groups primary tasks without hiding administrative routes", async () => {
-  // Break caught: restoring ten equal top-level links, stranding an existing
+test("keeps v1 model work in Library and Catalog without legacy profile navigation", async () => {
+  // Break caught: restoring the profile/model editors, stranding a retained
   // route, or removing the accessible mobile control must fail this test.
   const {container} = render(<App api={apiFixture}/>);
   const user = userEvent.setup();
@@ -89,13 +89,14 @@ test("groups primary tasks without hiding administrative routes", async () => {
     ["Jobs", "/jobs"],
     ["Audit", "/audit"],
     ["Agents", "/agents"],
-    ["Profiles", "/profiles"],
-    ["Models", "/models"],
     ["Packages", "/packages"],
+    ["Catalog", "/catalog"],
   ]);
   for (const [name, href] of routes) {
     expect(within(primary).getByRole("link", {name})).toHaveAttribute("href", href);
   }
+  expect(within(primary).queryByRole("link", {name: "Profiles"})).not.toBeInTheDocument();
+  expect(within(primary).queryByRole("link", {name: "Models"})).not.toBeInTheDocument();
   for (const icon of container.querySelectorAll("svg")) {
     expect(icon).toHaveAttribute("aria-hidden", "true");
   }

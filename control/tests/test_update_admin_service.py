@@ -12,14 +12,17 @@ from sqlalchemy.orm import sessionmaker
 from vonk_control.models import (
     AgentNode,
     Base,
+    RecipeRun,
     Reconciliation,
     RoutePublication,
     RoutePublicationOwner,
+    RunNode,
 )
 from vonk_control.update_admin import (
     PlatformUpdateAdminService,
     RouteImpact,
     durable_agent_observations,
+    durable_distributed_workloads,
     durable_route_impacts,
     selected_platform_target,
     topology_exclusions_from_document,
@@ -395,6 +398,64 @@ def test_durable_route_impacts_use_only_the_accepted_publication_owner(tmp_path)
     assert durable_route_impacts(sessions) == (
         RouteImpact("chat", "model-a", (NODE_A, NODE_B)),
     )
+
+
+def test_durable_update_workloads_follow_running_v1_recipe_runs(tmp_path) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'recipe-runs.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    now = datetime(2026, 8, 6, tzinfo=UTC)
+    run_id = "50000000-0000-4000-8000-000000000005"
+    with sessions.begin() as session:
+        session.add(
+            RecipeRun(
+                id=run_id,
+                installation_id="60000000-0000-4000-8000-000000000006",
+                mapping_id="70000000-0000-4000-8000-000000000007",
+                mapping_generation=1,
+                alias="mia-flash",
+                plan_digest="a" * 64,
+                plan={
+                    "schema_version": 1,
+                    "nodes": [
+                        {"node_id": NODE_A, "rank": 0, "role": "entrypoint"},
+                        {"node_id": NODE_B, "rank": 1, "role": "worker"},
+                    ],
+                },
+                state="running",
+                route_state="published",
+                actor="admin",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.add_all(
+            RunNode(
+                run_id=run_id,
+                node_id=node_id,
+                rank=rank,
+                role=role,
+                state="running",
+                port=8000,
+                reserved_memory_bytes=1,
+                evidence_digest=str(rank + 1) * 64,
+                updated_at=now,
+            )
+            for rank, (node_id, role) in enumerate(
+                ((NODE_A, "entrypoint"), (NODE_B, "worker"))
+            )
+        )
+
+    workloads = durable_distributed_workloads(sessions, lambda: now)
+
+    assert len(workloads) == 1
+    assert workloads[0].workload_id == "mia-flash"
+    assert workloads[0].members == (NODE_A, NODE_B)
+    assert workloads[0].minimum_available == 1
+    assert [(item.node_id, item.healthy, item.serving) for item in workloads[0].replicas] == [
+        (NODE_A, True, True),
+        (NODE_B, True, True),
+    ]
 
 
 def test_apply_revalidates_exact_plan_and_persists_api_grant_before_visibility() -> None:

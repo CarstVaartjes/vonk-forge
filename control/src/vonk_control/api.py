@@ -79,21 +79,16 @@ from .operation_api import (
     JobsResponse,
     OperationApiServices,
     OperationPage,
-    ReconciliationAcceptedResponse,
-    ReconciliationPlanResponse,
     bounded_error_responses,
     decode_offset,
     fleet_response,
     job_response,
-    plan_response,
 )
 from .package_api import PackageApiServices, install_package_routes
 from .proposals import DocumentChange
 from .recipe_api import install_recipe_operation_routes
 from .recipe_builds import RecipeBuildService
 from .recipe_operations import RecipeOperationService
-from .reconcile import IneligibleCommit, StaleFleetEvidence
-from .repository import RepositoryPolicyError
 from .settings import StartupMode
 from .source_bundles import SourceBundleStore
 from .telemetry import TelemetryResolution
@@ -636,8 +631,6 @@ class AdminServices:
     repository: Any
     proposals: Any
     changes: Any | None
-    reconciler: Any | None
-    cancellations: Any | None = None
 
 
 def build_agent_services(
@@ -918,23 +911,6 @@ class ProposalRequest(BaseModel):
 class ChangeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     proposal_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-
-
-class ReconciliationPlanRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    commit: str = Field(pattern=r"^[0-9a-f]{40}$")
-    profile_id: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]{0,62}$")
-
-
-class ReconciliationRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    plan_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-    fleet_evidence_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-
-
-class ReconciliationCancelRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    reason: str = Field(min_length=1, max_length=1024)
 
 
 class UpdatePlanRequest(BaseModel):
@@ -1422,41 +1398,6 @@ def create_app(
             "dependencies": dict(snapshot.dependencies),
         }
 
-    @app.get("/api/v1/documents")
-    def document_view(
-        commit: str | None = None,
-        path: str | None = None,
-        kind: str | None = None,
-        _actor: Actor = authenticated_actor,
-    ) -> dict[str, object]:
-        if admin is None:
-            raise HTTPException(
-                status_code=503, detail="repository administration unavailable"
-            )
-        resolved = commit or admin.repository.head()
-        if path is None:
-            snapshot = admin.repository.inspect(resolved)
-            prefixes = {
-                "models": ("config/workloads/", "locks/", "manifests/"),
-                "profiles": ("config/cluster-profiles/",),
-            }
-            selected = prefixes.get(kind or "", ())
-            if not selected:
-                raise HTTPException(status_code=400, detail="document kind is invalid")
-            return {
-                "commit": resolved,
-                "documents": [
-                    name for name in snapshot.documents if name.startswith(selected)
-                ],
-            }
-        document = admin.repository.read_document(resolved, path)
-        return {
-            "commit": document.commit,
-            "path": document.path,
-            "sha256": document.sha256,
-            "document": document.parsed,
-        }
-
     @app.post("/api/v1/proposals")
     def proposal_preview(
         body: ProposalRequest, authenticated: Actor = authenticated_actor
@@ -1501,163 +1442,6 @@ def create_app(
             )
         )
         return dict(result)
-
-    def planned_response(commit: str, profile_id: str) -> ReconciliationPlanResponse:
-        if admin is None or admin.reconciler is None:
-            raise HTTPException(status_code=503, detail="reconciliation unavailable")
-        try:
-            evidence = fleet_response(fleet())
-            planned = admin.reconciler.plan(
-                commit,
-                profile_id,
-                fleet_evidence_digest=evidence.evidence_digest,
-            )
-            return plan_response(
-                planned,
-                fleet_evidence_digest=evidence.evidence_digest,
-            )
-        except IneligibleCommit:
-            raise HTTPException(
-                status_code=409, detail="commit is not eligible"
-            ) from None
-        except RepositoryPolicyError:
-            raise HTTPException(
-                status_code=422, detail="repository desired state is invalid"
-            ) from None
-        except (TypeError, ValueError):
-            raise HTTPException(
-                status_code=422, detail="desired state cannot be planned"
-            ) from None
-
-    @app.post(
-        "/api/v1/reconciliations/plan",
-        response_model=ReconciliationPlanResponse,
-        responses=bounded_error_responses(401, 403, 409, 503),
-        operation_id="planReconciliation",
-    )
-    def reconcile_plan(
-        body: ReconciliationPlanRequest, authenticated: Actor = authenticated_actor
-    ) -> ReconciliationPlanResponse:
-        require_mutation_role(authenticated, "/api/v1/reconciliations/plan")
-        return planned_response(body.commit, body.profile_id)
-
-    @app.post(
-        "/api/v1/profiles/{profile_id}/plan",
-        response_model=ReconciliationPlanResponse,
-        responses=bounded_error_responses(401, 403, 409, 503),
-        operation_id="planProfileReconciliation",
-    )
-    def profile_reconcile_plan(
-        profile_id: str = ApiPath(pattern=r"^[a-z0-9][a-z0-9._-]{0,62}$"),
-        body: None = Body(default=None),
-        authenticated: Actor = authenticated_actor,
-    ) -> ReconciliationPlanResponse:
-        del body
-        require_mutation_role(authenticated, "/api/v1/profiles/{profile_id}/plan")
-        if admin is None:
-            raise HTTPException(status_code=503, detail="reconciliation unavailable")
-        return planned_response(admin.repository.head(), profile_id)
-
-    @app.post(
-        "/api/v1/reconciliations",
-        response_model=ReconciliationAcceptedResponse,
-        responses=bounded_error_responses(401, 403, 409, 503),
-        status_code=status.HTTP_202_ACCEPTED,
-        operation_id="applyReconciliation",
-    )
-    def reconcile(
-        body: ReconciliationRequest,
-        request: Request,
-        authenticated: Actor = authenticated_actor,
-    ) -> dict[str, object]:
-        require_mutation_role(authenticated, "/api/v1/reconciliations")
-        if admin is None or admin.reconciler is None:
-            raise HTTPException(status_code=503, detail="reconciliation unavailable")
-        current_evidence = fleet_response(fleet()).evidence_digest
-        if current_evidence != body.fleet_evidence_digest:
-            raise HTTPException(
-                status_code=409, detail="fleet acceptance evidence is stale"
-            )
-        try:
-            result = dict(
-                admin.reconciler.enqueue(
-                    body.plan_digest,
-                    authenticated.subject,
-                    request.state.request_id,
-                    fleet_evidence_digest=body.fleet_evidence_digest,
-                    current_fleet_evidence=lambda: (
-                        fleet_response(fleet()).evidence_digest
-                    ),
-                )
-            )
-            audits.append(
-                AuditRecord(
-                    request.state.request_id,
-                    authenticated.subject,
-                    "reconciliation.apply",
-                    str(result.get("base_commit")),
-                    (),
-                )
-            )
-            return result
-        except IneligibleCommit:
-            raise HTTPException(
-                status_code=409, detail="commit is not eligible"
-            ) from None
-        except StaleFleetEvidence:
-            raise HTTPException(
-                status_code=409, detail="fleet acceptance evidence is stale"
-            ) from None
-        except (TypeError, ValueError):
-            raise HTTPException(
-                status_code=409, detail="reconciliation plan digest is stale"
-            ) from None
-
-    @app.post(
-        "/api/v1/reconciliations/{reconciliation_id}/cancel",
-        status_code=status.HTTP_202_ACCEPTED,
-        responses=bounded_error_responses(401, 403, 404, 409, 503),
-    )
-    def cancel_reconciliation(
-        reconciliation_id: str,
-        body: ReconciliationCancelRequest,
-        request: Request,
-        authenticated: Actor = authenticated_actor,
-    ) -> dict[str, str]:
-        route = "/api/v1/reconciliations/{reconciliation_id}/cancel"
-        require_mutation_role(authenticated, route)
-        if admin is None or admin.cancellations is None:
-            raise HTTPException(
-                status_code=503, detail="reconciliation cancellation unavailable"
-            )
-        try:
-            cancellation = admin.cancellations.enqueue_cancel(
-                reconciliation_id,
-                body.reason,
-                actor=authenticated.subject,
-                request_id=request.state.request_id,
-            )
-        except KeyError:
-            raise HTTPException(
-                status_code=404, detail="reconciliation is unavailable"
-            ) from None
-        except ValueError:
-            raise HTTPException(
-                status_code=409, detail="reconciliation cannot be cancelled"
-            ) from None
-        audits.append(
-            AuditRecord(
-                request.state.request_id,
-                authenticated.subject,
-                "reconciliation.cancel.request",
-                None,
-                (),
-            )
-        )
-        return {
-            "reconciliation_id": cancellation.reconciliation_id,
-            "state": cancellation.state,
-        }
 
     @app.post(
         "/api/v1/jobs",
@@ -2042,10 +1826,6 @@ def production_app() -> FastAPI:
     from .code_host import RepositoryCodeHost
     from .dashboard import DashboardService
     from .db import build_engine, session_factory
-    from .desired_state import (
-        DesiredStateResolver,
-        durable_desired_state_observations,
-    )
     from .fleet_events import FleetEventRepository
     from .fleet_projection import FleetProjection
     from .fleet_stream import FleetStream
@@ -2060,14 +1840,13 @@ def production_app() -> FastAPI:
     from .models import Job
     from .offline import OnlineLock
     from .operation_api import durable_operation_services
-    from .orchestration import ReconciliationOrchestrator
     from .package_publication import PackagePublicationService
     from .package_services import ProductionPackageProjectionService
     from .package_validation_runner import PackageValidationRunner
     from .presence import ManagementAddressPolicy
     from .proposals import ProposalService
     from .recipe_routes import AtomicRecipeRoutePublisher, RecipeRouteService
-    from .reconcile import ChangeService, Reconciler
+    from .reconcile import ChangeService
     from .repository import RepositoryService
     from .route_runtime import AtomicRouteBundlePublisher, FileSupervisorAcknowledger
     from .run_admission import RunAdmissionService
@@ -2153,13 +1932,6 @@ def production_app() -> FastAPI:
         required_checks=settings.required_checks,
     )
     changes = ChangeService(proposals, git_policy)
-    reconciler = Reconciler(
-        git_policy,
-        DesiredStateResolver(repository, clock=clock),
-        jobs=job_service,
-        observations=lambda: durable_desired_state_observations(sessions),
-        orchestrator=ReconciliationOrchestrator(sessions, clock=clock),
-    )
     dashboard = DashboardService(
         repository,
         sessions,
@@ -2270,7 +2042,7 @@ def production_app() -> FastAPI:
     update_admin = PlatformUpdateAdminService(
         target_source=active_update_target,
         observation_source=lambda: durable_agent_observations(sessions, clock),
-        workload_source=lambda: durable_distributed_workloads(sessions),
+        workload_source=lambda: durable_distributed_workloads(sessions, clock),
         orchestrator=api_update_orchestrator,
         grant_issuer=admin_grant_issuer,
         status_source=lambda identifier: durable_update_status(sessions, identifier),
@@ -2364,7 +2136,7 @@ def production_app() -> FastAPI:
         ),
         mappings=ClusterMappingService(sessions),
     )
-    reconciliation_cancellations = bind_reconciliation_result_consumer(
+    bind_reconciliation_result_consumer(
         sessions,
         operations=agent_services.operations,
         presence=agent_services.presence,
@@ -2410,8 +2182,6 @@ def production_app() -> FastAPI:
             repository,
             proposals,
             changes,
-            reconciler,
-            reconciliation_cancellations,
         ),
         metrics=metrics,
         metrics_token=settings.metrics_token,

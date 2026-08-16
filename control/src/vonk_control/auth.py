@@ -26,14 +26,6 @@ MUTATION_ROLES = {
     ("POST", "/api/v1/jobs"): frozenset({"operator", "administrator"}),
     ("POST", "/api/v1/proposals"): frozenset({"operator", "administrator"}),
     ("POST", "/api/v1/changes"): frozenset({"administrator"}),
-    ("POST", "/api/v1/reconciliations/plan"): frozenset({"operator", "administrator"}),
-    ("POST", "/api/v1/profiles/{profile_id}/plan"): frozenset(
-        {"operator", "administrator"}
-    ),
-    ("POST", "/api/v1/reconciliations"): frozenset({"operator", "administrator"}),
-    ("POST", "/api/v1/reconciliations/{reconciliation_id}/cancel"): frozenset(
-        {"operator", "administrator"}
-    ),
     ("POST", "/api/v1/jobs/{job_id}/resume"): frozenset({"operator", "administrator"}),
     ("POST", "/api/v1/agents/enrollments/grants"): frozenset({"administrator"}),
     ("POST", "/api/v1/agents/nodes/{node_id}/migration-grant"): frozenset(

@@ -8,7 +8,6 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
-from vonk_control.desired_state import durable_desired_state_observations
 from vonk_control.models import Base, Reconciliation
 from vonk_control.orchestration import ReconciliationOrchestrator
 
@@ -319,7 +318,6 @@ def test_zero_compute_gate_is_the_only_cross_workload_barrier(planner) -> None:
     assert graph.dependencies("new:install") == ("node:gate",)
 
 
-@pytest.mark.parametrize("consumer", ("restart", "replay"))
 @pytest.mark.parametrize(
     "corruption",
     (
@@ -335,7 +333,7 @@ def test_zero_compute_gate_is_the_only_cross_workload_barrier(planner) -> None:
     ),
 )
 def test_persisted_plan_consumers_reject_semantic_gate_and_nonmutating_corruption(
-    planner, consumer: str, corruption: str
+    planner, corruption: str
 ) -> None:
     orchestrator, sessions = planner
     graph, resolved, graph_digest, plan_digest, completion_generation = (
@@ -344,7 +342,7 @@ def test_persisted_plan_consumers_reject_semantic_gate_and_nonmutating_corruptio
     with sessions.begin() as session:
         session.add(
             Reconciliation(
-                id=f"{consumer}-{corruption}",
+                id=f"restart-{corruption}",
                 base_commit=BASE_COMMIT,
                 status="succeeded",
                 summary={},
@@ -360,10 +358,7 @@ def test_persisted_plan_consumers_reject_semantic_gate_and_nonmutating_corruptio
         )
 
     with pytest.raises((TypeError, ValueError), match="persisted resolved plan"):
-        if consumer == "restart":
-            orchestrator.resolved_plan(plan_digest)
-        else:
-            durable_desired_state_observations(sessions)
+        orchestrator.resolved_plan(plan_digest)
 
 
 @pytest.mark.parametrize(

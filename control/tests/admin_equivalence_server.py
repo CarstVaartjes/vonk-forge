@@ -39,46 +39,6 @@ class Repository:
         return SimpleNamespace(commit=commit, documents={}, dependencies={})
 
 
-class Reconciler:
-    def plan(
-        self,
-        commit: str,
-        profile_id: str,
-        *,
-        fleet_evidence_digest: str,
-    ):
-        del fleet_evidence_digest
-        if profile_id != "production-agents":
-            raise ValueError("profile is invalid")
-        operation = {
-            "operation_id": "model:node.probe",
-            "node_id": NODE_ID,
-            "workload_id": "model",
-            "kind": "node.probe",
-            "dependencies": [],
-            "compensation_kind": None,
-            "payload_digest": "9" * 64,
-        }
-        return SimpleNamespace(
-            commit=commit,
-            digest=PLAN_DIGEST,
-            targets=(NODE_ID,),
-            placements={"model": (NODE_ID,)},
-            routes={},
-            releases={},
-            input_digests={"profile": "f" * 64},
-            operation_graph=SimpleNamespace(
-                reconciliation_id="22222222-2222-4222-8222-222222222222",
-                document={
-                    "base_commit": commit,
-                    "nodes": [operation],
-                    "schema_version": 1,
-                    "targets": [NODE_ID],
-                },
-            ),
-            agent_protocol_range=(3, 3),
-        )
-
     def enqueue(
         self,
         digest: str,
@@ -143,7 +103,6 @@ def main() -> None:
                     "labels": {},
                     "lifecycle": "managed",
                     "memory_available_bytes": 1_000_000,
-                    "profile": "production-agents",
                     "stale": not available,
                 }
             ],
@@ -159,7 +118,6 @@ def main() -> None:
             repository=Repository(),
             proposals=None,
             changes=None,
-            reconciler=Reconciler(),
         ),
         browser_auth=browser_auth,
     )

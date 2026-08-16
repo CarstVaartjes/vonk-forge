@@ -75,13 +75,9 @@ def test_runtime_module_contains_no_process_or_transport_implementation() -> Non
     assert "ssh" not in source.lower()
 
 
-def test_legacy_runtime_is_explicitly_isolated_from_production_modules() -> None:
-    legacy = PACKAGE / "legacy_runtime.py"
-    assert legacy.is_file()
-    source = legacy.read_text()
-    assert "explicit-test-only" in source
-    assert "LegacyRuntimeHandlers" in source
-    assert "subprocess" in _imports(legacy)
+def test_retired_runtime_modules_are_absent() -> None:
+    assert not (PACKAGE / "legacy_runtime.py").exists()
+    assert not (PACKAGE / "legacy_route_runtime.py").exists()
 
 
 def test_production_worker_image_has_local_git_without_direct_transport_tools() -> None:

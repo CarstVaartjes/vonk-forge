@@ -6,7 +6,6 @@ import type {
   AgentsResponse,
   AuditSummary,
   ControlApi,
-  DocumentList,
   EnrollmentDecisionResponse,
   EnrollmentGrantResponse,
   EnrollmentListResponse,
@@ -21,8 +20,6 @@ import type {
   PackageProgress,
   PackageRemovalProgress,
   PackageRemovalPreview,
-  ReconciliationAccepted,
-  ReconciliationPlan,
   UpdatePlan,
   UpdateRollout,
   UpdateSkew,
@@ -498,18 +495,6 @@ export class ApiClient implements ControlApi {
     if (!response.ok) throw new Error(`Control API returned ${response.status}`);
   }
 
-  async planProfile(profileId: string): Promise<ReconciliationPlan> {
-    return resultData(await this.generated.POST("/api/v1/profiles/{profile_id}/plan", {
-      params: {path: {profile_id: profileId}},
-    }));
-  }
-
-  async applyReconciliation(digest: string, fleetEvidenceDigest: string): Promise<ReconciliationAccepted> {
-    return resultData(await this.generated.POST("/api/v1/reconciliations", {
-      body: {plan_digest: digest, fleet_evidence_digest: fleetEvidenceDigest},
-    }));
-  }
-
   async jobs(cursor?: string): Promise<JobsResponse> {
     return resultData(await this.generated.GET("/api/v1/jobs", {
       params: {query: {cursor, limit: 20}},
@@ -531,7 +516,6 @@ export class ApiClient implements ControlApi {
     }));
   }
 
-  documents(kind: "models" | "profiles") { return this.request<DocumentList>(`/api/v1/documents?kind=${kind}`); }
   audit() { return this.request<{events: AuditSummary[]}>("/api/v1/audit"); }
   preview(input: ProposalInput) { return this.request<ProposalPreview>("/api/v1/proposals", {method: "POST", body: JSON.stringify(input)}); }
   submit(digest: string) { return this.request<Record<string, unknown>>("/api/v1/changes", {method: "POST", body: JSON.stringify({proposal_digest: digest})}); }
