@@ -1848,8 +1848,36 @@ replaces the authority snapshot and rearms cleanup before acknowledgement.
 Production and embedded-development supervisor behavior is covered by shared
 vectors and a real pinned-Caddy integration.
 
-The final current-image development stack passed all three complete-stack
-checks, and all retained Task 8, protocol, Rust, development-slice, security,
-supply-chain, formatting, lock, and Caddy configuration gates are green. Task
-8 remains pending until independent review of commits `3642c36..e42b230` is
-clean; physical Spark acceptance is still exclusively Task 9.
+The first independent review covered exact range `3642c36..de248c2`. It
+confirmed exact request-time expiry, the closed authority status set, Caddy
+authorization on every configured route, bounded pre-health startup recovery,
+and the exact fresh `0027_execution_harness_catalog` identity. It also found
+one Critical network bypass, one Important old-timer renewal race, and stale
+final-head image/supply evidence.
+
+The bypass was closed in `27db102`: LiteLLM no longer shares `data` with API,
+worker, or other control clients. Its database connectivity uses an internal
+`litellm-data` network whose only members are LiteLLM and Postgres, while its
+serving interface remains on `litellm-edge` with Caddy. Rendered production and
+development contracts reject any other service sharing a LiteLLM network.
+
+The renewal race was closed in `6ddc1f3`: the guard lock now invalidates the
+old timer generation, prepares the replacement timer, and installs the new
+authority snapshot as one serialized transition before acknowledgement. A
+deterministic test launches the old expiry callback during replacement in both
+supervisors and proves it cannot deny, expire, or kill the renewed service.
+
+Supply evidence was regenerated in `f9182b3`, then API image `955ee967ec34`
+and worker image `62a2d961934e` were rebuilt with exact source commit
+`f9182b39d17540573cd13418218a2176e35b4a28`. Secret scanning exited zero and
+the rebuilt complete stack passed all three tests in 116.65 seconds. Final
+post-fix verification passed 469 focused Python checks, 166 Rust tests, 451
+Python protocol tests, 59 development-slice checks, and 61 security/supply
+chain checks. The supply verifier reported seven images, no errors, and
+manifest SHA-256
+`2a06062c68e6e1481fc04e2354027b3b87d4b22be46aea9881c64cc962e2975c`.
+Ruff, Cargo format/Clippy, lock, JSON, Caddy validation, and diff gates also
+exited zero.
+
+Task 8 remains pending a clean follow-up review of the remediation range
+beginning at `de248c2`; physical Spark acceptance is still exclusively Task 9.
