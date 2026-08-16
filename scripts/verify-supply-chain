@@ -343,7 +343,6 @@ def expected(root: Path) -> tuple[dict[str, bytes], bytes, dict[str, object]]:
         "deploy/compose/hermes-agent/Dockerfile",
         "deploy/compose/hermes-agent/entrypoint.sh",
         "deploy/compose/bin/harden-hermes-egress",
-        "config/hermes-agent-policy.toml",
         "deploy/compose/litellm/config.yaml",
         "deploy/compose/litellm/bootstrap-config.json",
         "deploy/compose/litellm/config_supervisor.py",

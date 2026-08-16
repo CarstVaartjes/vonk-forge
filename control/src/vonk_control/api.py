@@ -1816,10 +1816,7 @@ def create_app(
 def production_app() -> FastAPI:
     from sqlalchemy import func, select, text
 
-    from .agent_reconciliation import (
-        bind_reconciliation_result_consumer,
-        load_reconciliation_authority_input,
-    )
+    from .agent_reconciliation import bind_reconciliation_result_consumer
     from .artifact_sizes import DeclaredArtifactSizeResolver
     from .audit import SqlAuditStore
     from .catalog_seeds import seed_builtin_harnesses
@@ -1830,7 +1827,6 @@ def production_app() -> FastAPI:
     from .fleet_projection import FleetProjection
     from .fleet_stream import FleetStream
     from .git_policy import GitPolicy, PolicyStore
-    from .hermes_routes import RepositoryHermesRoutePolicy
     from .host_state import HostGenerationStore
     from .install_admission import InstallAdmissionService
     from .jobs import JobService
@@ -2058,38 +2054,12 @@ def production_app() -> FastAPI:
         route_source=lambda: durable_route_impacts(sessions),
     )
 
-    def reconciliation_authority_input(
-        reconciliation_id: str,
-    ) -> tuple[str, str, tuple[Any, ...], str]:
-        def endpoint(session, node_id: str) -> tuple[str, Any]:
-            observation = agent_services.presence.latest_in_session(
-                session,
-                node_id,
-                maximum_age_seconds=300,
-            )
-            return observation.address, observation.observed_at
-
-        with sessions() as session:
-            snapshot = load_reconciliation_authority_input(
-                session,
-                reconciliation_id,
-                endpoint,
-            )
-        return (
-            snapshot.base_commit,
-            snapshot.plan_digest,
-            snapshot.routes,
-            snapshot.fleet_evidence_digest,
-        )
-
     worker_authority = RepositoryAuthorityService(
         current_commit=current_commit,
         commit_eligible=commit_eligible,
-        reconciliation_input=reconciliation_authority_input,
         current_fleet_evidence=lambda: (
             fleet_response(dashboard.fleet()).evidence_digest
         ),
-        deployments=RepositoryHermesRoutePolicy(settings.repository_path).deployments,
     )
     recipe_route_runtime = AtomicRouteBundlePublisher(
         Path("/routes"),

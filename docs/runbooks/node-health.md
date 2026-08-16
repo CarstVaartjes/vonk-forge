@@ -11,9 +11,9 @@ uv run --no-project --with jsonschema -- bin/vonkctl nodes status --json
 The command starts both key-only SSH probes concurrently and always renders
 `node1`, then `node2`. It sends the checked-in `nodes/bin/collect-health`
 bytes to `bash -s` over standard input. It does not install a collector, use
-`sudo`, retain a sample, enumerate model processes, repair a node, or switch a
-Cluster Profile. `vonkctl status` remains the separate, fast local view of
-persisted profile-controller state.
+`sudo`, retain a sample, enumerate model processes, repair a node, or start or
+stop a recipe run. `vonkctl status` remains the separate, fast local view of
+persisted control state.
 
 ## What it reports
 

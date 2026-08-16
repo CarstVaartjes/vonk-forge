@@ -10,7 +10,6 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from vonk_agent_protocol import canonical_message
-from vonk_control.litellm import LiteLlmDeployment
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.route_runtime import (
     AcceptedEndpointEvidence,
@@ -51,16 +50,6 @@ def _client(*, eligible: bool = True) -> TestClient:
         )
         if reconciliation_id == RECONCILIATION_ID
         else (_ for _ in ()).throw(ValueError("unknown reconciliation")),
-        deployments=lambda commit, routes: (
-            LiteLlmDeployment(
-                model_name="hermes-agent",
-                workload="model-a",
-                api_base=routes[0].api_base,
-                priority=1,
-                requests_per_minute=10,
-                tokens_per_minute=20,
-            ),
-        ),
         current_fleet_evidence=lambda: "e" * 64,
         clock=lambda: 100,
     )
@@ -118,55 +107,6 @@ def test_internal_worker_authority_requires_exact_service_token() -> None:
     assert response.json()["commit"] == COMMIT
     assert response.json()["nonce"] == "0" * 32
     assert response.json()["expires_at"] == 115
-
-
-def test_internal_worker_authority_returns_commit_bound_hermes_deployments() -> None:
-    client = _client()
-    body = {
-        "schema_version": 1,
-        "reconciliation_id": RECONCILIATION_ID,
-        "commit": COMMIT,
-        "plan_digest": PLAN_DIGEST,
-        "nonce": "1" * 32,
-        "routes": [
-            {
-                "alias": ROUTE.alias,
-                "workload_id": ROUTE.workload_id,
-                "api_base": ROUTE.api_base,
-                "requests_per_minute": ROUTE.requests_per_minute,
-                "tokens_per_minute": ROUTE.tokens_per_minute,
-            }
-        ],
-    }
-    response = client.post(
-        "/internal/v1/repository/evaluate",
-        headers={
-            "x-vonk-worker-signature": worker_document_signature(
-                b"w" * 32,
-                body,
-                purpose="request",
-            )
-        },
-        json=body,
-    )
-
-    assert response.status_code == 200
-    assert response.json()["commit"] == COMMIT
-    assert response.json()["nonce"] == "1" * 32
-    assert response.json()["current"] is True
-    assert response.json()["eligible"] is True
-    assert response.json()["deployments"] == [
-        {
-            "model_name": "hermes-agent",
-            "workload": "model-a",
-            "api_base": ROUTE.api_base,
-            "priority": 1,
-            "requests_per_minute": 10,
-            "tokens_per_minute": 20,
-        }
-    ]
-
-
 def test_internal_worker_authority_fails_closed_before_repository_policy_output() -> None:
     client = _client(eligible=False)
     body = {
@@ -319,7 +259,6 @@ def test_worker_publication_uses_prefetched_route_policy_without_network() -> No
     )
     authority.prefetch(RECONCILIATION_ID, COMMIT, PLAN_DIGEST, (ROUTE,))
 
-    assert authority.deployments(COMMIT, (ROUTE,))[0].model_name == "hermes-agent"
     assert calls == 1
 
 
@@ -408,7 +347,6 @@ def test_atomic_publisher_never_performs_authority_network_io_under_file_lock(
         tmp_path / "routes",
         management_policy=ManagementAddressPolicy.parse("10.0.0.0/24"),
         clock=lambda: now,
-        litellm_deployments=authority.deployments,
     )
     request = RouteBundleRequest(
         reconciliation_id=RECONCILIATION_ID,
@@ -432,20 +370,6 @@ def test_atomic_publisher_never_performs_authority_network_io_under_file_lock(
     publisher.publish(request)
     publisher.publish(request)
 
-    assert calls == 1
-    with pytest.raises(WorkerAuthorityError):
-        authority.deployments(
-            COMMIT,
-            (
-                PublishedRoute(
-                    alias=ROUTE.alias,
-                    workload_id=ROUTE.workload_id,
-                    api_base="http://10.0.0.11:8000/v1",
-                    requests_per_minute=ROUTE.requests_per_minute,
-                    tokens_per_minute=ROUTE.tokens_per_minute,
-                ),
-            ),
-        )
     assert calls == 1
 
 

@@ -51,9 +51,6 @@ def test_model_overviews_preserve_upstream_dspark_and_trellis_names() -> None:
         "(https://github.com/dr-vij/Trellis2-DGX-Spark-Docker)"
     ) in capacity
 
-    profile = _read("docs/model-profile-overview.md")
-    assert "DS4 v0.5.3 Q2-imatrix + DSpark GGUF pair" in profile
-    assert "`bleysg` DSpark work" in profile
 
 
 def test_nvidia_document_links_keep_their_external_product_names() -> None:

@@ -448,7 +448,6 @@ if __name__ == "__main__":
             Path("/supervisor/ack.json"),
             clock=clock,
         ),
-        litellm_deployments=authority.deployments,
     )
     worker = assemble_production_worker(
         jobs=jobs,

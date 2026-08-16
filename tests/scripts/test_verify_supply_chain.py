@@ -60,7 +60,6 @@ def _copy(tmp_path: Path) -> Path:
         "deploy/compose/hermes-agent/Dockerfile",
         "deploy/compose/hermes-agent/entrypoint.sh",
         "deploy/compose/bin/harden-hermes-egress",
-        "config/hermes-agent-policy.toml",
         "deploy/compose/litellm/config.yaml",
         "deploy/compose/litellm/config_supervisor.py",
         "deploy/compose/litellm/entrypoint.sh",

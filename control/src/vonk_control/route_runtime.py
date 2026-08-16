@@ -20,11 +20,9 @@ from typing import Any
 
 from vonk_agent_protocol import canonical_message
 
-from .litellm import LiteLlmDeployment, LiteLlmPublisher
 from .presence import ManagementAddressPolicy, PresenceError
 
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
-_COMMIT = re.compile(r"[0-9a-f]{40,64}\Z")
 _NODE = re.compile(r"spk_[0-9a-f]{32}\Z")
 _IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,127}\Z")
 _OPERATION = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}\Z")
@@ -376,11 +374,6 @@ class AtomicRouteBundlePublisher:
         validate_routes: Callable[[bytes], bool] | None = None,
         validate_litellm: Callable[[bytes], bool] | None = None,
         await_supervisor_ack: Callable[[ActivationMarker], None] | None = None,
-        litellm_deployments: Callable[
-            [str, tuple[PublishedRoute, ...]],
-            tuple[LiteLlmDeployment, ...],
-        ]
-        | None = None,
     ) -> None:
         if root.is_symlink():
             raise RouteRuntimeError("route runtime root must not be a symlink")
@@ -401,7 +394,6 @@ class AtomicRouteBundlePublisher:
         self._validate_routes = validate_routes or self._valid_json_mapping
         self._validate_litellm = validate_litellm or self._valid_litellm
         self._await_supervisor_ack = await_supervisor_ack
-        self._litellm_deployments = litellm_deployments
 
     def _require_supervisor_ack(self, marker: ActivationMarker) -> None:
         if self._await_supervisor_ack is None:
@@ -582,7 +574,6 @@ class AtomicRouteBundlePublisher:
         exact_endpoints: set[str] = set()
         rendered_routes: dict[str, object] = {}
         models: list[dict[str, object]] = []
-        published_routes: list[PublishedRoute] = []
         for alias, raw in sorted(request.routes.items()):
             if not isinstance(alias, str) or _IDENTIFIER.fullmatch(alias) is None:
                 raise RouteRuntimeError("route alias is invalid")
@@ -700,7 +691,6 @@ class AtomicRouteBundlePublisher:
                     },
                 }
             )
-            published_routes.append(published_route)
         if set(request.endpoints) != exact_endpoints:
             raise RouteRuntimeError(
                 "endpoint evidence must exactly cover route entrypoints"
@@ -714,63 +704,6 @@ class AtomicRouteBundlePublisher:
             }
         )
         litellm_document = json.loads(self.empty_litellm())
-        if self._litellm_deployments is not None:
-            if _COMMIT.fullmatch(request.base_commit) is None:
-                raise RouteRuntimeError("Hermes repository commit is invalid")
-            try:
-                deployments = tuple(
-                    self._litellm_deployments(
-                        request.base_commit,
-                        tuple(published_routes),
-                    )
-                )
-                if (
-                    any(
-                        not isinstance(deployment, LiteLlmDeployment)
-                        for deployment in deployments
-                    )
-                    or len({item.priority for item in deployments}) != len(deployments)
-                    or len({item.workload for item in deployments}) != len(deployments)
-                ):
-                    raise ValueError("Hermes deployments are invalid")
-                for deployment in sorted(
-                    deployments,
-                    key=lambda item: item.priority,
-                ):
-                    LiteLlmPublisher._validate_hermes_deployment(deployment)
-                    models.append(
-                        {
-                            "model_name": deployment.model_name,
-                            "litellm_params": {
-                                "api_base": deployment.api_base,
-                                "api_key": "os.environ/LITELLM_UPSTREAM_KEY",
-                                "model": f"openai/{deployment.workload}",
-                                "order": deployment.priority,
-                                "rpm": deployment.requests_per_minute,
-                                "tpm": deployment.tokens_per_minute,
-                            },
-                        }
-                    )
-            except RouteRuntimeError:
-                raise
-            except Exception as error:
-                raise RouteRuntimeError(
-                    "Hermes repository policy is invalid"
-                ) from error
-            if deployments:
-                litellm_document["router_settings"].update(
-                    {
-                        "allowed_fails": 0,
-                        "num_retries": 1,
-                        "retry_policy": {
-                            "AuthenticationErrorRetries": 0,
-                            "BadRequestErrorRetries": 0,
-                            "ContentPolicyViolationErrorRetries": 0,
-                            "RateLimitErrorRetries": 1,
-                            "TimeoutErrorRetries": 1,
-                        },
-                    }
-                )
         litellm_document["model_list"] = models
         return route_content, _encoded(litellm_document)
 

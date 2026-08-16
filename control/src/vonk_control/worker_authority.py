@@ -102,7 +102,7 @@ class RepositoryAuthorityService:
         commit_eligible: Callable[[str], bool],
         reconciliation_input: ReconciliationInput,
         current_fleet_evidence: Callable[[], str],
-        deployments: DeploymentPolicy,
+        deployments: DeploymentPolicy | None = None,
         clock: Callable[[], int] = lambda: int(time.time()),
     ) -> None:
         self._current_commit = current_commit
@@ -149,7 +149,13 @@ class RepositoryAuthorityService:
         current = secrets.compare_digest(self.current(), commit)
         eligible = current and self._commit_eligible(commit) is True
         deployments: tuple[LiteLlmDeployment, ...] = ()
-        if current and eligible and fleet_evidence_current and routes:
+        if (
+            self._deployments is not None
+            and current
+            and eligible
+            and fleet_evidence_current
+            and routes
+        ):
             deployments = self._deployments(commit, routes)
             for deployment in deployments:
                 if not isinstance(deployment, LiteLlmDeployment):
@@ -651,7 +657,6 @@ class HttpWorkerAuthority:
         ):
             raise WorkerAuthorityError("repository authority was lost")
         return cached.deployments
-
 
 @dataclass(frozen=True)
 class _CachedAuthority:

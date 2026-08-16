@@ -304,7 +304,7 @@ and its trust configuration, then return to the standard signed update path.
 
 Before declaring the rollout complete, require all intended online nodes to
 report the exact target version/build/protocol and a stable active slot. Verify
-the pre-existing model profiles, LiteLLM/Caddy routes, workload availability,
+the currently published recipe runs, LiteLLM/Caddy routes, workload availability,
 and audit trail. Confirm that no standard-path command used SSH.
 
 Run the deterministic acceptance gate during development:

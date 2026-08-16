@@ -358,6 +358,27 @@ def test_public_alias_routes_to_primary_runtime_model_alias(tmp_path: Path) -> N
     assert model["litellm_params"]["model"] == "openai/internal-qwen"
 
 
+def test_hermes_alias_comes_only_from_published_v1_recipe_run(
+    tmp_path: Path,
+) -> None:
+    service, _publisher, applied, run_id = setup(
+        tmp_path,
+        run_alias="hermes-agent",
+        runtime_model_aliases=("deepseek-v4-flash-dspark",),
+    )
+
+    service.publish_run(run_id)
+
+    document = json.loads(applied[-1])
+    assert [row["model_name"] for row in document["model_list"]] == [
+        "hermes-agent"
+    ]
+    assert (
+        document["model_list"][0]["litellm_params"]["model"]
+        == "openai/deepseek-v4-flash-dspark"
+    )
+
+
 def test_artifact_interface_never_publishes_a_litellm_route(tmp_path: Path) -> None:
     service, _publisher, applied, run_id = setup(
         tmp_path, interfaces=[{"adapter": "video-job"}]

@@ -488,7 +488,7 @@
 
       <article class="flow">
         <span class="num">8</span>
-        <div><h3>Bad health withdraws the route</h3><p>If evidence becomes stale, a rank fails, or a deployment stops, the controller removes the LiteLLM route before cleanup. Caddy does not invent a fallback and LiteLLM does not rediscover the container.</p></div>
+        <div><h3>Bad health withdraws the route</h3><p>If evidence becomes stale, a rank fails, or a recipe run stops, the controller removes the LiteLLM route before cleanup. Caddy does not invent a fallback, LiteLLM does not rediscover the container, and Hermes is available only while an accepted v1 run owns the exact <code>hermes-agent</code> alias.</p></div>
         <div class="route">health lost → alias withdrawn → stop/repair/rollback</div>
       </article>
     </section>

@@ -5,7 +5,8 @@ port, SSH server, Docker socket, host network, or control-plane credential.
 Authorized users reach its dashboard and API through exact Tailscale HTTPS
 Services. Hermes sends model requests only to Caddy on the private
 `hermes-inference` network; Caddy forwards lease-authorized requests to LiteLLM
-on `litellm-edge`. Hermes uses the fixed model alias `hermes-agent`.
+on `litellm-edge`. Hermes uses the fixed model alias `hermes-agent`, which is
+created only by publishing an accepted v1 `RecipeRun` with that exact alias.
 
 ## Keep the identities separate
 
@@ -102,6 +103,12 @@ The apply path holds the host-operation lock and invokes only the signed active
 generation's fixed `hermes-setup` profile. It cannot select another Compose
 file, profile, entrypoint, mount, environment file, or service.
 
+Resolve and install the exact recipe revision in the browser Catalog and
+Library. Start it under a temporary alias, run its source, placement, health,
+and canary gates, and only then stop the previous `hermes-agent` run and start
+the accepted replacement with the exact alias `hermes-agent`. The route
+publisher rejects duplicate aliases and does not synthesize a fallback group.
+
 Configure the provider/model prompts as:
 
 ```text
@@ -123,11 +130,10 @@ closed without contacting LiteLLM. A same-config lease renewal replaces the
 deadline without restarting the healthy LiteLLM child.
 
 Do not configure Nous Portal, OpenRouter, OpenAI, Anthropic, or another remote
-model provider as a fallback. Repository policy is `local_only = true`. The
-LiteLLM group prefers an accepted, healthy, already-running dual DeepSeek
-workload, then an accepted healthy single DeepSeek workload. A merely
-`verified` workload is ineligible. If no accepted local candidate exists, the
-alias is absent and Hermes receives an unavailable response.
+model provider as a fallback. Hermes does not select models from Git, a
+repository maturity report, or a hidden compatibility alias. If the exact
+accepted `hermes-agent` run is not healthy and published, the alias is absent
+and Hermes receives an unavailable response.
 
 Setup state, sessions, memory, skills, logs, and provider configuration persist
 under `data`. Repositories and output persist under `workspaces`. Cache is

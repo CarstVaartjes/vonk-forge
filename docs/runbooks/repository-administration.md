@@ -18,8 +18,7 @@ affected targets, and a diff before submission.
 
 ```bash
 vonkctl admin fleet --json
-vonkctl admin models --json
-vonkctl admin profiles --json
+vonkctl nodes status --json
 vonkctl admin proposal --file change.json --json
 ```
 

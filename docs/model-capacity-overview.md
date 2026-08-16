@@ -7,8 +7,8 @@ Last researched: 2026-08-03
 - `DeepSeek-V4-Flash-0731` is the only required model whose preferred service must span both GPU nodes.
 - Nemotron 3 Super is also large, but NVIDIA's NVFP4 release is explicitly designed to run on one DGX Spark.
 - Every other required model is expected to run on one GPU node individually.
-- Fitting individually does not imply that arbitrary models may remain loaded together. Every Model Definition begins as exclusive and becomes shareable only in an exact N-way set that has passed co-residency acceptance for a named Cluster Profile.
-- The user-facing Cluster Profile always selects the best accepted GPU node-optimized Model Definition. Official generic definitions remain non-serving correctness references and diagnostic fallbacks.
+- Fitting individually does not imply that arbitrary models may remain loaded together. Every recipe starts as exclusive and becomes shareable only after its exact N-way placement passes co-residency acceptance.
+- The user-facing Library selects an accepted immutable recipe revision and mapping. There is no separate cluster-profile authority or hidden model fallback.
 - The active qualification pass is LLM-only. Image/3D rows remain cataloged design intent and are not part of the current serving pass.
 
 Each GPU node is marketed as having 128 GB of unified memory shared by the
@@ -21,7 +21,7 @@ final admission limit. Cluster acceptance records measured resident weights,
 activations or KV cache, runtime workspaces, operating-system headroom, and
 recovered memory after shutdown.
 
-## Official model versus GPU node-optimized Model Definition
+## Official model versus GPU node-optimized recipe target
 
 | Required model | Official release and published capacity evidence | Preferred Vonk Forge GPU node-optimized path | Placement | Initial residency | Evidence status |
 | --- | --- | --- | --- | --- | --- |
@@ -74,7 +74,7 @@ Single-GPU node or mixed profiles:
 
 The initial mixed arrangement keeps the single-GPU node DeepSeek Model Definition
 on GPU node 1 while GPU node 2 runs the exact creative set declared by the selected
-Cluster Profile. Nemotron Nano Omni is another future lightweight resident
+accepted recipe mapping. Nemotron Nano Omni is another future lightweight resident
 candidate. These are target configurations, not accepted combinations. Each
 exact N-way set must pass combined startup, peak-memory, concurrent and
 sustained inference, thermal, output-quality, memory-recovery, and clean-
@@ -90,7 +90,7 @@ not yet mean:
 - the ARM64/CUDA 13/GB10 runtime builds without patches;
 - the optimized checkpoint preserves required output quality;
 - maximum resolution or context fits at useful concurrency;
-- the Model Definition can coexist with another resident definition; or
+- the recipe can coexist with another resident recipe; or
 - every official and optimized checkpoint copy fits on local NVMe simultaneously.
 
 Disk capacity is tracked separately. Before downloading the catalog, implementation records each immutable snapshot, auxiliary model, container image, and writable cache size, then compares the complete manifest with free local NVMe on both GPU nodes. Correctness and optimized checkpoint variants are not assumed to be deduplicated.
@@ -98,6 +98,6 @@ Disk capacity is tracked separately. Before downloading the catalog, implementat
 ## Related design documents
 
 - [Dual Vonk Forge GPU node architecture](architecture-overview.md)
-- [Visual model and profile overview](model-profile-overview.md)
+- [Model catalog](operators/model-catalog.md)
 - [Dual Vonk Forge GPU node platform design](superpowers/specs/2026-08-01-dual-vonk-node-platform-design.md)
-- [Multi-runtime model profiles](superpowers/specs/2026-08-02-multi-runtime-model-profiles-design.md)
+- [Execution harness operations](operators/execution-harnesses.md)
