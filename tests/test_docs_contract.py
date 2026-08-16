@@ -760,6 +760,10 @@ def test_fresh_install_finishes_with_direct_login_and_both_nodes_visible() -> No
     assert "both Sparks" in normalized
     assert "Logout" in normalized
     assert "normal browser access does not require an SSH tunnel" in normalized
+    assert "git clone https://github.com/CarstVaartjes/vonk-forge-recipes" in normalized
+    assert "scripts/validate-recipe-library" in normalized
+    assert "scripts/import-recipe-library" in normalized
+    assert "Candidate recipes require an explicit opt-in" in normalized
 
     proof_parts = re.split(
         r"^## (?:\d+\. )?Prove the installation$",

@@ -233,6 +233,28 @@ Development marker, then use this authenticated browser for the pairing steps
 below. Tailnet membership is only the reachability gate; it does not replace
 the application login.
 
+Before selecting a model, clone the public standard recipe library beside the
+platform checkout on the administrator workstation and preview its exact
+contents:
+
+```bash
+git clone https://github.com/CarstVaartjes/vonk-forge-recipes ../vonk-forge-recipes
+cd vonk-forge
+./scripts/validate-recipe-library \
+  --library-root ../vonk-forge-recipes \
+  --platform-root . \
+  --json
+./scripts/import-recipe-library \
+  --library-root ../vonk-forge-recipes \
+  --platform-root .
+```
+
+The preview imports only accepted recipes and records the exact library commit
+when applied. Candidate recipes require an explicit opt-in; the library
+checkout is never copied to the NAS or mounted into a workload. See the
+[standard recipe library](../operators/recipe-library.md) guide for candidate
+qualification and production release-tag rules.
+
 ## 5. Install and configure each GPU node
 
 On every Ubuntu 24.04 ARM64 node:
