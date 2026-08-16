@@ -201,9 +201,12 @@ def test_hermes_secret_mode_matches_the_authoritative_nas_guide() -> None:
 
 
 def test_inference_runbooks_route_hermes_through_the_caddy_lease_edge() -> None:
+    hermes = " ".join(HERMES_RUNBOOK.read_text().split())
+
     assert (
         "OpenAI-compatible base URL: http://caddy:8081/v1" in HERMES_RUNBOOK.read_text()
     )
+    assert "Hermes sends model requests only to LiteLLM" not in hermes
 
     for path in (HERMES_RUNBOOK, CONTROL_BOOTSTRAP):
         text = path.read_text()

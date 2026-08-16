@@ -3,8 +3,9 @@
 Hermes Agent runs inside the main NAS Compose project. It has no Docker-published
 port, SSH server, Docker socket, host network, or control-plane credential.
 Authorized users reach its dashboard and API through exact Tailscale HTTPS
-Services. Hermes sends model requests only to LiteLLM on the private
-`hermes-inference` network, using the fixed model alias `hermes-agent`.
+Services. Hermes sends model requests only to Caddy on the private
+`hermes-inference` network; Caddy forwards lease-authorized requests to LiteLLM
+on `litellm-edge`. Hermes uses the fixed model alias `hermes-agent`.
 
 ## Keep the identities separate
 
