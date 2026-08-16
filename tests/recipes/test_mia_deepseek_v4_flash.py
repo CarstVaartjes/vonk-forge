@@ -379,6 +379,10 @@ def test_mia_runtime_spec_preserves_verified_host_fabric_authority() -> None:
     )
 
     assert spec["security"]["host_network"] is True
+    assert spec["security"]["mounts"] == [
+        {"source": "model", "target": "/models", "read_only": True},
+        {"source": "outputs", "target": "/outputs", "read_only": False},
+    ]
     assert spec["runtime"]["placement_environment"] == {
         "local_address": "VONK_LOCAL_ADDR",
         "master_address": "VONK_MASTER_ADDR",

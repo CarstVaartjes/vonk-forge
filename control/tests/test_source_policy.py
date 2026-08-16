@@ -128,3 +128,42 @@ def test_bundle_identity_must_match_recipe(recipe: dict[str, object]) -> None:
         enforce_build_source_policy(changed, bundle)
 
     assert caught.value.report.findings[0].code == "source.digest_mismatch"
+
+
+def test_public_build_refuses_a_url_outside_the_declared_host_allowlist(
+    recipe: dict[str, object],
+) -> None:
+    recipe["build"]["network"] = {
+        "mode": "public",
+        "hosts": ["archives.example"],
+    }
+    bundle = bundle_for(
+        recipe,
+        "FROM ghcr.io/example/x@sha256:"
+        + "a" * 64
+        + "\nRUN curl --fail https://undeclared.example/source.tar.gz -o /tmp/source\n"
+        + "USER 10001\n",
+    )
+
+    with pytest.raises(SourcePolicyError) as caught:
+        enforce_build_source_policy(recipe, bundle)
+
+    assert caught.value.report.findings[0].code == "dockerfile.network_host"
+
+
+def test_public_build_accepts_only_urls_on_the_declared_host_allowlist(
+    recipe: dict[str, object],
+) -> None:
+    recipe["build"]["network"] = {
+        "mode": "public",
+        "hosts": ["archives.example"],
+    }
+    bundle = bundle_for(
+        recipe,
+        "FROM ghcr.io/example/x@sha256:"
+        + "a" * 64
+        + "\nRUN curl --fail https://archives.example/source.tar.gz -o /tmp/source\n"
+        + "USER 10001\n",
+    )
+
+    assert enforce_build_source_policy(recipe, bundle).passed is True

@@ -712,3 +712,331 @@ and no compatibility reader.
    immediately passed alone and the same complete scope passed in two isolated
    processes (293 + 188 tests). This appears to be process/runtime instability,
    not an assertion failure, but it is retained here as environment evidence.
+
+---
+
+## Fix round 2 — 2026-08-16
+
+Status: DONE_WITH_CONCERNS
+
+This section supersedes the fix-round-1 description of the simplified
+development runner and the DS4 public build path. All seven round-2 findings
+were addressed. Physical Spark acceptance remains Task 9 and is not claimed.
+
+### What was implemented
+
+1. The bridge-networked DS4 qualifier now publishes only the endpoint-owner
+   port as the bounded mapping `<endpoint-host>:<recipe-port>:<recipe-port>`.
+   Its behavioral test inspects the actual generated `docker run` argv,
+   including the complete DS4 engine argv and the bounded publication, on both
+   initial start and restart.
+2. The retained distributed-recovery deadline is now validated before every
+   stop and start phase advance, at terminal start completion, and immediately
+   before route republication. Expiry creates no next-phase work, fails the job,
+   keeps the route withdrawn, queues bounded cleanup when ranks may have
+   started, and moves the run to a non-revivable failed/stopping state. Route
+   publication marks a recovery as published only after the publication
+   succeeds, so ordinary later route renewal does not incorrectly reuse an old
+   deadline.
+3. The DS4 source archive is now staged in the canonical source bundle and
+   verified by exact SHA-256 before extraction. Qualification always executes
+   Docker builds with `--network none --pull false`; the agent's rootless Podman
+   builder also uses `--pull=never`. Dockerfile HTTPS URLs are checked against
+   the exact declared host allowlist, and undeclared URLs fail source policy.
+   No build maps `public` to unrestricted Docker networking.
+4. Runtime compilation now projects the recipe's exact mount list. Python and
+   Rust both require/read-only-map `model -> /models` and create/write-map only
+   `outputs -> /outputs`; the invented writable `/state` mount and
+   `VONK_STATE_ROOT` environment variable were removed. Agent metadata remains
+   outside the workload-writable output tree.
+5. The complete synthetic, `model-single`, and `model-multinode` public-API
+   development lifecycle was restored, including checkpoint/restart/failure
+   phases, secret-safe evidence, and `.outputs.run_id`. Native DS4/Mia phases
+   recursively resolve current v1 entities instead of deleted prototype
+   catalogs. The synthetic fixture resolves the existing canonical `vllm`
+   built-in and a fixture-only digest-pinned Python distribution whose shim
+   accepts the exact compiled vLLM argv. Production remains exactly the required
+   eight built-in harnesses; an explicit literal-set regression enforces this.
+6. `qualify-development-model` now traverses every output parent with
+   descriptor-relative `O_DIRECTORY|O_NOFOLLOW`, checks the final path without
+   following it, creates the temporary file with `O_EXCL|O_NOFOLLOW`, and uses
+   descriptor-relative atomic replacement. Existing output symlinks and
+   symlinked parents are refused without modifying their targets.
+7. Deleted
+   `docs/superpowers/plans/2026-08-15-task-8-review-fix-round-1.md`; the SDD
+   review/report ledger is the sole fix-round record.
+
+The controller follow-up caught an initially proposed ninth development HTTP
+built-in. A literal eight-harness test was added RED, the unauthorized compiler,
+schema enum, and entity were removed, and the synthetic fixture was rebound to
+the existing vLLM contract before final verification.
+
+### TDD RED evidence
+
+The primary round-2 test batch was written and run before implementation:
+
+```text
+uv run --project control --frozen python -m pytest -q \
+  scripts/tests/test_qualify_recipe.py::test_bridge_qualification_publishes_the_bounded_endpoint_and_builds_offline \
+  control/tests/test_source_policy.py::test_public_build_refuses_a_url_outside_the_declared_host_allowlist \
+  control/tests/test_recipe_runtime_specs.py::test_runtime_spec_is_compiled_from_the_trusted_builtin_projection \
+  tests/recipes/test_deepseek_v4_flash_ds4.py::test_ds4_runtime_spec_preserves_exact_declared_mount_authority \
+  tests/recipes/test_mia_deepseek_v4_flash.py::test_mia_runtime_spec_preserves_verified_host_fabric_authority \
+  scripts/tests/test_native_development_entrypoints.py::test_development_model_qualifier_refuses_a_symlink_output_before_resolution \
+  scripts/tests/test_native_development_entrypoints.py::test_development_model_qualifier_refuses_a_symlinked_output_parent \
+  control/tests/test_recipe_operations.py::test_distributed_recovery_deadline_is_enforced_before_phase_advance \
+  control/tests/test_recipe_operations.py::test_distributed_recovery_deadline_is_rechecked_before_route_publication \
+  scripts/tests/test_run_development_slices.py::test_runner_help_exposes_restart_and_failure_checkpoints \
+  scripts/tests/test_run_development_slices.py::test_runner_completes_exact_public_lifecycle_without_secret_leaks
+
+11 failed in 3.15s
+```
+
+The failures demonstrated the reviewed defects: Docker `default` networking,
+no host publication, ignored source host authority, `/state` replacing
+`/outputs`, symlinks being followed, expired recovery advancing/publishing, and
+the missing restored lifecycle CLI/output.
+
+The strict Rust launch boundary was independently RED:
+
+```text
+cargo test -p vonk-agent --test workloads \
+  container_arguments_are_typed_and_hardened -- --exact
+
+FAILED: Workload(Invalid("security"))
+```
+
+The restored synthetic fixture initially used an unregistered custom harness;
+the production compiler test captured that gap:
+
+```text
+uv run --project control --frozen python -m pytest -q \
+  control/tests/test_development_recipe_fixture.py::test_synthetic_development_recipe_compiles_through_the_native_runtime_path
+
+1 failed: RecipeRuntimeSpecError: unknown execution harness
+```
+
+The controller's exact built-in-set regression was also captured RED before
+removing the proposed ninth harness:
+
+```text
+uv run --project control --frozen python -m pytest -q \
+  control/tests/test_builtin_harnesses.py::test_production_builtin_harness_set_remains_exactly_the_required_eight
+
+1 failed: Left contains one more item: 'development-http'
+```
+
+One full restored-runner iteration found its hard-coded pre-change fixture
+digest, as expected after changing the native fixture identities:
+
+```text
+58 passed, 1 failed in 36.01s
+```
+
+The expected digest was updated to the independently recomputed canonical
+recipe digest, after which the full suite passed.
+
+### GREEN evidence
+
+Final focused round-2 behavior, including the eight-built-in guard:
+
+```text
+uv run --project control --frozen python -m pytest -q <15 exact round-2 tests>
+...............                                                          [100%]
+15 passed in 3.39s
+```
+
+Complete restored development lifecycle suite:
+
+```text
+uv run --project control --frozen python -m pytest -q \
+  scripts/tests/test_run_development_slices.py
+
+59 passed in 35.84s
+```
+
+Complete Task 8 scoped Python suite, split into fresh processes to retain the
+round-1 SQLAlchemy-extension stability workaround:
+
+```text
+# Catalog/schema/compiler/conformance/topology/mapping/source-policy group
+317 passed in 3.84s
+
+# Operations/routes/builds/agent API/recipes/qualifiers/docs/runbooks group
+358 passed in 57.71s
+```
+
+Retained development NAS/runbook tests were also run directly:
+
+```text
+uv run --project control --frozen python -m pytest -q \
+  tests/runbooks/test_development_nas_installation.py \
+  tests/test_docs_contract.py
+
+53 passed in 0.04s
+```
+
+Full Rust agent suite after the mount correction:
+
+```text
+cargo test -p vonk-agent --all-targets
+
+129 passed; 0 failed
+```
+
+Additional final verification:
+
+```text
+uvx --from ruff==0.16.1 ruff check <all changed Python files>
+All checks passed!
+
+cargo fmt --all --check
+git diff --check
+jq empty <changed strict JSON/schema documents>
+
+All exited 0.
+```
+
+### Container qualification evidence and environment limitation
+
+The executable qualifier path is behaviorally covered with a bounded fake
+ARM64 engine and HTTP endpoint. The final focused test verifies real generated
+Docker build/run argv, offline build networking, bounded bridge publication,
+DS4 engine flags, health/invocation, restart, and cleanup. The distributed
+fixture retains collective health, endpoint-owner readiness, invocation,
+rank-loss withdrawal, worker-first recovery, recovered invocation, and cleanup.
+
+Both real local qualifications performed strict structural resolution, then
+correctly stopped at the physical architecture gate on this x86_64 host:
+
+```text
+scripts/qualify-recipe --recipe config/recipes/deepseek-v4-flash-0731-ds4-single.json --level container
+{"detail":"container qualification requires a native linux/arm64 host","detected_architecture":"x86_64","passed":false,"required_architecture":"arm64","status":"environment-limited"}
+
+scripts/qualify-recipe --recipe config/recipes/deepseek-v4-flash-0731-mia-dual.json --level container
+{"detail":"container qualification requires a native linux/arm64 host","detected_architecture":"x86_64","passed":false,"required_architecture":"arm64","status":"environment-limited"}
+
+ds4_exit=3 mia_exit=3
+```
+
+No physical ARM64 image build, GPU inference, two-Spark collective, RoCE,
+performance, or acceptance result is claimed. Those remain Task 9.
+
+### Deterministic source evidence
+
+DS4 and Mia source bundles were each generated twice into independent temporary
+directories. Both manifest pairs passed `diff` and both archive pairs passed
+`cmp` byte-for-byte:
+
+```text
+DS4: aff78f2e9bc43bd426c951f342ab3c162c748cab245edc69512389359aded750
+      8,386,560 archive bytes; 2 files; 8,381,301 source bytes
+Mia: 1db8274206e65ccf2f58b5e744c5b4e7f96c14f916bce2b4a0429630eda6256f
+      235,520 archive bytes; 24 files; 208,498 source bytes
+```
+
+The staged DS4 archive is 8,379,876 bytes with SHA-256
+`3ab2c4485bee87f36166b12ab59abbc293ad9fdfadb1c2920d1cbc7f617da165`,
+matching the accepted canonical source identity.
+
+### Exact identities preserved
+
+All accepted external identities remain unchanged:
+
+- Mia source `f752cd04ab30f2cf42077dd8811a5e1e682d63e7`.
+- DS4 source `84cc882352757baf628a1776badf7cc54d584e28`.
+- Anemll source `47503f8e38dadd4dededca798150db2619594fce`.
+- vLLM source `752a3a504485790a2e8491cacbb35c137339ad34`.
+- Antirez model revision `e7f04037032990db0346398d249baf9fb9df1ccc`;
+  target 86,720,111,488 bytes / SHA-256
+  `ca22ae2f838e14077c22bc1c1417b71b45b5e5a3687bd96c2ac6e17fdb6261c0`;
+  support 5,989,114,272 bytes / SHA-256
+  `7e319924541db3f7a163ed7e11d7532a70d48228ab59d36cb81e1d4511885360`.
+- Official model revision `62af8fffb2f7030cac4de2f0169f5b8d1101b646`;
+  public/ungated, 74 files totaling 166,898,666,055 bytes.
+- Anemll linux/arm64 image
+  `ghcr.io/anemll/dspark-vllm-gx10@sha256:a83948492cf13df455170fb42885f5ef4db54fefe0feff0f841ecbff464ac9d8`,
+  manifest size 9,530.
+- DS4 CUDA build/runtime digests
+  `5c36750138dc1447a17dafbb397674f167d3b44ce18d9160d769df114577b35d`
+  and `36050649ad1acc5d3de2c26620191c25850fb12a5771b6c22996033003d952e4`.
+
+Round-2 canonical internal identities changed only where canonical DS4 build
+content changed:
+
+- DS4 runtime distribution:
+  `337c9d850a70b6a8907e588d4fee1d447f770bc004cb15bbc45283d017dca389`.
+- DS4 recipe:
+  `373169b0ef24f8d21b0aa40e918e13554bb4d788b4bd426df9f14b64b47d184a`.
+- Mia recipe remains
+  `fb7e6314de7649871f080d9dc0c63dbb1ea827eaf5b47d24291c34f26b49ec35`.
+
+The test-only synthetic recipe has canonical digest
+`90396dc5d736ad8083ddfa23f90b2ecef5c05ea1c3129da5375455ddd684413a`,
+source-bundle digest
+`61086ce766236b70045c7c45dbc7615a24e4cef96e0cad424de808d5f0861f94`,
+and fixture-only runtime-distribution digest
+`40a2e2be4069930f3e903afff0fb1efcb23fae75aedf4a57380cedbb3b96c68b`.
+It references the unchanged canonical vLLM harness digest
+`c0d297318f223378fe573964291bc90fc950242e0d16d1d301c7d3cb4251487d`.
+
+### Files changed in fix round 2
+
+- Build/network/runtime:
+  - `adapters/deepseek/ds4/Dockerfile`
+  - `adapters/deepseek/ds4/vendor/ds4-84cc882352757baf628a1776badf7cc54d584e28.tar.gz`
+  - `config/recipes/deepseek-v4-flash-0731-ds4-single.json`
+  - `config/runtime-distributions/ds4-spark.json`
+  - `control/src/vonk_control/source_policy.py`
+  - `control/src/vonk_control/recipe_runtime_specs.py`
+  - `rust/crates/vonk-agent/src/{oci,recipe_builder,workloads}.rs`
+- Recovery/publication:
+  - `control/src/vonk_control/distributed_recovery.py`
+  - `control/src/vonk_control/recipe_operations.py`
+  - `control/src/vonk_control/recipe_routes.py`
+- Qualification/development:
+  - `scripts/qualify-recipe`
+  - `scripts/qualify-development-model`
+  - `scripts/run-development-slices`
+  - `control/tests/fixtures/recipes/dev-http-smoke/{recipe.json,context/**,entities/**}`
+  - `docs/runbooks/{development-agent-workloads,fresh-development-install,mia-deepseek-v4-flash}.md`
+  - deleted `docs/superpowers/plans/2026-08-15-task-8-review-fix-round-1.md`
+- Tests:
+  - changed controller source-policy/runtime-spec/operation/built-in/development
+    tests, DS4/Mia recipe tests, Rust builder/workload tests, qualifier/native
+    entrypoint/docs tests
+  - restored `scripts/tests/test_run_development_slices.py`
+
+### Self-review findings
+
+- Exact identity/immutability: an independent final scan found every accepted
+  source commit, model revision, artifact size/hash, and OCI digest unchanged.
+  The accepted Mia/model authoritative documents are byte-unchanged from fix
+  round 1. DS4's new internal references were recomputed and strict-resolved.
+- Built-in scope: production remains the literal required eight harnesses;
+  there is no development compiler/schema enum/global entity. The synthetic
+  test fixture uses canonical vLLM and does not widen production registration.
+- Security/offline: DS4's source is local, hash-verified, and built with no
+  network; Podman refuses pulls; Docker qualification has no build network;
+  undeclared Dockerfile URL hosts fail. No startup patching/fetch was added.
+- Mount authority: controller and agent agree on exactly one read-only model
+  mount and one isolated writable output mount. No writable state mount or
+  agent metadata enters the workload-authorized tree.
+- Recovery: deadline checks cover both stop/start phase transitions, final
+  restart completion, and the last route-publication boundary. Expired routes
+  stay withdrawn and failed, so later health observations cannot republish.
+- Development behavior: native entity dependency order, source/build/mapping/
+  install/run/route/inference/recovery/stop/uninstall evidence, resume
+  checkpoints, and secret rejection are executable tests rather than document
+  restatements. `.outputs.run_id` is retained.
+- Symlink safety: output traversal and replacement remain descriptor-relative
+  and do not resolve/follow attacker-controlled symlinks.
+- Review tooling: the requesting-code-review workflow was applied. No subagent
+  dispatch tool was available, so the seven-item review, immutable identity
+  scan, and complete final diff were audited locally.
+
+### Concerns
+
+1. Physical linux/arm64, GPU, two-DGX-Spark, RoCE, and performance acceptance
+   cannot run on this x86_64 host. No physical acceptance is claimed; Task 9
+   retains it.

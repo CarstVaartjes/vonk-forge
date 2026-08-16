@@ -425,22 +425,26 @@ starting a workload. Retain only bounded API output in the evidence directory.
 
 ## Synthetic lifecycle
 
-The deleted prototype acceptance catalog and its `synthetic` phase are no
-longer supported. Structural qualification now enters through the same native
-v1 recipe contract as container qualification. This command is architecture
-independent and does not contact a registry or model repository:
+Run the deterministic native-v1 synthetic fixture through every public API
+stage. Its entity graph lives with the fixture; it does not read a prototype
+catalog:
 
 ```bash
 cd '<REPOSITORY_CHECKOUT>'
-scripts/qualify-development-model \
-  --recipe config/recipes/deepseek-v4-flash-0731-ds4-single.json \
-  --level structural \
-  --output '<EVIDENCE_DIRECTORY>/ds4-structural.json'
+scripts/run-development-slices \
+  --api-base 'http://127.0.0.1:<LOCAL_API_PORT>' \
+  --inference-base 'http://127.0.0.1:<LOCAL_INFERENCE_PORT>' \
+  --admin-token-file '<EVIDENCE_DIRECTORY>/admin-token' \
+  --inference-token-file '<LOCAL_SECRETS_DIR>/litellm-master-key' \
+  --phase synthetic \
+  --builder-node '<SPARK_1_NODE_ID>' \
+  --target-node '<SPARK_1_NODE_ID>' \
+  --evidence-file '<EVIDENCE_DIRECTORY>/synthetic.json'
 ```
 
-Structural evidence proves strict catalog references, immutable input
-identities, compiler compatibility, and adapter selection. It is not container
-or physical acceptance.
+The final states include source verification, image build/distribution,
+install, run, route publication, exact deterministic inference, stop, route
+withdrawal, and uninstall.
 
 Recipe image distribution uses bounded 8 MiB range requests from the
 controller's content-addressed store. The controller verifies the complete
@@ -489,16 +493,22 @@ the full container path:
 
 ```bash
 scripts/run-development-slices \
+  --api-base 'http://127.0.0.1:<LOCAL_API_PORT>' \
+  --inference-base 'http://127.0.0.1:<LOCAL_INFERENCE_PORT>' \
+  --admin-token-file '<EVIDENCE_DIRECTORY>/admin-token' \
+  --inference-token-file '<LOCAL_SECRETS_DIR>/litellm-master-key' \
   --phase model-single \
-  --level container \
-  --engine docker \
-  --artifact-root '<MODEL_ARTIFACT_ROOT>' \
+  --qualification-file '<EVIDENCE_DIRECTORY>/ds4-structural.json' \
+  --builder-node '<SPARK_1_NODE_ID>' \
+  --target-node '<SPARK_1_NODE_ID>' \
   --evidence-file '<EVIDENCE_DIRECTORY>/model-single.json' \
-  --timeout-seconds 1800
+  --timeout-seconds 1800 \
+  --stop-after inference-ok
 ```
 
-The canonical qualification evidence records build, start, health, invocation,
-bounded stop, and restart. The 86,720,111,488-byte target and
+Restart the NAS stack and agent, wait for fresh inventory, then resume with
+the identical command and evidence file without `--stop-after`. The
+86,720,111,488-byte target and
 5,989,114,272-byte support model remain separate immutable cache objects. An
 exact verified cache hit must not download either model again.
 
@@ -564,12 +574,19 @@ Run the complete two-rank path through the sole entrypoint:
 
 ```bash
 scripts/run-development-slices \
+  --api-base 'http://127.0.0.1:<LOCAL_API_PORT>' \
+  --inference-base 'http://127.0.0.1:<LOCAL_INFERENCE_PORT>' \
+  --admin-token-file '<EVIDENCE_DIRECTORY>/admin-token' \
+  --inference-token-file '<LOCAL_SECRETS_DIR>/litellm-master-key' \
   --phase model-multinode \
-  --level container \
-  --engine docker \
-  --artifact-root '<MODEL_ARTIFACT_ROOT>' \
+  --qualification-file '<EVIDENCE_DIRECTORY>/mia-structural.json' \
+  --builder-node '<SPARK_1_NODE_ID>' \
+  --target-node '<SPARK_1_NODE_ID>' \
+  --target-node '<SPARK_2_NODE_ID>' \
+  --failure-node '<SPARK_2_NODE_ID>' \
   --evidence-file '<EVIDENCE_DIRECTORY>/model-multinode.json' \
-  --timeout-seconds 1800
+  --timeout-seconds 3600 \
+  --stop-after inference-ok
 ```
 
 Read the non-secret run ID from the acceptance evidence and stop only the

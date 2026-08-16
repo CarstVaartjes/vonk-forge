@@ -9,7 +9,7 @@ import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
@@ -2341,6 +2341,190 @@ def test_distributed_rank_loss_queues_bounded_worker_first_recovery(
                 .order_by(RunNode.rank)
             )
         ] == ["running", "running"]
+
+
+def _queued_distributed_recovery_stop(tmp_path: Path):
+    sessions, service, queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2, distributed_lifecycle=True
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="i" * 36
+    )
+    started = started_recipe(
+        sessions,
+        service,
+        installation.owner_id,
+        nodes,
+        request_id="r" * 36,
+        alias="deadline-gang",
+    )
+    publisher = ConcurrentPublisher()
+    service, routes = bind_route_publications(sessions, service, publisher)
+    routes.publish_run(started.owner_id)
+    record_recipe_run_observations(sessions, nodes[1], NOW, ())
+    recovery = DistributedRecoveryCoordinator(
+        sessions, routes=routes, agent_jobs=queue, clock=lambda: NOW
+    )
+    assert recovery.tick() is True
+    with sessions() as session:
+        stop_job = session.scalar(
+            select(Job).where(
+                Job.kind == "recipe.stop",
+                Job.payload["owner_id"].as_string() == started.owner_id,
+            )
+        )
+    return sessions, service, routes, publisher, started, stop_job, nodes
+
+
+def _queued_distributed_recovery_restart(tmp_path: Path):
+    (
+        sessions,
+        service,
+        routes,
+        publisher,
+        started,
+        stop_job,
+        nodes,
+    ) = _queued_distributed_recovery_stop(tmp_path)
+    service.record_node_result(stop_job.id, nodes[0], succeeded=True, evidence={})
+    service.record_node_result(stop_job.id, nodes[1], succeeded=True, evidence={})
+    with sessions() as session:
+        restart = session.scalar(
+            select(Job).where(
+                Job.kind == "recipe.start",
+                Job.payload["owner_id"].as_string() == started.owner_id,
+                Job.id != started.id,
+            )
+        )
+        worker_start = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == restart.id,
+                AgentOperation.node_id == nodes[1],
+            )
+        )
+    return (
+        sessions,
+        service,
+        routes,
+        publisher,
+        started,
+        restart,
+        worker_start,
+        nodes,
+    )
+
+
+def test_distributed_recovery_deadline_is_enforced_during_stop_phase_advance(
+    tmp_path: Path,
+) -> None:
+    (
+        sessions,
+        service,
+        _routes,
+        _publisher,
+        started,
+        stop_job,
+        nodes,
+    ) = _queued_distributed_recovery_stop(tmp_path)
+    service._clock = lambda: NOW + timedelta(seconds=31)
+
+    service.record_node_result(stop_job.id, nodes[0], succeeded=True, evidence={})
+
+    with sessions() as session:
+        worker_stop = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == stop_job.id,
+                AgentOperation.node_id == nodes[1],
+            )
+        )
+        run = session.get(RecipeRun, started.owner_id)
+        stored_stop = session.get(Job, stop_job.id)
+        assert worker_stop is None
+        assert stored_stop.state == "failed"
+        assert run.state == "failed"
+        assert run.route_state == "withdrawn"
+
+
+def test_distributed_recovery_deadline_is_enforced_before_phase_advance(
+    tmp_path: Path,
+) -> None:
+    (
+        sessions,
+        service,
+        _routes,
+        _publisher,
+        started,
+        restart,
+        worker_start,
+        nodes,
+    ) = _queued_distributed_recovery_restart(tmp_path)
+    service._clock = lambda: NOW + timedelta(seconds=31)
+
+    service.record_node_result(
+        restart.id,
+        nodes[1],
+        succeeded=True,
+        evidence=start_evidence(worker_start.payload),
+    )
+
+    with sessions() as session:
+        owner_start = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == restart.id,
+                AgentOperation.node_id == nodes[0],
+            )
+        )
+        run = session.get(RecipeRun, started.owner_id)
+        stored_restart = session.get(Job, restart.id)
+        assert owner_start is None
+        assert stored_restart.state == "failed"
+        assert run.state == "stopping"
+        assert run.route_state == "withdrawn"
+
+
+def test_distributed_recovery_deadline_is_rechecked_before_route_publication(
+    tmp_path: Path,
+) -> None:
+    (
+        sessions,
+        service,
+        routes,
+        publisher,
+        started,
+        restart,
+        worker_start,
+        nodes,
+    ) = _queued_distributed_recovery_restart(tmp_path)
+    service.record_node_result(
+        restart.id,
+        nodes[1],
+        succeeded=True,
+        evidence=start_evidence(worker_start.payload),
+    )
+    with sessions() as session:
+        owner_start = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == restart.id,
+                AgentOperation.node_id == nodes[0],
+            )
+        )
+    service.record_node_result(
+        restart.id,
+        nodes[0],
+        succeeded=True,
+        evidence=start_evidence(owner_start.payload),
+    )
+    routes._clock = lambda: NOW + timedelta(seconds=31)
+    publications_before = list(publisher.aliases)
+
+    with pytest.raises(RuntimeError, match="deadline"):
+        routes.publish_run(started.owner_id)
+
+    assert publisher.aliases == publications_before
+    with sessions() as session:
+        run = session.get(RecipeRun, started.owner_id)
+        assert run.state == "failed"
+        assert run.route_state == "withdrawn"
 
 
 def test_distributed_rank_loss_withdraws_route_when_recovery_authority_is_missing(

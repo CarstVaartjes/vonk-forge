@@ -58,3 +58,58 @@ def test_development_model_qualifier_executes_native_structural_path(
     assert evidence["passed"] is True
     assert evidence["status"] == "passed"
     assert evidence["recipe"] == "deepseek-v4-flash-0731-ds4-single.json"
+
+
+def test_development_model_qualifier_refuses_a_symlink_output_before_resolution(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "target.json"
+    target.write_text("do-not-replace\n", encoding="utf-8")
+    output = tmp_path / "qualification.json"
+    output.symlink_to(target)
+
+    result = subprocess.run(
+        [
+            str(QUALIFIER),
+            "--level",
+            "structural",
+            "--output",
+            str(output),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+    )
+
+    assert result.returncode == 1
+    assert target.read_text(encoding="utf-8") == "do-not-replace\n"
+    assert output.is_symlink()
+
+
+def test_development_model_qualifier_refuses_a_symlinked_output_parent(
+    tmp_path: Path,
+) -> None:
+    real_parent = tmp_path / "real"
+    real_parent.mkdir()
+    linked_parent = tmp_path / "linked"
+    linked_parent.symlink_to(real_parent, target_is_directory=True)
+
+    result = subprocess.run(
+        [
+            str(QUALIFIER),
+            "--level",
+            "structural",
+            "--output",
+            str(linked_parent / "qualification.json"),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+    )
+
+    assert result.returncode == 1
+    assert not (real_parent / "qualification.json").exists()

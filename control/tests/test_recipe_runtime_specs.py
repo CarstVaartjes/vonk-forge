@@ -149,8 +149,8 @@ def test_runtime_spec_is_compiled_from_the_trusted_builtin_projection() -> None:
                 "read_only": True,
             },
             {
-                "source": "state",
-                "target": "/state",
+                "source": "outputs",
+                "target": "/outputs",
                 "read_only": False,
             },
         ],

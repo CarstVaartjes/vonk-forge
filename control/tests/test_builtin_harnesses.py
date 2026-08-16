@@ -21,6 +21,16 @@ from vonk_control.models import Base
 ROOT = Path(__file__).resolve().parents[2]
 HARNESS_ROOT = ROOT / "config/execution-harnesses"
 BASE_RECIPE = ROOT / "control/tests/fixtures/global/recipe-v1-minimal.json"
+REQUIRED_BUILTIN_HARNESS_SLUGS = (
+    "vllm",
+    "sglang",
+    "tensorrt-llm",
+    "llama-cpp",
+    "ds4",
+    "diffusers",
+    "comfyui",
+    "pytorch-pipeline",
+)
 
 EXPECTED_COMMANDS = {
     "vllm": (
@@ -816,6 +826,10 @@ def test_job_mime_validator_evidence_must_match_exactly(slug: str) -> None:
 
     with pytest.raises(HarnessCompileError, match="MIME validator"):
         _compile(slug, recipe=recipe)
+
+
+def test_production_builtin_harness_set_remains_exactly_the_required_eight() -> None:
+    assert BUILTIN_HARNESS_SLUGS == REQUIRED_BUILTIN_HARNESS_SLUGS
 
 
 def test_catalog_contains_exactly_eight_canonical_builtin_harness_documents() -> None:

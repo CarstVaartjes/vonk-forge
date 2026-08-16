@@ -162,8 +162,8 @@ fn spec() -> WorkloadSpec {
                     read_only: true,
                 },
                 MountSpec {
-                    source: "state".to_owned(),
-                    target: "/state".to_owned(),
+                    source: "outputs".to_owned(),
+                    target: "/outputs".to_owned(),
                     read_only: false,
                 },
             ],
@@ -376,7 +376,6 @@ fn container_arguments_are_typed_and_hardened() {
         "VONK_MASTER_PORT=29500",
         "VONK_RUNTIME_SPEC=/run/vonk/runtime.json",
         "VONK_MODEL_ROOT=/models",
-        "VONK_STATE_ROOT=/state",
         "VONK_LISTEN_HOST=0.0.0.0",
         "VONK_LISTEN_PORT=8000",
     ] {
@@ -404,6 +403,14 @@ fn container_arguments_are_typed_and_hardened() {
         arguments
             .iter()
             .any(|value| value.ends_with("dst=/models,readonly"))
+    );
+    assert!(arguments.iter().any(|value| {
+        value.ends_with("/outputs,dst=/outputs") && !value.ends_with(",readonly")
+    }));
+    assert!(
+        !arguments
+            .iter()
+            .any(|value| { value == "VONK_STATE_ROOT=/state" || value.contains("dst=/state") })
     );
     assert!(
         arguments
@@ -1183,8 +1190,16 @@ fn start_keeps_agent_metadata_outside_workload_writable_state() {
             .join("lifecycle.json")
             .is_file()
     );
+    let writable_run_root = directory.path().join("runs").join(run_id);
+    assert_eq!(
+        fs::read_dir(&writable_run_root)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect::<Vec<_>>(),
+        vec!["outputs"]
+    );
     assert!(
-        fs::read_dir(directory.path().join("runs").join(run_id))
+        fs::read_dir(writable_run_root.join("outputs"))
             .unwrap()
             .next()
             .is_none()

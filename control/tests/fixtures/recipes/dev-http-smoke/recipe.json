@@ -17,20 +17,20 @@
     "kind": "model-version",
     "publisher": "vonk",
     "slug": "dev-http-smoke-version",
-    "content_sha256": "70168975723e23edf164266d602934316e7e2aef78aab3a666e92cc384c2524a"
+    "content_sha256": "d867ee65812ec1e0f22d40d862f44f24c9c9d204c08fa45d7eeacbb0a6d9c6a0"
   },
   "execution": {
     "harness": {
       "kind": "execution-harness",
-      "publisher": "vonk",
-      "slug": "dev-http-smoke",
-      "content_sha256": "6d927a3041c72d71ecb6a1591d15dac41f24f7dbef25c3ae4b98b99df09dd4a2"
+      "publisher": "vonk-forge",
+      "slug": "vllm",
+      "content_sha256": "c0d297318f223378fe573964291bc90fc950242e0d16d1d301c7d3cb4251487d"
     },
     "patch_bundle": null
   },
   "build": {
     "context": {
-      "sha256": "3bcb427bb551833bfece49d1724935d7ddf5e93bd802aa74a3e806023da39caf",
+      "sha256": "61086ce766236b70045c7c45dbc7615a24e4cef96e0cad424de808d5f0861f94",
       "expected_bytes": 10240,
       "media_type": "application/vnd.vonk-forge.source-bundle.v1+tar"
     },
@@ -70,31 +70,43 @@
     "distribution": {
       "kind": "runtime-distribution",
       "publisher": "vonk",
-      "slug": "python-linux-arm64",
-      "content_sha256": "eb74e141c3e164503d01354448f255662ac50e8b5ac726e92b3382120e95cb15"
+      "slug": "development-vllm-shim-arm64",
+      "content_sha256": "40a2e2be4069930f3e903afff0fb1efcb23fae75aedf4a57380cedbb3b96c68b"
     },
     "entrypoint": [
-      "python",
-      "/app/server.py"
+      "/opt/vonk/bin/vllm",
+      "serve",
+      "/models"
     ],
-    "arguments": [],
+    "arguments": [
+      {
+        "name": "max-model-len",
+        "value": 1
+      },
+      {
+        "name": "tensor-parallel-size",
+        "value": 1
+      }
+    ],
     "environment": [],
     "security": {
-      "devices": [],
+      "devices": [
+        "nvidia.com/gpu=all"
+      ],
       "capabilities": [],
       "host_network": false,
       "privileged": false,
       "user": "10001:10001",
       "mounts": [
         {
-          "source": "state",
-          "target": "/state",
-          "read_only": false
-        },
-        {
           "source": "model",
           "target": "/models",
           "read_only": true
+        },
+        {
+          "source": "outputs",
+          "target": "/outputs",
+          "read_only": false
         }
       ]
     },

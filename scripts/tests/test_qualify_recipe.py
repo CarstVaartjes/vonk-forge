@@ -260,6 +260,88 @@ def test_container_qualification_executes_generic_distributed_lifecycle(
     assert json.loads(state.read_text(encoding="utf-8")) == {"running": []}
 
 
+def test_bridge_qualification_publishes_the_bounded_endpoint_and_builds_offline(
+    tmp_path: Path,
+) -> None:
+    engine, state, log = _behavioral_engine(tmp_path)
+    artifacts = tmp_path / "models"
+    artifacts.mkdir()
+    recipe = json.loads(DS4.read_text(encoding="utf-8"))
+    recipe["identity"]["slug"] = "user-authored-ds4-single"
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _QualificationHandler)
+    _QualificationHandler.state_path = state
+    _QualificationHandler.required_ranks = 1
+    recipe["interfaces"][0]["port"] = server.server_port
+    recipe_path = tmp_path / "user-ds4-recipe.json"
+    recipe_path.write_text(json.dumps(recipe), encoding="utf-8")
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        result = subprocess.run(
+            [
+                str(SCRIPT),
+                "--recipe",
+                str(recipe_path),
+                "--level",
+                "container",
+                "--engine",
+                str(engine),
+                "--endpoint-host",
+                "127.0.0.1",
+                "--artifact-root",
+                str(artifacts),
+                "--timeout-seconds",
+                "5",
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+            env={
+                **os.environ,
+                "VONK_FAKE_ENGINE_STATE": str(state),
+                "VONK_FAKE_ENGINE_LOG": str(log),
+                "PYTHONDONTWRITEBYTECODE": "1",
+            },
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    calls = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+    build = next(call for call in calls if call[:1] == ["build"])
+    assert build[build.index("--network") + 1] == "none"
+    assert build[build.index("--pull") + 1] == "false"
+    starts = [call for call in calls if call[:1] == ["run"]]
+    assert len(starts) == 2
+    assert all(
+        call[call.index("--publish") + 1]
+        == f"127.0.0.1:{server.server_port}:{server.server_port}"
+        for call in starts
+    )
+    expected_engine_argv = [
+        "/opt/vonk/bin/ds4-serve",
+        "--model",
+        "/models/DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf",
+        "--mtp",
+        "/models/DeepSeek-V4-Flash-DSpark-support-0731.gguf",
+        "--ctx",
+        "131072",
+        "--batched-session",
+        "2",
+        "--dspark",
+        "--cuda",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        str(server.server_port),
+    ]
+    assert all(call[-len(expected_engine_argv) :] == expected_engine_argv for call in starts)
+
+
 def test_container_qualification_is_fail_closed_on_failed_invocation(
     tmp_path: Path,
 ) -> None:

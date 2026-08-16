@@ -78,19 +78,28 @@ On a supported DGX Spark host, execute the complete path:
 
 ```bash
 scripts/run-development-slices \
+  --api-base 'http://127.0.0.1:<LOCAL_API_PORT>' \
+  --inference-base 'http://127.0.0.1:<LOCAL_INFERENCE_PORT>' \
+  --admin-token-file '<EVIDENCE_DIRECTORY>/admin-token' \
+  --inference-token-file '<LOCAL_SECRETS_DIR>/litellm-master-key' \
   --phase model-multinode \
-  --level container \
-  --engine docker \
-  --artifact-root '<MODEL_ARTIFACT_ROOT>' \
+  --qualification-file '<EVIDENCE_DIRECTORY>/mia-structural.json' \
+  --builder-node '<SPARK_1_NODE_ID>' \
+  --target-node '<SPARK_1_NODE_ID>' \
+  --target-node '<SPARK_2_NODE_ID>' \
+  --failure-node '<SPARK_2_NODE_ID>' \
   --evidence-file '<EVIDENCE_DIRECTORY>/mia-container.json' \
-  --timeout-seconds 3600
+  --timeout-seconds 3600 \
+  --stop-after inference-ok
 ```
 
 The qualifier resolves the digest-pinned base image, verifies the expected
 linux/arm64 manifest, builds offline from the retained context, starts worker
 then entrypoint, checks collective and endpoint-owner readiness, invokes the
 OpenAI-compatible endpoint, performs bounded stop/restart, and cleans up. It
-writes canonical evidence and fails closed on every incomplete phase.
+writes canonical evidence and fails closed on every incomplete phase. Resume
+with the identical command and evidence file after each documented failure or
+restart action, advancing only when the corresponding checkpoint is proven.
 
 ## Failure, recovery, and cleanup
 

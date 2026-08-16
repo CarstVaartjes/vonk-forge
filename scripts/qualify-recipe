@@ -327,7 +327,9 @@ class ContainerQualification:
             "--platform",
             "linux/arm64",
             "--network",
-            "none" if network["mode"] == "none" else "default",
+            "none",
+            "--pull",
+            "false",
             "--file",
             str(self.inputs.context / str(build["dockerfile"])),
             "--tag",
@@ -341,7 +343,12 @@ class ContainerQualification:
             command.extend(("--build-arg", f"{argument['name']}={argument['value']}"))
         command.append(str(self.inputs.context))
         self._engine(*command)
-        self._record("image.build", network=network["mode"], platform="linux/arm64")
+        self._record(
+            "image.build",
+            declared_network=network["mode"],
+            network="none",
+            platform="linux/arm64",
+        )
 
     def start(self, rank: int, outputs: Path) -> None:
         projection = self._projection(rank)
@@ -362,6 +369,16 @@ class ContainerQualification:
             "--network",
             "host" if self.recipe["runtime"]["security"]["host_network"] else "bridge",
         ]
+        if (
+            not self.recipe["runtime"]["security"]["host_network"]
+            and self._endpoint_owner(rank)
+        ):
+            command.extend(
+                (
+                    "--publish",
+                    f"{self.args.endpoint_host}:{self.port}:{self.port}",
+                )
+            )
         if "nvidia.com/gpu=all" in self.recipe["runtime"]["security"]["devices"]:
             command.extend(("--gpus", "all"))
         command.extend(("--env", f"VONK_RANK={rank}"))
@@ -382,6 +399,18 @@ class ContainerQualification:
         command.extend((self.image, *projection.command))
         self._engine(*command)
         self.containers[rank] = name
+
+    def _endpoint_owner(self, rank: int) -> bool:
+        topology = self.recipe["topology"]
+        assert isinstance(topology, Mapping)
+        roles = topology["roles"]
+        assert isinstance(roles, list)
+        return any(
+            isinstance(item, Mapping)
+            and item.get("name") == self.roles[rank]
+            and item.get("endpoint_owner") is True
+            for item in roles
+        )
 
     def running(self, rank: int) -> bool:
         name = self.containers.get(rank)

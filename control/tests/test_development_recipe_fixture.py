@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from vonk_control.catalog_contract import (
     catalog_content_sha256,
     validate_catalog_document,
 )
 from vonk_control.recipe_contract import validate_recipe
+from vonk_control.recipe_runtime_specs import compile_runtime_spec
 
 ROOT = Path(__file__).resolve().parents[2]
 DEVELOPMENT = ROOT / "config/recipes/development"
@@ -73,3 +75,57 @@ def test_native_recipes_have_no_startup_mutation_or_network_fetch_hooks() -> Non
         }
         assert environment["HF_HUB_OFFLINE"] == "1"
         assert not any("PATCH" in name or "DOWNLOAD" in name for name in environment)
+
+
+def test_synthetic_development_recipe_compiles_through_the_native_runtime_path() -> None:
+    fixture = ROOT / "control/tests/fixtures/recipes/dev-http-smoke"
+    recipe = _load(fixture / "recipe.json")
+    entities = {
+        document["kind"]: document
+        for path in sorted((fixture / "entities").glob("*.json"))
+        if (document := _load(path))["kind"]
+        in {"model-version", "execution-harness", "runtime-distribution"}
+    }
+    resolved = {
+        "model_version": SimpleNamespace(
+            content_sha256=recipe["model"]["content_sha256"]
+        ),
+        "harness": SimpleNamespace(
+            document=entities["execution-harness"],
+            content_sha256=recipe["execution"]["harness"]["content_sha256"],
+        ),
+        "runtime_distribution": SimpleNamespace(
+            document=entities["runtime-distribution"],
+            content_sha256=recipe["runtime"]["distribution"]["content_sha256"],
+        ),
+        "patch_bundle": None,
+    }
+
+    spec = compile_runtime_spec(
+        recipe,
+        resolved_entities=resolved,
+        parameters={},
+        role="entrypoint",
+        rank=0,
+        recipe_build_id="00000000-0000-4000-8000-000000000001",
+        image_digest="sha256:" + "d" * 64,
+    )
+
+    assert spec["runtime"]["entrypoint"] == [
+        "/opt/vonk/bin/vllm",
+        "serve",
+        "/models",
+        "--max-model-len",
+        "1",
+        "--tensor-parallel-size",
+        "1",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+    ]
+    assert spec["security"]["devices"] == ["nvidia.com/gpu=all"]
+    assert spec["security"]["mounts"] == [
+        {"source": "model", "target": "/models", "read_only": True},
+        {"source": "outputs", "target": "/outputs", "read_only": False},
+    ]

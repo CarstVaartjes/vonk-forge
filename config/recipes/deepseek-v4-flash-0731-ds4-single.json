@@ -24,14 +24,14 @@
   "build": {
     "context": {
       "path": "adapters/deepseek/ds4",
-      "sha256": "228fede9f501c71514aba8ced8058b05e73ad606c47a2ba32ff257d695177de6",
-      "expected_bytes": 10240,
+      "sha256": "aff78f2e9bc43bd426c951f342ab3c162c748cab245edc69512389359aded750",
+      "expected_bytes": 8386560,
       "media_type": "application/vnd.vonk-forge.source-bundle.v1+tar"
     },
     "dockerfile": "Dockerfile",
     "platform": "linux/arm64",
     "arguments": [],
-    "network": {"mode": "public", "hosts": ["codeload.github.com", "nvcr.io"]},
+    "network": {"mode": "none", "hosts": []},
     "resources": {
       "download_bytes": 6500000000,
       "temporary_bytes": 16000000000,
@@ -67,7 +67,7 @@
       "kind": "runtime-distribution",
       "publisher": "antirez",
       "slug": "ds4-spark",
-      "content_sha256": "25bb4fd479d179169bafbc82662bb8bd66e73b9f9dbd3012da915216601bd26a"
+      "content_sha256": "337c9d850a70b6a8907e588d4fee1d447f770bc004cb15bbc45283d017dca389"
     },
     "entrypoint": ["/opt/vonk/bin/ds4-serve"],
     "arguments": [

@@ -165,6 +165,31 @@ def recovery_start_plan(
         "start_phases",
     }:
         raise DistributedLifecycleError("distributed recovery authority is invalid")
+    enforce_recovery_deadline(payload, now=now)
+    failed_rank = value["failed_rank"]
+    deadline_value = value["deadline"]
+    phases = _decode_phases(value.get("start_phases"))
+    marker = {
+        "schema_version": 1,
+        "failed_rank": failed_rank,
+        "deadline": deadline_value,
+    }
+    return phases, marker
+
+
+def enforce_recovery_deadline(
+    payload: Mapping[str, object], *, now: datetime
+) -> bool:
+    """Validate and enforce a retained recovery marker at a trust boundary."""
+
+    value = payload.get("recovery")
+    if value is None:
+        return False
+    if not isinstance(value, Mapping) or set(value) not in (
+        {"schema_version", "failed_rank", "deadline"},
+        {"schema_version", "failed_rank", "deadline", "start_phases"},
+    ):
+        raise DistributedLifecycleError("distributed recovery authority is invalid")
     failed_rank = value.get("failed_rank")
     deadline_value = value.get("deadline")
     if (
@@ -184,13 +209,7 @@ def recovery_start_plan(
         raise DistributedLifecycleError("distributed recovery authority is invalid")
     if _aware(now) >= _aware(deadline):
         raise DistributedLifecycleError("distributed recovery deadline elapsed")
-    phases = _decode_phases(value.get("start_phases"))
-    marker = {
-        "schema_version": 1,
-        "failed_rank": failed_rank,
-        "deadline": deadline_value,
-    }
-    return phases, marker
+    return True
 
 
 def _recovery_authority(
@@ -471,4 +490,8 @@ def _aware(value: datetime) -> datetime:
     return value.astimezone(UTC)
 
 
-__all__ = ["DistributedRecoveryCoordinator", "recovery_start_plan"]
+__all__ = [
+    "DistributedRecoveryCoordinator",
+    "enforce_recovery_deadline",
+    "recovery_start_plan",
+]

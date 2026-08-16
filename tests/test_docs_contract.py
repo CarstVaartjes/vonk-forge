@@ -394,11 +394,13 @@ def test_complete_development_workload_runbook_has_every_operator_phase() -> Non
     assert "scripts/qualify-development-model" in text
     for phase in ("model-single", "model-multinode"):
         assert f"--phase {phase}" in text
-    assert "--level container" in text
+    assert "--api-base" in text
+    assert "--inference-base" in text
+    assert "--qualification-file" in text
     assert "config/recipes/deepseek-v4-flash-0731-ds4-single.json" in text
     assert "config/recipes/deepseek-v4-flash-0731-mia-dual.json" in text
     assert "config/recipes/development" not in text
-    assert "--stop-after" not in text
+    assert "--stop-after inference-ok" in text
 
 
 def test_multinode_rendezvous_firewall_is_direct_fabric_only() -> None:
@@ -431,12 +433,19 @@ def test_model_commands_bind_private_qualification_and_runtime_evidence() -> Non
 
     for phase in ("model-single", "model-multinode"):
         command = next(block for block in blocks if f"--phase {phase}" in block)
-        assert "--level container" in command
+        assert "--api-base" in command
+        assert "--admin-token-file" in command
+        assert "--inference-token-file" in command
+        assert "--qualification-file" in command
+        assert "--builder-node" in command
+        assert "--target-node" in command
+        assert "--stop-after inference-ok" in command
         assert "--evidence-file '<EVIDENCE_DIRECTORY>/" in command
 
     normalized = _normalized_text(DEV_WORKLOADS)
     assert "canonical qualification evidence" in normalized
-    assert "build, start, health, invocation, bounded stop, and restart" in normalized
+    assert "source verification, image build/distribution" in normalized
+    assert "route publication" in normalized
     assert "rank-loss route withdrawal" in normalized
     assert "worker-first recovery" in normalized
 

@@ -247,7 +247,8 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         }
         managed_path(self.data_root, "installations", installation_id)?;
         let models = self.data_root.join("models");
-        let state = managed_path(self.data_root, "runs", run_id)?;
+        let run_root = managed_path(self.data_root, "runs", run_id)?;
+        let outputs = run_root.join("outputs");
         let metadata = self.run_metadata_path(run_id)?;
         let shared_memory_bytes =
             (placement.reserved_memory_bytes / 8).clamp(64 * 1024 * 1024, 16 * 1024 * 1024 * 1024);
@@ -296,9 +297,6 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             "VONK_RUNTIME_SPEC=/run/vonk/runtime.json".to_owned(),
             "--env".to_owned(),
             "VONK_MODEL_ROOT=/models".to_owned(),
-            "--env".to_owned(),
-            "VONK_STATE_ROOT=/state".to_owned(),
-            "--env".to_owned(),
             "VONK_LISTEN_HOST=0.0.0.0".to_owned(),
             "--env".to_owned(),
             format!("VONK_LISTEN_PORT={}", spec.endpoint.port),
@@ -374,10 +372,10 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             arguments.extend(["--env".to_owned(), format!("{}={value}", environment.name)]);
         }
         for mount in &spec.security.mounts {
-            let source = if mount.source == "model" {
-                &models
-            } else {
-                &state
+            let source = match mount.source.as_str() {
+                "model" => &models,
+                "outputs" => &outputs,
+                _ => return Err(OciError::Runtime),
             };
             let mut value = format!("type=bind,src={},dst={}", source.display(), mount.target);
             if mount.read_only {
@@ -417,6 +415,9 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         let state = managed_path(self.data_root, "runs", run_id)?;
         fs::create_dir_all(&state)?;
         fs::set_permissions(&state, fs::Permissions::from_mode(0o700))?;
+        let outputs = state.join("outputs");
+        fs::create_dir_all(&outputs)?;
+        fs::set_permissions(&outputs, fs::Permissions::from_mode(0o700))?;
         let metadata = self.ensure_run_metadata(run_id)?;
         self.write_runtime_contract(spec, installation_id, run_id, placement)?;
         let main = self.start_arguments(spec, installation_id, run_id, placement)?;

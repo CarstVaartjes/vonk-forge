@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "control/src"))
@@ -12,6 +13,7 @@ from vonk_control.catalog_contract import (
     validate_catalog_document,
 )
 from vonk_control.recipe_contract import validate_recipe
+from vonk_control.recipe_runtime_specs import compile_runtime_spec
 from vonk_control.source_bundles import generate_source_bundle
 from vonk_control.source_policy import enforce_build_source_policy
 
@@ -174,4 +176,38 @@ def test_ds4_validation_is_bounded_openai_validation() -> None:
                 "chat.max-output-64",
             ],
         }
+    ]
+
+
+def test_ds4_runtime_spec_preserves_exact_declared_mount_authority() -> None:
+    recipe = _recipe("deepseek-v4-flash-0731-ds4-single")
+    harness = _resolve(recipe["execution"]["harness"])
+    distribution = _resolve(recipe["runtime"]["distribution"])
+
+    spec = compile_runtime_spec(
+        recipe,
+        resolved_entities={
+            "model_version": SimpleNamespace(
+                content_sha256=recipe["model"]["content_sha256"]
+            ),
+            "harness": SimpleNamespace(
+                document=harness,
+                content_sha256=recipe["execution"]["harness"]["content_sha256"],
+            ),
+            "runtime_distribution": SimpleNamespace(
+                document=distribution,
+                content_sha256=recipe["runtime"]["distribution"]["content_sha256"],
+            ),
+            "patch_bundle": None,
+        },
+        parameters={},
+        role="entrypoint",
+        rank=0,
+        recipe_build_id="00000000-0000-4000-8000-000000000001",
+        image_digest="sha256:" + "d" * 64,
+    )
+
+    assert spec["security"]["mounts"] == [
+        {"source": "model", "target": "/models", "read_only": True},
+        {"source": "outputs", "target": "/outputs", "read_only": False},
     ]

@@ -36,7 +36,7 @@
     }
   ],
   "build": {
-    "network_hosts": ["codeload.github.com", "nvcr.io"],
+    "network_hosts": [],
     "offline_after_installation": true
   },
   "capabilities": {"distributed_vllm": null},

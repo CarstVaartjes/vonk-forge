@@ -379,7 +379,7 @@ fn canonical_runtime_mounts(mounts: &[MountSpec]) -> bool {
         && mounts
             .iter()
             .any(|mount| mount.source == "model" && mount.target == "/models" && mount.read_only)
-        && mounts
-            .iter()
-            .any(|mount| mount.source == "state" && mount.target == "/state" && !mount.read_only)
+        && mounts.iter().any(|mount| {
+            mount.source == "outputs" && mount.target == "/outputs" && !mount.read_only
+        })
 }

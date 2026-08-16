@@ -1,10 +1,8 @@
 FROM nvcr.io/nvidia/cuda:13.0.1-devel-ubuntu24.04@sha256:5c36750138dc1447a17dafbb397674f167d3b44ce18d9160d769df114577b35d AS build
 
 WORKDIR /opt/src
+COPY vendor/ds4-84cc882352757baf628a1776badf7cc54d584e28.tar.gz /tmp/ds4.tar.gz
 RUN test "$(uname -m)" = aarch64 \
-    && curl --fail --location --silent --show-error \
-        --output /tmp/ds4.tar.gz \
-        "https://codeload.github.com/antirez/ds4/tar.gz/84cc882352757baf628a1776badf7cc54d584e28" \
     && echo "3ab2c4485bee87f36166b12ab59abbc293ad9fdfadb1c2920d1cbc7f617da165  /tmp/ds4.tar.gz" | sha256sum -c - \
     && tar -xzf /tmp/ds4.tar.gz \
     && mv "ds4-84cc882352757baf628a1776badf7cc54d584e28" ds4 \

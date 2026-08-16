@@ -155,10 +155,7 @@ def compile_runtime_spec(
             "capabilities": list(projection.capabilities),
             "privileged": False,
             "host_network": runtime_security.get("host_network") is True,
-            "mounts": [
-                {"source": "model", "target": "/models", "read_only": True},
-                {"source": "state", "target": "/state", "read_only": False},
-            ],
+            "mounts": copy.deepcopy(runtime_security["mounts"]),
         },
         "lifecycle": {
             "pre_start": copy.deepcopy(lifecycle["pre_start"]),

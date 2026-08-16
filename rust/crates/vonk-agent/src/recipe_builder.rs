@@ -129,6 +129,7 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
         arguments.extend([
             "build".to_owned(),
             "--no-cache".to_owned(),
+            "--pull=never".to_owned(),
             "--platform".to_owned(),
             request.platform.clone(),
             "--file".to_owned(),

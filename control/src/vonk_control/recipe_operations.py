@@ -18,7 +18,7 @@ from vonk_agent_protocol import canonical_message
 
 from .cluster_mappings import ClusterMappingPlan, ClusterMappingService
 from .distributed_lifecycle import DistributedLifecycleError
-from .distributed_recovery import recovery_start_plan
+from .distributed_recovery import enforce_recovery_deadline, recovery_start_plan
 from .install_admission import InstallAdmissionService, InstallPlan
 from .models import (
     AgentOperation,
@@ -1272,6 +1272,7 @@ class RecipeOperationService:
             )
         )
         phases = _stored_phases(job.payload)
+        recovery_error: DistributedLifecycleError | None = None
         if phases:
             phase_index = _current_phase_index(children, phases)
             if phase_index is not None:
@@ -1288,19 +1289,24 @@ class RecipeOperationService:
                 if all(child.state == "succeeded" for child in phase_children) and (
                     phase_index + 1 < len(phases)
                 ):
-                    for next_node_id, next_payload in phases[phase_index + 1]:
-                        self._agent_jobs.enqueue_in_session(
-                            session,
-                            job.id,
-                            next_node_id,
-                            job.kind,
-                            job.base_commit,
-                            next_payload,
-                            operation_id=str(uuid.uuid4()),
-                        )
-                    job.state = "running"
-                    job.updated_at = now
-                    return True
+                    try:
+                        enforce_recovery_deadline(job.payload, now=now)
+                    except DistributedLifecycleError as error:
+                        recovery_error = error
+                    if recovery_error is None:
+                        for next_node_id, next_payload in phases[phase_index + 1]:
+                            self._agent_jobs.enqueue_in_session(
+                                session,
+                                job.id,
+                                next_node_id,
+                                job.kind,
+                                job.base_commit,
+                                next_payload,
+                                operation_id=str(uuid.uuid4()),
+                            )
+                        job.state = "running"
+                        job.updated_at = now
+                        return True
         terminal = all(child.state in _TERMINAL_JOB_STATES for child in children)
         if terminal:
             successful = sorted(
@@ -1309,12 +1315,23 @@ class RecipeOperationService:
             failed = sorted(
                 child.node_id for child in children if child.state == "failed"
             )
-            job.state = "failed" if failed else "succeeded"
+            if job.kind == "recipe.start" and recovery_error is None:
+                try:
+                    enforce_recovery_deadline(job.payload, now=now)
+                except DistributedLifecycleError as error:
+                    recovery_error = error
+            start_failed = bool(failed) or recovery_error is not None
+            job.state = "failed" if start_failed else "succeeded"
             job.result = {
                 "successful_nodes": successful,
                 "failed_nodes": failed,
                 "node_evidence": node_evidence,
             }
+            if recovery_error is not None:
+                job.result = {
+                    **job.result,
+                    "recovery_error": str(recovery_error),
+                }
             if job.kind == "recipe.build.v1":
                 self._release(session, "recipe-build", owner_id, now)
             elif job.kind == "recipe.install":
@@ -1325,11 +1342,13 @@ class RecipeOperationService:
             elif job.kind == "recipe.start":
                 run = session.get(RecipeRun, owner_id)
                 assert run is not None
-                if failed:
+                if start_failed:
                     run.state = "stopping"
                     run.route_state = "withdrawn"
                     run.route_error = (
-                        "one or more ranks failed to start; cleanup queued"
+                        f"{recovery_error}; cleanup queued"
+                        if recovery_error is not None
+                        else "one or more ranks failed to start; cleanup queued"
                     )
                     cleanup_request_id = str(
                         uuid.uuid5(

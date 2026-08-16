@@ -167,6 +167,7 @@ fn build_exports_a_docker_load_archive_from_the_rootless_builder() {
     for required in [
         "--cgroup-manager=systemd",
         "--no-cache",
+        "--pull=never",
         "--cap-drop=all",
         "--security-opt=no-new-privileges",
         "--storage-opt",
