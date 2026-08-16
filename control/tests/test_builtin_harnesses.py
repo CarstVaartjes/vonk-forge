@@ -725,6 +725,36 @@ def test_input_capable_artifact_harness_projects_a_read_only_job_input_mount() -
     assert projection.input_mount.isolated is True
 
 
+def test_diffusers_accepts_specialized_image_layer_pipeline() -> None:
+    recipe = _recipe("diffusers")
+    pipeline = next(
+        item for item in recipe["runtime"]["arguments"] if item["name"] == "pipeline"
+    )
+    pipeline["value"] = "image-to-layers"
+    recipe["runtime"]["arguments"].extend(
+        [
+            {"name": "true-cfg-scale", "value": "4"},
+            {"name": "layers", "value": 4},
+            {"name": "resolution", "value": 640},
+        ]
+    )
+    recipe["interfaces"][0]["adapter"] = "artifact-job"
+    recipe["validation"]["validators"][0]["interface"] = "artifact-job"
+    recipe["interfaces"][0]["input"] = {
+        "path": "/inputs",
+        "required": True,
+        "media_types": ["image/png"],
+        "max_bytes": 8 * 1024 * 1024,
+    }
+    recipe["runtime"]["security"]["mounts"].insert(
+        1, {"source": "inputs", "target": "/inputs", "read_only": True}
+    )
+
+    projection = _compile("diffusers", recipe=recipe)
+
+    assert "image-to-layers" in projection.command
+
+
 def test_input_contract_requires_the_exact_read_only_input_mount() -> None:
     recipe = _recipe("diffusers")
     recipe["interfaces"][0]["input"] = {
