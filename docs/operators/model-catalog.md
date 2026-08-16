@@ -12,13 +12,17 @@ A **model group** is the human product family, such as DeepSeek. A **model** is
 one member of that family with a stable upstream identity, such as DeepSeek V4
 Flash. A **model version** fixes publisher, upstream revision, format,
 quantization, artifact inventory, checksums, size, lineage, access, and license.
-A **recipe** selects one model version and adds an execution harness, runtime
+A **recipe** selects one primary model version and may select additional exact
+model-version dependencies for companion weights such as encoders, LoRAs,
+tokenizers, VAEs, or upscalers. It then adds an execution harness, runtime
 distribution, optional patch bundle, build input, parameters, topology,
 resources, interfaces, and validation ladder.
 
 The layers are deliberately separate. Two recipes can use the same model
 version with different runtimes or topology, and a new model artifact revision
-does not silently rewrite an accepted recipe.
+does not silently rewrite an accepted recipe. Auxiliary model versions are
+resolved by the same exact content-addressed identity; an adapter must not
+silently fetch a mutable companion checkpoint.
 
 The broader discovery list is maintained separately in the
 [model target ledger](model-targets.md). It distinguishes accepted recipes from
@@ -38,8 +42,11 @@ authority. Resolution verifies that tuple against the canonical checked-in
 document. A resolved revision is never edited in place; a change creates a new
 revision and digest.
 
-Installation evidence binds the exact recipe revision, source-bundle digest,
-build-input digest, OCI image digest, artifact-set digest, placement generation,
+The role-specific runtime handoff also contains the exact recipe revision,
+primary model-version, auxiliary model-version, harness, runtime-distribution,
+optional patch, topology name, rank, and role identities. Installation evidence
+then binds those identities to the source-bundle digest, build-input digest,
+OCI image digest, artifact-set digest, placement generation,
 and certificate-bound `spk_…` node identities. Mutable image tags, display
 names, host IP addresses, and “latest” model revisions cannot substitute for
 those identities.
