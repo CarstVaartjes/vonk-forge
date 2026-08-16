@@ -55,11 +55,11 @@ not treated as production-ready until its evidence gates are accepted.
 - Build recipe workload containers from digest-bound Dockerfiles on a compatible
   GPU node, transfer the exact OCI result to mapped nodes, and run them without
   requiring a community container registry.
-- Build and operate model-specific runtime adapters, including the checked-in
-  DeepSeek Mia and DS4 definitions.
+- Build approved recipe source bundles for immutable execution-harness
+  revisions, including the checked-in DeepSeek Mia and DS4 recipes.
 - Publish and operate generic, signed workload packages independently from
-  Vonk Forge platform releases; ordinary model/runtime releases do not require
-  an agent update.
+  Vonk Forge platform releases. Recipe selection is owned by Catalog and
+  Library, not the package plane.
 - Review and apply NAS-to-GPU node platform skew updates through the Admin web UX
   or `vonkctl`, with explicit signed fan-out over the outbound agent channel.
 

@@ -294,6 +294,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/catalog/imports/recipe-library": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Import Recipe Library */
+        post: operations["importRecipeLibrary"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/catalog/imports/workload_run": {
         parameters: {
             query?: never;
@@ -2251,7 +2268,7 @@ export interface components {
              * Source Kind
              * @enum {string}
              */
-            source_kind: "local" | "workload_run" | "global";
+            source_kind: "local" | "workload_run" | "global" | "recipe_library";
             /** Title */
             title: string;
         };
@@ -2288,7 +2305,7 @@ export interface components {
              * Source Kind
              * @enum {string}
              */
-            source_kind: "local" | "workload_run" | "global";
+            source_kind: "local" | "workload_run" | "global" | "recipe_library";
             /** Title */
             title: string;
             /** Topology Name */
@@ -3367,6 +3384,19 @@ export interface components {
             /** Minimum Bandwidth Mbps */
             minimum_bandwidth_mbps: number;
         };
+        /** RecipeLibraryImportRequest */
+        RecipeLibraryImportRequest: {
+            /** Document */
+            document: {
+                [key: string]: unknown;
+            };
+            /** Expected Content Sha256 */
+            expected_content_sha256: string;
+            /** Library Commit */
+            library_commit: string;
+            /** Source Path */
+            source_path: string;
+        };
         /** RecipeListResponse */
         RecipeListResponse: {
             /** Next Cursor */
@@ -3475,7 +3505,7 @@ export interface components {
              * Origin
              * @enum {string}
              */
-            origin: "local" | "workload_run" | "global";
+            origin: "local" | "workload_run" | "global" | "recipe_library";
             /** Recipe Id */
             recipe_id: string;
             /** Revision Number */
@@ -3561,7 +3591,7 @@ export interface components {
              * Origin
              * @enum {string}
              */
-            origin: "local" | "workload_run" | "global";
+            origin: "local" | "workload_run" | "global" | "recipe_library";
             /** Recipe Id */
             recipe_id: string;
             /** Revision Number */
@@ -5264,6 +5294,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GlobalRevisionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    importRecipeLibrary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecipeLibraryImportRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecipeRevisionResponse"];
                 };
             };
             /** @description Validation Error */

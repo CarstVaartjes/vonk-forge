@@ -6,12 +6,13 @@ completely before changing GPU node 1. Never run a distributed model during this
 procedure, and never use ad-hoc `apt` or `fwupdmgr` updates while the Dashboard
 path is available.
 
-This document covers the platform plane only. Workload packages (models,
-adapters, runtimes, images, checkpoints, environments, and configuration) are
+This document covers the platform plane only. Generic workload packages are
 published from the NAS Git/TUF authority and rolled out independently through
-the workload package API. Follow [Workload package operations](workload-packages.md)
-for that flow; do not use this runbook, SSH, or `agent.update` for an ordinary
-new model/runtime release.
+the package API. Model recipes, adapters, runtimes, images, and checkpoints
+are selected through Catalog and Library. Follow [Generic workload package
+operations](workload-packages.md) only for a generic package; do not use this
+runbook, SSH, or `agent.update` for a recipe revision or routine package
+change.
 
 The authoritative NVIDIA references checked on 2026-08-01 are:
 

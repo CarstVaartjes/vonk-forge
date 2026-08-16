@@ -165,6 +165,8 @@ from .publication_export_request import PublicationExportRequest
 from .recipe_disk_requirements import RecipeDiskRequirements
 from .recipe_fabric import RecipeFabric
 from .recipe_fabric_connectivity import RecipeFabricConnectivity
+from .recipe_library_import_request import RecipeLibraryImportRequest
+from .recipe_library_import_request_document import RecipeLibraryImportRequestDocument
 from .recipe_list_response import RecipeListResponse
 from .recipe_memory_requirements import RecipeMemoryRequirements
 from .recipe_memory_requirements_kind import RecipeMemoryRequirementsKind
@@ -423,6 +425,8 @@ __all__ = (
     "RecipeDiskRequirements",
     "RecipeFabric",
     "RecipeFabricConnectivity",
+    "RecipeLibraryImportRequest",
+    "RecipeLibraryImportRequestDocument",
     "RecipeListResponse",
     "RecipeMemoryRequirements",
     "RecipeMemoryRequirementsKind",

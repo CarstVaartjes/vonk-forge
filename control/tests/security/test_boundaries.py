@@ -28,10 +28,10 @@ def proposals(tmp_path: Path):
     {"schema_version": 2, "id": "bad", "name": "Bad", "endpoint": {"host": "attacker.invalid", "port": 80}},
     {"schema_version": 2, "id": "bad", "name": "Bad", "commands": {"start": ["/bin/sh", "-c", "evil"]}},
 ])
-def test_retired_workload_root_is_not_a_repository_authority(proposals, document) -> None:
+def test_unmanaged_document_root_is_not_a_repository_authority(proposals, document) -> None:
     service, commit = proposals
     with pytest.raises(ValueError):
-        service.preview("admin", commit, [DocumentChange("config/workloads/bad.toml", document)])
+        service.preview("admin", commit, [DocumentChange("config/unmanaged/bad.toml", document)])
 
 
 def test_repository_content_cannot_escape_managed_roots(proposals) -> None:

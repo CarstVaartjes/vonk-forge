@@ -8,6 +8,14 @@
 
 **Tech Stack:** Python 3.12, FastAPI, SQLAlchemy 2, Alembic, PostgreSQL, JSON Schema Draft 2020-12, pytest, Podman/OCI, Bash, DGX Spark ARM64.
 
+> **Historical implementation note (2026-08-16):** This plan records the v1
+> foundation cutover. Use the current [model catalog](../../operators/model-catalog.md),
+> [execution-harness operations](../../operators/execution-harnesses.md), and
+> [standard recipe library](../../operators/recipe-library.md) guides for
+> operation. `vonk-forge-recipes` is the standard library for reviewed recipe
+> metadata; platform `config/` documents remain exact native-v1 test and
+> acceptance fixtures, not a second recipe authoring workflow.
+
 ## Global Constraints
 
 - `schema_version: 1` is the only supported catalog and recipe version after this cutover.

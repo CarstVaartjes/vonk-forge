@@ -2322,7 +2322,8 @@
             "enum": [
               "local",
               "workload_run",
-              "global"
+              "global",
+              "recipe_library"
             ],
             "title": "Source Kind",
             "type": "string"
@@ -2443,7 +2444,8 @@
             "enum": [
               "local",
               "workload_run",
-              "global"
+              "global",
+              "recipe_library"
             ],
             "title": "Source Kind",
             "type": "string"
@@ -5926,6 +5928,39 @@
         "title": "RecipeFabric",
         "type": "object"
       },
+      "RecipeLibraryImportRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "document": {
+            "additionalProperties": true,
+            "title": "Document",
+            "type": "object"
+          },
+          "expected_content_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Expected Content Sha256",
+            "type": "string"
+          },
+          "library_commit": {
+            "pattern": "^[0-9a-f]{40}$",
+            "title": "Library Commit",
+            "type": "string"
+          },
+          "source_path": {
+            "pattern": "^recipes/[a-z0-9][a-z0-9-]{1,62}\\.json$",
+            "title": "Source Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "library_commit",
+          "source_path",
+          "expected_content_sha256",
+          "document"
+        ],
+        "title": "RecipeLibraryImportRequest",
+        "type": "object"
+      },
       "RecipeListResponse": {
         "additionalProperties": false,
         "properties": {
@@ -6264,7 +6299,8 @@
             "enum": [
               "local",
               "workload_run",
-              "global"
+              "global",
+              "recipe_library"
             ],
             "title": "Origin",
             "type": "string"
@@ -6510,7 +6546,8 @@
             "enum": [
               "local",
               "workload_run",
-              "global"
+              "global",
+              "recipe_library"
             ],
             "title": "Origin",
             "type": "string"
@@ -10425,6 +10462,49 @@
           }
         ],
         "summary": "Preview Global Import"
+      }
+    },
+    "/api/v1/catalog/imports/recipe-library": {
+      "post": {
+        "operationId": "importRecipeLibrary",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecipeLibraryImportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecipeRevisionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Import Recipe Library"
       }
     },
     "/api/v1/catalog/imports/workload_run": {

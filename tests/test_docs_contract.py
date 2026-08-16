@@ -42,6 +42,15 @@ EXECUTION_HARNESSES = ROOT / "docs/operators/execution-harnesses.md"
 MODEL_CATALOG = ROOT / "docs/operators/model-catalog.md"
 RECIPE_LIBRARY = ROOT / "docs/operators/recipe-library.md"
 
+CURRENT_OPERATIONAL_DOCS = (
+    README,
+    DOCS_INDEX,
+    *(ROOT / "docs/runbooks").glob("*.md"),
+    *(ROOT / "docs/operations").glob("*.md"),
+    *(ROOT / "docs/operators").glob("*.md"),
+    ROOT / "deploy/compose/README.md",
+)
+
 GENERIC_ONBOARDING_DOCS = (
     README,
     INSTALL_AGENT,
@@ -160,6 +169,31 @@ def test_standard_recipe_library_documents_the_authority_split() -> None:
         "Custom libraries",
     ):
         assert required in text
+
+
+def test_current_docs_do_not_advertise_prototype_model_operations() -> None:
+    forbidden = (
+        "vonkctl-legacy",
+        "config/cluster-profiles/",
+        "config/workloads/",
+        "deepseek-agent-single",
+        "deepseek-agent-dual",
+        "adapters/<family>/<runtime>",
+    )
+    offenders = {
+        path.relative_to(ROOT).as_posix(): token
+        for path in CURRENT_OPERATIONAL_DOCS
+        for token in forbidden
+        if token in path.read_text()
+    }
+    assert offenders == {}
+
+
+def test_workload_packages_are_not_the_model_or_runtime_release_path() -> None:
+    text = _normalized_text(ROOT / "docs/runbooks/workload-packages.md")
+
+    assert "operator contract for model and runtime releases" not in text
+    assert "Catalog and Library are the operator path for model recipes" in text
 
 
 def test_mia_runbook_distinguishes_image_receipts_from_model_loading() -> None:

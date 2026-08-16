@@ -1,8 +1,8 @@
 from typing import Literal, cast
 
-LibraryRecipeIdentitySourceKind = Literal['global', 'local', 'workload_run']
+LibraryRecipeIdentitySourceKind = Literal['global', 'local', 'recipe_library', 'workload_run']
 
-LIBRARY_RECIPE_IDENTITY_SOURCE_KIND_VALUES: set[LibraryRecipeIdentitySourceKind] = { 'global', 'local', 'workload_run',  }
+LIBRARY_RECIPE_IDENTITY_SOURCE_KIND_VALUES: set[LibraryRecipeIdentitySourceKind] = { 'global', 'local', 'recipe_library', 'workload_run',  }
 
 def check_library_recipe_identity_source_kind(value: str) -> LibraryRecipeIdentitySourceKind:
     if value in LIBRARY_RECIPE_IDENTITY_SOURCE_KIND_VALUES:

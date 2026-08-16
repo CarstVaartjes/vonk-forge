@@ -15,7 +15,8 @@ def test_workload_runbook_covers_generic_lifecycle_and_recovery_boundaries() -> 
     text = (ROOT / "docs/runbooks/workload-packages.md").read_text()
     required = (
         "family_id",
-        "signed workload",
+        "signed package",
+        "Catalog and Library are the operator path for model recipes",
         "Candidate review and promotion",
         "Rollout and progress",
         "offline",

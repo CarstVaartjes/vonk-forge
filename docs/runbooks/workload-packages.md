@@ -1,19 +1,17 @@
-# Workload package operations
+# Generic workload package operations
 
-This is the compatibility runbook for the current signed workload-package
-release plane. New Vonk recipes are catalog records, not Git files: local
-PostgreSQL owns their revisions, imports, install plans, placements, and runs,
-and the optional public catalog only supplies immutable data to import. Do not
-use this Git/TUF promotion flow as a prerequisite for authoring or running a
-local recipe. A future catalog-backed release projection will preserve the
-same digest, capacity, topology, and evidence checks.
+This runbook covers the retained signed package plane for generic node
+components. It is deliberately not a model or runtime release procedure.
+Catalog and Library are the operator path for model recipes: local PostgreSQL
+owns recipe revisions, imports, install plans, placements, and runs, while the
+optional public recipe library supplies immutable data to import. Do not use
+the package promotion flow to author, install, or activate a model recipe.
 
-This runbook is the operator contract for model and runtime releases. A
-workload package is a signed, content-addressed description of a complete
-stack: source or OCI inputs, model/checkpoint files, adapters, Python
-environments, configuration, and the validation evidence needed to run it.
-The package path is generic. Adding a model, a new Mia/DS4/vLLM release, or a
-new auxiliary component does not require a `vonk-forge` platform release.
+A workload package is a signed, content-addressed description of a generic
+component that uses the stable node-package ABI. It records immutable source or
+OCI inputs, environments, configuration, and validation evidence. The package
+plane stays independent of `vonk-forge` platform releases, but it does not
+provide a second model, adapter, or runtime authority.
 
 The NAS is the administration and authority host. Its Docker services (the
 API/worker, PostgreSQL, Caddy, LiteLLM, Hermes, Prometheus, and Grafana) are
@@ -29,12 +27,12 @@ Keep the two release planes independent:
 
 | Plane | Authority | Updates | Does not update |
 | --- | --- | --- | --- |
-| Platform | platform TUF and the signed platform manifest | NAS Docker generations, the GPU node agent/supervisor, protocol and privileged helper ABI | model IDs, checkpoints, adapters, or ordinary runtime releases |
-| Workload | NAS-admin Git/TUF repository and signed workload locks | families, releases, adapters, images, environments, checkpoints, configuration, and deployment plans | the agent, supervisor, platform services, or SSH configuration |
+| Platform | platform TUF and the signed platform manifest | NAS Docker generations, the GPU node agent/supervisor, protocol and privileged helper ABI | recipe revisions, model artifacts, execution harnesses, or ordinary generic packages |
+| Generic package | NAS-admin Git/TUF repository and signed package locks | generic package families, images, environments, configuration, and deployment plans | recipe catalog identity, model artifacts, harnesses, the agent, supervisor, platform services, or SSH configuration |
 
 The GPU node agent contains a stable, typed package ABI and safe operation
-vocabulary. It must not contain a catalog of model names or adapter versions.
-The workload trust root authorizes immutable release-lock targets; node policy
+vocabulary. It must not contain a catalog of model names, recipes, or adapter
+versions. The package trust root authorizes immutable release-lock targets; node policy
 authorizes only the ABI operations and declared capabilities. The normal path
 never uses SSH, `agent.update`, platform TUF, or a control-plane file copy.
 SSH remains available for one-time onboarding and explicitly documented
@@ -43,13 +41,13 @@ exception.
 
 ## Before publishing
 
-1. Create a generic family document with a stable `family_id`, declared
+1. Create a generic package family document with a stable `family_id`, declared
    architecture/OS/capabilities, license and credential requirements, and a
    dependency graph. Do not add a model-specific branch to the agent.
 2. Build each component from an immutable source revision or digest. Record
    the exact source, media type, byte size, unpacked size, platform, and
    content digest. Never use a mutable tag as an identity.
-3. Produce a canonical release lock that includes the adapter ABI, compatibility
+3. Produce a canonical release lock that includes the package ABI, compatibility
    constraints, validation steps, provenance, and all component digests.
 4. Run local lint, license, provenance, capacity, and architecture checks. Keep
    secrets out of the lock, command line, logs, and evidence.
@@ -177,8 +175,8 @@ vonkctl admin updates apply --plan-digest PLAN_DIGEST --json
 vonkctl admin updates status --json
 ```
 
-An older, compatible GPU node agent may continue serving ordinary workload
-releases while the operator reviews the skew prompt. A workload package never
+An older, compatible GPU node agent may continue serving ordinary generic
+packages while the operator reviews the skew prompt. A generic package never
 triggers this prompt: only a platform capability/protocol/agent update does.
 If a platform update is required for a package's genuinely new privileged ABI,
 the candidate must state that compatibility requirement and the UI must show
