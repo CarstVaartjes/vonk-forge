@@ -165,14 +165,16 @@ scripts/dev-admin-token \
   --ttl-seconds 3600
 
 scripts/accept-recipe \
-  --recipe config/recipes/deepseek-v4-flash-0731-ds4-single.json \
+  --recipe ../vonk-forge-recipes/recipes/deepseek-v4-flash-0731-ds4-single.json \
+  --library-root ../vonk-forge-recipes \
   --nodes spark-3542 \
   --ssh-target spark-3542=vonk-node-1 \
   --preflight-only \
   --evidence-file "$PWD/.state/recipe-acceptance/pre-reset-ds4.json"
 
 scripts/accept-recipe \
-  --recipe config/recipes/deepseek-v4-flash-0731-mia-dual.json \
+  --recipe ../vonk-forge-recipes/recipes/deepseek-v4-flash-0731-mia-dual.json \
+  --library-root ../vonk-forge-recipes \
   --nodes spark-3542,spark-2297 \
   --ssh-target spark-3542=vonk-node-1 \
   --ssh-target spark-2297=vonk-node-2 \
@@ -223,14 +225,16 @@ and run the physical ladders with new evidence paths:
 
 ```bash
 scripts/accept-recipe \
-  --recipe config/recipes/deepseek-v4-flash-0731-ds4-single.json \
+  --recipe ../vonk-forge-recipes/recipes/deepseek-v4-flash-0731-ds4-single.json \
+  --library-root ../vonk-forge-recipes \
   --nodes spark-3542 \
   --ssh-target spark-3542=vonk-node-1 \
   --level spark \
   --evidence-file "$PWD/.state/recipe-acceptance/fresh-ds4.json"
 
 scripts/accept-recipe \
-  --recipe config/recipes/deepseek-v4-flash-0731-mia-dual.json \
+  --recipe ../vonk-forge-recipes/recipes/deepseek-v4-flash-0731-mia-dual.json \
+  --library-root ../vonk-forge-recipes \
   --nodes spark-3542,spark-2297 \
   --ssh-target spark-3542=vonk-node-1 \
   --ssh-target spark-2297=vonk-node-2 \

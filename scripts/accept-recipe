@@ -350,7 +350,14 @@ def _recipe(path: Path, selectors: list[str]) -> dict[str, Any]:
     return value
 
 
-def _catalog_document(reference: object) -> dict[str, Any]:
+def _content_root(root: Path) -> Path:
+    config = root / "config"
+    return config if (config / "model-groups").is_dir() else root
+
+
+def _catalog_document(
+    reference: object, *, library_root: Path, platform_root: Path
+) -> dict[str, Any]:
     if not isinstance(reference, dict):
         raise AcceptanceError("recipe catalog reference is invalid")
     kind = reference.get("kind")
@@ -364,23 +371,40 @@ def _catalog_document(reference: object) -> dict[str, Any]:
         or SHA256.fullmatch(str(digest)) is None
     ):
         raise AcceptanceError("recipe catalog reference is invalid")
-    path = ROOT / "config" / KIND_ROOTS[str(kind)] / f"{slug}.json"
-    document, _raw = _json_file(path, private=False)
-    identity = document.get("identity")
-    if (
-        document.get("kind") != kind
-        or not isinstance(identity, dict)
-        or identity.get("publisher") != publisher
-        or identity.get("slug") != slug
-        or _content_sha256(document) != digest
-    ):
-        raise AcceptanceError("recipe catalog reference digest mismatch")
-    return document
+    content_roots = (_content_root(library_root), _content_root(platform_root))
+    seen: set[Path] = set()
+    for content_root in content_roots:
+        directory = content_root / KIND_ROOTS[str(kind)]
+        path = directory / f"{slug}.json"
+        if path in seen or not path.is_file():
+            continue
+        seen.add(path)
+        document, _raw = _json_file(path, private=False)
+        identity = document.get("identity")
+        if (
+            document.get("kind") != kind
+            or not isinstance(identity, dict)
+            or identity.get("publisher") != publisher
+            or identity.get("slug") != slug
+            or _content_sha256(document) != digest
+        ):
+            raise AcceptanceError("recipe catalog reference digest mismatch")
+        return document
+    raise AcceptanceError("recipe catalog reference is unavailable")
 
 
 def _inputs(
-    recipe: dict[str, Any], selectors: list[str]
-) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
+    recipe: dict[str, Any],
+    selectors: list[str],
+    *,
+    library_root: Path,
+    platform_root: Path,
+) -> tuple[
+    dict[str, Any],
+    dict[str, Any],
+    list[dict[str, Any]],
+    tuple[dict[str, Any], ...],
+]:
     try:
         model_reference = recipe["model"]
         execution = recipe["execution"]
@@ -390,13 +414,27 @@ def _inputs(
         patch_reference = execution.get("patch_bundle")
     except (KeyError, TypeError) as error:
         raise AcceptanceError("recipe catalog references are invalid") from error
-    model_version = _catalog_document(model_reference)
+    model_version = _catalog_document(
+        model_reference, library_root=library_root, platform_root=platform_root
+    )
     model_reference_from_version = model_version.get("model")
-    model = _catalog_document(model_reference_from_version)
+    model = _catalog_document(
+        model_reference_from_version,
+        library_root=library_root,
+        platform_root=platform_root,
+    )
     model_group_reference = model.get("model_group")
-    _catalog_document(model_group_reference)
-    _catalog_document(harness_reference)
-    distribution = _catalog_document(distribution_reference)
+    model_group = _catalog_document(
+        model_group_reference, library_root=library_root, platform_root=platform_root
+    )
+    harness = _catalog_document(
+        harness_reference, library_root=library_root, platform_root=platform_root
+    )
+    distribution = _catalog_document(
+        distribution_reference,
+        library_root=library_root,
+        platform_root=platform_root,
+    )
     if distribution.get("implements_harness") != harness_reference:
         raise AcceptanceError(
             "runtime distribution does not implement the recipe harness"
@@ -409,8 +447,12 @@ def _inputs(
         distribution_reference,
     ]
     if patch_reference is not None:
-        _catalog_document(patch_reference)
+        patch = _catalog_document(
+            patch_reference, library_root=library_root, platform_root=platform_root
+        )
         references.append(patch_reference)
+    else:
+        patch = None
     normalized = [
         {
             "kind": reference["kind"],
@@ -437,7 +479,12 @@ def _inputs(
             raise AcceptanceError(
                 "runtime distribution does not prove the distributed topology"
             )
-    return model_version, distribution, normalized
+    catalog_documents = tuple(
+        document
+        for document in (model_group, model, model_version, harness, distribution, patch)
+        if document is not None
+    )
+    return model_version, distribution, normalized, catalog_documents
 
 
 def _artifact_inputs(model_version: dict[str, Any]) -> list[dict[str, Any]]:
@@ -477,7 +524,12 @@ def _runner_path(evidence: Path) -> Path:
 
 
 def _qualification(
-    recipe_path: Path, destination: Path, timeout: float
+    recipe_path: Path,
+    destination: Path,
+    timeout: float,
+    *,
+    library_root: Path,
+    platform_root: Path,
 ) -> tuple[dict[str, Any], str]:
     expected_recipes = {recipe_path.name}
     try:
@@ -487,6 +539,10 @@ def _qualification(
                 str(QUALIFIER),
                 "--recipe",
                 str(recipe_path),
+                "--library-root",
+                str(library_root),
+                "--platform-root",
+                str(platform_root),
                 "--level",
                 "structural",
             ],
@@ -1216,7 +1272,17 @@ class Acceptance:
         self.ssh_targets = ssh_targets
         self.recipe = recipe
         self.recipe_digest = _content_sha256(recipe)
-        self.model_version, self.distribution, references = _inputs(recipe, selectors)
+        (
+            self.model_version,
+            self.distribution,
+            references,
+            self.catalog_documents,
+        ) = _inputs(
+            recipe,
+            selectors,
+            library_root=args.library_root,
+            platform_root=ROOT,
+        )
         identity = recipe["identity"]
         self.recipe_identity = {
             "publisher": identity["publisher"],
@@ -1239,6 +1305,8 @@ class Acceptance:
             self.args.recipe,
             _qualification_path(self.args.evidence_file),
             self.args.timeout_seconds,
+            library_root=self.args.library_root,
+            platform_root=ROOT,
         )
         _complete_phase(self.evidence, "structurally-verified")
         self.evidence["qualification_sha256"] = digest
@@ -1362,7 +1430,12 @@ class Acceptance:
                 pass
 
     def _runner_command(
-        self, node_ids: list[str], qualification_sha256: str
+        self,
+        node_ids: list[str],
+        qualification_sha256: str,
+        *,
+        catalog_path: Path,
+        source_context: Path,
     ) -> list[str]:
         phase = "model-single" if len(node_ids) == 1 else "model-multinode"
         command = [
@@ -1383,6 +1456,10 @@ class Acceptance:
             str(_runner_path(self.args.evidence_file)),
             "--recipe",
             str(self.args.recipe),
+            "--catalog",
+            str(catalog_path),
+            "--source-context",
+            str(source_context),
             "--qualification-file",
             str(_qualification_path(self.args.evidence_file)),
             "--timeout-seconds",
@@ -1450,14 +1527,38 @@ class Acceptance:
     ) -> None:
         # Reading the inference token here keeps preflight independent of it.
         _private_token(self.args.inference_token_file, "inference")
-        command = self._runner_command(node_ids, qualification_sha256)
         try:
-            result = subprocess.run(
-                command,
-                capture_output=True,
-                check=False,
-                timeout=min(self.args.timeout_seconds * 20, 21_600),
-            )
+            with tempfile.TemporaryDirectory(prefix="vonk-accept-catalog-") as temp:
+                catalog_path = Path(temp)
+                for index, document in enumerate(self.catalog_documents):
+                    (catalog_path / f"{index:02d}.json").write_bytes(
+                        _canonical(document)
+                    )
+                context = self.recipe.get("build", {}).get("context", {})
+                context_path = context.get("path") if isinstance(context, dict) else None
+                if not isinstance(context_path, str):
+                    raise AcceptanceError("recipe source context is invalid")
+                source_context = (self.args.library_root / context_path).resolve()
+                try:
+                    source_context.relative_to(self.args.library_root.resolve())
+                except ValueError as error:
+                    raise AcceptanceError("recipe source context escapes library root") from error
+                if not source_context.is_dir():
+                    source_context = (ROOT / context_path).resolve()
+                if not source_context.is_dir():
+                    raise AcceptanceError("recipe source context is unavailable")
+                command = self._runner_command(
+                    node_ids,
+                    qualification_sha256,
+                    catalog_path=catalog_path,
+                    source_context=source_context,
+                )
+                result = subprocess.run(
+                    command,
+                    capture_output=True,
+                    check=False,
+                    timeout=min(self.args.timeout_seconds * 20, 21_600),
+                )
         except (OSError, subprocess.SubprocessError) as error:
             raise AcceptanceError("acceptance runner failed") from error
         if result.returncode != 0:
@@ -1581,6 +1682,12 @@ class Acceptance:
 def _arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--recipe", required=True, type=Path)
+    parser.add_argument(
+        "--library-root",
+        type=Path,
+        default=ROOT,
+        help="recipe-library checkout containing model entities and build contexts",
+    )
     parser.add_argument("--nodes", required=True)
     parser.add_argument("--preflight-only", action="store_true")
     parser.add_argument("--level", choices=("spark",), default="spark")
@@ -1633,6 +1740,7 @@ def _arguments() -> argparse.Namespace:
     if not 0 < args.timeout_seconds <= 3600 or not 0 < args.poll_seconds <= 30:
         parser.error("timeouts are outside the bounded acceptance contract")
     args.recipe = Path(os.path.abspath(args.recipe))
+    args.library_root = Path(os.path.abspath(args.library_root))
     args.admin_token_file = Path(os.path.abspath(args.admin_token_file))
     args.inference_token_file = Path(os.path.abspath(args.inference_token_file))
     args.fabric_validator = Path(os.path.abspath(args.fabric_validator))

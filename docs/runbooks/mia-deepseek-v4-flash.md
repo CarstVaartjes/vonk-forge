@@ -68,10 +68,11 @@ contract, reference, compiler, and adapter compatibility:
 
 ```bash
 cd '<REPOSITORY_CHECKOUT>'
-scripts/qualify-development-model \
-  --recipe config/recipes/deepseek-v4-flash-0731-mia-dual.json \
-  --level structural \
-  --output '<EVIDENCE_DIRECTORY>/mia-structural.json'
+scripts/qualify-recipe \
+  --recipe ../vonk-forge-recipes/recipes/deepseek-v4-flash-0731-mia-dual.json \
+  --library-root ../vonk-forge-recipes \
+  --platform-root . \
+  --level structural > '<EVIDENCE_DIRECTORY>/mia-structural.json'
 ```
 
 On a supported DGX Spark host, execute the complete path:

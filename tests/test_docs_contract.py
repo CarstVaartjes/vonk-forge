@@ -488,14 +488,14 @@ def test_complete_development_workload_runbook_has_every_operator_phase() -> Non
     assert "scripts/dev-admin-token" in text
     assert "docs/operations/agent-package-release.md#install-the-dev-channel" in text
     assert "vonk-agent pair" in text
-    assert "scripts/qualify-development-model" in text
+    assert "scripts/qualify-recipe" in text
     for phase in ("model-single", "model-multinode"):
         assert f"--phase {phase}" in text
     assert "--api-base" in text
     assert "--inference-base" in text
     assert "--qualification-file" in text
-    assert "config/recipes/deepseek-v4-flash-0731-ds4-single.json" in text
-    assert "config/recipes/deepseek-v4-flash-0731-mia-dual.json" in text
+    assert "../vonk-forge-recipes/recipes/deepseek-v4-flash-0731-ds4-single.json" in text
+    assert "../vonk-forge-recipes/recipes/deepseek-v4-flash-0731-mia-dual.json" in text
     assert "config/recipes/development" not in text
     assert "--stop-after inference-ok" in text
 
@@ -557,7 +557,7 @@ def test_latest_mia_runbook_is_exact_reproducible_and_secret_free() -> None:
         "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
         "166898666055",
         "a83948492cf13df455170fb42885f5ef4db54fefe0feff0f841ecbff464ac9d8",
-        "--recipe config/recipes/deepseek-v4-flash-0731-mia-dual.json",
+        "--recipe ../vonk-forge-recipes/recipes/deepseek-v4-flash-0731-mia-dual.json",
         "--phase model-multinode",
         "--level container",
     ):

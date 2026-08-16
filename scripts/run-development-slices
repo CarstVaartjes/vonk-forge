@@ -448,6 +448,11 @@ def _recipe_content_digest(document: dict[str, object]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _content_root(root: Path) -> Path:
+    config = root / "config"
+    return config if (config / "model-groups").is_dir() else root
+
+
 def _sensitive_catalog_path(value: object, path: str = "$") -> str | None:
     if isinstance(value, dict):
         for key, child in value.items():
@@ -491,12 +496,15 @@ def _reference_identity(value: object) -> tuple[str, str, str, str]:
 
 
 def _catalog_documents(
-    path: Path | None, recipe: dict[str, object]
+    path: Path | None,
+    recipe: dict[str, object],
+    *,
+    library_root: Path = ROOT,
 ) -> tuple[tuple[dict[str, object], str], ...]:
     try:
         paths = sorted(path.glob("*.json")) if path is not None else []
         if not paths and path is None:
-            return _native_catalog_documents(recipe)
+            return _native_catalog_documents(recipe, library_root=library_root)
         if not 1 <= len(paths) <= 32:
             raise SliceError("development catalog input is invalid")
         documents = [json.loads(item.read_text(encoding="utf-8")) for item in paths]
@@ -568,8 +576,12 @@ def _catalog_documents(
 
 def _native_catalog_documents(
     recipe: dict[str, object],
+    *,
+    library_root: Path = ROOT,
 ) -> tuple[tuple[dict[str, object], str], ...]:
     resolved: dict[tuple[str, str, str, str], dict[str, object]] = {}
+    library_content_root = _content_root(library_root)
+    platform_content_root = _content_root(ROOT)
 
     def load(reference: object) -> dict[str, object]:
         identity = _reference_identity(reference)
@@ -577,15 +589,23 @@ def _native_catalog_documents(
         if existing is not None:
             return existing
         kind, publisher, slug, digest = identity
-        root = CATALOG_ROOTS[kind]
+        directory = CATALOG_ROOTS[kind]
+        roots = (
+            (platform_content_root / directory,)
+            if kind == "execution-harness"
+            else (library_content_root / directory, platform_content_root / directory)
+        )
+        document = None
         try:
-            document = json.loads(
-                (ROOT / "config" / root / f"{slug}.json").read_text(
-                    encoding="utf-8"
-                )
-            )
+            for root in roots:
+                path = root / f"{slug}.json"
+                if path.is_file():
+                    document = json.loads(path.read_text(encoding="utf-8"))
+                    break
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
             raise SliceError("native v1 catalog input is unavailable") from error
+        if not isinstance(document, dict):
+            raise SliceError("native v1 catalog input is unavailable")
         document_identity = document.get("identity")
         if (
             not isinstance(document_identity, dict)
@@ -630,6 +650,7 @@ def _model_qualification(
     recipe: dict[str, object],
     recipe_path: Path,
     source_context: Path,
+    library_root: Path,
 ) -> tuple[dict[str, Any], str]:
     raw = _safe_read(path, maximum=MAXIMUM_EVIDENCE_BYTES, private=True)
     try:
@@ -655,11 +676,19 @@ def _model_qualification(
     ):
         raise SliceError("model qualification does not match this phase")
     context = recipe.get("build", {}).get("context", {})
-    if (
-        not source_context.is_dir()
-        or not isinstance(context, dict)
-        or context.get("path") != source_context.relative_to(ROOT).as_posix()
-    ):
+    context_path = context.get("path") if isinstance(context, dict) else None
+    expected_context = None
+    if isinstance(context_path, str):
+        for root in (library_root.resolve(), ROOT.resolve()):
+            candidate = (root / context_path).resolve()
+            try:
+                source_context.resolve().relative_to(root)
+            except ValueError:
+                continue
+            if candidate == source_context.resolve():
+                expected_context = context_path
+                break
+    if not source_context.is_dir() or expected_context is None:
         raise SliceError("model qualification does not match this phase")
     return document, hashlib.sha256(raw).hexdigest()
 
@@ -707,7 +736,9 @@ class Runner:
             catalog_path = SYNTHETIC_ROOT / "entities"
         else:
             catalog_path = None
-        self.catalog_documents = _catalog_documents(catalog_path, self.recipe)
+        self.catalog_documents = _catalog_documents(
+            catalog_path, self.recipe, library_root=args.library_root
+        )
         self.recipe_digest = _recipe_content_digest(self.recipe)
         self.slug = str(self.recipe.get("identity", {}).get("slug", ""))
         if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,62}", self.slug):
@@ -739,8 +770,10 @@ class Runner:
         self.source_context = args.source_context or (
             self.recipe_path.parent / "context"
             if args.phase == "synthetic"
-            else ROOT / str(context_path)
+            else _content_root(args.library_root) / str(context_path)
         )
+        if args.phase != "synthetic" and not self.source_context.is_dir():
+            self.source_context = ROOT / str(context_path)
         self.qualification: dict[str, Any] | None = None
         qualification_sha256: str | None = None
         if args.phase == "synthetic":
@@ -759,6 +792,7 @@ class Runner:
                 recipe=self.recipe,
                 recipe_path=self.recipe_path,
                 source_context=self.source_context,
+                library_root=args.library_root,
             )
         expected_inputs = {
             "phase": args.phase,
@@ -1851,6 +1885,12 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--target-node", action="append")
     parser.add_argument("--evidence-file", type=Path)
     parser.add_argument("--recipe", type=Path)
+    parser.add_argument(
+        "--library-root",
+        type=Path,
+        default=ROOT,
+        help="recipe-library checkout containing model entities and build contexts",
+    )
     parser.add_argument("--catalog", type=Path)
     parser.add_argument("--source-context", type=Path)
     parser.add_argument("--qualification-file", type=Path)
@@ -1883,6 +1923,7 @@ def _arguments() -> argparse.Namespace:
         parser.error("timeouts must be positive")
     assert args.evidence_file is not None
     args.evidence_file = args.evidence_file.resolve()
+    args.library_root = args.library_root.resolve()
     if args.recipe is not None:
         args.recipe = args.recipe.resolve()
     if args.catalog is not None:

@@ -481,7 +481,7 @@ model, or agent-state volumes to clear this state.
 ## Real single-node model
 
 The native DS4 recipe is
-`config/recipes/deepseek-v4-flash-0731-ds4-single.json`. It binds the canonical
+`../vonk-forge-recipes/recipes/deepseek-v4-flash-0731-ds4-single.json`. It binds the canonical
 DS4 source, runtime distribution, imatrix target GGUF, and DSpark support GGUF
 by immutable revision and digest. Model artifacts must already exist beneath
 the selected artifact root; container qualification performs no network
@@ -495,10 +495,11 @@ already provides `/opt/vonk/busybox`. Then qualify:
 
 ```bash
 cd '<REPOSITORY_CHECKOUT>'
-scripts/qualify-development-model \
-  --recipe config/recipes/deepseek-v4-flash-0731-ds4-single.json \
-  --level structural \
-  --output '<EVIDENCE_DIRECTORY>/ds4-structural.json'
+scripts/qualify-recipe \
+  --recipe ../vonk-forge-recipes/recipes/deepseek-v4-flash-0731-ds4-single.json \
+  --library-root ../vonk-forge-recipes \
+  --platform-root . \
+  --level structural > '<EVIDENCE_DIRECTORY>/ds4-structural.json'
 ```
 
 On a supported linux/arm64 Spark with Docker and the installed artifacts, run
@@ -506,6 +507,8 @@ the full container path:
 
 ```bash
 scripts/run-development-slices \
+  --library-root '../vonk-forge-recipes' \
+  --recipe '../vonk-forge-recipes/recipes/deepseek-v4-flash-0731-ds4-single.json' \
   --api-base 'http://127.0.0.1:<LOCAL_API_PORT>' \
   --inference-base 'http://127.0.0.1:<LOCAL_INFERENCE_PORT>' \
   --admin-token-file '<EVIDENCE_DIRECTORY>/admin-token' \
@@ -536,7 +539,7 @@ world size 2, not a replicated DS4 service. The runtime compiler projects
 rank-specific local/master rendezvous addresses and the exact HCA, socket, and
 GID environment from the verified distribution capability. Rank 1 runs
 headless; only rank 0 owns the routed inference endpoint. The selected input is
-`config/recipes/deepseek-v4-flash-0731-mia-dual.json`.
+`../vonk-forge-recipes/recipes/deepseek-v4-flash-0731-mia-dual.json`.
 
 Accepted workloads use the Spark-provided Docker/NVIDIA runtime on an isolated
 Docker bridge. Only the endpoint-owning rank publishes its model endpoint on
@@ -591,6 +594,8 @@ Run the complete two-rank path through the sole entrypoint:
 
 ```bash
 scripts/run-development-slices \
+  --library-root '../vonk-forge-recipes' \
+  --recipe '../vonk-forge-recipes/recipes/deepseek-v4-flash-0731-mia-dual.json' \
   --api-base 'http://127.0.0.1:<LOCAL_API_PORT>' \
   --inference-base 'http://127.0.0.1:<LOCAL_INFERENCE_PORT>' \
   --admin-token-file '<EVIDENCE_DIRECTORY>/admin-token' \
