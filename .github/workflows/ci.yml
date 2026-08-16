@@ -151,7 +151,7 @@ jobs:
           tests/runbooks/test_workload_packages.py
           tests/test_ci_platform_boundaries.py
           tests/test_container_release_workflow.py
-          tests/e2e/test_unknown_workload_package.py
+          control/tests/test_unknown_workload_package_e2e.py
           tests/e2e/test_workload_package_failure_matrix.py
       - name: Run focused control package contracts
         run: >-

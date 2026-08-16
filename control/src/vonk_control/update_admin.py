@@ -39,7 +39,6 @@ from .updates import (
     UpdatePlan,
     UpdatePlanner,
     VersionSkewAnalyzer,
-    WorkloadReplicaObservation,
     durable_recipe_workloads,
 )
 

@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.config import Config
@@ -320,8 +321,5 @@ def test_resolved_plan_migration_follows_issued_revocations_and_is_reversible(
     assert not {"plan_digest", "resolved_plan", "completion_generation"} & {
         column["name"] for column in inspect(engine).get_columns("reconciliations")
     }
-    upgrade_to("head", database)
-    with engine.connect() as connection:
-        assert connection.execute(
-            text("SELECT status FROM reconciliations WHERE id='legacy-plan'")
-        ).scalar_one() == "planned"
+    with pytest.raises(RuntimeError, match="fresh pre-production"):
+        upgrade_to("head", database)

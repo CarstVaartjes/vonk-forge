@@ -48,10 +48,19 @@ def test_prototype_model_authority_is_absent() -> None:
         ROOT / "config/profile-selectors.toml",
         ROOT / "locks/model-definitions.toml",
         ROOT / "inventory/reports/model-definitions.json",
+        ROOT / "inventory/reports/model-definitions",
         ROOT / "inventory/reports/accepted-cluster-profiles.json",
         ROOT / "inventory/reports/deepseek-ds4-operational.json",
         ROOT / "inventory/reports/deepseek-mia-operational.json",
+        ROOT / "inventory/reports/deepseek-agent-dual-accepted.json",
+        ROOT / "inventory/reports/deepseek-agent-dual-prepared.json",
+        ROOT / "inventory/reports/deepseek-agent-dual-verified.json",
+        ROOT / "inventory/reports/deepseek-agent-single-prepared.json",
+        ROOT / "inventory/reports/deepseek-agent-single-verified.json",
+        ROOT / "inventory/reports/qwen3-vl-8b-single-prepared.json",
+        ROOT / "inventory/reports/qwen3-vl-8b-single-verified.json",
         ROOT / "release/workloads/ds4-v0.5.3-spark-runtime.json",
+        ROOT / "release/workloads",
     )
     assert [str(path.relative_to(ROOT)) for path in forbidden if path.exists()] == []
 
@@ -88,7 +97,6 @@ def test_retired_profile_controller_modules_are_absent() -> None:
         "src/cluster_profiles/workload_packages/legacy.py",
         "src/cluster_profiles/schemas/accepted-cluster-profiles.schema.json",
         "src/cluster_profiles/schemas/model-definitions.schema.json",
-        "src/cluster_profiles/schemas/node-health-raw.schema.json",
-        "src/cluster_profiles/schemas/node-health.schema.json",
+        "bin/vonkctl-legacy",
     )
     assert [path for path in forbidden if (ROOT / path).exists()] == []

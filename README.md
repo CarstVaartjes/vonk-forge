@@ -150,40 +150,31 @@ See [Testing and CI policy](docs/testing-and-ci.md) for the exact local tiers,
 the hosted smoke subset, and the release-only acceptance gates.
 
 Configure the authenticated control origin and restrictive token file, then
-inspect current node state and preview the exact server reconciliation plan:
+inspect the fleet and current recipe operations:
 
 ```bash
 export VONK_CONTROL_URL=https://control.example.invalid
 export VONK_CONTROL_TOKEN_FILE=/run/secrets/vonk-control-token
 uv run --project /path/to/vonk-forge vonkctl nodes status --json
-uv run --project /path/to/vonk-forge vonkctl validate PROFILE --json
-uv run --project /path/to/vonk-forge vonkctl switch PROFILE --json
+uv run --project /path/to/vonk-forge vonkctl admin fleet --json
+uv run --project /path/to/vonk-forge vonkctl admin jobs --json
 ```
 
-`prepare`, `switch`, and `restore-default` are plan-only unless `--apply` is
-present. Applied commands wait for the accepted job by default; use `--no-wait`
-to return its job ID for later API polling. Routine commands fail with
-`error_type=control_api` when the control plane is unavailable and never fall
-back to SSH.
-
-The old local controller remains available only as an explicitly named
-migration/recovery compatibility tool:
-
-```bash
-uv run --no-project --with jsonschema -- bin/vonkctl-legacy status --json
-```
-
-Never use or configure `vonkctl-legacy` as a production command. It is never
-selected implicitly. Routine production work is repository-planned by the API,
-persisted in PostgreSQL, claimed outbound by each GPU node agent over mTLS, and
-reconciled by the repository-less worker.
+Recipe maintenance is performed in the authenticated browser at `/library` and
+`/catalog`: Library shows current model-version families and accepted recipe
+revisions, while Catalog handles creating/importing drafts, resolving immutable
+revisions, attaching build evidence, and mapping a recipe to a cluster. Routine
+CLI commands only read server projections or invoke current package/update
+operations; they never fall back to SSH. Production work is persisted in
+PostgreSQL, claimed outbound by each GPU node agent over mTLS, and reconciled by
+the repository-less worker.
 
 ## Repository layout
 
 - `bin/` — repository-local command launchers
-- `src/cluster_profiles/` — profile catalog, admission, state, health, and CLI
+- `src/cluster_profiles/` — current control client, typed contracts, node tooling, and CLI
 - `adapters/` — model-specific runtime definitions and lifecycle tooling
-- `config/` — controller, workload, and cluster-profile configuration
+- `config/` — current catalog recipes, execution harnesses, runtimes, and package authority
 - `nodes/` — node bootstrap, health, fabric, and recovery utilities
 - `schemas/` — JSON contracts for profiles, workloads, and health evidence
 - `tests/` — Python and shell test suites
@@ -208,7 +199,7 @@ reconciled by the repository-less worker.
   identities and compatibility with the current inventory, with no fixed node
   count
 - [Direct-fabric runbook](docs/runbooks/fabric.md)
-- [Runtime release runbook](docs/runbooks/runtime-release.md)
+- [Recipe runtime publication runbook](docs/runbooks/runtime-release.md)
 - [GPU node agent PKI and recovery runbook](docs/runbooks/agent-pki.md)
 - [Tailnet-only NAS ingress runbook](docs/runbooks/tailscale.md)
 - [Hermes Agent runbook](docs/runbooks/hermes-agent.md)

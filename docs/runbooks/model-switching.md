@@ -1,154 +1,51 @@
-# Model profile switching
+# Recipe activation and model changes
 
-`vonkctl` changes the complete desired state of the Vonk Forge GPU node cluster by
-activating a named Cluster Profile. It does not start or stop an individual
-model outside an accepted profile. The supported production path is the NAS
-control API and outbound mTLS agents; the developer-machine controller and SSH
-tunnels described by older examples are migration/recovery compatibility only.
+Vonk Forge does not switch named legacy profiles. A model family can have many
+immutable model versions, and each version can have multiple recipes for a
+specific execution harness, runtime distribution, patch bundle, and topology.
+The recipe revision is the unit the controller resolves and activates.
 
-Recipe installs and runs are planned from the local PostgreSQL catalog. The
-catalog records the immutable recipe revision, resource envelope, placement,
-and node-level disk/memory checks before any GPU node mutation. Existing checked-
-in profiles continue to use the content-addressed admission checks below until
-their equivalent catalog projection is enabled.
+For the complete clean-fleet acceptance path, follow the [development agent
+workload acceptance runbook](development-agent-workloads.md) after the recipe
+has passed its source and placement gates.
 
-## Safety model
+## Inspect current state
 
-Each activation is serialized by `.state/vonkctl/switch.lock` and recorded
-atomically in `.state/vonkctl/state.json`. Before any state or remote process
-change, the controller resolves a selector or canonical profile ID and runs
-admission against the exact profile hash, definition hashes, maturity records,
-accepted combination evidence, and a fresh live inventory from both GPU nodes.
-The successful activation stores the exact boot ID observed for each node.
+Open the private browser and choose `Library`. It groups recipes by exact model
+version and shows the accepted revision, cluster placement, node freshness,
+runtime state, and available actions. A model-family label is for navigation;
+the content-addressed model-version and recipe revision remain authoritative.
 
-If controller state names an active profile, its profile hash and complete
-definition ID/hash set must match the current content-addressed catalog before
-any mutation. Unknown or changed old runtime content is blocked for manual
-recovery; the controller never guesses that a newly cataloged stop command is
-safe for an unknown old process.
+## Create or import a recipe
 
-The checked-in `agent-full-dual` intent is currently `planned`. Its presence in
-the catalog does not make it activatable. Until its adapter, checkpoint
-manifest digest, and acceptance evidence have been recorded, activation must
-return `blocked` without issuing a remote lifecycle command.
+Choose `Catalog` to create a local draft or import a WorkloadRun. The visual
+editor captures the model version, execution harness, runtime distribution,
+topology, artifact identities, endpoint aliases, and resource envelope. Use the
+advanced canonical JSON section only for custom fields or debugging.
 
-Use a dry run before an accepted transition:
+The lifecycle is deliberately explicit:
 
-```text
-vonkctl switch PROFILE --dry-run
-```
+1. Save a draft.
+2. Resolve the draft into an immutable revision.
+3. Run the source security/build gate and attach evidence from the actual test.
+4. Map the revision to one or more compatible Spark nodes.
+5. Return to Library and preview the install/load action before applying it.
 
-A dry run loads existing controller state read-only and performs resolution and
-admission without acquiring the switch lock. It never creates the state
-directory, calls a GPU node backend command, or saves controller state.
+The control API performs identity, capacity, placement, evidence, and route
+checks. The browser never invents a digest or bypasses those checks.
 
-## Transition order
+## One Spark, two Sparks, or many
 
-For an admitted activation the controller:
+Single-node recipes run one rank on one enrolled Spark. Distributed recipes
+declare a tensor-parallel or other gang topology and list every expected rank.
+The same recipe contract works for one, two, or many Sparks; placement and
+readiness determine whether a specific fleet can run it. A recipe may be
+accepted for one topology without being accepted for another.
 
-1. collects live health, capacity, and exact boot IDs from both GPU nodes;
-2. checks whether an unchanged workload is eligible for retention;
-3. verifies retained workloads are healthy;
-4. writes `transitioning` state with no active profile, withdrawing published
-   endpoint metadata before stopping changed services;
-5. stops changed distributed workloads head first and worker second;
-6. runs `verify-release` after every stop sequence;
-7. verifies target runtime prerequisites;
-8. starts distributed workloads worker first and head second;
-9. after complete target residency is established, runs model-identity health
-   checks and the adapter's pinned inference quality gate for every target
-   workload, including retained workloads; and
-10. atomically records the active profile, definition fingerprints, and the
-    exact live boot IDs used for admission.
+## Stop, uninstall, and rollback
 
-A workload is retained only when the persisted active profile hash still
-matches the catalog, its persisted definition hash is unchanged, its placement
-and endpoint aliases are identical in the old and new profiles, and its live
-health command succeeds. Both persisted boot IDs must also match the current
-live boot IDs. If either GPU node rebooted, no workload is retained: an explicit
-switch performs the normal stop/start reconciliation and replaces the stored
-boot IDs only after all final gates pass. Nothing restarts automatically.
-
-`vonkctl endpoint ALIAS` is the live publication check. It repeats the node
-health probe and refuses the address if either GPU node is unhealthy or
-unreachable, either boot ID differs from activation, the active content is no
-longer accepted, the adapter's read-only workload health check fails, or the
-alias is not in the active profile. The check holds the same exclusive lock as
-a transition and confirms persisted state is unchanged before returning, so a
-concurrent switch cannot publish a withdrawn endpoint. Local `vonkctl status`
-never performs this probe and therefore always reports
-`published_endpoints: {}` rather than presenting persisted intent as live
-availability.
-
-For the dual-GPU node DeepSeek adapter, the controller appends the role argument
-derived from the declared rank order:
-
-```text
-node2: profile-start deepseek-agent-dual worker
-node1: profile-start deepseek-agent-dual head
-node1: profile-stop deepseek-agent-dual head
-node2: profile-stop deepseek-agent-dual worker
-```
-
-These commands are executed through the strict key-only SSH backend. OpenSSH
-passes the complete POSIX-quoted argv as one command to the remote login shell;
-the controller does not interpolate shell syntax, enable SSH agent forwarding,
-or assume an always-present gateway.
-
-## Failure behavior
-
-Any start, health, quality-gate, or unexpected backend operational failure
-withdraws every target endpoint and stops all target processes that may have
-started, including a command that returned failure after creating a process.
-Cleanup continues across per-node errors, follows each definition's declared
-stop order, and then verifies resource release. Successful cleanup is persisted
-as `stopped`; a failed stop or release check is persisted as `degraded`.
-Diagnostics, remote output, and `last_error` retained by the report or state
-are bounded.
-
-The controller never chooses another profile and never automatically restarts
-the previous heavyweight profile. A persisted `transitioning` or `degraded`
-state blocks another automatic activation until the operator has inspected the
-reported node, workload, operation, and diagnostic detail and performed manual
-recovery.
-
-## Explicit restoration
-
-Restoration is request state, not Cluster Profile metadata:
-
-```text
-vonkctl switch creative-3d --restore default
-```
-
-The selector `default` resolves to canonical profile `agent-full-dual`.
-This option stores only the canonical restore intent in controller state and
-the switch report. It never restores within the same `vonkctl switch` call.
-After the caller has completed its work and explicitly recovered the outputs
-and provenance, `vonkctl restore-default` performs a later ordinary profile
-switch. That later switch reacquires the lock and repeats all admission,
-health, quality, and failure gates. The original switch report keeps the
-temporary producing profile and definition hashes; no fallback profile is
-chosen automatically.
-
-## Recovery checklist
-
-When status is `degraded` or `transitioning` after interruption:
-
-1. preserve `.state/vonkctl/state.json` and the reported diagnostics;
-2. inspect each implicated adapter directly over key-only SSH;
-3. stop only the declared workload processes in head-first order where
-   distributed;
-4. run the matching `verify-release` command on every declared node; and
-5. repair controller state only after both GPU nodes are known to be stopped.
-
-Do not delete model snapshots, output artifacts, runtime caches, or logs as a
-switch-recovery shortcut.
-
-## Development recipe acceptance
-
-The catalog-backed development image lane does not use `vonkctl switch` for its
-physical qualification. Follow [Development agent workload
-acceptance](development-agent-workloads.md) for the source-build, exact image
-distribution, single-node/multi-node recipe, route, restart, rank-failure, and
-normal uninstall gates. Successful development evidence does not promote a
-planned production Cluster Profile or bypass its immutable acceptance record.
+Use the action preview in Library. Stop withdraws the route before stopping the
+run. Uninstall removes the selected recipe installation after its preview and
+does not delete unrelated model artifacts. To roll back, select an earlier
+accepted immutable revision and follow the same preview, evidence, mapping,
+and activation gates.

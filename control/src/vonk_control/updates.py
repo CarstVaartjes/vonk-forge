@@ -24,7 +24,6 @@ from .models import (
     AuditEvent,
     Job,
     NodeMutationLease,
-    Observation,
     RecipeRun,
     RunNode,
     UpdateRollout,

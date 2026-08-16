@@ -479,6 +479,11 @@ def test_postgresql_presence_reuses_an_existing_node_lock(
     # AgentNode gains runtime and migration columns after the original
     # execution migration; use the current schema while exercising the
     # presence lock semantics.
+    engine = create_engine(postgres_database)
+    with engine.begin() as connection:
+        connection.execute(text("DROP SCHEMA public CASCADE"))
+        connection.execute(text("CREATE SCHEMA public"))
+    engine.dispose()
     command.upgrade(_config(postgres_database), "head")
     engine = create_engine(
         postgres_database,

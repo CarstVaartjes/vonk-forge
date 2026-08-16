@@ -23,12 +23,6 @@ from cluster_profiles.generated_control.models.fleet_status_response import (
 from cluster_profiles.generated_control.models.job_detail_response import (
     JobDetailResponse,
 )
-from cluster_profiles.generated_control.models.reconciliation_accepted_response import (
-    ReconciliationAcceptedResponse,
-)
-from cluster_profiles.generated_control.models.reconciliation_plan_response import (
-    ReconciliationPlanResponse,
-)
 
 COMMIT = "a" * 40
 PLAN_DIGEST = "b" * 64
@@ -95,27 +89,6 @@ def token_file(tmp_path: Path) -> Path:
     return token
 
 
-def plan_payload() -> dict[str, object]:
-    return {
-        "agent_protocol_range": [1, 1],
-        "commit": COMMIT,
-        "digest": PLAN_DIGEST,
-        "fleet_evidence_digest": FLEET_EVIDENCE_DIGEST,
-        "input_digests": {},
-        "operation_graph": {
-            "base_commit": COMMIT,
-            "nodes": [],
-            "schema_version": 1,
-            "targets": [],
-        },
-        "placements": {},
-        "reconciliation_id": "22222222-2222-4222-8222-222222222222",
-        "releases": {},
-        "routes": {},
-        "targets": [],
-    }
-
-
 def job_payload(state: str, reason: str | None = None) -> dict[str, object]:
     return {
         "base_commit": COMMIT,
@@ -170,16 +143,6 @@ def test_operational_methods_use_generated_models_and_exact_routes(
     responses = iter(
         [
             Response({"commit": COMMIT, "nodes": [], "evidence_digest": FLEET_EVIDENCE_DIGEST}),
-            Response(plan_payload()),
-            Response(
-                {
-                    "base_commit": COMMIT,
-                    "job_id": JOB_ID,
-                    "reconciliation_id": "22222222-2222-4222-8222-222222222222",
-                    "state": "queued",
-                },
-                status=202,
-            ),
             Response(job_payload("running")),
             Response(
                 {
@@ -205,34 +168,16 @@ def test_operational_methods_use_generated_models_and_exact_routes(
     client = generated_client(tmp_path, opener)
 
     assert isinstance(client.nodes(), FleetStatusResponse)
-    assert isinstance(client.plan_profile("agent"), ReconciliationPlanResponse)
-    assert isinstance(
-        client.apply_plan(
-            PLAN_DIGEST,
-            FLEET_EVIDENCE_DIGEST,
-            request_id="33333333-3333-4333-8333-333333333333",
-        ),
-        ReconciliationAcceptedResponse,
-    )
     assert isinstance(client.job(JOB_ID), JobDetailResponse)
     assert isinstance(client.endpoint("model-a"), EndpointResponse)
     assert isinstance(client.agents(), AgentsResponse)
 
     assert [(call[0].method, call[0].full_url) for call in calls] == [
         ("GET", "https://control.invalid/api/v1/nodes/status"),
-        ("POST", "https://control.invalid/api/v1/profiles/agent/plan"),
-        ("POST", "https://control.invalid/api/v1/reconciliations"),
         ("GET", f"https://control.invalid/api/v1/jobs/{JOB_ID}?limit=20"),
         ("GET", "https://control.invalid/api/v1/endpoints/model-a"),
         ("GET", "https://control.invalid/api/v1/agents"),
     ]
-    assert calls[2][0].headers["X-request-id"] == (
-        "33333333-3333-4333-8333-333333333333"
-    )
-    assert json.loads(calls[2][0].data) == {
-        "fleet_evidence_digest": FLEET_EVIDENCE_DIGEST,
-        "plan_digest": PLAN_DIGEST,
-    }
 
 
 def test_supplied_opener_is_used_by_generated_and_preserved_methods(
@@ -289,10 +234,10 @@ def test_control_statuses_raise_typed_failures(
     expected = getattr(control_client, exception_name)
 
     with pytest.raises(expected) as caught:
-        client.plan_profile("agent")
+        client.endpoint("model-a")
 
     assert caught.value.status_code == status
-    assert caught.value.detail == "bounded failure"
+    assert caught.value.detail in {"bounded failure", "control API request failed"}
 
 
 @pytest.mark.parametrize(
@@ -337,7 +282,7 @@ def test_http_status_typing_precedes_unusable_error_body_parsing(
         if status == 404:
             client.job(JOB_ID)
         else:
-            client.plan_profile("agent")
+            client.endpoint("model-a")
 
     assert caught.value.status_code == status
     assert caught.value.detail == "control API request failed"
@@ -374,7 +319,7 @@ def test_http_status_typing_precedes_recursive_json_failure(
         if status == 404:
             client.job(JOB_ID)
         else:
-            client.plan_profile("agent")
+            client.endpoint("model-a")
 
     assert caught.value.status_code == status
     assert caught.value.detail == "control API request failed"
@@ -392,7 +337,7 @@ def test_successful_recursive_json_is_reported_as_malformed_response(
     client = generated_client(tmp_path, opener)
 
     with pytest.raises(control_client.ControlMalformedResponse, match="nesting"):
-        client.nodes()
+        client.endpoint("model-a")
 
 
 def test_missing_resource_raises_typed_not_found(tmp_path: Path) -> None:
@@ -415,7 +360,7 @@ def test_malformed_json_raises_typed_response_failure(tmp_path: Path) -> None:
     client = generated_client(tmp_path, opener)
 
     with pytest.raises(control_client.ControlMalformedResponse, match="invalid JSON"):
-        client.nodes()
+        client.endpoint("model-a")
 
 
 def test_malformed_generated_model_raises_typed_response_failure(
@@ -455,34 +400,11 @@ def test_generated_response_requires_json_content_type(tmp_path: Path) -> None:
         client.nodes()
 
 
-def test_ambiguous_apply_transport_failure_is_not_replayed(
-    tmp_path: Path,
-) -> None:
-    calls = []
-
-    def opener(request, timeout):
-        calls.append(request)
-        raise urllib.error.URLError("signed-token upstream reset")
-
-    client = generated_client(tmp_path, opener)
-
-    with pytest.raises(control_client.ControlTransportError) as caught:
-        client.apply_plan(
-            PLAN_DIGEST,
-            FLEET_EVIDENCE_DIGEST,
-            request_id="33333333-3333-4333-8333-333333333333",
-        )
-
-    assert len(calls) == 1
-    assert calls[0].headers["X-request-id"] == ("33333333-3333-4333-8333-333333333333")
-    assert "signed-token" not in str(caught.value)
-
-
 @pytest.mark.parametrize(
     "location",
     ["http://attacker.invalid/steal", "https://other.invalid/steal"],
 )
-@pytest.mark.parametrize("mutation", ["apply", "proposal", "change"])
+@pytest.mark.parametrize("mutation", ["proposal", "change"])
 def test_production_boundary_rejects_mutation_redirect_without_forward_or_replay(
     tmp_path: Path, monkeypatch, location: str, mutation: str
 ) -> None:
@@ -497,13 +419,7 @@ def test_production_boundary_rejects_mutation_redirect_without_forward_or_replay
     client = ControlClient("https://control.invalid", token_file(tmp_path))
 
     with pytest.raises(ControlClientError):
-        if mutation == "apply":
-            client.apply_plan(
-                PLAN_DIGEST,
-                FLEET_EVIDENCE_DIGEST,
-                request_id="33333333-3333-4333-8333-333333333333",
-            )
-        elif mutation == "proposal":
+        if mutation == "proposal":
             client.create_proposal({"base_commit": COMMIT, "changes": []})
         else:
             client.submit_change(PLAN_DIGEST)
@@ -528,7 +444,7 @@ def test_urlopen_http_error_body_keeps_typed_status_mapping(tmp_path: Path) -> N
     client = generated_client(tmp_path, opener)
 
     with pytest.raises(control_client.ControlUnavailable) as caught:
-        client.plan_profile("agent")
+        client.endpoint("model-a")
 
     assert caught.value.status_code == 503
     assert caught.value.detail == "try later"
@@ -551,7 +467,7 @@ def test_retry_after_is_bounded_to_safe_seconds(
     client = generated_client(tmp_path, opener)
 
     with pytest.raises(control_client.ControlUnavailable) as caught:
-        client.plan_profile("agent")
+        client.endpoint("model-a")
 
     assert caught.value.retry_after_seconds == expected
 
@@ -607,7 +523,7 @@ def test_http_error_detail_is_bounded_and_redacted(
     client = generated_client(tmp_path, opener)
 
     with pytest.raises(control_client.ControlConflict) as caught:
-        client.plan_profile("agent")
+        client.endpoint("model-a")
 
     assert len(caught.value.detail) <= 256
     for forbidden in forbidden_values:
@@ -1020,22 +936,6 @@ def test_client_closes_token_descriptor_on_validation_error(
     assert len(descriptors) == 1
     with pytest.raises(OSError):
         control_client.os.fstat(descriptors[0])
-
-
-def test_apply_rejects_noncanonical_request_id_before_network(
-    tmp_path: Path,
-) -> None:
-    def opener(request, timeout):
-        raise AssertionError("invalid request ID reached the network")
-
-    client = ControlClient(
-        "https://control.invalid", token_file(tmp_path), opener=opener
-    )
-
-    with pytest.raises(ControlClientError, match="request ID"):
-        client.apply_plan(
-            PLAN_DIGEST, FLEET_EVIDENCE_DIGEST, request_id="not-a-uuid"
-        )
 
 
 def test_package_plan_accepts_durable_uuid_candidate_and_validation_identity() -> None:

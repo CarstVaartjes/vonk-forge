@@ -10,9 +10,9 @@ from dataclasses import asdict, dataclass, field
 from types import MappingProxyType
 from typing import Any
 
+from .git_policy import GitPolicy
 from .orchestration import OperationGraph
 from .proposals import ProposalService
-from .git_policy import GitPolicy
 
 
 class ChangeService:

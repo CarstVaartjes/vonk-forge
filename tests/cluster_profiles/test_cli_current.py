@@ -62,5 +62,13 @@ def test_current_cli_has_no_retired_profile_commands(command: str) -> None:
     assert payload["error_type"] == "arguments"
 
 
+@pytest.mark.parametrize("command", ["profiles", "models"])
+def test_current_admin_cli_has_no_retired_catalog_commands(command: str) -> None:
+    result, payload = _invoke("--json", "admin", command)
+
+    assert result == 2
+    assert payload["error_type"] == "arguments"
+
+
 def test_root_package_exports_no_profile_contract() -> None:
     assert set(cluster_profiles.__all__) == set()

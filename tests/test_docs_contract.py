@@ -265,8 +265,8 @@ def test_fresh_spark_install_does_not_claim_nvidia_platform_ownership() -> None:
 
     assert "NVIDIA Sync owns supported cluster networking and node-to-node SSH" in fresh
     assert "must not stop, disable, mask, or install `earlyoom`" in platform
-    assert "archived SSH-controller compatibility tool" in runtime_release
-    assert "host networking and host IPC are legacy runtime exceptions" in legacy
+    assert "published by the repository’s GitHub Actions workflows" in runtime_release
+    assert "The browser is the normal recipe workflow" in legacy
 
 
 def test_onboarding_preserves_the_one_use_grant_pair_approve_pair_sequence() -> None:
