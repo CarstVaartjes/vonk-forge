@@ -284,12 +284,35 @@ class _ServingLeaseGuard:
         )
         if request is not None and expires is None:
             raise RuntimeError("LiteLLM serving lease is invalid")
-        self.cancel()
+        timer: threading.Timer | None = None
+        expire_generation: int | None = None
         with self._lock:
+            self._timer_generation += 1
+            generation = self._timer_generation
+            previous_timer = self._timer
+            self._timer = None
             if self._expired.is_set():
                 raise RuntimeError("LiteLLM serving lease already expired")
             self._expires = expires
-        self.start()
+            if expires is not None:
+                remaining = (expires - self._clock().astimezone(UTC)).total_seconds()
+                if remaining <= 0:
+                    expire_generation = generation
+                else:
+                    timer = threading.Timer(
+                        remaining,
+                        lambda: self._expire(generation),
+                    )
+                    timer.daemon = True
+            if request is not None and self._authority is not None:
+                self._authority.activate(request)
+            self._timer = timer
+        if previous_timer is not None:
+            previous_timer.cancel()
+        if timer is not None:
+            timer.start()
+        if expire_generation is not None:
+            self._expire(expire_generation)
 
     def publish_ack(self, request: ActiveRequest, *, now: datetime) -> None:
         with self._lock:
@@ -934,7 +957,6 @@ def _supervise(authority: _RouteLeaseAuthority) -> int:
                     authority.allow_bootstrap()
                 _clear_ack()
             else:
-                authority.activate(candidate_request)
                 try:
                     serving_lease.renew(candidate_request)
                 except Exception:

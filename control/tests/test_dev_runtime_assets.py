@@ -1278,10 +1278,14 @@ def test_development_supervisor_renews_same_config_route_lease_without_restart(
         def renew(self, request) -> None:
             if request is not None and request.marker["generation"] == 2:
                 renewal_order.append("renew")
-                assert authorities[0].authorized(
+                assert not authorities[0].authorized(
                     old_expires_at + timedelta(microseconds=1)
                 )
             super().renew(request)
+            if request is not None and request.marker["generation"] == 2:
+                assert authorities[0].authorized(
+                    old_expires_at + timedelta(microseconds=1)
+                )
 
         def publish_ack(self, request, *, now) -> None:
             if request.marker["generation"] == 2:
@@ -1308,7 +1312,7 @@ def test_development_supervisor_renews_same_config_route_lease_without_restart(
     assert spawn_count == 1
     assert renewal_observations["authorized_after_old_expiry"] is True
     assert renewal_observations["ack_generation"] == 2
-    assert renewal_order == ["activate", "renew", "publish", "ack"]
+    assert renewal_order == ["renew", "activate", "publish", "ack"]
     timers = renewal_observations["timers"]
     assert isinstance(timers, tuple) and len(timers) == 2
     assert timers[0].cancelled is True
@@ -1372,6 +1376,7 @@ def test_development_same_config_renewal_denies_and_aborts_when_rearm_fails(
 
         def renew(self, request) -> None:
             assert request.marker["generation"] == 2
+            self.authority.activate(request)
             observed["new_snapshot_installed"] = self.authority.authorized(
                 old_expires_at + timedelta(microseconds=1)
             )
@@ -1400,6 +1405,102 @@ def test_development_same_config_renewal_denies_and_aborts_when_rearm_fails(
     assert observed["new_snapshot_installed"] is True
     assert authority.authorized(issued_at) is False
     assert not supervisor.ACK.exists()
+
+
+def test_development_renewal_invalidates_old_expiry_before_authority_replacement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    supervisor = _litellm_supervisor()
+    issued_at = datetime.now(UTC)
+    old_expires_at = issued_at + timedelta(seconds=120)
+    config = _canonical_json(_litellm_document())
+    _active_litellm_bundle(
+        supervisor,
+        tmp_path,
+        config,
+        now=issued_at,
+        expires_at=old_expires_at,
+    )
+    first_request = supervisor._active_request(now=issued_at)
+    _active_litellm_bundle(
+        supervisor,
+        tmp_path,
+        config,
+        now=issued_at,
+        expires_at=issued_at + timedelta(seconds=240),
+        generation=2,
+    )
+    second_request = supervisor._active_request(now=issued_at)
+    assert first_request is not None and second_request is not None
+
+    class Child:
+        killed = False
+
+        @staticmethod
+        def poll() -> None:
+            return None
+
+        def kill(self) -> None:
+            self.killed = True
+
+    class Timer:
+        instances: ClassVar[list[Timer]] = []
+
+        def __init__(self, interval, function) -> None:
+            self.interval = interval
+            self.function = function
+            self.cancelled = False
+            self.daemon = False
+            self.instances.append(self)
+
+        def start(self) -> None:
+            return
+
+        def cancel(self) -> None:
+            self.cancelled = True
+
+    monkeypatch.setattr(supervisor.threading, "Timer", Timer)
+    authority = supervisor._RouteLeaseAuthority()
+    authority.activate(first_request)
+    child = Child()
+    guard = supervisor._ServingLeaseGuard(
+        first_request,
+        child,
+        authority=authority,
+        clock=lambda: issued_at,
+    )
+    guard.start()
+    old_timer = Timer.instances[0]
+    callback_started = threading.Event()
+    callback_threads: list[threading.Thread] = []
+    original_activate = authority.activate
+
+    def racing_activate(request) -> None:
+        if request.marker["generation"] == 2:
+
+            def run_old_expiry() -> None:
+                callback_started.set()
+                old_timer.function()
+
+            thread = threading.Thread(target=run_old_expiry)
+            callback_threads.append(thread)
+            thread.start()
+            assert callback_started.wait(timeout=1)
+        original_activate(request)
+
+    authority.activate = racing_activate
+
+    guard.renew(second_request)
+    for thread in callback_threads:
+        thread.join(timeout=1)
+        assert not thread.is_alive()
+
+    assert callback_threads, "renewal did not replace the authority snapshot"
+    assert old_timer.cancelled is True
+    assert guard.expired is False
+    assert child.killed is False
+    assert authority.authorized(old_expires_at + timedelta(microseconds=1)) is True
 
 
 def test_development_supervisor_denies_malformed_activation_before_cleanup(
