@@ -982,6 +982,187 @@ def test_litellm_supervisor_allows_first_run_database_migrations() -> None:
     assert supervisor.STARTUP_SECONDS == 120
 
 
+def test_development_supervisor_recovers_from_a_transient_pre_health_child_exit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    supervisor = _litellm_supervisor()
+    bootstrap = _canonical_json(_litellm_document(model_name=""))
+    supervisor.ACK_ROOT = tmp_path / "supervisor"
+    supervisor.ACK = supervisor.ACK_ROOT / "ack.json"
+    supervisor.ACK_ROOT.mkdir()
+    supervisor.ACK.write_text("stale\n")
+    authority = supervisor._RouteLeaseAuthority()
+    authority.allow_bootstrap()
+
+    class Child:
+        def __init__(self, *, pid: int, returncode: int) -> None:
+            self.pid = pid
+            self.returncode = returncode
+
+        def poll(self) -> int:
+            return self.returncode
+
+    children = iter(
+        (
+            Child(pid=101, returncode=70),
+            Child(pid=102, returncode=23),
+        )
+    )
+    health = iter((False, True))
+    spawns: list[Child] = []
+    selections = 0
+    materializations: list[bytes] = []
+    retry_delays: list[float] = []
+    authorization_at_cleanup: list[bool] = []
+    original_clear_ack = supervisor._clear_ack
+
+    def spawn(*_args, **_kwargs) -> Child:
+        child = next(children)
+        spawns.append(child)
+        return child
+
+    def clear_ack() -> None:
+        authorization_at_cleanup.append(authority.authorized(datetime.now(UTC)))
+        original_clear_ack()
+
+    def active_request(**_kwargs):
+        nonlocal selections
+        selections += 1
+
+    def materialize(source: bytes) -> Path:
+        materializations.append(source)
+        return tmp_path / "effective.json"
+
+    def retry_sleep(seconds: float) -> None:
+        assert authority.authorized(datetime.now(UTC)) is False
+        assert not supervisor.ACK.exists()
+        retry_delays.append(seconds)
+
+    monkeypatch.setattr(supervisor, "_active_request", active_request)
+    monkeypatch.setattr(supervisor, "_selected", lambda **_kwargs: bootstrap)
+    monkeypatch.setattr(
+        supervisor,
+        "_materialize_config",
+        materialize,
+    )
+    monkeypatch.setattr(
+        supervisor,
+        "_await_healthy",
+        lambda _child: next(health),
+    )
+    monkeypatch.setattr(supervisor, "_clear_ack", clear_ack)
+    monkeypatch.setattr(supervisor.subprocess, "Popen", spawn)
+    monkeypatch.setattr(supervisor.signal, "signal", lambda *_args: None)
+    monkeypatch.setattr(supervisor.time, "sleep", retry_sleep)
+
+    assert supervisor._supervise(authority) == 23
+    assert [child.pid for child in spawns] == [101, 102]
+    assert selections == 2
+    assert materializations == [bootstrap, bootstrap]
+    assert retry_delays == [1]
+    assert authorization_at_cleanup[0] is False
+    assert authority.authorized(datetime.now(UTC)) is False
+    assert not supervisor.ACK.exists()
+
+
+def test_development_supervisor_bounds_pre_health_child_exit_retries(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    supervisor = _litellm_supervisor()
+    bootstrap = _canonical_json(_litellm_document(model_name=""))
+    authority = supervisor._RouteLeaseAuthority()
+    spawns = 0
+    retry_delays: list[float] = []
+
+    class Child:
+        pid = 101
+        returncode = 70
+
+        @staticmethod
+        def poll() -> int:
+            return 70
+
+    def spawn(*_args, **_kwargs) -> Child:
+        nonlocal spawns
+        spawns += 1
+        return Child()
+
+    monkeypatch.setattr(supervisor, "_active_request", lambda **_kwargs: None)
+    monkeypatch.setattr(supervisor, "_selected", lambda **_kwargs: bootstrap)
+    monkeypatch.setattr(
+        supervisor,
+        "_materialize_config",
+        lambda _source: tmp_path / "effective.json",
+    )
+    monkeypatch.setattr(supervisor, "_await_healthy", lambda _child: False)
+    monkeypatch.setattr(supervisor, "_clear_ack", lambda: None)
+    monkeypatch.setattr(supervisor.subprocess, "Popen", spawn)
+    monkeypatch.setattr(supervisor.signal, "signal", lambda *_args: None)
+    monkeypatch.setattr(supervisor.time, "sleep", retry_delays.append)
+
+    assert supervisor._supervise(authority) == 1
+    assert spawns == 10
+    assert retry_delays == [1] * 9
+    assert authority.authorized(datetime.now(UTC)) is False
+
+
+def test_development_supervisor_does_not_retry_a_live_child_after_health_deadline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    supervisor = _litellm_supervisor()
+    bootstrap = _canonical_json(_litellm_document(model_name=""))
+    authority = supervisor._RouteLeaseAuthority()
+    spawns = 0
+
+    class Child:
+        pid = 101
+        returncode = None
+        terminated = False
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self) -> None:
+            self.terminated = True
+            self.returncode = 0
+
+        def wait(self, timeout=None):
+            del timeout
+            return self.returncode
+
+    child = Child()
+
+    def spawn(*_args, **_kwargs) -> Child:
+        nonlocal spawns
+        spawns += 1
+        return child
+
+    monkeypatch.setattr(supervisor, "_active_request", lambda **_kwargs: None)
+    monkeypatch.setattr(supervisor, "_selected", lambda **_kwargs: bootstrap)
+    monkeypatch.setattr(
+        supervisor,
+        "_materialize_config",
+        lambda _source: tmp_path / "effective.json",
+    )
+    monkeypatch.setattr(supervisor, "_await_healthy", lambda _child: False)
+    monkeypatch.setattr(supervisor, "_clear_ack", lambda: None)
+    monkeypatch.setattr(supervisor.subprocess, "Popen", spawn)
+    monkeypatch.setattr(supervisor.signal, "signal", lambda *_args: None)
+    monkeypatch.setattr(
+        supervisor.time,
+        "sleep",
+        lambda _seconds: pytest.fail("live unhealthy child was retried"),
+    )
+
+    assert supervisor._supervise(authority) == 1
+    assert spawns == 1
+    assert child.terminated is True
+    assert authority.authorized(datetime.now(UTC)) is False
+
+
 def test_development_supervisor_renews_same_config_route_lease_without_restart(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

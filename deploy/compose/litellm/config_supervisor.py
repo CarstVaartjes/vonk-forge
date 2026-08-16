@@ -29,6 +29,8 @@ ACK = ACK_ROOT / "ack.json"
 POLL_SECONDS = 2
 TERMINATE_SECONDS = 30
 STARTUP_SECONDS = 120
+STARTUP_ATTEMPTS = 10
+STARTUP_RETRY_SECONDS = 1
 HEALTH_TIMEOUT_SECONDS = 3
 MAXIMUM_LEASE = timedelta(seconds=300)
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
@@ -545,6 +547,7 @@ def _await_healthy(child: subprocess.Popen[bytes]) -> bool:
 def _supervise(authority: _RouteLeaseAuthority) -> int:
     stopping = False
     child: subprocess.Popen[bytes] | None = None
+    startup_attempts = 0
 
     def request_stop(_signum: int, _frame: object) -> None:
         nonlocal stopping
@@ -559,6 +562,7 @@ def _supervise(authority: _RouteLeaseAuthority) -> int:
     selected = request.config if request is not None else _selected()
     while not stopping:
         authority.deny()
+        startup_attempts += 1
         active_digest = _digest(selected)
         child = subprocess.Popen(
             [
@@ -575,15 +579,23 @@ def _supervise(authority: _RouteLeaseAuthority) -> int:
         serving_lease = _ServingLeaseGuard(request, child, authority=authority)
         serving_lease.start()
         if not _await_healthy(child):
+            exited_before_health = child.poll() is not None
             authority.deny()
             serving_lease.cancel()
             _clear_ack()
             _stop(child)
             if serving_lease.expired:
+                startup_attempts = 0
+                request = _active_request(now=datetime.now(UTC))
+                selected = request.config if request is not None else _selected()
+                continue
+            if exited_before_health and startup_attempts < STARTUP_ATTEMPTS:
+                time.sleep(STARTUP_RETRY_SECONDS)
                 request = _active_request(now=datetime.now(UTC))
                 selected = request.config if request is not None else _selected()
                 continue
             return 1
+        startup_attempts = 0
         if request is None:
             if _activation_present():
                 authority.deny()

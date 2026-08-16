@@ -39,6 +39,167 @@ def test_supervisor_allows_first_run_database_migrations() -> None:
     assert module.STARTUP_SECONDS == 120
 
 
+def test_supervisor_recovers_from_a_transient_pre_health_child_exit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _module()
+    bootstrap = tmp_path / "bootstrap.json"
+    bootstrap.write_text('{"model_list":[]}\n')
+    module.ACK_ROOT = tmp_path / "supervisor"
+    module.ACK = module.ACK_ROOT / "ack.json"
+    module.ACK_ROOT.mkdir()
+    module.ACK.write_text("stale\n")
+    authority = module._RouteLeaseAuthority()
+    authority.allow_bootstrap()
+
+    class Child:
+        def __init__(self, *, pid: int, returncode: int) -> None:
+            self.pid = pid
+            self.returncode = returncode
+
+        def poll(self) -> int:
+            return self.returncode
+
+    children = iter(
+        (
+            Child(pid=101, returncode=70),
+            Child(pid=102, returncode=23),
+        )
+    )
+    health = iter((False, True))
+    spawns: list[Child] = []
+    selections = 0
+    retry_delays: list[float] = []
+    authorization_at_cleanup: list[bool] = []
+    original_clear_ack = module._clear_ack
+
+    def spawn(*_args, **_kwargs) -> Child:
+        child = next(children)
+        spawns.append(child)
+        return child
+
+    def clear_ack() -> None:
+        authorization_at_cleanup.append(authority.authorized(datetime.now(UTC)))
+        original_clear_ack()
+
+    def active_request(**_kwargs):
+        nonlocal selections
+        selections += 1
+
+    def retry_sleep(seconds: float) -> None:
+        assert authority.authorized(datetime.now(UTC)) is False
+        assert not module.ACK.exists()
+        retry_delays.append(seconds)
+
+    monkeypatch.setattr(module, "_active_request", active_request)
+    monkeypatch.setattr(module, "_selected", lambda **_kwargs: bootstrap)
+    monkeypatch.setattr(module, "_await_healthy", lambda _child: next(health))
+    monkeypatch.setattr(module, "_clear_ack", clear_ack)
+    monkeypatch.setattr(module.subprocess, "Popen", spawn)
+    monkeypatch.setattr(module.signal, "signal", lambda *_args: None)
+    monkeypatch.setattr(module.time, "sleep", retry_sleep)
+
+    assert module._supervise(authority) == 23
+    assert [child.pid for child in spawns] == [101, 102]
+    assert selections == 2
+    assert retry_delays == [1]
+    assert authorization_at_cleanup[0] is False
+    assert authority.authorized(datetime.now(UTC)) is False
+    assert not module.ACK.exists()
+
+
+def test_supervisor_bounds_pre_health_child_exit_retries(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _module()
+    bootstrap = tmp_path / "bootstrap.json"
+    bootstrap.write_text('{"model_list":[]}\n')
+    module.ACK_ROOT = tmp_path / "supervisor"
+    module.ACK = module.ACK_ROOT / "ack.json"
+    authority = module._RouteLeaseAuthority()
+    spawns = 0
+    retry_delays: list[float] = []
+
+    class Child:
+        pid = 101
+        returncode = 70
+
+        @staticmethod
+        def poll() -> int:
+            return 70
+
+    def spawn(*_args, **_kwargs) -> Child:
+        nonlocal spawns
+        spawns += 1
+        return Child()
+
+    monkeypatch.setattr(module, "_active_request", lambda **_kwargs: None)
+    monkeypatch.setattr(module, "_selected", lambda **_kwargs: bootstrap)
+    monkeypatch.setattr(module, "_await_healthy", lambda _child: False)
+    monkeypatch.setattr(module.subprocess, "Popen", spawn)
+    monkeypatch.setattr(module.signal, "signal", lambda *_args: None)
+    monkeypatch.setattr(module.time, "sleep", retry_delays.append)
+
+    assert module._supervise(authority) == 1
+    assert spawns == 10
+    assert retry_delays == [1] * 9
+    assert authority.authorized(datetime.now(UTC)) is False
+
+
+def test_supervisor_does_not_retry_a_live_child_after_the_health_deadline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _module()
+    bootstrap = tmp_path / "bootstrap.json"
+    bootstrap.write_text('{"model_list":[]}\n')
+    module.ACK_ROOT = tmp_path / "supervisor"
+    module.ACK = module.ACK_ROOT / "ack.json"
+    authority = module._RouteLeaseAuthority()
+    spawns = 0
+
+    class Child:
+        pid = 101
+        returncode = None
+        terminated = False
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self) -> None:
+            self.terminated = True
+            self.returncode = 0
+
+        def wait(self, timeout=None):
+            del timeout
+            return self.returncode
+
+    child = Child()
+
+    def spawn(*_args, **_kwargs) -> Child:
+        nonlocal spawns
+        spawns += 1
+        return child
+
+    monkeypatch.setattr(module, "_active_request", lambda **_kwargs: None)
+    monkeypatch.setattr(module, "_selected", lambda **_kwargs: bootstrap)
+    monkeypatch.setattr(module, "_await_healthy", lambda _child: False)
+    monkeypatch.setattr(module.subprocess, "Popen", spawn)
+    monkeypatch.setattr(module.signal, "signal", lambda *_args: None)
+    monkeypatch.setattr(
+        module.time,
+        "sleep",
+        lambda _seconds: pytest.fail("live unhealthy child was retried"),
+    )
+
+    assert module._supervise(authority) == 1
+    assert spawns == 1
+    assert child.terminated is True
+    assert authority.authorized(datetime.now(UTC)) is False
+
+
 def test_route_lease_authority_enforces_immutable_exact_expiry(
     tmp_path: Path,
 ) -> None:
