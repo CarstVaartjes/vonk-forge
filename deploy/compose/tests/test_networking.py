@@ -120,10 +120,10 @@ def test_caddy_publishes_only_reserved_nas_backend_listener() -> None:
     assert caddy["environment"]["VONK_BACKEND_PORT"] == "8443"
 
 
-def test_database_has_only_data_network_and_ingress_is_segmented() -> None:
+def test_litellm_has_no_network_path_from_control_services() -> None:
     rendered = _rendered()
     services = rendered["services"]
-    assert set(services["postgres"]["networks"]) == {"data"}
+    assert set(services["postgres"]["networks"]) == {"data", "litellm-data"}
     assert set(services["caddy"]["networks"]) == {
         "agent-proxy",
         "hermes-inference",
@@ -147,16 +147,26 @@ def test_database_has_only_data_network_and_ingress_is_segmented() -> None:
     assert rendered["networks"]["worker-authority"]["internal"] is True
     assert set(services["litellm"]["networks"]) == {
         "cluster-egress",
-        "data",
+        "litellm-data",
         "litellm-edge",
     }
     assert services["litellm"].get("ports") in (None, [])
     assert rendered["networks"]["litellm-edge"]["internal"] is True
+    assert rendered["networks"]["litellm-data"]["internal"] is True
     assert {
         name
         for name, service in services.items()
         if "litellm-edge" in service.get("networks", {})
     } == {"caddy", "litellm"}
+    assert {
+        name
+        for name, service in services.items()
+        if "litellm-data" in service.get("networks", {})
+    } == {"litellm", "postgres"}
+    litellm_networks = set(services["litellm"]["networks"])
+    for name, service in services.items():
+        if name not in {"caddy", "litellm", "postgres"}:
+            assert litellm_networks.isdisjoint(service.get("networks", {})), name
     assert set(services["prometheus"]["networks"]) == {"application"}
     for service in ("control-api", "control-worker"):
         assert services[service]["environment"]["VONK_MANAGEMENT_CIDRS"] == (

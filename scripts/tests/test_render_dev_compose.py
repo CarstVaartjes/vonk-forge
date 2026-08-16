@@ -15,7 +15,9 @@ TEMPLATE = ROOT / "deploy/compose/compose.dev.images.yaml"
 COMMIT = "a" * 40
 DIGEST = "b" * 64
 API_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-api:dev-sha-{COMMIT}@sha256:{DIGEST}"
-WORKER_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-worker:dev-sha-{COMMIT}@sha256:{DIGEST}"
+WORKER_IMAGE = (
+    f"ghcr.io/carstvaartjes/vonk-forge-worker:dev-sha-{COMMIT}@sha256:{DIGEST}"
+)
 API_DEV_IMAGE = "ghcr.io/carstvaartjes/vonk-forge-api:dev"
 WORKER_DEV_IMAGE = "ghcr.io/carstvaartjes/vonk-forge-worker:dev"
 PINNED_BASELINE = f'x-pinned-expected-commit: "{COMMIT}"'
@@ -133,7 +135,7 @@ def test_litellm_loopback_port_terminates_at_caddy_lease_edge(
     caddy = _compose_service(output, "caddy")
     assert set(litellm["networks"]) == {
         "cluster-egress",
-        "data",
+        "litellm-data",
         "litellm-edge",
     }
     assert litellm.get("ports") in (None, [])
@@ -150,7 +152,7 @@ def test_litellm_loopback_port_terminates_at_caddy_lease_edge(
             "published": "45678",
             "protocol": "tcp",
             "host_ip": "127.0.0.1",
-        }
+        },
     ]
     assert "litellm-edge" in caddy["networks"]
 
@@ -244,8 +246,7 @@ def test_render_rejects_extra_compose_interpolation_even_when_caller_resolves_it
 ) -> None:
     template = _copy_template(
         tmp_path,
-        TEMPLATE.read_text(encoding="utf-8")
-        + f'\nx-extra: "{expression}"\n',
+        TEMPLATE.read_text(encoding="utf-8") + f'\nx-extra: "{expression}"\n',
     )
     output = tmp_path / "docker-compose.yml"
     output.write_text("previous output\n", encoding="utf-8")
@@ -305,10 +306,26 @@ def test_render_rejects_malformed_or_duplicate_documented_port_interpolation(
 @pytest.mark.parametrize(
     ("api_image", "worker_image", "commit"),
     [
-        ("ghcr.io/carstvaartjes/vonk-forge-api:latest@sha256:" + DIGEST, WORKER_IMAGE, COMMIT),
-        ("ghcr.io/carstvaartjes/vonk-forge-api:dev-sha-" + COMMIT, WORKER_IMAGE, COMMIT),
-        ("ghcr.io/carstvaartjes/vonk-forge-api:v1.2.3@sha256:" + DIGEST, WORKER_IMAGE, COMMIT),
-        ("ghcr.io/example/vonk-forge-api:dev-sha-" + COMMIT + "@sha256:" + DIGEST, WORKER_IMAGE, COMMIT),
+        (
+            "ghcr.io/carstvaartjes/vonk-forge-api:latest@sha256:" + DIGEST,
+            WORKER_IMAGE,
+            COMMIT,
+        ),
+        (
+            "ghcr.io/carstvaartjes/vonk-forge-api:dev-sha-" + COMMIT,
+            WORKER_IMAGE,
+            COMMIT,
+        ),
+        (
+            "ghcr.io/carstvaartjes/vonk-forge-api:v1.2.3@sha256:" + DIGEST,
+            WORKER_IMAGE,
+            COMMIT,
+        ),
+        (
+            "ghcr.io/example/vonk-forge-api:dev-sha-" + COMMIT + "@sha256:" + DIGEST,
+            WORKER_IMAGE,
+            COMMIT,
+        ),
         (API_IMAGE.replace(COMMIT, "c" * 40), WORKER_IMAGE, COMMIT),
         (API_IMAGE, WORKER_IMAGE, "A" * 40),
     ],
@@ -374,7 +391,9 @@ def test_compose_validation_uses_only_path_and_fixed_dev_port(
     stage.write_text("services: {}\n", encoding="utf-8")
     captured: dict[str, object] = {}
 
-    def capture_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+    def capture_run(
+        *args: object, **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
         captured.update(kwargs)
         return subprocess.CompletedProcess(args[0], 0, "", "")
 
@@ -491,10 +510,14 @@ def test_rendered_compose_is_image_only_and_has_exact_runtime_boundaries(
         assert "VONK_DEV_API_IMAGE" not in environment
         assert "VONK_DEV_WORKER_IMAGE" not in environment
     assert services["control-api"]["environment"]["VONK_DEPLOYMENT_BRANCH"] == "deploy"
-    assert services["control-worker"]["environment"]["VONK_DEPLOYMENT_BRANCH"] == "deploy"
+    assert (
+        services["control-worker"]["environment"]["VONK_DEPLOYMENT_BRANCH"] == "deploy"
+    )
 
     volumes = {
-        service_name: {volume["target"]: volume for volume in service.get("volumes", [])}
+        service_name: {
+            volume["target"]: volume for volume in service.get("volumes", [])
+        }
         for service_name, service in services.items()
     }
     assert volumes["control-api"]["/repository"].get("read_only", False) is False
@@ -504,7 +527,9 @@ def test_rendered_compose_is_image_only_and_has_exact_runtime_boundaries(
         for service in services.values()
         for volume in service.get("volumes", [])
     )
-    assert {secret["source"] for secret in services["postgres"]["secrets"]} == {"postgres-password"}
+    assert {secret["source"] for secret in services["postgres"]["secrets"]} == {
+        "postgres-password"
+    }
     assert {secret["source"] for secret in services["dev-init"]["secrets"]} == (
         EXPECTED_SECRET_NAMES - {"postgres-password"}
     )
@@ -527,8 +552,12 @@ def test_rendered_compose_is_image_only_and_has_exact_runtime_boundaries(
     assert migrate_secrets["source"].endswith("dev-migrate-secrets")
     assert migrate_secrets["read_only"] is True
     assert migrate_secrets["source"] != volumes["control-api"]["/run/secrets"]["source"]
-    assert migrate_secrets["source"] != volumes["control-worker"]["/run/secrets"]["source"]
-    assert volumes["control-worker"]["/run/secrets"]["source"].endswith("dev-worker-secrets")
+    assert (
+        migrate_secrets["source"] != volumes["control-worker"]["/run/secrets"]["source"]
+    )
+    assert volumes["control-worker"]["/run/secrets"]["source"].endswith(
+        "dev-worker-secrets"
+    )
     assert volumes["dev-auth-init"]["/auth-secrets"] == {
         "type": "volume",
         "source": "dev-auth-secrets",
@@ -577,7 +606,9 @@ def test_mutable_and_pinned_outputs_share_secret_projection_topology_without_val
                 if key not in {"image", "pull_policy"}
             },
             "tailscale-gateway-volumes": services["tailscale-gateway"]["volumes"],
-            "tailscale-gateway-environment": services["tailscale-gateway"]["environment"],
+            "tailscale-gateway-environment": services["tailscale-gateway"][
+                "environment"
+            ],
             "api-dependencies": services["control-api"]["depends_on"],
             "volumes": set(rendered["volumes"]),
         }
@@ -621,7 +652,9 @@ def test_mutable_compose_uses_exact_refs_and_always_pulls_every_first_party_serv
         for name in api_services | worker_services
     )
     dev_init_environment = services["dev-init"]["environment"]
-    assert dev_init_environment["VONK_DEV_SELECTED_COHORT_FILE"] == "/cohort/selected.json"
+    assert (
+        dev_init_environment["VONK_DEV_SELECTED_COHORT_FILE"] == "/cohort/selected.json"
+    )
     assert "VONK_DEV_EXPECTED_COMMIT" not in dev_init_environment
     assert "VONK_DEV_API_IMAGE" not in dev_init_environment
     assert "VONK_DEV_WORKER_IMAGE" not in dev_init_environment
@@ -634,6 +667,6 @@ def test_template_is_development_only_and_never_mentions_local_acceptance() -> N
     assert "build:" not in text
     assert "context:" not in text
     assert "../" not in text
-    assert {name for name, value in PORT_INTERPOLATIONS.items() if text.count(value) == 1} == set(
-        PORT_INTERPOLATIONS
-    )
+    assert {
+        name for name, value in PORT_INTERPOLATIONS.items() if text.count(value) == 1
+    } == set(PORT_INTERPOLATIONS)

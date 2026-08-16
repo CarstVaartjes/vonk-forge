@@ -143,7 +143,7 @@ services:
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres-password
     secrets: [postgres-password]
     volumes: [postgres-data:/var/lib/postgresql/data]
-    networks: [data]
+    networks: [data, litellm-data]
     healthcheck:
       test: [CMD-SHELL, "pg_isready -U control -d control"]
       interval: 10s
@@ -343,7 +343,7 @@ services:
       - route-publications:/routes:ro
       - litellm-supervisor-state:/supervisor:rw
     tmpfs: [/tmp]
-    networks: [data, cluster-egress, litellm-edge]
+    networks: [litellm-data, cluster-egress, litellm-edge]
     depends_on:
       postgres: {condition: service_healthy}
       route-publication-init: {condition: service_completed_successfully}
@@ -503,6 +503,7 @@ networks:
   application: {internal: true}
   worker-authority: {internal: true}
   data: {internal: true}
+  litellm-data: {internal: true}
   cluster-egress: {}
   litellm-edge: {internal: true}
   registry-edge: {internal: true}

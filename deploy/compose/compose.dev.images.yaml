@@ -25,7 +25,7 @@ services:
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres-password
     secrets: [postgres-password]
     volumes: [dev-postgres-data:/var/lib/postgresql]
-    networks: [data]
+    networks: [data, litellm-data]
     healthcheck:
       test: [CMD-SHELL, "pg_isready -U control -d control"]
       interval: 5s
@@ -381,7 +381,7 @@ services:
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,mode=1777
       - /run/vonk-litellm:rw,exec,nosuid,nodev,mode=0700,uid=10002,gid=10001
-    networks: [data, cluster-egress, litellm-edge]
+    networks: [litellm-data, cluster-egress, litellm-edge]
     depends_on:
       dev-litellm-database-init: {condition: service_completed_successfully}
       dev-init: {condition: service_completed_successfully}
@@ -501,6 +501,7 @@ services:
 networks:
   application: {internal: true}
   data: {internal: true}
+  litellm-data: {internal: true}
   ingress: {}
   cluster-egress: {}
   litellm-edge: {internal: true}

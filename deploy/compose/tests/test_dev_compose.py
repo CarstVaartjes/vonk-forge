@@ -165,7 +165,7 @@ def test_image_template_routes_loopback_inference_through_isolated_caddy() -> No
     assert litellm.get("ports") in (None, [])
     assert set(litellm["networks"]) == {
         "cluster-egress",
-        "data",
+        "litellm-data",
         "litellm-edge",
     }
     assert {
@@ -174,6 +174,16 @@ def test_image_template_routes_loopback_inference_through_isolated_caddy() -> No
         if "litellm-edge" in service.get("networks", {})
     } == {"caddy", "litellm"}
     assert rendered["networks"]["litellm-edge"]["internal"] is True
+    assert rendered["networks"]["litellm-data"]["internal"] is True
+    assert {
+        name
+        for name, service in services.items()
+        if "litellm-data" in service.get("networks", {})
+    } == {"litellm", "postgres"}
+    litellm_networks = set(litellm["networks"])
+    for name, service in services.items():
+        if name not in {"caddy", "litellm", "postgres"}:
+            assert litellm_networks.isdisjoint(service.get("networks", {})), name
     assert {
         (port["host_ip"], port["published"], port["target"])
         for port in caddy["ports"]
@@ -415,10 +425,11 @@ def test_image_template_isolates_litellm_behind_caddy_with_bounded_egress() -> N
     }
     assert set(litellm["networks"]) == {
         "cluster-egress",
-        "data",
+        "litellm-data",
         "litellm-edge",
     }
     assert rendered["networks"]["data"]["internal"] is True
+    assert rendered["networks"]["litellm-data"]["internal"] is True
     assert rendered["networks"]["litellm-edge"]["internal"] is True
     assert rendered["networks"]["cluster-egress"].get("internal", False) is False
     assert litellm.get("ports") in (None, [])
