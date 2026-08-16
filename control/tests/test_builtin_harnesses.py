@@ -427,6 +427,18 @@ def test_vllm_accepts_qwen35_reasoning_and_text_only_options() -> None:
     assert "--language-model-only" in projection.command
 
 
+def test_vllm_accepts_laguna_poolside_reasoning_parser() -> None:
+    recipe = _recipe("vllm")
+    recipe["runtime"]["arguments"].append(
+        {"name": "reasoning-parser", "value": "poolside_v1"}
+    )
+
+    projection = _compile("vllm", recipe=recipe)
+
+    assert "--reasoning-parser" in projection.command
+    assert "poolside_v1" in projection.command
+
+
 def test_vllm_accepts_offline_and_nvfp4_runtime_environment() -> None:
     recipe = _recipe("vllm")
     recipe["runtime"]["environment"] = [
