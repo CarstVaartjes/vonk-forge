@@ -28,18 +28,18 @@ class MappingPlanResponse:
             nodes (list['MappingNodePlanResponse']):
             parameters (MappingPlanResponseParameters):
             placement_digest (str):
-            profile_name (str):
             recipe_content_sha256 (str):
             recipe_revision_id (str):
+            topology_name (str):
      """
 
     generation: int
     nodes: list['MappingNodePlanResponse']
     parameters: 'MappingPlanResponseParameters'
     placement_digest: str
-    profile_name: str
     recipe_content_sha256: str
     recipe_revision_id: str
+    topology_name: str
 
 
 
@@ -61,11 +61,11 @@ class MappingPlanResponse:
 
         placement_digest = self.placement_digest
 
-        profile_name = self.profile_name
-
         recipe_content_sha256 = self.recipe_content_sha256
 
         recipe_revision_id = self.recipe_revision_id
+
+        topology_name = self.topology_name
 
 
         field_dict: dict[str, Any] = {}
@@ -75,9 +75,9 @@ class MappingPlanResponse:
             "nodes": nodes,
             "parameters": parameters,
             "placement_digest": placement_digest,
-            "profile_name": profile_name,
             "recipe_content_sha256": recipe_content_sha256,
             "recipe_revision_id": recipe_revision_id,
+            "topology_name": topology_name,
         })
 
         return field_dict
@@ -108,20 +108,20 @@ class MappingPlanResponse:
 
         placement_digest = d.pop("placement_digest")
 
-        profile_name = d.pop("profile_name")
-
         recipe_content_sha256 = d.pop("recipe_content_sha256")
 
         recipe_revision_id = d.pop("recipe_revision_id")
+
+        topology_name = d.pop("topology_name")
 
         mapping_plan_response = cls(
             generation=generation,
             nodes=nodes,
             parameters=parameters,
             placement_digest=placement_digest,
-            profile_name=profile_name,
             recipe_content_sha256=recipe_content_sha256,
             recipe_revision_id=recipe_revision_id,
+            topology_name=topology_name,
         )
 
         return mapping_plan_response

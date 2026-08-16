@@ -4,6 +4,7 @@ import hashlib
 import importlib.resources
 import json
 from collections.abc import Callable
+from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -67,6 +68,36 @@ def claim_for_operation(
         "payload": payload,
         "payload_digest": hashlib.sha256(canonical_message(payload)).hexdigest(),
     }
+
+
+def recipe_build_vectors() -> dict[str, object]:
+    return json.loads(
+        (
+            importlib.resources.files("vonk_agent_protocol")
+            / "vectors"
+            / "recipe-build-claim-v1.json"
+        ).read_text(encoding="utf-8")
+    )
+
+
+def apply_vector_changes(
+    base: dict[str, object], changes: list[dict[str, object]]
+) -> dict[str, object]:
+    payload = deepcopy(base)
+    for change in changes:
+        path = change["path"]
+        assert isinstance(path, list) and path
+        target: object = payload
+        for component in path[:-1]:
+            assert isinstance(target, (dict, list))
+            target = target[component]  # type: ignore[index]
+        assert isinstance(target, (dict, list))
+        if change["op"] == "set":
+            target[path[-1]] = deepcopy(change["value"])  # type: ignore[index]
+        else:
+            assert change["op"] == "remove"
+            del target[path[-1]]  # type: ignore[index]
+    return payload
 
 
 PATH_KEY_TOKENS = ("path", "file", "filename", "filepath", "directory", "folder")
@@ -215,7 +246,9 @@ def test_direct_result_construction_rejects_client_filesystem_paths() -> None:
         )
 
 
-def test_recipe_start_result_accepts_only_typed_endpoint_and_model_identity_uris() -> None:
+def test_recipe_start_result_accepts_only_typed_endpoint_and_model_identity_uris() -> (
+    None
+):
     raw = valid_attempt()
     revision = "sha256:" + "a" * 64
     result = {
@@ -315,15 +348,34 @@ def test_protocol_rejects_client_selected_filesystem_paths(
 
 
 def test_recipe_build_claim_accepts_only_typed_slash_bearing_fields() -> None:
-    payload = {
-        "platform": "linux/arm64",
-        "dockerfile": "containers/runtime/Dockerfile",
-        "arguments": [{"name": "runtime-source", "value": "vendor/runtime"}],
-    }
+    vectors = recipe_build_vectors()
+    payload = deepcopy(vectors["base_payload"])
+    assert isinstance(payload, dict)
+    payload["arguments"] = [{"name": "runtime-source", "value": "vendor/runtime"}]
 
     claim = AgentClaim.parse(claim_for_operation("recipe.build.v1", payload))
 
     assert claim.payload["platform"] == "linux/arm64"
+    assert claim.payload["base_images"][0]["reference"].startswith("ghcr.io/")
+
+
+def test_recipe_build_claim_matches_shared_cross_language_vectors() -> None:
+    vectors = recipe_build_vectors()
+    base = vectors["base_payload"]
+    cases = vectors["cases"]
+    assert vectors["schema_version"] == 1
+    assert isinstance(base, dict)
+    assert isinstance(cases, list)
+
+    for case in cases:
+        assert isinstance(case, dict)
+        payload = apply_vector_changes(base, case["changes"])
+        raw = claim_for_operation("recipe.build.v1", payload)
+        if case["valid"]:
+            AgentClaim.parse(raw)
+        else:
+            with pytest.raises(AgentProtocolError, match=".+"):
+                AgentClaim.parse(raw)
 
 
 @pytest.mark.parametrize(
@@ -333,6 +385,7 @@ def test_recipe_build_claim_accepts_only_typed_slash_bearing_fields() -> None:
         {"dockerfile": "/etc/passwd"},
         {"dockerfile": "../Dockerfile"},
         {"dockerfile": "containers//Dockerfile"},
+        {"base_images": [{"reference": "ghcr.io/vonkforge/runtime:latest"}]},
         {"evidence": "host/path"},
         {"arguments": [{"name": "safe", "nested": {"value": "host/path"}}]},
     ],

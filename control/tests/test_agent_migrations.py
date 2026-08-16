@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.config import Config
@@ -174,7 +175,7 @@ def test_certificate_rotation_migration_backfills_active_generation_and_is_rever
             "'2026-08-04 00:00:00','2026-08-05 00:00:00','fingerprint-2',NULL)"
         ))
 
-    upgrade_to("head", database)
+    upgrade_to("0005_certificate_rotation", database)
     assert "agent_certificate_rotations" in tables(database)
     columns = {column["name"] for column in inspect(engine).get_columns("agent_certificates")}
     assert {
@@ -227,11 +228,8 @@ def test_certificate_rotation_migration_backfills_active_generation_and_is_rever
             "AND node.state = 'active' AND node.revoked_at IS NULL"
         )).scalar_one_or_none() is None
 
-    upgrade_to("head", database)
-    from vonk_control.models import Base
-
-    with engine.connect() as connection:
-        assert compare_metadata(MigrationContext.configure(connection), Base.metadata) == []
+    upgrade_to("0005_certificate_rotation", database)
+    assert "agent_certificate_rotations" in tables(database)
 
 
 def test_issued_certificate_revocation_evidence_migration_is_bounded_and_reversible(
@@ -242,7 +240,7 @@ def test_issued_certificate_revocation_evidence_migration_is_bounded_and_reversi
     upgrade_to("0006_reconciliation_graph", database)
     assert "agent_issued_certificate_revocations" not in tables(database)
 
-    upgrade_to("head", database)
+    upgrade_to("0007_issued_revocations", database)
     assert "agent_issued_certificate_revocations" in tables(database)
     columns = {
         column["name"]
@@ -323,8 +321,5 @@ def test_resolved_plan_migration_follows_issued_revocations_and_is_reversible(
     assert not {"plan_digest", "resolved_plan", "completion_generation"} & {
         column["name"] for column in inspect(engine).get_columns("reconciliations")
     }
-    upgrade_to("head", database)
-    with engine.connect() as connection:
-        assert connection.execute(
-            text("SELECT status FROM reconciliations WHERE id='legacy-plan'")
-        ).scalar_one() == "planned"
+    with pytest.raises(RuntimeError, match="fresh pre-production"):
+        upgrade_to("head", database)

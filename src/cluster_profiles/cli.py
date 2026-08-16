@@ -19,8 +19,6 @@ from .control_client import (
 )
 
 _MAX_TEXT_CHARS = 1_024
-_WAIT_TIMEOUT_SECONDS = 900.0
-_WAIT_INTERVAL_SECONDS = 1.0
 _SENSITIVE_ASSIGNMENT = re.compile(
     r"(?i)\b(authorization|api[_-]?key|password|secret|token)\b"
     r"(\s*[:=]\s*)(?:bearer\s+)?[^\s,;]+"
@@ -55,29 +53,11 @@ class _GeneratedModel(Protocol):
 class _RoutineControlClient(Protocol):
     def nodes(self) -> _GeneratedModel: ...
 
-    def plan_profile(self, profile: str) -> _GeneratedModel: ...
-
-    def apply_plan(
-        self, digest: str, fleet_evidence_digest: str, *, request_id: str
-    ) -> _GeneratedModel: ...
-
-    def wait_job(
-        self, job_id: str, timeout: float, interval: float
-    ) -> _GeneratedModel: ...
-
     def endpoint(self, alias: str) -> _GeneratedModel: ...
 
 
 def _add_json(command: argparse.ArgumentParser) -> None:
     command.add_argument("--json", action="store_true")
-
-
-def _add_mutation_options(command: argparse.ArgumentParser) -> None:
-    command.add_argument("--apply", action="store_true")
-    wait = command.add_mutually_exclusive_group()
-    wait.add_argument("--wait", dest="wait", action="store_true", default=True)
-    wait.add_argument("--no-wait", dest="wait", action="store_false")
-    _add_json(command)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -93,24 +73,6 @@ def _parser() -> argparse.ArgumentParser:
     )
     _add_json(node_commands.add_parser("status"))
 
-    validate = commands.add_parser("validate")
-    validate.add_argument("selector")
-    _add_json(validate)
-
-    prepare = commands.add_parser("prepare")
-    prepare.add_argument("selector")
-    _add_mutation_options(prepare)
-
-    switch = commands.add_parser("switch")
-    switch.add_argument("selector")
-    switch.add_argument("--restore")
-    switch.add_argument("--dry-run", action="store_true")
-    _add_mutation_options(switch)
-
-    restore_default = commands.add_parser("restore-default")
-    restore_default.add_argument("--dry-run", action="store_true")
-    _add_mutation_options(restore_default)
-
     endpoint = commands.add_parser("endpoint")
     endpoint.add_argument("name")
     _add_json(endpoint)
@@ -119,7 +81,7 @@ def _parser() -> argparse.ArgumentParser:
     admin_commands = admin.add_subparsers(
         dest="admin_command", required=True, parser_class=_CliParser
     )
-    for name in ("fleet", "models", "profiles", "jobs", "audit"):
+    for name in ("fleet", "jobs", "audit"):
         _add_json(admin_commands.add_parser(name))
     updates = admin_commands.add_parser("updates")
     update_commands = updates.add_subparsers(
@@ -432,8 +394,6 @@ def _admin(
         }
     endpoint = {
         "fleet": "/api/v1/fleet",
-        "models": "/api/v1/documents?kind=models",
-        "profiles": "/api/v1/documents?kind=profiles",
         "jobs": "/api/v1/jobs",
         "audit": "/api/v1/audit",
     }[args.admin_command]
@@ -449,25 +409,7 @@ def _routine(
         return _model_payload(client.nodes())
     if args.command == "endpoint":
         return _model_payload(client.endpoint(args.name))
-
-    profile = "default" if args.command == "restore-default" else args.selector
-    plan = client.plan_profile(profile)
-    plan_payload = _model_payload(plan)
-    if args.command == "validate" or not args.apply or getattr(args, "dry_run", False):
-        return plan_payload
-    accepted = client.apply_plan(
-        plan.digest,
-        plan.fleet_evidence_digest,  # type: ignore[attr-defined]
-        request_id=request_id_factory(),
-    )
-    if not args.wait:
-        return _model_payload(accepted)
-    result = client.wait_job(
-        accepted.job_id,  # type: ignore[attr-defined]
-        timeout=_WAIT_TIMEOUT_SECONDS,
-        interval=_WAIT_INTERVAL_SECONDS,
-    )
-    return _model_payload(result)
+    raise ControlClientError("unsupported routine command")
 
 
 def main(
@@ -477,7 +419,7 @@ def main(
     control_client: object | None = None,
     request_id_factory: Callable[[], str] | None = None,
 ) -> int:
-    """Run the API-backed CLI; legacy execution has a separate launcher."""
+    """Run the API-backed CLI."""
     del root
     raw_argv = tuple(argv) if argv is not None else tuple(sys.argv[1:])
     try:
@@ -494,25 +436,6 @@ def main(
                 "error_type": "arguments",
             },
             error_args,
-        )
-        return 2
-
-    if args.command == "switch" and args.restore is not None:
-        _emit(
-            {
-                "error": "--restore is available only through vonkctl-legacy",
-                "error_type": "arguments",
-            },
-            args,
-        )
-        return 2
-    if args.command in {"switch", "restore-default"} and args.dry_run and args.apply:
-        _emit(
-            {
-                "error": "--dry-run cannot be combined with --apply",
-                "error_type": "arguments",
-            },
-            args,
         )
         return 2
 

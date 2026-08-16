@@ -432,6 +432,14 @@ Keep them bound to `127.0.0.1` in Compose and permit one NAS operator to open
 local forwards only to those two destinations. On an OpenSSH NAS, create
 `/etc/ssh/sshd_config.d/00-vonk-operator-forwarding.conf` with:
 
+`127.0.0.1:4000` terminates at Caddy's lease-gated internal `:8081` listener;
+no LiteLLM port is published to the host. Caddy evaluates the current
+route-serving lease at request admission. A request whose Caddy authorization
+begins at or after lease expiry is never forwarded to LiteLLM. If the
+supervisor authority is unavailable, Caddy fails closed without contacting
+LiteLLM. A same-config lease renewal replaces the deadline without restarting
+the healthy LiteLLM child.
+
 ```sshconfig
 Match User <NAS_OPERATOR>
     AllowTcpForwarding local
@@ -509,6 +517,33 @@ Log in as exact subject `admin` using the password from the 1Password item
 user into the application. After login, verify the Development marker, the
 `admin` / `administrator` identity, and the expected fleet. Use **Logout** and
 confirm the login page returns; logout revokes the server-side browser session.
+
+## Fresh recipe-domain reset
+
+Normal updates retain every named volume. The destructive pre-production reset
+is a different operation and must use the reviewed bounded helper in
+[Execution harness operations](../operators/execution-harnesses.md#clean-development-reset).
+It validates the exact development Compose graph before mutation, drains runs
+and installations through public APIs, removes every project volume, verifies
+fresh schema head `0027_execution_harness_catalog`, and verifies only the eight
+supported v1 harness seeds. It is forbidden for production or an unknown
+Compose graph.
+
+A fresh pre-production reset removes every user, browser session, and agent
+enrollment. Recreate the development administrator, sign in to establish a
+fresh browser session, and re-enroll every Spark before acceptance. The
+retained NAS `secrets/` generation supplies the administrator verifier and
+control authorities to fresh initializers; it does not preserve database
+rows. The gateway also receives a fresh volume identity. Never retain or
+translate a pre-reset browser cookie, pairing token, enrollment, route,
+acceptance sidecar, or control-state row.
+
+Spark-local content-addressed caches are outside the NAS reset. Reuse is
+permitted only after the fresh acceptance independently verifies each exact
+image and artifact digest. See
+[Acceptance evidence](../operators/execution-harnesses.md#acceptance-evidence)
+for separate preflight and post-reset evidence paths and the one-Spark and
+distributed ladders.
 
 ## Update after an accepted development publication
 
@@ -732,6 +767,10 @@ as a substitute for restoring PostgreSQL or generated-secret state.
 - The generated admin private key and worker token are intentionally not
   operator files. A disposable full development reset can rotate them by
   removing their named volumes, but that invalidates related development state.
+  A fresh pre-production reset removes every user, browser session, and agent
+  enrollment. Recreate the development administrator, sign in to establish a
+  fresh browser session, and re-enroll every Spark before acceptance. Never
+  retain or translate pre-reset authentication or enrollment state.
   Do not delete individual secret-projection volumes in a stateful installation
   without a tested recovery plan.
 - Rotate agent/controller PKI and LiteLLM/proxy tokens as one planned bundle

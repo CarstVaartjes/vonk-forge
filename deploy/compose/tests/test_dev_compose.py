@@ -8,6 +8,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from vonk_control import dev_cohort, dev_init
 
 ROOT = Path(__file__).resolve().parents[3]
 COMPOSE = ROOT / "deploy/compose/compose.dev.yaml"
@@ -133,8 +134,17 @@ def test_source_compose_advertises_the_actual_alembic_head(tmp_path: Path) -> No
         services[name]["environment"]["VONK_DATABASE_REVISION"]
         for name in ("control-api", "control-worker")
     }
+    alembic_heads = _alembic_heads()
 
-    assert advertised_revisions == _alembic_heads()
+    assert alembic_heads == {"0027_execution_harness_catalog"}
+    assert {
+        *advertised_revisions,
+        dev_cohort.DEVELOPMENT_DATABASE_REVISION,
+        dev_init._DATABASE_REVISION,
+        dev_cohort.build_identity(
+            role="api", source_commit=EXPECTED_COMMIT
+        ).database_revision,
+    } == alembic_heads
 
 
 def test_local_source_compose_remains_distinct_from_published_image_template() -> None:
@@ -144,6 +154,41 @@ def test_local_source_compose_remains_distinct_from_published_image_template() -
     assert image_template.exists()
     assert "build:" in COMPOSE.read_text(encoding="utf-8")
     assert "__VONK_API_IMAGE__" in image_template.read_text(encoding="utf-8")
+
+
+def test_image_template_routes_loopback_inference_through_isolated_caddy() -> None:
+    rendered = _rendered_image_template()
+    services = rendered["services"]
+    litellm = services["litellm"]
+    caddy = services["caddy"]
+
+    assert litellm.get("ports") in (None, [])
+    assert set(litellm["networks"]) == {
+        "cluster-egress",
+        "litellm-data",
+        "litellm-edge",
+    }
+    assert {
+        name
+        for name, service in services.items()
+        if "litellm-edge" in service.get("networks", {})
+    } == {"caddy", "litellm"}
+    assert rendered["networks"]["litellm-edge"]["internal"] is True
+    assert rendered["networks"]["litellm-data"]["internal"] is True
+    assert {
+        name
+        for name, service in services.items()
+        if "litellm-data" in service.get("networks", {})
+    } == {"litellm", "postgres"}
+    litellm_networks = set(litellm["networks"])
+    for name, service in services.items():
+        if name not in {"caddy", "litellm", "postgres"}:
+            assert litellm_networks.isdisjoint(service.get("networks", {})), name
+    assert {
+        (port["host_ip"], port["published"], port["target"])
+        for port in caddy["ports"]
+        if port.get("host_ip") == "127.0.0.1"
+    } == {("127.0.0.1", "4000", 8081)}
 
 
 def test_dev_compose_initializes_identity_before_api_and_worker(tmp_path: Path) -> None:
@@ -240,11 +285,19 @@ def test_image_template_hardens_caddy_as_the_only_lan_listener() -> None:
             "published": "8443",
             "protocol": "tcp",
             "target": 8443,
-        }
+        },
+        {
+            "host_ip": "127.0.0.1",
+            "mode": "ingress",
+            "published": "4000",
+            "protocol": "tcp",
+            "target": 8081,
+        },
     ]
     assert set(caddy["networks"]) == {
         "application",
         "ingress",
+        "litellm-edge",
         "tailnet-web-edge",
     }
     assert caddy["healthcheck"] == {
@@ -302,13 +355,7 @@ def test_image_template_hardens_caddy_as_the_only_lan_listener() -> None:
         for name, service in services.items()
         if service.get("ports")
     }
-    assert set(listeners) == {"caddy", "control-api", "litellm"}
-    assert all(
-        port.get("host_ip") == "127.0.0.1"
-        for service_name in ("control-api", "litellm")
-        for port in listeners[service_name]
-    )
-    assert all("host_ip" not in port for port in listeners["caddy"])
+    assert set(listeners) == {"caddy", "control-api"}
     assert listeners["control-api"] == [
         {
             "host_ip": "127.0.0.1",
@@ -318,12 +365,7 @@ def test_image_template_hardens_caddy_as_the_only_lan_listener() -> None:
             "target": 8000,
         }
     ]
-    assert all(
-        port.get("host_ip") == "127.0.0.1"
-        for name, ports in listeners.items()
-        if name != "caddy"
-        for port in ports
-    )
+    assert all(port.get("host_ip") == "127.0.0.1" for port in listeners["control-api"])
 
 
 def test_pinned_caddy_image_provides_the_configured_http_probe() -> None:
@@ -357,7 +399,7 @@ def test_pinned_caddy_image_provides_the_configured_http_probe() -> None:
     assert "-T SEC" in result.stdout + result.stderr
 
 
-def test_image_template_runs_litellm_on_application_and_loopback_ingress() -> None:
+def test_image_template_isolates_litellm_behind_caddy_with_bounded_egress() -> None:
     rendered = _rendered_image_template()
     services = rendered["services"]
     litellm = services["litellm"]
@@ -381,18 +423,16 @@ def test_image_template_runs_litellm_on_application_and_loopback_ingress() -> No
         "STORE_MODEL_IN_DB": "False",
         "XDG_CACHE_HOME": "/run/vonk-litellm/cache",
     }
-    assert set(litellm["networks"]) == {"application", "data", "ingress"}
-    assert rendered["networks"]["application"]["internal"] is True
+    assert set(litellm["networks"]) == {
+        "cluster-egress",
+        "litellm-data",
+        "litellm-edge",
+    }
     assert rendered["networks"]["data"]["internal"] is True
-    assert litellm["ports"] == [
-        {
-            "host_ip": "127.0.0.1",
-            "mode": "ingress",
-            "published": "4000",
-            "protocol": "tcp",
-            "target": 4000,
-        }
-    ]
+    assert rendered["networks"]["litellm-data"]["internal"] is True
+    assert rendered["networks"]["litellm-edge"]["internal"] is True
+    assert rendered["networks"]["cluster-egress"].get("internal", False) is False
+    assert litellm.get("ports") in (None, [])
     assert litellm["healthcheck"] == {
         "test": [
             "CMD",
@@ -508,6 +548,7 @@ def test_image_template_enables_only_the_explicit_builtin_agent_authority() -> N
     assert set(services["caddy"]["networks"]) == {
         "application",
         "ingress",
+        "litellm-edge",
         "tailnet-web-edge",
     }
     assert services["control-worker"]["networks"] == {
@@ -776,7 +817,9 @@ def _script_repository(tmp_path: Path) -> tuple[Path, Path]:
     package = repository / "control/src/vonk_control"
     package.mkdir(parents=True)
     shutil.copy2(ROOT / "control/src/vonk_control/__init__.py", package / "__init__.py")
-    shutil.copy2(ROOT / "control/src/vonk_control/passwords.py", package / "passwords.py")
+    shutil.copy2(
+        ROOT / "control/src/vonk_control/passwords.py", package / "passwords.py"
+    )
     local_compose = repository / "deploy/compose/compose.dev.images.yaml"
     local_compose.parent.mkdir(parents=True)
     shutil.copy2(IMAGE_TEMPLATE, local_compose)

@@ -165,6 +165,49 @@ def workload_package_inputs(root: Path) -> tuple[str, ...]:
     return tuple(dict.fromkeys(paths))
 
 
+def recipe_catalog_inputs(root: Path) -> tuple[str, ...]:
+    """Return the immutable v1 recipe-authority inputs bound by the manifest."""
+
+    paths = [
+        "schemas/global/catalog-entity-v1.schema.json",
+        "schemas/global/recipe-v1.schema.json",
+        "schemas/global/harness-evidence-v1.schema.json",
+        "control/src/vonk_control/catalog_contract.py",
+        "control/src/vonk_control/recipe_contract.py",
+        "control/src/vonk_control/catalog_entities.py",
+        "control/src/vonk_control/catalog_service.py",
+        "control/src/vonk_control/catalog_api.py",
+        "control/src/vonk_control/auth.py",
+        "control/src/vonk_control/library_contract.py",
+        "control/src/vonk_control/recipe_routes.py",
+        "control/src/vonk_control/models.py",
+        "control/migrations/versions/0015_recipe_catalog.py",
+        "scripts/accept-recipe",
+        "scripts/run-development-slices",
+        "scripts/qualify-recipe",
+        "scripts/import-recipe-library",
+        "scripts/validate-recipe-library",
+        "config/recipe-library-manifest.json",
+    ]
+    for relative in (
+        "config/model-groups",
+        "config/models",
+        "config/model-versions",
+        "config/execution-harnesses",
+        "config/runtime-distributions",
+        "config/patch-bundles",
+        "config/recipes",
+        "config/model-targets",
+    ):
+        directory = root / relative
+        if directory.is_dir():
+            paths.extend(
+                path.relative_to(root).as_posix()
+                for path in sorted(directory.glob("*.json"))
+            )
+    return tuple(dict.fromkeys(paths))
+
+
 def protocol_wheel(root: Path) -> bytes:
     """Build the release wheel in a temporary directory and return its bytes."""
     with tempfile.TemporaryDirectory(prefix="vonk-agent-protocol-") as directory:
@@ -343,7 +386,6 @@ def expected(root: Path) -> tuple[dict[str, bytes], bytes, dict[str, object]]:
         "deploy/compose/hermes-agent/Dockerfile",
         "deploy/compose/hermes-agent/entrypoint.sh",
         "deploy/compose/bin/harden-hermes-egress",
-        "config/hermes-agent-policy.toml",
         "deploy/compose/litellm/config.yaml",
         "deploy/compose/litellm/bootstrap-config.json",
         "deploy/compose/litellm/config_supervisor.py",
@@ -379,6 +421,7 @@ def expected(root: Path) -> tuple[dict[str, bytes], bytes, dict[str, object]]:
         "src/cluster_profiles/update_trust.py",
     )
     input_paths += workload_package_inputs(root)
+    input_paths += recipe_catalog_inputs(root)
     deployment_bundle = control_deployment_bundle(root)
     manifest = {
         "schema_version": 2,
@@ -567,7 +610,13 @@ def verify(root: Path, generate: bool) -> tuple[list[str], dict[str, object]]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
-    parser.add_argument("--generate", action="store_true")
+    parser.add_argument(
+        "--generate",
+        "--write-manifest",
+        dest="generate",
+        action="store_true",
+        help="regenerate reviewed SBOM, protocol-wheel, and manifest evidence",
+    )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
     errors, result = verify(args.root.resolve(), args.generate)

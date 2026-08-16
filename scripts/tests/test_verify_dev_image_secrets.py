@@ -8,6 +8,7 @@ import uuid
 from pathlib import Path
 
 import pytest
+from vonk_control.dev_cohort import DevelopmentImageIdentity
 
 ROOT = Path(__file__).resolve().parents[2]
 SCANNER = ROOT / "scripts" / "verify-dev-image-secrets"
@@ -21,14 +22,14 @@ SOURCE_COMMIT = "0123456789abcdef0123456789abcdef01234567"
 OTHER_COMMIT = "fedcba9876543210fedcba9876543210fedcba98"
 SOURCE_REPOSITORY = "https://github.com/CarstVaartjes/vonk-forge"
 OTHER_REPOSITORY = "https://github.com/example/fork"
-BUILD_DIGEST = "sha256:417d194fbdb2ae0359258796aed4b84f4a15466697774f633bf6c0ca94b10c5d"
+BUILD_DIGEST = "sha256:6175d9ed69ec10f2c4903e3d0466e2dd5cf41f547f4787a3f4de06de9037f872"
 
 
 def _embedded_identity_document(**overrides: object) -> dict[str, object]:
     document: dict[str, object] = {
         "build_digest": BUILD_DIGEST,
         "channel": "development",
-        "database_revision": "0021_browser_authentication",
+        "database_revision": "0027_execution_harness_catalog",
         "image_role": "api",
         "platform_version": "0.1.0",
         "protocol_maximum": 3,
@@ -52,6 +53,14 @@ def _canonical_identity_output(**overrides: object) -> str:
     )
 
 
+def test_image_identity_fixture_uses_the_fresh_database_revision() -> None:
+    raw = _canonical_identity_output().encode("ascii")
+
+    identity = DevelopmentImageIdentity.from_bytes(raw, expected_role="api")
+
+    assert identity.database_revision == "0027_execution_harness_catalog"
+
+
 def _accepted_image_inspection() -> dict[str, object]:
     return {
         "Config": {
@@ -67,7 +76,9 @@ def _accepted_image_inspection() -> dict[str, object]:
 def image_factory(tmp_path: Path):
     built: list[str] = []
 
-    def build(*, files: dict[str, bytes] | None = None, dockerfile: str | None = None) -> str:
+    def build(
+        *, files: dict[str, bytes] | None = None, dockerfile: str | None = None
+    ) -> str:
         context = tmp_path / uuid.uuid4().hex
         context.mkdir()
         for name, content in (files or {"healthy.txt": b"all clear\n"}).items():
@@ -75,19 +86,24 @@ def image_factory(tmp_path: Path):
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_bytes(content)
         (context / "Dockerfile").write_text(
-            dockerfile
-            or "FROM scratch\nCOPY . /scan/\nUSER 10001:10001\n",
+            dockerfile or "FROM scratch\nCOPY . /scan/\nUSER 10001:10001\n",
             encoding="utf-8",
         )
         image = f"vonk-forge-secret-scan-test:{uuid.uuid4().hex}"
-        subprocess.run(("docker", "build", "--quiet", "-t", image, str(context)), check=True)
+        subprocess.run(
+            ("docker", "build", "--quiet", "-t", image, str(context)), check=True
+        )
         built.append(image)
         return image
 
     yield build
 
     for image in built:
-        subprocess.run(("docker", "image", "rm", "--force", image), check=False, capture_output=True)
+        subprocess.run(
+            ("docker", "image", "rm", "--force", image),
+            check=False,
+            capture_output=True,
+        )
 
 
 def _scan(*images: str) -> subprocess.CompletedProcess[str]:
@@ -125,7 +141,9 @@ def _accept(
 
 
 def _scanner_module():
-    loader = importlib.machinery.SourceFileLoader("verify_dev_image_secrets", str(SCANNER))
+    loader = importlib.machinery.SourceFileLoader(
+        "verify_dev_image_secrets", str(SCANNER)
+    )
     spec = importlib.util.spec_from_loader(loader.name, loader)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
@@ -190,7 +208,11 @@ def local_development_images():
         )
     yield images
     for image in images.values():
-        subprocess.run(("docker", "image", "rm", "--force", image), check=False, capture_output=True)
+        subprocess.run(
+            ("docker", "image", "rm", "--force", image),
+            check=False,
+            capture_output=True,
+        )
 
 
 @pytest.fixture(scope="module")
@@ -240,8 +262,12 @@ def test_scanner_accepts_path_only_mode_for_clean_publication_artifacts(
 ) -> None:
     artifact_root = tmp_path / "artifact"
     artifact_root.mkdir()
-    (artifact_root / "docker-compose.dev.yml").write_text("services: {}\n", encoding="utf-8")
-    (artifact_root / "provenance.json").write_text('{"predicateType":"clean"}\n', encoding="utf-8")
+    (artifact_root / "docker-compose.dev.yml").write_text(
+        "services: {}\n", encoding="utf-8"
+    )
+    (artifact_root / "provenance.json").write_text(
+        '{"predicateType":"clean"}\n', encoding="utf-8"
+    )
     canaries = _canary_dir(tmp_path, opaque=b"secret-canary-opaque\n")
 
     result = _scan(
@@ -373,7 +399,9 @@ def test_scanner_allows_private_key_fixture_only_in_dense_compiled_like_binary(
 ) -> None:
     compiled_bytes = b"\x7fELF" + (b"\0\x01\x02\x03compiled-code" * 512)
     image = image_factory(
-        files={"usr/lib/libfixture.so": compiled_bytes + PRIVATE_KEY_BLOCK + compiled_bytes}
+        files={
+            "usr/lib/libfixture.so": compiled_bytes + PRIVATE_KEY_BLOCK + compiled_bytes
+        }
     )
 
     result = _scan(image, image)
@@ -454,7 +482,12 @@ def test_scanner_rejects_concatenated_environment_authority(name: str) -> None:
 
 @pytest.mark.parametrize(
     "key",
-    ("org.example.apikey", "org.example.sshkey", "org.example.privatekey", "org.example.signingkey"),
+    (
+        "org.example.apikey",
+        "org.example.sshkey",
+        "org.example.privatekey",
+        "org.example.signingkey",
+    ),
 )
 def test_scanner_rejects_concatenated_label_authority(key: str) -> None:
     scanner = _scanner_module()
@@ -703,8 +736,8 @@ def test_scanner_rejects_every_forbidden_filesystem_name_family(
         "FROM scratch\nCOPY . /scan/\nENV APP_SECRET=do-not-print\nUSER 10001:10001\n",
         "FROM alpine:3.22\nARG BUILD_SECRET=do-not-print\nRUN echo $BUILD_SECRET >/dev/null\nCOPY . /scan/\nUSER 10001:10001\n",
         "FROM scratch\nCOPY . /scan/\nLABEL org.example.token=do-not-print\nUSER 10001:10001\n",
-        "FROM scratch\nCOPY . /scan/\nENTRYPOINT [\"--password=do-not-print\"]\nUSER 10001:10001\n",
-        "FROM scratch\nCOPY . /scan/\nENTRYPOINT [\"--password\", \"do-not-print\"]\nUSER 10001:10001\n",
+        'FROM scratch\nCOPY . /scan/\nENTRYPOINT ["--password=do-not-print"]\nUSER 10001:10001\n',
+        'FROM scratch\nCOPY . /scan/\nENTRYPOINT ["--password", "do-not-print"]\nUSER 10001:10001\n',
     ),
 )
 def test_scanner_rejects_secret_authority_metadata_without_value_leaks(
@@ -735,7 +768,15 @@ def test_scanner_removes_its_temporary_containers(image_factory) -> None:
 
     assert result.returncode == 0, result.stderr
     containers = subprocess.run(
-        ("docker", "ps", "--all", "--filter", "label=vonk-forge.secret-scan=true", "--format", "{{.ID}}"),
+        (
+            "docker",
+            "ps",
+            "--all",
+            "--filter",
+            "label=vonk-forge.secret-scan=true",
+            "--format",
+            "{{.ID}}",
+        ),
         check=True,
         text=True,
         capture_output=True,
@@ -743,14 +784,24 @@ def test_scanner_removes_its_temporary_containers(image_factory) -> None:
     assert containers == []
 
 
-def test_scanner_removes_temporary_containers_after_filesystem_failure(image_factory) -> None:
+def test_scanner_removes_temporary_containers_after_filesystem_failure(
+    image_factory,
+) -> None:
     image = image_factory(files={".dev/runtime": b"forbidden\n"})
 
     result = _scan(image, image)
 
     assert result.returncode == 1
     containers = subprocess.run(
-        ("docker", "ps", "--all", "--filter", "label=vonk-forge.secret-scan=true", "--format", "{{.ID}}"),
+        (
+            "docker",
+            "ps",
+            "--all",
+            "--filter",
+            "label=vonk-forge.secret-scan=true",
+            "--format",
+            "{{.ID}}",
+        ),
         check=True,
         text=True,
         capture_output=True,
@@ -797,7 +848,9 @@ def test_scanner_fails_closed_when_its_exact_container_is_not_cleaned_up(
     with pytest.raises(scanner.ScanFailure, match="cleanup"):
         scanner.scan_image("synthetic:latest")
 
-    removal_commands = [command for command in commands if command[:2] == ("docker", "rm")]
+    removal_commands = [
+        command for command in commands if command[:2] == ("docker", "rm")
+    ]
     assert removal_commands == [("docker", "rm", "--force", "scanner-container")]
 
 
@@ -808,7 +861,14 @@ def test_development_targets_are_scannable_nonroot_and_have_only_required_git_to
 
     for image in images.values():
         platform = subprocess.run(
-            ("docker", "image", "inspect", "--format", "{{.Os}}/{{.Architecture}}", image),
+            (
+                "docker",
+                "image",
+                "inspect",
+                "--format",
+                "{{.Os}}/{{.Architecture}}",
+                image,
+            ),
             check=True,
             text=True,
             capture_output=True,
@@ -827,7 +887,9 @@ def test_development_targets_are_scannable_nonroot_and_have_only_required_git_to
         "assert shutil.which('git')"
     )
     for image in images.values():
-        subprocess.run(("docker", "run", "--rm", image, "python", "-c", check), check=True)
+        subprocess.run(
+            ("docker", "run", "--rm", image, "python", "-c", check), check=True
+        )
 
     api_tools = subprocess.run(
         (

@@ -24,7 +24,7 @@ def _config(database_url: str) -> Config:
     return config
 
 
-def _upgrade(database: str, revision: str = "head") -> None:
+def _upgrade(database: str, revision: str = "0016_recipe_deployment_authority") -> None:
     command.upgrade(_config(database), revision)
 
 

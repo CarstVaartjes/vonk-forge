@@ -225,7 +225,7 @@ class RecipePresence(_StrictModel):
     recipe_id: Text128
     recipe_revision_id: Text128
     title: Text200
-    profile_name: Text64
+    topology_name: Text64
     expected_rank_count: int = Field(ge=1, le=_MAX_FLEET_NODES)
     present_ranks: list[Rank] = Field(max_length=_MAX_FLEET_NODES)
     member_node_ids: list[NodeId] = Field(max_length=_MAX_FLEET_NODES)
@@ -719,7 +719,7 @@ class FleetProjection:
                         recipe_id=recipe.id,
                         recipe_revision_id=revision.id,
                         title=recipe.title,
-                        profile_name=mapping.profile_name,
+                        topology_name=mapping.topology_name,
                         expected_rank_count=mapping.node_count,
                         present_ranks=present_ranks,
                         member_node_ids=member_node_ids,

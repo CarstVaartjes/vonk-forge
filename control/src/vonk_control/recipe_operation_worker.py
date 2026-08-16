@@ -4,12 +4,17 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import datetime
+from typing import Protocol
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .models import RecipeRun
 from .recipe_routes import RecipeRouteService
+
+
+class _RecoveryCoordinator(Protocol):
+    def tick(self) -> bool: ...
 
 
 class RecipeOperationWorker:
@@ -19,12 +24,16 @@ class RecipeOperationWorker:
         routes: RecipeRouteService,
         *,
         clock: Callable[[], datetime],
+        recoveries: _RecoveryCoordinator | None = None,
     ) -> None:
         self._sessions = sessions
         self._routes = routes
         self._clock = clock
+        self._recoveries = recoveries
 
     def tick(self) -> bool:
+        if self._recoveries is not None and self._recoveries.tick():
+            return True
         with self._sessions() as session:
             run_id = session.scalar(
                 select(RecipeRun.id)

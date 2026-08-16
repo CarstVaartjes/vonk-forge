@@ -96,6 +96,7 @@ def setup(
     clock=None,
     run_alias="qwen",
     runtime_model_aliases=("qwen",),
+    interfaces=None,
 ):
     tmp_path.mkdir(parents=True, exist_ok=True)
     engine = create_engine(f"sqlite:///{tmp_path / 'routes.sqlite'}")
@@ -129,11 +130,14 @@ def setup(
             lifecycle="resolved",
             schema_version=1,
             document={
-                "runtime": {
-                    "endpoint": {
+                "interfaces": interfaces
+                if interfaces is not None
+                else [
+                    {
+                        "adapter": "openai",
                         "model_aliases": list(runtime_model_aliases),
                     }
-                }
+                ]
             },
             content_sha256="a" * 64,
             created_by="admin",
@@ -143,7 +147,7 @@ def setup(
         session.flush()
         mapping = ClusterMapping(
             recipe_revision_id=revision.id,
-            profile_name=f"{ranks}-node",
+            topology_name=f"{ranks}-node",
             generation=1,
             node_count=ranks,
             state="ready",
@@ -354,12 +358,42 @@ def test_public_alias_routes_to_primary_runtime_model_alias(tmp_path: Path) -> N
     assert model["litellm_params"]["model"] == "openai/internal-qwen"
 
 
-def test_missing_runtime_model_authority_blocks_route_publication(
+def test_hermes_alias_comes_only_from_published_v1_recipe_run(
     tmp_path: Path,
 ) -> None:
     service, _publisher, applied, run_id = setup(
-        tmp_path, runtime_model_aliases=()
+        tmp_path,
+        run_alias="hermes-agent",
+        runtime_model_aliases=("deepseek-v4-flash-dspark",),
     )
+
+    service.publish_run(run_id)
+
+    document = json.loads(applied[-1])
+    assert [row["model_name"] for row in document["model_list"]] == [
+        "hermes-agent"
+    ]
+    assert (
+        document["model_list"][0]["litellm_params"]["model"]
+        == "openai/deepseek-v4-flash-dspark"
+    )
+
+
+def test_artifact_interface_never_publishes_a_litellm_route(tmp_path: Path) -> None:
+    service, _publisher, applied, run_id = setup(
+        tmp_path, interfaces=[{"adapter": "video-job"}]
+    )
+
+    with pytest.raises(RecipeRouteError, match="LiteLLM interface"):
+        service.publish_run(run_id)
+
+    assert applied == []
+
+
+def test_missing_runtime_model_authority_blocks_route_publication(
+    tmp_path: Path,
+) -> None:
+    service, _publisher, applied, run_id = setup(tmp_path, runtime_model_aliases=())
 
     with pytest.raises(RecipeRouteError, match="model authority"):
         service.publish_run(run_id)

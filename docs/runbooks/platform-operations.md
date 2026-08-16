@@ -2,24 +2,18 @@
 
 Onboard each GPU node independently with `node-install`; never place an address,
 name, or assumed fleet size in code. After acceptance, emit its canonical fleet
-record and submit it through the admin CLI or web UX. Models and profiles follow
-the same preview, validation, and repository review path.
+record and submit it through the admin CLI or web UX. Model versions and recipes
+follow the same immutable preview, evidence, and repository review path.
 
 The control worker reconciles only an eligible merged commit. It withdraws the
 affected route first, leases stable node IDs in sorted order, applies exact
 repository revisions, verifies health, then atomically publishes Caddy/LiteLLM
 state. A failure or withdrawal remains HTTP 503 maintenance.
 
-Run the simulated full lifecycle before release:
-
-```bash
-scripts/accept-platform-lifecycle --host new-node.local --display-name new-node \
-  --output inventory/reports/platform-lifecycle.json --json
-```
-
-The report explicitly identifies simulated boundaries. The first real release
-also requires an approved physical GPU node lifecycle and a protected code-host
-PR/merge lifecycle; do not convert simulator evidence into those claims.
+Run the current control, recipe-route, and agent acceptance suites before
+release. Physical Spark acceptance is recorded separately and is never inferred
+from a simulator or a browser preview. The Library action preview remains the
+operator gate for install, load, stop, and uninstall.
 
 ## Agent-derived availability and address changes
 

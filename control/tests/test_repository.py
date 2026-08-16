@@ -20,8 +20,8 @@ def repository(tmp_path: Path):
     _git(root, "init", "-q")
     (root / "inventory").mkdir()
     (root / "inventory/fleet.toml").write_text("schema_version = 2\n")
-    (root / "config/cluster-profiles").mkdir(parents=True)
-    (root / "config/cluster-profiles/basic.toml").write_text('schema_version = 1\nname = "basic"\n')
+    (root / "config/package-families").mkdir(parents=True, exist_ok=True)
+    (root / "config/package-families/basic.toml").write_text('schema_version = 1\nname = "basic"\n')
     _git(root, "add", ".")
     _git(root, "commit", "-qm", "initial")
     return root, _git(root, "rev-parse", "HEAD")
@@ -48,7 +48,7 @@ def test_read_is_pinned_to_immutable_commit(repository) -> None:
 
 def test_workload_authority_documents_are_read_from_pinned_commits(repository) -> None:
     root, _commit = repository
-    (root / "config/package-families").mkdir(parents=True)
+    (root / "config/package-families").mkdir(parents=True, exist_ok=True)
     (root / "config/package-families/future.toml").write_text(
         'schema_version = 1\nfamily_id = "future"\n'
     )

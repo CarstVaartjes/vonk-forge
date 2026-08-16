@@ -152,7 +152,7 @@ class Recipes:
         self.mapping_plan = ClusterMappingPlan(
             recipe_revision_id=REVISION,
             recipe_content_sha256="a" * 64,
-            profile_name="solo",
+            topology_name="solo",
             generation=1,
             parameters={},
             nodes=(ClusterMappingPlacement(NODE, 0, "entrypoint", True),),
@@ -168,8 +168,8 @@ class Recipes:
             agent_payload={"operation": "recipe.build.v1"},
         )
 
-    def preview_mapping(self, revision, profile, nodes, *, parameters):
-        self.calls.append(("preview_mapping", (revision, profile, nodes, parameters)))
+    def preview_mapping(self, revision, nodes, *, parameters, actor):
+        self.calls.append(("preview_mapping", (revision, nodes, parameters, actor)))
         return self.mapping_plan
 
     def create_mapping(self, plan, **kwargs):
@@ -388,7 +388,6 @@ def test_source_gate_build_and_cluster_mapping_are_explicit_steps() -> None:
         headers=headers(),
         json={
             "recipe_revision_id": REVISION,
-            "profile_name": "solo",
             "node_ids": [NODE],
             "parameters": {},
         },
@@ -398,7 +397,6 @@ def test_source_gate_build_and_cluster_mapping_are_explicit_steps() -> None:
         headers=headers(),
         json={
             "recipe_revision_id": REVISION,
-            "profile_name": "solo",
             "node_ids": [NODE],
             "parameters": {},
             "placement_digest": "e" * 64,
@@ -432,6 +430,7 @@ def test_source_gate_build_and_cluster_mapping_are_explicit_steps() -> None:
     )
 
     assert checked.json()["passed"] is True
+    assert mapping_preview.json()["topology_name"] == "solo"
     assert mapping_preview.json()["nodes"][0]["rank"] == 0
     assert mapping.status_code == 201
     assert build_preview.json()["build_input_sha256"] == "1" * 64

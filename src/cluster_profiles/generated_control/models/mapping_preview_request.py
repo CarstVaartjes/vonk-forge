@@ -26,13 +26,11 @@ class MappingPreviewRequest:
     """
         Attributes:
             node_ids (list[str]):
-            profile_name (str):
             recipe_revision_id (str):
             parameters (Union[Unset, MappingPreviewRequestParameters]):
      """
 
     node_ids: list[str]
-    profile_name: str
     recipe_revision_id: str
     parameters: Union[Unset, 'MappingPreviewRequestParameters'] = UNSET
 
@@ -46,8 +44,6 @@ class MappingPreviewRequest:
 
 
 
-        profile_name = self.profile_name
-
         recipe_revision_id = self.recipe_revision_id
 
         parameters: Union[Unset, dict[str, Any]] = UNSET
@@ -59,7 +55,6 @@ class MappingPreviewRequest:
 
         field_dict.update({
             "node_ids": node_ids,
-            "profile_name": profile_name,
             "recipe_revision_id": recipe_revision_id,
         })
         if parameters is not UNSET:
@@ -76,8 +71,6 @@ class MappingPreviewRequest:
         node_ids = cast(list[str], d.pop("node_ids"))
 
 
-        profile_name = d.pop("profile_name")
-
         recipe_revision_id = d.pop("recipe_revision_id")
 
         _parameters = d.pop("parameters", UNSET)
@@ -92,7 +85,6 @@ class MappingPreviewRequest:
 
         mapping_preview_request = cls(
             node_ids=node_ids,
-            profile_name=profile_name,
             recipe_revision_id=recipe_revision_id,
             parameters=parameters,
         )

@@ -105,55 +105,8 @@ class ProjectedFleet:
         )
 
 
-class Reconciler:
-    def __init__(self) -> None:
-        self.planned: list[tuple[str, str]] = []
-
-    def plan(self, commit, profile_id, *, fleet_evidence_digest):
-        del fleet_evidence_digest
-        self.planned.append((commit, profile_id))
-        return type(
-            "Plan",
-            (),
-            {
-                "commit": commit,
-                "digest": DIGEST,
-                "targets": (NODE_ID,),
-                "placements": {"model": (NODE_ID,)},
-                "routes": {},
-                "releases": {},
-                "input_digests": {"fleet": "f" * 64},
-                "operation_graph": type(
-                    "Graph",
-                    (),
-                    {
-                        "reconciliation_id": "22222222-2222-4222-8222-222222222222",
-                        "document": {
-                            "base_commit": commit,
-                            "nodes": [],
-                            "schema_version": 1,
-                            "targets": [NODE_ID],
-                        },
-                    },
-                )(),
-                "agent_protocol_range": (1, 1),
-            },
-        )()
-
-    def enqueue(self, plan_digest, actor, request_id, **_kwargs):
-        if plan_digest != DIGEST:
-            raise ValueError("unknown reconciliation plan digest")
-        return {
-            "base_commit": COMMIT,
-            "job_id": "11111111-1111-4111-8111-111111111111",
-            "reconciliation_id": "22222222-2222-4222-8222-222222222222",
-            "state": "queued",
-        }
-
-
 def _client(*, fleet=None, fleet_projection=None, operations=None, role="operator"):
     codec = TokenCodec(b"k" * 32)
-    reconciler = Reconciler()
     audits = MemoryAuditStore()
     app = create_app(
         jobs=Jobs(),
@@ -166,7 +119,6 @@ def _client(*, fleet=None, fleet_projection=None, operations=None, role="operato
             repository=Repository(),
             proposals=None,
             changes=None,
-            reconciler=reconciler,
         ),
         operations=operations,
     )
@@ -174,108 +126,23 @@ def _client(*, fleet=None, fleet_projection=None, operations=None, role="operato
     return (
         TestClient(app),
         {"Authorization": f"Bearer {token}"},
-        reconciler,
+        None,
         audits,
     )
 
 
-def test_profile_plan_is_a_strict_view_of_canonical_server_plan() -> None:
-    client, operator, reconciler, _audits = _client()
+def test_openapi_has_no_profile_reconciliation_or_legacy_document_editor() -> None:
+    client, *_ = _client()
 
-    canonical = client.post(
-        "/api/v1/reconciliations/plan",
-        headers=operator,
-        json={"commit": COMMIT, "profile_id": "agent"},
+    paths = client.app.openapi()["paths"]
+
+    assert not any(path.startswith("/api/v1/profiles/") for path in paths)
+    assert "/api/v1/reconciliations/plan" not in paths
+    assert "/api/v1/reconciliations" not in paths
+    assert not any(
+        path.startswith("/api/v1/reconciliations/") for path in paths
     )
-    scoped = client.post("/api/v1/profiles/agent/plan", headers=operator)
-
-    assert scoped.status_code == 200
-    assert scoped.content == canonical.content
-    assert reconciler.planned == [(COMMIT, "agent"), (COMMIT, "agent")]
-    assert (
-        client.post(
-            "/api/v1/profiles/agent/plan",
-            headers=operator,
-            json={"commit": "0" * 40},
-        ).status_code
-        == 422
-    )
-
-
-def test_apply_requires_exact_server_plan_digest() -> None:
-    client, operator, _reconciler, audits = _client()
-    plan = client.post("/api/v1/profiles/agent/plan", headers=operator)
-    assert plan.status_code == 200
-    fleet = client.get("/api/v1/nodes/status", headers=operator)
-    assert fleet.status_code == 200
-    assert plan.json()["fleet_evidence_digest"] == fleet.json()["evidence_digest"]
-
-    stale = client.post(
-        "/api/v1/reconciliations",
-        headers=operator,
-        json={
-            "fleet_evidence_digest": plan.json()["fleet_evidence_digest"],
-            "plan_digest": "0" * 64,
-        },
-    )
-    accepted = client.post(
-        "/api/v1/reconciliations",
-        headers=operator,
-        json={
-            "fleet_evidence_digest": plan.json()["fleet_evidence_digest"],
-            "plan_digest": plan.json()["digest"],
-        },
-    )
-
-    assert stale.status_code == 409
-    assert stale.json() == {"detail": "reconciliation plan digest is stale"}
-    assert accepted.status_code == 202
-    assert accepted.json()["base_commit"] == COMMIT
-    assert audits.for_request(accepted.headers["x-request-id"]).action == (
-        "reconciliation.apply"
-    )
-
-
-def test_apply_rejects_live_evidence_changed_after_plan() -> None:
-    fleet_state = {"commit": COMMIT, "nodes": []}
-    client, operator, _reconciler, audits = _client(fleet=lambda: fleet_state)
-    plan = client.post("/api/v1/profiles/agent/plan", headers=operator)
-    assert plan.status_code == 200
-    planned_evidence = plan.json()["fleet_evidence_digest"]
-
-    fleet_state["nodes"] = [
-        {
-            "agent_online": False,
-            "agent_state": "unavailable",
-            "compatibility": "incompatible",
-            "disk_available_bytes": 0,
-            "display_name": "Unavailable",
-            "healthy": False,
-            "hostname": "unavailable.invalid",
-            "id": NODE_ID,
-            "labels": {},
-            "lifecycle": "managed",
-            "memory_available_bytes": 0,
-            "profile": "agent",
-            "stale": True,
-        }
-    ]
-    changed = client.get("/api/v1/nodes/status", headers=operator).json()
-    assert changed["evidence_digest"] != planned_evidence
-
-    response = client.post(
-        "/api/v1/reconciliations",
-        headers=operator,
-        json={
-            "fleet_evidence_digest": planned_evidence,
-            "plan_digest": plan.json()["digest"],
-        },
-    )
-
-    assert response.status_code == 409
-    assert response.json() == {"detail": "fleet acceptance evidence is stale"}
-    with pytest.raises(KeyError):
-        audits.for_request(response.headers["x-request-id"])
+    assert "/api/v1/documents" not in paths
 
 
 def test_fleet_is_typed_visual_state_while_nodes_status_remains_legacy_evidence() -> (
@@ -439,6 +306,7 @@ def test_job_status_has_typed_progress_fields_without_payloads() -> None:
     assert "result" not in encoded
 
 
+@pytest.mark.skip(reason="legacy profile reconciliation projection retired in v1")
 def test_plan_response_whitelists_nested_route_release_and_dag_fields() -> None:
     public_digest = "1" * 64
     plan = SimpleNamespace(
@@ -1063,13 +931,10 @@ def test_admin_operation_schema_declares_applicable_bounded_errors() -> None:
         if method in {"delete", "get", "patch", "post", "put"}
     }
     expected = {
-        "applyReconciliation": {"401", "403", "409", "503"},
         "approveAgentEnrollment": {"401", "403", "409", "503"},
         "createEnrollmentGrant": {"401", "403", "503"},
         "getJobLog": {"401", "403", "404", "503"},
         "getPublishedEndpoint": {"401", "404", "503"},
-        "planProfileReconciliation": {"401", "403", "409", "503"},
-        "planReconciliation": {"401", "403", "409", "503"},
         "rejectAgentEnrollment": {"401", "403", "409", "503"},
         "resumeJob": {"401", "403", "404", "409", "503"},
         "revokeAgentNode": {"401", "403", "404", "503"},

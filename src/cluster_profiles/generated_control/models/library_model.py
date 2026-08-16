@@ -12,6 +12,7 @@ from typing import Union
 
 if TYPE_CHECKING:
   from ..models.library_recipe_summary import LibraryRecipeSummary
+  from ..models.model_version_identity import ModelVersionIdentity
 
 
 
@@ -25,14 +26,12 @@ T = TypeVar("T", bound="LibraryModel")
 class LibraryModel:
     """
         Attributes:
-            display_name (str):
-            family (str):
+            model (ModelVersionIdentity):
             recipes (list['LibraryRecipeSummary']):
             page_local (Union[Unset, bool]):  Default: True.
      """
 
-    display_name: str
-    family: str
+    model: 'ModelVersionIdentity'
     recipes: list['LibraryRecipeSummary']
     page_local: Union[Unset, bool] = True
 
@@ -42,9 +41,8 @@ class LibraryModel:
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.library_recipe_summary import LibraryRecipeSummary
-        display_name = self.display_name
-
-        family = self.family
+        from ..models.model_version_identity import ModelVersionIdentity
+        model = self.model.to_dict()
 
         recipes = []
         for recipes_item_data in self.recipes:
@@ -59,8 +57,7 @@ class LibraryModel:
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
-            "display_name": display_name,
-            "family": family,
+            "model": model,
             "recipes": recipes,
         })
         if page_local is not UNSET:
@@ -73,10 +70,12 @@ class LibraryModel:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.library_recipe_summary import LibraryRecipeSummary
+        from ..models.model_version_identity import ModelVersionIdentity
         d = dict(src_dict)
-        display_name = d.pop("display_name")
+        model = ModelVersionIdentity.from_dict(d.pop("model"))
 
-        family = d.pop("family")
+
+
 
         recipes = []
         _recipes = d.pop("recipes")
@@ -91,8 +90,7 @@ class LibraryModel:
         page_local = d.pop("page_local", UNSET)
 
         library_model = cls(
-            display_name=display_name,
-            family=family,
+            model=model,
             recipes=recipes,
             page_local=page_local,
         )

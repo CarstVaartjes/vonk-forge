@@ -1,0 +1,144 @@
+{
+  "schema_version": 1,
+  "kind": "runtime-distribution",
+  "identity": {"publisher": "anemll", "slug": "anemll-vllm-mia"},
+  "metadata": {
+    "title": "Anemll vLLM DSpark runtime for Mia",
+    "description": "Exact Anemll linux/arm64 image and source implementing verified two-node vLLM multiprocessing TP=2 on DGX Spark.",
+    "tags": ["anemll", "distributed", "dspark", "spark", "vllm"]
+  },
+  "implements_harness": {
+    "kind": "execution-harness",
+    "publisher": "vonk-forge",
+    "slug": "vllm",
+    "content_sha256": "c0d297318f223378fe573964291bc90fc950242e0d16d1d301c7d3cb4251487d"
+  },
+  "platform": "linux/arm64",
+  "source": {
+    "repository": "https://github.com/Anemll/dspark-vllm-gx10",
+    "revision": "47503f8e38dadd4dededca798150db2619594fce",
+    "archive_sha256": "9b3e1de63857220506201c5416df29260691597e3ae7ed7cf18f532b642803ea",
+    "license": "MIT"
+  },
+  "image": "ghcr.io/anemll/dspark-vllm-gx10@sha256:a83948492cf13df455170fb42885f5ef4db54fefe0feff0f841ecbff464ac9d8",
+  "image_manifest": {
+    "digest": "a83948492cf13df455170fb42885f5ef4db54fefe0feff0f841ecbff464ac9d8",
+    "size": 9530,
+    "config_digest": "3430d6614a8e2925f34d059af6caf05aff42387326db4d05639a60f10f2654d8",
+    "compressed_layers_bytes": 9787494235
+  },
+  "dependencies": [
+    {
+      "name": "vLLM",
+      "version": "0.25.2.dev0+g752a3a504.d20260714",
+      "source": "https://github.com/vllm-project/vllm@752a3a504485790a2e8491cacbb35c137339ad34",
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "FlashInfer",
+      "version": "0.6.15+0472b9b3",
+      "source": "https://github.com/flashinfer-ai/flashinfer@0472b9b3f2fba11b463f8526f390297d52a8aad7",
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "b12x",
+      "version": "7dc6fb8fcc6446ea093537d1657df81985fa5f43",
+      "source": "https://github.com/lukealonso/b12x@7dc6fb8fcc6446ea093537d1657df81985fa5f43",
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "PyTorch",
+      "version": "2.11.0+cu130",
+      "source": "https://download.pytorch.org/whl/cu130",
+      "license": "BSD-3-Clause"
+    },
+    {
+      "name": "CUDA",
+      "version": "13.0.2",
+      "source": "https://developer.nvidia.com/cuda-toolkit",
+      "license": "NVIDIA CUDA Toolkit EULA"
+    },
+    {
+      "name": "nvidia-cutlass-dsl",
+      "version": "4.5.2",
+      "source": "https://pypi.org/project/nvidia-cutlass-dsl/4.5.2/",
+      "license": "BSD-3-Clause"
+    },
+    {
+      "name": "cuda-python",
+      "version": "13.3.1",
+      "source": "https://pypi.org/project/cuda-python/13.3.1/",
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "apache-tvm-ffi",
+      "version": "0.1.9",
+      "source": "https://pypi.org/project/apache-tvm-ffi/0.1.9/",
+      "license": "Apache-2.0"
+    }
+  ],
+  "build": {
+    "network_hosts": [
+      "download.pytorch.org",
+      "files.pythonhosted.org",
+      "github.com",
+      "ghcr.io",
+      "pypi.org"
+    ],
+    "offline_after_installation": true
+  },
+  "capabilities": {
+    "distributed_vllm": {
+      "verified": true,
+      "mechanism": "vllm-mp",
+      "topology_mode": "distributed",
+      "node_count": 2,
+      "world_size": 2,
+      "tensor_parallel_size": 2,
+      "pipeline_parallel_size": 1,
+      "data_parallel_size": 1,
+      "fabric": "nccl-roce",
+      "endpoint_role": "entrypoint",
+      "worker_role": "worker",
+      "rank_loss_withdraws_endpoint": true,
+      "launch": {
+        "rendezvous": {
+          "local_address_environment": "VONK_LOCAL_ADDR",
+          "master_address_environment": "VONK_MASTER_ADDR",
+          "master_port_environment": "VONK_MASTER_PORT",
+          "master_role": "entrypoint"
+        },
+        "rank_profiles": [
+          {
+            "rank": 0,
+            "role": "entrypoint",
+            "environment": {
+              "GLOO_SOCKET_IFNAME": "enp1s0f1np1,enP2p1s0f1np1",
+              "NCCL_IB_GID_INDEX": "3",
+              "NCCL_IB_HCA": "=rocep1s0f1:1,roceP2p1s0f1:1",
+              "NCCL_SOCKET_IFNAME": "=enp1s0f1np1,enP2p1s0f1np1",
+              "TP_SOCKET_IFNAME": "enp1s0f1np1,enP2p1s0f1np1"
+            }
+          },
+          {
+            "rank": 1,
+            "role": "worker",
+            "environment": {
+              "GLOO_SOCKET_IFNAME": "enp1s0f1np1,enP2p1s0f1np1",
+              "NCCL_IB_GID_INDEX": "3",
+              "NCCL_IB_HCA": "=rocep1s0f1:1,roceP2p1s0f1:1",
+              "NCCL_SOCKET_IFNAME": "=enp1s0f1np1,enP2p1s0f1np1",
+              "TP_SOCKET_IFNAME": "enp1s0f1np1,enP2p1s0f1np1"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "security": {
+    "network_mode": "none",
+    "user": "10001:10001",
+    "no_new_privileges": true,
+    "capabilities": []
+  }
+}

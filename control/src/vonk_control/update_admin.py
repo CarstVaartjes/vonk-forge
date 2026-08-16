@@ -39,7 +39,7 @@ from .updates import (
     UpdatePlan,
     UpdatePlanner,
     VersionSkewAnalyzer,
-    WorkloadReplicaObservation,
+    durable_recipe_workloads,
 )
 
 _MAX_PLANNED_UPDATES = 256
@@ -735,71 +735,11 @@ def durable_route_impacts(
 
 def durable_distributed_workloads(
     sessions: sessionmaker[Session],
+    clock: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> tuple[DistributedWorkload, ...]:
-    """Project accepted active workload groups into rollout availability bounds."""
-    from .desired_state import (
-        _accepted_current_workloads,
-        durable_desired_state_observations,
-    )
+    """Project running v1 recipe runs into rollout availability bounds."""
 
-    observations = {
-        item.node_id: item for item in durable_desired_state_observations(sessions)
-    }
-    with sessions() as session:
-        current = _accepted_current_workloads(session)
-    groups: dict[str, object] = {}
-    observed_members: dict[str, set[str]] = {}
-    for node_id, workloads in current.items():
-        for workload_id, workload in workloads.items():
-            existing = groups.setdefault(workload_id, workload)
-            if existing != workload:
-                raise RuntimeError("active workload group evidence is inconsistent")
-            observed_members.setdefault(workload_id, set()).add(node_id)
-    result = []
-    for workload_id in sorted(groups):
-        workload = groups[workload_id]
-        nodes = tuple(getattr(workload, "nodes", ()))
-        if not nodes or observed_members[workload_id] != set(nodes):
-            raise RuntimeError("active workload group membership is unavailable")
-        if any(node_id not in observations for node_id in nodes):
-            raise RuntimeError("active workload replica health is unavailable")
-        replicas = tuple(
-            WorkloadReplicaObservation(
-                node_id=node_id,
-                healthy=observations[node_id].healthy,
-                serving=any(
-                    current.workload_id == workload_id
-                    for current in observations[node_id].current_workloads
-                ),
-                observed_at=observations[node_id].observed_at,
-                evidence_digest=hashlib.sha256(
-                    canonical_message(
-                        {
-                            "healthy": observations[node_id].healthy,
-                            "node_id": node_id,
-                            "observed_at": observations[
-                                node_id
-                            ].observed_at.isoformat(),
-                            "serving": any(
-                                current.workload_id == workload_id
-                                for current in observations[node_id].current_workloads
-                            ),
-                            "workload_id": workload_id,
-                        }
-                    )
-                ).hexdigest(),
-            )
-            for node_id in nodes
-        )
-        result.append(
-            DistributedWorkload(
-                workload_id=workload_id,
-                members=nodes,
-                minimum_available=max(0, len(nodes) - 1),
-                replicas=replicas,
-            )
-        )
-    return tuple(result)
+    return durable_recipe_workloads(sessions, clock)
 
 
 def topology_exclusions_from_document(

@@ -424,8 +424,9 @@ fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
     let image_reference = format!("{image}@{image_digest}");
     let image_id = format!("sha256:{}", "d".repeat(64));
     let state = roots.agent_data.join("runs").join(run_id);
+    let outputs = state.join("outputs");
     let metadata = roots.agent_data.join("run-metadata").join(run_id);
-    fs::create_dir_all(&state).unwrap();
+    fs::create_dir_all(&outputs).unwrap();
     fs::create_dir_all(&metadata).unwrap();
     fs::write(metadata.join("runtime.json"), b"{}").unwrap();
     fs::create_dir_all(&roots.runtime_image_receipts).unwrap();
@@ -483,7 +484,7 @@ fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
             roots.agent_data.join("models").display()
         ),
         "--mount".to_owned(),
-        format!("type=bind,src={},dst=/state", state.display()),
+        format!("type=bind,src={},dst=/outputs", outputs.display()),
         "--mount".to_owned(),
         format!(
             "type=bind,src={},dst=/run/vonk/runtime.json,readonly",
@@ -516,6 +517,22 @@ fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
             hex_sha256(&canonical_json(&request).unwrap()),
         ))
         .unwrap();
+
+    for forbidden_target in ["/state", "/scratch"] {
+        let mut forbidden = request.clone();
+        let writable = forbidden
+            .arguments
+            .iter_mut()
+            .find(|value| value.contains("dst=/outputs"))
+            .unwrap();
+        *writable = format!("type=bind,src={},dst={forbidden_target}", outputs.display());
+        let forbidden_digest = write_runtime_request(&roots, &forbidden);
+        assert!(
+            executor
+                .execute(&runtime_operation(&forbidden, forbidden_digest))
+                .is_err()
+        );
+    }
 
     {
         let calls = runner.calls.lock().unwrap();
@@ -656,8 +673,9 @@ fn accepted_direct_fabric_runtime_has_the_only_supported_host_shape() {
     let image_reference = format!("{image}@{image_digest}");
     let image_id = format!("sha256:{}", "d".repeat(64));
     let state = roots.agent_data.join("runs").join(run_id);
+    let outputs = state.join("outputs");
     let metadata = roots.agent_data.join("run-metadata").join(run_id);
-    fs::create_dir_all(&state).unwrap();
+    fs::create_dir_all(&outputs).unwrap();
     fs::create_dir_all(&metadata).unwrap();
     fs::write(metadata.join("runtime.json"), b"{}").unwrap();
     fs::create_dir_all(&roots.runtime_image_receipts).unwrap();
@@ -719,7 +737,7 @@ fn accepted_direct_fabric_runtime_has_the_only_supported_host_shape() {
             roots.agent_data.join("models").display()
         ),
         "--mount".to_owned(),
-        format!("type=bind,src={},dst=/state", state.display()),
+        format!("type=bind,src={},dst=/outputs", outputs.display()),
         "--mount".to_owned(),
         format!(
             "type=bind,src={},dst=/run/vonk/runtime.json,readonly",

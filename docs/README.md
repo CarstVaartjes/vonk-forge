@@ -13,12 +13,13 @@ Normal administration uses the stable private Tailscale HTTPS
 - Local PostgreSQL owns recipe families, authored and imported revisions,
   WorkloadRun import reports, installations, placements, and runs. It remains
   usable without the global catalog or a Git remote.
-- The optional global Vonk Forge Web service publishes immutable recipe
-  revisions and metadata. It never stores image layers, model weights, or
-  cluster state.
+- The public `vonk-forge-recipes` repository publishes reviewed immutable recipe
+  metadata and model-target research. It never stores image layers, model
+  weights, or cluster state. Vonk Forge Web may later provide a browser-facing
+  catalog, but it is not the recipe authority.
 - Git/TUF remains the authority for platform source, fleet/topology policy,
-  and the existing platform/workload release projection until that projection
-  is migrated to catalog revisions.
+  and the independent generic-package release projection. It is not a second
+  model or recipe authority.
 
 ## Deployment boundary
 
@@ -35,9 +36,10 @@ Normal administration uses the stable private Tailscale HTTPS
   `dev`; trusted stable tags attach the exact accepted package evidence to the
   GitHub Release before apt `stable` advances. Package and apt signing
   authority remain separate from NAS runtime secrets.
-- The initial local product does not require Railway or a global catalog. The
-  future `vonk-forge-web` frontend belongs on Cloudflare Pages; its global
-  API/validation worker/PostgreSQL backend may later run on Railway.
+- The initial local product does not require Railway or a hosted catalog API.
+  The future `vonk-forge-web` frontend belongs on Cloudflare Pages; its global
+  API/validation worker/PostgreSQL backend may later provide discovery without
+  replacing the public recipe repository or local catalog authority.
 - Recipe containers and model weights are installed and run on the NAS/GPU nodes,
   never on Railway or Cloudflare Pages.
 
@@ -53,10 +55,20 @@ Normal administration uses the stable private Tailscale HTTPS
 - [Control-plane bootstrap](runbooks/control-plane-bootstrap.md)
 - [Control-plane operations](runbooks/control-plane-operations.md) — Fleet,
   Library, recipe placement, resource previews, and safe action semantics
+- [Model catalog](operators/model-catalog.md) — model identity, recipes,
+  topology, install/update, and exact-revision rollback
+- [Model target ledger](operators/model-targets.md) — current defaults,
+  candidates, blocked upstreams, and the path from research to an accepted
+  recipe
+- [Standard recipe library](operators/recipe-library.md) — the public recipe
+  repository, authority split, immutable imports, and validation commands
+- [Execution harness operations](operators/execution-harnesses.md) — built-in
+  harnesses, interface publication, clean reset, and canonical acceptance
 - [Control-plane telemetry](runbooks/control-plane-telemetry.md) — metrics,
   freshness, resolutions, retention, and troubleshooting
 - [Node onboarding and health](runbooks/node-onboarding.md)
-- [Recipe and workload operations](runbooks/workload-packages.md)
+- [Recipe operations](runbooks/model-switching.md)
+- [Generic workload package operations](runbooks/workload-packages.md)
 - [Global catalog import and publication](runbooks/global-catalog.md)
 - [Vonk Forge agent installation](operations/install-vonk-agent.md)
 - [Accepted development system evidence](audits/2026-08-15-development-system-acceptance.md)

@@ -2,7 +2,7 @@ import {useCallback, useEffect, useRef, useState} from "react";
 import type {MouseEvent} from "react";
 import type {LibraryApi, LibraryModel, LibraryRecipeDetail, LibraryRecipeSummary, LibrarySnapshot} from "../api/types";
 import {LibraryBrowser} from "../components/library-browser";
-import {libraryRoute} from "../lib/library-route";
+import {libraryRoute, modelVersionKey} from "../lib/library-route";
 import type {LibraryRoute} from "../lib/library-route";
 import "./library.css";
 
@@ -22,15 +22,16 @@ function boundedItems<T>(items: T[], limit: number, key: (item: T) => string, pi
 }
 
 function mergeSnapshot(current: LibrarySnapshot | undefined, next: LibrarySnapshot, route: LibraryRoute): {snapshot: LibrarySnapshot; truncated: boolean} {
-  const models = new Map((current?.models ?? []).map(model => [model.family, {...model, recipes: [...model.recipes]}]));
+  const models = new Map((current?.models ?? []).map(model => [modelVersionKey(model.model), {...model, recipes: [...model.recipes]}]));
   for (const model of next.models) {
-    const existing = models.get(model.family);
+    const modelKey = modelVersionKey(model.model);
+    const existing = models.get(modelKey);
     if (!existing) {
-      models.set(model.family, {...model, recipes: [...model.recipes]});
+      models.set(modelKey, {...model, recipes: [...model.recipes]});
       continue;
     }
     const recipeIds = new Set(existing.recipes.map(recipe => recipe.recipe_id));
-    models.set(model.family, {
+    models.set(modelKey, {
       ...existing,
       recipes: existing.recipes.concat(model.recipes.filter(recipe => !recipeIds.has(recipe.recipe_id))),
     });
@@ -42,10 +43,13 @@ function mergeSnapshot(current: LibrarySnapshot | undefined, next: LibrarySnapsh
     truncated ||= bounded.truncated;
     return {...model, recipes: bounded.items};
   });
-  const selectedFamily = route.kind === "model" && !route.unlinked
-    ? route.family
-    : modelItems.find(model => recipeId && model.recipes.some(recipe => recipe.recipe_id === recipeId))?.family;
-  const boundedModels = boundedItems(modelItems, LIBRARY_MODEL_WINDOW, model => model.family, selectedFamily);
+  const recipeModel = modelItems.find(
+    model => recipeId && model.recipes.some(recipe => recipe.recipe_id === recipeId),
+  );
+  const selectedModelKey = route.kind === "model" && !route.unlinked
+    ? route.modelKey
+    : recipeModel ? modelVersionKey(recipeModel.model) : undefined;
+  const boundedModels = boundedItems(modelItems, LIBRARY_MODEL_WINDOW, model => modelVersionKey(model.model), selectedModelKey);
   truncated ||= boundedModels.truncated;
 
   const currentUnlinked = current?.unlinked_recipes ?? [];
@@ -85,7 +89,7 @@ function restoreRouteParent(snapshot: LibrarySnapshot, recipeId: string, parent:
     return {...snapshot, unlinked_recipes: unlinked.items};
   }
 
-  const existing = snapshot.models.find(model => model.family === parent.model.family);
+  const existing = snapshot.models.find(model => modelVersionKey(model.model) === modelVersionKey(parent.model.model));
   const restoredModel = existing
     ? {
         ...existing,
@@ -98,11 +102,11 @@ function restoreRouteParent(snapshot: LibrarySnapshot, recipeId: string, parent:
       }
     : {...parent.model, recipes: [parent.recipe]};
   const models = existing
-    ? snapshot.models.map(model => model.family === restoredModel.family ? restoredModel : model)
+    ? snapshot.models.map(model => modelVersionKey(model.model) === modelVersionKey(restoredModel.model) ? restoredModel : model)
     : snapshot.models.concat(restoredModel);
   return {
     ...snapshot,
-    models: boundedItems(models, LIBRARY_MODEL_WINDOW, model => model.family, restoredModel.family).items,
+    models: boundedItems(models, LIBRARY_MODEL_WINDOW, model => modelVersionKey(model.model), modelVersionKey(restoredModel.model)).items,
   };
 }
 
@@ -121,6 +125,7 @@ export function LibraryPage({api, path, onNavigate}: {
   const [paginationWindowed, setPaginationWindowed] = useState(false);
   const [snapshotAttempt, setSnapshotAttempt] = useState(0);
   const [detailAttempt, setDetailAttempt] = useState(0);
+  const [query, setQuery] = useState("");
   const loadMoreController = useRef<AbortController | undefined>(undefined);
   const routeParents = useRef(new Map<string, RouteParent>());
   const heading = useRef<HTMLHeadingElement>(null);
@@ -219,6 +224,10 @@ export function LibraryPage({api, path, onNavigate}: {
   const browserSnapshot = snapshot && route.kind === "recipe"
     ? restoreRouteParent(snapshot, route.recipeId, routeParents.current.get(route.recipeId))
     : snapshot;
+  const modelCount = snapshot?.models.length ?? 0;
+  const linkedRecipeCount = snapshot?.models.reduce((total, model) => total + model.recipes.length, 0) ?? 0;
+  const unlinkedRecipeCount = snapshot?.unlinked_recipes.length ?? 0;
+  const recipeCount = linkedRecipeCount + unlinkedRecipeCount;
 
   return <div className="library-page">
     <header className="fleet-hero">
@@ -227,7 +236,28 @@ export function LibraryPage({api, path, onNavigate}: {
         <h2 ref={heading} tabIndex={-1}>Library</h2>
         <p className="fleet-introduction">Choose a model, its exact recipe, and one complete placement group before reviewing any change.</p>
       </div>
+      <div className="library-hero-action">
+        <span>Ready to shape the fleet?</span>
+        <a className="button" href="/catalog" onClick={event => onNavigate(event, "/catalog")}>Manage recipes</a>
+      </div>
     </header>
+    {snapshot && <>
+      <section className="library-overview" aria-label="Library summary">
+        <div className="library-stat library-stat-accent" role="group" aria-label={`${modelCount} model version${modelCount === 1 ? "" : "s"}`}><span>Model versions</span><strong>{modelCount}</strong><small>Exact immutable identities</small></div>
+        <div className="library-stat" role="group" aria-label={`${recipeCount} recipes`}><span>Recipes in view</span><strong>{recipeCount}</strong><small>{paginationWindowed ? "Bounded loaded window" : "Available locally"}</small></div>
+        <div className="library-stat" role="group" aria-label={`${linkedRecipeCount} linked`}><span>Linked recipes</span><strong>{linkedRecipeCount}</strong><small>Ready to choose a model</small></div>
+        <div className={`library-stat${unlinkedRecipeCount > 0 ? " library-stat-warning" : ""}`} role="group" aria-label={`${unlinkedRecipeCount} needs a model version`}><span>Needs model version</span><strong>{unlinkedRecipeCount}</strong><small>{unlinkedRecipeCount > 0 ? "Review before install" : "Everything has an exact model"}</small></div>
+      </section>
+      <div className="library-toolbar">
+        <label className="library-search">
+          <span>Find a model or recipe</span>
+          <input type="search" aria-label="Search Library" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search names, slugs, capabilities…" />
+        </label>
+        <div className="library-search-meta" aria-live="polite">
+          {query.trim() ? <><span>Filtering the loaded window</span><button type="button" className="button secondary" onClick={() => setQuery("")}>Clear Library search</button></> : <span>Browse exact versions and their accepted recipes</span>}
+        </div>
+      </div>
+    </>}
     {error && <section className="fleet-error" role="alert"><h3>Library unavailable</h3><p>{error}</p><button type="button" onClick={() => setSnapshotAttempt(value => value + 1)}>Retry Library</button></section>}
     {!error && !snapshot && <section className="fleet-loading" role="status" aria-label="Loading Library"><span className="loading-orb" aria-hidden="true"/><div><h3>Opening Library</h3><p>Loading model, recipe, and placement authority…</p></div></section>}
     {snapshot && snapshot.models.length === 0 && snapshot.unlinked_recipes.length === 0 && <section className="fleet-empty"><h3>No recipes in the Library</h3><p>Create or import a recipe through the advanced catalog workflow.</p><a className="button" href="/catalog" onClick={event => onNavigate(event, "/catalog")}>Open advanced catalog</a></section>}
@@ -239,6 +269,7 @@ export function LibraryPage({api, path, onNavigate}: {
       onNavigate={onNavigate}
       onRefresh={refreshDetail}
       onRetryDetail={() => setDetailAttempt(value => value + 1)}
+      query={query}
       route={route}
       snapshot={browserSnapshot}
       windowed={paginationWindowed}

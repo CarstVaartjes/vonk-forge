@@ -26,6 +26,9 @@ def _copy(tmp_path: Path) -> Path:
         "schemas/control-deployment-bundle.schema.json",
         "schemas/platform-update-manifest.schema.json",
         "schemas/workload-artifact-build.schema.json",
+        "schemas/global/catalog-entity-v1.schema.json",
+        "schemas/global/recipe-v1.schema.json",
+        "schemas/global/harness-evidence-v1.schema.json",
         "src/cluster_profiles/deployment_bundle.py",
         "src/cluster_profiles/platform_authority_client.py",
         "src/cluster_profiles/platform_publication.py",
@@ -43,6 +46,16 @@ def _copy(tmp_path: Path) -> Path:
         "control/src/vonk_control/host_state.py",
         "control/src/vonk_control/oci_bundle.py",
         "control/src/vonk_control/upgrade.py",
+        "control/src/vonk_control/catalog_contract.py",
+        "control/src/vonk_control/recipe_contract.py",
+        "control/src/vonk_control/catalog_entities.py",
+        "control/src/vonk_control/catalog_service.py",
+        "control/src/vonk_control/catalog_api.py",
+        "control/src/vonk_control/auth.py",
+        "control/src/vonk_control/library_contract.py",
+        "control/src/vonk_control/recipe_routes.py",
+        "control/src/vonk_control/models.py",
+        "control/migrations/versions/0015_recipe_catalog.py",
         "control/web/package-lock.json", "control/Dockerfile",
         "deploy/compose/compose.yaml", "deploy/compose/images.lock.json",
         "deploy/compose/compose.dev.images.yaml",
@@ -60,7 +73,6 @@ def _copy(tmp_path: Path) -> Path:
         "deploy/compose/hermes-agent/Dockerfile",
         "deploy/compose/hermes-agent/entrypoint.sh",
         "deploy/compose/bin/harden-hermes-egress",
-        "config/hermes-agent-policy.toml",
         "deploy/compose/litellm/config.yaml",
         "deploy/compose/litellm/config_supervisor.py",
         "deploy/compose/litellm/entrypoint.sh",
@@ -92,12 +104,29 @@ def _copy(tmp_path: Path) -> Path:
         "scripts/verify-public-image-inputs",
         "scripts/verify-dev-image-secrets",
         "scripts/verify-supply-chain",
+        "scripts/accept-recipe",
+        "scripts/run-development-slices",
+        "scripts/qualify-recipe",
+        "scripts/import-recipe-library",
+        "scripts/validate-recipe-library",
         "scripts/workload-artifact-metadata",
         "src/cluster_profiles/update_trust.py",
+        "config/recipe-library-manifest.json",
     ):
         destination = target / path
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / path, destination)
+    for directory in (
+        "config/model-groups",
+        "config/models",
+        "config/model-versions",
+        "config/execution-harnesses",
+        "config/runtime-distributions",
+        "config/patch-bundles",
+        "config/recipes",
+        "config/model-targets",
+    ):
+        shutil.copytree(ROOT / directory, target / directory)
     shutil.copytree(
         ROOT / "agent_protocol/src",
         target / "agent_protocol/src",
@@ -135,6 +164,20 @@ def test_verifier_accepts_locked_offline_evidence(tmp_path: Path) -> None:
     assert result.returncode == 0
     assert '"ok":true' in result.stdout
     assert "inventory/sbom/agent-protocol.spdx.json" in result.stdout
+
+
+def test_verifier_accepts_write_manifest_alias(tmp_path: Path) -> None:
+    repository = _copy(tmp_path)
+
+    result = subprocess.run(
+        [SCRIPT, "--root", repository, "--write-manifest", "--json"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert '"ok":true' in result.stdout
 
 
 def test_supply_chain_runbook_separates_workload_build_and_promotion() -> None:
@@ -247,6 +290,61 @@ def test_supply_chain_manifest_binds_installed_host_updater_sources(
     repository = _copy(tmp_path)
     updater = repository / "control/src/vonk_control/offline.py"
     updater.write_bytes(updater.read_bytes() + b"\n# drift\n")
+
+    result = subprocess.run(
+        [SCRIPT, "--root", repository, "--json"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "manifest" in " ".join(json.loads(result.stdout)["errors"]).lower()
+
+
+def test_supply_chain_manifest_binds_v1_recipe_catalog_authority(
+    tmp_path: Path,
+) -> None:
+    repository = _copy(tmp_path)
+    manifest = json.loads(
+        (repository / "inventory/sbom/manifest.json").read_bytes()
+    )
+
+    for path in (
+        "schemas/global/catalog-entity-v1.schema.json",
+        "schemas/global/recipe-v1.schema.json",
+        "control/src/vonk_control/catalog_contract.py",
+        "control/src/vonk_control/recipe_contract.py",
+        "control/src/vonk_control/catalog_api.py",
+        "control/src/vonk_control/auth.py",
+        "control/src/vonk_control/recipe_routes.py",
+        "control/src/vonk_control/models.py",
+        "control/migrations/versions/0015_recipe_catalog.py",
+        "scripts/accept-recipe",
+        "scripts/run-development-slices",
+        "scripts/qualify-recipe",
+        "scripts/import-recipe-library",
+        "config/recipe-library-manifest.json",
+    ):
+        assert path in manifest["inputs"]
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        "control/src/vonk_control/catalog_api.py",
+        "control/src/vonk_control/auth.py",
+        "control/src/vonk_control/recipe_routes.py",
+        "control/src/vonk_control/models.py",
+        "control/migrations/versions/0015_recipe_catalog.py",
+    ),
+)
+def test_supply_chain_manifest_binds_recipe_authority_edges(
+    tmp_path: Path, path: str
+) -> None:
+    repository = _copy(tmp_path)
+    candidate = repository / path
+    candidate.write_bytes(candidate.read_bytes() + b"\n# recipe authority drift\n")
 
     result = subprocess.run(
         [SCRIPT, "--root", repository, "--json"],

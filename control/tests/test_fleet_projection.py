@@ -475,7 +475,7 @@ def test_projection_dtos_reject_coercion_unbounded_values_and_open_vocabularies(
         "recipe_id": "00000000-0000-4000-8000-000000000002",
         "recipe_revision_id": "00000000-0000-4000-8000-000000000003",
         "title": "Recipe",
-        "profile_name": "pair",
+        "topology_name": "pair",
         "expected_rank_count": 1,
         "present_ranks": [0],
         "member_node_ids": [NODE_A],
@@ -893,7 +893,7 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank() -> None:
         mapping = ClusterMapping(
             id=mapping_id,
             recipe_revision_id=revision_id,
-            profile_name="pair",
+            topology_name="pair",
             generation=1,
             node_count=2,
             state="ready",
@@ -1482,7 +1482,7 @@ def test_projection_selects_only_the_latest_512_current_installation_groups() ->
             ClusterMapping(
                 id=mapping_id,
                 recipe_revision_id=revision_id,
-                profile_name="solo",
+                topology_name="solo",
                 generation=1,
                 node_count=1,
                 state="ready",

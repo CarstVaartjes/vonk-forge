@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "kind": "runtime-distribution",
+  "identity": {"publisher": "antirez", "slug": "ds4-spark"},
+  "metadata": {
+    "title": "DS4 DGX Spark runtime",
+    "description": "DS4 built from the exact canonical source revision for CUDA SM121 on linux/arm64.",
+    "tags": ["cuda", "ds4", "spark"]
+  },
+  "implements_harness": {
+    "kind": "execution-harness",
+    "publisher": "vonk-forge",
+    "slug": "ds4",
+    "content_sha256": "ac139f771cc97b27c1cf6fd97404b6a4db56d6d1725b4282cc5af0289a5421b3"
+  },
+  "platform": "linux/arm64",
+  "source": {
+    "repository": "https://github.com/antirez/ds4",
+    "revision": "84cc882352757baf628a1776badf7cc54d584e28",
+    "archive_sha256": "3ab2c4485bee87f36166b12ab59abbc293ad9fdfadb1c2920d1cbc7f617da165",
+    "license": "MIT"
+  },
+  "image": "nvcr.io/nvidia/cuda:13.0.1-runtime-ubuntu24.04@sha256:36050649ad1acc5d3de2c26620191c25850fb12a5771b6c22996033003d952e4",
+  "image_manifest": {
+    "digest": "36050649ad1acc5d3de2c26620191c25850fb12a5771b6c22996033003d952e4",
+    "size": 2207,
+    "config_digest": "55e3a0bc92ce6d14b77cd8f4a81414f2b75c6b3964b17dc452028b55e09ab168",
+    "compressed_layers_bytes": 1765183632
+  },
+  "dependencies": [
+    {
+      "name": "CUDA runtime",
+      "version": "13.0.1-ubuntu24.04",
+      "source": "nvcr.io/nvidia/cuda",
+      "license": "NVIDIA CUDA Toolkit EULA"
+    }
+  ],
+  "build": {
+    "network_hosts": [],
+    "offline_after_installation": true
+  },
+  "capabilities": {"distributed_vllm": null},
+  "security": {
+    "network_mode": "none",
+    "user": "10001:10001",
+    "no_new_privileges": true,
+    "capabilities": []
+  }
+}

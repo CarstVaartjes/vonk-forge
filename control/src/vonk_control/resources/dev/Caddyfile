@@ -60,6 +60,12 @@ http://127.0.0.1:2019 {
 	reverse_proxy control-api:8000
 }
 
+(litellm_route_lease) {
+	forward_auth litellm:4001 {
+		uri /vonk/route-lease
+	}
+}
+
 # Tailscale Services terminates HTTPS before this private Docker listener. The
 # service MagicDNS name is exactly vonk-forge.<tailnet-name>.ts.net; every
 # other Host fails before it can reach the browser API or UI.
@@ -80,6 +86,7 @@ http://127.0.0.1:2019 {
 		}
 		handle /v1/* {
 			import browser_proxy_headers
+			import litellm_route_lease
 			reverse_proxy litellm:4000
 		}
 		@litellm_repository_authority {
@@ -91,6 +98,7 @@ http://127.0.0.1:2019 {
 		}
 		handle_path /litellm/* {
 			import browser_proxy_headers
+			import litellm_route_lease
 			reverse_proxy litellm:4000
 		}
 		handle /grafana/* {
@@ -104,6 +112,16 @@ http://127.0.0.1:2019 {
 	respond 421
 }
 # END PRIVATE BROWSER EDGE
+
+# Internal inference clients use the same request-time lease authority without
+# exposing LiteLLM's native listener or management routes.
+:8081 {
+	handle /v1/* {
+		import litellm_route_lease
+		reverse_proxy litellm:4000
+	}
+	respond 404
+}
 
 https://{$VONK_AGENT_ENROLL_HOSTNAME}:{$VONK_BACKEND_PORT} {
 	import edge_guards

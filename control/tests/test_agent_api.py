@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import hashlib
 import io
 import json
@@ -19,8 +20,10 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import sessionmaker
+from test_catalog_entities import execution_harness, patch_bundle, runtime_distribution
+from test_catalog_service import _resolve_entity, _seed_recipe_dependencies
 from vonk_agent_protocol import canonical_message
 from vonk_control.agent_api import (
     AgentApiServices,
@@ -33,6 +36,8 @@ from vonk_control.agent_jobs import AgentJobService
 from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
+from vonk_control.catalog_contract import catalog_content_sha256
+from vonk_control.catalog_service import CatalogService
 from vonk_control.enrollment import EnrollmentDenied, EnrollmentService
 from vonk_control.metrics import MetricsRegistry, OperationalMetricsCollector
 from vonk_control.models import (
@@ -742,8 +747,7 @@ def test_builder_uploads_digest_verified_docker_archive_without_a_registry(
 
     rejected = client.put(
         f"/agent/v1/recipe-builds/{build_id}/image",
-        headers=headers
-        | {"content-type": "application/vnd.oci.image.layout.v1.tar"},
+        headers=headers | {"content-type": "application/vnd.oci.image.layout.v1.tar"},
         content=payload,
     )
     assert rejected.status_code == 415
@@ -1843,13 +1847,47 @@ def test_rust_agent_enrollment_shape_remains_controller_compatible(
     assert body["grant_token"] not in repr(event)
 
 
-def test_agent_reads_only_its_installation_bound_built_recipe_spec(
+def test_agent_runtime_spec_requires_exact_dependencies_and_registry_projection(
     agent_system,
 ) -> None:
     client, services, _, clock = agent_system
     document = json.loads(
         (Path(__file__).parent / "fixtures/global/recipe-v1-minimal.json").read_text()
     )
+    harness_document = json.loads(
+        (Path(__file__).parents[2] / "config/execution-harnesses/vllm.json").read_text()
+    )
+    harness_digest = catalog_content_sha256(harness_document)
+    distribution_document = runtime_distribution(
+        harness_digest,
+        slug="vllm-arm64",
+        harness_slug="vllm",
+    )
+    distribution_digest = catalog_content_sha256(distribution_document)
+    document["execution"]["harness"] = {
+        "kind": "execution-harness",
+        "publisher": "vonk-forge",
+        "slug": "vllm",
+        "content_sha256": harness_digest,
+    }
+    document["runtime"]["distribution"] = {
+        "kind": "runtime-distribution",
+        "publisher": "vonk-forge",
+        "slug": "vllm-arm64",
+        "content_sha256": distribution_digest,
+    }
+    document["runtime"]["entrypoint"] = [
+        "/opt/vonk/bin/vllm",
+        "serve",
+        "/models",
+    ]
+    document["runtime"]["arguments"].append(
+        {"name": "tensor-parallel-size", "value": 1}
+    )
+    document["runtime"]["security"]["mounts"] = [
+        {"source": "model", "target": "/models", "read_only": True},
+        {"source": "outputs", "target": "/outputs", "read_only": False},
+    ]
     digest = recipe_content_sha256(document)
     recipe_id = str(uuid.uuid4())
     revision_id = str(uuid.uuid4())
@@ -1888,7 +1926,7 @@ def test_agent_reads_only_its_installation_bound_built_recipe_spec(
             ClusterMapping(
                 id=mapping_id,
                 recipe_revision_id=revision_id,
-                profile_name=document["deployment_profiles"][0]["name"],
+                topology_name=document["topology"]["name"],
                 generation=1,
                 node_count=1,
                 state="ready",
@@ -1961,16 +1999,167 @@ def test_agent_reads_only_its_installation_bound_built_recipe_spec(
         headers=agent_headers(NODE_A, "serial-a"),
     )
 
-    assert response.status_code == 200
-    assert response.content == canonical_message(response.json())
-    assert set(response.json()) == {
+    assert response.status_code == 409
+    assert response.json()["detail"] == "recipe specification dependencies are stale"
+    catalog = CatalogService(
+        services.sessions,
+        clock=lambda: clock.now,
+        cursors=TokenCodec(b"c" * 32).cursor_codec(),
+    )
+    _seed_recipe_dependencies(catalog, document)
+    resolved_harness = _resolve_entity(catalog, harness_document)
+    resolved_distribution = _resolve_entity(catalog, distribution_document)
+    document["execution"]["harness"] = {
+        "kind": "execution-harness",
+        "publisher": "vonk-forge",
+        "slug": "vllm",
+        "content_sha256": resolved_harness.content_sha256,
+    }
+    document["runtime"]["distribution"] = {
+        "kind": "runtime-distribution",
+        "publisher": "vonk-forge",
+        "slug": "vllm-arm64",
+        "content_sha256": resolved_distribution.content_sha256,
+    }
+    with services.sessions.begin() as session:
+        session.execute(
+            update(LocalRecipeRevision)
+            .where(LocalRecipeRevision.id == revision_id)
+            .values(
+                document=document,
+                content_sha256=recipe_content_sha256(document),
+            )
+        )
+    resolved = client.get(
+        f"/agent/v1/recipe-installations/{installation_id}/spec",
+        headers=agent_headers(NODE_A, "serial-a"),
+    )
+    assert resolved.status_code == 200
+    assert set(resolved.json()) == {
+        "runtime",
         "artifacts",
         "endpoint",
-        "runtime",
         "security",
         "lifecycle",
     }
-    assert response.json()["runtime"]["image"].endswith("@" + image_digest)
+    assert resolved.json()["runtime"]["entrypoint"] == [
+        "/opt/vonk/bin/vllm",
+        "serve",
+        "/models",
+        "--max-model-len",
+        "32768",
+        "--tensor-parallel-size",
+        "1",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+    ]
+    assert resolved.json()["runtime"]["arguments"] == []
+    shell_authority = copy.deepcopy(document)
+    shell_authority["runtime"]["entrypoint"] = [
+        "/bin/sh",
+        "-c",
+        "/tmp/recipe-authored-payload",
+    ]
+    with services.sessions.begin() as session:
+        session.execute(
+            update(LocalRecipeRevision)
+            .where(LocalRecipeRevision.id == revision_id)
+            .values(
+                document=shell_authority,
+                content_sha256=recipe_content_sha256(shell_authority),
+            )
+        )
+    rejected_shell = client.get(
+        f"/agent/v1/recipe-installations/{installation_id}/spec",
+        headers=agent_headers(NODE_A, "serial-a"),
+    )
+    assert rejected_shell.status_code == 409
+    assert "entrypoint" in rejected_shell.json()["detail"]
+    with services.sessions.begin() as session:
+        session.execute(
+            update(LocalRecipeRevision)
+            .where(LocalRecipeRevision.id == revision_id)
+            .values(
+                document=document,
+                content_sha256=recipe_content_sha256(document),
+            )
+        )
+    incompatible_harness = _resolve_entity(
+        catalog, execution_harness("different-harness", source_sha256="c" * 64)
+    )
+    incompatible_distribution = _resolve_entity(
+        catalog,
+        runtime_distribution(
+            incompatible_harness.content_sha256,
+            slug="different-runtime",
+            harness_slug="different-harness",
+        ),
+    )
+    distribution_mismatch = copy.deepcopy(document)
+    distribution_mismatch["runtime"]["distribution"] = {
+        "kind": "runtime-distribution",
+        "publisher": "vonk-forge",
+        "slug": "different-runtime",
+        "content_sha256": incompatible_distribution.content_sha256,
+    }
+    with services.sessions.begin() as session:
+        session.execute(
+            update(LocalRecipeRevision)
+            .where(LocalRecipeRevision.id == revision_id)
+            .values(
+                document=distribution_mismatch,
+                content_sha256=recipe_content_sha256(distribution_mismatch),
+            )
+        )
+    rejected_distribution = client.get(
+        f"/agent/v1/recipe-installations/{installation_id}/spec",
+        headers=agent_headers(NODE_A, "serial-a"),
+    )
+    assert rejected_distribution.status_code == 409
+    assert (
+        rejected_distribution.json()["detail"]
+        == "recipe specification distribution-harness binding is invalid"
+    )
+    selected_distribution = document["runtime"]["distribution"]
+    assert isinstance(selected_distribution, dict)
+    other_distribution = _resolve_entity(
+        catalog,
+        runtime_distribution(
+            str(document["execution"]["harness"]["content_sha256"]),
+            slug="other-runtime",
+            harness_slug="vllm",
+        ),
+    )
+    incompatible_patch = _resolve_entity(
+        catalog, patch_bundle("other-runtime", other_distribution.content_sha256)
+    )
+    patch_mismatch = copy.deepcopy(document)
+    patch_mismatch["execution"]["patch_bundle"] = {
+        "kind": "patch-bundle",
+        "publisher": "vonk-forge",
+        "slug": "vllm-fix",
+        "content_sha256": incompatible_patch.content_sha256,
+    }
+    with services.sessions.begin() as session:
+        session.execute(
+            update(LocalRecipeRevision)
+            .where(LocalRecipeRevision.id == revision_id)
+            .values(
+                document=patch_mismatch,
+                content_sha256=recipe_content_sha256(patch_mismatch),
+            )
+        )
+    rejected_patch = client.get(
+        f"/agent/v1/recipe-installations/{installation_id}/spec",
+        headers=agent_headers(NODE_A, "serial-a"),
+    )
+    assert rejected_patch.status_code == 409
+    assert (
+        rejected_patch.json()["detail"]
+        == "recipe specification patch-distribution binding is invalid"
+    )
     assert (
         client.get(
             f"/agent/v1/recipe-installations/{uuid.uuid4()}/spec",

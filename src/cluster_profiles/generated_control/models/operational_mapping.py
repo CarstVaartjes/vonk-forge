@@ -28,17 +28,17 @@ class OperationalMapping:
             generation (int):
             mapping_id (str):
             nodes (list['OperationalMappingNode']):
-            profile_name (str):
             recipe_revision_id (str):
             state (OperationalMappingState):
+            topology_name (str):
      """
 
     generation: int
     mapping_id: str
     nodes: list['OperationalMappingNode']
-    profile_name: str
     recipe_revision_id: str
     state: OperationalMappingState
+    topology_name: str
 
 
 
@@ -57,11 +57,11 @@ class OperationalMapping:
 
 
 
-        profile_name = self.profile_name
-
         recipe_revision_id = self.recipe_revision_id
 
         state: str = self.state
+
+        topology_name = self.topology_name
 
 
         field_dict: dict[str, Any] = {}
@@ -70,9 +70,9 @@ class OperationalMapping:
             "generation": generation,
             "mapping_id": mapping_id,
             "nodes": nodes,
-            "profile_name": profile_name,
             "recipe_revision_id": recipe_revision_id,
             "state": state,
+            "topology_name": topology_name,
         })
 
         return field_dict
@@ -97,8 +97,6 @@ class OperationalMapping:
             nodes.append(nodes_item)
 
 
-        profile_name = d.pop("profile_name")
-
         recipe_revision_id = d.pop("recipe_revision_id")
 
         state = check_operational_mapping_state(d.pop("state"))
@@ -106,13 +104,15 @@ class OperationalMapping:
 
 
 
+        topology_name = d.pop("topology_name")
+
         operational_mapping = cls(
             generation=generation,
             mapping_id=mapping_id,
             nodes=nodes,
-            profile_name=profile_name,
             recipe_revision_id=recipe_revision_id,
             state=state,
+            topology_name=topology_name,
         )
 
         return operational_mapping

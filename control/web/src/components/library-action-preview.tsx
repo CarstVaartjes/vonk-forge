@@ -45,7 +45,7 @@ export function MappingPreview({evidence, plan, policy}: {
   policy: LibrarySnapshot["freshness_policy"];
 }) {
   return <div className="action-preview">
-    <p><strong>{plan.profile_name}</strong> · generation {plan.generation}</p>
+    <p><strong>{plan.topology_name}</strong> · generation {plan.generation}</p>
     <ol className="action-node-plans">{plan.nodes.map(node => {
       const authority = evidence?.nodes.find(candidate => candidate.node_id === node.node_id && candidate.rank === node.rank);
       return <li key={node.node_id}>

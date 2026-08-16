@@ -38,7 +38,7 @@ function operation(state: string, result: Record<string, unknown> | null = null)
 const mappingPlan: LibraryMappingPlan = {
   generation: 5,
   nodes: [{endpoint_owner: true, node_id: "node-alpha", rank: 0, role: "leader"}, {endpoint_owner: false, node_id: "node-beta", rank: 1, role: "worker"}],
-  parameters: {tensor_parallel: 2}, placement_digest: "mapping-plan-digest", profile_name: "pair",
+  parameters: {tensor_parallel: 2}, placement_digest: "mapping-plan-digest", topology_name: "pair",
   recipe_content_sha256: "a".repeat(64), recipe_revision_id: "revision-chat",
 };
 
@@ -172,7 +172,7 @@ test("applies Mapping and Install only from their distinct authoritative preview
   lateInstallPlan.nodes.push({...lateInstallPlan.nodes[1], inventory_observed_at: "2026-08-15T12:01:00Z", node_id: "node-gamma", rank: 2, warnings: []});
   vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-08-15T12:10:00Z"));
   detail.placement[0].recommendations[0].preview_targets = [
-    {kind: "mapping", input: {recipe_revision_id: "revision-chat", profile_name: "pair", node_ids: ["node-alpha", "node-beta"], parameters: {tensor_parallel: 2}}},
+    {kind: "mapping", input: {recipe_revision_id: "revision-chat", node_ids: ["node-alpha", "node-beta"], parameters: {tensor_parallel: 2}}},
     {kind: "install", input: {recipe_build_id: "build-chat", mapping_id: "mapping-chat"}},
     {kind: "run", input: {installation_id: "installation-chat"}},
   ];

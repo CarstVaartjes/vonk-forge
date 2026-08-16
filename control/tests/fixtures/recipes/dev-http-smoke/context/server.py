@@ -1,7 +1,10 @@
+#!/usr/local/bin/python3
+
 from __future__ import annotations
 
 import json
 import os
+import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 MODEL = "dev-http-smoke"
@@ -85,6 +88,10 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    host = os.environ["VONK_LISTEN_HOST"]
-    port = int(os.environ["VONK_LISTEN_PORT"])
+    host = os.environ.get("VONK_LISTEN_HOST", "0.0.0.0")
+    port = int(os.environ.get("VONK_LISTEN_PORT", "8000"))
+    if "--host" in sys.argv:
+        host = sys.argv[sys.argv.index("--host") + 1]
+    if "--port" in sys.argv:
+        port = int(sys.argv[sys.argv.index("--port") + 1])
     ThreadingHTTPServer((host, port), Handler).serve_forever()

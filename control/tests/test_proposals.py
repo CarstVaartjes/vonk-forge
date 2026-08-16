@@ -19,8 +19,8 @@ def proposals(tmp_path: Path):
     root = tmp_path / "repo"
     root.mkdir()
     _git(root, "init", "-q")
-    (root / "config/workloads").mkdir(parents=True)
-    (root / "config/workloads/model.toml").write_text('schema_version = 2\nname = "old"\n')
+    (root / "config/package-families").mkdir(parents=True)
+    (root / "config/package-families/model.toml").write_text('schema_version = 2\nname = "old"\n')
     _git(root, "add", ".")
     _git(root, "commit", "-qm", "initial")
     service = ProposalService(RepositoryService(root), head=lambda: _git(root, "rev-parse", "HEAD"))
@@ -30,16 +30,16 @@ def proposals(tmp_path: Path):
 def test_equivalent_changes_produce_identical_patch(proposals) -> None:
     _, service = proposals
     base = service.head()
-    first = service.preview("admin", base, [DocumentChange("config/workloads/model.toml", {"name": "new", "schema_version": 2, "labels": {"z": "2", "a": "1"}})])
-    second = service.preview("admin", base, [DocumentChange("config/workloads/model.toml", {"labels": {"a": "1", "z": "2"}, "schema_version": 2, "name": "new"})])
+    first = service.preview("admin", base, [DocumentChange("config/package-families/model.toml", {"name": "new", "schema_version": 2, "labels": {"z": "2", "a": "1"}})])
+    second = service.preview("admin", base, [DocumentChange("config/package-families/model.toml", {"labels": {"a": "1", "z": "2"}, "schema_version": 2, "name": "new"})])
     assert first.patch == second.patch
     assert first.digest == second.digest
-    assert first.affected_documents == ("config/workloads/model.toml",)
+    assert first.affected_documents == ("config/package-families/model.toml",)
 
 
 def test_stale_base_is_rejected_after_head_moves(proposals) -> None:
     root, service = proposals
-    preview = service.preview("admin", service.head(), [DocumentChange("config/workloads/model.toml", {"schema_version": 2, "name": "new"})])
+    preview = service.preview("admin", service.head(), [DocumentChange("config/package-families/model.toml", {"schema_version": 2, "name": "new"})])
     (root / "inventory").mkdir()
     (root / "inventory/fleet.toml").write_text("schema_version = 2\n")
     _git(root, "add", ".")
@@ -56,13 +56,13 @@ def test_proposal_rejects_paths_and_does_not_run_hooks(proposals, tmp_path: Path
     hook.chmod(0o700)
     with pytest.raises(ValueError):
         service.preview("admin", service.head(), [DocumentChange("../../bad", {})])
-    service.preview("admin", service.head(), [DocumentChange("config/workloads/model.toml", {"schema_version": 2, "name": "safe"})])
+    service.preview("admin", service.head(), [DocumentChange("config/package-families/model.toml", {"schema_version": 2, "name": "safe"})])
     assert not marker.exists()
 
 
 def test_preview_does_not_modify_source_checkout(proposals) -> None:
     root, service = proposals
-    original = (root / "config/workloads/model.toml").read_bytes()
-    service.preview("admin", service.head(), [DocumentChange("config/workloads/model.toml", {"schema_version": 2, "name": "preview"})])
-    assert (root / "config/workloads/model.toml").read_bytes() == original
+    original = (root / "config/package-families/model.toml").read_bytes()
+    service.preview("admin", service.head(), [DocumentChange("config/package-families/model.toml", {"schema_version": 2, "name": "preview"})])
+    assert (root / "config/package-families/model.toml").read_bytes() == original
     assert _git(root, "status", "--porcelain") == ""

@@ -8,6 +8,8 @@ from ..types import UNSET, Unset
 
 from typing import cast
 
+if TYPE_CHECKING:
+  from ..models.visual_catalog_identity import VisualCatalogIdentity
 
 
 
@@ -21,55 +23,46 @@ T = TypeVar("T", bound="VisualRuntime")
 class VisualRuntime:
     """
         Attributes:
-            adapter (str):
-            adapter_version (int):
-            endpoint_port (int):
-            endpoint_protocol (str):
-            health_path (str):
-            interface (str):
-            model_aliases (list[str]):
+            distribution (VisualCatalogIdentity):
+            entrypoint (list[str]):
+            lifecycle_post_stop_count (int):
+            lifecycle_pre_start_count (int):
+            stop_timeout_seconds (int):
      """
 
-    adapter: str
-    adapter_version: int
-    endpoint_port: int
-    endpoint_protocol: str
-    health_path: str
-    interface: str
-    model_aliases: list[str]
+    distribution: 'VisualCatalogIdentity'
+    entrypoint: list[str]
+    lifecycle_post_stop_count: int
+    lifecycle_pre_start_count: int
+    stop_timeout_seconds: int
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        adapter = self.adapter
+        from ..models.visual_catalog_identity import VisualCatalogIdentity
+        distribution = self.distribution.to_dict()
 
-        adapter_version = self.adapter_version
-
-        endpoint_port = self.endpoint_port
-
-        endpoint_protocol = self.endpoint_protocol
-
-        health_path = self.health_path
-
-        interface = self.interface
-
-        model_aliases = self.model_aliases
+        entrypoint = self.entrypoint
 
 
+
+        lifecycle_post_stop_count = self.lifecycle_post_stop_count
+
+        lifecycle_pre_start_count = self.lifecycle_pre_start_count
+
+        stop_timeout_seconds = self.stop_timeout_seconds
 
 
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
-            "adapter": adapter,
-            "adapter_version": adapter_version,
-            "endpoint_port": endpoint_port,
-            "endpoint_protocol": endpoint_protocol,
-            "health_path": health_path,
-            "interface": interface,
-            "model_aliases": model_aliases,
+            "distribution": distribution,
+            "entrypoint": entrypoint,
+            "lifecycle_post_stop_count": lifecycle_post_stop_count,
+            "lifecycle_pre_start_count": lifecycle_pre_start_count,
+            "stop_timeout_seconds": stop_timeout_seconds,
         })
 
         return field_dict
@@ -78,30 +71,28 @@ class VisualRuntime:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.visual_catalog_identity import VisualCatalogIdentity
         d = dict(src_dict)
-        adapter = d.pop("adapter")
+        distribution = VisualCatalogIdentity.from_dict(d.pop("distribution"))
 
-        adapter_version = d.pop("adapter_version")
 
-        endpoint_port = d.pop("endpoint_port")
 
-        endpoint_protocol = d.pop("endpoint_protocol")
 
-        health_path = d.pop("health_path")
+        entrypoint = cast(list[str], d.pop("entrypoint"))
 
-        interface = d.pop("interface")
 
-        model_aliases = cast(list[str], d.pop("model_aliases"))
+        lifecycle_post_stop_count = d.pop("lifecycle_post_stop_count")
 
+        lifecycle_pre_start_count = d.pop("lifecycle_pre_start_count")
+
+        stop_timeout_seconds = d.pop("stop_timeout_seconds")
 
         visual_runtime = cls(
-            adapter=adapter,
-            adapter_version=adapter_version,
-            endpoint_port=endpoint_port,
-            endpoint_protocol=endpoint_protocol,
-            health_path=health_path,
-            interface=interface,
-            model_aliases=model_aliases,
+            distribution=distribution,
+            entrypoint=entrypoint,
+            lifecycle_post_stop_count=lifecycle_post_stop_count,
+            lifecycle_pre_start_count=lifecycle_pre_start_count,
+            stop_timeout_seconds=stop_timeout_seconds,
         )
 
         return visual_runtime

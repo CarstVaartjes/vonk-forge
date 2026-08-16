@@ -19,19 +19,6 @@ SHA_A = "sha256:" + "a" * 64
 SHA_B = "sha256:" + "b" * 64
 SHA_C = "sha256:" + "c" * 64
 SHA_D = "sha256:" + "d" * 64
-DS4_REQUEST = ROOT / "release/workloads/ds4-v0.5.3-spark-runtime.json"
-DS4_SOURCE_COMMIT = "b7737737aa2cd1246aa265687c8ba3d49d935bc3"
-DS4_CONTEXT_DIGEST = (
-    "sha256:a64b8fdccff10eaa9896902bbefa0015377ee54f9c67d548c4b3e3b40705b5bf"
-)
-DS4_IMAGE = (
-    "ghcr.io/carstvaartjes/spark-ds4@sha256:"
-    "084d9a9ffa47431842c5dec84de97b058034dec0535b2a563bc5db78c9e14615"
-)
-BUSYBOX_IMAGE = (
-    "docker.io/library/busybox@sha256:"
-    "fc6dddc4c44b1bfe37f41cae8e67d1693828e8f42a91862816d7953e2c9d3f23"
-)
 
 
 def _load_script():
@@ -70,22 +57,6 @@ def _result_document(build_request_digest: str) -> dict[str, object]:
         "schema_version": 1,
         "source_commit": COMMIT,
     }
-
-
-def test_repository_contains_exact_reviewed_ds4_runtime_request() -> None:
-    module = _load_script()
-    document = json.loads(DS4_REQUEST.read_text(encoding="utf-8"))
-
-    request = module.WorkloadArtifactBuild.parse(document)
-
-    assert request.source_commit == DS4_SOURCE_COMMIT
-    assert request.context_digest == DS4_CONTEXT_DIGEST
-    assert request.context == "adapters/deepseek/ds4"
-    assert request.dockerfile == "adapters/deepseek/ds4/Dockerfile.workload"
-    assert request.target == "runtime"
-    assert request.architecture == "linux/arm64"
-    assert request.output_repository == "ghcr.io/carstvaartjes/vonk-forge-workloads"
-    assert request.base_images == (BUSYBOX_IMAGE, DS4_IMAGE)
 
 
 def test_request_parser_accepts_only_a_bounded_exact_build_contract() -> None:

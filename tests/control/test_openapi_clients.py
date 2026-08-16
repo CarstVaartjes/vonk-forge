@@ -71,12 +71,9 @@ def test_tracked_admin_contract_has_secret_free_decisions_and_typed_errors() -> 
     assert set(decision["properties"]) == {"id", "node_id", "state"}
 
     expected_errors = {
-        "applyReconciliation": {"401", "403", "409", "503"},
         "approveAgentEnrollment": {"401", "403", "409", "503"},
         "getJobLog": {"401", "403", "404", "503"},
         "getPublishedEndpoint": {"401", "404", "503"},
-        "planProfileReconciliation": {"401", "403", "409", "503"},
-        "planReconciliation": {"401", "403", "409", "503"},
         "resumeJob": {"401", "403", "404", "409", "503"},
     }
     for operation_id, statuses in expected_errors.items():
@@ -90,9 +87,6 @@ def test_tracked_admin_contract_has_secret_free_decisions_and_typed_errors() -> 
     assert bounded_error["additionalProperties"] is False
     assert bounded_error["properties"]["detail"]["maxLength"] == 256
 
-    plan = schema["components"]["schemas"]["ReconciliationPlanResponse"]
-    for field in ("placements", "routes", "releases", "operation_graph"):
-        assert "$ref" in plan["properties"][field]
     progress = schema["components"]["schemas"]["JobOperationResponse"][
         "properties"
     ]["progress"]
@@ -104,6 +98,33 @@ def test_tracked_admin_contract_has_secret_free_decisions_and_typed_errors() -> 
     serialized = json.dumps(schema, sort_keys=True).lower()
     assert "certificate_pem" not in serialized
     assert "chain_pem" not in serialized
+
+
+def test_library_contract_uses_exact_model_versions_and_v1_revisions() -> None:
+    schema = json.loads(OPENAPI.read_text())
+    components = schema["components"]["schemas"]
+    library_model = components["LibraryModel"]
+    assert set(library_model["properties"]) == {"model", "page_local", "recipes"}
+    assert library_model["properties"]["model"] == {
+        "$ref": "#/components/schemas/ModelVersionIdentity"
+    }
+    model_identity = components["ModelVersionIdentity"]
+    assert model_identity["properties"]["kind"]["const"] == "model-version"
+    assert set(model_identity["required"]) == {
+        "kind",
+        "publisher",
+        "slug",
+        "content_sha256",
+    }
+    assert components["RecipeRevisionSummary"]["properties"]["schema_version"][
+        "const"
+    ] == 1
+
+    typescript = TYPESCRIPT_CLIENT.read_text()
+    assert 'model: components["schemas"]["ModelVersionIdentity"];' in typescript
+    assert "schema_version: 1;" in typescript
+    python_client = (PYTHON_CLIENT / "models/recipe_revision_summary.py").read_text()
+    assert "schema_version: Union[Literal[1], Unset] = 1" in python_client
 
 
 def test_generator_is_idempotent_and_admin_schema_is_secret_free() -> None:
@@ -127,9 +148,6 @@ def test_generator_is_idempotent_and_admin_schema_is_secret_free() -> None:
         "/api/v1/jobs/{job_id}/resume",
         "/api/v1/nodes/status",
         "/api/v1/nodes/{node_id}/telemetry",
-        "/api/v1/profiles/{profile_id}/plan",
-        "/api/v1/reconciliations",
-        "/api/v1/reconciliations/plan",
     }
     assert all(path.startswith("/api/v1/") for path in schema["paths"])
     operation_list = [
@@ -176,7 +194,6 @@ def test_generator_is_idempotent_and_admin_schema_is_secret_free() -> None:
 
     by_id = {operation["operationId"]: operation for operation in operation_list}
     for operation_id in (
-        "applyReconciliation",
         "getFleetStatus",
         "getJob",
         "getNodeStatuses",
@@ -185,8 +202,6 @@ def test_generator_is_idempotent_and_admin_schema_is_secret_free() -> None:
         "listAgents",
         "listJobLogs",
         "listJobs",
-        "planProfileReconciliation",
-        "planReconciliation",
         "resumeJob",
     ):
         response_schema = next(
@@ -298,6 +313,26 @@ def test_generated_run_preview_contracts_require_digest_bound_alias() -> None:
     assert "alias: string;" in response_contract
 
 
+def test_generated_library_contract_has_one_recipe_topology_and_strict_identities() -> None:
+    schema = json.loads(OPENAPI.read_text())["components"]["schemas"]
+    detail = schema["LibraryRecipeDetail"]
+    visual = schema["VisualRecipeDocument"]
+
+    assert set(detail["properties"]) >= {"topology", "placement", "visual_recipe"}
+    assert "profiles" not in detail["properties"]
+    assert set(visual["properties"]) >= {"model", "execution", "runtime", "interfaces"}
+    assert "workload" not in visual["properties"]
+    assert "adapter" not in schema["VisualRuntime"]["properties"]
+
+    typescript = TYPESCRIPT_CLIENT.read_text()
+    mapping_contract = typescript.split("MappingPreviewInput: {", 1)[1].split("};", 1)[0]
+    detail_contract = typescript.split("LibraryRecipeDetail: {", 1)[1].split("};", 1)[0]
+    runtime_contract = typescript.split("VisualRuntime: {", 1)[1].split("};", 1)[0]
+    assert "topology_name" not in mapping_contract
+    assert "topology:" in detail_contract and "profiles:" not in detail_contract
+    assert "distribution:" in runtime_contract and "adapter:" not in runtime_contract
+
+
 def test_generated_python_client_imports_in_the_root_locked_environment() -> None:
     result = subprocess.run(
         [
@@ -392,11 +427,8 @@ def test_generated_python_client_parses_documented_operation_errors() -> None:
 
     client = Client(base_url="https://control.invalid")
     expected = {
-        "apply_reconciliation": (401, 403, 409, 503),
         "get_job_log": (401, 403, 404, 503),
         "get_published_endpoint": (401, 404, 503),
-        "plan_profile_reconciliation": (401, 403, 409, 503),
-        "plan_reconciliation": (401, 403, 409, 503),
         "resume_job": (401, 403, 404, 409, 503),
     }
     for module_name, status_codes in expected.items():

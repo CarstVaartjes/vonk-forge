@@ -191,6 +191,75 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/catalog/entities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Entities */
+        get: operations["listCatalogEntities"];
+        put?: never;
+        /** Create Entity */
+        post: operations["createCatalogEntityDraft"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/catalog/entities/{entity_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Entity */
+        get: operations["getCatalogEntity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/catalog/entities/{entity_id}/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Revise Entity */
+        put: operations["reviseCatalogEntity"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/catalog/entities/{entity_id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resolve Entity */
+        post: operations["resolveCatalogEntity"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/catalog/imports/global": {
         parameters: {
             query?: never;
@@ -219,6 +288,23 @@ export interface paths {
         put?: never;
         /** Preview Global Import */
         post: operations["previewGlobalRecipeImport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/catalog/imports/recipe-library": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Import Recipe Library */
+        post: operations["importRecipeLibrary"];
         delete?: never;
         options?: never;
         head?: never;
@@ -578,23 +664,6 @@ export interface paths {
         put?: never;
         /** Preview Rollback */
         post: operations["previewPackageRollback"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/documents": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Document View */
-        get: operations["listDocuments"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1060,23 +1129,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/profiles/{profile_id}/plan": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Profile Reconcile Plan */
-        post: operations["planProfileReconciliation"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/proposals": {
         parameters: {
             query?: never;
@@ -1383,57 +1435,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/reconciliations": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Reconcile */
-        post: operations["applyReconciliation"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/reconciliations/plan": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Reconcile Plan */
-        post: operations["planReconciliation"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/reconciliations/{reconciliation_id}/cancel": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Cancel Reconciliation */
-        post: operations["cancelReconciliation"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/repository": {
         parameters: {
             query?: never;
@@ -1653,6 +1654,53 @@ export interface components {
             /** Unified Memory Bytes */
             unified_memory_bytes: number;
         };
+        /** CatalogEntityListResponse */
+        CatalogEntityListResponse: {
+            /** Entities */
+            entities: components["schemas"]["CatalogEntityRevisionResponse"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+        };
+        /** CatalogEntityRevisionResponse */
+        CatalogEntityRevisionResponse: {
+            /** Content Sha256 */
+            content_sha256?: string | null;
+            /** Created At */
+            created_at: string;
+            /** Created By */
+            created_by: string;
+            /** Document */
+            document: {
+                [key: string]: unknown;
+            };
+            /** Entity Id */
+            entity_id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "model-group" | "model" | "model-version" | "execution-harness" | "runtime-distribution" | "patch-bundle";
+            /**
+             * Lifecycle
+             * @enum {string}
+             */
+            lifecycle: "draft" | "blocked" | "resolved" | "deprecated";
+            /** Publisher */
+            publisher: string;
+            /** Revision Id */
+            revision_id: string;
+            /** Revision Number */
+            revision_number: number;
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 1;
+            /** Slug */
+            slug: string;
+            /** Title */
+            title: string;
+        };
         /** CatalogProblem */
         CatalogProblem: {
             /** Code */
@@ -1666,6 +1714,13 @@ export interface components {
         ChangeRequest: {
             /** Proposal Digest */
             proposal_digest: string;
+        };
+        /** CreateCatalogEntityRequest */
+        CreateCatalogEntityRequest: {
+            /** Document */
+            document: {
+                [key: string]: unknown;
+            };
         };
         /** CreateRecipeRequest */
         CreateRecipeRequest: {
@@ -2168,10 +2223,7 @@ export interface components {
         };
         /** LibraryModel */
         LibraryModel: {
-            /** Display Name */
-            display_name: string;
-            /** Family */
-            family: string;
+            model: components["schemas"]["ModelVersionIdentity"];
             /**
              * Page Local
              * @default true
@@ -2190,9 +2242,7 @@ export interface components {
             generated_at: string;
             operational_state: components["schemas"]["OperationalState"];
             /** Placement */
-            placement: components["schemas"]["ProfilePlacement"][];
-            /** Profiles */
-            profiles: components["schemas"]["RecipeProfile"][];
+            placement: components["schemas"]["TopologyPlacement"][];
             /** Reasons */
             reasons: components["schemas"]["vonk_control__library_contract__ProjectionReason"][];
             recipe: components["schemas"]["LibraryRecipeIdentity"];
@@ -2203,6 +2253,7 @@ export interface components {
              */
             schema_version: 1;
             selected_revision: components["schemas"]["RecipeRevisionSummary"] | null;
+            topology: components["schemas"]["RecipeTopology"] | null;
             visual_recipe: components["schemas"]["VisualRecipeDocument"] | null;
         };
         /** LibraryRecipeIdentity */
@@ -2217,7 +2268,7 @@ export interface components {
              * Source Kind
              * @enum {string}
              */
-            source_kind: "local" | "workload_run" | "global";
+            source_kind: "local" | "workload_run" | "global" | "recipe_library";
             /** Title */
             title: string;
         };
@@ -2235,8 +2286,6 @@ export interface components {
             installations: components["schemas"]["LibraryInstallationSummary"][];
             /** Installations Truncated */
             installations_truncated: boolean;
-            /** Profiles */
-            profiles: components["schemas"]["RecipeProfileSummary"][];
             /** Reasons */
             reasons: components["schemas"]["vonk_control__library_contract__ProjectionReason"][];
             /** Recipe Id */
@@ -2256,9 +2305,11 @@ export interface components {
              * Source Kind
              * @enum {string}
              */
-            source_kind: "local" | "workload_run" | "global";
+            source_kind: "local" | "workload_run" | "global" | "recipe_library";
             /** Title */
             title: string;
+            /** Topology Name */
+            topology_name: string | null;
         };
         /** LibraryRunSummary */
         LibraryRunSummary: {
@@ -2347,12 +2398,12 @@ export interface components {
             };
             /** Placement Digest */
             placement_digest: string;
-            /** Profile Name */
-            profile_name: string;
             /** Recipe Content Sha256 */
             recipe_content_sha256: string;
             /** Recipe Revision Id */
             recipe_revision_id: string;
+            /** Topology Name */
+            topology_name: string;
         };
         /** MappingPreviewInput */
         MappingPreviewInput: {
@@ -2362,8 +2413,6 @@ export interface components {
             parameters: {
                 [key: string]: string | number | boolean;
             };
-            /** Profile Name */
-            profile_name: string;
             /** Recipe Revision Id */
             recipe_revision_id: string;
         };
@@ -2375,8 +2424,6 @@ export interface components {
             parameters?: {
                 [key: string]: unknown;
             };
-            /** Profile Name */
-            profile_name: string;
             /** Recipe Revision Id */
             recipe_revision_id: string;
         };
@@ -2399,8 +2446,6 @@ export interface components {
             };
             /** Placement Digest */
             placement_digest: string;
-            /** Profile Name */
-            profile_name: string;
             /** Recipe Revision Id */
             recipe_revision_id: string;
             /** Request Key */
@@ -2422,6 +2467,20 @@ export interface components {
              * @default 600
              */
             ttl_seconds: number;
+        };
+        /** ModelVersionIdentity */
+        ModelVersionIdentity: {
+            /** Content Sha256 */
+            content_sha256: string;
+            /**
+             * Kind
+             * @constant
+             */
+            kind: "model-version";
+            /** Publisher */
+            publisher: string;
+            /** Slug */
+            slug: string;
         };
         /** NodeConnection */
         NodeConnection: {
@@ -2585,8 +2644,6 @@ export interface components {
             mapping_id: string;
             /** Nodes */
             nodes: components["schemas"]["OperationalMappingNode"][];
-            /** Profile Name */
-            profile_name: string;
             /** Recipe Revision Id */
             recipe_revision_id: string;
             /**
@@ -2594,6 +2651,8 @@ export interface components {
              * @enum {string}
              */
             state: "planned" | "ready" | "stale";
+            /** Topology Name */
+            topology_name: string;
         };
         /** OperationalMappingNode */
         OperationalMappingNode: {
@@ -3232,8 +3291,6 @@ export interface components {
             nodes: components["schemas"]["PlacementNode"][];
             /** Preview Targets */
             preview_targets: (components["schemas"]["MappingPreviewTarget"] | components["schemas"]["InstallPreviewTarget"] | components["schemas"]["RunPreviewTarget"])[];
-            /** Profile Name */
-            profile_name: string;
             /**
              * Ranking Scope
              * @default bounded-advisory
@@ -3249,6 +3306,8 @@ export interface components {
             /** Run Ids */
             run_ids: string[];
             score: components["schemas"]["PlacementScore"];
+            /** Topology Name */
+            topology_name: string;
         };
         /** PlacementScore */
         PlacementScore: {
@@ -3267,80 +3326,6 @@ export interface components {
             /** Minimum Memory Headroom Bytes */
             minimum_memory_headroom_bytes: number;
         };
-        /** PlanEndpoint */
-        PlanEndpoint: {
-            /** Path */
-            path: string;
-            /** Port */
-            port: number;
-            /**
-             * Scheme
-             * @enum {string}
-             */
-            scheme: "http" | "https";
-        };
-        /** PlanInputDigests */
-        PlanInputDigests: {
-            [key: string]: string;
-        };
-        /** PlanOperation */
-        PlanOperation: {
-            /** Compensation Kind */
-            compensation_kind?: string | null;
-            /** Dependencies */
-            dependencies: string[];
-            /** Kind */
-            kind: string;
-            /** Node Id */
-            node_id: string;
-            /** Operation Id */
-            operation_id: string;
-            /** Payload Digest */
-            payload_digest: string;
-            /** Workload Id */
-            workload_id: string;
-        };
-        /** PlanOperationGraph */
-        PlanOperationGraph: {
-            /** Base Commit */
-            base_commit: string;
-            /** Nodes */
-            nodes: components["schemas"]["PlanOperation"][];
-            /**
-             * Schema Version
-             * @constant
-             */
-            schema_version: 1;
-            /** Targets */
-            targets: string[];
-        };
-        /** PlanPlacements */
-        PlanPlacements: {
-            [key: string]: string[];
-        };
-        /** PlanPrepareRequest */
-        PlanPrepareRequest: {
-            /** Adapter Id */
-            adapter_id: string;
-            /** Profile Digest */
-            profile_digest: string;
-            /** Release Digest */
-            release_digest: string;
-            /**
-             * Schema Version
-             * @constant
-             */
-            schema_version: 1;
-            /** Workload Id */
-            workload_id: string;
-        };
-        /** PlanQuota */
-        PlanQuota: {
-            /** Requests Per Minute */
-            requests_per_minute: number;
-            /** Tokens Per Minute */
-            tokens_per_minute: number;
-        };
         /** PlanReason */
         PlanReason: {
             /** Code */
@@ -3348,148 +3333,10 @@ export interface components {
             /** Detail */
             detail: string;
         };
-        /** PlanRelease */
-        PlanRelease: {
-            /** Definition Hash */
-            definition_hash: string;
-            endpoint: components["schemas"]["PlanEndpoint"];
-            /** Manifest Path */
-            manifest_path: string;
-            /** Manifest Sha256 */
-            manifest_sha256: string;
-            release_request: components["schemas"]["PlanReleaseRequest"];
-            workload_requests: components["schemas"]["PlanWorkloadRequests"];
-        };
-        /** PlanReleaseRequest */
-        PlanReleaseRequest: {
-            /** Adapter Id */
-            adapter_id: string;
-            /** Oci Manifest Digest */
-            oci_manifest_digest: string;
-            /** Provenance Digest */
-            provenance_digest: string;
-            /**
-             * Schema Version
-             * @constant
-             */
-            schema_version: 1;
-            /** Target Digest */
-            target_digest: string;
-            /** Target Name */
-            target_name: string;
-        };
-        /** PlanReleases */
-        PlanReleases: {
-            [key: string]: components["schemas"]["PlanRelease"];
-        };
-        /** PlanRoute */
-        PlanRoute: {
-            /** Entrypoint Node Id */
-            entrypoint_node_id: string;
-            /** Nodes */
-            nodes: string[];
-            /** Path */
-            path: string;
-            /** Port */
-            port: number;
-            quota: components["schemas"]["PlanQuota"];
-            /** Quota Digest */
-            quota_digest: string;
-            /**
-             * Scheme
-             * @enum {string}
-             */
-            scheme: "http" | "https";
-            /** Workload Id */
-            workload_id: string;
-        };
-        /** PlanRoutes */
-        PlanRoutes: {
-            [key: string]: components["schemas"]["PlanRoute"];
-        };
-        /** PlanStartRequest */
-        PlanStartRequest: {
-            /** Adapter Id */
-            adapter_id: string;
-            /** Preparation Digest */
-            preparation_digest: string;
-            /** Release Digest */
-            release_digest: string;
-            /**
-             * Schema Version
-             * @constant
-             */
-            schema_version: 1;
-            /** Workload Id */
-            workload_id: string;
-        };
-        /** PlanVerifyRequest */
-        PlanVerifyRequest: {
-            /** Adapter Id */
-            adapter_id: string;
-            /** Expected Digest */
-            expected_digest: string;
-            /** Release Digest */
-            release_digest: string;
-            /**
-             * Schema Version
-             * @constant
-             */
-            schema_version: 1;
-            /** Workload Id */
-            workload_id: string;
-        };
-        /** PlanWorkloadRequest */
-        PlanWorkloadRequest: {
-            /** Adapter Id */
-            adapter_id: string;
-            /** Release Digest */
-            release_digest: string;
-            /**
-             * Schema Version
-             * @constant
-             */
-            schema_version: 1;
-            /** Workload Id */
-            workload_id: string;
-        };
-        /** PlanWorkloadRequests */
-        PlanWorkloadRequests: {
-            health: components["schemas"]["PlanWorkloadRequest"];
-            prepare: components["schemas"]["PlanPrepareRequest"];
-            start: components["schemas"]["PlanStartRequest"];
-            stop: components["schemas"]["PlanWorkloadRequest"];
-            verify: components["schemas"]["PlanVerifyRequest"];
-        };
         /** PreviewRequest */
         PreviewRequest: {
             /** Source Yaml */
             source_yaml: string;
-        };
-        /** ProfilePlacement */
-        ProfilePlacement: {
-            /** Candidate Node Ids */
-            candidate_node_ids: string[];
-            /** Evaluated Group Count */
-            evaluated_group_count: number;
-            evidence_counts: components["schemas"]["PlacementEvidenceCounts"];
-            limits: components["schemas"]["PlacementLimits"];
-            /** Node Count */
-            node_count: number;
-            /** Profile Name */
-            profile_name: string;
-            /** Reasons */
-            reasons: components["schemas"]["vonk_control__library_contract__ProjectionReason"][];
-            /** Recommendations */
-            recommendations: components["schemas"]["PlacementRecommendation"][];
-            /** Rejected Evidence Truncated */
-            rejected_evidence_truncated: boolean;
-            /** Rejected Groups */
-            rejected_groups: components["schemas"]["PlacementRecommendation"][];
-            /** Rejected Nodes */
-            rejected_nodes: components["schemas"]["RejectedNode"][];
-            /** Search Complete */
-            search_complete: boolean;
         };
         /** ProposalChangeRequest */
         ProposalChangeRequest: {
@@ -3536,6 +3383,19 @@ export interface components {
             connectivity: "none" | "connected" | "full_mesh" | "switch";
             /** Minimum Bandwidth Mbps */
             minimum_bandwidth_mbps: number;
+        };
+        /** RecipeLibraryImportRequest */
+        RecipeLibraryImportRequest: {
+            /** Document */
+            document: {
+                [key: string]: unknown;
+            };
+            /** Expected Content Sha256 */
+            expected_content_sha256: string;
+            /** Library Commit */
+            library_commit: string;
+            /** Source Path */
+            source_path: string;
         };
         /** RecipeListResponse */
         RecipeListResponse: {
@@ -3590,8 +3450,6 @@ export interface components {
             member_node_ids: string[];
             /** Present Ranks */
             present_ranks: number[];
-            /** Profile Name */
-            profile_name: string;
             /** Rank */
             rank: number;
             /**
@@ -3607,48 +3465,8 @@ export interface components {
             role: string;
             /** Title */
             title: string;
-        };
-        /** RecipeProfile */
-        RecipeProfile: {
-            /** Description */
-            description: string;
-            fabric: components["schemas"]["RecipeFabric"];
-            /**
-             * Measurement
-             * @enum {string}
-             */
-            measurement: "declared" | "derived" | "measured";
-            /** Name */
-            name: string;
-            /** Node Count */
-            node_count: number;
-            parallelism: components["schemas"]["RecipeParallelism"];
-            /** Parameter Overrides */
-            parameter_overrides: {
-                [key: string]: string | number | boolean | null;
-            };
-            /** Roles */
-            roles: components["schemas"]["RecipeRole"][];
-            /** Strategy */
-            strategy: string;
-        };
-        /** RecipeProfileSummary */
-        RecipeProfileSummary: {
-            /** Description */
-            description: string;
-            /**
-             * Fabric Connectivity
-             * @enum {string}
-             */
-            fabric_connectivity: "none" | "connected" | "full_mesh" | "switch";
-            /** Minimum Bandwidth Mbps */
-            minimum_bandwidth_mbps: number;
-            /** Name */
-            name: string;
-            /** Node Count */
-            node_count: number;
-            /** Roles */
-            roles: string[];
+            /** Topology Name */
+            topology_name: string;
         };
         /** RecipeRevisionResponse */
         RecipeRevisionResponse: {
@@ -3666,6 +3484,8 @@ export interface components {
             document: {
                 [key: string]: unknown;
             };
+            /** Execution Harness */
+            execution_harness: string;
             /** Expected Download Bytes */
             expected_download_bytes: number;
             /** Id */
@@ -3679,19 +3499,19 @@ export interface components {
             maximum_installed_bytes_per_node: number;
             /** Maximum Runtime Memory Bytes Per Node */
             maximum_runtime_memory_bytes_per_node: number;
+            /** Node Count */
+            node_count: number;
             /**
              * Origin
              * @enum {string}
              */
-            origin: "local" | "workload_run" | "global";
-            /** Profile Node Counts */
-            profile_node_counts: number[];
+            origin: "local" | "workload_run" | "global" | "recipe_library";
             /** Recipe Id */
             recipe_id: string;
             /** Revision Number */
             revision_number: number;
-            /** Runtime Family */
-            runtime_family: string;
+            /** Runtime Distribution */
+            runtime_distribution: string;
             /**
              * Schema Version
              * @constant
@@ -3703,6 +3523,10 @@ export interface components {
             source_bundle_sha256: string;
             /** Title */
             title: string;
+            /** Topology Mode */
+            topology_mode: string;
+            /** Topology Name */
+            topology_name: string;
         };
         /** RecipeRevisionSummary */
         RecipeRevisionSummary: {
@@ -3722,8 +3546,12 @@ export interface components {
             lifecycle: "draft" | "blocked" | "resolved" | "deprecated";
             /** Revision Number */
             revision_number: number;
-            /** Schema Version */
-            schema_version: number;
+            /**
+             * Schema Version
+             * @default 1
+             * @constant
+             */
+            schema_version: 1;
         };
         /** RecipeRole */
         RecipeRole: {
@@ -3744,6 +3572,8 @@ export interface components {
             artifact_count: number;
             /** Content Sha256 */
             content_sha256?: string | null;
+            /** Execution Harness */
+            execution_harness: string;
             /** Expected Download Bytes */
             expected_download_bytes: number;
             /**
@@ -3755,75 +3585,46 @@ export interface components {
             maximum_installed_bytes_per_node: number;
             /** Maximum Runtime Memory Bytes Per Node */
             maximum_runtime_memory_bytes_per_node: number;
+            /** Node Count */
+            node_count: number;
             /**
              * Origin
              * @enum {string}
              */
-            origin: "local" | "workload_run" | "global";
-            /** Profile Node Counts */
-            profile_node_counts: number[];
+            origin: "local" | "workload_run" | "global" | "recipe_library";
             /** Recipe Id */
             recipe_id: string;
             /** Revision Number */
             revision_number: number;
-            /** Runtime Family */
-            runtime_family: string;
+            /** Runtime Distribution */
+            runtime_distribution: string;
             /** Slug */
             slug: string;
             /** Source Bundle Sha256 */
             source_bundle_sha256: string;
             /** Title */
             title: string;
+            /** Topology Mode */
+            topology_mode: string;
+            /** Topology Name */
+            topology_name: string;
         };
-        /** ReconciliationAcceptedResponse */
-        ReconciliationAcceptedResponse: {
-            /** Base Commit */
-            base_commit: string;
-            /** Job Id */
-            job_id: string;
-            /** Reconciliation Id */
-            reconciliation_id?: string | null;
-            /** State */
-            state: string;
-        };
-        /** ReconciliationCancelRequest */
-        ReconciliationCancelRequest: {
-            /** Reason */
-            reason: string;
-        };
-        /** ReconciliationPlanRequest */
-        ReconciliationPlanRequest: {
-            /** Commit */
-            commit: string;
-            /** Profile Id */
-            profile_id: string;
-        };
-        /** ReconciliationPlanResponse */
-        ReconciliationPlanResponse: {
-            /** Agent Protocol Range */
-            agent_protocol_range: number[];
-            /** Commit */
-            commit: string;
-            /** Digest */
-            digest: string;
-            /** Fleet Evidence Digest */
-            fleet_evidence_digest: string;
-            input_digests: components["schemas"]["PlanInputDigests"];
-            operation_graph: components["schemas"]["PlanOperationGraph"];
-            placements: components["schemas"]["PlanPlacements"];
-            /** Reconciliation Id */
-            reconciliation_id: string;
-            releases: components["schemas"]["PlanReleases"];
-            routes: components["schemas"]["PlanRoutes"];
-            /** Targets */
-            targets: string[];
-        };
-        /** ReconciliationRequest */
-        ReconciliationRequest: {
-            /** Fleet Evidence Digest */
-            fleet_evidence_digest: string;
-            /** Plan Digest */
-            plan_digest: string;
+        /** RecipeTopology */
+        RecipeTopology: {
+            fabric: components["schemas"]["RecipeFabric"];
+            /** Mode */
+            mode: string;
+            /** Name */
+            name: string;
+            /** Node Count */
+            node_count: number;
+            parallelism: components["schemas"]["RecipeParallelism"];
+            /** Roles */
+            roles: components["schemas"]["RecipeRole"][];
+            /** Start Order */
+            start_order: string[];
+            /** Stop Order */
+            stop_order: string[];
         };
         /** RejectRequest */
         RejectRequest: {
@@ -3842,6 +3643,11 @@ export interface components {
             /** Request Key */
             request_key: string;
         };
+        /** ResolveCatalogEntityRequest */
+        ResolveCatalogEntityRequest: {
+            /** Expected Revision */
+            expected_revision: number;
+        };
         /** ResolveImportRequest */
         ResolveImportRequest: {
             /** Expected Revision */
@@ -3853,6 +3659,15 @@ export interface components {
         };
         /** ResolveRecipeRequest */
         ResolveRecipeRequest: {
+            /** Expected Revision */
+            expected_revision: number;
+        };
+        /** ReviseCatalogEntityRequest */
+        ReviseCatalogEntityRequest: {
+            /** Document */
+            document: {
+                [key: string]: unknown;
+            };
             /** Expected Revision */
             expected_revision: number;
         };
@@ -4280,6 +4095,31 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /** TopologyPlacement */
+        TopologyPlacement: {
+            /** Candidate Node Ids */
+            candidate_node_ids: string[];
+            /** Evaluated Group Count */
+            evaluated_group_count: number;
+            evidence_counts: components["schemas"]["PlacementEvidenceCounts"];
+            limits: components["schemas"]["PlacementLimits"];
+            /** Node Count */
+            node_count: number;
+            /** Reasons */
+            reasons: components["schemas"]["vonk_control__library_contract__ProjectionReason"][];
+            /** Recommendations */
+            recommendations: components["schemas"]["PlacementRecommendation"][];
+            /** Rejected Evidence Truncated */
+            rejected_evidence_truncated: boolean;
+            /** Rejected Groups */
+            rejected_groups: components["schemas"]["PlacementRecommendation"][];
+            /** Rejected Nodes */
+            rejected_nodes: components["schemas"]["RejectedNode"][];
+            /** Search Complete */
+            search_complete: boolean;
+            /** Topology Name */
+            topology_name: string;
+        };
         /** UninstallActiveRunResponse */
         UninstallActiveRunResponse: {
             /** Alias */
@@ -4447,12 +4287,44 @@ export interface components {
             /** Sha256 */
             sha256: string;
         };
+        /** VisualCatalogIdentity */
+        VisualCatalogIdentity: {
+            /** Content Sha256 */
+            content_sha256: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "model-version" | "execution-harness" | "runtime-distribution" | "patch-bundle";
+            /** Publisher */
+            publisher: string;
+            /** Slug */
+            slug: string;
+        };
+        /** VisualExecution */
+        VisualExecution: {
+            harness: components["schemas"]["VisualCatalogIdentity"];
+            patch_bundle: components["schemas"]["VisualCatalogIdentity"] | null;
+        };
         /** VisualIdentity */
         VisualIdentity: {
             /** Publisher */
             publisher: string;
             /** Slug */
             slug: string;
+        };
+        /** VisualInterface */
+        VisualInterface: {
+            /** Adapter */
+            adapter: string;
+            /** Health Path */
+            health_path?: string | null;
+            /** Model Aliases */
+            model_aliases?: string[];
+            /** Path */
+            path?: string | null;
+            /** Port */
+            port?: number | null;
         };
         /** VisualMetadata */
         VisualMetadata: {
@@ -4480,8 +4352,12 @@ export interface components {
             /** Artifacts */
             artifacts: components["schemas"]["VisualArtifact"][];
             build: components["schemas"]["VisualBuild"];
+            execution: components["schemas"]["VisualExecution"];
             identity: components["schemas"]["VisualIdentity"];
+            /** Interfaces */
+            interfaces: components["schemas"]["VisualInterface"][];
             metadata: components["schemas"]["VisualMetadata"];
+            model: components["schemas"]["VisualCatalogIdentity"];
             provenance: components["schemas"]["VisualProvenance"];
             runtime: components["schemas"]["VisualRuntime"];
             /**
@@ -4490,24 +4366,18 @@ export interface components {
              */
             schema_version: 1;
             validation: components["schemas"]["VisualValidation"];
-            workload: components["schemas"]["VisualWorkload"];
         };
         /** VisualRuntime */
         VisualRuntime: {
-            /** Adapter */
-            adapter: string;
-            /** Adapter Version */
-            adapter_version: number;
-            /** Endpoint Port */
-            endpoint_port: number;
-            /** Endpoint Protocol */
-            endpoint_protocol: string;
-            /** Health Path */
-            health_path: string;
-            /** Interface */
-            interface: string;
-            /** Model Aliases */
-            model_aliases: string[];
+            distribution: components["schemas"]["VisualCatalogIdentity"];
+            /** Entrypoint */
+            entrypoint: string[];
+            /** Lifecycle Post Stop Count */
+            lifecycle_post_stop_count: number;
+            /** Lifecycle Pre Start Count */
+            lifecycle_pre_start_count: number;
+            /** Stop Timeout Seconds */
+            stop_timeout_seconds: number;
         };
         /** VisualValidation */
         VisualValidation: {
@@ -4515,13 +4385,6 @@ export interface components {
             benchmark_count: number;
             /** Checks */
             checks: string[];
-        };
-        /** VisualWorkload */
-        VisualWorkload: {
-            /** Capabilities */
-            capabilities: string[];
-            /** Family */
-            family: string;
         };
         /** ProjectionReason */
         vonk_control__fleet_projection__ProjectionReason: {
@@ -5084,6 +4947,300 @@ export interface operations {
             };
         };
     };
+    listCatalogEntities: {
+        parameters: {
+            query?: {
+                kind?: string | null;
+                publisher?: string | null;
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogEntityListResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProblem"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProblem"];
+                };
+            };
+        };
+    };
+    createCatalogEntityDraft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateCatalogEntityRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogEntityRevisionResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProblem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProblem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProblem"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProblem"];
+                };
+            };
+        };
+    };
+    getCatalogEntity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                entity_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogEntityRevisionResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProblem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProblem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reviseCatalogEntity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                entity_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviseCatalogEntityRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogEntityRevisionResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProblem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProblem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProblem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProblem"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProblem"];
+                };
+            };
+        };
+    };
+    resolveCatalogEntity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                entity_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResolveCatalogEntityRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogEntityRevisionResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProblem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProblem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProblem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProblem"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogProblem"];
+                };
+            };
+        };
+    };
     importGlobalRecipe: {
         parameters: {
             query?: never;
@@ -5137,6 +5294,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GlobalRevisionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    importRecipeLibrary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecipeLibraryImportRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecipeRevisionResponse"];
                 };
             };
             /** @description Validation Error */
@@ -6463,41 +6653,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-        };
-    };
-    listDocuments: {
-        parameters: {
-            query?: {
-                commit?: string | null;
-                path?: string | null;
-                kind?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -8155,77 +8310,6 @@ export interface operations {
             };
         };
     };
-    planProfileReconciliation: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                profile_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": null;
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ReconciliationPlanResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Forbidden */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Conflict */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-            /** @description Service Unavailable */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-        };
-    };
     previewProposal: {
         parameters: {
             query?: never;
@@ -8820,226 +8904,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    applyReconciliation: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ReconciliationRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ReconciliationAcceptedResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Forbidden */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Conflict */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-            /** @description Service Unavailable */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-        };
-    };
-    planReconciliation: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ReconciliationPlanRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ReconciliationPlanResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Forbidden */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Conflict */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-            /** @description Service Unavailable */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-        };
-    };
-    cancelReconciliation: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                reconciliation_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ReconciliationCancelRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Forbidden */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Conflict */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-            /** @description Service Unavailable */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
         };

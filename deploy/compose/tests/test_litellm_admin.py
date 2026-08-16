@@ -3,6 +3,7 @@ from pathlib import Path
 
 from deploy.compose.tests.test_agent_ingress import (
     _adapted_caddy,
+    _adapted_development_caddy,
     _environment,
     _rendered,
     _routes_with_handlers,
@@ -26,6 +27,60 @@ def _path_patterns(route: dict) -> list[str]:
         for matcher in route.get("match", [])
         for path in matcher.get("path", [])
     ]
+
+
+def _reverse_proxy_dials(value: object) -> list[str]:
+    dials: list[str] = []
+    if isinstance(value, dict):
+        if value.get("handler") == "reverse_proxy":
+            dials.extend(upstream["dial"] for upstream in value["upstreams"])
+        for child in value.values():
+            dials.extend(_reverse_proxy_dials(child))
+    elif isinstance(value, list):
+        for child in value:
+            dials.extend(_reverse_proxy_dials(child))
+    return dials
+
+
+def _route_for_path(adapted: dict, *, port: int, path: str) -> dict:
+    routes = _routes_with_handlers(_server_on_port(adapted, port)["routes"])
+    return next(route for route in routes if path in _path_patterns(route))
+
+
+def _assert_litellm_route_is_lease_authorized(route: dict) -> None:
+    assert _reverse_proxy_dials(route) == ["litellm:4001", "litellm:4000"]
+
+
+def test_every_browser_litellm_route_authorizes_before_proxying() -> None:
+    for adapted in (
+        _adapted_caddy(_environment()),
+        _adapted_development_caddy(),
+    ):
+        _assert_litellm_route_is_lease_authorized(
+            _route_for_path(adapted, port=8080, path="/v1/*")
+        )
+        _assert_litellm_route_is_lease_authorized(
+            _route_for_path(adapted, port=8080, path="/litellm/*")
+        )
+
+
+def test_every_caddyfile_has_a_v1_only_internal_lease_edge() -> None:
+    for adapted in (
+        _adapted_caddy(_environment()),
+        _adapted_development_caddy(),
+    ):
+        edge = _server_on_port(adapted, 8081)
+        routes = edge["routes"]
+
+        assert edge["listen"] == [":8081"]
+        assert [route.get("match") for route in routes] == [
+            [{"path": ["/v1/*"]}],
+            None,
+        ]
+        _assert_litellm_route_is_lease_authorized(routes[0])
+        assert routes[1]["handle"] == [
+            {"handler": "static_response", "status_code": 404}
+        ]
 
 
 def test_native_litellm_admin_has_a_writable_root_path_and_preserves_auth_health() -> None:

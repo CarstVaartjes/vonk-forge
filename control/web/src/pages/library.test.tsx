@@ -4,9 +4,43 @@ import type {ControlApi} from "../api/types";
 import {App} from "../app";
 import {codeRecipe, fullLibraryDetail, librarySnapshot, minimalLibraryDetail, unlinkedRecipe} from "../test-fixtures/library";
 
+const qwenModel = `qwen/3@${"e".repeat(64)}`;
+const qwenModelPath = `/library/models/${encodeURIComponent(qwenModel)}`;
+
 afterEach(() => {
   history.replaceState(null, "", "/");
   vi.restoreAllMocks();
+});
+
+test("summarizes the loaded Library window and filters recipes without changing the route", async () => {
+  history.replaceState(null, "", "/library");
+  const api = {librarySnapshot: async () => librarySnapshot} as unknown as ControlApi;
+  const user = userEvent.setup();
+  render(<App api={api}/>);
+
+  expect(await screen.findByRole("heading", {name: "Library"})).toBeVisible();
+  const summary = screen.getByRole("region", {name: "Library summary"});
+  expect(within(summary).getByRole("group", {name: "1 model version"})).toBeVisible();
+  expect(within(summary).getByRole("group", {name: "3 recipes"})).toBeVisible();
+  expect(within(summary).getByRole("group", {name: "2 linked"})).toBeVisible();
+  expect(within(summary).getByRole("group", {name: "1 needs a model version"})).toBeVisible();
+
+  await user.click(screen.getByRole("link", {name: /qwen\/3/}));
+
+  const search = screen.getByRole("searchbox", {name: "Search Library"});
+  await user.type(search, "Qwen Code");
+
+  const models = screen.getByRole("region", {name: "Models"});
+  expect(within(models).getByRole("link", {name: /qwen\/3/})).toBeVisible();
+  const recipes = screen.getByRole("region", {name: /Recipes for/});
+  expect(within(recipes).getByRole("link", {name: /Qwen Code/})).toBeVisible();
+  expect(within(recipes).queryByRole("link", {name: /Qwen Chat/})).not.toBeInTheDocument();
+  expect(screen.getByRole("button", {name: "Clear Library search"})).toBeVisible();
+
+  await user.click(screen.getByRole("button", {name: "Clear Library search"}));
+  expect(within(recipes).getByRole("link", {name: /Qwen Chat/})).toBeVisible();
+  expect(history.state).toBeNull();
+  expect(location.pathname).toBe(qwenModelPath);
 });
 
 test("shows visual recipe truth and selects only one complete placement group on activation", async () => {
@@ -23,11 +57,16 @@ test("shows visual recipe truth and selects only one complete placement group on
 
   const detail = await screen.findByRole("region", {name: "Qwen Chat recipe authority"});
   expect(within(detail).getByText("Immutable revision 3")).toBeVisible();
-  expect(within(detail).getByText("qwen/3")).toBeVisible();
-  expect(within(detail).getByText("openai.chat")).toBeVisible();
-  expect(within(detail).getByText("tools")).toBeVisible();
+  expect(within(detail).getByText(`qwen/qwen3@${"e".repeat(64)}`)).toBeVisible();
+  expect(within(detail).getByText(`vonk-forge/vllm-openai@${"f".repeat(64)}`)).toBeVisible();
+  expect(within(detail).getByText(`vonk-forge/python-312-cuda@${"1".repeat(64)}`)).toBeVisible();
+  const identity = within(detail).getByRole("region", {name: "Recipe identity"});
+  expect(within(identity).getByText("Model version")).toBeVisible();
+  expect(within(identity).getByText("Execution harness")).toBeVisible();
+  expect(within(identity).getByText("Runtime distribution")).toBeVisible();
+  expect(within(detail).getByRole("region", {name: "Lifecycle overview"})).toBeVisible();
   const topology = within(detail).getByRole("region", {name: "Topology and resources"});
-  expect(within(topology).getByText("2 nodes · tensor_parallel · declared")).toBeVisible();
+  expect(within(topology).getByText("2 nodes · tensor_parallel")).toBeVisible();
   expect(within(topology).getByText("Rank 0 · leader · endpoint owner")).toBeVisible();
   expect(within(topology).getByText("Rank 1 · worker")).toBeVisible();
   expect(within(topology).getByText("144.0 GiB startup memory total")).toBeVisible();
@@ -79,8 +118,8 @@ test("shows visual recipe truth and selects only one complete placement group on
 
 test("loads and merges cursor pages without splitting model or unlinked recipe groups", async () => {
   // Break caught: a many-recipe Library silently stops at the first page or
-  // creates duplicate model groups instead of preserving family membership.
-  history.replaceState(null, "", "/library/models/qwen%2F3");
+  // creates duplicate exact model-version groups across cursor pages.
+  history.replaceState(null, "", qwenModelPath);
   const firstPage = {
     ...librarySnapshot,
     models: [{...librarySnapshot.models[0], recipes: [librarySnapshot.models[0].recipes[0]]}],
@@ -104,7 +143,7 @@ test("loads and merges cursor pages without splitting model or unlinked recipe g
 
   await waitFor(() => expect(librarySnapshotRequest).toHaveBeenCalledWith("page-2", expect.any(AbortSignal)));
   expect(within(models).getByText("2 recipes")).toBeVisible();
-  const recipes = screen.getByRole("region", {name: "Recipes for Qwen 3"});
+  const recipes = screen.getByRole("region", {name: `Recipes for ${qwenModel}`});
   expect(within(recipes).getByRole("link", {name: /Qwen Chat/})).toBeVisible();
   expect(within(recipes).getByRole("link", {name: /Qwen Code/})).toBeVisible();
   expect(within(models).getByRole("link", {name: /Unlinked/})).toBeVisible();
@@ -127,8 +166,7 @@ test("bounds repeated cursor pages while pinning selected and unlinked navigatio
       title: `Unlinked ${pageNumber}-${index}`,
     }));
     const extraModels = Array.from({length: 20}, (_, index) => ({
-      family: `family/${pageNumber}-${index}`,
-      display_name: `Family ${pageNumber}-${index}`,
+      model: {kind: "model-version" as const, publisher: "fixture", slug: `model-${pageNumber}-${index}`, content_sha256: `${pageNumber}`.repeat(64)},
       page_local: true,
       recipes: [{...codeRecipe, recipe_id: `family-recipe-${pageNumber}-${index}`, slug: `family-${pageNumber}-${index}`, title: `Family recipe ${pageNumber}-${index}`}],
     }));
@@ -160,8 +198,8 @@ test("bounds repeated cursor pages while pinning selected and unlinked navigatio
 
   const models = screen.getByRole("region", {name: "Models"});
   expect(within(models).getAllByRole("link").length).toBeLessThanOrEqual(41);
-  expect(within(models).getByRole("link", {name: /Qwen 3/})).toBeVisible();
-  const recipes = screen.getByRole("region", {name: "Recipes for Qwen 3"});
+  expect(within(models).getByRole("link", {name: new RegExp(qwenModel)})).toBeVisible();
+  const recipes = screen.getByRole("region", {name: `Recipes for ${qwenModel}`});
   expect(recipes.querySelectorAll(".library-row")).toHaveLength(50);
   expect(within(recipes).getByRole("link", {name: /Pinned Recipe/})).toBeVisible();
   expect(within(recipes).getByRole("link", {name: /Recipe 3-19/})).toBeVisible();
@@ -175,7 +213,7 @@ test("bounds repeated cursor pages while pinning selected and unlinked navigatio
 test("restores an evicted recipe parent when browser Back revisits bounded history", async () => {
   // Break caught: loading more while B is active can evict visited A; browser
   // Back then loses A's model list, selected row, and parent-specific Back link.
-  history.replaceState(null, "", "/library/models/qwen%2F3");
+  history.replaceState(null, "", qwenModelPath);
   const recipe = (id: string, title: string) => ({
     ...codeRecipe,
     recipe_id: id,
@@ -217,7 +255,7 @@ test("restores an evicted recipe parent when browser Back revisits bounded histo
   const user = userEvent.setup();
   render(<App api={api}/>);
 
-  let recipes = await screen.findByRole("region", {name: "Recipes for Qwen 3"});
+  let recipes = await screen.findByRole("region", {name: `Recipes for ${qwenModel}`});
   await user.click(within(recipes).getByRole("link", {name: /Recipe A/}));
   await screen.findByRole("region", {name: "Recipe A recipe authority"});
   await user.click(within(recipes).getByRole("link", {name: /Recipe B/}));
@@ -225,7 +263,7 @@ test("restores an evicted recipe parent when browser Back revisits bounded histo
   await user.click(screen.getByRole("button", {name: "Load more Library recipes"}));
   await waitFor(() => expect(librarySnapshotRequest).toHaveBeenCalledWith("page-2", expect.any(AbortSignal)));
 
-  recipes = screen.getByRole("region", {name: "Recipes for Qwen 3"});
+  recipes = screen.getByRole("region", {name: `Recipes for ${qwenModel}`});
   expect(recipes.querySelectorAll(".library-row")).toHaveLength(50);
   expect(within(recipes).queryByRole("link", {name: /Recipe A/})).not.toBeInTheDocument();
 
@@ -235,14 +273,14 @@ test("restores an evicted recipe parent when browser Back revisits bounded histo
   });
 
   await screen.findByRole("region", {name: "Recipe A recipe authority"});
-  recipes = screen.getByRole("region", {name: "Recipes for Qwen 3"});
+  recipes = screen.getByRole("region", {name: `Recipes for ${qwenModel}`});
   expect(recipes.querySelectorAll(".library-row")).toHaveLength(50);
   expect(within(recipes).getByRole("link", {name: /Recipe A/})).toHaveAttribute("aria-current", "page");
-  expect(screen.getByRole("link", {name: "Back to Qwen 3 recipes"})).toHaveAttribute("href", "/library/models/qwen%2F3");
+  expect(screen.getByRole("link", {name: `Back to ${qwenModel} recipes`})).toHaveAttribute("href", qwenModelPath);
 });
 
 test("changes URL selection only on activation and preserves drill-down history", async () => {
-  // Break caught: focus selects or fetches a model/recipe, one-family recipes
+  // Break caught: focus selects or fetches a model/recipe, one-version recipes
   // collapse into one row, unlinked recipes disappear, or navigation replaces
   // browser history instead of creating addressable selections.
   history.replaceState(null, "", "/library");
@@ -257,7 +295,7 @@ test("changes URL selection only on activation and preserves drill-down history"
 
   const heading = await screen.findByRole("heading", {name: "Library"});
   const models = await screen.findByRole("region", {name: "Models"});
-  const qwen = within(models).getByRole("link", {name: /Qwen 3/});
+  const qwen = within(models).getByRole("link", {name: new RegExp(qwenModel)});
   expect(within(models).getByText("2 recipes")).toBeVisible();
   expect(within(models).getByRole("link", {name: /Unlinked/})).toBeVisible();
 
@@ -267,37 +305,37 @@ test("changes URL selection only on activation and preserves drill-down history"
   expect(libraryRecipe).not.toHaveBeenCalled();
 
   await user.keyboard("{Enter}");
-  expect(location.pathname).toBe("/library/models/qwen%2F3");
-  expect(pushState).toHaveBeenLastCalledWith(null, "", "/library/models/qwen%2F3");
+  expect(location.pathname).toBe(qwenModelPath);
+  expect(pushState).toHaveBeenLastCalledWith(null, "", qwenModelPath);
   await waitFor(() => expect(heading).toHaveFocus());
 
-  const recipes = screen.getByRole("region", {name: "Recipes for Qwen 3"});
+  const recipes = screen.getByRole("region", {name: `Recipes for ${qwenModel}`});
   expect(within(recipes).getByRole("link", {name: /Qwen Chat/})).toBeVisible();
   expect(within(recipes).getByRole("link", {name: /Qwen Code/})).toBeVisible();
   expect(within(recipes).getByRole("link", {name: "Back to Models"})).toHaveAttribute("href", "/library");
 
   const chat = within(recipes).getByRole("link", {name: /Qwen Chat/});
   chat.focus();
-  expect(location.pathname).toBe("/library/models/qwen%2F3");
+  expect(location.pathname).toBe(qwenModelPath);
   expect(libraryRecipe).not.toHaveBeenCalled();
 
   await user.keyboard("{Enter}");
   expect(location.pathname).toBe("/library/recipes/recipe-chat");
   expect(pushState).toHaveBeenLastCalledWith(null, "", "/library/recipes/recipe-chat");
   expect(await screen.findByRole("heading", {name: "Qwen Chat"})).toBeVisible();
-  expect(screen.getByRole("link", {name: "Back to Qwen 3 recipes"})).toHaveAttribute("href", "/library/models/qwen%2F3");
+  expect(screen.getByRole("link", {name: `Back to ${qwenModel} recipes`})).toHaveAttribute("href", qwenModelPath);
   expect(libraryRecipe).toHaveBeenCalledTimes(1);
 
   act(() => {
-    history.replaceState(null, "", "/library/models/qwen%2F3");
+    history.replaceState(null, "", qwenModelPath);
     dispatchEvent(new PopStateEvent("popstate"));
   });
-  expect(screen.getByRole("region", {name: "Recipes for Qwen 3"})).toBeVisible();
+  expect(screen.getByRole("region", {name: `Recipes for ${qwenModel}`})).toBeVisible();
   await waitFor(() => expect(heading).toHaveFocus());
 });
 
 test("preserves the explicit unlinked-list parent through detail and Back navigation", async () => {
-  // Break caught: a recipe without a model family loses its recipe list and
+  // Break caught: a recipe without an exact model version loses its recipe list and
   // returns to the Library root instead of its addressable unlinked parent.
   history.replaceState(null, "", "/library");
   const unlinkedDetail = {

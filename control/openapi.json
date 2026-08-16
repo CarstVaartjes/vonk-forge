@@ -381,6 +381,142 @@
         "title": "CapacityReservations",
         "type": "object"
       },
+      "CatalogEntityListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "entities": {
+            "items": {
+              "$ref": "#/components/schemas/CatalogEntityRevisionResponse"
+            },
+            "maxItems": 100,
+            "title": "Entities",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "entities"
+        ],
+        "title": "CatalogEntityListResponse",
+        "type": "object"
+      },
+      "CatalogEntityRevisionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "content_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Sha256"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Created By",
+            "type": "string"
+          },
+          "document": {
+            "additionalProperties": true,
+            "title": "Document",
+            "type": "object"
+          },
+          "entity_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Entity Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "model-group",
+              "model",
+              "model-version",
+              "execution-harness",
+              "runtime-distribution",
+              "patch-bundle"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "lifecycle": {
+            "enum": [
+              "draft",
+              "blocked",
+              "resolved",
+              "deprecated"
+            ],
+            "title": "Lifecycle",
+            "type": "string"
+          },
+          "publisher": {
+            "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+            "title": "Publisher",
+            "type": "string"
+          },
+          "revision_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Revision Id",
+            "type": "string"
+          },
+          "revision_number": {
+            "minimum": 1.0,
+            "title": "Revision Number",
+            "type": "integer"
+          },
+          "schema_version": {
+            "const": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "slug": {
+            "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+            "title": "Slug",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entity_id",
+          "kind",
+          "publisher",
+          "slug",
+          "title",
+          "revision_id",
+          "revision_number",
+          "lifecycle",
+          "schema_version",
+          "document",
+          "created_by",
+          "created_at"
+        ],
+        "title": "CatalogEntityRevisionResponse",
+        "type": "object"
+      },
       "CatalogProblem": {
         "additionalProperties": false,
         "properties": {
@@ -423,6 +559,21 @@
           "proposal_digest"
         ],
         "title": "ChangeRequest",
+        "type": "object"
+      },
+      "CreateCatalogEntityRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "document": {
+            "additionalProperties": true,
+            "title": "Document",
+            "type": "object"
+          }
+        },
+        "required": [
+          "document"
+        ],
+        "title": "CreateCatalogEntityRequest",
         "type": "object"
       },
       "CreateRecipeRequest": {
@@ -2042,17 +2193,8 @@
       "LibraryModel": {
         "additionalProperties": false,
         "properties": {
-          "display_name": {
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Display Name",
-            "type": "string"
-          },
-          "family": {
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Family",
-            "type": "string"
+          "model": {
+            "$ref": "#/components/schemas/ModelVersionIdentity"
           },
           "page_local": {
             "const": true,
@@ -2071,8 +2213,7 @@
           }
         },
         "required": [
-          "family",
-          "display_name",
+          "model",
           "recipes"
         ],
         "title": "LibraryModel",
@@ -2091,18 +2232,10 @@
           },
           "placement": {
             "items": {
-              "$ref": "#/components/schemas/ProfilePlacement"
+              "$ref": "#/components/schemas/TopologyPlacement"
             },
-            "maxItems": 32,
+            "maxItems": 1,
             "title": "Placement",
-            "type": "array"
-          },
-          "profiles": {
-            "items": {
-              "$ref": "#/components/schemas/RecipeProfile"
-            },
-            "maxItems": 32,
-            "title": "Profiles",
             "type": "array"
           },
           "reasons": {
@@ -2132,6 +2265,16 @@
               }
             ]
           },
+          "topology": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecipeTopology"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "visual_recipe": {
             "anyOf": [
               {
@@ -2148,7 +2291,7 @@
           "recipe",
           "selected_revision",
           "visual_recipe",
-          "profiles",
+          "topology",
           "operational_state",
           "placement",
           "reasons"
@@ -2179,7 +2322,8 @@
             "enum": [
               "local",
               "workload_run",
-              "global"
+              "global",
+              "recipe_library"
             ],
             "title": "Source Kind",
             "type": "string"
@@ -2243,14 +2387,6 @@
             "title": "Installations Truncated",
             "type": "boolean"
           },
-          "profiles": {
-            "items": {
-              "$ref": "#/components/schemas/RecipeProfileSummary"
-            },
-            "maxItems": 32,
-            "title": "Profiles",
-            "type": "array"
-          },
           "reasons": {
             "items": {
               "$ref": "#/components/schemas/vonk_control__library_contract__ProjectionReason"
@@ -2308,7 +2444,8 @@
             "enum": [
               "local",
               "workload_run",
-              "global"
+              "global",
+              "recipe_library"
             ],
             "title": "Source Kind",
             "type": "string"
@@ -2318,6 +2455,19 @@
             "minLength": 1,
             "title": "Title",
             "type": "string"
+          },
+          "topology_name": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topology Name"
           }
         },
         "required": [
@@ -2328,7 +2478,7 @@
           "source_kind",
           "selected_revision",
           "capabilities",
-          "profiles",
+          "topology_name",
           "installations",
           "installation_total_count",
           "installation_returned_count",
@@ -2555,10 +2705,6 @@
             "title": "Placement Digest",
             "type": "string"
           },
-          "profile_name": {
-            "title": "Profile Name",
-            "type": "string"
-          },
           "recipe_content_sha256": {
             "title": "Recipe Content Sha256",
             "type": "string"
@@ -2566,12 +2712,16 @@
           "recipe_revision_id": {
             "title": "Recipe Revision Id",
             "type": "string"
+          },
+          "topology_name": {
+            "title": "Topology Name",
+            "type": "string"
           }
         },
         "required": [
           "recipe_revision_id",
           "recipe_content_sha256",
-          "profile_name",
+          "topology_name",
           "generation",
           "parameters",
           "nodes",
@@ -2615,12 +2765,6 @@
             "title": "Parameters",
             "type": "object"
           },
-          "profile_name": {
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Profile Name",
-            "type": "string"
-          },
           "recipe_revision_id": {
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
             "title": "Recipe Revision Id",
@@ -2629,7 +2773,6 @@
         },
         "required": [
           "recipe_revision_id",
-          "profile_name",
           "node_ids",
           "parameters"
         ],
@@ -2654,11 +2797,6 @@
             "title": "Parameters",
             "type": "object"
           },
-          "profile_name": {
-            "pattern": "^[a-z][a-z0-9_.-]{0,63}$",
-            "title": "Profile Name",
-            "type": "string"
-          },
           "recipe_revision_id": {
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
             "title": "Recipe Revision Id",
@@ -2667,7 +2805,6 @@
         },
         "required": [
           "recipe_revision_id",
-          "profile_name",
           "node_ids"
         ],
         "title": "MappingPreviewRequest",
@@ -2715,11 +2852,6 @@
             "title": "Placement Digest",
             "type": "string"
           },
-          "profile_name": {
-            "pattern": "^[a-z][a-z0-9_.-]{0,63}$",
-            "title": "Profile Name",
-            "type": "string"
-          },
           "recipe_revision_id": {
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
             "title": "Recipe Revision Id",
@@ -2733,7 +2865,6 @@
         },
         "required": [
           "recipe_revision_id",
-          "profile_name",
           "node_ids",
           "placement_digest",
           "request_key"
@@ -2777,6 +2908,41 @@
           }
         },
         "title": "MigrationGrantRequest",
+        "type": "object"
+      },
+      "ModelVersionIdentity": {
+        "additionalProperties": false,
+        "properties": {
+          "content_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Content Sha256",
+            "type": "string"
+          },
+          "kind": {
+            "const": "model-version",
+            "title": "Kind",
+            "type": "string"
+          },
+          "publisher": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Publisher",
+            "type": "string"
+          },
+          "slug": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "publisher",
+          "slug",
+          "content_sha256"
+        ],
+        "title": "ModelVersionIdentity",
         "type": "object"
       },
       "NodeConnection": {
@@ -3342,12 +3508,6 @@
             "title": "Nodes",
             "type": "array"
           },
-          "profile_name": {
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Profile Name",
-            "type": "string"
-          },
           "recipe_revision_id": {
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
             "title": "Recipe Revision Id",
@@ -3361,12 +3521,18 @@
             ],
             "title": "State",
             "type": "string"
+          },
+          "topology_name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Topology Name",
+            "type": "string"
           }
         },
         "required": [
           "mapping_id",
           "recipe_revision_id",
-          "profile_name",
+          "topology_name",
           "generation",
           "state",
           "nodes"
@@ -5460,12 +5626,6 @@
             "title": "Preview Targets",
             "type": "array"
           },
-          "profile_name": {
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Profile Name",
-            "type": "string"
-          },
           "ranking_scope": {
             "const": "bounded-advisory",
             "default": "bounded-advisory",
@@ -5508,11 +5668,17 @@
           },
           "score": {
             "$ref": "#/components/schemas/PlacementScore"
+          },
+          "topology_name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Topology Name",
+            "type": "string"
           }
         },
         "required": [
           "recipe_revision_id",
-          "profile_name",
+          "topology_name",
           "node_ids",
           "nodes",
           "eligible",
@@ -5583,222 +5749,6 @@
         "title": "PlacementScore",
         "type": "object"
       },
-      "PlanEndpoint": {
-        "additionalProperties": false,
-        "properties": {
-          "path": {
-            "maxLength": 512,
-            "minLength": 1,
-            "pattern": "^/",
-            "title": "Path",
-            "type": "string"
-          },
-          "port": {
-            "maximum": 65535.0,
-            "minimum": 1.0,
-            "title": "Port",
-            "type": "integer"
-          },
-          "scheme": {
-            "enum": [
-              "http",
-              "https"
-            ],
-            "title": "Scheme",
-            "type": "string"
-          }
-        },
-        "required": [
-          "scheme",
-          "port",
-          "path"
-        ],
-        "title": "PlanEndpoint",
-        "type": "object"
-      },
-      "PlanInputDigests": {
-        "additionalProperties": {
-          "type": "string"
-        },
-        "maxProperties": 512,
-        "title": "PlanInputDigests",
-        "type": "object"
-      },
-      "PlanOperation": {
-        "additionalProperties": false,
-        "properties": {
-          "compensation_kind": {
-            "anyOf": [
-              {
-                "maxLength": 80,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Compensation Kind"
-          },
-          "dependencies": {
-            "items": {
-              "type": "string"
-            },
-            "maxItems": 512,
-            "title": "Dependencies",
-            "type": "array"
-          },
-          "kind": {
-            "maxLength": 80,
-            "minLength": 1,
-            "title": "Kind",
-            "type": "string"
-          },
-          "node_id": {
-            "pattern": "^spk_[0-9a-f]{32}$",
-            "title": "Node Id",
-            "type": "string"
-          },
-          "operation_id": {
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Operation Id",
-            "type": "string"
-          },
-          "payload_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Payload Digest",
-            "type": "string"
-          },
-          "workload_id": {
-            "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
-            "title": "Workload Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "operation_id",
-          "node_id",
-          "workload_id",
-          "kind",
-          "dependencies",
-          "payload_digest"
-        ],
-        "title": "PlanOperation",
-        "type": "object"
-      },
-      "PlanOperationGraph": {
-        "additionalProperties": false,
-        "properties": {
-          "base_commit": {
-            "pattern": "^[0-9a-f]{40}$",
-            "title": "Base Commit",
-            "type": "string"
-          },
-          "nodes": {
-            "items": {
-              "$ref": "#/components/schemas/PlanOperation"
-            },
-            "maxItems": 4096,
-            "title": "Nodes",
-            "type": "array"
-          },
-          "schema_version": {
-            "const": 1,
-            "title": "Schema Version",
-            "type": "integer"
-          },
-          "targets": {
-            "items": {
-              "pattern": "^spk_[0-9a-f]{32}$",
-              "type": "string"
-            },
-            "maxItems": 512,
-            "title": "Targets",
-            "type": "array"
-          }
-        },
-        "required": [
-          "schema_version",
-          "base_commit",
-          "targets",
-          "nodes"
-        ],
-        "title": "PlanOperationGraph",
-        "type": "object"
-      },
-      "PlanPlacements": {
-        "additionalProperties": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "maxProperties": 128,
-        "title": "PlanPlacements",
-        "type": "object"
-      },
-      "PlanPrepareRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "adapter_id": {
-            "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
-            "title": "Adapter Id",
-            "type": "string"
-          },
-          "profile_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Profile Digest",
-            "type": "string"
-          },
-          "release_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Release Digest",
-            "type": "string"
-          },
-          "schema_version": {
-            "const": 1,
-            "title": "Schema Version",
-            "type": "integer"
-          },
-          "workload_id": {
-            "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
-            "title": "Workload Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "schema_version",
-          "workload_id",
-          "release_digest",
-          "adapter_id",
-          "profile_digest"
-        ],
-        "title": "PlanPrepareRequest",
-        "type": "object"
-      },
-      "PlanQuota": {
-        "additionalProperties": false,
-        "properties": {
-          "requests_per_minute": {
-            "maximum": 100000.0,
-            "minimum": 1.0,
-            "title": "Requests Per Minute",
-            "type": "integer"
-          },
-          "tokens_per_minute": {
-            "maximum": 100000000.0,
-            "minimum": 1.0,
-            "title": "Tokens Per Minute",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "requests_per_minute",
-          "tokens_per_minute"
-        ],
-        "title": "PlanQuota",
-        "type": "object"
-      },
       "PlanReason": {
         "additionalProperties": false,
         "properties": {
@@ -5822,312 +5772,6 @@
         "title": "PlanReason",
         "type": "object"
       },
-      "PlanRelease": {
-        "additionalProperties": false,
-        "properties": {
-          "definition_hash": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Definition Hash",
-            "type": "string"
-          },
-          "endpoint": {
-            "$ref": "#/components/schemas/PlanEndpoint"
-          },
-          "manifest_path": {
-            "maxLength": 512,
-            "minLength": 1,
-            "title": "Manifest Path",
-            "type": "string"
-          },
-          "manifest_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Manifest Sha256",
-            "type": "string"
-          },
-          "release_request": {
-            "$ref": "#/components/schemas/PlanReleaseRequest"
-          },
-          "workload_requests": {
-            "$ref": "#/components/schemas/PlanWorkloadRequests"
-          }
-        },
-        "required": [
-          "manifest_path",
-          "manifest_sha256",
-          "definition_hash",
-          "release_request",
-          "workload_requests",
-          "endpoint"
-        ],
-        "title": "PlanRelease",
-        "type": "object"
-      },
-      "PlanReleaseRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "adapter_id": {
-            "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
-            "title": "Adapter Id",
-            "type": "string"
-          },
-          "oci_manifest_digest": {
-            "pattern": "^sha256:[0-9a-f]{64}$",
-            "title": "Oci Manifest Digest",
-            "type": "string"
-          },
-          "provenance_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Provenance Digest",
-            "type": "string"
-          },
-          "schema_version": {
-            "const": 1,
-            "title": "Schema Version",
-            "type": "integer"
-          },
-          "target_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Target Digest",
-            "type": "string"
-          },
-          "target_name": {
-            "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
-            "title": "Target Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "schema_version",
-          "target_name",
-          "oci_manifest_digest",
-          "target_digest",
-          "provenance_digest",
-          "adapter_id"
-        ],
-        "title": "PlanReleaseRequest",
-        "type": "object"
-      },
-      "PlanReleases": {
-        "additionalProperties": {
-          "$ref": "#/components/schemas/PlanRelease"
-        },
-        "maxProperties": 128,
-        "title": "PlanReleases",
-        "type": "object"
-      },
-      "PlanRoute": {
-        "additionalProperties": false,
-        "properties": {
-          "entrypoint_node_id": {
-            "pattern": "^spk_[0-9a-f]{32}$",
-            "title": "Entrypoint Node Id",
-            "type": "string"
-          },
-          "nodes": {
-            "items": {
-              "type": "string"
-            },
-            "maxItems": 64,
-            "minItems": 1,
-            "title": "Nodes",
-            "type": "array"
-          },
-          "path": {
-            "maxLength": 512,
-            "minLength": 1,
-            "pattern": "^/",
-            "title": "Path",
-            "type": "string"
-          },
-          "port": {
-            "maximum": 65535.0,
-            "minimum": 1.0,
-            "title": "Port",
-            "type": "integer"
-          },
-          "quota": {
-            "$ref": "#/components/schemas/PlanQuota"
-          },
-          "quota_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Quota Digest",
-            "type": "string"
-          },
-          "scheme": {
-            "enum": [
-              "http",
-              "https"
-            ],
-            "title": "Scheme",
-            "type": "string"
-          },
-          "workload_id": {
-            "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
-            "title": "Workload Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "workload_id",
-          "nodes",
-          "entrypoint_node_id",
-          "scheme",
-          "port",
-          "path",
-          "quota",
-          "quota_digest"
-        ],
-        "title": "PlanRoute",
-        "type": "object"
-      },
-      "PlanRoutes": {
-        "additionalProperties": {
-          "$ref": "#/components/schemas/PlanRoute"
-        },
-        "maxProperties": 128,
-        "title": "PlanRoutes",
-        "type": "object"
-      },
-      "PlanStartRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "adapter_id": {
-            "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
-            "title": "Adapter Id",
-            "type": "string"
-          },
-          "preparation_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Preparation Digest",
-            "type": "string"
-          },
-          "release_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Release Digest",
-            "type": "string"
-          },
-          "schema_version": {
-            "const": 1,
-            "title": "Schema Version",
-            "type": "integer"
-          },
-          "workload_id": {
-            "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
-            "title": "Workload Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "schema_version",
-          "workload_id",
-          "release_digest",
-          "adapter_id",
-          "preparation_digest"
-        ],
-        "title": "PlanStartRequest",
-        "type": "object"
-      },
-      "PlanVerifyRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "adapter_id": {
-            "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
-            "title": "Adapter Id",
-            "type": "string"
-          },
-          "expected_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Expected Digest",
-            "type": "string"
-          },
-          "release_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Release Digest",
-            "type": "string"
-          },
-          "schema_version": {
-            "const": 1,
-            "title": "Schema Version",
-            "type": "integer"
-          },
-          "workload_id": {
-            "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
-            "title": "Workload Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "schema_version",
-          "workload_id",
-          "release_digest",
-          "adapter_id",
-          "expected_digest"
-        ],
-        "title": "PlanVerifyRequest",
-        "type": "object"
-      },
-      "PlanWorkloadRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "adapter_id": {
-            "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
-            "title": "Adapter Id",
-            "type": "string"
-          },
-          "release_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Release Digest",
-            "type": "string"
-          },
-          "schema_version": {
-            "const": 1,
-            "title": "Schema Version",
-            "type": "integer"
-          },
-          "workload_id": {
-            "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
-            "title": "Workload Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "schema_version",
-          "workload_id",
-          "release_digest",
-          "adapter_id"
-        ],
-        "title": "PlanWorkloadRequest",
-        "type": "object"
-      },
-      "PlanWorkloadRequests": {
-        "additionalProperties": false,
-        "properties": {
-          "health": {
-            "$ref": "#/components/schemas/PlanWorkloadRequest"
-          },
-          "prepare": {
-            "$ref": "#/components/schemas/PlanPrepareRequest"
-          },
-          "start": {
-            "$ref": "#/components/schemas/PlanStartRequest"
-          },
-          "stop": {
-            "$ref": "#/components/schemas/PlanWorkloadRequest"
-          },
-          "verify": {
-            "$ref": "#/components/schemas/PlanVerifyRequest"
-          }
-        },
-        "required": [
-          "prepare",
-          "start",
-          "stop",
-          "health",
-          "verify"
-        ],
-        "title": "PlanWorkloadRequests",
-        "type": "object"
-      },
       "PreviewRequest": {
         "additionalProperties": false,
         "properties": {
@@ -6142,100 +5786,6 @@
           "source_yaml"
         ],
         "title": "PreviewRequest",
-        "type": "object"
-      },
-      "ProfilePlacement": {
-        "additionalProperties": false,
-        "properties": {
-          "candidate_node_ids": {
-            "items": {
-              "pattern": "^spk_[0-9a-f]{32}$",
-              "type": "string"
-            },
-            "maxItems": 32,
-            "title": "Candidate Node Ids",
-            "type": "array"
-          },
-          "evaluated_group_count": {
-            "maximum": 512.0,
-            "minimum": 0.0,
-            "title": "Evaluated Group Count",
-            "type": "integer"
-          },
-          "evidence_counts": {
-            "$ref": "#/components/schemas/PlacementEvidenceCounts"
-          },
-          "limits": {
-            "$ref": "#/components/schemas/PlacementLimits"
-          },
-          "node_count": {
-            "maximum": 9.223372036854776e+18,
-            "minimum": 1.0,
-            "title": "Node Count",
-            "type": "integer"
-          },
-          "profile_name": {
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Profile Name",
-            "type": "string"
-          },
-          "reasons": {
-            "items": {
-              "$ref": "#/components/schemas/vonk_control__library_contract__ProjectionReason"
-            },
-            "maxItems": 16,
-            "title": "Reasons",
-            "type": "array"
-          },
-          "recommendations": {
-            "items": {
-              "$ref": "#/components/schemas/PlacementRecommendation"
-            },
-            "maxItems": 16,
-            "title": "Recommendations",
-            "type": "array"
-          },
-          "rejected_evidence_truncated": {
-            "title": "Rejected Evidence Truncated",
-            "type": "boolean"
-          },
-          "rejected_groups": {
-            "items": {
-              "$ref": "#/components/schemas/PlacementRecommendation"
-            },
-            "maxItems": 16,
-            "title": "Rejected Groups",
-            "type": "array"
-          },
-          "rejected_nodes": {
-            "items": {
-              "$ref": "#/components/schemas/RejectedNode"
-            },
-            "maxItems": 32,
-            "title": "Rejected Nodes",
-            "type": "array"
-          },
-          "search_complete": {
-            "title": "Search Complete",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "profile_name",
-          "node_count",
-          "candidate_node_ids",
-          "recommendations",
-          "rejected_nodes",
-          "rejected_groups",
-          "evaluated_group_count",
-          "search_complete",
-          "rejected_evidence_truncated",
-          "limits",
-          "evidence_counts",
-          "reasons"
-        ],
-        "title": "ProfilePlacement",
         "type": "object"
       },
       "ProposalChangeRequest": {
@@ -6376,6 +5926,39 @@
           "minimum_bandwidth_mbps"
         ],
         "title": "RecipeFabric",
+        "type": "object"
+      },
+      "RecipeLibraryImportRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "document": {
+            "additionalProperties": true,
+            "title": "Document",
+            "type": "object"
+          },
+          "expected_content_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Expected Content Sha256",
+            "type": "string"
+          },
+          "library_commit": {
+            "pattern": "^[0-9a-f]{40}$",
+            "title": "Library Commit",
+            "type": "string"
+          },
+          "source_path": {
+            "pattern": "^recipes/[a-z0-9][a-z0-9-]{1,62}\\.json$",
+            "title": "Source Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "library_commit",
+          "source_path",
+          "expected_content_sha256",
+          "document"
+        ],
+        "title": "RecipeLibraryImportRequest",
         "type": "object"
       },
       "RecipeListResponse": {
@@ -6563,12 +6146,6 @@
             "title": "Present Ranks",
             "type": "array"
           },
-          "profile_name": {
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Profile Name",
-            "type": "string"
-          },
           "rank": {
             "maximum": 499.0,
             "minimum": 0.0,
@@ -6610,6 +6187,12 @@
             "minLength": 1,
             "title": "Title",
             "type": "string"
+          },
+          "topology_name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Topology Name",
+            "type": "string"
           }
         },
         "required": [
@@ -6617,7 +6200,7 @@
           "recipe_id",
           "recipe_revision_id",
           "title",
-          "profile_name",
+          "topology_name",
           "expected_rank_count",
           "present_ranks",
           "member_node_ids",
@@ -6628,159 +6211,6 @@
           "complete"
         ],
         "title": "RecipePresence",
-        "type": "object"
-      },
-      "RecipeProfile": {
-        "additionalProperties": false,
-        "properties": {
-          "description": {
-            "maxLength": 512,
-            "minLength": 1,
-            "title": "Description",
-            "type": "string"
-          },
-          "fabric": {
-            "$ref": "#/components/schemas/RecipeFabric"
-          },
-          "measurement": {
-            "enum": [
-              "declared",
-              "derived",
-              "measured"
-            ],
-            "title": "Measurement",
-            "type": "string"
-          },
-          "name": {
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Name",
-            "type": "string"
-          },
-          "node_count": {
-            "maximum": 9.223372036854776e+18,
-            "minimum": 1.0,
-            "title": "Node Count",
-            "type": "integer"
-          },
-          "parallelism": {
-            "$ref": "#/components/schemas/RecipeParallelism"
-          },
-          "parameter_overrides": {
-            "additionalProperties": {
-              "anyOf": [
-                {
-                  "maxLength": 512,
-                  "type": "string"
-                },
-                {
-                  "maximum": 9.223372036854776e+18,
-                  "minimum": -9.223372036854776e+18,
-                  "type": "integer"
-                },
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "maxProperties": 128,
-            "propertyNames": {
-              "maxLength": 64,
-              "minLength": 1
-            },
-            "title": "Parameter Overrides",
-            "type": "object"
-          },
-          "roles": {
-            "items": {
-              "$ref": "#/components/schemas/RecipeRole"
-            },
-            "maxItems": 32,
-            "minItems": 1,
-            "title": "Roles",
-            "type": "array"
-          },
-          "strategy": {
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Strategy",
-            "type": "string"
-          }
-        },
-        "required": [
-          "name",
-          "description",
-          "node_count",
-          "strategy",
-          "parallelism",
-          "roles",
-          "fabric",
-          "parameter_overrides",
-          "measurement"
-        ],
-        "title": "RecipeProfile",
-        "type": "object"
-      },
-      "RecipeProfileSummary": {
-        "additionalProperties": false,
-        "properties": {
-          "description": {
-            "maxLength": 512,
-            "minLength": 1,
-            "title": "Description",
-            "type": "string"
-          },
-          "fabric_connectivity": {
-            "enum": [
-              "none",
-              "connected",
-              "full_mesh",
-              "switch"
-            ],
-            "title": "Fabric Connectivity",
-            "type": "string"
-          },
-          "minimum_bandwidth_mbps": {
-            "maximum": 9.223372036854776e+18,
-            "minimum": 0.0,
-            "title": "Minimum Bandwidth Mbps",
-            "type": "integer"
-          },
-          "name": {
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Name",
-            "type": "string"
-          },
-          "node_count": {
-            "maximum": 9.223372036854776e+18,
-            "minimum": 1.0,
-            "title": "Node Count",
-            "type": "integer"
-          },
-          "roles": {
-            "items": {
-              "maxLength": 64,
-              "minLength": 1,
-              "type": "string"
-            },
-            "maxItems": 64,
-            "title": "Roles",
-            "type": "array"
-          }
-        },
-        "required": [
-          "name",
-          "description",
-          "node_count",
-          "roles",
-          "fabric_connectivity",
-          "minimum_bandwidth_mbps"
-        ],
-        "title": "RecipeProfileSummary",
         "type": "object"
       },
       "RecipeRevisionResponse": {
@@ -6825,6 +6255,11 @@
             "title": "Document",
             "type": "object"
           },
+          "execution_harness": {
+            "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+            "title": "Execution Harness",
+            "type": "string"
+          },
           "expected_download_bytes": {
             "minimum": 1.0,
             "title": "Expected Download Bytes",
@@ -6855,22 +6290,20 @@
             "title": "Maximum Runtime Memory Bytes Per Node",
             "type": "integer"
           },
+          "node_count": {
+            "minimum": 1.0,
+            "title": "Node Count",
+            "type": "integer"
+          },
           "origin": {
             "enum": [
               "local",
               "workload_run",
-              "global"
+              "global",
+              "recipe_library"
             ],
             "title": "Origin",
             "type": "string"
-          },
-          "profile_node_counts": {
-            "items": {
-              "type": "integer"
-            },
-            "minItems": 1,
-            "title": "Profile Node Counts",
-            "type": "array"
           },
           "recipe_id": {
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
@@ -6882,10 +6315,9 @@
             "title": "Revision Number",
             "type": "integer"
           },
-          "runtime_family": {
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Runtime Family",
+          "runtime_distribution": {
+            "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+            "title": "Runtime Distribution",
             "type": "string"
           },
           "schema_version": {
@@ -6908,6 +6340,18 @@
             "minLength": 1,
             "title": "Title",
             "type": "string"
+          },
+          "topology_mode": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Topology Mode",
+            "type": "string"
+          },
+          "topology_name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Topology Name",
+            "type": "string"
           }
         },
         "required": [
@@ -6917,11 +6361,14 @@
           "origin",
           "revision_number",
           "lifecycle",
-          "runtime_family",
+          "execution_harness",
+          "runtime_distribution",
           "source_bundle_sha256",
           "artifact_count",
           "expected_download_bytes",
-          "profile_node_counts",
+          "topology_name",
+          "topology_mode",
+          "node_count",
           "maximum_installed_bytes_per_node",
           "maximum_runtime_memory_bytes_per_node",
           "id",
@@ -6976,8 +6423,8 @@
             "type": "integer"
           },
           "schema_version": {
-            "maximum": 2147483647.0,
-            "minimum": 1.0,
+            "const": 1,
+            "default": 1,
             "title": "Schema Version",
             "type": "integer"
           }
@@ -6986,7 +6433,6 @@
           "id",
           "revision_number",
           "lifecycle",
-          "schema_version",
           "content_sha256",
           "created_at"
         ],
@@ -7061,6 +6507,11 @@
             ],
             "title": "Content Sha256"
           },
+          "execution_harness": {
+            "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+            "title": "Execution Harness",
+            "type": "string"
+          },
           "expected_download_bytes": {
             "minimum": 1.0,
             "title": "Expected Download Bytes",
@@ -7086,22 +6537,20 @@
             "title": "Maximum Runtime Memory Bytes Per Node",
             "type": "integer"
           },
+          "node_count": {
+            "minimum": 1.0,
+            "title": "Node Count",
+            "type": "integer"
+          },
           "origin": {
             "enum": [
               "local",
               "workload_run",
-              "global"
+              "global",
+              "recipe_library"
             ],
             "title": "Origin",
             "type": "string"
-          },
-          "profile_node_counts": {
-            "items": {
-              "type": "integer"
-            },
-            "minItems": 1,
-            "title": "Profile Node Counts",
-            "type": "array"
           },
           "recipe_id": {
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
@@ -7113,10 +6562,9 @@
             "title": "Revision Number",
             "type": "integer"
           },
-          "runtime_family": {
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Runtime Family",
+          "runtime_distribution": {
+            "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+            "title": "Runtime Distribution",
             "type": "string"
           },
           "slug": {
@@ -7134,6 +6582,18 @@
             "minLength": 1,
             "title": "Title",
             "type": "string"
+          },
+          "topology_mode": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Topology Mode",
+            "type": "string"
+          },
+          "topology_name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Topology Name",
+            "type": "string"
           }
         },
         "required": [
@@ -7143,183 +6603,88 @@
           "origin",
           "revision_number",
           "lifecycle",
-          "runtime_family",
+          "execution_harness",
+          "runtime_distribution",
           "source_bundle_sha256",
           "artifact_count",
           "expected_download_bytes",
-          "profile_node_counts",
+          "topology_name",
+          "topology_mode",
+          "node_count",
           "maximum_installed_bytes_per_node",
           "maximum_runtime_memory_bytes_per_node"
         ],
         "title": "RecipeSummaryResponse",
         "type": "object"
       },
-      "ReconciliationAcceptedResponse": {
+      "RecipeTopology": {
         "additionalProperties": false,
         "properties": {
-          "base_commit": {
-            "pattern": "^[0-9a-f]{40}$",
-            "title": "Base Commit",
-            "type": "string"
+          "fabric": {
+            "$ref": "#/components/schemas/RecipeFabric"
           },
-          "job_id": {
-            "title": "Job Id",
-            "type": "string"
-          },
-          "reconciliation_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reconciliation Id"
-          },
-          "state": {
-            "title": "State",
-            "type": "string"
-          }
-        },
-        "required": [
-          "base_commit",
-          "job_id",
-          "state"
-        ],
-        "title": "ReconciliationAcceptedResponse",
-        "type": "object"
-      },
-      "ReconciliationCancelRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "reason": {
-            "maxLength": 1024,
+          "mode": {
+            "maxLength": 64,
             "minLength": 1,
-            "title": "Reason",
-            "type": "string"
-          }
-        },
-        "required": [
-          "reason"
-        ],
-        "title": "ReconciliationCancelRequest",
-        "type": "object"
-      },
-      "ReconciliationPlanRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "commit": {
-            "pattern": "^[0-9a-f]{40}$",
-            "title": "Commit",
+            "title": "Mode",
             "type": "string"
           },
-          "profile_id": {
-            "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
-            "title": "Profile Id",
+          "name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Name",
             "type": "string"
-          }
-        },
-        "required": [
-          "commit",
-          "profile_id"
-        ],
-        "title": "ReconciliationPlanRequest",
-        "type": "object"
-      },
-      "ReconciliationPlanResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "agent_protocol_range": {
+          },
+          "node_count": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 1.0,
+            "title": "Node Count",
+            "type": "integer"
+          },
+          "parallelism": {
+            "$ref": "#/components/schemas/RecipeParallelism"
+          },
+          "roles": {
             "items": {
-              "type": "integer"
+              "$ref": "#/components/schemas/RecipeRole"
             },
-            "maxItems": 2,
-            "minItems": 2,
-            "title": "Agent Protocol Range",
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Roles",
             "type": "array"
           },
-          "commit": {
-            "pattern": "^[0-9a-f]{40}$",
-            "title": "Commit",
-            "type": "string"
-          },
-          "digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Digest",
-            "type": "string"
-          },
-          "fleet_evidence_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Fleet Evidence Digest",
-            "type": "string"
-          },
-          "input_digests": {
-            "$ref": "#/components/schemas/PlanInputDigests"
-          },
-          "operation_graph": {
-            "$ref": "#/components/schemas/PlanOperationGraph"
-          },
-          "placements": {
-            "$ref": "#/components/schemas/PlanPlacements"
-          },
-          "reconciliation_id": {
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Reconciliation Id",
-            "type": "string"
-          },
-          "releases": {
-            "$ref": "#/components/schemas/PlanReleases"
-          },
-          "routes": {
-            "$ref": "#/components/schemas/PlanRoutes"
-          },
-          "targets": {
+          "start_order": {
             "items": {
-              "pattern": "^spk_[0-9a-f]{32}$",
+              "maxLength": 64,
+              "minLength": 1,
               "type": "string"
             },
-            "maxItems": 512,
-            "title": "Targets",
+            "maxItems": 32,
+            "title": "Start Order",
+            "type": "array"
+          },
+          "stop_order": {
+            "items": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Stop Order",
             "type": "array"
           }
         },
         "required": [
-          "commit",
-          "digest",
-          "fleet_evidence_digest",
-          "targets",
-          "placements",
-          "routes",
-          "releases",
-          "input_digests",
-          "reconciliation_id",
-          "operation_graph",
-          "agent_protocol_range"
+          "name",
+          "mode",
+          "node_count",
+          "parallelism",
+          "roles",
+          "fabric",
+          "start_order",
+          "stop_order"
         ],
-        "title": "ReconciliationPlanResponse",
-        "type": "object"
-      },
-      "ReconciliationRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "fleet_evidence_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Fleet Evidence Digest",
-            "type": "string"
-          },
-          "plan_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Plan Digest",
-            "type": "string"
-          }
-        },
-        "required": [
-          "plan_digest",
-          "fleet_evidence_digest"
-        ],
-        "title": "ReconciliationRequest",
+        "title": "RecipeTopology",
         "type": "object"
       },
       "RejectRequest": {
@@ -7378,6 +6743,21 @@
         "title": "RequestKey",
         "type": "object"
       },
+      "ResolveCatalogEntityRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_revision": {
+            "minimum": 1.0,
+            "title": "Expected Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "expected_revision"
+        ],
+        "title": "ResolveCatalogEntityRequest",
+        "type": "object"
+      },
       "ResolveImportRequest": {
         "additionalProperties": false,
         "properties": {
@@ -7412,6 +6792,27 @@
           "expected_revision"
         ],
         "title": "ResolveRecipeRequest",
+        "type": "object"
+      },
+      "ReviseCatalogEntityRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "document": {
+            "additionalProperties": true,
+            "title": "Document",
+            "type": "object"
+          },
+          "expected_revision": {
+            "minimum": 1.0,
+            "title": "Expected Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "document",
+          "expected_revision"
+        ],
+        "title": "ReviseCatalogEntityRequest",
         "type": "object"
       },
       "RunNodePlanResponse": {
@@ -8777,6 +8178,100 @@
         "title": "TestReportRequest",
         "type": "object"
       },
+      "TopologyPlacement": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate_node_ids": {
+            "items": {
+              "pattern": "^spk_[0-9a-f]{32}$",
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Candidate Node Ids",
+            "type": "array"
+          },
+          "evaluated_group_count": {
+            "maximum": 512.0,
+            "minimum": 0.0,
+            "title": "Evaluated Group Count",
+            "type": "integer"
+          },
+          "evidence_counts": {
+            "$ref": "#/components/schemas/PlacementEvidenceCounts"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/PlacementLimits"
+          },
+          "node_count": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 1.0,
+            "title": "Node Count",
+            "type": "integer"
+          },
+          "reasons": {
+            "items": {
+              "$ref": "#/components/schemas/vonk_control__library_contract__ProjectionReason"
+            },
+            "maxItems": 16,
+            "title": "Reasons",
+            "type": "array"
+          },
+          "recommendations": {
+            "items": {
+              "$ref": "#/components/schemas/PlacementRecommendation"
+            },
+            "maxItems": 16,
+            "title": "Recommendations",
+            "type": "array"
+          },
+          "rejected_evidence_truncated": {
+            "title": "Rejected Evidence Truncated",
+            "type": "boolean"
+          },
+          "rejected_groups": {
+            "items": {
+              "$ref": "#/components/schemas/PlacementRecommendation"
+            },
+            "maxItems": 16,
+            "title": "Rejected Groups",
+            "type": "array"
+          },
+          "rejected_nodes": {
+            "items": {
+              "$ref": "#/components/schemas/RejectedNode"
+            },
+            "maxItems": 32,
+            "title": "Rejected Nodes",
+            "type": "array"
+          },
+          "search_complete": {
+            "title": "Search Complete",
+            "type": "boolean"
+          },
+          "topology_name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Topology Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "topology_name",
+          "node_count",
+          "candidate_node_ids",
+          "recommendations",
+          "rejected_nodes",
+          "rejected_groups",
+          "evaluated_group_count",
+          "search_complete",
+          "rejected_evidence_truncated",
+          "limits",
+          "evidence_counts",
+          "reasons"
+        ],
+        "title": "TopologyPlacement",
+        "type": "object"
+      },
       "UninstallActiveRunResponse": {
         "additionalProperties": false,
         "properties": {
@@ -9313,6 +8808,70 @@
         "title": "VisualBuildContext",
         "type": "object"
       },
+      "VisualCatalogIdentity": {
+        "additionalProperties": false,
+        "properties": {
+          "content_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Content Sha256",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "model-version",
+              "execution-harness",
+              "runtime-distribution",
+              "patch-bundle"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "publisher": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Publisher",
+            "type": "string"
+          },
+          "slug": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "publisher",
+          "slug",
+          "content_sha256"
+        ],
+        "title": "VisualCatalogIdentity",
+        "type": "object"
+      },
+      "VisualExecution": {
+        "additionalProperties": false,
+        "properties": {
+          "harness": {
+            "$ref": "#/components/schemas/VisualCatalogIdentity"
+          },
+          "patch_bundle": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VisualCatalogIdentity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "harness",
+          "patch_bundle"
+        ],
+        "title": "VisualExecution",
+        "type": "object"
+      },
       "VisualIdentity": {
         "additionalProperties": false,
         "properties": {
@@ -9334,6 +8893,71 @@
           "slug"
         ],
         "title": "VisualIdentity",
+        "type": "object"
+      },
+      "VisualInterface": {
+        "additionalProperties": false,
+        "properties": {
+          "adapter": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Adapter",
+            "type": "string"
+          },
+          "health_path": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Health Path"
+          },
+          "model_aliases": {
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Model Aliases",
+            "type": "array"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path"
+          },
+          "port": {
+            "anyOf": [
+              {
+                "maximum": 65535.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Port"
+          }
+        },
+        "required": [
+          "adapter"
+        ],
+        "title": "VisualInterface",
         "type": "object"
       },
       "VisualMetadata": {
@@ -9428,11 +9052,25 @@
           "build": {
             "$ref": "#/components/schemas/VisualBuild"
           },
+          "execution": {
+            "$ref": "#/components/schemas/VisualExecution"
+          },
           "identity": {
             "$ref": "#/components/schemas/VisualIdentity"
           },
+          "interfaces": {
+            "items": {
+              "$ref": "#/components/schemas/VisualInterface"
+            },
+            "maxItems": 64,
+            "title": "Interfaces",
+            "type": "array"
+          },
           "metadata": {
             "$ref": "#/components/schemas/VisualMetadata"
+          },
+          "model": {
+            "$ref": "#/components/schemas/VisualCatalogIdentity"
           },
           "provenance": {
             "$ref": "#/components/schemas/VisualProvenance"
@@ -9447,19 +9085,18 @@
           },
           "validation": {
             "$ref": "#/components/schemas/VisualValidation"
-          },
-          "workload": {
-            "$ref": "#/components/schemas/VisualWorkload"
           }
         },
         "required": [
           "schema_version",
           "identity",
           "metadata",
-          "workload",
+          "model",
+          "execution",
           "build",
           "artifacts",
           "runtime",
+          "interfaces",
           "validation",
           "provenance"
         ],
@@ -9469,61 +9106,44 @@
       "VisualRuntime": {
         "additionalProperties": false,
         "properties": {
-          "adapter": {
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Adapter",
-            "type": "string"
+          "distribution": {
+            "$ref": "#/components/schemas/VisualCatalogIdentity"
           },
-          "adapter_version": {
-            "maximum": 9.223372036854776e+18,
-            "minimum": 1.0,
-            "title": "Adapter Version",
-            "type": "integer"
-          },
-          "endpoint_port": {
-            "maximum": 65535.0,
-            "minimum": 1.0,
-            "title": "Endpoint Port",
-            "type": "integer"
-          },
-          "endpoint_protocol": {
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Endpoint Protocol",
-            "type": "string"
-          },
-          "health_path": {
-            "maxLength": 512,
-            "minLength": 1,
-            "title": "Health Path",
-            "type": "string"
-          },
-          "interface": {
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Interface",
-            "type": "string"
-          },
-          "model_aliases": {
+          "entrypoint": {
             "items": {
-              "maxLength": 128,
+              "maxLength": 256,
               "minLength": 1,
               "type": "string"
             },
             "maxItems": 64,
-            "title": "Model Aliases",
+            "title": "Entrypoint",
             "type": "array"
+          },
+          "lifecycle_post_stop_count": {
+            "maximum": 64.0,
+            "minimum": 0.0,
+            "title": "Lifecycle Post Stop Count",
+            "type": "integer"
+          },
+          "lifecycle_pre_start_count": {
+            "maximum": 64.0,
+            "minimum": 0.0,
+            "title": "Lifecycle Pre Start Count",
+            "type": "integer"
+          },
+          "stop_timeout_seconds": {
+            "maximum": 86400.0,
+            "minimum": 1.0,
+            "title": "Stop Timeout Seconds",
+            "type": "integer"
           }
         },
         "required": [
-          "interface",
-          "adapter",
-          "adapter_version",
-          "endpoint_protocol",
-          "endpoint_port",
-          "model_aliases",
-          "health_path"
+          "distribution",
+          "entrypoint",
+          "lifecycle_pre_start_count",
+          "lifecycle_post_stop_count",
+          "stop_timeout_seconds"
         ],
         "title": "VisualRuntime",
         "type": "object"
@@ -9554,33 +9174,6 @@
           "benchmark_count"
         ],
         "title": "VisualValidation",
-        "type": "object"
-      },
-      "VisualWorkload": {
-        "additionalProperties": false,
-        "properties": {
-          "capabilities": {
-            "items": {
-              "maxLength": 64,
-              "minLength": 1,
-              "type": "string"
-            },
-            "maxItems": 64,
-            "title": "Capabilities",
-            "type": "array"
-          },
-          "family": {
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Family",
-            "type": "string"
-          }
-        },
-        "required": [
-          "family",
-          "capabilities"
-        ],
-        "title": "VisualWorkload",
         "type": "object"
       },
       "vonk_control__fleet_projection__ProjectionReason": {
@@ -10351,6 +9944,440 @@
         "summary": "Session"
       }
     },
+    "/api/v1/catalog/entities": {
+      "get": {
+        "operationId": "listCatalogEntities",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 32,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "publisher",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Publisher"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogEntityListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProblem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProblem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "List Entities"
+      },
+      "post": {
+        "operationId": "createCatalogEntityDraft",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCatalogEntityRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogEntityRevisionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProblem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProblem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProblem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProblem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Create Entity"
+      }
+    },
+    "/api/v1/catalog/entities/{entity_id}": {
+      "get": {
+        "operationId": "getCatalogEntity",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entity_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Entity Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogEntityRevisionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProblem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProblem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Get Entity"
+      }
+    },
+    "/api/v1/catalog/entities/{entity_id}/draft": {
+      "put": {
+        "operationId": "reviseCatalogEntity",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entity_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Entity Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviseCatalogEntityRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogEntityRevisionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProblem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProblem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProblem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProblem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProblem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Revise Entity"
+      }
+    },
+    "/api/v1/catalog/entities/{entity_id}/resolve": {
+      "post": {
+        "operationId": "resolveCatalogEntity",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entity_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Entity Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveCatalogEntityRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogEntityRevisionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProblem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProblem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProblem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProblem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProblem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Resolve Entity"
+      }
+    },
     "/api/v1/catalog/imports/global": {
       "post": {
         "operationId": "importGlobalRecipe",
@@ -10435,6 +10462,49 @@
           }
         ],
         "summary": "Preview Global Import"
+      }
+    },
+    "/api/v1/catalog/imports/recipe-library": {
+      "post": {
+        "operationId": "importRecipeLibrary",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecipeLibraryImportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecipeRevisionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Import Recipe Library"
       }
     },
     "/api/v1/catalog/imports/workload_run": {
@@ -12250,91 +12320,6 @@
           }
         ],
         "summary": "Preview Rollback"
-      }
-    },
-    "/api/v1/documents": {
-      "get": {
-        "operationId": "listDocuments",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "commit",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Commit"
-            }
-          },
-          {
-            "in": "query",
-            "name": "path",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Path"
-            }
-          },
-          {
-            "in": "query",
-            "name": "kind",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Kind"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Document View Api V1 Documents Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "summary": "Document View"
       }
     },
     "/api/v1/endpoints/{alias}": {
@@ -14693,101 +14678,6 @@
         "summary": "Get Validation"
       }
     },
-    "/api/v1/profiles/{profile_id}/plan": {
-      "post": {
-        "operationId": "planProfileReconciliation",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "profile_id",
-            "required": true,
-            "schema": {
-              "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
-              "title": "Profile Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "title": "Body",
-                "type": "null"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReconciliationPlanResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Service Unavailable"
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "summary": "Profile Reconcile Plan"
-      }
-    },
     "/api/v1/proposals": {
       "post": {
         "operationId": "previewProposal",
@@ -15602,280 +15492,6 @@
           }
         ],
         "summary": "Preview Uninstall"
-      }
-    },
-    "/api/v1/reconciliations": {
-      "post": {
-        "operationId": "applyReconciliation",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ReconciliationRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "202": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReconciliationAcceptedResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Service Unavailable"
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "summary": "Reconcile"
-      }
-    },
-    "/api/v1/reconciliations/plan": {
-      "post": {
-        "operationId": "planReconciliation",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ReconciliationPlanRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReconciliationPlanResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Service Unavailable"
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "summary": "Reconcile Plan"
-      }
-    },
-    "/api/v1/reconciliations/{reconciliation_id}/cancel": {
-      "post": {
-        "operationId": "cancelReconciliation",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "reconciliation_id",
-            "required": true,
-            "schema": {
-              "title": "Reconciliation Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ReconciliationCancelRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "202": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Cancel Reconciliation Api V1 Reconciliations  Reconciliation Id  Cancel Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Service Unavailable"
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "summary": "Cancel Reconciliation"
       }
     },
     "/api/v1/repository": {

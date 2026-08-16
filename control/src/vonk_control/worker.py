@@ -281,6 +281,7 @@ def assemble_production_worker(
     """Compose the one worker-owned reconciliation and platform-update runtime."""
 
     from .agent_reconciliation import AgentReconciliationService
+    from .distributed_recovery import DistributedRecoveryCoordinator
     from .package_rollout_worker import PackageRolloutWorker
     from .package_rollouts import PackageRolloutOrchestrator
     from .package_validation_runner import PackageValidationRunner
@@ -350,7 +351,15 @@ def assemble_production_worker(
         maximum_age_seconds=120,
     )
     recipe_operations = RecipeOperationWorker(
-        sessions, recipe_routes, clock=clock
+        sessions,
+        recipe_routes,
+        clock=clock,
+        recoveries=DistributedRecoveryCoordinator(
+            sessions,
+            routes=recipe_routes,
+            agent_jobs=agent_jobs,
+            clock=clock,
+        ),
     )
     telemetry_maintenance = TelemetryMaintenance(sessions, clock=clock)
     return Worker(
@@ -439,7 +448,6 @@ if __name__ == "__main__":
             Path("/supervisor/ack.json"),
             clock=clock,
         ),
-        litellm_deployments=authority.deployments,
     )
     worker = assemble_production_worker(
         jobs=jobs,

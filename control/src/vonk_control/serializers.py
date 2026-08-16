@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Mapping
 
 import tomli_w
@@ -16,31 +15,6 @@ _PRIORITY = {
     "description": 4,
     "lifecycle": 5,
 }
-_ADAPTER = re.compile(r"[a-z0-9][a-z0-9-]{1,63}")
-_EXECUTABLE = re.compile(r"/opt/node/model-adapters/[a-z0-9-]+/releases/[0-9a-f]{64}/bin/[A-Za-z0-9._-]+")
-
-
-def _workload_policy(document: Mapping[str, object]) -> None:
-    adapter = document.get("adapter")
-    if adapter is not None and (not isinstance(adapter, str) or _ADAPTER.fullmatch(adapter) is None):
-        raise ValueError("workload adapter must be a trusted identifier, not a path")
-    for forbidden in ("upstream", "api_base", "upstream_url"):
-        if forbidden in document:
-            raise ValueError("repository workload cannot directly select a network upstream")
-    endpoint = document.get("endpoint")
-    if endpoint is not None:
-        host = endpoint.get("host") if isinstance(endpoint, Mapping) else None
-        if not isinstance(host, str) or host not in {"127.0.0.1", "localhost", "::1"}:
-            raise ValueError("workload endpoint must remain node-local")
-    commands = document.get("commands")
-    if commands is not None:
-        if not isinstance(commands, Mapping) or not commands:
-            raise ValueError("workload commands must be a typed command mapping")
-        for command in commands.values():
-            if not isinstance(command, list) or not command or not isinstance(command[0], str) or _EXECUTABLE.fullmatch(command[0]) is None:
-                raise ValueError("workload command executable is outside immutable adapter releases")
-
-
 def _ordered(value: object) -> object:
     if isinstance(value, Mapping):
         keys = sorted(value, key=lambda key: (_PRIORITY.get(str(key), 100), str(key)))
@@ -53,8 +27,6 @@ def _ordered(value: object) -> object:
 
 
 def serialize_document(path: str, document: Mapping[str, object]) -> bytes:
-    if path.startswith("config/workloads/"):
-        _workload_policy(document)
     ordered = _ordered(document)
     assert isinstance(ordered, dict)
     if path.endswith(".json"):

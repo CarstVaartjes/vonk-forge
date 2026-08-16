@@ -365,9 +365,16 @@ def test_development_image_compose_enables_complete_builtin_agent_settings(
     assert set(caddy["networks"]) == {
         "application",
         "ingress",
+        "litellm-edge",
         "tailnet-web-edge",
     }
     assert set(api["networks"]) == {"application", "data", "ingress"}
+    assert set(services["litellm"]["networks"]) == {
+        "cluster-egress",
+        "data",
+        "litellm-edge",
+    }
+    assert services["litellm"].get("ports") in (None, [])
     assert caddy["depends_on"]["control-api"] == {
         "condition": "service_healthy",
         "required": True,
@@ -855,7 +862,9 @@ def test_rendered_production_boundary_has_only_caddy_public_and_step_ca_private(
     assert {name for name, service in services.items() if service.get("ports")} == {"caddy"}
     assert set(services["caddy"]["networks"]) == {
         "agent-proxy",
+        "hermes-inference",
         "ingress",
+        "litellm-edge",
         "registry-edge",
         "tailnet-web-edge",
     }

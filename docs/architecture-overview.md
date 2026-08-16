@@ -45,13 +45,13 @@ flowchart LR
     api --> db
     worker --> db
     api <-->|HMAC repository authority| worker
-    hermes -->|fixed hermes-agent alias| litellm
+    hermes -->|published v1 hermes-agent run| caddy
     telemetry --> api
     litellm -->|accepted published route only| s1
     litellm -->|accepted published route only| sn
     s1 -->|outbound mTLS claim, heartbeat, result| caddy
     sn -->|outbound mTLS claim, heartbeat, result| caddy
-    s1 <-->|direct fabric when profile requires it| sn
+    s1 <-->|direct fabric when a recipe requires it| sn
     operator -. break-glass only .-> s1
     operator -. break-glass only .-> sn
 ```
@@ -69,7 +69,7 @@ The control/runtime contract stays the same as nodes are added:
 | **Many Sparks** | The planner places independent workloads and gangs across compatible nodes. A gang can use any accepted subset; other nodes remain available for other work. | Each node still pulls only its fenced operations. The controller publishes each healthy entrypoint independently; it does not broadcast Docker commands or turn IP addresses into authority. |
 
 For every shape, user inference follows **Tailscale → Caddy → LiteLLM → one
-accepted entrypoint**. Caddy knows paths, LiteLLM knows controller-published
+accepted recipe entrypoint**. Caddy knows paths, LiteLLM knows controller-published
 aliases, and neither discovers containers. GPU nodes initiate outbound mTLS to
 the NAS; they do not run Tailscale, Caddy, LiteLLM, PostgreSQL, or the control
 API.
@@ -78,16 +78,20 @@ API.
 
 Vonk Forge has an explicit authority split. PostgreSQL is authoritative for the
 local recipe catalog: package families, authored and imported revisions,
-WorkloadRun import reports, installations, placements, and runs. A recipe can be
-created, imported, resolved, installed, and run while the operator is offline;
-the optional global catalog is a source of immutable revisions, never a remote
-dependency for local execution. Git/TUF remains authoritative for platform
+WorkloadRun import reports, installations, placements, and runs. The public
+`vonk-forge-recipes` repository is the standard source of reviewed immutable
+recipe revisions; once imported, a snapshot can be resolved, installed, and run
+while the operator is offline. A hosted catalog is optional discovery, never a
+remote dependency for local execution. Git/TUF remains authoritative for platform
 source, fleet/topology policy, and the existing workload-release projection
 until that projection is migrated to catalog revisions.
 
 For the current platform path, the API owns the repository, signed changes,
-current deployment-branch head, eligibility policy, model/profile resolution,
-and commit-pinned Hermes policy. Accepted plans are canonical and persisted in
+current deployment-branch head, and eligibility policy. The catalog owns exact
+model versions, execution harnesses, recipe revisions, installations, mappings,
+and runs. Recipe route publication derives LiteLLM configuration from the
+accepted v1 run itself; no repository model-definition or Hermes fallback
+policy participates. Platform plans remain canonical and persisted in
 PostgreSQL with their commit, targets, operation graph, payload digests, routes,
 protocol range, and plan digest. Catalog plans use a recipe revision digest
 instead of treating `base_commit` as authorization.
@@ -114,7 +118,7 @@ fabric recovery, and explicit break-glass inspection.
 | Control worker | Durable reconciliation, dependency waves, compensation, fail-closed withdrawal, and atomic route/LiteLLM publication. |
 | PostgreSQL | Jobs, immutable resolved plans, operation/attempt fences, agent identity/presence, reconciliation state, cancellation, and audit evidence. |
 | LiteLLM | OpenAI-compatible aliases and quotas generated only from an acknowledged, unexpired publication bundle. |
-| Hermes Agent | Persistent tools/UI service that reaches inference only through the fixed repository-policy `hermes-agent` alias. |
+| Hermes Agent | Persistent tools/UI service that reaches inference only through the Caddy-gated LiteLLM route published by an exact v1 `RecipeRun` named `hermes-agent`. |
 | Prometheus/Grafana | Platform, agent, job, route, node-exporter, and DCGM observability. |
 | Tailscale | Named remote services without placing remote-access software on GPU nodes. |
 | GPU node agent | Non-root outbound control client and the only routine executor of typed node/release/workload operations. |
@@ -161,10 +165,10 @@ rejects `network.mode: public` rather than allowing a Dockerfile to reach
 private or metadata endpoints. Networkless recipes and cached pinned bases are
 the supported initial build path.
 
-Installation maps a resolved recipe profile to exact node identities and ranks.
+Installation maps a resolved recipe revision to exact node identities and ranks.
 The controller transfers that one verified Docker-loadable archive over the
 authenticated agent channel and each target re-verifies it before import, so a
-three-node profile never rebuilds independently on the other two nodes. Model
+three-node recipe never rebuilds independently on the other two nodes. Model
 weights and other declared artifacts are installed separately, with disk checks before
 installation and memory/VRAM, active-workload, and direct-fabric checks before
 start. Multi-node v1 uses ordinary TCP over the declared direct-fabric
@@ -199,10 +203,10 @@ authoritative for installation, placement, admission, and execution.
 
 ## Reconciliation and route publication
 
-For a new repository commit or profile, the control plane follows a durable,
+For a new platform commit or recipe revision, the control plane follows a durable,
 restart-safe sequence:
 
-1. Verify the commit is current and eligible, resolve the complete profile, and
+1. Verify the platform commit or recipe revision is current and eligible, resolve the exact run plan, and
    persist the immutable plan before mutation.
 2. Withdraw the prior route into acknowledged maintenance.
 3. Execute stop operations in repository-declared order, then prove every
@@ -230,7 +234,7 @@ cluster shape, not a hard product limit.
 
 Tensor-parallel traffic follows the repository topology directly between the
 selected GPU nodes. It never traverses Caddy, LiteLLM, PostgreSQL, or the service
-host. The [fleet migration runbook](runbooks/fleet-migration.md) covers stable
-identity and count-independent inventory. Model/profile contracts and capacity
-comparisons live in the [model/profile overview](model-profile-overview.md) and
+host. The [node onboarding runbook](runbooks/node-onboarding.md) covers stable
+identity and count-independent inventory. Model-version, harness, recipe, and
+capacity comparisons live in the [model catalog](operators/model-catalog.md) and
 [model capacity overview](model-capacity-overview.md).

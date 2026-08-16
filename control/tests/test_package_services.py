@@ -22,10 +22,10 @@ def test_production_package_projection_reads_git_authority_and_sql_state(tmp_pat
     families = service.families(None, 100)
     deployments = service.deployments(None, 100)
 
-    assert families["total"] >= 2
-    assert any(item["id"] == "mia-deepseek" for item in families["families"])
-    assert deployments["total"] >= 2
-    assert all(str(item["release_digest"]).startswith("sha256:") for item in deployments["deployments"])
+    assert families["total"] == 0
+    assert families["families"] == []
+    assert deployments["total"] == 0
+    assert deployments["deployments"] == []
     assert service.inventory(None, None, None, 100)["nodes"] == []
 
 

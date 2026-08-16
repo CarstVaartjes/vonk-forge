@@ -622,7 +622,7 @@ def test_unknown_workload_acceptance_helper_runs_real_e2e_and_emits_canonical_re
     namespace = runpy.run_path(str(SCRIPT))
     assert namespace["_workload_acceptance_valid"](report)
     assert report["test_command"]
-    assert "test_unknown_workload_package.py" in report["test_command"]
+    assert "test_unknown_workload_package_e2e.py" in report["test_command"]
     assert report["physical_nodes_exercised"] is False
 
 

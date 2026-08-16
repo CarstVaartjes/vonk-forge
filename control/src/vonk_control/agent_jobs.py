@@ -1192,7 +1192,9 @@ class AgentJobService:
         runtime_identity: Mapping[str, object] | None,
     ) -> bool:
         build_id = operation.payload.get("build_id")
-        build = session.get(RecipeBuild, build_id) if isinstance(build_id, str) else None
+        build = (
+            session.get(RecipeBuild, build_id) if isinstance(build_id, str) else None
+        )
         report = build.policy_report if build is not None else None
         return bool(
             build is not None
@@ -1734,6 +1736,9 @@ class AgentJobService:
             ):
                 self._result_consumer(session, operation, attempt, message)
             self._aggregate_parent(session, operation.parent_job_id)
+        # A result consumer can atomically make the next durable recipe phase
+        # queueable; wake long-polling agents only after that transaction commits.
+        self.notify_available()
 
     def _active(
         self,

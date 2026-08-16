@@ -9,8 +9,9 @@ from pathlib import Path
 
 import pytest
 import vonk_control.recipe_builds as recipe_builds_module
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, delete, select
 from sqlalchemy.orm import sessionmaker
+from test_catalog_service import _seed_recipe_dependencies
 from vonk_agent_protocol import (
     AgentClaim,
     AgentResult,
@@ -19,6 +20,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol import (
     AgentOperation as ProtocolOperation,
 )
+from vonk_control.auth import TokenCodec
 from vonk_control.catalog_service import CatalogService, RecipeDraftInput
 from vonk_control.inventory_repository import (
     InventoryRepository,
@@ -28,6 +30,8 @@ from vonk_control.models import (
     AgentNode,
     AgentOperation,
     Base,
+    CatalogEntity,
+    CatalogEntityRevision,
     ClusterMapping,
     ClusterMappingNode,
     Job,
@@ -97,6 +101,7 @@ def setup(tmp_path: Path, *, network: dict[str, object] | None = None):
     document["build"]["network"] = network or {"mode": "none", "hosts": []}
     document["build"]["context"]["sha256"] = bundle.sha256
     document["build"]["context"]["expected_bytes"] = len(bundle.archive)
+    document["identity"]["slug"] = "qwen3-vllm"
     document["build"]["resources"] = {
         "download_bytes": 100,
         "temporary_bytes": 200,
@@ -143,7 +148,10 @@ def setup(tmp_path: Path, *, network: dict[str, object] | None = None):
             ("recipe.build.v1", "recipe.image.import.v1"),
         )
     )
-    catalog = CatalogService(sessions, clock=lambda: now)
+    catalog = CatalogService(
+        sessions, clock=lambda: now, cursors=TokenCodec(b"c" * 32).cursor_codec()
+    )
+    _seed_recipe_dependencies(catalog, document)
     draft = catalog.create_recipe(
         "admin", RecipeDraftInput(slug="qwen3-vllm", document=document)
     )
@@ -161,6 +169,13 @@ def test_build_plan_is_typed_sandboxed_and_durable(tmp_path: Path) -> None:
     assert plan.agent_payload["kind"] == "recipe.build.v1"
     assert "command" not in plan.agent_payload
     assert plan.agent_payload["limits"]["gpu"] == 0
+    assert plan.agent_payload["base_images"] == [
+        {
+            "manifest_digest": "sha256:" + "a" * 64,
+            "reference": "ghcr.io/example/vllm@sha256:" + "a" * 64,
+        }
+    ]
+    assert plan.agent_payload["base_image_storage_bytes"] == 100
     assert (
         plan.agent_payload["source_bundle_sha256"]
         == revision.document["build"]["context"]["sha256"]
@@ -168,6 +183,20 @@ def test_build_plan_is_typed_sandboxed_and_durable(tmp_path: Path) -> None:
     with sessions() as session:
         stored = session.get(RecipeBuild, plan.build_id)
         assert stored is not None and stored.state == "planned"
+
+
+def test_build_plan_rejects_missing_exact_recipe_dependency(tmp_path: Path) -> None:
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    with sessions.begin() as session:
+        session.execute(delete(CatalogEntityRevision))
+        session.execute(delete(CatalogEntity))
+
+    with pytest.raises(RecipeBuildError) as caught:
+        RecipeBuildService(sessions, bundles=bundles).plan(
+            revision.id, node_id, now=now
+        )
+
+    assert caught.value.code == "build.dependencies_stale"
 
 
 def test_build_identity_changes_when_builder_runtime_changes(tmp_path: Path) -> None:
@@ -210,8 +239,9 @@ def test_build_reservation_rejects_changed_builder_runtime(tmp_path: Path) -> No
         assert node is not None
         node.agent_sha256 = "2" * 64
 
-    with sessions.begin() as session, pytest.raises(
-        RecipeBuildError, match="runtime identity changed"
+    with (
+        sessions.begin() as session,
+        pytest.raises(RecipeBuildError, match="runtime identity changed"),
     ):
         service.reserve_in_session(session, plan, now=now)
 
@@ -292,7 +322,8 @@ def test_starting_build_atomically_reserves_temporary_disk_and_memory(
             "disk",
             plan.agent_payload["limits"]["temporary_bytes"]
             + plan.agent_payload["source_bundle_bytes"]
-            + plan.agent_payload["limits"]["output_bytes"],
+            + plan.agent_payload["limits"]["output_bytes"]
+            + plan.agent_payload["base_image_storage_bytes"],
         ),
         ("host-memory", plan.agent_payload["limits"]["memory_bytes"]),
     ]
@@ -528,8 +559,7 @@ def test_build_plan_rejects_disk_below_concurrent_oci_export_peak(
     temporary_bytes = revision.document["build"]["resources"]["temporary_bytes"]
     output_bytes = max(
         role["resources"]["disk"]["image_bytes"]
-        for profile in revision.document["deployment_profiles"]
-        for role in profile["roles"]
+        for role in revision.document["topology"]["roles"]
     )
     peak_bytes = temporary_bytes + source_bytes + output_bytes
     # This inventory has enough capacity for staging + source, but not for the
@@ -582,7 +612,9 @@ def test_source_check_returns_the_structured_pre_dispatch_policy_report(
     assert report.source_bundle_sha256
 
 
-def test_success_does_not_claim_isolated_build_image_is_installed(tmp_path: Path) -> None:
+def test_success_does_not_claim_isolated_build_image_is_installed(
+    tmp_path: Path,
+) -> None:
     sessions, bundles, now, node_id, revision = setup(tmp_path)
     service = RecipeBuildService(sessions, bundles=bundles)
     plan = service.plan(revision.id, node_id, now=now)
@@ -724,9 +756,10 @@ def test_build_result_accepts_protocol_frozen_empty_findings(tmp_path: Path) -> 
         job = session.get(Job, operation_view.id)
         assert job is not None and job.state == "succeeded"
         assert job.result["node_evidence"][node_id]["policy"]["findings"] == []
-        assert session.scalar(
-            select(NodeArtifact).where(NodeArtifact.node_id == node_id)
-        ) is None
+        assert (
+            session.scalar(select(NodeArtifact).where(NodeArtifact.node_id == node_id))
+            is None
+        )
 
 
 def test_distribution_reimports_one_build_digest_for_every_mapped_node(
@@ -768,7 +801,7 @@ def test_distribution_reimports_one_build_digest_for_every_mapped_node(
         )
         mapping = ClusterMapping(
             recipe_revision_id=revision.id,
-            profile_name="synthetic-test",
+            topology_name="synthetic-test",
             generation=1,
             node_count=2,
             state="ready",

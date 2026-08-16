@@ -93,7 +93,10 @@ impl AgentClaim {
             return Err(ProtocolError::Identity("claim operation"));
         }
         let payload = canonical_json(&self.payload)?;
-        if hex_sha256(&payload) != self.payload_digest {
+        if !self.payload.is_object()
+            || payload.len() > 64 * 1024
+            || hex_sha256(&payload) != self.payload_digest
+        {
             return Err(ProtocolError::Identity("claim payload digest"));
         }
         Ok(())
@@ -227,6 +230,8 @@ pub enum RecipeOperationRequest {
 #[serde(deny_unknown_fields)]
 pub struct RecipeBuildRequest {
     pub arguments: Vec<RecipeBuildArgument>,
+    pub base_image_storage_bytes: u64,
+    pub base_images: Vec<RecipeBuildBaseImage>,
     pub build_id: Uuid,
     pub build_input_sha256: String,
     pub dockerfile: String,
@@ -239,6 +244,13 @@ pub struct RecipeBuildRequest {
     pub schema_version: u8,
     pub source_bundle_bytes: u64,
     pub source_bundle_sha256: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeBuildBaseImage {
+    pub manifest_digest: String,
+    pub reference: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -348,7 +360,10 @@ impl RecipeOperationRequest {
     pub fn parse(claim: &AgentClaim) -> Result<Self, ProtocolError> {
         claim.validate()?;
         let request = match claim.operation.as_str() {
-            "recipe.build.v1" => Self::Build(serde_json::from_value(claim.payload.clone())?),
+            "recipe.build.v1" => {
+                validate_build_wire(&claim.payload)?;
+                Self::Build(serde_json::from_value(claim.payload.clone())?)
+            }
             "recipe.image.import.v1" => {
                 Self::ImageImport(serde_json::from_value(claim.payload.clone())?)
             }
@@ -424,6 +439,20 @@ impl RecipeOperationRequest {
     }
 }
 
+fn validate_build_wire(value: &Value) -> Result<(), ProtocolError> {
+    let canonical_uuid = |field: &str| {
+        value
+            .get(field)
+            .and_then(Value::as_str)
+            .and_then(|raw| Uuid::parse_str(raw).ok().map(|parsed| (raw, parsed)))
+            .is_some_and(|(raw, parsed)| parsed.to_string() == raw)
+    };
+    if !canonical_uuid("build_id") || !canonical_uuid("recipe_revision_id") {
+        return Err(ProtocolError::Identity("recipe payload"));
+    }
+    Ok(())
+}
+
 fn validate_build(value: &RecipeBuildRequest) -> bool {
     value.schema_version == 1
         && value.kind == "recipe.build.v1"
@@ -438,6 +467,18 @@ fn validate_build(value: &RecipeBuildRequest) -> bool {
             .arguments
             .iter()
             .all(|argument| valid_name(&argument.name) && valid_scalar(&argument.value))
+        && value.base_images.len() <= 8
+        && value.base_images.iter().enumerate().all(|(index, image)| {
+            valid_pinned_image(&image.reference, &image.manifest_digest)
+                && !value.base_images[..index]
+                    .iter()
+                    .any(|prior| prior.reference == image.reference)
+        })
+        && if value.base_images.is_empty() {
+            value.base_image_storage_bytes == 0
+        } else {
+            (1..=16 * 1024_u64.pow(4)).contains(&value.base_image_storage_bytes)
+        }
         && matches!(value.network.mode.as_str(), "none" | "public")
         && ((value.network.mode == "none" && value.network.hosts.is_empty())
             || (value.network.mode == "public" && !value.network.hosts.is_empty()))
@@ -539,6 +580,25 @@ fn valid_oci_digest(value: &str) -> bool {
         .is_some_and(|digest| lower_hex(digest, 64))
 }
 
+fn valid_pinned_image(reference: &str, manifest_digest: &str) -> bool {
+    let Some((name, digest)) = reference.rsplit_once('@') else {
+        return false;
+    };
+    !name.is_empty()
+        && name.len() <= 512
+        && name
+            .as_bytes()
+            .first()
+            .is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+        && name.bytes().all(|byte| {
+            byte.is_ascii_lowercase()
+                || byte.is_ascii_digit()
+                || matches!(byte, b'.' | b'_' | b':' | b'/' | b'-')
+        })
+        && digest == manifest_digest
+        && valid_oci_digest(digest)
+}
+
 fn valid_role(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 64
@@ -578,6 +638,7 @@ fn valid_bundle_path(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 512
         && !value.starts_with('/')
+        && !value.contains('\\')
         && !value.contains('\0')
         && value
             .split('/')

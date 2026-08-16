@@ -21,7 +21,6 @@ from .library_contract import (
     _MAX_OPERATIONAL_ROWS,
     _MAX_PAGE_RECIPES,
     _MAX_PROJECTED_CAPABILITIES,
-    _MAX_PROJECTED_PROFILES,
     _MAX_RECOMMENDATIONS,
     _MAX_REJECTED_GROUPS,
     _MAX_REJECTED_NODES,
@@ -49,33 +48,32 @@ from .library_contract import (
     PlacementRecommendation,
     PlacementScore,
     PreviewTarget,
-    ProfilePlacement,
     ProjectionReason,
     RecipeDiskRequirements,
     RecipeFabric,
     RecipeMemoryRequirements,
     RecipeParallelism,
-    RecipeProfile,
-    RecipeProfileSummary,
     RecipeRevisionSummary,
     RecipeRole,
+    RecipeTopology,
     RejectedNode,
     RunPreviewInput,
     RunPreviewTarget,
+    TopologyPlacement,
     VisualArtifact,
     VisualBuild,
     VisualBuildContext,
+    VisualCatalogIdentity,
+    VisualExecution,
     VisualIdentity,
+    VisualInterface,
     VisualMetadata,
     VisualProvenance,
     VisualRecipeDocument,
     VisualRuntime,
     VisualValidation,
-    VisualWorkload,
-    _bounded_display_scalar,
     _bounded_reasons,
     _bounded_text,
-    _display_scalar_truncation_count,
     _numeric_truncation_count,
     _reason,
     _saturating_headroom,
@@ -112,7 +110,7 @@ from .models import (
     ResourceReservation,
     RunNode,
 )
-from .recipe_contract import RecipeContractError, validate_recipe
+from .recipe_contract import RecipeContractError, recipe_topology, validate_recipe
 from .topology import Placement, TopologyError, validate_topology
 
 _LIBRARY_CURSOR_RESOURCE = "library-recipes"
@@ -179,39 +177,12 @@ def _projection_bound_reasons(
     reasons: list[ProjectionReason] = []
     text_fields_truncated = int(len(recipe.description) > 4_096)
     if document is not None:
-        profiles = document["deployment_profiles"]
-        capabilities = document["workload"]["capabilities"]
         numeric_truncations = _numeric_truncation_count(document)
         if numeric_truncations:
             reasons.append(
                 _reason(
                     "recipe.numeric_truncated",
                     f"The bounded Library projection saturated {numeric_truncations} numeric values at the signed-bigint bounds; immutable recipe content is unchanged.",
-                )
-            )
-        display_scalar_truncations = sum(
-            _display_scalar_truncation_count(profile["parameter_overrides"])
-            for profile in profiles
-        )
-        if display_scalar_truncations:
-            reasons.append(
-                _reason(
-                    "recipe.display_scalar_truncated",
-                    f"The bounded Library projection truncated {display_scalar_truncations} display-only scalar values; action inputs still use the immutable recipe.",
-                )
-            )
-        if len(profiles) > _MAX_PROJECTED_PROFILES:
-            reasons.append(
-                _reason(
-                    "recipe.profiles_truncated",
-                    f"Recipe declares {len(profiles)} profiles; returning the first {_MAX_PROJECTED_PROFILES} in canonical order.",
-                )
-            )
-        if len(capabilities) > _MAX_PROJECTED_CAPABILITIES:
-            reasons.append(
-                _reason(
-                    "recipe.capabilities_truncated",
-                    f"Recipe declares {len(capabilities)} capabilities; returning the first {_MAX_PROJECTED_CAPABILITIES} in canonical order.",
                 )
             )
         if include_visual_text:
@@ -232,7 +203,9 @@ def _projection_bound_reasons(
     return reasons
 
 
-def _revision_summary(value: LocalRecipeRevision) -> RecipeRevisionSummary:
+def _revision_summary(value: LocalRecipeRevision) -> RecipeRevisionSummary | None:
+    if value.schema_version != 1:
+        return None
     return RecipeRevisionSummary(
         id=value.id,
         revision_number=value.revision_number,
@@ -264,6 +237,14 @@ def _validated_document(
                 "error",
             )
         ]
+    if revision.schema_version != 1:
+        return None, [
+            _reason(
+                "recipe.schema_version_unsupported",
+                "Only recipe schema version 1 can be projected.",
+                "error",
+            )
+        ]
     try:
         validate_recipe(revision.document)
     except (RecipeContractError, TypeError, ValueError) as error:
@@ -286,35 +267,7 @@ def _validated_document(
     return revision.document, reasons
 
 
-def _profile_summaries(document: Mapping[str, object]) -> list[RecipeProfileSummary]:
-    values = []
-    for profile in document["deployment_profiles"][:_MAX_PROJECTED_PROFILES]:  # type: ignore[index]
-        roles: list[str] = []
-        for role in profile["roles"]:
-            returned_count = min(
-                int(role["count"]),
-                _MAX_PROJECTED_CAPABILITIES - len(roles),
-            )
-            roles.extend([_bounded_text(role["name"], 64)] * returned_count)
-            if len(roles) == _MAX_PROJECTED_CAPABILITIES:
-                break
-        fabric = profile["fabric"]
-        values.append(
-            RecipeProfileSummary(
-                name=_bounded_text(profile["name"], 64),
-                description=_bounded_text(profile["description"], 512),
-                node_count=_saturating_nonnegative(profile["node_count"]),
-                roles=roles,
-                fabric_connectivity=str(fabric["connectivity"]),
-                minimum_bandwidth_mbps=_saturating_nonnegative(
-                    fabric["minimum_bandwidth_mbps"]
-                ),
-            )
-        )
-    return values
-
-
-def _profile(value: Mapping[str, object]) -> RecipeProfile:
+def _topology(value: Mapping[str, object]) -> RecipeTopology:
     roles = []
     for raw_role in value["roles"]:  # type: ignore[index]
         resources = raw_role["resources"]
@@ -342,11 +295,10 @@ def _profile(value: Mapping[str, object]) -> RecipeProfile:
         )
     parallelism = value["parallelism"]
     fabric = value["fabric"]
-    return RecipeProfile(
+    return RecipeTopology(
         name=_bounded_text(value["name"], 64),
-        description=_bounded_text(value["description"], 512),
+        mode=_bounded_text(value["mode"], 64),
         node_count=_saturating_nonnegative(value["node_count"]),
-        strategy=str(value["strategy"]),
         parallelism=RecipeParallelism(
             tensor=_saturating_nonnegative(parallelism["tensor"]),
             pipeline=_saturating_nonnegative(parallelism["pipeline"]),
@@ -360,26 +312,32 @@ def _profile(value: Mapping[str, object]) -> RecipeProfile:
                 fabric["minimum_bandwidth_mbps"]
             ),
         ),
-        parameter_overrides={
-            _bounded_text(key, 64): _bounded_display_scalar(item)
-            for key, item in value["parameter_overrides"].items()
-        },
-        measurement=str(value["measurement"]),
+        start_order=[_bounded_text(item, 64) for item in value["start_order"]][:32],
+        stop_order=[_bounded_text(item, 64) for item in value["stop_order"]][:32],
+    )
+
+
+def _catalog_identity(value: Mapping[str, object]) -> VisualCatalogIdentity:
+    return VisualCatalogIdentity(
+        kind=str(value["kind"]),
+        publisher=_bounded_text(value["publisher"], 128),
+        slug=_bounded_text(value["slug"], 128),
+        content_sha256=str(value["content_sha256"]),
     )
 
 
 def _visual_recipe(document: Mapping[str, object]) -> VisualRecipeDocument:
     identity = document["identity"]
     metadata = document["metadata"]
-    workload = document["workload"]
     build = document["build"]
     context = build["context"]
     network = build["network"]
     build_resources = build["resources"]
     runtime = document["runtime"]
-    endpoint = runtime["endpoint"]
     validation = document["validation"]
     provenance = document["provenance"]
+    execution = document["execution"]
+    lifecycle = runtime["lifecycle"]
     return VisualRecipeDocument(
         schema_version=1,
         identity=VisualIdentity(
@@ -391,11 +349,14 @@ def _visual_recipe(document: Mapping[str, object]) -> VisualRecipeDocument:
             description=_bounded_text(metadata["description"], 512),
             tags=[_bounded_text(item, 64) for item in metadata["tags"]][:64],
         ),
-        workload=VisualWorkload(
-            family=_bounded_text(workload["family"], 128),
-            capabilities=[_bounded_text(item, 64) for item in workload["capabilities"]][
-                :_MAX_PROJECTED_CAPABILITIES
-            ],
+        model=_catalog_identity(document["model"]),
+        execution=VisualExecution(
+            harness=_catalog_identity(execution["harness"]),
+            patch_bundle=(
+                None
+                if execution["patch_bundle"] is None
+                else _catalog_identity(execution["patch_bundle"])
+            ),
         ),
         build=VisualBuild(
             context=VisualBuildContext(
@@ -425,18 +386,42 @@ def _visual_recipe(document: Mapping[str, object]) -> VisualRecipeDocument:
             for artifact in document["artifacts"]
         ],
         runtime=VisualRuntime(
-            interface=_bounded_text(runtime["interface"], 64),
-            adapter=_bounded_text(runtime["adapter"], 64),
-            adapter_version=_saturating_nonnegative(runtime["adapter_version"]),
-            endpoint_protocol=_bounded_text(endpoint["protocol"], 64),
-            endpoint_port=int(endpoint["port"]),
-            model_aliases=[
-                _bounded_text(item, 128) for item in endpoint["model_aliases"]
-            ][:64],
-            health_path=_bounded_text(endpoint["health_path"], 512),
+            distribution=_catalog_identity(runtime["distribution"]),
+            entrypoint=[_bounded_text(item, 256) for item in runtime["entrypoint"]][
+                :64
+            ],
+            lifecycle_pre_start_count=len(lifecycle["pre_start"]),
+            lifecycle_post_stop_count=len(lifecycle["post_stop"]),
+            stop_timeout_seconds=int(lifecycle["stop_timeout_seconds"]),
         ),
+        interfaces=[
+            VisualInterface(
+                adapter=_bounded_text(interface["adapter"], 64),
+                port=(None if "port" not in interface else int(interface["port"])),
+                model_aliases=[
+                    _bounded_text(item, 128) for item in interface["model_aliases"]
+                ][:64]
+                if "model_aliases" in interface
+                else [],
+                health_path=(
+                    None
+                    if "health_path" not in interface
+                    else _bounded_text(interface["health_path"], 512)
+                ),
+                path=(
+                    None
+                    if "path" not in interface
+                    else _bounded_text(interface["path"], 512)
+                ),
+            )
+            for interface in document["interfaces"]
+        ][:64],
         validation=VisualValidation(
-            checks=[_bounded_text(item, 80) for item in validation["checks"]][:64],
+            checks=[
+                _bounded_text(check, 80)
+                for validator in validation["validators"]
+                for check in validator["checks"]
+            ][:64],
             benchmark_count=len(validation["benchmarks"]),
         ),
         provenance=VisualProvenance(
@@ -804,7 +789,7 @@ class LibraryProjection:
                     healthy=health.healthy and not root_members_truncated,
                 )
             )
-        grouped: dict[str, list[LibraryRecipeSummary]] = {}
+        grouped: dict[tuple[str, str, str], list[LibraryRecipeSummary]] = {}
         unlinked: list[LibraryRecipeSummary] = []
         for recipe, revision in page:
             document, reasons = _validated_document(revision)
@@ -825,15 +810,20 @@ class LibraryProjection:
                     )
                 )
             capabilities: list[str] = []
-            profiles: list[RecipeProfileSummary] = []
-            family: str | None = None
+            topology_name: str | None = None
+            model_identity: tuple[str, str, str] | None = None
             if document is not None:
-                workload = document["workload"]
-                family = str(workload["family"])
+                model = document["model"]
+                model_identity = (
+                    str(model["publisher"]),
+                    str(model["slug"]),
+                    str(model["content_sha256"]),
+                )
                 capabilities = [
-                    _bounded_text(item, 64) for item in workload["capabilities"]
+                    _bounded_text(item["adapter"], 64)
+                    for item in document["interfaces"]
                 ][:_MAX_PROJECTED_CAPABILITIES]
-                profiles = _profile_summaries(document)
+                topology_name = _bounded_text(recipe_topology(document)["name"], 64)
             recipe_installations = installations.get(recipe.id, [])
             recipe_runs = runs.get(recipe.id, [])
             installation_total = installation_totals.get(recipe.id, 0)
@@ -862,7 +852,7 @@ class LibraryProjection:
                     None if revision is None else _revision_summary(revision)
                 ),
                 capabilities=capabilities,
-                profiles=profiles,
+                topology_name=topology_name,
                 installations=recipe_installations,
                 installation_total_count=installation_total,
                 installation_returned_count=len(recipe_installations),
@@ -875,10 +865,10 @@ class LibraryProjection:
                 runs_truncated=run_total > len(recipe_runs),
                 reasons=_bounded_reasons(reasons, 16),
             )
-            if family is None:
+            if model_identity is None:
                 unlinked.append(summary)
             else:
-                grouped.setdefault(family, []).append(summary)
+                grouped.setdefault(model_identity, []).append(summary)
         next_cursor = None
         if len(rows) > limit and page:
             last_recipe = page[-1][0]
@@ -892,11 +882,17 @@ class LibraryProjection:
             generated_at=current,
             models=[
                 LibraryModel(
-                    family=family,
-                    display_name=family,
+                    model={
+                        "kind": "model-version",
+                        "publisher": publisher,
+                        "slug": slug,
+                        "content_sha256": content_sha256,
+                    },
                     recipes=values,
                 )
-                for family, values in sorted(grouped.items())
+                for (publisher, slug, content_sha256), values in sorted(
+                    grouped.items()
+                )
             ],
             unlinked_recipes=unlinked,
             next_cursor=next_cursor,
@@ -1144,7 +1140,11 @@ class LibraryProjection:
             }
             required_ports = {"29500"}
             if document is not None:
-                required_ports.add(str(document["runtime"]["endpoint"]["port"]))
+                required_ports.update(
+                    str(interface["port"])
+                    for interface in document["interfaces"]
+                    if "port" in interface
+                )
             reservations = self._reservations(
                 session, candidate_node_ids, required_ports
             )
@@ -1210,45 +1210,39 @@ class LibraryProjection:
                     None if revision is None else _revision_summary(revision)
                 ),
                 visual_recipe=None,
-                profiles=[],
+                topology=None,
                 operational_state=operational,
                 placement=[],
                 reasons=_bounded_reasons(reasons, 16),
             )
         assert revision is not None
         assert placement_evidence is not None
-        profiles = [
-            _profile(item)
-            for item in document["deployment_profiles"][:_MAX_PROJECTED_PROFILES]
-        ]
+        topology = _topology(recipe_topology(document))
         artifacts_by_node: dict[str, list[NodeArtifact]] = {}
         for artifact in artifacts:
             artifacts_by_node.setdefault(artifact.node_id, []).append(artifact)
-        placement = [
-            self._place_profile(
-                revision,
-                document,
-                profile,
-                eligible,
-                rejected,
-                candidate_truncated,
-                reservations,
-                artifacts_by_node,
-                artifact_truncated_node_ids,
-                active_run_counts,
-                placement_evidence,
-                current,
-            )
-            for profile in profiles
-        ]
+        placement = self._place_topology(
+            revision,
+            document,
+            topology,
+            eligible,
+            rejected,
+            candidate_truncated,
+            reservations,
+            artifacts_by_node,
+            artifact_truncated_node_ids,
+            active_run_counts,
+            placement_evidence,
+            current,
+        )
         return LibraryRecipeDetail(
             generated_at=current,
             recipe=_identity(recipe),
             selected_revision=_revision_summary(revision),
             visual_recipe=_visual_recipe(document),
-            profiles=profiles,
+            topology=topology,
             operational_state=operational,
-            placement=placement,
+            placement=[placement],
             reasons=_bounded_reasons(reasons, 16),
         )
 
@@ -1493,7 +1487,7 @@ class LibraryProjection:
                 OperationalMapping(
                     mapping_id=item.id,
                     recipe_revision_id=item.recipe_revision_id,
-                    profile_name=item.profile_name,
+                    topology_name=item.topology_name,
                     generation=item.generation,
                     state=item.state,
                     nodes=[
@@ -1545,11 +1539,11 @@ class LibraryProjection:
             ],
         )
 
-    def _place_profile(
+    def _place_topology(
         self,
         revision: LocalRecipeRevision,
         document: Mapping[str, object],
-        profile: RecipeProfile,
+        topology: RecipeTopology,
         candidates: Sequence[_NodeEvidence],
         rejected_nodes: Sequence[RejectedNode],
         candidate_truncated: bool,
@@ -1559,15 +1553,15 @@ class LibraryProjection:
         active_run_counts: Mapping[str, int],
         operational_evidence: _PlacementOperationalEvidence,
         current: datetime,
-    ) -> ProfilePlacement:
+    ) -> TopologyPlacement:
         limits = PlacementLimits()
         operational = operational_evidence.operational
         numeric_truncated = _numeric_truncation_count(document) > 0
-        if profile.node_count > _MAX_CANDIDATE_NODES:
+        if topology.node_count > _MAX_CANDIDATE_NODES:
             unsupported_reasons = [
                 _reason(
-                    "profile.node_count_unsupported",
-                    "This profile requires more than the active 32-node placement limit.",
+                    "topology.node_count_unsupported",
+                    "This topology requires more than the active 32-node placement limit.",
                     "error",
                 )
             ]
@@ -1586,9 +1580,9 @@ class LibraryProjection:
                         severity="error",
                     )
                 )
-            return ProfilePlacement(
-                profile_name=profile.name,
-                node_count=profile.node_count,
+            return TopologyPlacement(
+                topology_name=topology.name,
+                node_count=topology.node_count,
                 candidate_node_ids=[],
                 recommendations=[],
                 rejected_nodes=[],
@@ -1602,12 +1596,12 @@ class LibraryProjection:
             )
         candidate_ids = [item.agent.node_id for item in candidates]
         total_groups = (
-            math.comb(len(candidates), profile.node_count)
-            if len(candidates) >= profile.node_count
+            math.comb(len(candidates), topology.node_count)
+            if len(candidates) >= topology.node_count
             else 0
         )
         groups = itertools.islice(
-            itertools.combinations(candidates, profile.node_count),
+            itertools.combinations(candidates, topology.node_count),
             _MAX_EXAMINED_GROUPS,
         )
         recommendations: list[PlacementRecommendation] = []
@@ -1618,7 +1612,7 @@ class LibraryProjection:
             recommendation = self._evaluate_group(
                 revision,
                 document,
-                profile,
+                topology,
                 group,
                 reservations,
                 artifacts_by_node,
@@ -1643,9 +1637,9 @@ class LibraryProjection:
             and not operational_evidence.truncated
             and total_groups <= _MAX_EXAMINED_GROUPS
         )
-        profile_reasons: list[ProjectionReason] = []
+        topology_reasons: list[ProjectionReason] = []
         if not search_complete:
-            profile_reasons.append(
+            topology_reasons.append(
                 _reason(
                     "placement.search_truncated",
                     "Placement ranking is bounded and does not claim exhaustive or global optimality.",
@@ -1653,7 +1647,7 @@ class LibraryProjection:
                 )
             )
         if artifact_evidence_truncated:
-            profile_reasons.append(
+            topology_reasons.append(
                 _reason(
                     "projection.evidence_truncated",
                     f"Artifact evidence exceeded the active per-node limit of {_MAX_NODE_ARTIFACTS_PER_NODE}; affected groups are ineligible.",
@@ -1661,23 +1655,23 @@ class LibraryProjection:
                 )
             )
         if operational_evidence.truncated:
-            profile_reasons.append(
+            topology_reasons.append(
                 _placement_evidence_truncation_reason(
                     operational_evidence.counts,
                     severity="warning",
                 )
             )
         if numeric_truncated:
-            profile_reasons.append(
+            topology_reasons.append(
                 _reason(
                     "projection.numeric_truncated",
                     "Placement inputs exceed signed-bigint DTO limits; saturated values are not exact evidence.",
                     "warning",
                 )
             )
-        return ProfilePlacement(
-            profile_name=profile.name,
-            node_count=profile.node_count,
+        return TopologyPlacement(
+            topology_name=topology.name,
+            node_count=topology.node_count,
             candidate_node_ids=candidate_ids,
             recommendations=recommendations[:_MAX_RECOMMENDATIONS],
             rejected_nodes=list(rejected_nodes)[:_MAX_REJECTED_NODES],
@@ -1692,7 +1686,7 @@ class LibraryProjection:
             ),
             limits=limits,
             evidence_counts=operational_evidence.counts,
-            reasons=_bounded_reasons(profile_reasons, 16),
+            reasons=_bounded_reasons(topology_reasons, 16),
         )
 
     @staticmethod
@@ -1714,7 +1708,7 @@ class LibraryProjection:
         self,
         revision: LocalRecipeRevision,
         document: Mapping[str, object],
-        profile: RecipeProfile,
+        topology: RecipeTopology,
         group: Sequence[_NodeEvidence],
         reservations: Mapping[str, Mapping[str, tuple[int, frozenset[str]]]],
         artifacts_by_node: Mapping[str, Sequence[NodeArtifact]],
@@ -1728,14 +1722,14 @@ class LibraryProjection:
         expanded_roles = list(
             itertools.islice(
                 itertools.chain.from_iterable(
-                    itertools.repeat(role, min(role.count, profile.node_count))
-                    for role in profile.roles
+                    itertools.repeat(role, min(role.count, topology.node_count))
+                    for role in topology.roles
                 ),
-                profile.node_count,
+                topology.node_count,
             )
         )
         placements = [
-            Placement(item.agent.node_id, rank, role.name)
+            Placement(item.agent.node_id, rank, role.name, role.endpoint_owner)
             for rank, (item, role) in enumerate(
                 zip(ordered, expanded_roles, strict=True)
             )
@@ -1780,11 +1774,11 @@ class LibraryProjection:
             item.agent.node_id: tuple(item.inventory.capabilities) for item in ordered
         }
         try:
-            validate_topology(document, profile.name, placements, capabilities)
+            validate_topology(document, placements, capabilities)
         except TopologyError as error:
             reasons.append(_reason(error.code, str(error), "error"))
         fabric_addresses = [item.inventory.fabric_address for item in ordered]
-        if profile.node_count > 1:
+        if topology.node_count > 1:
             if any(address is None for address in fabric_addresses):
                 reasons.append(
                     _reason(
@@ -1804,13 +1798,13 @@ class LibraryProjection:
             if any(
                 item.inventory.fabric_bandwidth_mbps is None
                 or item.inventory.fabric_bandwidth_mbps
-                < profile.fabric.minimum_bandwidth_mbps
+                < topology.fabric.minimum_bandwidth_mbps
                 for item in ordered
             ):
                 reasons.append(
                     _reason(
                         "topology.fabric_insufficient",
-                        "Authenticated fabric bandwidth is below the profile minimum.",
+                        "Authenticated fabric bandwidth is below the topology minimum.",
                         "error",
                     )
                 )
@@ -1863,7 +1857,7 @@ class LibraryProjection:
                 item.mapping_generation,
                 expected_members,
                 _member_evidence(operational.installation_members.get(item.id, [])),
-                declared_expected_count=profile.node_count,
+                declared_expected_count=topology.node_count,
             ).complete
             for item in operational.installations
             if not operational_evidence_truncated and item.state != "uninstalled"
@@ -1880,7 +1874,7 @@ class LibraryProjection:
                     item
                     for item in operational.mappings
                     if item.recipe_revision_id == revision.id
-                    and item.profile_name == profile.name
+                    and item.topology_name == topology.name
                     and item.state == "ready"
                     and _members_are_exact(
                         expected_members,
@@ -2064,7 +2058,14 @@ class LibraryProjection:
                 )
             )
         raw_artifacts = {str(item["id"]): item for item in document["artifacts"]}
-        endpoint_port = int(document["runtime"]["endpoint"]["port"])
+        endpoint_port = next(
+            (
+                int(interface["port"])
+                for interface in document["interfaces"]
+                if "port" in interface
+            ),
+            0,
+        )
         node_results: list[PlacementNode] = []
         for rank, (evidence, role) in enumerate(
             zip(ordered, expanded_roles, strict=True)
@@ -2201,7 +2202,7 @@ class LibraryProjection:
                     )
                 )
             if (
-                profile.node_count > 1
+                topology.node_count > 1
                 and role.endpoint_owner
                 and (endpoint_port == 29_500 or "29500" in ports)
             ):
@@ -2308,7 +2309,6 @@ class LibraryProjection:
                 MappingPreviewTarget(
                     input=MappingPreviewInput(
                         recipe_revision_id=revision.id,
-                        profile_name=profile.name,
                         node_ids=[item.agent.node_id for item in ordered],
                         parameters={},
                     )
@@ -2327,7 +2327,11 @@ class LibraryProjection:
                     )
                 )
             )
-        if revision_operable and complete_installation_ids:
+        if (
+            revision_operable
+            and any(item["adapter"] == "openai" for item in document["interfaces"])
+            and complete_installation_ids
+        ):
             preview_targets.append(
                 RunPreviewTarget(
                     input=RunPreviewInput(installation_id=complete_installation_ids[0])
@@ -2344,7 +2348,7 @@ class LibraryProjection:
         )
         return PlacementRecommendation(
             recipe_revision_id=revision.id,
-            profile_name=profile.name,
+            topology_name=topology.name,
             node_ids=[item.agent.node_id for item in ordered],
             nodes=node_results,
             eligible=eligible,

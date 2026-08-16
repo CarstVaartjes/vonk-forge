@@ -9,7 +9,7 @@ import re
 import threading
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import AbstractContextManager, contextmanager, nullcontext
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlsplit
 
@@ -17,8 +17,12 @@ from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
+from .distributed_lifecycle import DistributedLifecycleError
+from .distributed_recovery import enforce_recovery_deadline
+from .interface_adapters import InterfaceAdapterError, interface_adapter
 from .litellm import LiteLlmGeneration, LiteLlmPolicy, LiteLlmPublisher
 from .models import (
+    Job,
     LocalRecipeRevision,
     RecipeInstallation,
     RecipeRun,
@@ -42,6 +46,20 @@ class RecipeRouteError(RuntimeError):
     def __init__(self, message: str, *, run_id: str | None = None) -> None:
         super().__init__(message)
         self.run_id = run_id
+
+
+class RecipeRecoveryDeadlineError(RecipeRouteError):
+    pass
+
+
+class RecipeRecoveryPublicationError(RecipeRouteError):
+    pass
+
+
+class _ActivatedRecipeRouteError(RecipeRouteError):
+    def __init__(self, message: str, *, generation: LiteLlmGeneration) -> None:
+        super().__init__(message)
+        self.generation = generation
 
 
 @dataclass(frozen=True)
@@ -96,6 +114,12 @@ class _RecipeWithdrawal:
 @dataclass(frozen=True)
 class _AtomicRecipeGeneration(LiteLlmGeneration):
     activation_marker: ActivationMarker
+
+
+@dataclass(frozen=True)
+class _RecoveryPublication:
+    job: Job
+    deadline: datetime
 
 
 def route_publication_owner_lock_statement():
@@ -210,6 +234,7 @@ class AtomicRecipeRoutePublisher:
                 "atomic recipe route publisher lacks compiled route support"
             )
         self._publisher._identity(self._AUTHORITY_ID, route_digest, route_digest)
+        acknowledgement_error: Exception | None = None
         with self._publisher._locked():
             self._publisher._require_update_boundary(None)
             issued, expires = self._publisher._lease(expires_at)
@@ -242,7 +267,10 @@ class AtomicRecipeRoutePublisher:
                 issued=issued,
                 expires=expires,
             )
-            self._publisher._require_supervisor_ack(marker)
+            try:
+                self._publisher._require_supervisor_ack(marker)
+            except Exception as error:  # noqa: BLE001
+                acknowledgement_error = error
         config_sha256 = hashlib.sha256(litellm).hexdigest()
         root = getattr(self._publisher, "_root", None)
         path = (
@@ -250,13 +278,20 @@ class AtomicRecipeRoutePublisher:
             if hasattr(root, "joinpath")
             else marker.directory
         )
-        return _AtomicRecipeGeneration(
+        result = _AtomicRecipeGeneration(
             marker.generation,
             route_digest,
             config_sha256,
             path,
             marker,
         )
+        if acknowledgement_error is not None:
+            raise _ActivatedRecipeRouteError(
+                "recipe route activation acknowledgement failed: "
+                f"{acknowledgement_error}",
+                generation=result,
+            ) from acknowledgement_error
+        return result
 
 
 class RecipeRouteService:
@@ -279,8 +314,17 @@ class RecipeRouteService:
         self._maximum_age = timedelta(seconds=maximum_age_seconds)
 
     def publish_run(self, run_id: str) -> LiteLlmGeneration:
+        committed_error: RecipeRouteError | None = None
         with self.publication_transaction() as session:
-            return self.publish_run_in_session(session, run_id)
+            try:
+                return self.publish_run_in_session(session, run_id)
+            except (
+                RecipeRecoveryDeadlineError,
+                RecipeRecoveryPublicationError,
+            ) as error:
+                committed_error = error
+        assert committed_error is not None
+        raise committed_error
 
     def publication_transaction(self) -> AbstractContextManager[Session]:
         return route_publication_transaction(self.sessions)
@@ -301,8 +345,63 @@ class RecipeRouteService:
         )
         if run_id not in candidate.included:
             raise RecipeRouteError("recipe run is absent from route candidate")
-        generation = self._publish(candidate)
+        recovery = self._enforce_recovery_publication_deadline(session, run)
+        if recovery is not None:
+            candidate = replace(
+                candidate,
+                expires_at=min(candidate.expires_at, recovery.deadline),
+            )
+        try:
+            generation = self._publish(candidate)
+        except Exception as publication_error:
+            if recovery is None:
+                raise
+            try:
+                self._enforce_recovery_publication_deadline(session, run)
+            except RecipeRecoveryDeadlineError as deadline_error:
+                failure: RecipeRouteError = deadline_error
+            else:
+                failure = RecipeRecoveryPublicationError(
+                    "recovery route publication failed: "
+                    f"{type(publication_error).__name__}",
+                    run_id=run_id,
+                )
+            generation = (
+                publication_error.generation
+                if isinstance(publication_error, _ActivatedRecipeRouteError)
+                else None
+            )
+            self._fail_recovery_publication_in_session(
+                session,
+                run,
+                recovery,
+                failure,
+                generation=generation,
+            )
+            raise failure from publication_error
+        if recovery is not None:
+            try:
+                # External activation can cross the bounded recovery window.
+                # Recheck before projecting success or recording the marker.
+                self._enforce_recovery_publication_deadline(session, run)
+            except RecipeRecoveryDeadlineError as deadline_error:
+                self._fail_recovery_publication_in_session(
+                    session,
+                    run,
+                    recovery,
+                    deadline_error,
+                    generation=generation,
+                )
+                raise
         self.projection_in_session(session, generation, state="completed")
+        if recovery is not None:
+            result = (
+                dict(recovery.job.result)
+                if isinstance(recovery.job.result, Mapping)
+                else {}
+            )
+            recovery.job.result = {**result, "recovery_route_published": True}
+            recovery.job.updated_at = self._clock()
         for included_id in sorted(candidate.included):
             included = session.get(RecipeRun, included_id)
             if included is None or included.state != "running":
@@ -313,6 +412,91 @@ class RecipeRouteService:
             included.route_error = None
             included.updated_at = self._clock()
         return generation
+
+    def _fail_recovery_publication_in_session(
+        self,
+        session: Session,
+        run: RecipeRun,
+        recovery: _RecoveryPublication,
+        failure: RecipeRouteError,
+        *,
+        generation: LiteLlmGeneration | None,
+    ) -> None:
+        """Commit one fail-closed state for activation, ack, or deadline failure."""
+
+        if generation is not None:
+            self.projection_in_session(session, generation, state="withdrawal-pending")
+        recovery_result = (
+            dict(recovery.job.result)
+            if isinstance(recovery.job.result, Mapping)
+            else {}
+        )
+        recovery.job.state = "failed"
+        recovery.job.result = {
+            **recovery_result,
+            "recovery_error": str(failure),
+        }
+        recovery.job.updated_at = self._clock()
+        cleanup_error: Exception | None = None
+        try:
+            self._withdraw_runs_in_session(session, frozenset({run.id}))
+        # External publishers are plug-ins and may fail with any ordinary
+        # exception. Persist retry intent instead of rolling safety state back.
+        except Exception as error:  # noqa: BLE001
+            cleanup_error = error
+        run.state = "failed"
+        run.route_state = "withdrawn"
+        run.route_error = str(failure)[:512]
+        if cleanup_error is not None:
+            if generation is not None:
+                run.route_generation = generation.generation
+                run.route_digest = generation.route_digest
+            publication = session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)
+            if publication is not None:
+                publication.state = "withdrawal-pending"
+            run.route_error = (
+                f"{failure}; route withdrawal retry pending: "
+                f"{type(cleanup_error).__name__}"
+            )[:512]
+        run.updated_at = self._clock()
+
+    def _enforce_recovery_publication_deadline(
+        self, session: Session, run: RecipeRun
+    ) -> _RecoveryPublication | None:
+        jobs = session.scalars(
+            select(Job)
+            .where(Job.kind == "recipe.start")
+            .order_by(Job.created_at.desc(), Job.id.desc())
+        )
+        recovery_job = next(
+            (
+                job
+                for job in jobs
+                if job.payload.get("owner_id") == run.id
+                and isinstance(job.payload.get("recovery"), Mapping)
+            ),
+            None,
+        )
+        if recovery_job is None:
+            return None
+        result = recovery_job.result
+        if (
+            isinstance(result, Mapping)
+            and result.get("recovery_route_published") is True
+        ):
+            return None
+        try:
+            enforce_recovery_deadline(recovery_job.payload, now=self._clock())
+        except DistributedLifecycleError as error:
+            run.state = "failed"
+            run.route_state = "withdrawn"
+            run.route_error = str(error)[:512]
+            run.updated_at = self._clock()
+            raise RecipeRecoveryDeadlineError(str(error), run_id=run.id) from error
+        recovery = recovery_job.payload["recovery"]
+        assert isinstance(recovery, Mapping)
+        deadline = datetime.fromisoformat(str(recovery["deadline"]))
+        return _RecoveryPublication(recovery_job, _aware(deadline))
 
     def withdraw_run(self, run_id: str) -> LiteLlmGeneration:
         with self.publication_transaction() as session:
@@ -403,6 +587,11 @@ class RecipeRouteService:
         if not 1 <= renew_before_seconds < self._maximum_age_seconds:
             raise ValueError("recipe route renewal window is invalid")
         with self.publication_transaction() as session:
+            pending = session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)
+            if pending is not None and pending.state == "withdrawal-pending":
+                withdrawal = self.prepare_withdrawal_in_session(session, frozenset())
+                self._publish_withdrawal_in_session(session, withdrawal)
+                return True
             published = tuple(
                 session.scalars(
                     select(RecipeRun)
@@ -782,15 +971,31 @@ def _primary_model_alias(session: Session, run: RecipeRun) -> str:
         if installation is not None
         else None
     )
-    runtime = revision.document.get("runtime") if revision is not None else None
-    endpoint = runtime.get("endpoint") if isinstance(runtime, Mapping) else None
+    interfaces = revision.document.get("interfaces") if revision is not None else None
+    interface = None
+    if isinstance(interfaces, list):
+        for value in interfaces:
+            name = value.get("adapter") if isinstance(value, Mapping) else None
+            if not isinstance(name, str):
+                continue
+            try:
+                adapter = interface_adapter(name)
+            except InterfaceAdapterError as error:
+                raise RecipeRouteError(
+                    "recipe runtime interface authority is invalid", run_id=run.id
+                ) from error
+            if adapter.publication == "litellm":
+                interface = value
+                break
+    if interface is None:
+        raise RecipeRouteError(
+            "recipe run does not declare a LiteLLM interface", run_id=run.id
+        )
     model_aliases = (
-        endpoint.get("model_aliases") if isinstance(endpoint, Mapping) else None
+        interface.get("model_aliases") if isinstance(interface, Mapping) else None
     )
     primary = (
-        model_aliases[0]
-        if isinstance(model_aliases, list) and model_aliases
-        else None
+        model_aliases[0] if isinstance(model_aliases, list) and model_aliases else None
     )
     if not isinstance(primary, str) or _UPSTREAM_MODEL.fullmatch(primary) is None:
         raise RecipeRouteError(

@@ -9,10 +9,16 @@ from .bounded_error_response import BoundedErrorResponse
 from .build_plan_response import BuildPlanResponse
 from .build_preview_request import BuildPreviewRequest
 from .build_request import BuildRequest
-from .cancel_reconciliation_response_cancel_reconciliation_api_v1_reconciliations_reconciliation_id_cancel_post import CancelReconciliationResponseCancelReconciliationApiV1ReconciliationsReconciliationIdCancelPost
 from .capacity_reservations import CapacityReservations
+from .catalog_entity_list_response import CatalogEntityListResponse
+from .catalog_entity_revision_response import CatalogEntityRevisionResponse
+from .catalog_entity_revision_response_document import CatalogEntityRevisionResponseDocument
+from .catalog_entity_revision_response_kind import CatalogEntityRevisionResponseKind
+from .catalog_entity_revision_response_lifecycle import CatalogEntityRevisionResponseLifecycle
 from .catalog_problem import CatalogProblem
 from .change_request import ChangeRequest
+from .create_catalog_entity_request import CreateCatalogEntityRequest
+from .create_catalog_entity_request_document import CreateCatalogEntityRequestDocument
 from .create_recipe_request import CreateRecipeRequest
 from .create_recipe_request_document import CreateRecipeRequestDocument
 from .deployment_response import DeploymentResponse
@@ -72,7 +78,6 @@ from .library_run_summary_route_state import LibraryRunSummaryRouteState
 from .library_run_summary_state import LibraryRunSummaryState
 from .library_snapshot import LibrarySnapshot
 from .list_audit_events_response_audit_view_api_v1_audit_get import ListAuditEventsResponseAuditViewApiV1AuditGet
-from .list_documents_response_document_view_api_v1_documents_get import ListDocumentsResponseDocumentViewApiV1DocumentsGet
 from .mapping_node_plan_response import MappingNodePlanResponse
 from .mapping_plan_response import MappingPlanResponse
 from .mapping_plan_response_parameters import MappingPlanResponseParameters
@@ -85,6 +90,7 @@ from .mapping_request import MappingRequest
 from .mapping_request_parameters import MappingRequestParameters
 from .mapping_response import MappingResponse
 from .migration_grant_request import MigrationGrantRequest
+from .model_version_identity import ModelVersionIdentity
 from .node_connection import NodeConnection
 from .node_connection_agent_state import NodeConnectionAgentState
 from .node_connection_certificate_state import NodeConnectionCertificateState
@@ -145,29 +151,10 @@ from .placement_recommendation import PlacementRecommendation
 from .placement_recommendation_install_state import PlacementRecommendationInstallState
 from .placement_recommendation_load_state import PlacementRecommendationLoadState
 from .placement_score import PlacementScore
-from .plan_endpoint import PlanEndpoint
-from .plan_endpoint_scheme import PlanEndpointScheme
-from .plan_input_digests import PlanInputDigests
-from .plan_operation import PlanOperation
-from .plan_operation_graph import PlanOperationGraph
-from .plan_placements import PlanPlacements
 from .plan_platform_update_response_update_plan_api_v1_updates_plan_post import PlanPlatformUpdateResponseUpdatePlanApiV1UpdatesPlanPost
-from .plan_prepare_request import PlanPrepareRequest
-from .plan_quota import PlanQuota
 from .plan_reason import PlanReason
-from .plan_release import PlanRelease
-from .plan_release_request import PlanReleaseRequest
-from .plan_releases import PlanReleases
-from .plan_route import PlanRoute
-from .plan_route_scheme import PlanRouteScheme
-from .plan_routes import PlanRoutes
-from .plan_start_request import PlanStartRequest
-from .plan_verify_request import PlanVerifyRequest
-from .plan_workload_request import PlanWorkloadRequest
-from .plan_workload_requests import PlanWorkloadRequests
 from .preview_proposal_response_proposal_preview_api_v1_proposals_post import PreviewProposalResponseProposalPreviewApiV1ProposalsPost
 from .preview_request import PreviewRequest
-from .profile_placement import ProfilePlacement
 from .projection_reason import ProjectionReason
 from .projection_reason_code import ProjectionReasonCode
 from .projection_reason_severity import ProjectionReasonSeverity
@@ -178,6 +165,8 @@ from .publication_export_request import PublicationExportRequest
 from .recipe_disk_requirements import RecipeDiskRequirements
 from .recipe_fabric import RecipeFabric
 from .recipe_fabric_connectivity import RecipeFabricConnectivity
+from .recipe_library_import_request import RecipeLibraryImportRequest
+from .recipe_library_import_request_document import RecipeLibraryImportRequestDocument
 from .recipe_list_response import RecipeListResponse
 from .recipe_memory_requirements import RecipeMemoryRequirements
 from .recipe_memory_requirements_kind import RecipeMemoryRequirementsKind
@@ -186,11 +175,6 @@ from .recipe_presence import RecipePresence
 from .recipe_presence_degraded_reason_type_0 import RecipePresenceDegradedReasonType0
 from .recipe_presence_group_state import RecipePresenceGroupState
 from .recipe_presence_rank_state import RecipePresenceRankState
-from .recipe_profile import RecipeProfile
-from .recipe_profile_measurement import RecipeProfileMeasurement
-from .recipe_profile_parameter_overrides import RecipeProfileParameterOverrides
-from .recipe_profile_summary import RecipeProfileSummary
-from .recipe_profile_summary_fabric_connectivity import RecipeProfileSummaryFabricConnectivity
 from .recipe_revision_response import RecipeRevisionResponse
 from .recipe_revision_response_document import RecipeRevisionResponseDocument
 from .recipe_revision_response_lifecycle import RecipeRevisionResponseLifecycle
@@ -201,17 +185,16 @@ from .recipe_role import RecipeRole
 from .recipe_summary_response import RecipeSummaryResponse
 from .recipe_summary_response_lifecycle import RecipeSummaryResponseLifecycle
 from .recipe_summary_response_origin import RecipeSummaryResponseOrigin
-from .reconciliation_accepted_response import ReconciliationAcceptedResponse
-from .reconciliation_cancel_request import ReconciliationCancelRequest
-from .reconciliation_plan_request import ReconciliationPlanRequest
-from .reconciliation_plan_response import ReconciliationPlanResponse
-from .reconciliation_request import ReconciliationRequest
+from .recipe_topology import RecipeTopology
 from .reject_request import RejectRequest
 from .rejected_node import RejectedNode
 from .request_key import RequestKey
+from .resolve_catalog_entity_request import ResolveCatalogEntityRequest
 from .resolve_import_request import ResolveImportRequest
 from .resolve_import_request_overlays import ResolveImportRequestOverlays
 from .resolve_recipe_request import ResolveRecipeRequest
+from .revise_catalog_entity_request import ReviseCatalogEntityRequest
+from .revise_catalog_entity_request_document import ReviseCatalogEntityRequestDocument
 from .run_node_plan_response import RunNodePlanResponse
 from .run_plan_response import RunPlanResponse
 from .run_presence import RunPresence
@@ -247,6 +230,7 @@ from .telemetry_state import TelemetryState
 from .telemetry_state_freshness import TelemetryStateFreshness
 from .test_report_request import TestReportRequest
 from .test_report_request_report import TestReportRequestReport
+from .topology_placement import TopologyPlacement
 from .uninstall_active_run_response import UninstallActiveRunResponse
 from .uninstall_consequences_response import UninstallConsequencesResponse
 from .uninstall_node_impact_response import UninstallNodeImpactResponse
@@ -263,14 +247,17 @@ from .validation_error import ValidationError
 from .visual_artifact import VisualArtifact
 from .visual_build import VisualBuild
 from .visual_build_context import VisualBuildContext
+from .visual_catalog_identity import VisualCatalogIdentity
+from .visual_catalog_identity_kind import VisualCatalogIdentityKind
+from .visual_execution import VisualExecution
 from .visual_identity import VisualIdentity
+from .visual_interface import VisualInterface
 from .visual_metadata import VisualMetadata
 from .visual_provenance import VisualProvenance
 from .visual_provenance_source_kind import VisualProvenanceSourceKind
 from .visual_recipe_document import VisualRecipeDocument
 from .visual_runtime import VisualRuntime
 from .visual_validation import VisualValidation
-from .visual_workload import VisualWorkload
 
 __all__ = (
     "AgentsResponse",
@@ -282,10 +269,16 @@ __all__ = (
     "BuildPlanResponse",
     "BuildPreviewRequest",
     "BuildRequest",
-    "CancelReconciliationResponseCancelReconciliationApiV1ReconciliationsReconciliationIdCancelPost",
     "CapacityReservations",
+    "CatalogEntityListResponse",
+    "CatalogEntityRevisionResponse",
+    "CatalogEntityRevisionResponseDocument",
+    "CatalogEntityRevisionResponseKind",
+    "CatalogEntityRevisionResponseLifecycle",
     "CatalogProblem",
     "ChangeRequest",
+    "CreateCatalogEntityRequest",
+    "CreateCatalogEntityRequestDocument",
     "CreateRecipeRequest",
     "CreateRecipeRequestDocument",
     "DeploymentResponse",
@@ -345,7 +338,6 @@ __all__ = (
     "LibraryRunSummaryState",
     "LibrarySnapshot",
     "ListAuditEventsResponseAuditViewApiV1AuditGet",
-    "ListDocumentsResponseDocumentViewApiV1DocumentsGet",
     "MappingNodePlanResponse",
     "MappingPlanResponse",
     "MappingPlanResponseParameters",
@@ -358,6 +350,7 @@ __all__ = (
     "MappingRequestParameters",
     "MappingResponse",
     "MigrationGrantRequest",
+    "ModelVersionIdentity",
     "NodeConnection",
     "NodeConnectionAgentState",
     "NodeConnectionCertificateState",
@@ -418,29 +411,10 @@ __all__ = (
     "PlacementRecommendationInstallState",
     "PlacementRecommendationLoadState",
     "PlacementScore",
-    "PlanEndpoint",
-    "PlanEndpointScheme",
-    "PlanInputDigests",
-    "PlanOperation",
-    "PlanOperationGraph",
-    "PlanPlacements",
     "PlanPlatformUpdateResponseUpdatePlanApiV1UpdatesPlanPost",
-    "PlanPrepareRequest",
-    "PlanQuota",
     "PlanReason",
-    "PlanRelease",
-    "PlanReleaseRequest",
-    "PlanReleases",
-    "PlanRoute",
-    "PlanRoutes",
-    "PlanRouteScheme",
-    "PlanStartRequest",
-    "PlanVerifyRequest",
-    "PlanWorkloadRequest",
-    "PlanWorkloadRequests",
     "PreviewProposalResponseProposalPreviewApiV1ProposalsPost",
     "PreviewRequest",
-    "ProfilePlacement",
     "ProjectionReason",
     "ProjectionReasonCode",
     "ProjectionReasonSeverity",
@@ -451,6 +425,8 @@ __all__ = (
     "RecipeDiskRequirements",
     "RecipeFabric",
     "RecipeFabricConnectivity",
+    "RecipeLibraryImportRequest",
+    "RecipeLibraryImportRequestDocument",
     "RecipeListResponse",
     "RecipeMemoryRequirements",
     "RecipeMemoryRequirementsKind",
@@ -459,11 +435,6 @@ __all__ = (
     "RecipePresenceDegradedReasonType0",
     "RecipePresenceGroupState",
     "RecipePresenceRankState",
-    "RecipeProfile",
-    "RecipeProfileMeasurement",
-    "RecipeProfileParameterOverrides",
-    "RecipeProfileSummary",
-    "RecipeProfileSummaryFabricConnectivity",
     "RecipeRevisionResponse",
     "RecipeRevisionResponseDocument",
     "RecipeRevisionResponseLifecycle",
@@ -474,17 +445,16 @@ __all__ = (
     "RecipeSummaryResponse",
     "RecipeSummaryResponseLifecycle",
     "RecipeSummaryResponseOrigin",
-    "ReconciliationAcceptedResponse",
-    "ReconciliationCancelRequest",
-    "ReconciliationPlanRequest",
-    "ReconciliationPlanResponse",
-    "ReconciliationRequest",
+    "RecipeTopology",
     "RejectedNode",
     "RejectRequest",
     "RequestKey",
+    "ResolveCatalogEntityRequest",
     "ResolveImportRequest",
     "ResolveImportRequestOverlays",
     "ResolveRecipeRequest",
+    "ReviseCatalogEntityRequest",
+    "ReviseCatalogEntityRequestDocument",
     "RunNodePlanResponse",
     "RunPlanResponse",
     "RunPresence",
@@ -520,6 +490,7 @@ __all__ = (
     "TelemetryStateFreshness",
     "TestReportRequest",
     "TestReportRequestReport",
+    "TopologyPlacement",
     "UninstallActiveRunResponse",
     "UninstallConsequencesResponse",
     "UninstallNodeImpactResponse",
@@ -536,12 +507,15 @@ __all__ = (
     "VisualArtifact",
     "VisualBuild",
     "VisualBuildContext",
+    "VisualCatalogIdentity",
+    "VisualCatalogIdentityKind",
+    "VisualExecution",
     "VisualIdentity",
+    "VisualInterface",
     "VisualMetadata",
     "VisualProvenance",
     "VisualProvenanceSourceKind",
     "VisualRecipeDocument",
     "VisualRuntime",
     "VisualValidation",
-    "VisualWorkload",
 )

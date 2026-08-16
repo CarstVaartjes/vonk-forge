@@ -25,7 +25,7 @@ services:
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres-password
     secrets: [postgres-password]
     volumes: [dev-postgres-data:/var/lib/postgresql]
-    networks: [data]
+    networks: [data, litellm-data]
     healthcheck:
       test: [CMD-SHELL, "pg_isready -U control -d control"]
       interval: 5s
@@ -381,8 +381,7 @@ services:
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,mode=1777
       - /run/vonk-litellm:rw,exec,nosuid,nodev,mode=0700,uid=10002,gid=10001
-    ports: ["127.0.0.1:${VONK_DEV_INFERENCE_PORT:-4000}:4000"]
-    networks: [application, data, ingress]
+    networks: [litellm-data, cluster-egress, litellm-edge]
     depends_on:
       dev-litellm-database-init: {condition: service_completed_successfully}
       dev-init: {condition: service_completed_successfully}
@@ -401,7 +400,9 @@ services:
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
-    ports: ["${VONK_AGENT_PORT:-8443}:8443"]
+    ports:
+      - "${VONK_AGENT_PORT:-8443}:8443"
+      - "127.0.0.1:${VONK_DEV_INFERENCE_PORT:-4000}:8081"
     volumes:
       - dev-runtime-config:/run/vonk-runtime:ro
       - dev-caddy-secrets:/run/secrets:ro
@@ -417,7 +418,7 @@ services:
       VONK_AGENT_HOSTNAME: agents.vonk-forge.lan
       VONK_BACKEND_PORT: "8443"
       VONK_CONTROL_HOSTNAME_FILE: /run/vonk-tailnet/control-hostname.ready
-    networks: [application, ingress, tailnet-web-edge]
+    networks: [application, ingress, tailnet-web-edge, litellm-edge]
     depends_on:
       control-api: {condition: service_healthy}
       dev-init: {condition: service_completed_successfully}
@@ -500,7 +501,10 @@ services:
 networks:
   application: {internal: true}
   data: {internal: true}
+  litellm-data: {internal: true}
   ingress: {}
+  cluster-egress: {}
+  litellm-edge: {internal: true}
   tailscale-egress: {}
   tailnet-web-edge: {internal: true}
 

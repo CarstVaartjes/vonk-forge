@@ -43,6 +43,7 @@ def test_container_and_mods_become_a_source_bundle() -> None:
         "hosts": [],
     }
     assert result.draft_document["build"]["context"]["sha256"] == result.bundle.sha256
+    assert result.draft_document["topology"]["name"] == "nodes_2"
     validate_recipe(result.draft_document)
 
 
@@ -76,3 +77,43 @@ def test_redacted_source_never_contains_secret_values() -> None:
 
     assert result.redacted_source["credentials"]["password"] == "<redacted>"
     assert "never-store-me" not in str(result.redacted_source)
+
+
+def test_runtime_name_requires_exact_execution_harness_resolution() -> None:
+    source = parse_workload_run_yaml(
+        b"model: bartowski/Qwen-GGUF\n"
+        b"model_revision: 0123456789abcdef0123456789abcdef01234567\n"
+        b"runtime: llama.cpp\n"
+        b"min_nodes: 1\nmax_nodes: 1\n"
+        b"command: llama-server --model /models/qwen.gguf --port 8000\n"
+    )
+
+    result = import_workload_run(source)
+
+    runtime_item = next(
+        item for item in result.report if item.source_path == "/runtime"
+    )
+    assert runtime_item.disposition is ImportDisposition.RESOLUTION_REQUIRED
+    assert runtime_item.destination_path == "/execution/harness"
+    assert runtime_item.reason_code == "execution.harness"
+    assert runtime_item.blocking is True
+    assert result.draft_document["execution"]["harness"]["slug"] == "unresolved-harness"
+    assert result.draft_document["runtime"]["distribution"]["slug"] == (
+        "unresolved-distribution"
+    )
+    validate_recipe(result.draft_document)
+
+
+def test_raw_workload_run_command_never_becomes_builtin_harness_authority() -> None:
+    source = parse_workload_run_yaml((FIXTURES / "minimal-vllm.yaml").read_bytes())
+
+    result = import_workload_run(source)
+
+    command_item = next(
+        item for item in result.report if item.source_path == "/command"
+    )
+    assert command_item.disposition is ImportDisposition.UNSUPPORTED_BLOCKING
+    assert command_item.reason_code == "runtime.command_unsupported"
+    assert result.draft_document["runtime"]["entrypoint"] == ["unresolved-runtime"]
+    assert result.draft_document["runtime"]["arguments"] == []
+    assert result.draft_document["runtime"]["environment"] == []

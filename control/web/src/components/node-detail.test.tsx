@@ -182,9 +182,9 @@ test("refreshes selected history after live telemetry without stealing focus", a
 test("separates complete and healthy recipe evidence from transitional group state", async () => {
   const projected = node();
   projected.installed = [{
-    installation_id: "install-complete", recipe_id: "recipe-1", recipe_revision_id: "revision-1", title: "Qwen pair", profile_name: "pair", expected_rank_count: 2, present_ranks: [0, 1], member_node_ids: [projected.id, "node-b"], rank: 0, role: "leader", rank_state: "installed", group_state: "installed", complete: true, degraded_reason: null,
+    installation_id: "install-complete", recipe_id: "recipe-1", recipe_revision_id: "revision-1", title: "Qwen pair", topology_name: "pair", expected_rank_count: 2, present_ranks: [0, 1], member_node_ids: [projected.id, "node-b"], rank: 0, role: "leader", rank_state: "installed", group_state: "installed", complete: true, degraded_reason: null,
   }, {
-    installation_id: "install-partial", recipe_id: "recipe-2", recipe_revision_id: "revision-2", title: "Vision pair", profile_name: "pair", expected_rank_count: 2, present_ranks: [0], member_node_ids: [projected.id], rank: 0, role: "leader", rank_state: "installing", group_state: "partial", complete: false, degraded_reason: "missing-ranks",
+    installation_id: "install-partial", recipe_id: "recipe-2", recipe_revision_id: "revision-2", title: "Vision pair", topology_name: "pair", expected_rank_count: 2, present_ranks: [0], member_node_ids: [projected.id], rank: 0, role: "leader", rank_state: "installing", group_state: "partial", complete: false, degraded_reason: "missing-ranks",
   }];
   projected.loaded = [{
     run_id: "run-healthy", installation_id: "install-complete", recipe_id: "recipe-1", recipe_revision_id: "revision-1", title: "Qwen pair", alias: "chat", expected_rank_count: 2, present_ranks: [0, 1], member_node_ids: [projected.id, "node-b"], rank: 0, role: "leader", rank_state: "running", rank_age_seconds: 2, rank_fresh: true, run_state: "running", route_state: "published", group_state: "healthy", healthy: true, degraded_reason: null,

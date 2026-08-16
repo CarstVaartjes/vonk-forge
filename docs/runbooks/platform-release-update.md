@@ -4,7 +4,8 @@ This runbook updates `vonk-forge` itself: the Docker control services on a
 Docker-capable control host and the `vonk-forge` agents on any number of enrolled
 Vonk Forge GPU nodes. It does not update model packages, DGX OS, firmware, the kernel,
 NVIDIA drivers, or CUDA. Workload packages have an independent release cadence;
-see [Runtime releases](runtime-release.md).
+Platform image publication is separate from recipe runtime publication; see
+[Recipe runtime publication](runtime-release.md) for the recipe boundary.
 
 The normal GPU node path is the outbound, mutually authenticated agent channel.
 It is not SSH. An administrator can still SSH into a GPU node, but SSH is reserved
@@ -303,7 +304,7 @@ and its trust configuration, then return to the standard signed update path.
 
 Before declaring the rollout complete, require all intended online nodes to
 report the exact target version/build/protocol and a stable active slot. Verify
-the pre-existing model profiles, LiteLLM/Caddy routes, workload availability,
+the currently published recipe runs, LiteLLM/Caddy routes, workload availability,
 and audit trail. Confirm that no standard-path command used SSH.
 
 Run the deterministic acceptance gate during development:

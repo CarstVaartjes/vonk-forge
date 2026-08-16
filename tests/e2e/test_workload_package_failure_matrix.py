@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-for source_root in (ROOT / "agent/src", ROOT / "agent_protocol/src", ROOT / "control/src"):
+for source_root in (ROOT / "agent/src", ROOT / "agent_protocol/src"):
     sys.path.insert(0, str(source_root))
 
 from vonk_agent.packages.failures import (

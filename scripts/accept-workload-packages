@@ -35,11 +35,11 @@ def _run_acceptance() -> tuple[bool, str, str]:
             "--python",
             sys.executable,
             "--project",
-            "agent",
+            "control",
             "--frozen",
             "pytest",
             "-q",
-            "tests/e2e/test_unknown_workload_package.py",
+            "control/tests/test_unknown_workload_package_e2e.py",
         ]
     else:
         command = [
@@ -47,7 +47,7 @@ def _run_acceptance() -> tuple[bool, str, str]:
             "-m",
             "pytest",
             "-q",
-            "tests/e2e/test_unknown_workload_package.py",
+            "control/tests/test_unknown_workload_package_e2e.py",
         ]
     completed = subprocess.run(
         command,

@@ -5,6 +5,8 @@ const GIB = 1024 ** 3;
 const nodeId = "spk_0123456789abcdef0123456789abcdef";
 const borealisId = "spk_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const commit = "a".repeat(40);
+const qwenModel = `qwen/3@${"e".repeat(64)}`;
+const qwenModelPath = `/library/models/${encodeURIComponent(qwenModel)}`;
 const browserProblems = new WeakMap<Page, string[]>();
 type LibraryFixtureState = {
   detailFailuresRemaining: number;
@@ -73,7 +75,7 @@ function localSnapshot() {
       inventory: null,
       telemetry: {age_seconds: 0, freshness: "live", sample: telemetry(observedAt)},
       installed: [{
-        installation_id: "install-chat", recipe_id: "recipe-chat", recipe_revision_id: "revision-chat", title: "Qwen pair", profile_name: "pair", expected_rank_count: 2, present_ranks: [0, 1], member_node_ids: [nodeId, borealisId], rank: 0, role: "leader", rank_state: "installed", group_state: "installed", complete: true, degraded_reason: null,
+        installation_id: "install-chat", recipe_id: "recipe-chat", recipe_revision_id: "revision-chat", title: "Qwen pair", topology_name: "pair", expected_rank_count: 2, present_ranks: [0, 1], member_node_ids: [nodeId, borealisId], rank: 0, role: "leader", rank_state: "installed", group_state: "installed", complete: true, degraded_reason: null,
       }],
       loaded: [{
         run_id: "run-chat", installation_id: "install-chat", recipe_id: "recipe-chat", recipe_revision_id: "revision-chat", title: "Qwen pair", alias: "chat", expected_rank_count: 2, present_ranks: [0, 1], member_node_ids: [nodeId, borealisId], rank: 0, role: "leader", rank_state: "running", rank_age_seconds: 1, rank_fresh: true, run_state: "running", route_state: "failed", group_state: "degraded", healthy: false, degraded_reason: "route-not-published",
@@ -92,7 +94,7 @@ function localSnapshot() {
       inventory: null,
       telemetry: null,
       installed: [{
-        installation_id: "install-chat", recipe_id: "recipe-chat", recipe_revision_id: "revision-chat", title: "Qwen pair", profile_name: "pair", expected_rank_count: 2, present_ranks: [0, 1], member_node_ids: [nodeId, borealisId], rank: 1, role: "worker", rank_state: "installed", group_state: "installed", complete: true, degraded_reason: null,
+        installation_id: "install-chat", recipe_id: "recipe-chat", recipe_revision_id: "revision-chat", title: "Qwen pair", topology_name: "pair", expected_rank_count: 2, present_ranks: [0, 1], member_node_ids: [nodeId, borealisId], rank: 1, role: "worker", rank_state: "installed", group_state: "installed", complete: true, degraded_reason: null,
       }],
       loaded: [{
         run_id: "run-chat", installation_id: "install-chat", recipe_id: "recipe-chat", recipe_revision_id: "revision-chat", title: "Qwen pair", alias: "chat", expected_rank_count: 2, present_ranks: [0, 1], member_node_ids: [nodeId, borealisId], rank: 1, role: "worker", rank_state: "lost", rank_age_seconds: null, rank_fresh: false, run_state: "lost", route_state: "failed", group_state: "degraded", healthy: false, degraded_reason: "member-rank-unhealthy",
@@ -294,24 +296,24 @@ test("Library keeps URL drill-down below 900px and three coordinated panes above
   await expect(recipes).toBeHidden();
   await expect(detail).toBeHidden();
 
-  await models.getByRole("link", {name: /Qwen 3/}).focus();
+  await models.getByRole("link", {name: new RegExp(qwenModel)}).focus();
   await page.keyboard.press("Enter");
-  await expect(page).toHaveURL(/\/library\/models\/qwen%2F3$/);
+  await expect(page).toHaveURL(new RegExp(`${qwenModelPath}$`));
   await expect(page.getByRole("heading", {name: "Library", exact: true})).toBeFocused();
   await expect(models).toBeHidden();
-  await expect(page.getByRole("region", {name: "Recipes for Qwen 3"})).toBeVisible();
+  await expect(page.getByRole("region", {name: `Recipes for ${qwenModel}`})).toBeVisible();
   await expect(detail).toBeHidden();
 
   await page.getByRole("link", {name: /Qwen Chat/}).click();
   await expect(page).toHaveURL(/\/library\/recipes\/recipe-chat$/);
   await expect(page.getByRole("heading", {name: "Library", exact: true})).toBeFocused();
   await expect(models).toBeHidden();
-  await expect(page.getByRole("region", {name: "Recipes for Qwen 3"})).toBeHidden();
+  await expect(page.getByRole("region", {name: `Recipes for ${qwenModel}`})).toBeHidden();
   await expect(detail).toBeVisible();
 
   await page.goBack();
-  await expect(page).toHaveURL(/\/library\/models\/qwen%2F3$/);
-  await expect(page.getByRole("region", {name: "Recipes for Qwen 3"})).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`${qwenModelPath}$`));
+  await expect(page.getByRole("region", {name: `Recipes for ${qwenModel}`})).toBeVisible();
   await page.goBack();
   await expect(page).toHaveURL(/\/library$/);
   await expect(models).toBeVisible();
@@ -328,10 +330,10 @@ test("Library keeps URL drill-down below 900px and three coordinated panes above
   await expect(unlinked).toBeVisible();
 
   await page.setViewportSize({width: 1280, height: 900});
-  await models.getByRole("link", {name: /Qwen 3/}).click();
+  await models.getByRole("link", {name: new RegExp(qwenModel)}).click();
   await page.getByRole("link", {name: /Qwen Chat/}).click();
   await expect(models).toBeVisible();
-  await expect(page.getByRole("region", {name: "Recipes for Qwen 3"})).toBeVisible();
+  await expect(page.getByRole("region", {name: `Recipes for ${qwenModel}`})).toBeVisible();
   await expect(detail).toBeVisible();
 
   for (const width of [320, 360, 768, 899, 900, 1280, 1920]) {
@@ -348,7 +350,7 @@ test("Library keeps URL drill-down below 900px and three coordinated panes above
   await expect(detail).toBeVisible();
   await page.setViewportSize({width: 900, height: 900});
   await expect(models).toBeVisible();
-  await expect(page.getByRole("region", {name: "Recipes for Qwen 3"})).toBeVisible();
+  await expect(page.getByRole("region", {name: `Recipes for ${qwenModel}`})).toBeVisible();
   await expect(detail).toBeVisible();
 
   await page.setViewportSize({width: 1280, height: 900});
@@ -371,7 +373,7 @@ test("Library keeps URL drill-down below 900px and three coordinated panes above
     }
   });
   await expect(fractionalFrame.getByRole("region", {name: "Models"})).toBeHidden();
-  await expect(fractionalFrame.getByRole("region", {name: "Recipes for Qwen 3"})).toBeHidden();
+  await expect(fractionalFrame.getByRole("region", {name: `Recipes for ${qwenModel}`})).toBeHidden();
   await expect(fractionalFrame.getByRole("region", {name: "Recipe detail"})).toBeVisible();
   await page.locator('iframe[title="Fractional Library viewport"]').evaluate(element => element.remove());
 
@@ -385,7 +387,7 @@ test("Library fixture journey keeps visual authority primary through preview, pa
   await page.goto("/library/recipes/recipe-chat");
 
   const models = page.getByRole("region", {name: "Models"});
-  const recipes = page.getByRole("region", {name: "Recipes for Qwen 3"});
+  const recipes = page.getByRole("region", {name: `Recipes for ${qwenModel}`});
   const authority = page.getByRole("region", {name: "Qwen Chat recipe authority"});
   await expect(models.getByRole("link", {name: /Unlinked/})).toBeVisible();
   await expect(recipes.getByRole("link", {name: /Qwen Chat/})).toBeVisible();
@@ -438,22 +440,22 @@ test("Library fixture journey keeps visual authority primary through preview, pa
   const advanced = page.getByRole("group", {name: "Advanced recipe document"});
   await advanced.getByText("Advanced recipe document").click();
   const editor = advanced.getByRole("textbox", {name: "Recipe JSON"});
-  const firstValid = {...fullLibraryDetail.visual_recipe!, workload: {...fullLibraryDetail.visual_recipe!.workload, family: "qwen/e2e"}};
+  const firstValid = {...fullLibraryDetail.visual_recipe!, model: {...fullLibraryDetail.visual_recipe!.model, slug: "qwen-e2e"}};
   await editor.fill(JSON.stringify(firstValid, null, 2));
-  await expect(authority.getByRole("region", {name: "Model and runtime"})).toContainText("qwen/e2e");
-  const invalid = {...firstValid, workload: {...firstValid.workload, family: 4}};
+  await expect(authority.getByRole("region", {name: "Model and runtime"})).toContainText("qwen/qwen-e2e@");
+  const invalid = {...firstValid, model: {...firstValid.model, content_sha256: "not-a-digest"}};
   await editor.fill(JSON.stringify(invalid, null, 2));
-  await expect(advanced.getByRole("alert")).toContainText("$.workload.family must be a string.");
+  await expect(advanced.getByRole("alert")).toContainText("$.model.content_sha256 must be 64 lowercase hexadecimal characters.");
   await expect(editor).toBeFocused();
-  await expect(authority.getByRole("region", {name: "Model and runtime"})).toContainText("qwen/e2e");
+  await expect(authority.getByRole("region", {name: "Model and runtime"})).toContainText("qwen/qwen-e2e@");
 
   const upload = advanced.getByLabel("Upload recipe JSON");
-  const uploaded = {...firstValid, workload: {...firstValid.workload, family: "qwen/uploaded"}};
+  const uploaded = {...firstValid, model: {...firstValid.model, slug: "qwen-uploaded"}};
   await upload.focus();
   await upload.setInputFiles({name: "recipe.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(uploaded))});
   await expect(advanced.getByRole("alert")).toHaveCount(0);
   await expect(upload).toBeFocused();
-  await expect(authority.getByRole("region", {name: "Model and runtime"})).toContainText("qwen/uploaded");
+  await expect(authority.getByRole("region", {name: "Model and runtime"})).toContainText("qwen/qwen-uploaded@");
   await expect(page.getByRole("link", {name: "Source and build"})).toBeVisible();
   await expect(page.getByRole("link", {name: "Cluster mapping"})).toBeVisible();
   await expect(page.getByRole("link", {name: "Raw editor"})).toBeVisible();
@@ -471,7 +473,7 @@ test("Library local fixture recovers from errors and exposes an empty-state esca
   await expect(page.getByRole("region", {name: "Models"})).toBeVisible();
 
   state.detailFailuresRemaining = 1;
-  await page.getByRole("link", {name: /Qwen 3/}).click();
+  await page.getByRole("link", {name: new RegExp(qwenModel)}).click();
   await page.getByRole("link", {name: /Qwen Chat/}).click();
   await expect(page.getByRole("alert")).toBeVisible();
   await page.getByRole("button", {name: "Retry recipe detail"}).click();

@@ -36,13 +36,13 @@ class RecipePresence:
             installation_id (str):
             member_node_ids (list[str]):
             present_ranks (list[int]):
-            profile_name (str):
             rank (int):
             rank_state (RecipePresenceRankState):
             recipe_id (str):
             recipe_revision_id (str):
             role (str):
             title (str):
+            topology_name (str):
             degraded_reason (Union[None, RecipePresenceDegradedReasonType0, Unset]):
      """
 
@@ -52,13 +52,13 @@ class RecipePresence:
     installation_id: str
     member_node_ids: list[str]
     present_ranks: list[int]
-    profile_name: str
     rank: int
     rank_state: RecipePresenceRankState
     recipe_id: str
     recipe_revision_id: str
     role: str
     title: str
+    topology_name: str
     degraded_reason: Union[None, RecipePresenceDegradedReasonType0, Unset] = UNSET
 
 
@@ -82,8 +82,6 @@ class RecipePresence:
 
 
 
-        profile_name = self.profile_name
-
         rank = self.rank
 
         rank_state: str = self.rank_state
@@ -95,6 +93,8 @@ class RecipePresence:
         role = self.role
 
         title = self.title
+
+        topology_name = self.topology_name
 
         degraded_reason: Union[None, Unset, str]
         if isinstance(self.degraded_reason, Unset):
@@ -114,13 +114,13 @@ class RecipePresence:
             "installation_id": installation_id,
             "member_node_ids": member_node_ids,
             "present_ranks": present_ranks,
-            "profile_name": profile_name,
             "rank": rank,
             "rank_state": rank_state,
             "recipe_id": recipe_id,
             "recipe_revision_id": recipe_revision_id,
             "role": role,
             "title": title,
+            "topology_name": topology_name,
         })
         if degraded_reason is not UNSET:
             field_dict["degraded_reason"] = degraded_reason
@@ -149,8 +149,6 @@ class RecipePresence:
         present_ranks = cast(list[int], d.pop("present_ranks"))
 
 
-        profile_name = d.pop("profile_name")
-
         rank = d.pop("rank")
 
         rank_state = check_recipe_presence_rank_state(d.pop("rank_state"))
@@ -165,6 +163,8 @@ class RecipePresence:
         role = d.pop("role")
 
         title = d.pop("title")
+
+        topology_name = d.pop("topology_name")
 
         def _parse_degraded_reason(data: object) -> Union[None, RecipePresenceDegradedReasonType0, Unset]:
             if data is None:
@@ -193,13 +193,13 @@ class RecipePresence:
             installation_id=installation_id,
             member_node_ids=member_node_ids,
             present_ranks=present_ranks,
-            profile_name=profile_name,
             rank=rank,
             rank_state=rank_state,
             recipe_id=recipe_id,
             recipe_revision_id=recipe_revision_id,
             role=role,
             title=title,
+            topology_name=topology_name,
             degraded_reason=degraded_reason,
         )
 

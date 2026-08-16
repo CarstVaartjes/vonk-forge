@@ -57,6 +57,33 @@ pub fn inspect_build_source(
     }
 }
 
+pub fn dockerfile_base_images(
+    files: &BTreeMap<String, Vec<u8>>,
+    dockerfile: &str,
+) -> Option<Vec<String>> {
+    let text = std::str::from_utf8(files.get(dockerfile)?).ok()?;
+    let mut seen = BTreeSet::new();
+    let mut images = Vec::new();
+    for (_line, instruction, argument) in dockerfile_instructions(text) {
+        if !instruction.eq_ignore_ascii_case("FROM") {
+            continue;
+        }
+        let reference = argument
+            .split_ascii_whitespace()
+            .find(|value| !value.starts_with("--platform="))?;
+        if reference == "scratch" {
+            continue;
+        }
+        if !pinned_image(reference) {
+            return None;
+        }
+        if seen.insert(reference.to_owned()) {
+            images.push(reference.to_owned());
+        }
+    }
+    Some(images)
+}
+
 fn inspect_dockerfile(path: &str, payload: &[u8], findings: &mut Vec<SourceFinding>) {
     let Ok(text) = std::str::from_utf8(payload) else {
         findings.push(finding(

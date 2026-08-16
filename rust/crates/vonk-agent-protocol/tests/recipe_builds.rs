@@ -1,4 +1,5 @@
 use chrono::DateTime;
+use serde::Deserialize;
 use serde_json::json;
 use uuid::Uuid;
 use vonk_agent_protocol::{AgentClaim, RecipeOperationRequest, canonical_json, hex_sha256};
@@ -29,6 +30,11 @@ fn build_payload() -> serde_json::Value {
         "source_bundle_sha256": "b".repeat(64),
         "source_bundle_bytes": 4096,
         "build_input_sha256": "c".repeat(64),
+        "base_images": [{
+            "reference": format!("ghcr.io/vonkforge/base@sha256:{}", "d".repeat(64)),
+            "manifest_digest": format!("sha256:{}", "d".repeat(64))
+        }],
+        "base_image_storage_bytes": 68719476736_u64,
         "dockerfile": "Dockerfile",
         "platform": "linux/arm64",
         "arguments": [{"name": "runtime-version", "value": "1"}],
@@ -46,6 +52,88 @@ fn build_payload() -> serde_json::Value {
             "container_socket": false
         }
     })
+}
+
+#[derive(Deserialize)]
+struct SharedVectors {
+    schema_version: u8,
+    base_payload: serde_json::Value,
+    cases: Vec<SharedVectorCase>,
+}
+
+#[derive(Deserialize)]
+struct SharedVectorCase {
+    name: String,
+    valid: bool,
+    changes: Vec<SharedVectorChange>,
+}
+
+#[derive(Deserialize)]
+struct SharedVectorChange {
+    op: String,
+    path: Vec<serde_json::Value>,
+    value: Option<serde_json::Value>,
+}
+
+fn apply_change(payload: &mut serde_json::Value, change: &SharedVectorChange) {
+    let (last, parents) = change.path.split_last().expect("non-empty vector path");
+    let mut target = payload;
+    for component in parents {
+        target = match component {
+            serde_json::Value::String(key) => target
+                .as_object_mut()
+                .and_then(|value| value.get_mut(key))
+                .expect("object vector path"),
+            serde_json::Value::Number(index) => target
+                .as_array_mut()
+                .and_then(|value| value.get_mut(index.as_u64().expect("array index") as usize))
+                .expect("array vector path"),
+            _ => panic!("invalid vector path component"),
+        };
+    }
+    match (change.op.as_str(), last) {
+        ("set", serde_json::Value::String(key)) => {
+            target
+                .as_object_mut()
+                .expect("object vector target")
+                .insert(key.clone(), change.value.clone().expect("set value"));
+        }
+        ("set", serde_json::Value::Number(index)) => {
+            target.as_array_mut().expect("array vector target")
+                [index.as_u64().expect("array index") as usize] =
+                change.value.clone().expect("set value");
+        }
+        ("remove", serde_json::Value::String(key)) => {
+            target
+                .as_object_mut()
+                .expect("object vector target")
+                .remove(key)
+                .expect("removed vector field");
+        }
+        _ => panic!("invalid shared vector change"),
+    }
+}
+
+#[test]
+fn build_claim_matches_shared_python_rust_vectors() {
+    let vectors: SharedVectors = serde_json::from_str(include_str!(
+        "../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-build-claim-v1.json"
+    ))
+    .unwrap();
+    assert_eq!(vectors.schema_version, 1);
+
+    for case in vectors.cases {
+        let mut payload = vectors.base_payload.clone();
+        for change in &case.changes {
+            apply_change(&mut payload, change);
+        }
+        assert_eq!(
+            RecipeOperationRequest::parse(&claim("recipe.build.v1", payload)).is_ok(),
+            case.valid,
+            "shared vector disagreed: {}",
+            case.name
+        );
+    }
 }
 
 #[test]
@@ -72,6 +160,17 @@ fn build_network_requires_a_consistent_mode_and_host_declaration() {
 
     let mut payload = build_payload();
     payload["network"] = json!({"mode": "public", "hosts": []});
+    assert!(RecipeOperationRequest::parse(&claim("recipe.build.v1", payload)).is_err());
+}
+
+#[test]
+fn build_base_images_are_exact_declared_supply_chain_authority() {
+    let mut payload = build_payload();
+    payload["base_images"][0]["manifest_digest"] = json!(format!("sha256:{}", "e".repeat(64)));
+    assert!(RecipeOperationRequest::parse(&claim("recipe.build.v1", payload)).is_err());
+
+    let mut payload = build_payload();
+    payload["base_images"][0]["reference"] = json!("ghcr.io/vonkforge/base:latest");
     assert!(RecipeOperationRequest::parse(&claim("recipe.build.v1", payload)).is_err());
 }
 

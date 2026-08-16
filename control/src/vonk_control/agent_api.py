@@ -78,7 +78,11 @@ from .pki import IssuedCertificate
 from .presence import AgentPresenceService, ManagementAddressPolicy, PresenceError
 from .recipe_contract import recipe_content_sha256, validate_recipe
 from .recipe_operations import RecipeRunObservation, record_recipe_run_observations
-from .recipe_runtime_specs import RecipeRuntimeSpecError, compile_runtime_spec
+from .recipe_runtime_specs import (
+    RecipeRuntimeSpecError,
+    compile_runtime_spec,
+    resolve_recipe_entities,
+)
 from .source_bundles import SourceBundleError, SourceBundleStore
 from .telemetry import (
     TelemetryDetailsInput,
@@ -1696,6 +1700,21 @@ def install_agent_routes(
                 )
             document = revision.document
             parameters = mapping.parameters
+            try:
+                resolved_entities = resolve_recipe_entities(session, document)
+            except RecipeRuntimeSpecError as error:
+                detail = {
+                    "runtime distribution does not implement harness": (
+                        "recipe specification distribution-harness binding is invalid"
+                    ),
+                    "patch bundle does not apply to distribution": (
+                        "recipe specification patch-distribution binding is invalid"
+                    ),
+                }.get(str(error), "recipe specification dependencies are stale")
+                raise HTTPException(
+                    status_code=409,
+                    detail=detail,
+                ) from None
         validate_recipe(document)
         if recipe_content_sha256(document) != revision.content_sha256:
             raise HTTPException(
@@ -1704,8 +1723,10 @@ def install_agent_routes(
         try:
             spec = compile_runtime_spec(
                 document,
+                resolved_entities=resolved_entities,
                 parameters=parameters,
                 role=placement.role,
+                rank=placement.rank,
                 recipe_build_id=build.id,
                 image_digest=build.image_digest,
             )

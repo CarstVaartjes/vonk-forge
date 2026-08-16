@@ -11,7 +11,6 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
-from vonk_control.litellm import LiteLlmDeployment
 from vonk_control.models import (
     Base,
     Reconciliation,
@@ -23,7 +22,6 @@ from vonk_control.route_runtime import (
     AcceptedEndpointEvidence,
     ActivationMarker,
     AtomicRouteBundlePublisher,
-    PublishedRoute,
     RouteBundleRequest,
     RouteRuntimeError,
     endpoint_evidence_digest,
@@ -115,24 +113,6 @@ def _request(clock: Clock, addresses: dict[str, str]) -> RouteBundleRequest:
     )
 
 
-def _hermes(
-    _commit: str, routes: tuple[PublishedRoute, ...]
-) -> tuple[LiteLlmDeployment, ...]:
-    solo = next((route for route in routes if route.workload_id == "solo"), None)
-    if solo is None:
-        return ()
-    return (
-        LiteLlmDeployment(
-            model_name="hermes-agent",
-            workload="solo",
-            api_base=solo.api_base,
-            priority=1,
-            requests_per_minute=10,
-            tokens_per_minute=1_000,
-        ),
-    )
-
-
 def _harness(tmp_path: Path, *, clock=None):
     clock = clock or Clock()
     addresses = {NODE_A: "10.0.0.11", NODE_C: "10.0.0.13"}
@@ -141,7 +121,6 @@ def _harness(tmp_path: Path, *, clock=None):
         route_root,
         management_policy=ManagementAddressPolicy.parse("10.0.0.0/24"),
         clock=clock,
-        litellm_deployments=_hermes,
     )
     initial = publisher.publish(_request(clock, addresses))
     engine = create_engine(f"sqlite:///{tmp_path / 'control.sqlite'}")
@@ -206,7 +185,7 @@ def _active_documents(route_root: Path, marker: ActivationMarker):
     )
 
 
-def test_withdraw_removes_distributed_route_but_preserves_unaffected_and_hermes(
+def test_withdraw_removes_distributed_route_but_preserves_unaffected_route(
     tmp_path: Path,
 ) -> None:
     boundary, publisher, _sessions, _clock, _addresses, route_root = _harness(tmp_path)
@@ -222,10 +201,7 @@ def test_withdraw_removes_distributed_route_but_preserves_unaffected_and_hermes(
     assert receipt.route_digest == retried.route_digest == marker.digest
     assert receipt.targets == (NODE_B,)
     assert set(routes["routes"]) == {"solo"}
-    assert [item["model_name"] for item in litellm["model_list"]] == [
-        "solo",
-        "hermes-agent",
-    ]
+    assert [item["model_name"] for item in litellm["model_list"]] == ["solo"]
 
 
 def test_restore_rebuilds_all_routes_from_fresh_authoritative_endpoint_evidence(

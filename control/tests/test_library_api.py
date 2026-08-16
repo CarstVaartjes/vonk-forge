@@ -69,7 +69,7 @@ class Library:
                 created_at=NOW,
             ),
             visual_recipe=None,
-            profiles=[],
+            topology=None,
             operational_state=OperationalState(
                 builds=[], mappings=[], installations=[], runs=[]
             ),

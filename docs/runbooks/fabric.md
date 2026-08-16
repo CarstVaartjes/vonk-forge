@@ -248,7 +248,9 @@ site. A fresh cluster uses NVIDIA Sync's generated network inspection and speed
 report; do not install host CUDA, MPI, NCCL, or benchmark source trees merely
 to reproduce this old evidence.
 
-On the existing site, run `scripts/validate-fabric --inventory inventory/cluster.toml --output
+On the existing site, run `scripts/validate-fabric` with `--inventory
+inventory/cluster.toml`, both ordered `--expected-node
+<SPARK_NODE_ID>=<INVENTORY_SSH_ALIAS>` bindings, and `--output
 inventory/reports/rdma-nccl.json` from the controller only after the recorded
 postchecks pass. The wrapper is fail-closed: it validates the exact 200000 Mb/s
 physical-link state, net-device MTU 1500, both recorded HCA/GID/netdev
@@ -274,6 +276,8 @@ Before a source tree is created, run the non-mutating worker-first gate:
 
 ```bash
 scripts/validate-fabric --inventory inventory/cluster.toml \
+  --expected-node '<SPARK_1_NODE_ID>=vonk-node-1' \
+  --expected-node '<SPARK_2_NODE_ID>=vonk-node-2' \
   --output /tmp/rdma-nccl-preflight.json --nccl-preflight-only
 ```
 

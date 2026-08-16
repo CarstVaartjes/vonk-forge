@@ -11,11 +11,14 @@ import signal
 import stat
 import subprocess
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path("/routes")
@@ -24,9 +27,7 @@ GENERATIONS = ROOT / "generations"
 BOOTSTRAP = Path("/run/vonk-runtime/litellm-bootstrap.json")
 EFFECTIVE_CONFIG = Path("/tmp/vonk-litellm-effective.json")
 SECRET_FILES = {
-    "os.environ/LITELLM_DATABASE_URL": Path(
-        "/run/secrets/litellm-database-url"
-    ),
+    "os.environ/LITELLM_DATABASE_URL": Path("/run/secrets/litellm-database-url"),
     "os.environ/LITELLM_MASTER_KEY": Path("/run/secrets/litellm-master-key"),
     "os.environ/LITELLM_UPSTREAM_KEY": Path("/run/secrets/litellm-upstream-key"),
 }
@@ -35,6 +36,8 @@ ACK = ACK_ROOT / "ack.json"
 POLL_SECONDS = 2
 TERMINATE_SECONDS = 30
 STARTUP_SECONDS = 120
+STARTUP_ATTEMPTS = 10
+STARTUP_RETRY_SECONDS = 1
 HEALTH_TIMEOUT_SECONDS = 3
 MAXIMUM_LEASE = timedelta(seconds=300)
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
@@ -73,6 +76,267 @@ class ActiveRequest:
         self.config_sha256 = config_sha256
         self.marker = marker
         self.activation_sha256 = activation_sha256
+
+
+@dataclass(frozen=True)
+class _RouteLeaseSnapshot:
+    state: str
+    generation: int | None = None
+    activation_sha256: str | None = None
+    litellm_sha256: str | None = None
+    expires_at: datetime | None = None
+
+
+class _RouteLeaseAuthority:
+    """Own the request-time decision for the loaded LiteLLM route."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._snapshot = _RouteLeaseSnapshot(state="denied")
+
+    def deny(self) -> None:
+        with self._lock:
+            self._snapshot = _RouteLeaseSnapshot(state="denied")
+
+    def allow_bootstrap(self) -> None:
+        with self._lock:
+            self._snapshot = _RouteLeaseSnapshot(state="bootstrap")
+
+    def activate(self, request: ActiveRequest) -> None:
+        marker = getattr(request, "marker", None)
+        activation_sha256 = getattr(request, "activation_sha256", None)
+        if not isinstance(marker, dict):
+            self.deny()
+            return
+        generation = marker.get("generation")
+        litellm_sha256 = marker.get("litellm_sha256")
+        expires_at = _parse_timestamp(marker.get("expires_at"))
+        if (
+            isinstance(generation, bool)
+            or not isinstance(generation, int)
+            or generation <= 0
+            or not isinstance(activation_sha256, str)
+            or _DIGEST.fullmatch(activation_sha256) is None
+            or not isinstance(litellm_sha256, str)
+            or _DIGEST.fullmatch(litellm_sha256) is None
+            or expires_at is None
+        ):
+            self.deny()
+            return
+        snapshot = _RouteLeaseSnapshot(
+            state="active",
+            generation=generation,
+            activation_sha256=activation_sha256,
+            litellm_sha256=litellm_sha256,
+            expires_at=expires_at,
+        )
+        with self._lock:
+            self._snapshot = snapshot
+
+    def authorized(self, now: datetime) -> bool:
+        if (
+            not isinstance(now, datetime)
+            or now.tzinfo is None
+            or now.utcoffset() is None
+        ):
+            return False
+        with self._lock:
+            snapshot = self._snapshot
+        if snapshot.state == "bootstrap":
+            return True
+        return (
+            snapshot.state == "active"
+            and isinstance(snapshot.generation, int)
+            and not isinstance(snapshot.generation, bool)
+            and snapshot.generation > 0
+            and isinstance(snapshot.activation_sha256, str)
+            and _DIGEST.fullmatch(snapshot.activation_sha256) is not None
+            and isinstance(snapshot.litellm_sha256, str)
+            and _DIGEST.fullmatch(snapshot.litellm_sha256) is not None
+            and isinstance(snapshot.expires_at, datetime)
+            and snapshot.expires_at.tzinfo is not None
+            and snapshot.expires_at.utcoffset() is not None
+            and now.astimezone(UTC) < snapshot.expires_at.astimezone(UTC)
+        )
+
+
+def _start_route_lease_server(
+    authority: _RouteLeaseAuthority,
+    *,
+    host: str = "0.0.0.0",
+    port: int = 4001,
+) -> ThreadingHTTPServer:
+    class RouteLeaseHandler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def _respond(self, status: int) -> None:
+            self.request_version = self.protocol_version
+            self.send_response_only(status)
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def _not_found(self) -> None:
+            self._respond(404)
+
+        def handle_expect_100(self) -> bool:
+            self.close_connection = True
+            self._not_found()
+            return False
+
+        def send_error(
+            self,
+            code: int,
+            message: str | None = None,
+            explain: str | None = None,
+        ) -> None:
+            del code, message, explain
+            self.close_connection = True
+            self._not_found()
+
+        def do_GET(self) -> None:
+            if self.path != "/vonk/route-lease":
+                self._not_found()
+                return
+            self._respond(204 if authority.authorized(datetime.now(UTC)) else 503)
+
+        do_CONNECT = _not_found
+        do_DELETE = _not_found
+        do_HEAD = _not_found
+        do_OPTIONS = _not_found
+        do_PATCH = _not_found
+        do_POST = _not_found
+        do_PUT = _not_found
+        do_TRACE = _not_found
+
+        def log_message(self, _format: str, *_args: object) -> None:
+            return
+
+    server = ThreadingHTTPServer((host, port), RouteLeaseHandler)
+    server.daemon_threads = True
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server
+
+
+class _ServingLeaseGuard:
+    """Kill the exact loaded serving process when its route lease expires."""
+
+    def __init__(
+        self,
+        request: ActiveRequest | None,
+        child: subprocess.Popen[bytes],
+        *,
+        authority: _RouteLeaseAuthority | None = None,
+        clock=lambda: datetime.now(UTC),
+    ) -> None:
+        self._child = child
+        self._authority = authority
+        self._clock = clock
+        self._expires = (
+            _parse_timestamp(request.marker.get("expires_at"))
+            if request is not None
+            else None
+        )
+        if request is not None and self._expires is None:
+            raise RuntimeError("LiteLLM serving lease is invalid")
+        self._lock = threading.Lock()
+        self._timer: threading.Timer | None = None
+        self._timer_generation = 0
+        self._expired = threading.Event()
+
+    @property
+    def expired(self) -> bool:
+        return self._expired.is_set()
+
+    def start(self) -> None:
+        with self._lock:
+            self._timer_generation += 1
+            generation = self._timer_generation
+            expires = self._expires
+        if expires is None:
+            return
+        remaining = (expires - self._clock().astimezone(UTC)).total_seconds()
+        if remaining <= 0:
+            self._expire(generation)
+            return
+        timer = threading.Timer(remaining, lambda: self._expire(generation))
+        timer.daemon = True
+        with self._lock:
+            if generation != self._timer_generation:
+                return
+            self._timer = timer
+        timer.start()
+
+    def cancel(self) -> None:
+        with self._lock:
+            self._timer_generation += 1
+            timer = self._timer
+            self._timer = None
+        if timer is not None:
+            timer.cancel()
+
+    def renew(self, request: ActiveRequest | None) -> None:
+        expires = (
+            _parse_timestamp(request.marker.get("expires_at"))
+            if request is not None
+            else None
+        )
+        if request is not None and expires is None:
+            raise RuntimeError("LiteLLM serving lease is invalid")
+        timer: threading.Timer | None = None
+        expire_generation: int | None = None
+        with self._lock:
+            self._timer_generation += 1
+            generation = self._timer_generation
+            previous_timer = self._timer
+            self._timer = None
+            if self._expired.is_set():
+                raise RuntimeError("LiteLLM serving lease already expired")
+            self._expires = expires
+            if expires is not None:
+                remaining = (expires - self._clock().astimezone(UTC)).total_seconds()
+                if remaining <= 0:
+                    expire_generation = generation
+                else:
+                    timer = threading.Timer(
+                        remaining,
+                        lambda: self._expire(generation),
+                    )
+                    timer.daemon = True
+            if request is not None and self._authority is not None:
+                self._authority.activate(request)
+            self._timer = timer
+        if previous_timer is not None:
+            previous_timer.cancel()
+        if timer is not None:
+            timer.start()
+        if expire_generation is not None:
+            self._expire(expire_generation)
+
+    def publish_ack(self, request: ActiveRequest, *, now: datetime) -> None:
+        with self._lock:
+            if self._expired.is_set():
+                raise RuntimeError("LiteLLM serving lease already expired")
+            _write_ack(request, self._child, now=now)
+
+    def _expire(self, generation: int) -> None:
+        with self._lock:
+            if generation != self._timer_generation:
+                return
+            self._timer = None
+            self._expired.set()
+            if self._authority is not None:
+                self._authority.deny()
+            try:
+                _clear_ack()
+            except RuntimeError:
+                pass
+        try:
+            if self._child.poll() is None:
+                self._child.kill()
+        except OSError:
+            pass
 
 
 def _parse_timestamp(value: object) -> datetime | None:
@@ -198,10 +462,11 @@ def _read_secret(path: Path) -> str:
             os.close(descriptor)
 
 
-def _marker_paths(value: object, path: tuple[object, ...] = ()) -> dict[str, set[tuple[object, ...]]]:
+def _marker_paths(
+    value: object, path: tuple[object, ...] = ()
+) -> dict[str, set[tuple[object, ...]]]:
     found = {
-        marker: set()
-        for marker in (_MASTER_MARKER, _UPSTREAM_MARKER, _DATABASE_MARKER)
+        marker: set() for marker in (_MASTER_MARKER, _UPSTREAM_MARKER, _DATABASE_MARKER)
     }
     if isinstance(value, str):
         if value in found:
@@ -272,7 +537,10 @@ def _validated_config_document(content: bytes) -> dict[str, object]:
         raise RuntimeError("LiteLLM selected config is invalid")  # noqa: TRY004
     expected_upstream_paths: set[tuple[object, ...]] = set()
     for index, model in enumerate(models):
-        if not isinstance(model, dict) or set(model) != {"model_name", "litellm_params"}:
+        if not isinstance(model, dict) or set(model) != {
+            "model_name",
+            "litellm_params",
+        }:
             raise RuntimeError("LiteLLM selected config is invalid")
         if not isinstance(model.get("model_name"), str) or not model["model_name"]:
             raise RuntimeError("LiteLLM selected config is invalid")
@@ -438,9 +706,7 @@ def _active_request(*, now: datetime) -> ActiveRequest | None:
     manifest = directory / "manifest.json"
     routes = directory / "routes.json"
     config = directory / "litellm.json"
-    if any(
-        path.is_symlink() or not path.is_file() for path in (manifest, routes)
-    ):
+    if any(path.is_symlink() or not path.is_file() for path in (manifest, routes)):
         return None
     try:
         exact_manifest = {field: marker[field] for field in _MANIFEST_FIELDS}
@@ -472,6 +738,10 @@ def _active_request(*, now: datetime) -> ActiveRequest | None:
 def _active_config(*, now: datetime) -> bytes | None:
     request = _active_request(now=now)
     return None if request is None else request.config_bytes
+
+
+def _activation_present() -> bool:
+    return ACTIVATION.exists() or ACTIVATION.is_symlink()
 
 
 def _selected(*, now: datetime | None = None) -> bytes:
@@ -524,6 +794,14 @@ def _write_ack(
     if child.poll() is not None or not isinstance(child.pid, int) or child.pid <= 0:
         raise RuntimeError("LiteLLM process is not live")
     marker = request.marker
+    expires = _parse_timestamp(marker.get("expires_at"))
+    if expires is None or now.astimezone(UTC) >= expires:
+        try:
+            if child.poll() is None:
+                child.kill()
+        except OSError:
+            pass
+        raise RuntimeError("LiteLLM serving lease expired before acknowledgement")
     acknowledgement = {
         "acknowledged_at": now.astimezone(UTC).isoformat(),
         "activation_sha256": request.activation_sha256,
@@ -597,13 +875,15 @@ def _litellm_command(effective_config: Path) -> list[str]:
     ]
 
 
-def main() -> int:
+def _supervise(authority: _RouteLeaseAuthority) -> int:
     stopping = False
     child: subprocess.Popen[bytes] | None = None
+    startup_attempts = 0
 
     def request_stop(_signum: int, _frame: object) -> None:
         nonlocal stopping
         stopping = True
+        authority.deny()
         if child is not None:
             child.terminate()
 
@@ -612,19 +892,42 @@ def main() -> int:
     request = _active_request(now=datetime.now(UTC))
     selected = request.config_bytes if request is not None else _selected()
     while not stopping:
+        authority.deny()
+        startup_attempts += 1
         active_digest = _digest(selected)
         effective_config = _materialize_config(selected)
         child = subprocess.Popen(
             _litellm_command(effective_config), stdin=subprocess.DEVNULL
         )
+        serving_lease = _ServingLeaseGuard(request, child, authority=authority)
+        serving_lease.start()
         if not _await_healthy(child):
+            exited_before_health = child.poll() is not None
+            authority.deny()
+            serving_lease.cancel()
             _clear_ack()
             _stop(child)
+            if serving_lease.expired:
+                startup_attempts = 0
+                request = _active_request(now=datetime.now(UTC))
+                selected = request.config_bytes if request is not None else _selected()
+                continue
+            if exited_before_health and startup_attempts < STARTUP_ATTEMPTS:
+                time.sleep(STARTUP_RETRY_SECONDS)
+                request = _active_request(now=datetime.now(UTC))
+                selected = request.config_bytes if request is not None else _selected()
+                continue
             return 1
+        startup_attempts = 0
         if request is None:
+            if _activation_present():
+                authority.deny()
+            else:
+                authority.allow_bootstrap()
             _clear_ack()
         else:
-            _write_ack(request, child, now=datetime.now(UTC))
+            authority.activate(request)
+            serving_lease.publish_ack(request, now=datetime.now(UTC))
         reload_requested = False
         while child.poll() is None and not stopping:
             time.sleep(POLL_SECONDS)
@@ -634,26 +937,61 @@ def main() -> int:
                 if candidate_request is not None
                 else _selected()
             )
-            if candidate != selected or _digest(candidate) != active_digest:
+            if _digest(candidate) != active_digest:
                 reload_requested = True
+                authority.deny()
+                serving_lease.cancel()
                 _clear_ack()
                 _stop(child)
                 selected = candidate
                 request = candidate_request
                 break
-            if candidate_request is None or not _healthy(child):
+            if not _healthy(child):
+                authority.deny()
+                _clear_ack()
+            elif candidate_request is None:
+                serving_lease.renew(None)
+                if _activation_present():
+                    authority.deny()
+                else:
+                    authority.allow_bootstrap()
                 _clear_ack()
             else:
-                _write_ack(candidate_request, child, now=datetime.now(UTC))
+                try:
+                    serving_lease.renew(candidate_request)
+                except Exception:
+                    authority.deny()
+                    _clear_ack()
+                    raise
+                serving_lease.publish_ack(
+                    candidate_request,
+                    now=datetime.now(UTC),
+                )
+            request = candidate_request
         if stopping:
+            authority.deny()
+            serving_lease.cancel()
             _clear_ack()
             _stop(child)
             return 0
         if reload_requested:
             continue
+        authority.deny()
+        serving_lease.cancel()
         _clear_ack()
         return int(child.returncode or 1)
     return 0
+
+
+def main() -> int:
+    authority = _RouteLeaseAuthority()
+    server = _start_route_lease_server(authority)
+    try:
+        return _supervise(authority)
+    finally:
+        authority.deny()
+        server.shutdown()
+        server.server_close()
 
 
 if __name__ == "__main__":

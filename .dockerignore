@@ -20,8 +20,14 @@ control/web/playwright-report
 schemas/*
 !schemas/global/
 schemas/global/*
+!schemas/global/catalog-entity-v1.schema.json
+!schemas/global/harness-evidence-v1.schema.json
 !schemas/global/recipe-v1.schema.json
 !schemas/global/test-report-v1.schema.json
+!config/
+config/*
+!config/execution-harnesses/
+!config/execution-harnesses/*.json
 !inventory/
 !inventory/wheels/
 !inventory/wheels/vonk_agent_protocol-2.1.0-py3-none-any.whl

@@ -5,8 +5,6 @@ import {AppShell} from "./components/app-shell";
 import type {AppRoute} from "./components/app-shell";
 import {FleetPage} from "./pages/fleet";
 import {AgentsPage} from "./pages/agents";
-import {ProfilesPage} from "./pages/profiles";
-import {ModelsPage} from "./pages/models";
 import {JobsPage} from "./pages/jobs";
 import {AuditPage} from "./pages/audit";
 import {UpdatesPage} from "./pages/updates";
@@ -21,7 +19,7 @@ import {RecipeSourcePage} from "./pages/recipe-source";
 import {ClusterMappingPage} from "./pages/cluster-mapping";
 import {LibraryPage} from "./pages/library";
 
-const pages: AppRoute[] = ["fleet", "library", "agents", "profiles", "models", "catalog", "packages", "deployments", "updates", "jobs", "audit"];
+const pages: AppRoute[] = ["fleet", "library", "agents", "catalog", "packages", "deployments", "updates", "jobs", "audit"];
 
 function candidateId(): string | undefined {
   const match = /^\/packages\/([^/]+)$/.exec(location.pathname);
@@ -90,8 +88,6 @@ export function App({api}: {api: ControlApi}) {
       fleet: <FleetPage api={api}/>,
       library: <LibraryPage api={api} path={path} onNavigate={navigatePath}/>,
       agents: <AgentsPage api={api}/>,
-      profiles: <ProfilesPage api={api}/>,
-      models: <ModelsPage api={api}/>,
       catalog: catalogContent,
       packages: <PackagesPage api={packageApi}/>,
       deployments: <DeploymentsPage api={packageApi}/>,

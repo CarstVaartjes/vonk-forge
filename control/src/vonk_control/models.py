@@ -28,11 +28,13 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     event,
+    inspect,
     literal_column,
+    select,
     text,
 )
 from sqlalchemy.ext.compiler import compiles
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship
 from sqlalchemy.sql.functions import FunctionElement
 
 
@@ -1748,11 +1750,137 @@ class RecipeSourceBundle(Base):
     )
 
 
+class CatalogEntity(Base):
+    __tablename__ = "catalog_entities"
+    __table_args__ = (
+        UniqueConstraint(
+            "kind", "publisher", "slug", name="uq_catalog_entities_identity"
+        ),
+        CheckConstraint(
+            "kind IN ('model-group','model','model-version','execution-harness',"
+            "'runtime-distribution','patch-bundle')",
+            name="ck_catalog_entities_kind",
+        ),
+        CheckConstraint(
+            "publisher = lower(publisher) AND length(publisher) BETWEEN 2 AND 63",
+            name="ck_catalog_entities_publisher",
+        ),
+        CheckConstraint(
+            "slug = lower(slug) AND length(slug) BETWEEN 2 AND 63",
+            name="ck_catalog_entities_slug",
+        ),
+        CheckConstraint(
+            "length(title) BETWEEN 1 AND 120", name="ck_catalog_entities_title"
+        ),
+    )
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    kind: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    publisher: Mapped[str] = mapped_column(String(63), nullable=False, index=True)
+    slug: Mapped[str] = mapped_column(String(63), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(120), nullable=False)
+    created_by: Mapped[str] = mapped_column(String(200), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+
+
+class CatalogEntityRevision(Base):
+    __tablename__ = "catalog_entity_revisions"
+    __table_args__ = (
+        UniqueConstraint(
+            "entity_id", "revision_number", name="uq_catalog_entity_revision_number"
+        ),
+        CheckConstraint(
+            "revision_number >= 1", name="ck_catalog_entity_revisions_number"
+        ),
+        CheckConstraint(
+            "schema_version = 1", name="ck_catalog_entity_revisions_schema"
+        ),
+        CheckConstraint(
+            "lifecycle IN ('draft','blocked','resolved','deprecated')",
+            name="ck_catalog_entity_revisions_lifecycle",
+        ),
+        CheckConstraint(
+            "lifecycle != 'resolved' OR content_sha256 IS NOT NULL",
+            name="ck_catalog_entity_revisions_resolved_digest",
+        ),
+        CheckConstraint(
+            _nullable_lower_hex("content_sha256", 64),
+            name="ck_catalog_entity_revisions_content_digest",
+        ),
+    )
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    entity_id: Mapped[str] = mapped_column(
+        ForeignKey("catalog_entities.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    revision_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    lifecycle: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    document: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    content_sha256: Mapped[str | None] = mapped_column(String(64), index=True)
+    created_by: Mapped[str] = mapped_column(String(200), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    entity: Mapped[CatalogEntity] = relationship(lazy="joined")
+
+
+@event.listens_for(CatalogEntity, "before_delete")
+def _catalog_entity_with_revisions_cannot_be_deleted(
+    _mapper, connection, target: CatalogEntity
+) -> None:
+    revision_id = connection.scalar(
+        select(CatalogEntityRevision.id)
+        .where(CatalogEntityRevision.entity_id == target.id)
+        .limit(1)
+    )
+    if revision_id is not None:
+        raise ValueError("catalog entities with revisions cannot be deleted")
+
+
+@event.listens_for(CatalogEntityRevision, "before_update")
+@event.listens_for(CatalogEntityRevision, "before_delete")
+def _resolved_catalog_entity_revision_is_immutable(
+    _mapper, _connection, target: CatalogEntityRevision
+) -> None:
+    lifecycle_history = inspect(target).attrs.lifecycle.history
+    previous = lifecycle_history.deleted[0] if lifecycle_history.deleted else None
+    if target.lifecycle == "resolved" or previous == "resolved":
+        raise ValueError("resolved catalog entity revisions are immutable")
+
+
+@event.listens_for(Session, "before_commit")
+def _resolved_catalog_entity_document_is_immutable(session: Session) -> None:
+    for value in session.identity_map.values():
+        if not isinstance(value, CatalogEntityRevision):
+            continue
+        if value.lifecycle != "resolved" or value.content_sha256 is None:
+            continue
+        encoded = json.dumps(
+            value.document,
+            ensure_ascii=False,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        if hashlib.sha256(encoded).hexdigest() != value.content_sha256:
+            raise ValueError("resolved catalog entity revisions are immutable")
+
+
 class LocalRecipe(Base):
     __tablename__ = "local_recipes"
     __table_args__ = (
         CheckConstraint(
-            "source_kind IN ('local','workload_run','global')",
+            "source_kind IN ('local','workload_run','global','recipe_library')",
             name="ck_local_recipes_source_kind",
         ),
         CheckConstraint(
@@ -1835,7 +1963,7 @@ class RecipeImport(Base):
             "source_kind", "source_sha256", name="uq_recipe_import_source"
         ),
         CheckConstraint(
-            "source_kind IN ('local','workload_run','global')",
+            "source_kind IN ('local','workload_run','global','recipe_library')",
             name="ck_recipe_imports_source_kind",
         ),
         CheckConstraint(
@@ -2025,7 +2153,7 @@ class ClusterMapping(Base):
         nullable=False,
         index=True,
     )
-    profile_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    topology_name: Mapped[str] = mapped_column(String(64), nullable=False)
     generation: Mapped[int] = mapped_column(Integer, nullable=False)
     node_count: Mapped[int] = mapped_column(Integer, nullable=False)
     state: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
@@ -2074,6 +2202,20 @@ class ClusterMappingNode(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
+
+
+def _reject_ready_mapping_node_mutation(
+    _mapper: object, connection: object, target: ClusterMappingNode
+) -> None:
+    state = connection.execute(
+        select(ClusterMapping.state).where(ClusterMapping.id == target.mapping_id)
+    ).scalar_one_or_none()
+    if state == "ready":
+        raise ValueError("mapping.ready_immutable")
+
+
+event.listen(ClusterMappingNode, "before_update", _reject_ready_mapping_node_mutation)
+event.listen(ClusterMappingNode, "before_delete", _reject_ready_mapping_node_mutation)
 
 
 class NodeInventorySnapshot(Base):

@@ -20,7 +20,7 @@ DEVELOPMENT_IMAGE_IDENTITY_PATH = Path(
 DEVELOPMENT_SOURCE_REPOSITORY = "https://github.com/CarstVaartjes/vonk-forge"
 DEVELOPMENT_CHANNEL = "development"
 DEVELOPMENT_PLATFORM_VERSION = "0.1.0"
-DEVELOPMENT_DATABASE_REVISION = "0021_browser_authentication"
+DEVELOPMENT_DATABASE_REVISION = "0027_execution_harness_catalog"
 DEVELOPMENT_PROTOCOL_MINIMUM = 1
 DEVELOPMENT_PROTOCOL_MAXIMUM = 3
 DEVELOPMENT_SCHEMA_VERSION = 1
@@ -71,7 +71,9 @@ _COHORT_DIGEST_FIELDS = (
 )
 _COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
-_IMAGE = re.compile(r"development\.invalid/vonk-forge-(api|worker)@sha256:[0-9a-f]{64}\Z")
+_IMAGE = re.compile(
+    r"development\.invalid/vonk-forge-(api|worker)@sha256:[0-9a-f]{64}\Z"
+)
 _SEMVER = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
 _REVISION = re.compile(r"[0-9]{4}_[a-z0-9_]+\Z")
 _GENERATION_ID = re.compile(r"gen-[0-9a-f]{24}\Z")
@@ -107,7 +109,9 @@ def canonical_json(value: object) -> bytes:
             + "\n"
         ).encode("ascii")
     except (TypeError, UnicodeEncodeError, ValueError) as error:
-        raise DevelopmentCohortError("development identity is not canonical JSON") from error
+        raise DevelopmentCohortError(
+            "development identity is not canonical JSON"
+        ) from error
 
 
 def _load_canonical_object(raw: bytes, *, label: str) -> dict[str, object]:
@@ -235,9 +239,7 @@ class DevelopmentImageIdentity:
             )
 
     @classmethod
-    def from_bytes(
-        cls, raw: bytes, *, expected_role: str
-    ) -> DevelopmentImageIdentity:
+    def from_bytes(cls, raw: bytes, *, expected_role: str) -> DevelopmentImageIdentity:
         document = _load_canonical_object(raw, label="image")
         _require_exact_fields(document, _IDENTITY_FIELDS, label="image")
         identity = cls(
@@ -443,7 +445,9 @@ def _read_stable_regular_file_at(
             dir_fd=directory_descriptor,
         )
     except OSError as error:
-        raise DevelopmentCohortError(f"development {label} identity source is unsafe") from error
+        raise DevelopmentCohortError(
+            f"development {label} identity source is unsafe"
+        ) from error
     try:
         before = os.fstat(descriptor)
         if (
@@ -780,11 +784,7 @@ def _publish_new_file(
     try:
         reservation_descriptor = os.open(
             name,
-            os.O_WRONLY
-            | os.O_CREAT
-            | os.O_EXCL
-            | os.O_NOFOLLOW
-            | os.O_CLOEXEC,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
             0,
             dir_fd=directory_descriptor,
         )
@@ -794,11 +794,7 @@ def _publish_new_file(
 
         temporary_descriptor = os.open(
             temporary_name,
-            os.O_WRONLY
-            | os.O_CREAT
-            | os.O_EXCL
-            | os.O_NOFOLLOW
-            | os.O_CLOEXEC,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
             0o600,
             dir_fd=directory_descriptor,
         )
@@ -825,9 +821,7 @@ def _publish_new_file(
             or _stable_file_fingerprint(current_reservation)
             != _stable_file_fingerprint(reservation)
         ):
-            raise DevelopmentCohortError(
-                f"development {label} destination changed"
-            )
+            raise DevelopmentCohortError(f"development {label} destination changed")
         os.replace(
             temporary_name,
             name,
@@ -843,9 +837,7 @@ def _publish_new_file(
             or published.st_size != len(content)
             or stat.S_IMODE(published.st_mode) != _PUBLISHED_MODE
         ):
-            raise DevelopmentCohortError(
-                f"development {label} publication is unsafe"
-            )
+            raise DevelopmentCohortError(f"development {label} publication is unsafe")
     except FileExistsError as error:
         raise DevelopmentCohortError(
             f"development {label} destination already exists"
@@ -853,7 +845,9 @@ def _publish_new_file(
     except DevelopmentCohortError:
         raise
     except OSError as error:
-        raise DevelopmentCohortError(f"development {label} cannot be written") from error
+        raise DevelopmentCohortError(
+            f"development {label} cannot be written"
+        ) from error
     finally:
         if reservation_descriptor >= 0:
             os.close(reservation_descriptor)
@@ -921,9 +915,7 @@ def select_cohort(root: Path) -> SelectedDevelopmentCohort:
         os.close(descriptor)
 
 
-def require_selected_cohort(
-    path: Path, role: str
-) -> SelectedDevelopmentCohort:
+def require_selected_cohort(path: Path, role: str) -> SelectedDevelopmentCohort:
     """Require a selected cohort to contain this image's embedded identity."""
     expected_role = _validate_role(role)
     selected = SelectedDevelopmentCohort.from_bytes(
@@ -1005,9 +997,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         selected_path = os.environ.get("VONK_DEV_SELECTED_COHORT_FILE")
         if not selected_path:
-            raise DevelopmentCohortError(
-                "VONK_DEV_SELECTED_COHORT_FILE is required"
-            )
+            raise DevelopmentCohortError("VONK_DEV_SELECTED_COHORT_FILE is required")
         require_selected_cohort(Path(selected_path), arguments.role)
         os.execvp(program[0], program)
         raise AssertionError("os.execvp returned unexpectedly")

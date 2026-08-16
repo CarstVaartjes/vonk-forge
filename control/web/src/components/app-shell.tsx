@@ -2,7 +2,7 @@ import {useEffect, useRef, useState} from "react";
 import type {MouseEvent, ReactNode} from "react";
 import {ActivityIcon, ChevronIcon, CloseIcon, FleetIcon, LibraryIcon, MenuIcon, SystemIcon} from "./icons";
 
-export type AppRoute = "fleet" | "library" | "agents" | "profiles" | "models" | "catalog" | "packages" | "deployments" | "updates" | "jobs" | "audit";
+export type AppRoute = "fleet" | "library" | "agents" | "catalog" | "packages" | "deployments" | "updates" | "jobs" | "audit";
 
 type Operator = {
   environment: string;
@@ -31,8 +31,7 @@ const activityRoutes: RouteLink[] = [
 
 const systemRoutes: RouteLink[] = [
   {label: "Agents", route: "agents"},
-  {label: "Profiles", route: "profiles"},
-  {label: "Models", route: "models"},
+  {label: "Catalog", route: "catalog"},
   {label: "Packages", route: "packages"},
 ];
 

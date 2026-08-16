@@ -12,21 +12,21 @@ import {LibraryRecipeAdvanced} from "./library-recipe-advanced";
 import {LibraryRecipeVisual} from "./library-recipe-visual";
 import "./library-recipe-detail.css";
 
-type Profile = LibraryRecipeDetail["profiles"][number];
+type Topology = NonNullable<LibraryRecipeDetail["topology"]>;
 
 const diskFields = ["image_bytes", "artifact_bytes", "staging_bytes", "cache_bytes", "rollback_bytes", "safety_margin_bytes"] as const;
 
-function profileRanks(profile: Profile) {
+function topologyRanks(topology: Topology) {
   let rank = 0;
-  return profile.roles.flatMap(role => Array.from({length: role.count}, () => ({...role, rank: rank++})));
+  return topology.roles.flatMap(role => Array.from({length: role.count}, () => ({...role, rank: rank++})));
 }
 
-function profileDisk(profile: Profile): number {
-  return profile.roles.reduce((total, role) => total + role.count * diskFields.reduce((subtotal, field) => subtotal + role.disk[field], 0), 0);
+function topologyDisk(topology: Topology): number {
+  return topology.roles.reduce((total, role) => total + role.count * diskFields.reduce((subtotal, field) => subtotal + role.disk[field], 0), 0);
 }
 
-function profileMemory(profile: Profile): number {
-  return profile.roles.reduce((total, role) => total + role.count * role.memory.startup_peak_bytes, 0);
+function topologyMemory(topology: Topology): number {
+  return topology.roles.reduce((total, role) => total + role.count * role.memory.startup_peak_bytes, 0);
 }
 
 function operationTone(state: string) {
@@ -59,7 +59,7 @@ export function LibraryRecipeAuthority({api, detail, onRefresh, policy}: {
   const visual = preview.canonicalKey === canonicalPreviewKey ? preview.document : detail.visual_recipe;
   const localPreview = visual !== null && preview.canonicalKey === canonicalPreviewKey && preview.local;
   const revision = detail.selected_revision;
-  const alias = detail.visual_recipe?.runtime.model_aliases[0] ?? detail.recipe.slug;
+  const alias = detail.visual_recipe?.interfaces.find(item => item.adapter === "openai")?.model_aliases?.[0] ?? detail.recipe.slug;
   useEffect(() => {
     setPreview(current => current.canonicalKey === canonicalPreviewKey
       ? current
@@ -92,8 +92,8 @@ export function LibraryRecipeAuthority({api, detail, onRefresh, policy}: {
         <StatusPill tone={revision?.lifecycle === "resolved" ? "healthy" : "warning"}>{revision ? `${revision.lifecycle === "resolved" ? "Immutable" : revision.lifecycle} revision ${revision.revision_number}` : "No valid revision"}</StatusPill>
       </div>
     </header>
-    <section className="library-section library-primary-control" aria-label="Recent operation state">
-      <div className="section-heading"><div><p className="fleet-kicker">Current authority</p><h4>Recent operation state</h4></div></div>
+    <section className="library-section library-primary-control" aria-label="Lifecycle overview">
+      <div className="section-heading"><div><p className="fleet-kicker">Current authority</p><h4>Lifecycle overview</h4></div><span className="identity-note">Build · map · install · run</span></div>
       <div className="operation-summary">
         {detail.operational_state.builds.map(build => <StatusPill key={build.recipe_build_id} tone={operationTone(build.state)}>{operationLabel("build", build.state)}</StatusPill>)}
         {detail.operational_state.mappings.map(mapping => <StatusPill key={mapping.mapping_id} tone={operationTone(mapping.state)}>{operationLabel("mapping", mapping.state)}</StatusPill>)}
@@ -113,13 +113,14 @@ export function LibraryRecipeAuthority({api, detail, onRefresh, policy}: {
     {visual && <>
       <LibraryRecipeVisual document={visual}/>
       <section className="library-section" aria-label="Topology and resources">
-        <div className="section-heading"><div><p className="fleet-kicker">Declared topology</p><h4>Profiles and ranks</h4></div></div>
-        {detail.profiles.map(profile => <article className="topology-card" key={profile.name}>
-          <h5>{profile.name}</h5><p>{profile.node_count} nodes · {profile.strategy} · {profile.measurement}</p>
-          <div className="resource-totals"><strong>{formatBytes(profileMemory(profile))} startup memory total</strong><strong>{formatBytes(profileDisk(profile))} disk envelope total</strong></div>
-          <ol>{profileRanks(profile).map(role => <li key={`${role.rank}:${role.name}`}><strong>Rank {role.rank} · {role.name}{role.endpoint_owner ? " · endpoint owner" : ""}</strong><span>{formatBytes(role.memory.startup_peak_bytes)} startup memory · {formatBytes(diskFields.reduce((total, field) => total + role.disk[field], 0))} disk envelope</span></li>)}</ol>
-          <p className="topology-fabric">{profile.fabric.connectivity} fabric · {profile.fabric.minimum_bandwidth_mbps.toLocaleString()} Mbps minimum · {profile.parallelism.backend}</p>
-        </article>)}
+        <div className="section-heading"><div><p className="fleet-kicker">Declared topology</p><h4>Topology and ranks</h4></div></div>
+        {detail.topology && <article className="topology-card">
+          <h5>{detail.topology.name}</h5><p>{detail.topology.node_count} nodes · {detail.topology.mode}</p>
+          <div className="resource-totals"><strong>{formatBytes(topologyMemory(detail.topology))} startup memory total</strong><strong>{formatBytes(topologyDisk(detail.topology))} disk envelope total</strong></div>
+          <ol>{topologyRanks(detail.topology).map(role => <li key={`${role.rank}:${role.name}`}><strong>Rank {role.rank} · {role.name}{role.endpoint_owner ? " · endpoint owner" : ""}</strong><span>{formatBytes(role.memory.startup_peak_bytes)} startup memory · {formatBytes(diskFields.reduce((total, field) => total + role.disk[field], 0))} disk envelope</span></li>)}</ol>
+          <p className="topology-fabric">{detail.topology.fabric.connectivity} fabric · {detail.topology.fabric.minimum_bandwidth_mbps.toLocaleString()} Mbps minimum · {detail.topology.parallelism.backend}</p>
+          <p className="topology-fabric">Start: {detail.topology.start_order.join(" → ")} · Stop: {detail.topology.stop_order.join(" → ")}</p>
+        </article>}
       </section>
     </>}
     <LibraryReasons reasons={detail.reasons}/>

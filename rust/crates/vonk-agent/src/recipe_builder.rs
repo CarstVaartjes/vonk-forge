@@ -2,6 +2,7 @@
 
 use std::{
     fs,
+    io::{Seek, SeekFrom},
     os::unix::{ffi::OsStrExt, fs::PermissionsExt},
     path::Path,
     time::Duration,
@@ -15,9 +16,10 @@ use uuid::Uuid;
 use vonk_agent_protocol::RecipeBuildRequest;
 
 use crate::{
+    base_images::{BaseImageError, BaseImageStore},
     build_source::{BuildSourceError, materialize_source_bundle},
     process::{ProcessError, ProcessRunner, Program},
-    source_policy::{SourcePolicyReport, inspect_build_source},
+    source_policy::{SourcePolicyReport, dockerfile_base_images, inspect_build_source},
 };
 
 #[derive(Debug, Error)]
@@ -119,6 +121,18 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
         if !policy.passed {
             return Err(RecipeBuildError::Policy(policy));
         }
+        let source_bases = dockerfile_base_images(&source.files, &request.dockerfile)
+            .ok_or(RecipeBuildError::Evidence)?;
+        if source_bases
+            != request
+                .base_images
+                .iter()
+                .map(|image| image.reference.clone())
+                .collect::<Vec<_>>()
+        {
+            return Err(RecipeBuildError::Evidence);
+        }
+        self.import_base_images(request, &storage, runroot.path())?;
         let tag = format!("localhost/vonk/recipe-build-{}", request.build_id);
         // Ubuntu 24.04's supported Podman 4.9 build command does not accept
         // the `--cpus` or `--pids-limit` aliases. Express the same boundaries
@@ -129,6 +143,7 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
         arguments.extend([
             "build".to_owned(),
             "--no-cache".to_owned(),
+            "--pull=never".to_owned(),
             "--platform".to_owned(),
             request.platform.clone(),
             "--file".to_owned(),
@@ -154,7 +169,11 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
             &arguments,
             timeout,
             staging.path(),
-            request.limits.temporary_bytes,
+            request
+                .limits
+                .temporary_bytes
+                .checked_add(request.base_image_storage_bytes)
+                .ok_or(RecipeBuildError::Evidence)?,
             request.limits.output_bytes,
         )?;
         if !output.success {
@@ -235,6 +254,78 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
     }
 }
 
+impl<R: ProcessRunner> RecipeBuilder<'_, R> {
+    fn import_base_images(
+        &self,
+        request: &RecipeBuildRequest,
+        storage: &Path,
+        runroot: &Path,
+    ) -> Result<(), RecipeBuildError> {
+        if request.base_images.is_empty() {
+            return Ok(());
+        }
+        let store = BaseImageStore::open(self.data_root).map_err(recipe_base_image_error)?;
+        let mut archive_bytes = 0_u64;
+        for image in &request.base_images {
+            let remaining = request
+                .base_image_storage_bytes
+                .checked_sub(archive_bytes)
+                .ok_or(RecipeBuildError::OutputLimit)?;
+            let mut archive = store
+                .materialize(
+                    self.runner,
+                    image,
+                    &request.platform,
+                    remaining,
+                    request.limits.temporary_bytes,
+                )
+                .map_err(recipe_base_image_error)?;
+            archive_bytes = archive_bytes
+                .checked_add(archive.bytes)
+                .ok_or(RecipeBuildError::Evidence)?;
+            if archive_bytes > request.base_image_storage_bytes {
+                return Err(RecipeBuildError::OutputLimit);
+            }
+            archive.file.seek(SeekFrom::Start(0))?;
+            let mut load_arguments = podman_storage_arguments(storage, runroot);
+            load_arguments.push("load".to_owned());
+            let loaded = self.runner.run_bounded_directory_with_input(
+                Program::Podman,
+                &load_arguments,
+                Duration::from_secs(600),
+                &archive.file,
+                storage,
+                request.base_image_storage_bytes,
+            )?;
+            if !loaded.success {
+                return Err(RecipeBuildError::Evidence);
+            }
+            let mut inspect_arguments = podman_storage_arguments(storage, runroot);
+            inspect_arguments.extend([
+                "image".to_owned(),
+                "inspect".to_owned(),
+                "--format".to_owned(),
+                "{{.Digest}}\t{{.Os}}\t{{.Architecture}}".to_owned(),
+                image.reference.clone(),
+            ]);
+            let inspected =
+                self.runner
+                    .run(Program::Podman, &inspect_arguments, Duration::from_secs(60))?;
+            inspect_base_image(&inspected, &image.manifest_digest)?;
+        }
+        Ok(())
+    }
+}
+
+fn recipe_base_image_error(error: BaseImageError) -> RecipeBuildError {
+    match error {
+        BaseImageError::Invalid => RecipeBuildError::Evidence,
+        BaseImageError::Limit => RecipeBuildError::OutputLimit,
+        BaseImageError::Io(error) => RecipeBuildError::Io(error),
+        BaseImageError::Process(error) => RecipeBuildError::Process(error),
+    }
+}
+
 fn make_owned_directories_removable(path: &Path) -> std::io::Result<()> {
     let metadata = fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
@@ -293,6 +384,18 @@ fn inspect_image(payload: &[u8]) -> Result<(), RecipeBuildError> {
         || fields[2] != "v1"
         || !non_root_user(fields[3])
     {
+        return Err(RecipeBuildError::Evidence);
+    }
+    Ok(())
+}
+
+fn inspect_base_image(
+    output: &crate::process::ProcessOutput,
+    manifest_digest: &str,
+) -> Result<(), RecipeBuildError> {
+    let text = std::str::from_utf8(&output.stdout).map_err(|_| RecipeBuildError::Evidence)?;
+    let fields = text.trim().split('\t').collect::<Vec<_>>();
+    if !output.success || fields != [manifest_digest, "linux", "arm64"] {
         return Err(RecipeBuildError::Evidence);
     }
     Ok(())

@@ -1,0 +1,45 @@
+from __future__ import annotations
+
+import json
+import subprocess
+import zipfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+CANONICAL = ROOT / "src/cluster_profiles/schemas"
+MIRROR = ROOT / "schemas"
+
+
+def test_repository_schema_mirrors_match_canonical_package_schemas() -> None:
+    canonical_names = {path.name for path in CANONICAL.glob("*.json")}
+    mirror_names = {
+        path.name
+        for path in MIRROR.glob("*.json")
+        if path.name != "workload-artifact-build.schema.json"
+    }
+
+    assert mirror_names == canonical_names
+    for name in sorted(canonical_names):
+        assert (MIRROR / name).read_bytes() == (CANONICAL / name).read_bytes()
+
+
+def test_owned_schema_identifiers_use_the_vonk_forge_namespace() -> None:
+    for path in sorted(MIRROR.glob("*.json")):
+        document = json.loads(path.read_text(encoding="utf-8"))
+        if "$id" in document:
+            assert document["$id"].startswith("https://vonk-forge.")
+
+
+def test_built_wheel_contains_every_canonical_schema(tmp_path: Path) -> None:
+    subprocess.run(
+        ["uv", "build", "--wheel", "--out-dir", str(tmp_path)],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    wheel = next(tmp_path.glob("*.whl"))
+
+    with zipfile.ZipFile(wheel) as archive:
+        for schema in sorted(CANONICAL.glob("*.json")):
+            assert archive.read(f"cluster_profiles/schemas/{schema.name}") == schema.read_bytes()

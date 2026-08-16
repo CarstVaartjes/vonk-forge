@@ -1,0 +1,10 @@
+Vonk Forge Mia DeepSeek V4 Flash runtime patch bundle
+
+This image contains modified and backported portions of vLLM from immutable
+revision 752a3a504485790a2e8491cacbb35c137339ad34. Those portions are licensed
+under Apache License 2.0; the accompanying vLLM-LICENSE file contains its full
+terms. The vLLM upstream revision does not contain a NOTICE file. This notice
+records the retained attribution and that Vonk Forge applies the modifications
+during image construction.
+
+vLLM contributors: https://github.com/vllm-project/vllm

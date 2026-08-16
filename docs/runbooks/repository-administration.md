@@ -1,81 +1,49 @@
 # Repository-backed platform administration
 
-This runbook covers the existing Git/TUF-backed platform and workload-release
-path. Git remains authoritative for fleet nodes, topology, platform policy,
-and the release projection described below. PostgreSQL is authoritative for
-local recipe catalog entries, immutable recipe revisions, imports,
-installations, placements, and runs; those records do not require a commit,
-branch, or pull request and remain available when the remote is unreachable.
-Use the catalog/API runbooks for recipe authoring and WorkloadRun import. Never
-turn a recipe operation into a Git change merely to satisfy this runbook.
+Git remains authoritative for platform source, fleet/topology policy, and
+release trust. PostgreSQL is authoritative for the local v1 recipe catalog,
+immutable revisions, installations, placements, and runs. Do not turn a
+recipe edit or activation into a Git change.
 
-## Inspect and propose
+## Inspect the platform boundary
 
-Use either the web application or `vonkctl admin`. Both call `/api/v1` and
-produce the same canonical proposal bytes. Every proposal pins a full 40-hex
-base commit, operates only on allowlisted typed documents, and shows validation,
-affected targets, and a diff before submission.
+Use the browser Fleet and Library views for normal operation. The generated
+CLI exposes the same read-only platform views:
 
 ```bash
+vonkctl nodes status --json
 vonkctl admin fleet --json
-vonkctl admin models --json
-vonkctl admin profiles --json
 vonkctl admin proposal --file change.json --json
 ```
 
-Before the first real release, an administrator may explicitly submit a signed,
-audited direct commit. Enabling `release-pr-only` at the first release is a
-one-way transition. From then on, submission creates `vonk-control/<digest>` and
-a pull request; it never force-pushes or deploys an unreviewed branch.
+Platform proposals pin a full commit, typed document changes, affected targets,
+and all input digests. A proposal is reviewable before submission and cannot
+select a model version, recipe revision, or node by hostname.
 
-## Reconcile
+## Platform changes
 
-Only a platform/release commit reachable from the protected deployment branch
-with every exact required check in the successful state is eligible. Planning pins that commit,
-sorted node targets, placements, routes, immutable releases, and all input
-digests. Execution rechecks eligibility immediately before any node mutation.
-The worker also reconstructs that exact plan from the checked-out
-`inventory/reconciliation.json`; caller-supplied content cannot create or alter
-a reconciliation job through the generic jobs endpoint. Every route target
-must independently exist with lifecycle `ready` in the checked-out
-`inventory/fleet.toml`.
+Only a commit reachable from the protected deployment branch and passing every
+required check is eligible for a platform change. The worker rechecks that
+eligibility immediately before mutation, leases stable node IDs in order, and
+fails closed if the commit, evidence, agent identity, or route lease changes.
 
-Affected routes enter maintenance before work begins. Node leases are acquired
-in sorted stable-ID order. Workloads must pass health and acceptance before
-routes publish atomically. A failed apply, verification, stale lease, revoked
-check, or changed digest fails closed: affected routes remain withdrawn and the
-job/audit records explain the bounded failure.
+Model and runtime changes use the v1 Catalog and Library workflow instead:
 
-Each `routes` entry in the commit-pinned reconciliation document names an
-alias, the certificate-bound target identity, and a repository workload. It
-does not contain an address or port:
+1. Create or import a recipe draft in Catalog.
+2. Resolve the exact model-version, harness, runtime, patch, and topology
+   identities into an immutable revision.
+3. Attach source/build and physical acceptance evidence.
+4. Map the revision to compatible enrolled nodes.
+5. Preview and apply install/load/start from Library.
 
-```json
-{
-  "routes": {
-    "deepseek": {
-      "node_id": "spk_0123456789abcdef0123456789abcdef",
-      "workload": "deepseek-agent-single",
-      "requests_per_minute": 30,
-      "tokens_per_minute": 10000
-    }
-  }
-}
-```
+The recipe route publisher derives LiteLLM and Caddy state from the published
+run. It never reads `config/workloads`, `config/cluster-profiles`, a model
+maturity report, or an operator-supplied address. Hermes is available only when
+an accepted v1 run owns the exact `hermes-agent` alias.
 
-The worker resolves the port from that exact commit's
-`config/workloads/<workload>.toml`, resolves the address from fresh
-certificate-authenticated presence, and probes `/v1/models` with the
-file-backed upstream credential. It then writes a generated JSON-as-YAML config
-to the dedicated `litellm-routes` volume. LiteLLM's in-container supervisor
-restarts the proxy only when that atomic file changes. The config is paired
-with a SHA-256-bound lease whose expiry cannot exceed the oldest source
-observation's 150-second lifetime. The supervisor accepts only a lease issued
-after its own process started. Every 60 seconds the worker repeats presence
-resolution and the probe; an expired lease or agent observation, dead worker,
-failed probe, changed checkout, or invalid definition selects the empty
-bootstrap config. On a DHCP address change, maintenance is live before the
-replacement address is probed.
+## Recovery boundary
 
-Never use `vonk-control-offline` for ordinary repository administration. Its
-exclusive lock and stopped-service proof are only for bootstrap and recovery.
+Do not use `vonk-control-offline` for ordinary catalog or platform changes. Its
+exclusive lock and stopped-service proof are reserved for documented bootstrap
+and recovery operations. Never use SSH to bypass a queued preview, route lease,
+or evidence gate.

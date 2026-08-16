@@ -536,27 +536,34 @@ def _assert_litellm_health(container: str) -> None:
     _run(["docker", "exec", container, "python", "-c", code], timeout=15)
 
 
-def _create_restricted_litellm_virtual_key(
-    *, port: int, master_key: str
-) -> str:
-    payload = json.dumps({
-        "key_alias": "complete-stack-restricted",
-        "models": ["mia-deepseek-v4-flash"],
-        "allowed_routes": ["openai_routes"],
-    }).encode()
-    request = urllib.request.Request(
-        f"http://127.0.0.1:{port}/key/generate",
-        data=payload,
-        method="POST",
-        headers={
-            "Authorization": f"Bearer {master_key}",
-            "Content-Type": "application/json",
-        },
+def _create_restricted_litellm_virtual_key(*, container: str, master_key: str) -> str:
+    payload = json.dumps(
+        {
+            "key_alias": "complete-stack-restricted",
+            "models": ["mia-deepseek-v4-flash"],
+            "allowed_routes": ["openai_routes"],
+        }
     )
-    with urllib.request.urlopen(request, timeout=15) as response:
-        generated = json.loads(response.read())
-        assert response.status == 200
-    key = generated["key"]
+    code = f"""
+import json
+import urllib.request
+
+payload = {payload!r}.encode()
+request = urllib.request.Request(
+    'http://127.0.0.1:4000/key/generate',
+    data=payload,
+    method='POST',
+    headers={{
+        'Authorization': 'Bearer ' + {master_key!r},
+        'Content-Type': 'application/json',
+    }},
+)
+with urllib.request.urlopen(request, timeout=15) as response:
+    assert response.status == 200
+    print(json.loads(response.read())['key'])
+"""
+    result = _run(["docker", "exec", container, "python", "-c", code], timeout=20)
+    key = result.stdout.strip()
     assert isinstance(key, str) and key and key != master_key
     return key
 
@@ -569,22 +576,24 @@ def _assert_litellm_management_denied(*, port: int, key: str) -> None:
     )
     with pytest.raises(urllib.error.HTTPError) as denied:
         urllib.request.urlopen(request, timeout=15)
-    assert denied.value.code in {401, 403}
+    assert denied.value.code == 404
 
 
-def _wait_for_litellm_port(port: int) -> None:
+def _wait_for_caddy_inference(*, port: int, key: str) -> None:
     deadline = time.monotonic() + 120
     while time.monotonic() < deadline:
         try:
-            with urllib.request.urlopen(
-                f"http://127.0.0.1:{port}/health/liveliness", timeout=3
-            ) as response:
+            request = urllib.request.Request(
+                f"http://127.0.0.1:{port}/v1/models",
+                headers={"Authorization": f"Bearer {key}"},
+            )
+            with urllib.request.urlopen(request, timeout=3) as response:
                 if response.status == 200:
                     return
-        except (OSError, urllib.error.URLError):
+        except (OSError, urllib.error.HTTPError, urllib.error.URLError):
             pass
         time.sleep(1)
-    pytest.fail("LiteLLM did not become healthy after restart")
+    pytest.fail("Caddy inference edge did not admit LiteLLM after restart")
 
 
 def test_complete_development_stack_enforces_tls_identity_and_acks_routes(
@@ -799,11 +808,12 @@ def test_complete_development_stack_enforces_tls_identity_and_acks_routes(
             encoding="ascii"
         ).strip()
         virtual_key = _create_restricted_litellm_virtual_key(
-            port=inference_port, master_key=master_key
+            container=litellm_container, master_key=master_key
         )
+        _wait_for_caddy_inference(port=inference_port, key=virtual_key)
         _assert_litellm_management_denied(port=inference_port, key=virtual_key)
         _run(["docker", "restart", litellm_container], timeout=60)
-        _wait_for_litellm_port(inference_port)
+        _wait_for_caddy_inference(port=inference_port, key=virtual_key)
         _assert_litellm_management_denied(port=inference_port, key=virtual_key)
         marker_digest = _publish_activation(api_container)
         _wait_for_exact_ack(litellm_container, marker_digest)

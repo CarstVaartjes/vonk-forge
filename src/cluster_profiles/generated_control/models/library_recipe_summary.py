@@ -12,10 +12,9 @@ from typing import cast
 from typing import cast, Union
 
 if TYPE_CHECKING:
-  from ..models.recipe_profile_summary import RecipeProfileSummary
+  from ..models.library_installation_summary import LibraryInstallationSummary
   from ..models.recipe_revision_summary import RecipeRevisionSummary
   from ..models.library_run_summary import LibraryRunSummary
-  from ..models.library_installation_summary import LibraryInstallationSummary
   from ..models.library_projection_reason import LibraryProjectionReason
 
 
@@ -36,7 +35,6 @@ class LibraryRecipeSummary:
             installation_total_count (int):
             installations (list['LibraryInstallationSummary']):
             installations_truncated (bool):
-            profiles (list['RecipeProfileSummary']):
             reasons (list['LibraryProjectionReason']):
             recipe_id (str):
             run_returned_count (int):
@@ -47,6 +45,7 @@ class LibraryRecipeSummary:
             slug (str):
             source_kind (LibraryRecipeSummarySourceKind):
             title (str):
+            topology_name (Union[None, str]):
      """
 
     capabilities: list[str]
@@ -55,7 +54,6 @@ class LibraryRecipeSummary:
     installation_total_count: int
     installations: list['LibraryInstallationSummary']
     installations_truncated: bool
-    profiles: list['RecipeProfileSummary']
     reasons: list['LibraryProjectionReason']
     recipe_id: str
     run_returned_count: int
@@ -66,16 +64,16 @@ class LibraryRecipeSummary:
     slug: str
     source_kind: LibraryRecipeSummarySourceKind
     title: str
+    topology_name: Union[None, str]
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.recipe_profile_summary import RecipeProfileSummary
+        from ..models.library_installation_summary import LibraryInstallationSummary
         from ..models.recipe_revision_summary import RecipeRevisionSummary
         from ..models.library_run_summary import LibraryRunSummary
-        from ..models.library_installation_summary import LibraryInstallationSummary
         from ..models.library_projection_reason import LibraryProjectionReason
         capabilities = self.capabilities
 
@@ -95,13 +93,6 @@ class LibraryRecipeSummary:
 
 
         installations_truncated = self.installations_truncated
-
-        profiles = []
-        for profiles_item_data in self.profiles:
-            profiles_item = profiles_item_data.to_dict()
-            profiles.append(profiles_item)
-
-
 
         reasons = []
         for reasons_item_data in self.reasons:
@@ -137,6 +128,9 @@ class LibraryRecipeSummary:
 
         title = self.title
 
+        topology_name: Union[None, str]
+        topology_name = self.topology_name
+
 
         field_dict: dict[str, Any] = {}
 
@@ -147,7 +141,6 @@ class LibraryRecipeSummary:
             "installation_total_count": installation_total_count,
             "installations": installations,
             "installations_truncated": installations_truncated,
-            "profiles": profiles,
             "reasons": reasons,
             "recipe_id": recipe_id,
             "run_returned_count": run_returned_count,
@@ -158,6 +151,7 @@ class LibraryRecipeSummary:
             "slug": slug,
             "source_kind": source_kind,
             "title": title,
+            "topology_name": topology_name,
         })
 
         return field_dict
@@ -166,10 +160,9 @@ class LibraryRecipeSummary:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.recipe_profile_summary import RecipeProfileSummary
+        from ..models.library_installation_summary import LibraryInstallationSummary
         from ..models.recipe_revision_summary import RecipeRevisionSummary
         from ..models.library_run_summary import LibraryRunSummary
-        from ..models.library_installation_summary import LibraryInstallationSummary
         from ..models.library_projection_reason import LibraryProjectionReason
         d = dict(src_dict)
         capabilities = cast(list[str], d.pop("capabilities"))
@@ -192,16 +185,6 @@ class LibraryRecipeSummary:
 
 
         installations_truncated = d.pop("installations_truncated")
-
-        profiles = []
-        _profiles = d.pop("profiles")
-        for profiles_item_data in (_profiles):
-            profiles_item = RecipeProfileSummary.from_dict(profiles_item_data)
-
-
-
-            profiles.append(profiles_item)
-
 
         reasons = []
         _reasons = d.pop("reasons")
@@ -258,6 +241,14 @@ class LibraryRecipeSummary:
 
         title = d.pop("title")
 
+        def _parse_topology_name(data: object) -> Union[None, str]:
+            if data is None:
+                return data
+            return cast(Union[None, str], data)
+
+        topology_name = _parse_topology_name(d.pop("topology_name"))
+
+
         library_recipe_summary = cls(
             capabilities=capabilities,
             description=description,
@@ -265,7 +256,6 @@ class LibraryRecipeSummary:
             installation_total_count=installation_total_count,
             installations=installations,
             installations_truncated=installations_truncated,
-            profiles=profiles,
             reasons=reasons,
             recipe_id=recipe_id,
             run_returned_count=run_returned_count,
@@ -276,6 +266,7 @@ class LibraryRecipeSummary:
             slug=slug,
             source_kind=source_kind,
             title=title,
+            topology_name=topology_name,
         )
 
         return library_recipe_summary

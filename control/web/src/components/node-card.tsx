@@ -63,7 +63,7 @@ function RecipeGroups({node}: {node: VisualFleetNode}) {
       {installed.length === 0
         ? <p className="empty-copy">No complete installations reported</p>
         : <ul className="recipe-presence-list">{installed.map(installation => <li key={`${installation.installation_id}:${installation.rank}`} className="is-healthy">
-          <strong>{installation.title}</strong><span>{installation.profile_name} · {installation.role} rank {installation.rank}</span><small>Group {installation.group_state} · Rank {installation.rank_state}</small><small>{installationGroupLabel(installation)}</small>
+          <strong>{installation.title}</strong><span>{installation.topology_name} · {installation.role} rank {installation.rank}</span><small>Group {installation.group_state} · Rank {installation.rank_state}</small><small>{installationGroupLabel(installation)}</small>
         </li>)}</ul>}
     </section>
     <section aria-label={`Installation state on ${node.display_name}`}>
@@ -71,7 +71,7 @@ function RecipeGroups({node}: {node: VisualFleetNode}) {
       {installationStates.length === 0
         ? <p className="empty-copy">No incomplete installation states</p>
         : <ul className="recipe-presence-list">{installationStates.map(installation => <li key={`${installation.installation_id}:${installation.rank}`} className="is-degraded">
-          <strong>{installation.title}</strong><span>{installation.profile_name} · {installation.role} rank {installation.rank}</span><small>Group {installation.group_state} · Rank {installation.rank_state}</small><small>{installationGroupLabel(installation)}</small>
+          <strong>{installation.title}</strong><span>{installation.topology_name} · {installation.role} rank {installation.rank}</span><small>Group {installation.group_state} · Rank {installation.rank_state}</small><small>{installationGroupLabel(installation)}</small>
         </li>)}</ul>}
     </section>
     <section aria-label={`Run state on ${node.display_name}`}>

@@ -17,6 +17,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
 
 from .cluster_mappings import ClusterMappingPlan, ClusterMappingService
+from .distributed_lifecycle import DistributedLifecycleError
+from .distributed_recovery import enforce_recovery_deadline, recovery_start_plan
 from .install_admission import InstallAdmissionService, InstallPlan
 from .models import (
     AgentOperation,
@@ -41,6 +43,7 @@ from .recipe_action_plans import (
     uninstall_plan,
 )
 from .recipe_builds import RecipeBuildPlan, RecipeBuildService
+from .recipe_contract import recipe_topology
 from .recipe_routes import RecipeRouteService, route_publication_transaction
 from .run_admission import RunAdmissionService, RunPlan
 from .source_policy import SourcePolicyReport
@@ -147,16 +150,14 @@ class RecipeOperationService:
     def preview_mapping(
         self,
         recipe_revision_id: str,
-        profile_name: str,
         node_ids: tuple[str, ...],
         *,
         parameters: Mapping[str, object],
+        actor: str,
     ) -> ClusterMappingPlan:
         if self._mappings is None:
             raise RecipeOperationConflict("cluster mapping service is unavailable")
-        return self._mappings.plan(
-            recipe_revision_id, profile_name, node_ids, parameters=parameters
-        )
+        return self._mappings.preview(recipe_revision_id, node_ids, parameters, actor)
 
     def create_mapping(self, plan: ClusterMappingPlan, *, actor: str) -> str:
         if self._mappings is None:
@@ -529,9 +530,9 @@ class RecipeOperationService:
                 raise RecipeOperationConflict(
                     "recipe node endpoint evidence is unavailable"
                 )
-            master = next((node for node in plan.nodes if node.rank == 0), None)
+            master = next((node for node in plan.nodes if node.endpoint_owner), None)
             if master is None:
-                raise RecipeOperationConflict("recipe run has no rank-zero entrypoint")
+                raise RecipeOperationConflict("recipe run has no endpoint owner")
             world_size = len(plan.nodes)
             master_address = master.fabric_address if world_size > 1 else None
             master_port = master.rendezvous_port if world_size > 1 else None
@@ -566,6 +567,7 @@ class RecipeOperationService:
             revision = session.get(LocalRecipeRevision, plan.recipe_revision_id)
             installation = session.get(RecipeInstallation, plan.installation_id)
             assert run is not None and revision is not None and installation is not None
+            start_order = _topology_order(revision.document, "start_order")
             run.state = "starting"
             run.updated_at = now
             recipe_digest = revision.content_sha256
@@ -610,6 +612,42 @@ class RecipeOperationService:
                         },
                     )
                     for node in plan.nodes
+                ),
+                phases=_role_phases(
+                    start_order,
+                    tuple(
+                        (
+                            node.node_id,
+                            {
+                                "schema_version": 1,
+                                "run_id": run_id,
+                                "installation_id": plan.installation_id,
+                                "recipe_revision_id": plan.recipe_revision_id,
+                                "recipe_content_sha256": recipe_digest,
+                                "mapping_id": plan.mapping_id,
+                                "mapping_generation": plan.mapping_generation,
+                                "image_digest": installation.image_digest,
+                                "plan_digest": plan.plan_digest,
+                                "alias": plan.alias,
+                                "rank": node.rank,
+                                "role": node.role,
+                                "port": node.port,
+                                "reserved_memory_bytes": node.required_memory_bytes,
+                                "endpoint_address": (
+                                    presences[node.node_id]
+                                    if node.endpoint_owner
+                                    else node.fabric_address
+                                ),
+                                "world_size": world_size,
+                                "local_address": node.fabric_address
+                                if world_size > 1
+                                else None,
+                                "master_address": master_address,
+                                "master_port": master_port,
+                            },
+                        )
+                        for node in plan.nodes
+                    ),
                 ),
                 authority_digest=recipe_digest,
                 now=now,
@@ -668,6 +706,14 @@ class RecipeOperationService:
                 )
                 run = session.get(RecipeRun, run_id)
                 assert run is not None
+                revision = session.get(
+                    LocalRecipeRevision, admitted.recipe_revision_id
+                )
+                if revision is None:
+                    raise RecipeOperationConflict(
+                        "recipe run topology is unavailable"
+                    )
+                stop_order = _topology_order(revision.document, "stop_order")
                 run.state = "stopping"
                 run.updated_at = now
                 job = self._queue_in_session(
@@ -688,6 +734,22 @@ class RecipeOperationService:
                             },
                         )
                         for node in admitted.nodes
+                    ),
+                    phases=_role_phases(
+                        stop_order,
+                        tuple(
+                            (
+                                node.node_id,
+                                {
+                                    "schema_version": 1,
+                                    "run_id": run_id,
+                                    "plan_digest": admitted.authority_digest,
+                                    "role": node.role,
+                                },
+                            )
+                            for node in admitted.nodes
+                        ),
+                        include_role=False,
                     ),
                     authority_digest=admitted.authority_digest,
                     now=now,
@@ -1128,6 +1190,10 @@ class RecipeOperationService:
         if locked_job is None:
             raise RecipeOperationConflict("recipe operation disappeared")
         job = locked_job
+        # Lock acquisition can outlive a retained recovery deadline. Every
+        # phase/terminal transition uses a fresh time sampled inside the lock.
+        now = self._clock()
+        operation.updated_at = now
         node_id = operation.node_id
         owner_id = _required_string(job.payload, "owner_id")
         if job.kind == "recipe.build.v1":
@@ -1209,6 +1275,42 @@ class RecipeOperationService:
                 select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
             )
         )
+        phases = _stored_phases(job.payload)
+        recovery_error: DistributedLifecycleError | None = None
+        if phases:
+            phase_index = _current_phase_index(children, phases)
+            if phase_index is not None:
+                phase_nodes = {node_id for node_id, _payload in phases[phase_index]}
+                phase_children = tuple(
+                    child for child in children if child.node_id in phase_nodes
+                )
+                if any(
+                    child.state not in _TERMINAL_JOB_STATES for child in phase_children
+                ):
+                    job.state = "running"
+                    job.updated_at = now
+                    return cleanup_queued
+                if all(child.state == "succeeded" for child in phase_children) and (
+                    phase_index + 1 < len(phases)
+                ):
+                    try:
+                        enforce_recovery_deadline(job.payload, now=now)
+                    except DistributedLifecycleError as error:
+                        recovery_error = error
+                    if recovery_error is None:
+                        for next_node_id, next_payload in phases[phase_index + 1]:
+                            self._agent_jobs.enqueue_in_session(
+                                session,
+                                job.id,
+                                next_node_id,
+                                job.kind,
+                                job.base_commit,
+                                next_payload,
+                                operation_id=str(uuid.uuid4()),
+                            )
+                        job.state = "running"
+                        job.updated_at = now
+                        return True
         terminal = all(child.state in _TERMINAL_JOB_STATES for child in children)
         if terminal:
             successful = sorted(
@@ -1217,12 +1319,23 @@ class RecipeOperationService:
             failed = sorted(
                 child.node_id for child in children if child.state == "failed"
             )
-            job.state = "failed" if failed else "succeeded"
+            if job.kind == "recipe.start" and recovery_error is None:
+                try:
+                    enforce_recovery_deadline(job.payload, now=now)
+                except DistributedLifecycleError as error:
+                    recovery_error = error
+            start_failed = bool(failed) or recovery_error is not None
+            job.state = "failed" if start_failed else "succeeded"
             job.result = {
                 "successful_nodes": successful,
                 "failed_nodes": failed,
                 "node_evidence": node_evidence,
             }
+            if recovery_error is not None:
+                job.result = {
+                    **job.result,
+                    "recovery_error": str(recovery_error),
+                }
             if job.kind == "recipe.build.v1":
                 self._release(session, "recipe-build", owner_id, now)
             elif job.kind == "recipe.install":
@@ -1233,11 +1346,13 @@ class RecipeOperationService:
             elif job.kind == "recipe.start":
                 run = session.get(RecipeRun, owner_id)
                 assert run is not None
-                if failed:
+                if start_failed:
                     run.state = "stopping"
                     run.route_state = "withdrawn"
                     run.route_error = (
-                        "one or more ranks failed to start; cleanup queued"
+                        f"{recovery_error}; cleanup queued"
+                        if recovery_error is not None
+                        else "one or more ranks failed to start; cleanup queued"
                     )
                     cleanup_request_id = str(
                         uuid.uuid5(
@@ -1248,13 +1363,27 @@ class RecipeOperationService:
                     if not session.scalar(
                         select(Job.id).where(Job.request_id == cleanup_request_id)
                     ):
-                        run_nodes = tuple(
+                        stop_nodes = tuple(
                             session.scalars(
                                 select(RunNode)
                                 .where(RunNode.run_id == owner_id)
                                 .order_by(RunNode.rank)
                             )
                         )
+                        installation = session.get(
+                            RecipeInstallation, run.installation_id
+                        )
+                        revision = (
+                            session.get(
+                                LocalRecipeRevision, installation.recipe_revision_id
+                            )
+                            if installation is not None
+                            else None
+                        )
+                        if revision is None:
+                            raise RecipeOperationConflict(
+                                "recipe run topology is unavailable"
+                            )
                         self._queue_in_session(
                             session,
                             kind="recipe.stop",
@@ -1272,7 +1401,23 @@ class RecipeOperationService:
                                         "plan_digest": run.plan_digest,
                                     },
                                 )
-                                for run_node in run_nodes
+                                for run_node in stop_nodes
+                            ),
+                            phases=_role_phases(
+                                _topology_order(revision.document, "stop_order"),
+                                tuple(
+                                    (
+                                        run_node.node_id,
+                                        {
+                                            "schema_version": 1,
+                                            "run_id": owner_id,
+                                            "plan_digest": run.plan_digest,
+                                            "role": run_node.role,
+                                        },
+                                    )
+                                    for run_node in stop_nodes
+                                ),
+                                include_role=False,
                             ),
                             authority_digest=run.plan_digest,
                             now=now,
@@ -1286,11 +1431,62 @@ class RecipeOperationService:
             elif job.kind == "recipe.stop":
                 run = session.get(RecipeRun, owner_id)
                 assert run is not None
-                run.state = "failed" if failed else "stopped"
-                run.stopped_at = now if not failed else None
-                run.updated_at = now
-                if not failed:
-                    self._release(session, "run", owner_id, now)
+                recovery = None
+                recovery_error: DistributedLifecycleError | None = None
+                try:
+                    recovery = recovery_start_plan(job.payload, now=now)
+                except DistributedLifecycleError as error:
+                    recovery_error = error
+                if recovery is not None and not failed:
+                    phases, marker = recovery
+                    installation = session.get(
+                        RecipeInstallation, run.installation_id
+                    )
+                    revision = (
+                        session.get(
+                            LocalRecipeRevision, installation.recipe_revision_id
+                        )
+                        if installation is not None
+                        else None
+                    )
+                    if revision is None or revision.content_sha256 is None:
+                        raise RecipeOperationConflict(
+                            "distributed recovery authority is unavailable"
+                        )
+                    flattened = tuple(item for phase in phases for item in phase)
+                    self._queue_in_session(
+                        session,
+                        kind="recipe.start",
+                        owner_kind="run",
+                        owner_id=owner_id,
+                        plan_digest=run.plan_digest,
+                        actor=job.actor,
+                        request_id=str(
+                            uuid.uuid5(
+                                uuid.NAMESPACE_URL,
+                                f"vonk:distributed-recovery-start:{job.id}",
+                            )
+                        ),
+                        node_payloads=flattened,
+                        phases=phases,
+                        authority_digest=revision.content_sha256,
+                        now=now,
+                        job_context={"recovery": marker},
+                    )
+                    run.state = "starting"
+                    run.route_state = "withdrawn"
+                    run.route_error = "distributed recovery restarting"
+                    run.updated_at = now
+                    cleanup_queued = True
+                else:
+                    run.state = "failed" if failed or recovery_error else "stopped"
+                    run.stopped_at = now if not failed else None
+                    run.route_state = "withdrawn"
+                    if recovery_error is not None:
+                        run.route_error = str(recovery_error)[:512]
+                    run.updated_at = now
+                    if not failed:
+                        self._release(session, "run", owner_id, now)
             elif job.kind == "recipe.uninstall":
                 installation = session.get(RecipeInstallation, owner_id)
                 assert installation is not None
@@ -1681,19 +1877,45 @@ class RecipeOperationService:
         node_payloads: Sequence[tuple[str, Mapping[str, object]]],
         authority_digest: str,
         now: datetime,
+        phases: Sequence[Sequence[tuple[str, Mapping[str, object]]]] | None = None,
+        job_context: Mapping[str, object] | None = None,
     ) -> Job:
         if not node_payloads:
             raise RecipeOperationConflict("operation group has no target nodes")
         if session.scalar(select(Job.id).where(Job.request_id == request_id)):
             raise RecipeOperationConflict("request key was already used differently")
         job_id = str(uuid.uuid4())
-        targets = sorted(node_id for node_id, _payload in node_payloads)
+        phase_groups = (
+            tuple(tuple(group) for group in phases)
+            if phases is not None
+            else (tuple(node_payloads),)
+        )
+        if not phase_groups or any(not group for group in phase_groups):
+            raise RecipeOperationConflict("operation phases are invalid")
+        flattened = tuple(item for group in phase_groups for item in group)
+        if {node_id for node_id, _payload in flattened} != {
+            node_id for node_id, _payload in node_payloads
+        } or len({node_id for node_id, _payload in flattened}) != len(flattened):
+            raise RecipeOperationConflict("operation phases do not match target nodes")
+        targets = sorted(node_id for node_id, _payload in flattened)
         job_payload: dict[str, object] = {
             "schema_version": 1,
             "owner_kind": owner_kind,
             "owner_id": owner_id,
             "plan_digest": plan_digest,
         }
+        if phases is not None:
+            job_payload["phases"] = [
+                [
+                    {"node_id": node_id, "payload": dict(payload)}
+                    for node_id, payload in group
+                ]
+                for group in phase_groups
+            ]
+        if job_context is not None:
+            if set(job_context) & set(job_payload):
+                raise RecipeOperationConflict("operation context is invalid")
+            job_payload.update(json.loads(canonical_message(job_context)))
         job = Job(
             id=job_id,
             request_id=request_id,
@@ -1709,7 +1931,7 @@ class RecipeOperationService:
         )
         session.add(job)
         session.flush()
-        for node_id, payload in node_payloads:
+        for node_id, payload in phase_groups[0]:
             self._agent_jobs.enqueue_in_session(
                 session,
                 job_id,
@@ -1752,6 +1974,81 @@ def _required_string(value: Mapping[str, object], key: str) -> str:
     if not isinstance(item, str):
         raise RecipeOperationConflict(f"operation {key} is invalid")
     return item
+
+
+def _topology_order(document: Mapping[str, object], key: str) -> tuple[str, ...]:
+    try:
+        topology = recipe_topology(document)
+    except Exception as error:
+        raise RecipeOperationConflict("recipe topology is invalid") from error
+    order = topology.get(key)
+    if not isinstance(order, list) or not all(isinstance(role, str) for role in order):
+        raise RecipeOperationConflict(f"recipe topology {key} is invalid")
+    return tuple(order)
+
+
+def _role_phases(
+    order: Sequence[str],
+    node_payloads: Sequence[tuple[str, Mapping[str, object]]],
+    *,
+    include_role: bool = True,
+) -> tuple[tuple[tuple[str, Mapping[str, object]], ...], ...]:
+    by_role: dict[str, list[tuple[str, Mapping[str, object]]]] = {}
+    for node_id, payload in node_payloads:
+        role = payload.get("role")
+        if not isinstance(role, str):
+            raise RecipeOperationConflict("operation role is invalid")
+        projected = dict(payload)
+        if not include_role:
+            projected.pop("role")
+        by_role.setdefault(role, []).append((node_id, projected))
+    if set(by_role) != set(order) or len(set(order)) != len(order):
+        raise RecipeOperationConflict("operation topology order is invalid")
+    return tuple(
+        tuple(sorted(by_role[role], key=lambda item: item[0])) for role in order
+    )
+
+
+def _stored_phases(
+    payload: Mapping[str, object],
+) -> tuple[tuple[tuple[str, Mapping[str, object]], ...], ...]:
+    raw_phases = payload.get("phases")
+    if raw_phases is None:
+        return ()
+    if not isinstance(raw_phases, list) or not raw_phases:
+        raise RecipeOperationConflict("stored operation phases are invalid")
+    phases: list[tuple[tuple[str, Mapping[str, object]], ...]] = []
+    seen: set[str] = set()
+    for raw_phase in raw_phases:
+        if not isinstance(raw_phase, list) or not raw_phase:
+            raise RecipeOperationConflict("stored operation phases are invalid")
+        group: list[tuple[str, Mapping[str, object]]] = []
+        for raw_item in raw_phase:
+            if not isinstance(raw_item, Mapping):
+                raise RecipeOperationConflict("stored operation phases are invalid")
+            node_id = raw_item.get("node_id")
+            item_payload = raw_item.get("payload")
+            if not isinstance(node_id, str) or not isinstance(item_payload, Mapping):
+                raise RecipeOperationConflict("stored operation phases are invalid")
+            if node_id in seen:
+                raise RecipeOperationConflict("stored operation phases are invalid")
+            seen.add(node_id)
+            group.append((node_id, dict(item_payload)))
+        phases.append(tuple(group))
+    return tuple(phases)
+
+
+def _current_phase_index(
+    children: Sequence[AgentOperation],
+    phases: Sequence[Sequence[tuple[str, Mapping[str, object]]]],
+) -> int | None:
+    child_nodes = {child.node_id for child in children}
+    for index in range(len(phases) - 1, -1, -1):
+        phase = phases[index]
+        phase_nodes = {node_id for node_id, _payload in phase}
+        if phase_nodes <= child_nodes:
+            return index
+    return None
 
 
 def _valid_image_import_payload(value: object, expected_build_id: str) -> bool:

@@ -19,25 +19,16 @@ from typing import Any
 import httpx
 
 from .generated_control.api.default import (
-    apply_reconciliation,
     get_job,
     get_node_statuses,
     get_published_endpoint,
     list_agents,
-    plan_profile_reconciliation,
 )
 from .generated_control.client import AuthenticatedClient
 from .generated_control.models.agents_response import AgentsResponse
 from .generated_control.models.endpoint_response import EndpointResponse
 from .generated_control.models.fleet_status_response import FleetStatusResponse
 from .generated_control.models.job_detail_response import JobDetailResponse
-from .generated_control.models.reconciliation_accepted_response import (
-    ReconciliationAcceptedResponse,
-)
-from .generated_control.models.reconciliation_plan_response import (
-    ReconciliationPlanResponse,
-)
-from .generated_control.models.reconciliation_request import ReconciliationRequest
 from .generated_control.types import Response as GeneratedResponse
 
 _MAX_RESPONSE = 1_048_576
@@ -970,29 +961,6 @@ class ControlClient:
 
     def nodes(self) -> FleetStatusResponse:
         return self._call_generated(get_node_statuses.sync_detailed)  # type: ignore[return-value]
-
-    def plan_profile(self, profile: str) -> ReconciliationPlanResponse:
-        return self._call_generated(
-            plan_profile_reconciliation.sync_detailed, profile, body=None
-        )  # type: ignore[return-value]
-
-    def apply_plan(
-        self, digest: str, fleet_evidence_digest: str, *, request_id: str
-    ) -> ReconciliationAcceptedResponse:
-        try:
-            canonical_request_id = str(uuid.UUID(request_id))
-        except ValueError:
-            raise ControlClientError("control mutation request ID is invalid") from None
-        if canonical_request_id != request_id:
-            raise ControlClientError("control mutation request ID is invalid")
-        return self._call_generated(
-            apply_reconciliation.sync_detailed,
-            body=ReconciliationRequest(
-                plan_digest=digest,
-                fleet_evidence_digest=fleet_evidence_digest,
-            ),
-            headers={"X-Request-ID": canonical_request_id},
-        )  # type: ignore[return-value]
 
     def job(self, job_id: str) -> JobDetailResponse:
         return self._call_generated(get_job.sync_detailed, job_id)  # type: ignore[return-value]
