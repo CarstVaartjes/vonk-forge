@@ -53,6 +53,10 @@ Normal administration uses the stable private Tailscale HTTPS
 - [Control-plane bootstrap](runbooks/control-plane-bootstrap.md)
 - [Control-plane operations](runbooks/control-plane-operations.md) — Fleet,
   Library, recipe placement, resource previews, and safe action semantics
+- [Model catalog](operators/model-catalog.md) — model identity, recipes,
+  topology, install/update, and exact-revision rollback
+- [Execution harness operations](operators/execution-harnesses.md) — built-in
+  harnesses, interface publication, clean reset, and canonical acceptance
 - [Control-plane telemetry](runbooks/control-plane-telemetry.md) — metrics,
   freshness, resolutions, retention, and troubleshooting
 - [Node onboarding and health](runbooks/node-onboarding.md)

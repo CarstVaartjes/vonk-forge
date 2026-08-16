@@ -1,0 +1,594 @@
+#!/usr/bin/env python3
+"""Destructively reset only the bounded pre-production development domain."""
+
+from __future__ import annotations
+
+import argparse
+import ipaddress
+import json
+import os
+import re
+import stat
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import uuid
+from pathlib import Path
+from typing import Any
+
+EXPECTED_REVISION = "0027_execution_harness_catalog"
+EXPECTED_COMPOSE_PROJECT = "vonk-forge-dev"
+EXPECTED_SERVICES = {
+    "postgres",
+    "dev-cohort-reset",
+    "dev-api-cohort",
+    "dev-worker-cohort",
+    "dev-cohort-verify",
+    "dev-repository-init",
+    "dev-init",
+    "dev-supervisor-init",
+    "migrate",
+    "dev-auth-init",
+    "dev-litellm-database-init",
+    "control-worker",
+    "control-api",
+    "litellm",
+    "caddy",
+    "tailscale-gateway",
+    "tailscale-configurator",
+}
+EXPECTED_VOLUMES = {
+    "dev-auth-secrets",
+    "dev-postgres-data",
+    "dev-image-cohort",
+    "dev-control-identity",
+    "dev-control-state",
+    "dev-route-publications",
+    "dev-supervisor-state",
+    "dev-repository",
+    "dev-api-secrets",
+    "dev-caddy-secrets",
+    "dev-litellm-secrets",
+    "dev-litellm-database-secrets",
+    "dev-migrate-secrets",
+    "dev-runtime-config",
+    "dev-tailscale-secrets",
+    "dev-tailscale-runtime",
+    "dev-tailscale-socket",
+    "dev-tailscale-state",
+    "dev-worker-secrets",
+}
+EXPECTED_HARNESSES = {
+    "comfyui",
+    "diffusers",
+    "ds4",
+    "llama-cpp",
+    "pytorch-pipeline",
+    "sglang",
+    "tensorrt-llm",
+    "vllm",
+}
+MAXIMUM_TOKEN_BYTES = 16 * 1024
+MAXIMUM_RESPONSE_BYTES = 2 * 1024 * 1024
+MAXIMUM_COMPOSE_BYTES = 4 * 1024 * 1024
+SHA256 = re.compile(r"[0-9a-f]{64}\Z")
+
+
+class ResetError(RuntimeError):
+    """A bounded reset could not prove its next action safe."""
+
+
+def _base_url(value: str) -> str:
+    parsed = urllib.parse.urlsplit(value)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ResetError("control API URL is invalid")
+    if parsed.scheme == "http":
+        try:
+            address = ipaddress.ip_address(parsed.hostname)
+        except ValueError as error:
+            raise ResetError(
+                "control API plain HTTP requires an explicit loopback address"
+            ) from error
+        if not address.is_loopback:
+            raise ResetError(
+                "control API plain HTTP requires an explicit loopback address"
+            )
+    return value.rstrip("/")
+
+
+def _private_token(path: Path) -> str:
+    descriptor = -1
+    try:
+        descriptor = os.open(
+            path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
+        )
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_uid != os.geteuid()
+            or before.st_nlink != 1
+            or stat.S_IMODE(before.st_mode) & 0o077
+            or not 0 < before.st_size <= MAXIMUM_TOKEN_BYTES
+        ):
+            raise ResetError("administrator token file is unsafe")
+        content = os.read(descriptor, MAXIMUM_TOKEN_BYTES + 1)
+        after = os.fstat(descriptor)
+        if len(content) != before.st_size or (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_mtime_ns,
+        ) != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
+            raise ResetError("administrator token file changed while read")
+    except ResetError:
+        raise
+    except OSError as error:
+        raise ResetError("administrator token file is unavailable") from error
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    try:
+        token = content.decode("ascii").rstrip("\r\n")
+    except UnicodeDecodeError as error:
+        raise ResetError("administrator token file is invalid") from error
+    if (
+        not token
+        or token != token.strip()
+        or "\n" in token
+        or "\r" in token
+        or any(not 0x21 <= ord(character) <= 0x7E for character in token)
+    ):
+        raise ResetError("administrator token file is invalid")
+    return token
+
+
+class Client:
+    def __init__(self, base: str, token: str, timeout: float) -> None:
+        self.base = base
+        self._token = token
+        self.timeout = timeout
+
+    def request(
+        self,
+        method: str,
+        path: str,
+        payload: object | None = None,
+        *,
+        query: dict[str, str | int] | None = None,
+    ) -> dict[str, Any]:
+        if not path.startswith("/") or "?" in path or "#" in path:
+            raise ResetError("control API request path is invalid")
+        query_string = urllib.parse.urlencode(query or {})
+        url = self.base + path + (f"?{query_string}" if query_string else "")
+        data = (
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+            if payload is not None
+            else None
+        )
+        request = urllib.request.Request(
+            url,
+            data=data,
+            method=method,
+            headers={
+                "Authorization": f"Bearer {self._token}",
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                status = response.status
+                body = response.read(MAXIMUM_RESPONSE_BYTES + 1)
+        except urllib.error.HTTPError as error:
+            status = error.code
+            body = error.read(MAXIMUM_RESPONSE_BYTES + 1)
+        except (OSError, urllib.error.URLError) as error:
+            raise ResetError(f"control API request failed: {method} {path}") from error
+        if status not in {200, 201, 202}:
+            raise ResetError(
+                f"control API request failed: {method} {path} returned HTTP {status}"
+            )
+        if len(body) > MAXIMUM_RESPONSE_BYTES:
+            raise ResetError("control API response is too large")
+        try:
+            value = json.loads(body)
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ResetError("control API response is invalid") from error
+        if not isinstance(value, dict):
+            raise ResetError("control API response is invalid")
+        return value
+
+
+def _compose_prefix(args: argparse.Namespace, compose: Path) -> list[str]:
+    docker = (
+        ["sudo", "-n", args.docker_command]
+        if args.docker_mode == "sudo"
+        else [args.docker_command]
+    )
+    return [
+        *docker,
+        "compose",
+        "--project-directory",
+        str(args.project_directory),
+        "--file",
+        str(compose),
+    ]
+
+
+def _command(
+    command: list[str], *, timeout: float, label: str
+) -> subprocess.CompletedProcess[str]:
+    try:
+        result = subprocess.run(
+            command,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=timeout,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        raise ResetError(f"{label} failed") from error
+    if result.returncode != 0:
+        raise ResetError(f"{label} failed")
+    return result
+
+
+def _development_project(args: argparse.Namespace) -> tuple[Path, list[str]]:
+    project = args.project_directory
+    try:
+        project_status = project.stat(follow_symlinks=False)
+        compose = project / "docker-compose.yaml"
+        compose_status = compose.stat(follow_symlinks=False)
+        secrets_status = (project / "secrets").stat(follow_symlinks=False)
+    except OSError as error:
+        raise ResetError("development Compose project is unavailable") from error
+    if (
+        not stat.S_ISDIR(project_status.st_mode)
+        or not stat.S_ISREG(compose_status.st_mode)
+        or compose_status.st_nlink != 1
+        or not stat.S_ISDIR(secrets_status.st_mode)
+    ):
+        raise ResetError("development Compose project is unsafe")
+    prefix = _compose_prefix(args, compose)
+    result = _command(
+        [*prefix, "config", "--format", "json"],
+        timeout=args.timeout_seconds,
+        label="development Compose validation",
+    )
+    if len(result.stdout.encode()) > MAXIMUM_COMPOSE_BYTES:
+        raise ResetError("development Compose graph is too large")
+    try:
+        document = json.loads(result.stdout)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ResetError("development Compose graph is invalid") from error
+    services = document.get("services") if isinstance(document, dict) else None
+    volumes = document.get("volumes") if isinstance(document, dict) else None
+    if (
+        document.get("name") != EXPECTED_COMPOSE_PROJECT
+        or not isinstance(services, dict)
+        or set(services) != EXPECTED_SERVICES
+        or not isinstance(volumes, dict)
+        or set(volumes) != EXPECTED_VOLUMES
+        or any(
+            not isinstance(volume, dict)
+            or volume.get("external") is True
+            or volume.get("name") != f"{EXPECTED_COMPOSE_PROJECT}_{name}"
+            for name, volume in volumes.items()
+        )
+    ):
+        raise ResetError("development Compose graph is not the bounded reset contract")
+    for name in ("control-api", "control-worker"):
+        service = services.get(name)
+        environment = service.get("environment") if isinstance(service, dict) else None
+        if isinstance(environment, list):
+            environment = dict(
+                item.split("=", 1) for item in environment if "=" in str(item)
+            )
+        if (
+            not isinstance(environment, dict)
+            or environment.get("VONK_DEPLOYMENT_MODE") != "development"
+        ):
+            raise ResetError(
+                "development Compose graph is not the bounded reset contract"
+            )
+    return compose, prefix
+
+
+def _fleet(client: Client) -> dict[str, Any]:
+    fleet = client.request("GET", "/api/v1/fleet")
+    if (
+        fleet.get("schema_version") != 1
+        or not isinstance(fleet.get("event_cursor"), int)
+        or not isinstance(fleet.get("nodes"), list)
+    ):
+        raise ResetError("fleet response is invalid")
+    return fleet
+
+
+def _operation(
+    client: Client,
+    response: dict[str, Any],
+    *,
+    label: str,
+    timeout: float,
+    poll: float,
+) -> None:
+    operation_id = response.get("id")
+    if not isinstance(operation_id, str) or not operation_id:
+        raise ResetError(f"{label} response is invalid")
+    deadline = time.monotonic() + timeout
+    current = response
+    while True:
+        state = current.get("state")
+        if state == "succeeded":
+            return
+        if state in {"failed", "waiting-for-operator", "expired"}:
+            raise ResetError(f"{label} ended in {state}")
+        if time.monotonic() >= deadline:
+            raise ResetError(f"{label} timed out")
+        time.sleep(poll)
+        current = client.request("GET", f"/api/v1/recipes/operations/{operation_id}")
+
+
+def _drain(client: Client, args: argparse.Namespace) -> None:
+    fleet = _fleet(client)
+    nodes = fleet["nodes"]
+    run_ids = sorted(
+        {
+            str(run["run_id"])
+            for node in nodes
+            if isinstance(node, dict)
+            for run in node.get("loaded", [])
+            if isinstance(run, dict) and isinstance(run.get("run_id"), str)
+        }
+    )
+    installation_ids = sorted(
+        {
+            str(installation["installation_id"])
+            for node in nodes
+            if isinstance(node, dict)
+            for installation in node.get("installed", [])
+            if isinstance(installation, dict)
+            and isinstance(installation.get("installation_id"), str)
+        }
+    )
+    for run_id in run_ids:
+        preview = client.request(
+            "POST", "/api/v1/recipes/stop-plans/preview", {"run_id": run_id}
+        )
+        digest = preview.get("plan_digest")
+        if (
+            preview.get("allowed") is not True
+            or not isinstance(digest, str)
+            or SHA256.fullmatch(digest) is None
+        ):
+            raise ResetError("active workload stop is not admitted")
+        response = client.request(
+            "POST",
+            f"/api/v1/recipes/runs/{run_id}/stop",
+            {
+                "plan_digest": digest,
+                "request_key": str(
+                    uuid.uuid5(uuid.NAMESPACE_URL, f"vonk-reset:stop:{run_id}")
+                ),
+            },
+        )
+        _operation(
+            client,
+            response,
+            label="active workload stop",
+            timeout=args.timeout_seconds,
+            poll=args.poll_seconds,
+        )
+    for installation_id in installation_ids:
+        preview = client.request(
+            "POST",
+            "/api/v1/recipes/uninstall-plans/preview",
+            {"installation_id": installation_id},
+        )
+        digest = preview.get("plan_digest")
+        if (
+            preview.get("allowed") is not True
+            or not isinstance(digest, str)
+            or SHA256.fullmatch(digest) is None
+        ):
+            raise ResetError("active recipe uninstall is not admitted")
+        response = client.request(
+            "POST",
+            f"/api/v1/recipes/installations/{installation_id}/uninstall",
+            {
+                "plan_digest": digest,
+                "request_key": str(
+                    uuid.uuid5(
+                        uuid.NAMESPACE_URL,
+                        f"vonk-reset:uninstall:{installation_id}",
+                    )
+                ),
+            },
+        )
+        _operation(
+            client,
+            response,
+            label="active recipe uninstall",
+            timeout=args.timeout_seconds,
+            poll=args.poll_seconds,
+        )
+
+
+MIGRATE_AND_REPORT = """\
+from pathlib import Path
+from alembic import command
+from alembic.config import Config
+from sqlalchemy import create_engine, text
+url = Path('/run/secrets/database-url').read_text().strip()
+config = Config('/srv/vonk-control/alembic.ini')
+config.set_main_option('sqlalchemy.url', url)
+command.upgrade(config, 'head')
+with create_engine(url).connect() as connection:
+    print(connection.execute(text('SELECT version_num FROM alembic_version')).scalar_one())
+"""
+
+
+def _recreate(args: argparse.Namespace, prefix: list[str]) -> None:
+    _command(
+        [*prefix, "down", "--volumes", "--remove-orphans"],
+        timeout=args.timeout_seconds,
+        label="development Compose teardown",
+    )
+    _command(
+        [*prefix, "up", "-d", "--wait", "postgres"],
+        timeout=args.timeout_seconds,
+        label="fresh PostgreSQL startup",
+    )
+    migration = _command(
+        [
+            *prefix,
+            "run",
+            "--rm",
+            "migrate",
+            "python",
+            "-m",
+            "vonk_control.dev_cohort",
+            "run-selected",
+            "--role",
+            "api",
+            "--",
+            "python",
+            "-c",
+            MIGRATE_AND_REPORT,
+        ],
+        timeout=args.timeout_seconds,
+        label="fresh database migration",
+    )
+    revision_lines = [
+        line.strip() for line in migration.stdout.splitlines() if line.strip()
+    ]
+    if not revision_lines or revision_lines[-1] != EXPECTED_REVISION:
+        raise ResetError(f"fresh database revision is not {EXPECTED_REVISION}")
+    _command(
+        [*prefix, "up", "-d", "--wait"],
+        timeout=args.timeout_seconds,
+        label="fresh development Compose startup",
+    )
+
+
+def _verify_fresh(client: Client, args: argparse.Namespace) -> None:
+    deadline = time.monotonic() + args.timeout_seconds
+    last_error: ResetError | None = None
+    while True:
+        try:
+            fleet = _fleet(client)
+            catalog = client.request(
+                "GET",
+                "/api/v1/catalog/entities",
+                query={
+                    "kind": "execution-harness",
+                    "publisher": "vonk-forge",
+                    "limit": 100,
+                },
+            )
+            entities = catalog.get("entities")
+            if fleet.get("nodes") != []:
+                raise ResetError("fresh reset retained agent enrollments")
+            if not isinstance(entities, list):
+                raise ResetError("fresh catalog response is invalid")
+            harnesses = {
+                str(entity["slug"])
+                for entity in entities
+                if isinstance(entity, dict)
+                and entity.get("kind") == "execution-harness"
+                and entity.get("publisher") == "vonk-forge"
+                and entity.get("lifecycle") == "resolved"
+            }
+            if harnesses != EXPECTED_HARNESSES or len(entities) != len(
+                EXPECTED_HARNESSES
+            ):
+                raise ResetError("fresh supported v1 catalog is not exact")
+            return
+        except ResetError as error:
+            last_error = error
+        if time.monotonic() >= deadline:
+            assert last_error is not None
+            raise last_error
+        time.sleep(args.poll_seconds)
+
+
+def _arguments() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--environment", required=True)
+    parser.add_argument(
+        "--confirm-destructive-preproduction-reset", action="store_true"
+    )
+    parser.add_argument(
+        "--project-directory",
+        type=Path,
+        default=Path(
+            os.environ.get(
+                "VONK_DEVELOPMENT_PROJECT_DIRECTORY", "/volume1/docker/vonk-forge"
+            )
+        ),
+    )
+    parser.add_argument(
+        "--api-base",
+        default=os.environ.get("VONK_DEVELOPMENT_API_BASE", "http://127.0.0.1:8080"),
+    )
+    parser.add_argument(
+        "--admin-token-file",
+        type=Path,
+        default=Path(
+            os.environ.get(
+                "VONK_DEVELOPMENT_ADMIN_TOKEN_FILE",
+                ".state/recipe-acceptance/admin-token",
+            )
+        ),
+    )
+    parser.add_argument("--docker-command", default="docker")
+    parser.add_argument(
+        "--docker-mode", choices=("sudo", "direct"), default="sudo"
+    )
+    parser.add_argument("--timeout-seconds", type=float, default=900.0)
+    parser.add_argument("--poll-seconds", type=float, default=1.0)
+    args = parser.parse_args()
+    if args.environment != "development":
+        parser.error("environment must be exactly development")
+    if not args.confirm_destructive_preproduction_reset:
+        parser.error("--confirm-destructive-preproduction-reset is required")
+    if not 0 < args.timeout_seconds <= 3600 or not 0 < args.poll_seconds <= 30:
+        parser.error("timeouts are outside the bounded reset contract")
+    args.project_directory = Path(os.path.abspath(args.project_directory))
+    args.admin_token_file = Path(os.path.abspath(args.admin_token_file))
+    return args
+
+
+def main() -> int:
+    args = _arguments()
+    try:
+        _compose, prefix = _development_project(args)
+        token = _private_token(args.admin_token_file)
+        client = Client(_base_url(args.api_base), token, args.timeout_seconds)
+        _drain(client, args)
+        _recreate(args, prefix)
+        _verify_fresh(client, args)
+    except ResetError as error:
+        print(f"development recipe-domain reset failed: {error}", file=sys.stderr)
+        return 1
+    print(
+        "Fresh reset complete at 0027_execution_harness_catalog. Recreate the "
+        "development administrator, establish a fresh browser session, and "
+        "re-enroll every Spark before acceptance."
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -250,7 +250,11 @@ def _load_evidence(
         evidence = json.loads(raw)
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise SliceError("evidence document is invalid") from error
-    if not isinstance(evidence, dict) or evidence.get("schema_version") != 1:
+    if (
+        not isinstance(evidence, dict)
+        or raw != _canonical(evidence)
+        or evidence.get("schema_version") != 1
+    ):
         raise SliceError("evidence document is invalid")
     if any(evidence.get(key) != value for key, value in expected.items()):
         raise SliceError("evidence inputs do not match this invocation")
@@ -261,13 +265,9 @@ def _load_evidence(
         not isinstance(completed, list)
         or completed != list(states[: len(completed)])
         or not isinstance(outputs, dict)
-        or not isinstance(acceptance_id, str)
+        or not _canonical_uuid(acceptance_id)
     ):
         raise SliceError("evidence state is invalid")
-    try:
-        uuid.UUID(acceptance_id)
-    except ValueError as error:
-        raise SliceError("evidence state is invalid") from error
     return evidence
 
 
@@ -912,16 +912,13 @@ class Runner:
                 return
 
     def inventory_ready(self) -> None:
-        fleet, by_id = self._fleet()
+        _fleet, by_id, digest = self._fleet()
         required = {self.args.builder_node, *self.targets}
         for node_id in required:
             if not self._node_ready(by_id.get(node_id)):
                 raise SliceError("required development inventory is not ready")
-        digest = fleet.get("evidence_digest")
-        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
-            raise SliceError("fleet evidence is invalid")
         last_seen = {
-            node_id: by_id[node_id].get("agent_last_seen_at")
+            node_id: by_id[node_id]["connection"].get("last_seen_at")
             for node_id in self.targets
         }
         if self.args.phase != "synthetic" and any(
@@ -936,30 +933,52 @@ class Runner:
             },
         )
 
-    def _fleet(self) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
+    def _fleet(
+        self,
+    ) -> tuple[dict[str, Any], dict[str, dict[str, Any]], str]:
         _, payload = self.control.request("GET", "/api/v1/fleet")
         fleet = _object(payload, "fleet")
         nodes = fleet.get("nodes")
-        by_id = (
-            {
-                node.get("id"): node
-                for node in nodes
-                if isinstance(node, dict) and isinstance(node.get("id"), str)
-            }
-            if isinstance(nodes, list)
-            else {}
-        )
-        return fleet, by_id
+        cursor = fleet.get("event_cursor")
+        if (
+            fleet.get("schema_version") != 1
+            or not isinstance(cursor, int)
+            or isinstance(cursor, bool)
+            or cursor < 0
+            or not isinstance(fleet.get("generated_at"), str)
+            or re.fullmatch(r"[0-9a-f]{40}", str(fleet.get("repository_commit"))) is None
+            or not isinstance(nodes, list)
+        ):
+            raise SliceError("fleet response is invalid")
+        by_id: dict[str, dict[str, Any]] = {}
+        for node in nodes:
+            node_id = node.get("id") if isinstance(node, dict) else None
+            if (
+                not isinstance(node, dict)
+                or not isinstance(node_id, str)
+                or NODE.fullmatch(node_id) is None
+                or node_id in by_id
+            ):
+                raise SliceError("fleet response is invalid")
+            by_id[node_id] = node
+        return fleet, by_id, hashlib.sha256(_canonical(fleet)).hexdigest()
 
     @staticmethod
     def _node_ready(node: dict[str, Any] | None) -> bool:
-        capabilities = node.get("inventory_capabilities", ()) if node else ()
+        connection = node.get("connection") if node else None
+        inventory = node.get("inventory") if node else None
+        capabilities = (
+            inventory.get("capabilities", ()) if isinstance(inventory, dict) else ()
+        )
         return bool(
             node is not None
-            and node.get("agent_online") is True
-            and node.get("agent_state") == "active"
-            and node.get("compatibility") == "supported"
-            and node.get("inventory_stale") is False
+            and node.get("lifecycle") == "active"
+            and isinstance(connection, dict)
+            and connection.get("agent_state") == "active"
+            and connection.get("certificate_state") == "active"
+            and connection.get("online_state") == "online"
+            and isinstance(inventory, dict)
+            and inventory.get("freshness") == "fresh"
             and "build.rootless-podman.v1" in capabilities
             and "runtime.spark-docker-nvidia.v1" in capabilities
         )
@@ -1619,7 +1638,7 @@ class Runner:
         return response
 
     def rank_failure_observed(self) -> None:
-        _fleet, by_id = self._fleet()
+        _fleet, by_id, _digest = self._fleet()
         if any(not self._node_ready(by_id.get(node_id)) for node_id in self.targets):
             raise SliceError("agent presence was lost during workload-rank failure")
         _, payload = self.control.request(
@@ -1655,7 +1674,7 @@ class Runner:
         self.complete("route-withdrawn-after-failure")
 
     def rank_recovered(self) -> None:
-        _fleet, by_id = self._fleet()
+        _fleet, by_id, _digest = self._fleet()
         if any(not self._node_ready(by_id.get(node_id)) for node_id in self.targets):
             raise SliceError("agent presence has not recovered")
         _, payload = self.control.request(
@@ -1694,14 +1713,15 @@ class Runner:
         )
 
     def restart_persistence_observed(self) -> None:
-        fleet, by_id = self._fleet()
+        _fleet, by_id, digest = self._fleet()
         initial = self.outputs.get("initial_agent_last_seen")
         if not isinstance(initial, dict):
             raise SliceError("initial agent freshness evidence is missing")
         current: dict[str, str] = {}
         for node_id in self.targets:
             node = by_id.get(node_id)
-            value = node.get("agent_last_seen_at") if self._node_ready(node) else None
+            connection = node.get("connection") if self._node_ready(node) else None
+            value = connection.get("last_seen_at") if isinstance(connection, dict) else None
             before = initial.get(node_id)
             if (
                 not isinstance(value, str)
@@ -1712,11 +1732,7 @@ class Runner:
             current[node_id] = value
         self._await_endpoint(published=True)
         response = self._inference()
-        digest = fleet.get("evidence_digest")
-        if (
-            not isinstance(digest, str)
-            or digest == self.outputs["fleet_evidence_digest"]
-        ):
+        if digest == self.outputs["fleet_evidence_digest"]:
             raise SliceError("restart persistence fleet evidence did not advance")
         self.complete(
             "restart-persistence-observed",

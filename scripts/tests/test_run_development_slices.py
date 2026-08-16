@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -115,7 +116,8 @@ class SliceServer(ThreadingHTTPServer):
             NODE: "2026-08-11T10:00:00+00:00",
             NODE_2: "2026-08-11T10:00:00+00:00",
         }
-        self.fleet_digest = "b" * 64
+        self.fleet_event_cursor = 1
+        self.last_fleet_document: dict[str, object] | None = None
         self.artifact_set_digests = {NODE: "7" * 64, NODE_2: "7" * 64}
         self.rank_states = {NODE: "running", NODE_2: "running"}
         self.entity_mismatch = False
@@ -243,29 +245,72 @@ class SliceHandler(BaseHTTPRequestHandler):
             else:
                 self._json(200, self._entity_response(record))
         elif self.path == "/api/v1/fleet":
-            self._json(
-                200,
-                {
-                    "commit": "a" * 40,
-                    "evidence_digest": self.server.fleet_digest,
-                    "nodes": [
-                        {
-                            "id": node,
-                            "healthy": True,
-                            "stale": False,
-                            "agent_online": self.server.online[node],
+            document = {
+                "schema_version": 1,
+                "event_cursor": self.server.fleet_event_cursor,
+                "generated_at": "2026-08-11T10:00:01+00:00",
+                "repository_commit": "a" * 40,
+                "nodes": [
+                    {
+                        "id": node,
+                        "display_name": f"spark-{node[-1]}",
+                        "hostname": f"spark-{node[-1]}.example.test",
+                        "lifecycle": "active",
+                        "labels": {},
+                        "connection": {
                             "agent_state": "active",
-                            "compatibility": "supported",
-                            "inventory_stale": self.server.inventory_stale[node],
-                            "inventory_capabilities": (
-                                self.server.inventory_capabilities[node]
+                            "certificate_state": "active",
+                            "online_state": (
+                                "online" if self.server.online[node] else "offline"
                             ),
-                            "agent_last_seen_at": self.server.last_seen[node],
-                        }
-                        for node in self.server.nodes
-                    ],
-                },
-            )
+                            "offline_reason": (
+                                None if self.server.online[node] else "stale"
+                            ),
+                            "last_seen_at": self.server.last_seen[node],
+                            "last_seen_age_seconds": 1.0,
+                        },
+                        "inventory": {
+                            "observed_at": self.server.last_seen[node],
+                            "received_at": self.server.last_seen[node],
+                            "age_seconds": 1.0,
+                            "freshness": (
+                                "stale"
+                                if self.server.inventory_stale[node]
+                                else "fresh"
+                            ),
+                            "disk_total_bytes": 2_000_000_000_000,
+                            "disk_free_bytes": 1_000_000_000_000,
+                            "host_memory_total_bytes": 128_000_000_000,
+                            "host_memory_free_bytes": 120_000_000_000,
+                            "gpu_memory_total_bytes": 128_000_000_000,
+                            "gpu_memory_free_bytes": 120_000_000_000,
+                            "gpu_count": 1,
+                            "artifact_store_read_only": False,
+                            "capabilities": self.server.inventory_capabilities[node],
+                            "fabric_address": (
+                                "192.0.2.10" if node == NODE else "192.0.2.11"
+                            ),
+                            "fabric_bandwidth_mbps": 200_000,
+                            "nvidia_driver_version": "580.65.06",
+                            "container_runtime_version": "28.3.3",
+                        },
+                        "telemetry": None,
+                        "installed": [],
+                        "loaded": [],
+                        "reservations": {
+                            "disk_bytes": 0,
+                            "unified_memory_bytes": 0,
+                            "host_memory_bytes": 0,
+                            "gpu_memory_bytes": 0,
+                            "port_count": 0,
+                        },
+                        "warnings": [],
+                    }
+                    for node in self.server.nodes
+                ],
+            }
+            self.server.last_fleet_document = document
+            self._json(200, document)
         elif self.path == (
             "/api/v1/catalog/recipes/10000000-0000-4000-8000-000000000001"
         ):
@@ -1226,6 +1271,21 @@ def test_runner_completes_exact_public_lifecycle_without_secret_leaks(
     )
 
 
+def test_runner_consumes_current_fleet_snapshot_and_binds_its_canonical_digest(
+    tmp_path: Path, server: SliceServer
+) -> None:
+    result, evidence_path = _run(tmp_path, server, "--stop-after", "inventory-ready")
+
+    assert result.returncode == 0, result.stderr
+    assert server.last_fleet_document is not None
+    evidence = json.loads(evidence_path.read_text())
+    assert evidence["completed_states"] == ["inventory-ready"]
+    assert (
+        evidence["outputs"]["fleet_evidence_digest"]
+        == hashlib.sha256(_canonical(server.last_fleet_document)).hexdigest()
+    )
+
+
 @pytest.mark.parametrize(
     ("phase", "preview_path", "apply_path", "identifier", "digest"),
     (
@@ -1741,7 +1801,7 @@ def test_model_multinode_runner_proves_failure_recovery_restart_and_cleanup(
         NODE: "2026-08-11T10:01:00+00:00",
         NODE_2: "2026-08-11T10:01:00+00:00",
     }
-    server.fleet_digest = "c" * 64
+    server.fleet_event_cursor = 2
     server.route_published = True
     recovered, _ = _run_model(tmp_path, server, "--stop-after", "inference-recovered")
     assert recovered.returncode == 0, recovered.stderr
@@ -1750,14 +1810,16 @@ def test_model_multinode_runner_proves_failure_recovery_restart_and_cleanup(
         NODE: "2026-08-11T10:02:00+00:00",
         NODE_2: "2026-08-11T10:02:00+00:00",
     }
-    server.fleet_digest = "d" * 64
+    server.fleet_event_cursor = 3
     completed, _ = _run_model(tmp_path, server)
 
     assert completed.returncode == 0, completed.stderr
     evidence = json.loads(evidence_path.read_text())
     assert evidence["completed_states"] == list(MODEL_MULTINODE_STATES)
     assert evidence["failure_node"] == NODE_2
-    assert evidence["outputs"]["restart_fleet_evidence_digest"] == "d" * 64
+    restart_digest = evidence["outputs"]["restart_fleet_evidence_digest"]
+    assert re.fullmatch(r"[0-9a-f]{64}", restart_digest)
+    assert restart_digest != evidence["outputs"]["fleet_evidence_digest"]
     assert (
         evidence["qualification_sha256"]
         == hashlib.sha256((tmp_path / "qualification.json").read_bytes()).hexdigest()

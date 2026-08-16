@@ -1,5 +1,6 @@
 import re
 import tomllib
+from html.parser import HTMLParser
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -37,6 +38,8 @@ EXECUTION_HARNESS_PLAN = (
 ROUTE_LEASE_PLAN = (
     ROOT / "docs/superpowers/plans/2026-08-16-route-serving-lease-authority.md"
 )
+EXECUTION_HARNESSES = ROOT / "docs/operators/execution-harnesses.md"
+MODEL_CATALOG = ROOT / "docs/operators/model-catalog.md"
 
 GENERIC_ONBOARDING_DOCS = (
     README,
@@ -84,6 +87,29 @@ def _ordered_steps(section: str) -> list[str]:
         elif steps and line.startswith("   "):
             steps[-1] += f" {line.strip()}"
     return steps
+
+
+def _headings(path: Path) -> list[str]:
+    return [
+        match.group(2).strip()
+        for match in re.finditer(
+            r"^(#{1,6})\s+(.+?)\s*$", path.read_text(), re.MULTILINE
+        )
+    ]
+
+
+class _ArchitectureDocument(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.ids: set[str] = set()
+        self.links: set[str] = set()
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = dict(attrs)
+        if attributes.get("id"):
+            self.ids.add(str(attributes["id"]))
+        if tag == "a" and attributes.get("href"):
+            self.links.add(str(attributes["href"]))
 
 
 def test_readme_describes_the_spark_native_runtime_boundary() -> None:
@@ -777,3 +803,48 @@ def test_quick_start_does_not_present_a_tunnel_as_normal_browser_access() -> Non
         assert "-L 18080:127.0.0.1:8080" not in text
         for claim in forbidden:
             assert claim not in text
+
+
+def test_operator_catalog_guides_expose_complete_navigable_concept_and_lifecycle_sections() -> (
+    None
+):
+    assert _headings(MODEL_CATALOG) == [
+        "Model catalog",
+        "Four catalog layers",
+        "Exact immutable identity",
+        "One Spark, many Sparks, and replicas",
+        "Custom recipes and license responsibility",
+        "Catalog operations",
+        "Install and invoke",
+        "Stop and uninstall",
+        "Update and exact-revision rollback",
+    ]
+    assert _headings(EXECUTION_HARNESSES) == [
+        "Execution harness operations",
+        "Harness, distribution, and patch",
+        "The eight built-in harnesses",
+        "Interface publication",
+        "Clean development reset",
+        "Acceptance evidence",
+        "Controller execution sequence",
+    ]
+
+    index_links = {
+        destination
+        for _label, destination in re.findall(
+            r"\[([^\]]+)\]\(([^)]+)\)", DOCS_INDEX.read_text()
+        )
+    }
+    assert "operators/model-catalog.md" in index_links
+    assert "operators/execution-harnesses.md" in index_links
+
+
+def test_architecture_html_has_semantic_catalog_resolution_and_interface_publication_paths() -> (
+    None
+):
+    document = _ArchitectureDocument()
+    document.feed(ARCHITECTURE_HTML.read_text())
+
+    assert {"catalog-resolution", "interface-publication"} <= document.ids
+    assert "operators/model-catalog.md" in document.links
+    assert "operators/execution-harnesses.md" in document.links

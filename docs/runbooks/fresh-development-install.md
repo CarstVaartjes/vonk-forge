@@ -296,6 +296,20 @@ installation guide's bounded
 [start-limit recovery](../operations/install-vonk-agent.md#rotation-recovery-and-removal);
 do not re-pair the node or delete its state.
 
+If this installation is replacing any earlier prototype or recipe-domain
+state, do not continue with a retained database or selected volumes. Run the
+development-only procedure in
+[Clean development reset](../operators/execution-harnesses.md#clean-development-reset).
+That procedure removes every control volume and verifies exact fresh head
+`0027_execution_harness_catalog`; it has no compatibility or prototype import
+path. Afterward, the initializer recreates administrator subject `admin` from
+the retained verifier, but the operator must establish a fresh browser session
+and repeat the one-use grant/pair/approve/pair sequence for every Spark. Use new
+acceptance paths. A pre-reset login, session, pairing token, enrollment, route,
+or evidence file is never proof for the fresh installation. Spark-local caches
+may survive only as untrusted candidates until their exact content digests are
+verified again.
+
 ## 7. Prove the installation
 
 The commands below are deterministic acceptance, not normal browser access.
@@ -332,7 +346,9 @@ Success proves source verification, isolated rootless image build, signed
 Docker import/start, install, route publication, inference, stop, route
 withdrawal, and uninstall. For native DS4/Mia model qualification, restart
 persistence, and rank failure/recovery, continue with
-[Development agent workload acceptance](development-agent-workloads.md).
+[Development agent workload acceptance](development-agent-workloads.md) and
+the canonical
+[recipe acceptance sequence](../operators/execution-harnesses.md#controller-execution-sequence).
 
 Finish the supported installation in the browser: open the stable private
 Tailscale HTTPS Service URL, log in as exact subject `admin`, and confirm the
