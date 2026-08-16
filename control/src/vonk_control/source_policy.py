@@ -112,6 +112,34 @@ def enforce_build_source_policy(
     return report
 
 
+def dockerfile_base_images(payload: bytes) -> tuple[dict[str, str], ...]:
+    """Return the ordered, unique immutable FROM authorities in a checked file."""
+
+    text = payload.decode("utf-8")
+    images: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for _line, instruction, argument in _dockerfile_instructions(text):
+        if instruction.upper() != "FROM":
+            continue
+        tokens = [
+            token for token in argument.split() if not token.startswith("--platform=")
+        ]
+        reference = tokens[0] if tokens else ""
+        if reference == "scratch" or reference in seen:
+            continue
+        matched = _PINNED_IMAGE.fullmatch(reference)
+        if matched is None:
+            raise ValueError("Dockerfile base image authority is invalid")
+        images.append(
+            {
+                "manifest_digest": f"sha256:{matched.group(1)}",
+                "reference": reference,
+            }
+        )
+        seen.add(reference)
+    return tuple(images)
+
+
 def _inspect_dockerfile(
     path: str,
     payload: bytes,

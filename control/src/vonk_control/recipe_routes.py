@@ -317,6 +317,14 @@ class RecipeRouteService:
             raise RecipeRouteError("recipe run is absent from route candidate")
         recovery_job = self._enforce_recovery_publication_deadline(session, run)
         generation = self._publish(candidate)
+        if recovery_job is not None:
+            try:
+                # External activation can cross the bounded recovery window.
+                # Recheck before projecting success or recording the marker.
+                self._enforce_recovery_publication_deadline(session, run)
+            except RecipeRecoveryDeadlineError:
+                self._withdraw_runs_in_session(session, frozenset({run_id}))
+                raise
         self.projection_in_session(session, generation, state="completed")
         if recovery_job is not None:
             result = (

@@ -12,13 +12,15 @@ use vonk_agent::{
     recipe_builder::{RecipeBuildError, RecipeBuilder},
 };
 use vonk_agent_protocol::{
-    RecipeBuildArgument, RecipeBuildLimits, RecipeBuildNetwork, RecipeBuildRequest, canonical_json,
-    hex_sha256,
+    RecipeBuildArgument, RecipeBuildBaseImage, RecipeBuildLimits, RecipeBuildNetwork,
+    RecipeBuildRequest, canonical_json, hex_sha256,
 };
 
 struct Runner {
     calls: RefCell<Vec<(Program, Vec<String>)>>,
     fail_build: bool,
+    oversize_base: bool,
+    substitute_base: bool,
 }
 
 impl ProcessRunner for Runner {
@@ -29,11 +31,29 @@ impl ProcessRunner for Runner {
         _timeout: Duration,
     ) -> Result<ProcessOutput, ProcessError> {
         self.calls.borrow_mut().push((program, arguments.to_vec()));
-        let stdout = if arguments.iter().any(|value| value == "inspect") {
+        let stdout = if arguments.iter().any(|value| value.contains("{{.Digest}}")) {
+            format!(
+                "sha256:{}\tlinux\tarm64\n",
+                if self.substitute_base {
+                    "e".repeat(64)
+                } else {
+                    "a".repeat(64)
+                }
+            )
+            .into_bytes()
+        } else if arguments.iter().any(|value| value == "inspect") {
             b"linux\tarm64\tv1\t10001:10001\n".to_vec()
         } else {
             Vec::new()
         };
+        if self.oversize_base && arguments.iter().any(|value| value == "load") {
+            let storage = arguments
+                .windows(2)
+                .find(|pair| pair[0] == "--root")
+                .map(|pair| Path::new(&pair[1]))
+                .unwrap();
+            fs::write(storage.join("oversized-layer"), [0_u8; 1024])?;
+        }
         if arguments.iter().any(|value| value == "push") {
             let digest_file = arguments
                 .windows(2)
@@ -111,6 +131,11 @@ fn request(bundle_bytes: usize, digest: String) -> RecipeBuildRequest {
             name: "runtime-version".to_owned(),
             value: serde_json::json!("1"),
         }],
+        base_image_storage_bytes: 64 * 1024 * 1024,
+        base_images: vec![RecipeBuildBaseImage {
+            manifest_digest: format!("sha256:{}", "a".repeat(64)),
+            reference: format!("ghcr.io/vonkforge/base@sha256:{}", "a".repeat(64)),
+        }],
         build_id: Uuid::parse_str("00000000-0000-4000-8000-000000000009").unwrap(),
         build_input_sha256: "c".repeat(64),
         dockerfile: "Dockerfile".to_owned(),
@@ -140,14 +165,23 @@ fn request(bundle_bytes: usize, digest: String) -> RecipeBuildRequest {
     }
 }
 
+fn stage_base_archive(root: &Path) {
+    let directory = root.join("base-images").join("sha256").join("a".repeat(64));
+    fs::create_dir_all(&directory).unwrap();
+    fs::write(directory.join("image.oci.tar"), b"exact OCI archive").unwrap();
+}
+
 #[test]
 fn build_exports_a_docker_load_archive_from_the_rootless_builder() {
     let (archive, digest) = bundle();
     let runner = Runner {
         calls: RefCell::new(Vec::new()),
         fail_build: false,
+        oversize_base: false,
+        substitute_base: false,
     };
     let root = tempdir().unwrap();
+    stage_base_archive(root.path());
     let runtime = tempdir().unwrap();
     let operation = Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap();
 
@@ -162,7 +196,37 @@ fn build_exports_a_docker_load_archive_from_the_rootless_builder() {
     assert_eq!(evidence.image_digest, format!("sha256:{}", "d".repeat(64)));
     assert_eq!(evidence.image_bytes, 20);
     let calls = runner.calls.borrow();
-    let build = &calls[0];
+    let load_index = calls
+        .iter()
+        .position(|call| call.1.iter().any(|value| value == "load"))
+        .unwrap();
+    let base_inspect_index = calls
+        .iter()
+        .position(|call| call.1.iter().any(|value| value.contains("{{.Digest}}")))
+        .unwrap();
+    let build_index = calls
+        .iter()
+        .position(|call| call.1.iter().any(|value| value == "build"))
+        .unwrap();
+    assert!(load_index < base_inspect_index && base_inspect_index < build_index);
+    assert!(
+        calls[load_index]
+            .1
+            .iter()
+            .any(|value| value.ends_with(&format!(
+                "base-images/sha256/{}/image.oci.tar",
+                "a".repeat(64)
+            )))
+    );
+    assert!(
+        calls
+            .iter()
+            .all(|call| !call.1.iter().any(|value| value == "pull"))
+    );
+    let build = calls
+        .iter()
+        .find(|call| call.1.iter().any(|value| value == "build"))
+        .unwrap();
     assert_eq!(build.0, Program::Podman);
     for required in [
         "--cgroup-manager=systemd",
@@ -230,7 +294,10 @@ fn build_exports_a_docker_load_archive_from_the_rootless_builder() {
     }
     assert!(
         Path::new(
-            calls[2]
+            calls
+                .iter()
+                .find(|call| call.1.iter().any(|value| value == "push"))
+                .unwrap()
                 .1
                 .last()
                 .unwrap()
@@ -254,8 +321,11 @@ fn build_removes_readonly_private_graphroot_after_process_failure() {
     let runner = Runner {
         calls: RefCell::new(Vec::new()),
         fail_build: true,
+        oversize_base: false,
+        substitute_base: false,
     };
     let root = tempdir().unwrap();
+    stage_base_archive(root.path());
     let runtime = tempdir().unwrap();
     let operation = Uuid::parse_str("00000000-0000-4000-8000-000000000004").unwrap();
 
@@ -283,6 +353,8 @@ fn build_rejects_declared_public_hosts_before_running_podman() {
     let runner = Runner {
         calls: RefCell::new(Vec::new()),
         fail_build: false,
+        oversize_base: false,
+        substitute_base: false,
     };
     let root = tempdir().unwrap();
     let runtime = tempdir().unwrap();
@@ -311,8 +383,11 @@ fn build_rejects_a_docker_archive_larger_than_declared_output_limit() {
     let runner = Runner {
         calls: RefCell::new(Vec::new()),
         fail_build: false,
+        oversize_base: false,
+        substitute_base: false,
     };
     let root = tempdir().unwrap();
+    stage_base_archive(root.path());
     let runtime = tempdir().unwrap();
     let operation = Uuid::parse_str("00000000-0000-4000-8000-000000000003").unwrap();
     let mut build_request = request(archive.len(), digest);
@@ -327,4 +402,113 @@ fn build_rejects_a_docker_archive_larger_than_declared_output_limit() {
     .unwrap_err();
 
     assert!(matches!(error, RecipeBuildError::OutputLimit));
+}
+
+#[test]
+fn build_fails_closed_when_declared_base_archive_is_absent() {
+    let (archive, digest) = bundle();
+    let runner = Runner {
+        calls: RefCell::new(Vec::new()),
+        fail_build: false,
+        oversize_base: false,
+        substitute_base: false,
+    };
+    let root = tempdir().unwrap();
+    let runtime = tempdir().unwrap();
+
+    let error = RecipeBuilder {
+        runner: &runner,
+        data_root: root.path(),
+        runtime_root: runtime.path(),
+    }
+    .build(
+        &request(archive.len(), digest),
+        Uuid::parse_str("00000000-0000-4000-8000-000000000005").unwrap(),
+        &archive,
+    )
+    .unwrap_err();
+
+    assert!(matches!(error, RecipeBuildError::Io(_)));
+    assert!(
+        !runner
+            .calls
+            .borrow()
+            .iter()
+            .any(|call| call.1.contains(&"build".to_owned()))
+    );
+}
+
+#[test]
+fn build_rejects_substituted_base_before_offline_build() {
+    let (archive, digest) = bundle();
+    let runner = Runner {
+        calls: RefCell::new(Vec::new()),
+        fail_build: false,
+        oversize_base: false,
+        substitute_base: true,
+    };
+    let root = tempdir().unwrap();
+    stage_base_archive(root.path());
+    let runtime = tempdir().unwrap();
+
+    let error = RecipeBuilder {
+        runner: &runner,
+        data_root: root.path(),
+        runtime_root: runtime.path(),
+    }
+    .build(
+        &request(archive.len(), digest),
+        Uuid::parse_str("00000000-0000-4000-8000-000000000006").unwrap(),
+        &archive,
+    )
+    .unwrap_err();
+
+    assert!(matches!(error, RecipeBuildError::Evidence));
+    let calls = runner.calls.borrow();
+    assert!(calls.iter().any(|call| call.1.contains(&"load".to_owned())));
+    assert!(
+        !calls
+            .iter()
+            .any(|call| call.1.contains(&"build".to_owned()))
+    );
+}
+
+#[test]
+fn base_import_is_bounded_before_offline_build() {
+    let (archive, digest) = bundle();
+    let runner = Runner {
+        calls: RefCell::new(Vec::new()),
+        fail_build: false,
+        oversize_base: true,
+        substitute_base: false,
+    };
+    let root = tempdir().unwrap();
+    stage_base_archive(root.path());
+    let runtime = tempdir().unwrap();
+    let mut build_request = request(archive.len(), digest);
+    build_request.base_image_storage_bytes = 100;
+
+    let error = RecipeBuilder {
+        runner: &runner,
+        data_root: root.path(),
+        runtime_root: runtime.path(),
+    }
+    .build(
+        &build_request,
+        Uuid::parse_str("00000000-0000-4000-8000-000000000007").unwrap(),
+        &archive,
+    )
+    .unwrap_err();
+
+    assert!(matches!(
+        error,
+        RecipeBuildError::Process(ProcessError::StorageLimit)
+    ));
+    assert!(
+        !runner
+            .calls
+            .borrow()
+            .iter()
+            .any(|call| call.1.contains(&"build".to_owned()))
+    );
 }

@@ -169,6 +169,13 @@ def test_build_plan_is_typed_sandboxed_and_durable(tmp_path: Path) -> None:
     assert plan.agent_payload["kind"] == "recipe.build.v1"
     assert "command" not in plan.agent_payload
     assert plan.agent_payload["limits"]["gpu"] == 0
+    assert plan.agent_payload["base_images"] == [
+        {
+            "manifest_digest": "sha256:" + "a" * 64,
+            "reference": "ghcr.io/example/vllm@sha256:" + "a" * 64,
+        }
+    ]
+    assert plan.agent_payload["base_image_storage_bytes"] == 100
     assert (
         plan.agent_payload["source_bundle_sha256"]
         == revision.document["build"]["context"]["sha256"]
@@ -315,7 +322,8 @@ def test_starting_build_atomically_reserves_temporary_disk_and_memory(
             "disk",
             plan.agent_payload["limits"]["temporary_bytes"]
             + plan.agent_payload["source_bundle_bytes"]
-            + plan.agent_payload["limits"]["output_bytes"],
+            + plan.agent_payload["limits"]["output_bytes"]
+            + plan.agent_payload["base_image_storage_bytes"],
         ),
         ("host-memory", plan.agent_payload["limits"]["memory_bytes"]),
     ]

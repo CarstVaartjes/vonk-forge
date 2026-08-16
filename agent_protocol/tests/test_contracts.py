@@ -319,11 +319,18 @@ def test_recipe_build_claim_accepts_only_typed_slash_bearing_fields() -> None:
         "platform": "linux/arm64",
         "dockerfile": "containers/runtime/Dockerfile",
         "arguments": [{"name": "runtime-source", "value": "vendor/runtime"}],
+        "base_images": [
+            {
+                "manifest_digest": "sha256:" + "a" * 64,
+                "reference": "ghcr.io/vonkforge/runtime@sha256:" + "a" * 64,
+            }
+        ],
     }
 
     claim = AgentClaim.parse(claim_for_operation("recipe.build.v1", payload))
 
     assert claim.payload["platform"] == "linux/arm64"
+    assert claim.payload["base_images"][0]["reference"].startswith("ghcr.io/")
 
 
 @pytest.mark.parametrize(
@@ -333,6 +340,7 @@ def test_recipe_build_claim_accepts_only_typed_slash_bearing_fields() -> None:
         {"dockerfile": "/etc/passwd"},
         {"dockerfile": "../Dockerfile"},
         {"dockerfile": "containers//Dockerfile"},
+        {"base_images": [{"reference": "ghcr.io/vonkforge/runtime:latest"}]},
         {"evidence": "host/path"},
         {"arguments": [{"name": "safe", "nested": {"value": "host/path"}}]},
     ],

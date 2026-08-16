@@ -51,6 +51,9 @@ running = set(state["running"])
 if arguments[:1] == ["info"]:
     print({architecture!r})
 elif arguments[:1] == ["build"]:
+    if arguments.count("--pull=false") != 1 or "--pull" in arguments:
+        print("malformed or pull-enabled build invocation", file=sys.stderr)
+        raise SystemExit(96)
     print("qualified-image")
 elif arguments[:1] == ["run"]:
     name = arguments[arguments.index("--name") + 1]
@@ -314,7 +317,8 @@ def test_bridge_qualification_publishes_the_bounded_endpoint_and_builds_offline(
     calls = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
     build = next(call for call in calls if call[:1] == ["build"])
     assert build[build.index("--network") + 1] == "none"
-    assert build[build.index("--pull") + 1] == "false"
+    assert build.count("--pull=false") == 1
+    assert "--pull" not in build
     starts = [call for call in calls if call[:1] == ["run"]]
     assert len(starts) == 2
     assert all(

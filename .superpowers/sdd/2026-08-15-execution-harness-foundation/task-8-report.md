@@ -1040,3 +1040,294 @@ It references the unchanged canonical vLLM harness digest
 1. Physical linux/arm64, GPU, two-DGX-Spark, RoCE, and performance acceptance
    cannot run on this x86_64 host. No physical acceptance is claimed; Task 9
    retains it.
+
+## Fix round 3 — 2026-08-16
+
+Fix round 3 addressed exactly the four residuals in the appended authoritative
+review. The previously corrected recipe, harness, model, distribution, patch,
+source-bundle, lifecycle, and built-in-harness behavior remains intact.
+
+### What was implemented
+
+1. Recovery phase projection now re-samples the clock only after the recovery
+   job row lock has been acquired. Deadline expiry is therefore evaluated with
+   lock-held time before any phase or terminal transition. Route publication
+   also rechecks the deadline after the external activation call; a publication
+   that crosses the deadline is immediately replaced by the withdrawn/empty
+   generation, commits the failed/withdrawn run state, and never records
+   `recovery_route_published`.
+2. The privileged helper now accepts exactly the writable host projection
+   `agent-data/runs/<run-id>/outputs -> /outputs`. It derives and verifies the
+   run ID from that parent, applies write ACLs only to the output directory,
+   retains read-only model and runtime-contract mounts, and rejects `/state`,
+   `/scratch`, or every other writable target before invoking Docker.
+3. The executable Docker qualifier now emits the valid single argument
+   `--pull=false`. Its behavioral engine parses build argv and exits 96 for the
+   old split `--pull false` form, a missing no-pull declaration, or duplicate
+   declarations, so this is an executable build-engine regression rather than
+   a string-only assertion.
+4. Recipe build authority now includes the ordered unique exact `FROM` image
+   references, matching manifest digests, and a bounded base-image store byte
+   envelope in the controller's build identity and signed agent claim. The
+   Python and Rust protocol boundaries validate the closed shape and reject
+   floating or mismatched references. The agent re-derives `FROM` authority
+   from the verified source bundle, requires each immutable archive at
+   `base-images/sha256/<manifest-hex>/image.oci.tar`, rejects absent, empty,
+   symlinked, escaped, oversized, or substituted input, and loads each archive
+   into the same fresh operation-private Podman graphroot used by the build.
+   It then inspects exact digest, OS, and architecture before executing the
+   still-networkless `--pull=never` build. Controller admission/reservation and
+   live agent directory accounting both include the declared base-image store.
+
+The production Python protocol wheel and its dependent lock/SBOM evidence were
+regenerated after adding the typed base-image claim fields. The wheel SHA-256 is
+`17f8de6fd41b35572343d48d82fb28d329862af4baa5063a9cb96168ef11ef23`;
+the regenerated supply manifest SHA-256 is
+`b407c1f7dbeb629ec0936c8baa20c0b7469a7a6b869fc04e7d62b5cf61028558`.
+
+### TDD RED evidence
+
+The publication-window and real qualifier regressions were first captured
+together:
+
+```text
+control/.venv/bin/pytest -q \
+  control/tests/test_recipe_operations.py::test_recovery_publication_crossing_deadline_is_immediately_withdrawn \
+  scripts/tests/test_qualify_recipe.py::test_bridge_qualification_publishes_the_bounded_endpoint_and_builds_offline
+
+2 failed
+- publication did not raise after its external call crossed the deadline
+- the behavioral engine exited 96 because build argv contained `--pull false`
+```
+
+The helper ABI was independently RED against the required exact output mount:
+
+```text
+cargo test -p vonk-agent-helper --test authority \
+  accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority -- --exact
+
+FAILED: InvalidOperation (the helper still permitted `/state`, not `/outputs`)
+```
+
+The signed build authority was RED at both controller and Rust protocol
+boundaries:
+
+```text
+cargo test -p vonk-agent-protocol --test recipe_builds \
+  build_payload_is_closed_and_declarative -- --exact
+
+FAILED: unknown field `base_images`
+
+control/.venv/bin/pytest -q \
+  control/tests/test_recipe_builds.py::test_build_plan_is_typed_sandboxed_and_durable \
+  control/tests/test_recipe_builds.py::test_starting_build_atomically_reserves_temporary_disk_and_memory
+
+2 failed: missing `base_images` / `base_image_storage_bytes`
+```
+
+The faithful private-OCI-store test proved the prior production builder ignored
+an absent declared base:
+
+```text
+cargo test -p vonk-agent --test recipe_builder \
+  build_fails_closed_when_declared_base_archive_is_absent -- --exact
+
+FAILED: expected an error, received successful build evidence
+```
+
+Finally, the cross-language signed claim test exposed that the Python protocol
+boundary had no typed slash-bearing base-image reference:
+
+```text
+uv run --project agent_protocol --frozen python -m pytest -q \
+  agent_protocol/tests/test_contracts.py::test_recipe_build_claim_accepts_only_typed_slash_bearing_fields
+
+1 failed: AgentProtocolError: filesystem path values are not allowed
+```
+
+All failures were expected because they directly exercised missing round-3
+behavior before implementation.
+
+### GREEN evidence
+
+The final focused controller/recipe/qualifier batch includes the real
+PostgreSQL row-lock wait, publication-crosses-deadline withdrawal, source and
+signed build authority, exact native base identities, strict eight-built-in
+guard, qualifier argv parser, source bundling, and DS4/Mia conformance:
+
+```text
+uv run --project control --frozen python -m pytest -q \
+  control/tests/test_recipe_operations.py control/tests/test_recipe_routes.py \
+  control/tests/test_recipe_builds.py control/tests/test_source_policy.py \
+  control/tests/test_development_recipe_fixture.py \
+  control/tests/test_builtin_harnesses.py \
+  control/tests/test_recipe_runtime_specs.py \
+  control/tests/test_distributed_lifecycle.py \
+  control/tests/test_development_catalog.py \
+  scripts/tests/test_qualify_recipe.py \
+  scripts/tests/test_recipe_source_bundle.py \
+  scripts/tests/test_native_development_entrypoints.py \
+  tests/recipes/test_deepseek_v4_flash_ds4.py \
+  tests/recipes/test_mia_deepseek_v4_flash.py
+
+292 passed in 32.64s
+```
+
+Complete Rust agent/helper/protocol targets exercised the exact helper ABI and
+the faithful private-store sequence `load -> exact inspect -> offline build`,
+including absent, substituted, and live-over-budget base failures:
+
+```text
+cargo test -p vonk-agent-protocol -p vonk-agent \
+  -p vonk-agent-helper --all-targets
+
+155 passed; 0 failed
+```
+
+Additional complete retained suites and security evidence:
+
+```text
+uv run --project agent_protocol --frozen python -m pytest -q agent_protocol/tests
+450 passed in 0.44s
+
+uv run --project control --frozen python -m pytest -q \
+  scripts/tests/test_run_development_slices.py
+59 passed in 35.75s
+
+uv run --project control --frozen python -m pytest -q \
+  tests/runbooks/test_development_nas_installation.py tests/test_docs_contract.py
+53 passed in 0.04s
+
+uv run --project control --frozen python -m pytest -q \
+  control/tests/security/test_agent_protocol.py tests/scripts/test_verify_supply_chain.py
+61 passed in 23.19s
+```
+
+Final non-test gates:
+
+```text
+uvx --from ruff==0.16.1 ruff check <all changed Python files>
+All checks passed!
+
+cargo clippy -p vonk-agent-protocol -p vonk-agent \
+  -p vonk-agent-helper --tests -- -D warnings
+cargo fmt --all -- --check
+git diff --check
+jq empty <all changed SBOM JSON documents>
+
+All exited 0.
+
+scripts/verify-supply-chain --json
+{"errors":[],"images":7,"manifest_sha256":"b407c1f7dbeb629ec0936c8baa20c0b7469a7a6b869fc04e7d62b5cf61028558","ok":true,...}
+```
+
+One verification iteration found only formatter layout in the strengthened
+helper test. The formatter's exact layout was applied, after which
+`cargo test -p vonk-agent-helper --all-targets` passed all 12 tests and both
+`cargo fmt --all -- --check` and `git diff --check` exited 0.
+
+### Container qualification evidence and environment limitation
+
+The qualifier's real executable path performs strict structural resolution,
+then correctly stops at the physical architecture gate on this x86_64 host:
+
+```text
+scripts/qualify-recipe --recipe config/recipes/deepseek-v4-flash-0731-ds4-single.json --level container
+{"detail":"container qualification requires a native linux/arm64 host","detected_architecture":"x86_64","passed":false,"required_architecture":"arm64","status":"environment-limited"}
+
+scripts/qualify-recipe --recipe config/recipes/deepseek-v4-flash-0731-mia-dual.json --level container
+{"detail":"container qualification requires a native linux/arm64 host","detected_architecture":"x86_64","passed":false,"required_architecture":"arm64","status":"environment-limited"}
+
+ds4_exit=3 mia_exit=3
+```
+
+No physical ARM64 image import/build, GPU inference, two-Spark collective,
+RoCE, performance, or acceptance result is claimed. Physical Spark acceptance
+remains Task 9.
+
+### Exact identities preserved
+
+All accepted external identities are unchanged:
+
+- Mia source `f752cd04ab30f2cf42077dd8811a5e1e682d63e7`.
+- DS4 source `84cc882352757baf628a1776badf7cc54d584e28`.
+- Anemll source `47503f8e38dadd4dededca798150db2619594fce`.
+- vLLM source `752a3a504485790a2e8491cacbb35c137339ad34`.
+- Antirez model revision `e7f04037032990db0346398d249baf9fb9df1ccc`;
+  target 86,720,111,488 bytes / SHA-256
+  `ca22ae2f838e14077c22bc1c1417b71b45b5e5a3687bd96c2ac6e17fdb6261c0`;
+  support 5,989,114,272 bytes / SHA-256
+  `7e319924541db3f7a163ed7e11d7532a70d48228ab59d36cb81e1d4511885360`.
+- Official model revision `62af8fffb2f7030cac4de2f0169f5b8d1101b646`;
+  public/ungated, 74 files totaling 166,898,666,055 bytes.
+- Mia base image
+  `ghcr.io/anemll/dspark-vllm-gx10@sha256:a83948492cf13df455170fb42885f5ef4db54fefe0feff0f841ecbff464ac9d8`,
+  manifest size 9,530.
+- DS4 build base
+  `nvcr.io/nvidia/cuda:13.0.1-devel-ubuntu24.04@sha256:5c36750138dc1447a17dafbb397674f167d3b44ce18d9160d769df114577b35d`.
+- DS4 runtime base
+  `nvcr.io/nvidia/cuda:13.0.1-runtime-ubuntu24.04@sha256:36050649ad1acc5d3de2c26620191c25850fb12a5771b6c22996033003d952e4`.
+
+No `config/` or `adapters/deepseek/` authoritative identity file changed in
+round 3. The canonical DS4 runtime-distribution, DS4 recipe, and Mia recipe
+digests therefore remain respectively
+`337c9d850a70b6a8907e588d4fee1d447f770bc004cb15bbc45283d017dca389`,
+`373169b0ef24f8d21b0aa40e918e13554bb4d788b4bd426df9f14b64b47d184a`,
+and `fb7e6314de7649871f080d9dc0c63dbb1ea827eaf5b47d24291c34f26b49ec35`.
+
+### Files changed in fix round 3
+
+- Recovery/publication:
+  `control/src/vonk_control/{recipe_operations,recipe_routes}.py` and
+  `control/tests/test_recipe_operations.py`.
+- Base-image authority and admission:
+  `control/src/vonk_control/{recipe_builds,source_policy}.py`,
+  `control/tests/{test_recipe_builds,test_development_recipe_fixture}.py`,
+  `agent_protocol/src/vonk_agent_protocol/contracts.py`, and
+  `agent_protocol/tests/test_contracts.py`.
+- Agent protocol/store behavior:
+  `rust/crates/vonk-agent-protocol/{src/lib.rs,tests/recipe_builds.rs}` and
+  `rust/crates/vonk-agent/{src/recipe_builder.rs,src/source_policy.rs,tests/recipe_builder.rs}`.
+- Privileged helper ABI:
+  `rust/crates/vonk-agent-helper/{src/operations.rs,tests/authority.rs}`.
+- Qualifier:
+  `scripts/qualify-recipe` and `scripts/tests/test_qualify_recipe.py`.
+- Regenerated supply evidence:
+  `agent/uv.lock`, `control/uv.lock`,
+  `inventory/wheels/vonk_agent_protocol-2.1.0-py3-none-any.whl`, and the changed
+  agent-protocol/agent-Python/control-Python SBOMs plus
+  `inventory/sbom/manifest.json`.
+
+### Self-review findings
+
+- Lock/deadline semantics: the regression uses a real PostgreSQL `FOR UPDATE`
+  blocker and advances the injected clock only while the worker is blocked.
+  No next recovery phase is created after release. The separate publisher test
+  advances time inside the external publish call and verifies published then
+  empty generations, durable failure/withdrawal, and absence of the recovery
+  publication marker.
+- Helper authority: host source shape and container target are both exact;
+  forbidden-target tests keep the valid output source and vary only `/state`
+  or `/scratch`. Validation fails before any additional Docker run.
+- Build/offline security: controller and agent independently derive the same
+  ordered immutable `FROM` set. The signed claim binds the set and storage
+  envelope. The agent accepts no ambient graphroot, loads only fixed local
+  archive paths into its operation-private graphroot, verifies exact imported
+  digest/platform, retains `--network=none --pull=never`, and has executable
+  absent/substitution/live-storage failure tests.
+- Identity/immutability: no accepted external or canonical recipe entity was
+  changed. No floating image tag, compatibility reader, alias, migration, or
+  startup/network patch behavior was introduced.
+- Built-in scope: the stale round-1 plan remains absent, `development-http`
+  remains absent from production harness config/compiler paths, and the exact
+  required-eight regression remains GREEN.
+- Review tooling: no independent subagent dispatcher was exposed in this
+  session. The authoritative four-item review, complete diff, generated binary
+  evidence, immutable identities, and security/offline boundaries were audited
+  locally; no unresolved critical or important finding remained.
+
+### Concerns
+
+1. This x86_64 environment cannot provide physical linux/arm64, GPU,
+   two-DGX-Spark, RoCE, or performance acceptance. No such acceptance is
+   claimed; Task 9 retains it.

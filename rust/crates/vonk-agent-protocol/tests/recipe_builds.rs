@@ -29,6 +29,11 @@ fn build_payload() -> serde_json::Value {
         "source_bundle_sha256": "b".repeat(64),
         "source_bundle_bytes": 4096,
         "build_input_sha256": "c".repeat(64),
+        "base_images": [{
+            "reference": format!("ghcr.io/vonkforge/base@sha256:{}", "d".repeat(64)),
+            "manifest_digest": format!("sha256:{}", "d".repeat(64))
+        }],
+        "base_image_storage_bytes": 68719476736_u64,
         "dockerfile": "Dockerfile",
         "platform": "linux/arm64",
         "arguments": [{"name": "runtime-version", "value": "1"}],
@@ -72,6 +77,17 @@ fn build_network_requires_a_consistent_mode_and_host_declaration() {
 
     let mut payload = build_payload();
     payload["network"] = json!({"mode": "public", "hosts": []});
+    assert!(RecipeOperationRequest::parse(&claim("recipe.build.v1", payload)).is_err());
+}
+
+#[test]
+fn build_base_images_are_exact_declared_supply_chain_authority() {
+    let mut payload = build_payload();
+    payload["base_images"][0]["manifest_digest"] = json!(format!("sha256:{}", "e".repeat(64)));
+    assert!(RecipeOperationRequest::parse(&claim("recipe.build.v1", payload)).is_err());
+
+    let mut payload = build_payload();
+    payload["base_images"][0]["reference"] = json!("ghcr.io/vonkforge/base:latest");
     assert!(RecipeOperationRequest::parse(&claim("recipe.build.v1", payload)).is_err());
 }
 

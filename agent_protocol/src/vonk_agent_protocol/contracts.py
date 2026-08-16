@@ -35,6 +35,9 @@ MODEL_REPOSITORY = re.compile(
     r"(?:/[A-Za-z0-9][A-Za-z0-9._-]{0,127}){1,7}\Z"
 )
 MODEL_QUERY_COMPONENT = re.compile(r"[A-Za-z0-9._~-]{1,128}\Z")
+PINNED_OCI_IMAGE = re.compile(
+    r"[a-z0-9][a-z0-9._:/-]{0,511}@sha256:[0-9a-f]{64}\Z"
+)
 
 
 def _ascii_case_pattern(token: str, *, initial_upper: bool = False) -> str:
@@ -225,6 +228,13 @@ def _typed_build_string(path: tuple[str | int, ...], value: str) -> bool:
             and "\x00" not in value
             and all(part not in {"", ".", ".."} for part in value.split("/"))
         )
+    if (
+        len(path) == 3
+        and path[0] == "base_images"
+        and isinstance(path[1], int)
+        and path[2] == "reference"
+    ):
+        return PINNED_OCI_IMAGE.fullmatch(value) is not None
     return (
         len(path) == 3
         and path[0] == "arguments"

@@ -1190,6 +1190,10 @@ class RecipeOperationService:
         if locked_job is None:
             raise RecipeOperationConflict("recipe operation disappeared")
         job = locked_job
+        # Lock acquisition can outlive a retained recovery deadline. Every
+        # phase/terminal transition uses a fresh time sampled inside the lock.
+        now = self._clock()
+        operation.updated_at = now
         node_id = operation.node_id
         owner_id = _required_string(job.payload, "owner_id")
         if job.kind == "recipe.build.v1":

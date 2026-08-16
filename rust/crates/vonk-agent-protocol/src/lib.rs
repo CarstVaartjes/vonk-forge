@@ -227,6 +227,8 @@ pub enum RecipeOperationRequest {
 #[serde(deny_unknown_fields)]
 pub struct RecipeBuildRequest {
     pub arguments: Vec<RecipeBuildArgument>,
+    pub base_image_storage_bytes: u64,
+    pub base_images: Vec<RecipeBuildBaseImage>,
     pub build_id: Uuid,
     pub build_input_sha256: String,
     pub dockerfile: String,
@@ -239,6 +241,13 @@ pub struct RecipeBuildRequest {
     pub schema_version: u8,
     pub source_bundle_bytes: u64,
     pub source_bundle_sha256: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeBuildBaseImage {
+    pub manifest_digest: String,
+    pub reference: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -438,6 +447,18 @@ fn validate_build(value: &RecipeBuildRequest) -> bool {
             .arguments
             .iter()
             .all(|argument| valid_name(&argument.name) && valid_scalar(&argument.value))
+        && value.base_images.len() <= 8
+        && value.base_images.iter().enumerate().all(|(index, image)| {
+            valid_pinned_image(&image.reference, &image.manifest_digest)
+                && !value.base_images[..index]
+                    .iter()
+                    .any(|prior| prior.reference == image.reference)
+        })
+        && if value.base_images.is_empty() {
+            value.base_image_storage_bytes == 0
+        } else {
+            (1..=16 * 1024_u64.pow(4)).contains(&value.base_image_storage_bytes)
+        }
         && matches!(value.network.mode.as_str(), "none" | "public")
         && ((value.network.mode == "none" && value.network.hosts.is_empty())
             || (value.network.mode == "public" && !value.network.hosts.is_empty()))
@@ -537,6 +558,21 @@ fn valid_oci_digest(value: &str) -> bool {
     value
         .strip_prefix("sha256:")
         .is_some_and(|digest| lower_hex(digest, 64))
+}
+
+fn valid_pinned_image(reference: &str, manifest_digest: &str) -> bool {
+    let Some((name, digest)) = reference.rsplit_once('@') else {
+        return false;
+    };
+    !name.is_empty()
+        && name.len() <= 512
+        && name.bytes().all(|byte| {
+            byte.is_ascii_lowercase()
+                || byte.is_ascii_digit()
+                || matches!(byte, b'.' | b'_' | b':' | b'/' | b'-')
+        })
+        && digest == manifest_digest
+        && valid_oci_digest(digest)
 }
 
 fn valid_role(value: &str) -> bool {

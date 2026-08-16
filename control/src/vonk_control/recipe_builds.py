@@ -29,6 +29,7 @@ from .source_bundles import SourceBundleError, SourceBundleStore
 from .source_policy import (
     SourcePolicyError,
     SourcePolicyReport,
+    dockerfile_base_images,
     enforce_build_source_policy,
     inspect_build_source_policy,
 )
@@ -167,6 +168,15 @@ class RecipeBuildService:
         except SourcePolicyError as error:
             finding = error.report.findings[0]
             raise RecipeBuildError(finding.code, finding.detail) from error
+        dockerfile_path = build.get("dockerfile") if isinstance(build, dict) else None
+        dockerfile_payload = (
+            bundle.files.get(dockerfile_path) if isinstance(dockerfile_path, str) else None
+        )
+        if dockerfile_payload is None:
+            raise RecipeBuildError(
+                "build.source_invalid", "recipe Dockerfile authority is unavailable"
+            )
+        base_images = list(dockerfile_base_images(dockerfile_payload))
         try:
             snapshot = self._inventory.latest(
                 builder_node_id, now=now, maximum_age=self._inventory_max_age
@@ -201,7 +211,10 @@ class RecipeBuildService:
         # per-node image envelope across the selected recipe topology;
         # CUDA/vLLM images routinely exceed 64 MiB.
         output_bytes = _declared_image_bytes(document)
-        required_disk = temporary_bytes + len(bundle.archive) + output_bytes
+        base_image_storage_bytes = int(resources["download_bytes"]) if base_images else 0
+        required_disk = (
+            base_image_storage_bytes + temporary_bytes + len(bundle.archive) + output_bytes
+        )
         if snapshot.disk_free_bytes - disk_reserved < required_disk:
             raise RecipeBuildError(
                 "build.insufficient_disk", "builder lacks temporary disk capacity"
@@ -217,6 +230,8 @@ class RecipeBuildService:
             "source_bundle_sha256": source_sha256,
             "builder_agent_sha256": builder_agent_sha256,
             "artifact_format": BUILD_ARTIFACT_FORMAT,
+            "base_images": base_images,
+            "base_image_storage_bytes": base_image_storage_bytes,
             "build": build,
         }
         build_input_sha256 = _digest(build_identity)
@@ -242,6 +257,8 @@ class RecipeBuildService:
             "source_bundle_sha256": source_sha256,
             "source_bundle_bytes": len(bundle.archive),
             "build_input_sha256": build_input_sha256,
+            "base_images": copy.deepcopy(base_images),
+            "base_image_storage_bytes": base_image_storage_bytes,
             "dockerfile": build["dockerfile"],
             "platform": build["platform"],
             "arguments": copy.deepcopy(build["arguments"]),
@@ -416,14 +433,18 @@ class RecipeBuildService:
         temporary_bytes = limits.get("temporary_bytes")
         memory_bytes = limits.get("memory_bytes")
         output_bytes = limits.get("output_bytes")
+        base_image_storage_bytes = plan.agent_payload.get("base_image_storage_bytes")
         if (
             not isinstance(temporary_bytes, int)
             or not isinstance(memory_bytes, int)
             or not isinstance(output_bytes, int)
+            or not isinstance(base_image_storage_bytes, int)
         ):
             raise RecipeBuildError("build.plan_invalid", "build plan is invalid")
         # Staging and the OCI export coexist until the build is committed.
-        disk_bytes = temporary_bytes + source_bytes + output_bytes
+        disk_bytes = (
+            base_image_storage_bytes + temporary_bytes + source_bytes + output_bytes
+        )
         if (
             snapshot.disk_free_bytes - _reserved(session, plan.builder_node_id, "disk")
             < disk_bytes

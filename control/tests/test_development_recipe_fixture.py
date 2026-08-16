@@ -10,6 +10,7 @@ from vonk_control.catalog_contract import (
 )
 from vonk_control.recipe_contract import validate_recipe
 from vonk_control.recipe_runtime_specs import compile_runtime_spec
+from vonk_control.source_policy import dockerfile_base_images
 
 ROOT = Path(__file__).resolve().parents[2]
 DEVELOPMENT = ROOT / "config/recipes/development"
@@ -75,6 +76,25 @@ def test_native_recipes_have_no_startup_mutation_or_network_fetch_hooks() -> Non
         }
         assert environment["HF_HUB_OFFLINE"] == "1"
         assert not any("PATCH" in name or "DOWNLOAD" in name for name in environment)
+
+
+def test_native_recipe_builds_declare_the_exact_offline_base_image_supply() -> None:
+    expected = {
+        "ds4": (
+            "nvcr.io/nvidia/cuda:13.0.1-devel-ubuntu24.04@sha256:5c36750138dc1447a17dafbb397674f167d3b44ce18d9160d769df114577b35d",
+            "nvcr.io/nvidia/cuda:13.0.1-runtime-ubuntu24.04@sha256:36050649ad1acc5d3de2c26620191c25850fb12a5771b6c22996033003d952e4",
+        ),
+        "mia-vllm": (
+            "ghcr.io/anemll/dspark-vllm-gx10@sha256:a83948492cf13df455170fb42885f5ef4db54fefe0feff0f841ecbff464ac9d8",
+        ),
+    }
+    for adapter, references in expected.items():
+        payload = (ROOT / "adapters/deepseek" / adapter / "Dockerfile").read_bytes()
+        authorities = dockerfile_base_images(payload)
+        assert tuple(item["reference"] for item in authorities) == references
+        assert tuple(item["manifest_digest"] for item in authorities) == tuple(
+            reference.rsplit("@", 1)[1] for reference in references
+        )
 
 
 def test_synthetic_development_recipe_compiles_through_the_native_runtime_path() -> None:

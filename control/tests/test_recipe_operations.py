@@ -2343,9 +2343,9 @@ def test_distributed_rank_loss_queues_bounded_worker_first_recovery(
         ] == ["running", "running"]
 
 
-def _queued_distributed_recovery_stop(tmp_path: Path):
+def _queued_distributed_recovery_stop(tmp_path: Path, *, engine=None):
     sessions, service, queue, mapping_id, build_id, nodes = setup_services(
-        tmp_path, nodes=2, distributed_lifecycle=True
+        tmp_path, nodes=2, distributed_lifecycle=True, engine=engine
     )
     installation = installed_recipe(
         service, mapping_id, build_id, nodes, request_id="i" * 36
@@ -2376,7 +2376,7 @@ def _queued_distributed_recovery_stop(tmp_path: Path):
     return sessions, service, routes, publisher, started, stop_job, nodes
 
 
-def _queued_distributed_recovery_restart(tmp_path: Path):
+def _queued_distributed_recovery_restart(tmp_path: Path, *, engine=None):
     (
         sessions,
         service,
@@ -2385,7 +2385,7 @@ def _queued_distributed_recovery_restart(tmp_path: Path):
         started,
         stop_job,
         nodes,
-    ) = _queued_distributed_recovery_stop(tmp_path)
+    ) = _queued_distributed_recovery_stop(tmp_path, engine=engine)
     service.record_node_result(stop_job.id, nodes[0], succeeded=True, evidence={})
     service.record_node_result(stop_job.id, nodes[1], succeeded=True, evidence={})
     with sessions() as session:
@@ -2525,6 +2525,127 @@ def test_distributed_recovery_deadline_is_rechecked_before_route_publication(
         run = session.get(RecipeRun, started.owner_id)
         assert run.state == "failed"
         assert run.route_state == "withdrawn"
+
+
+def test_recovery_phase_deadline_is_resampled_after_waiting_for_job_lock(
+    tmp_path: Path, postgres_engine
+) -> None:
+    Base.metadata.drop_all(postgres_engine)
+    (
+        sessions,
+        service,
+        _routes,
+        _publisher,
+        started,
+        restart,
+        worker_start,
+        nodes,
+    ) = _queued_distributed_recovery_restart(tmp_path, engine=postgres_engine)
+    current = {"now": NOW}
+    service._clock = lambda: current["now"]
+    worker_pid: dict[str, int] = {}
+    lock_started = threading.Event()
+
+    def before_lock(connection, _cursor, statement, _parameters, _context, _many):
+        if "FROM jobs" in statement and "FOR UPDATE" in statement:
+            worker_pid["value"] = _postgres_backend_pid(connection)
+            lock_started.set()
+
+    blocker = postgres_engine.connect()
+    transaction = blocker.begin()
+    blocker_pid = _postgres_backend_pid(blocker)
+    blocker.execute(select(Job).where(Job.id == restart.id).with_for_update())
+    event.listen(postgres_engine, "before_cursor_execute", before_lock)
+    pool = ThreadPoolExecutor(max_workers=1)
+    try:
+        result = pool.submit(
+            service.record_node_result,
+            restart.id,
+            nodes[1],
+            succeeded=True,
+            evidence=start_evidence(worker_start.payload),
+        )
+        assert lock_started.wait(timeout=10)
+        _wait_for_postgres_block(
+            postgres_engine,
+            blocked_pid=worker_pid["value"],
+            blocker_pid=blocker_pid,
+        )
+        current["now"] = NOW + timedelta(seconds=31)
+        transaction.commit()
+        result.result(timeout=10)
+    finally:
+        if transaction.is_active:
+            transaction.rollback()
+        blocker.close()
+        pool.shutdown(wait=True)
+        event.remove(postgres_engine, "before_cursor_execute", before_lock)
+
+    with sessions() as session:
+        assert session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == restart.id,
+                AgentOperation.node_id == nodes[0],
+            )
+        ) is None
+        assert session.get(Job, restart.id).state == "failed"  # type: ignore[union-attr]
+        assert session.get(RecipeRun, started.owner_id).state == "stopping"  # type: ignore[union-attr]
+
+
+def test_recovery_publication_crossing_deadline_is_immediately_withdrawn(
+    tmp_path: Path,
+) -> None:
+    (
+        sessions,
+        service,
+        routes,
+        _publisher,
+        started,
+        restart,
+        worker_start,
+        nodes,
+    ) = _queued_distributed_recovery_restart(tmp_path)
+    service.record_node_result(
+        restart.id,
+        nodes[1],
+        succeeded=True,
+        evidence=start_evidence(worker_start.payload),
+    )
+    with sessions() as session:
+        owner_start = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == restart.id,
+                AgentOperation.node_id == nodes[0],
+            )
+        )
+    service.record_node_result(
+        restart.id,
+        nodes[0],
+        succeeded=True,
+        evidence=start_evidence(owner_start.payload),
+    )
+    current = {"now": NOW}
+
+    class DeadlineCrossingPublisher(ConcurrentPublisher):
+        def publish(self, state, policy):
+            generation = super().publish(state, policy)
+            current["now"] = NOW + timedelta(seconds=31)
+            return generation
+
+    publisher = DeadlineCrossingPublisher()
+    routes._publisher = publisher
+    routes._clock = lambda: current["now"]
+
+    with pytest.raises(RuntimeError, match="deadline"):
+        routes.publish_run(started.owner_id)
+
+    assert publisher.aliases == [("deadline-gang",), ()]
+    with sessions() as session:
+        run = session.get(RecipeRun, started.owner_id)
+        recovery = session.get(Job, restart.id)
+        assert run.state == "failed"
+        assert run.route_state == "withdrawn"
+        assert recovery.result.get("recovery_route_published") is not True
 
 
 def test_distributed_rank_loss_withdraws_route_when_recovery_authority_is_missing(
