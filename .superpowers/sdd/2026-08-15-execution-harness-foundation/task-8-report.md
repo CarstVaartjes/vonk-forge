@@ -1829,3 +1829,27 @@ No unresolved round-5 correctness concern remains. Physical ARM64 base
 import/build, GPU inference, two-Spark collective, RoCE, performance, and
 physical acceptance remain explicitly assigned to Task 9 and are not claimed
 by Task 8.
+
+## Request-time lease-authority breaker remediation
+
+The round-5 conclusion above was reopened after breaker review demonstrated
+that process termination could not be the serving authority when a kill fails,
+and that the embedded development supervisor did not rearm cleanup for a
+same-configuration renewal. The focused remediation is implemented under
+`docs/superpowers/plans/2026-08-16-route-serving-lease-authority.md`; exact
+evidence is recorded in
+`.superpowers/sdd/2026-08-16-route-serving-lease-authority/task-3-report.md`.
+
+The resulting boundary is request-authoritative: Caddy asks the supervisor's
+immutable lease snapshot before every inference request, exact expiry and
+authority outage deny admission while LiteLLM may still be alive, and only
+Caddy shares LiteLLM's internal edge network. Same-configuration renewal
+replaces the authority snapshot and rearms cleanup before acknowledgement.
+Production and embedded-development supervisor behavior is covered by shared
+vectors and a real pinned-Caddy integration.
+
+The final current-image development stack passed all three complete-stack
+checks, and all retained Task 8, protocol, Rust, development-slice, security,
+supply-chain, formatting, lock, and Caddy configuration gates are green. Task
+8 remains pending until independent review of commits `3642c36..e42b230` is
+clean; physical Spark acceptance is still exclusively Task 9.
