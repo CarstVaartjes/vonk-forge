@@ -154,6 +154,7 @@ def _start_route_lease_server(
         protocol_version = "HTTP/1.1"
 
         def _respond(self, status: int) -> None:
+            self.request_version = self.protocol_version
             self.send_response_only(status)
             self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", "0")
@@ -168,8 +169,9 @@ def _start_route_lease_server(
             message: str | None = None,
             explain: str | None = None,
         ) -> None:
-            del message, explain
-            self._respond(404 if code == 501 else code)
+            del code, message, explain
+            self.close_connection = True
+            self._not_found()
 
         def do_GET(self) -> None:
             if self.path != "/vonk/route-lease":
@@ -268,18 +270,24 @@ class _ServingLeaseGuard:
             self._expires = expires
         self.start()
 
+    def publish_ack(self, request: ActiveRequest, *, now: datetime) -> None:
+        with self._lock:
+            if self._expired.is_set():
+                raise RuntimeError("LiteLLM serving lease already expired")
+            _write_ack(request, self._child, now=now)
+
     def _expire(self, generation: int) -> None:
         with self._lock:
             if generation != self._timer_generation:
                 return
             self._timer = None
             self._expired.set()
-        if self._authority is not None:
-            self._authority.deny()
-        try:
-            _clear_ack()
-        except RuntimeError:
-            pass
+            if self._authority is not None:
+                self._authority.deny()
+            try:
+                _clear_ack()
+            except RuntimeError:
+                pass
         try:
             if self._child.poll() is None:
                 self._child.kill()
@@ -579,7 +587,7 @@ def _supervise(authority: _RouteLeaseAuthority) -> int:
             _clear_ack()
         else:
             authority.activate(request)
-            _write_ack(request, child, now=datetime.now(UTC))
+            serving_lease.publish_ack(request, now=datetime.now(UTC))
         reload_requested = False
         while child.poll() is None and not stopping:
             time.sleep(POLL_SECONDS)
@@ -609,9 +617,17 @@ def _supervise(authority: _RouteLeaseAuthority) -> int:
                     authority.allow_bootstrap()
                 _clear_ack()
             else:
-                serving_lease.renew(candidate_request)
                 authority.activate(candidate_request)
-                _write_ack(candidate_request, child, now=datetime.now(UTC))
+                try:
+                    serving_lease.renew(candidate_request)
+                except Exception:
+                    authority.deny()
+                    _clear_ack()
+                    raise
+                serving_lease.publish_ack(
+                    candidate_request,
+                    now=datetime.now(UTC),
+                )
             request = candidate_request
         if stopping:
             authority.deny()

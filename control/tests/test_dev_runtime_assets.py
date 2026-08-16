@@ -8,9 +8,11 @@ import json
 import os
 import selectors
 import shutil
+import socket
 import stat
 import subprocess
 import sys
+import threading
 import time
 import types
 import urllib.error
@@ -175,6 +177,64 @@ def _development_route_lease_status(
         return error.code, error.read(), error.headers
     with response:
         return response.status, response.read(), response.headers
+
+
+def _raw_development_route_lease_response(server: object, request: bytes) -> bytes:
+    host, port = server.server_address
+    with socket.create_connection((host, port), timeout=2) as connection:
+        connection.sendall(request)
+        connection.shutdown(socket.SHUT_WR)
+        chunks: list[bytes] = []
+        while chunk := connection.recv(65536):
+            chunks.append(chunk)
+    return b"".join(chunks)
+
+
+@pytest.mark.parametrize(
+    "raw_request",
+    (
+        pytest.param(
+            b"GET /" + b"a" * 65536 + b" HTTP/1.1\r\nHost: x\r\n\r\n",
+            id="overlong-request-line",
+        ),
+        pytest.param(
+            b"GET / extra HTTP/1.1\r\nHost: x\r\n\r\n",
+            id="malformed-request-line",
+        ),
+        pytest.param(
+            b"GET / HTTP/nope\r\nHost: x\r\n\r\n",
+            id="malformed-http-version",
+        ),
+        pytest.param(
+            b"GET / HTTP/1.1\r\nX: " + b"a" * 65536 + b"\r\n\r\n",
+            id="overlong-header-line",
+        ),
+    ),
+)
+def test_development_route_lease_http_maps_parser_errors_to_empty_404(
+    raw_request: bytes,
+) -> None:
+    supervisor = _litellm_supervisor()
+    server = supervisor._start_route_lease_server(
+        supervisor._RouteLeaseAuthority(),
+        host="127.0.0.1",
+        port=0,
+    )
+    try:
+        response = _raw_development_route_lease_response(server, raw_request)
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    status, separator, remainder = response.partition(b"\r\n")
+    headers, header_separator, body = remainder.partition(b"\r\n\r\n")
+    assert status == b"HTTP/1.1 404 Not Found"
+    assert separator == b"\r\n"
+    assert header_separator == b"\r\n\r\n"
+    assert b"Cache-Control: no-store\r\n" in headers + b"\r\n"
+    assert b"Content-Length: 0\r\n" in headers + b"\r\n"
+    assert b"Server:" not in headers
+    assert body == b""
 
 
 def test_development_route_lease_http_matches_production_boundaries(
@@ -964,10 +1024,20 @@ def test_development_supervisor_renews_same_config_route_lease_without_restart(
     authorities = []
     spawn_count = 0
     renewal_observations: dict[str, object] = {}
+    renewal_order: list[str] = []
     original_write_ack = supervisor._write_ack
+    original_guard = supervisor._ServingLeaseGuard
 
     def start_server(authority, **_kwargs):
         authorities.append(authority)
+        original_activate = authority.activate
+
+        def activate(request) -> None:
+            original_activate(request)
+            if request.marker["generation"] == 2:
+                renewal_order.append("activate")
+
+        authority.activate = activate
         return Server()
 
     def spawn(*_args, **_kwargs):
@@ -979,6 +1049,7 @@ def test_development_supervisor_renews_same_config_route_lease_without_restart(
     def write_ack(request, loaded_child, *, now):
         original_write_ack(request, loaded_child, now=now)
         if request.marker["generation"] == 2:
+            renewal_order.append("ack")
             renewal_observations["authorized_after_old_expiry"] = authorities[
                 0
             ].authorized(old_expires_at + timedelta(microseconds=1))
@@ -987,6 +1058,20 @@ def test_development_supervisor_renews_same_config_route_lease_without_restart(
             )["generation"]
             renewal_observations["timers"] = tuple(Timer.instances)
             child.returncode = 29
+
+    class Guard(original_guard):
+        def renew(self, request) -> None:
+            if request is not None and request.marker["generation"] == 2:
+                renewal_order.append("renew")
+                assert authorities[0].authorized(
+                    old_expires_at + timedelta(microseconds=1)
+                )
+            super().renew(request)
+
+        def publish_ack(self, request, *, now) -> None:
+            if request.marker["generation"] == 2:
+                renewal_order.append("publish")
+            super().publish_ack(request, now=now)
 
     monkeypatch.setattr(
         supervisor,
@@ -998,6 +1083,7 @@ def test_development_supervisor_renews_same_config_route_lease_without_restart(
     monkeypatch.setattr(supervisor, "_materialize_config", lambda _source: tmp_path)
     monkeypatch.setattr(supervisor, "_start_route_lease_server", start_server)
     monkeypatch.setattr(supervisor, "_write_ack", write_ack)
+    monkeypatch.setattr(supervisor, "_ServingLeaseGuard", Guard)
     monkeypatch.setattr(supervisor.subprocess, "Popen", spawn)
     monkeypatch.setattr(supervisor.signal, "signal", lambda *_args: None)
     monkeypatch.setattr(supervisor.threading, "Timer", Timer)
@@ -1007,10 +1093,98 @@ def test_development_supervisor_renews_same_config_route_lease_without_restart(
     assert spawn_count == 1
     assert renewal_observations["authorized_after_old_expiry"] is True
     assert renewal_observations["ack_generation"] == 2
+    assert renewal_order == ["activate", "renew", "publish", "ack"]
     timers = renewal_observations["timers"]
     assert isinstance(timers, tuple) and len(timers) == 2
     assert timers[0].cancelled is True
     assert timers[1].interval > timers[0].interval
+
+
+def test_development_same_config_renewal_denies_and_aborts_when_rearm_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    supervisor = _litellm_supervisor()
+    issued_at = datetime.now(UTC)
+    old_expires_at = issued_at + timedelta(seconds=120)
+    config = _canonical_json(_litellm_document())
+    _active_litellm_bundle(
+        supervisor,
+        tmp_path,
+        config,
+        now=issued_at,
+        expires_at=old_expires_at,
+    )
+    first_request = supervisor._active_request(now=issued_at)
+    _active_litellm_bundle(
+        supervisor,
+        tmp_path,
+        config,
+        now=issued_at,
+        expires_at=issued_at + timedelta(seconds=240),
+        generation=2,
+    )
+    second_request = supervisor._active_request(now=issued_at)
+    assert first_request is not None and second_request is not None
+    supervisor.ACK_ROOT = tmp_path / "supervisor"
+    supervisor.ACK = supervisor.ACK_ROOT / "ack.json"
+    authority = supervisor._RouteLeaseAuthority()
+    requests = iter((first_request, second_request))
+    observed: dict[str, bool] = {}
+
+    class Child:
+        pid = 654
+
+        @staticmethod
+        def poll():
+            return None
+
+    class Guard:
+        expired = False
+
+        def __init__(self, _request, child, *, authority) -> None:
+            self.authority = authority
+            self.child = child
+
+        def start(self) -> None:
+            return
+
+        def cancel(self) -> None:
+            return
+
+        def publish_ack(self, request, *, now) -> None:
+            supervisor._write_ack(request, self.child, now=now)
+
+        def renew(self, request) -> None:
+            assert request.marker["generation"] == 2
+            observed["new_snapshot_installed"] = self.authority.authorized(
+                old_expires_at + timedelta(microseconds=1)
+            )
+            raise RuntimeError("simulated rearm failure")
+
+    monkeypatch.setattr(
+        supervisor,
+        "_active_request",
+        lambda **_kwargs: next(requests),
+    )
+    monkeypatch.setattr(supervisor, "_await_healthy", lambda _child: True)
+    monkeypatch.setattr(supervisor, "_healthy", lambda _child: True)
+    monkeypatch.setattr(supervisor, "_materialize_config", lambda _source: tmp_path)
+    monkeypatch.setattr(supervisor, "_ServingLeaseGuard", Guard)
+    monkeypatch.setattr(
+        supervisor.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: Child(),
+    )
+    monkeypatch.setattr(supervisor.signal, "signal", lambda *_args: None)
+    monkeypatch.setattr(supervisor.time, "sleep", lambda _seconds: None)
+
+    with pytest.raises(RuntimeError, match="simulated rearm failure"):
+        supervisor._supervise(authority)
+
+    assert observed["new_snapshot_installed"] is True
+    assert authority.authorized(issued_at) is False
+    assert not supervisor.ACK.exists()
 
 
 def test_development_supervisor_denies_malformed_activation_before_cleanup(
@@ -1104,6 +1278,116 @@ def test_development_expiry_denies_authority_before_ack_or_process_cleanup(
     guard.start()
 
     assert events == [("clear", False), ("kill", False)]
+
+
+def test_development_expiry_claim_serializes_ack_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    supervisor = _litellm_supervisor()
+    issued_at = datetime.now(UTC)
+    _active_litellm_bundle(
+        supervisor,
+        tmp_path,
+        _canonical_json(_litellm_document()),
+        now=issued_at,
+    )
+    request = supervisor._active_request(now=issued_at)
+    assert request is not None
+    supervisor.ACK_ROOT = tmp_path / "supervisor"
+    supervisor.ACK = supervisor.ACK_ROOT / "ack.json"
+    authority = supervisor._RouteLeaseAuthority()
+    authority.activate(request)
+    write_entered = threading.Event()
+    release_write = threading.Event()
+    write_published = threading.Event()
+    release_return = threading.Event()
+    clear_entered = threading.Event()
+    errors: list[BaseException] = []
+    original_atomic_write = supervisor._atomic_write
+    original_clear_ack = supervisor._clear_ack
+
+    class Child:
+        pid = 321
+        returncode = None
+
+        def poll(self):
+            return self.returncode
+
+        def kill(self) -> None:
+            self.returncode = -9
+
+    class Timer:
+        instances: ClassVar[list[Timer]] = []
+
+        def __init__(self, interval, function) -> None:
+            self.interval = interval
+            self.function = function
+            self.daemon = False
+            self.instances.append(self)
+
+        def start(self) -> None:
+            return
+
+        def cancel(self) -> None:
+            return
+
+    child = Child()
+
+    def blocked_atomic_write(target, content) -> None:
+        write_entered.set()
+        assert release_write.wait(2), "test did not release acknowledgement write"
+        original_atomic_write(target, content)
+        write_published.set()
+        assert release_return.wait(2), "test did not release acknowledgement return"
+
+    def observed_clear_ack() -> None:
+        clear_entered.set()
+        original_clear_ack()
+
+    def publish() -> None:
+        try:
+            publisher = getattr(guard, "publish_ack", None)
+            if publisher is None:
+                supervisor._write_ack(request, child, now=issued_at)
+            else:
+                publisher(request, now=issued_at)
+        except (AssertionError, OSError, RuntimeError) as error:
+            errors.append(error)
+
+    def expire() -> None:
+        try:
+            Timer.instances[0].function()
+        except (AssertionError, OSError, RuntimeError) as error:
+            errors.append(error)
+
+    monkeypatch.setattr(supervisor, "_atomic_write", blocked_atomic_write)
+    monkeypatch.setattr(supervisor, "_clear_ack", observed_clear_ack)
+    monkeypatch.setattr(supervisor.threading, "Timer", Timer)
+    guard = supervisor._ServingLeaseGuard(
+        request,
+        child,
+        authority=authority,
+        clock=lambda: issued_at,
+    )
+    guard.start()
+    writer = threading.Thread(target=publish)
+    expiry = threading.Thread(target=expire)
+    writer.start()
+    assert write_entered.wait(2), "acknowledgement write did not reach interleaving"
+    expiry.start()
+    expiry_cleared_while_write_pending = clear_entered.wait(0.1)
+    release_write.set()
+    assert write_published.wait(2), "acknowledgement was not published"
+    release_return.set()
+    writer.join(timeout=2)
+    expiry.join(timeout=2)
+
+    assert not writer.is_alive() and not expiry.is_alive()
+    assert errors == []
+    assert expiry_cleared_while_write_pending is False
+    assert clear_entered.is_set()
+    assert not supervisor.ACK.exists()
 
 
 def test_development_expired_serving_guard_cannot_be_renewed(
