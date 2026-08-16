@@ -6,6 +6,11 @@ inventory, source build, distribution, install, routing, real inference,
 restart persistence, rank failure/recovery, and normal cleanup. Complete the
 steps in order. A green unit test is not a substitute for the physical gates.
 
+A fresh pre-production reset removes every user, browser session, and agent
+enrollment. Recreate the development administrator, sign in to establish a
+fresh browser session, and re-enroll every Spark before acceptance. Never use a
+pre-reset login, token, session, or enrollment as physical acceptance evidence.
+
 ## Scope and placeholders
 
 Define every placeholder before executing a command. Site values are data, not
@@ -422,6 +427,14 @@ fleet shows both exact node IDs online, Rust protocol 3, fresh inventory,
 both `build.rootless-podman.v1` and `runtime.spark-docker-nvidia.v1`, and
 distinct management/fabric addresses before
 starting a workload. Retain only bounded API output in the evidence directory.
+
+`127.0.0.1:4000` terminates at Caddy's lease-gated internal `:8081` listener;
+no LiteLLM port is published to the host. Caddy evaluates the current
+route-serving lease at request admission. A request whose Caddy authorization
+begins at or after lease expiry is never forwarded to LiteLLM. If the
+supervisor authority is unavailable, Caddy fails closed without contacting
+LiteLLM. A same-config lease renewal replaces the deadline without restarting
+the healthy LiteLLM child.
 
 ## Synthetic lifecycle
 

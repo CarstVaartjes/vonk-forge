@@ -16,6 +16,21 @@ PowerShell forwarding process, bearer token, Windows hosts-file entry, or LAN
 browser port.
 There is no Windows hosts-file entry for the Tailscale Service.
 
+The optional NAS acceptance tunnel does not bypass route authority:
+`127.0.0.1:4000` terminates at Caddy's lease-gated internal `:8081` listener;
+no LiteLLM port is published to the host. Caddy evaluates the current
+route-serving lease at request admission. A request whose Caddy authorization
+begins at or after lease expiry is never forwarded to LiteLLM. If the
+supervisor authority is unavailable, Caddy fails closed without contacting
+LiteLLM. A same-config lease renewal replaces the deadline without restarting
+the healthy LiteLLM child.
+
+A fresh pre-production reset removes every user, browser session, and agent
+enrollment. Recreate the development administrator, sign in to establish a
+fresh browser session, and re-enroll every Spark before acceptance. No login,
+session cookie, pairing token, or enrollment from before the reset remains
+valid.
+
 Plan local NVMe capacity for images and model artifacts separately. The
 qualified DS4 wrapper image is about 2.59 GB. Its immutable base and drafter
 model files are separate cache objects of 86,720,111,488 and 6,971,241,504

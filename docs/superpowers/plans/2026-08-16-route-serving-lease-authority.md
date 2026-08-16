@@ -244,7 +244,15 @@ published port or client network.
 - [ ] **Step 6: Run format/config gates and commit**
 
 ```bash
+validation_root=$(mktemp -d)
+trap 'rm -rf -- "$validation_root"' EXIT
+openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+  -subj '/CN=vonk-caddy-validation' \
+  -keyout "$validation_root/ca-key.pem" \
+  -out "$validation_root/ca.pem" >/dev/null 2>&1
 docker run --rm -v "$PWD/deploy/compose/Caddyfile:/etc/caddy/Caddyfile:ro" \
+  -e VONK_CONTROL_HOSTNAME=control.test.example \
+  -v "$validation_root/ca.pem:/run/secrets/agent-client-ca:ro" \
   caddy:2.11.4@sha256:844f60b64e4724a5aa8245e019dace0d3f199f7433ce6c57676cb30a920dbad9 \
   caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 uvx --from ruff==0.16.1 ruff check deploy/compose/tests scripts/tests

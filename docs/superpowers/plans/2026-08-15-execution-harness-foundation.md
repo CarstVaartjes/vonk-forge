@@ -730,7 +730,16 @@ Expected: FAIL because the scripts do not exist.
 
 - [ ] **Step 3: Implement bounded reset and acceptance scripts**
 
-The reset script requires the exact development-only confirmation flag, stops Vonk Forge workloads, removes the complete pre-production Vonk Forge control database and runtime state, applies Alembic head to a fresh database, seeds the supported v1 catalog, and requires users and agents to be created or enrolled again. It may retain only independently content-addressed model/build caches after verifying their digests. The acceptance script validates exact node count, records node/image/entity identities, executes each ladder phase, stores canonical evidence, and never advances state beyond completed evidence.
+The reset script requires the exact development-only confirmation flag, stops
+Vonk Forge workloads, removes the complete pre-production Vonk Forge control
+database and runtime state, applies Alembic head to a fresh database, and seeds
+the supported v1 catalog. A fresh pre-production reset removes every user,
+browser session, and agent enrollment. Recreate the development administrator,
+sign in to establish a fresh browser session, and re-enroll every Spark before
+acceptance. It may retain only independently content-addressed model/build
+caches after verifying their digests. The acceptance script validates exact
+node count, records node/image/entity identities, executes each ladder phase,
+stores canonical evidence, and never advances state beyond completed evidence.
 
 - [ ] **Step 4: Publish repository and website-ready explanations**
 

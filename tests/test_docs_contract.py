@@ -24,12 +24,19 @@ MODEL_SWITCHING = ROOT / "docs/runbooks/model-switching.md"
 MODEL_CAPACITY = ROOT / "docs/model-capacity-overview.md"
 DEVELOPMENT_MODEL_SMOKE = ROOT / "docs/audits/development-model-smoke.md"
 FRESH_DEVELOPMENT_INSTALL = ROOT / "docs/runbooks/fresh-development-install.md"
+HERMES_AGENT = ROOT / "docs/runbooks/hermes-agent.md"
 PLATFORM_UPDATE = ROOT / "docs/runbooks/platform-update.md"
 RUNTIME_RELEASE = ROOT / "docs/runbooks/runtime-release.md"
 VONKCTL = ROOT / "docs/runbooks/vonkctl.md"
 DOCS_INDEX = ROOT / "docs/README.md"
 CONTROL_RECOVERY = ROOT / "docs/runbooks/control-plane-recovery.md"
 THREAT_MODEL = ROOT / "docs/security/threat-model.md"
+EXECUTION_HARNESS_PLAN = (
+    ROOT / "docs/superpowers/plans/2026-08-15-execution-harness-foundation.md"
+)
+ROUTE_LEASE_PLAN = (
+    ROOT / "docs/superpowers/plans/2026-08-16-route-serving-lease-authority.md"
+)
 
 GENERIC_ONBOARDING_DOCS = (
     README,
@@ -519,6 +526,86 @@ def test_complete_runbook_keeps_access_loopback_tokens_private_and_evidence_loca
     for block in _fenced_blocks(DEV_WORKLOADS, "bash", "sh", "shell"):
         assert "cat " not in block
         assert "Get-Content" not in block
+
+
+def test_active_inference_guides_define_the_request_time_caddy_boundary() -> None:
+    inference_guides = (
+        DEV_NAS,
+        DEV_WORKLOADS,
+        FRESH_DEVELOPMENT_INSTALL,
+        HERMES_AGENT,
+    )
+    required_claims = (
+        (
+            "A request whose Caddy authorization begins at or after lease expiry "
+            "is never forwarded to LiteLLM"
+        ),
+        (
+            "If the supervisor authority is unavailable, Caddy fails closed "
+            "without contacting LiteLLM"
+        ),
+        (
+            "A same-config lease renewal replaces the deadline without restarting "
+            "the healthy LiteLLM child"
+        ),
+    )
+
+    for path in inference_guides:
+        normalized = _normalized_text(path)
+        for claim in required_claims:
+            assert claim in normalized, path
+
+    loopback_claim = (
+        "`127.0.0.1:4000` terminates at Caddy's lease-gated internal `:8081` "
+        "listener; no LiteLLM port is published to the host"
+    )
+    for path in (DEV_NAS, DEV_WORKLOADS, FRESH_DEVELOPMENT_INSTALL):
+        assert loopback_claim in _normalized_text(path), path
+
+    assert (
+        "OpenAI-compatible base URL: http://caddy:8081/v1" in HERMES_AGENT.read_text()
+    )
+    for path in sorted((ROOT / "docs/runbooks").glob("*.md")):
+        text = path.read_text().lower()
+        assert "http://litellm:4000" not in text, path
+        assert "https://litellm:4000" not in text, path
+
+
+def test_fresh_preproduction_reset_recreates_users_sessions_and_enrollments() -> None:
+    reset_contracts = (
+        DEV_NAS,
+        DEV_WORKLOADS,
+        FRESH_DEVELOPMENT_INSTALL,
+        EXECUTION_HARNESS_PLAN,
+    )
+    required = (
+        (
+            "A fresh pre-production reset removes every user, browser session, "
+            "and agent enrollment"
+        ),
+        (
+            "Recreate the development administrator, sign in to establish a fresh "
+            "browser session, and re-enroll every Spark before acceptance"
+        ),
+    )
+
+    for path in reset_contracts:
+        normalized = _normalized_text(path)
+        for claim in required:
+            assert claim in normalized, path
+
+
+def test_route_lease_plan_caddy_validation_supplies_required_inputs() -> None:
+    text = ROUTE_LEASE_PLAN.read_text()
+
+    for required in (
+        "validation_root=$(mktemp -d)",
+        "openssl req -x509 -newkey rsa:2048 -nodes -days 1",
+        "-e VONK_CONTROL_HOSTNAME=control.test.example",
+        "$validation_root/ca.pem:/run/secrets/agent-client-ca:ro",
+        "caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile",
+    ):
+        assert required in text
 
 
 def test_complete_runbook_documents_exact_cleanup_and_recovery_boundaries() -> None:

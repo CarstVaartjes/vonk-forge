@@ -432,6 +432,14 @@ Keep them bound to `127.0.0.1` in Compose and permit one NAS operator to open
 local forwards only to those two destinations. On an OpenSSH NAS, create
 `/etc/ssh/sshd_config.d/00-vonk-operator-forwarding.conf` with:
 
+`127.0.0.1:4000` terminates at Caddy's lease-gated internal `:8081` listener;
+no LiteLLM port is published to the host. Caddy evaluates the current
+route-serving lease at request admission. A request whose Caddy authorization
+begins at or after lease expiry is never forwarded to LiteLLM. If the
+supervisor authority is unavailable, Caddy fails closed without contacting
+LiteLLM. A same-config lease renewal replaces the deadline without restarting
+the healthy LiteLLM child.
+
 ```sshconfig
 Match User <NAS_OPERATOR>
     AllowTcpForwarding local
@@ -732,6 +740,10 @@ as a substitute for restoring PostgreSQL or generated-secret state.
 - The generated admin private key and worker token are intentionally not
   operator files. A disposable full development reset can rotate them by
   removing their named volumes, but that invalidates related development state.
+  A fresh pre-production reset removes every user, browser session, and agent
+  enrollment. Recreate the development administrator, sign in to establish a
+  fresh browser session, and re-enroll every Spark before acceptance. Never
+  retain or translate pre-reset authentication or enrollment state.
   Do not delete individual secret-projection volumes in a stateful installation
   without a tested recovery plan.
 - Rotate agent/controller PKI and LiteLLM/proxy tokens as one planned bundle

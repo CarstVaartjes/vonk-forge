@@ -116,6 +116,12 @@ over the dedicated internal `litellm-edge` network. Only Caddy and LiteLLM
 share `litellm-edge`; Hermes cannot resolve or dial LiteLLM directly. Do not
 configure a direct LiteLLM address or an ingress-network path.
 
+Caddy evaluates the current route-serving lease at request admission. A
+request whose Caddy authorization begins at or after lease expiry is never
+forwarded to LiteLLM. If the supervisor authority is unavailable, Caddy fails
+closed without contacting LiteLLM. A same-config lease renewal replaces the
+deadline without restarting the healthy LiteLLM child.
+
 Do not configure Nous Portal, OpenRouter, OpenAI, Anthropic, or another remote
 model provider as a fallback. Repository policy is `local_only = true`. The
 LiteLLM group prefers an accepted, healthy, already-running dual DeepSeek
