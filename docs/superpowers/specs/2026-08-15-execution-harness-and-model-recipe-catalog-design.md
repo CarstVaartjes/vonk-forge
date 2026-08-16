@@ -196,7 +196,7 @@ schema, harness implementations, control-plane authority, and acceptance
 tools; the recipe repository owns reviewed model/recipe material and public
 build contexts. A development checkout may be supplied through
 `--library-root`, but a production import records the exact signed
-recipe-library commit. Local PostgreSQL remains authoritative for installed
+approved immutable recipe-library commit. Local PostgreSQL remains authoritative for installed
 state and runs after import. No runtime path reads a mutable branch or tag.
 
 ## Universal execution contract
