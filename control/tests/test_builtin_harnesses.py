@@ -411,6 +411,22 @@ def test_vllm_accepts_nemotron_mamba_and_reasoning_options() -> None:
     assert "nemotron_v3" in projection.command
 
 
+def test_vllm_accepts_qwen35_reasoning_and_text_only_options() -> None:
+    recipe = _recipe("vllm")
+    recipe["runtime"]["arguments"].extend(
+        [
+            {"name": "reasoning-parser", "value": "qwen3"},
+            {"name": "language-model-only", "value": True},
+        ]
+    )
+
+    projection = _compile("vllm", recipe=recipe)
+
+    assert "--reasoning-parser" in projection.command
+    assert "qwen3" in projection.command
+    assert "--language-model-only" in projection.command
+
+
 def test_vllm_accepts_offline_and_nvfp4_runtime_environment() -> None:
     recipe = _recipe("vllm")
     recipe["runtime"]["environment"] = [
