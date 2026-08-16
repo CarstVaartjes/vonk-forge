@@ -33,6 +33,7 @@ _ARGUMENTS = {
             "text-to-image",
             "image-to-image",
             "image-edit",
+            "image-to-layers",
             "text-to-audio",
             "text-to-video",
             "artifact",
@@ -43,8 +44,11 @@ _ARGUMENTS = {
         "--num-inference-steps", validate=integer(1, 1000)
     ),
     "guidance-scale": ArgumentSpec("--guidance-scale", validate=decimal(0.0, 100.0)),
+    "true-cfg-scale": ArgumentSpec("--true-cfg-scale", validate=decimal(0.0, 100.0)),
     "width": ArgumentSpec("--width", validate=integer(64, 8192)),
     "height": ArgumentSpec("--height", validate=integer(64, 8192)),
+    "layers": ArgumentSpec("--layers", validate=integer(1, 8)),
+    "resolution": ArgumentSpec("--resolution", validate=integer(256, 4096)),
     "seed": ArgumentSpec("--seed", validate=integer(0, 2**63 - 1)),
 }
 
@@ -78,7 +82,9 @@ class DiffusersHarnessCompiler:
             rank,
             modes=frozenset({"single", "data_parallel"}),
         )
-        environment = compile_environment(recipe, frozenset({"HF_HUB_OFFLINE"}))
+        environment = compile_environment(
+            recipe, frozenset({"HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE"})
+        )
         return projection(
             slug=self.slug,
             command=(

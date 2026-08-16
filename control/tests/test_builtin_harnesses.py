@@ -688,6 +688,71 @@ def test_artifact_harnesses_require_isolated_outputs_and_one_mime_validator(
         _compile(slug, recipe=recipe)
 
 
+def test_input_capable_artifact_harness_projects_a_read_only_job_input_mount() -> None:
+    recipe = _recipe("diffusers")
+    recipe["interfaces"][0]["input"] = {
+        "path": "/inputs",
+        "required": True,
+        "media_types": ["image/png"],
+        "max_bytes": 32 * 1024 * 1024,
+    }
+    recipe["runtime"]["security"]["mounts"].insert(
+        1, {"source": "inputs", "target": "/inputs", "read_only": True}
+    )
+
+    projection = _compile("diffusers", recipe=recipe)
+
+    assert projection.input_mount is not None
+    assert projection.input_mount.source == "/run/vonk/inputs"
+    assert projection.input_mount.target == "/inputs"
+    assert projection.input_mount.read_only is True
+    assert projection.input_mount.isolated is True
+
+
+def test_diffusers_accepts_specialized_image_layer_pipeline() -> None:
+    recipe = _recipe("diffusers")
+    pipeline = next(
+        item for item in recipe["runtime"]["arguments"] if item["name"] == "pipeline"
+    )
+    pipeline["value"] = "image-to-layers"
+    recipe["runtime"]["arguments"].extend(
+        [
+            {"name": "true-cfg-scale", "value": "4"},
+            {"name": "layers", "value": 4},
+            {"name": "resolution", "value": 640},
+        ]
+    )
+    recipe["interfaces"][0]["adapter"] = "artifact-job"
+    recipe["validation"]["validators"][0]["interface"] = "artifact-job"
+    recipe["interfaces"][0]["input"] = {
+        "path": "/inputs",
+        "required": True,
+        "media_types": ["image/png"],
+        "max_bytes": 8 * 1024 * 1024,
+    }
+    recipe["runtime"]["security"]["mounts"].insert(
+        1, {"source": "inputs", "target": "/inputs", "read_only": True}
+    )
+
+    projection = _compile("diffusers", recipe=recipe)
+
+    assert "image-to-layers" in projection.command
+
+
+def test_input_contract_requires_the_exact_read_only_input_mount() -> None:
+    recipe = _recipe("diffusers")
+    recipe["interfaces"][0]["input"] = {
+        "path": "/inputs",
+        "required": True,
+        "media_types": ["image/png"],
+        "max_bytes": 32 * 1024 * 1024,
+    }
+
+    with pytest.raises(HarnessCompileError, match="input mount"):
+        _compile("diffusers", recipe=recipe)
+
+
+
 def test_comfyui_requires_an_immutable_workflow_from_the_recipe_bundle() -> None:
     recipe = _recipe("comfyui")
     workflow = next(
