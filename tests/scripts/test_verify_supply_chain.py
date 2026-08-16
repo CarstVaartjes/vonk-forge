@@ -50,7 +50,12 @@ def _copy(tmp_path: Path) -> Path:
         "control/src/vonk_control/recipe_contract.py",
         "control/src/vonk_control/catalog_entities.py",
         "control/src/vonk_control/catalog_service.py",
+        "control/src/vonk_control/catalog_api.py",
+        "control/src/vonk_control/auth.py",
         "control/src/vonk_control/library_contract.py",
+        "control/src/vonk_control/recipe_routes.py",
+        "control/src/vonk_control/models.py",
+        "control/migrations/versions/0015_recipe_catalog.py",
         "control/web/package-lock.json", "control/Dockerfile",
         "deploy/compose/compose.yaml", "deploy/compose/images.lock.json",
         "deploy/compose/compose.dev.images.yaml",
@@ -307,10 +312,43 @@ def test_supply_chain_manifest_binds_v1_recipe_catalog_authority(
         "schemas/global/recipe-v1.schema.json",
         "control/src/vonk_control/catalog_contract.py",
         "control/src/vonk_control/recipe_contract.py",
+        "control/src/vonk_control/catalog_api.py",
+        "control/src/vonk_control/auth.py",
+        "control/src/vonk_control/recipe_routes.py",
+        "control/src/vonk_control/models.py",
+        "control/migrations/versions/0015_recipe_catalog.py",
         "scripts/import-recipe-library",
         "config/recipe-library-manifest.json",
     ):
         assert path in manifest["inputs"]
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        "control/src/vonk_control/catalog_api.py",
+        "control/src/vonk_control/auth.py",
+        "control/src/vonk_control/recipe_routes.py",
+        "control/src/vonk_control/models.py",
+        "control/migrations/versions/0015_recipe_catalog.py",
+    ),
+)
+def test_supply_chain_manifest_binds_recipe_authority_edges(
+    tmp_path: Path, path: str
+) -> None:
+    repository = _copy(tmp_path)
+    candidate = repository / path
+    candidate.write_bytes(candidate.read_bytes() + b"\n# recipe authority drift\n")
+
+    result = subprocess.run(
+        [SCRIPT, "--root", repository, "--json"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "manifest" in " ".join(json.loads(result.stdout)["errors"]).lower()
 
 
 @pytest.mark.parametrize(

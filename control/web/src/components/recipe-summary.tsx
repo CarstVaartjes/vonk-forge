@@ -1,6 +1,6 @@
 import type {CatalogRecipeSummary} from "../api/types";
 
-const originLabels = {local: "Local", workload_run: "Imported from WorkloadRun", global: "Downloaded from vonkforge.ai"} as const;
+const originLabels = {local: "Local", workload_run: "Imported from WorkloadRun", global: "Downloaded from vonkforge.ai", recipe_library: "Imported from recipe library"} as const;
 
 function bytes(value: number): string {
   if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(1)} GB`;
