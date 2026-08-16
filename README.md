@@ -195,9 +195,8 @@ the repository-less worker.
 - [Control-plane telemetry](docs/runbooks/control-plane-telemetry.md)
 - [`vonkctl` runbook](docs/runbooks/vonkctl.md)
 - [Inventory runbook](docs/runbooks/inventory.md)
-- [Generic fleet migration](docs/runbooks/fleet-migration.md) — generated node
-  identities and compatibility with the current inventory, with no fixed node
-  count
+- [Node onboarding and health](docs/runbooks/node-onboarding.md) — add any
+  number of certificate-bound GPU nodes without a fixed fleet size
 - [Direct-fabric runbook](docs/runbooks/fabric.md)
 - [Recipe runtime publication runbook](docs/runbooks/runtime-release.md)
 - [GPU node agent PKI and recovery runbook](docs/runbooks/agent-pki.md)

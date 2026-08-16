@@ -233,7 +233,7 @@ cluster shape, not a hard product limit.
 
 Tensor-parallel traffic follows the repository topology directly between the
 selected GPU nodes. It never traverses Caddy, LiteLLM, PostgreSQL, or the service
-host. The [fleet migration runbook](runbooks/fleet-migration.md) covers stable
+host. The [node onboarding runbook](runbooks/node-onboarding.md) covers stable
 identity and count-independent inventory. Model-version, harness, recipe, and
 capacity comparisons live in the [model catalog](operators/model-catalog.md) and
 [model capacity overview](model-capacity-overview.md).
