@@ -168,6 +168,30 @@ def test_structural_qualification_validates_both_native_recipes() -> None:
         assert payload["recipe"] == recipe.name
 
 
+def test_structural_qualification_compiles_the_selected_harness(
+    tmp_path: Path,
+) -> None:
+    recipe = json.loads(DS4.read_text(encoding="utf-8"))
+    recipe["runtime"]["entrypoint"] = ["ds4-serve"]
+    recipe_path = tmp_path / "invalid-entrypoint.json"
+    recipe_path.write_text(json.dumps(recipe), encoding="utf-8")
+
+    result = subprocess.run(
+        [str(SCRIPT), "--recipe", str(recipe_path), "--level", "structural"],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+    )
+
+    assert result.returncode == 1
+    payload = json.loads(result.stdout)
+    assert payload["passed"] is False
+    assert payload["status"] == "failed"
+    assert payload["error"] == "harness recipe entrypoint is invalid"
+
+
 def test_container_qualification_executes_generic_distributed_lifecycle(
     tmp_path: Path,
 ) -> None:

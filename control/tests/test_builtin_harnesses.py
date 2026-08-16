@@ -391,6 +391,41 @@ def test_builtin_harness_accepts_only_typed_engine_flags(
     assert projection.command[projection.command.index(emitted) + 1] == str(value)
 
 
+def test_vllm_accepts_nemotron_mamba_and_reasoning_options() -> None:
+    recipe = _recipe("vllm")
+    recipe["runtime"]["arguments"].extend(
+        [
+            {"name": "mamba-backend", "value": "flashinfer"},
+            {"name": "mamba-ssm-cache-dtype", "value": "float16"},
+            {"name": "reasoning-parser", "value": "nemotron_v3"},
+        ]
+    )
+
+    projection = _compile("vllm", recipe=recipe)
+
+    assert "--mamba-backend" in projection.command
+    assert "flashinfer" in projection.command
+    assert "--mamba-ssm-cache-dtype" in projection.command
+    assert "float16" in projection.command
+    assert "--reasoning-parser" in projection.command
+    assert "nemotron_v3" in projection.command
+
+
+def test_vllm_accepts_offline_and_nvfp4_runtime_environment() -> None:
+    recipe = _recipe("vllm")
+    recipe["runtime"]["environment"] = [
+        {"name": "VLLM_NO_USAGE_STATS", "value": "1"},
+        {"name": "VLLM_NVFP4_GEMM_BACKEND", "value": "marlin"},
+        {"name": "VLLM_USE_FLASHINFER_MOE_FP4", "value": "0"},
+    ]
+
+    projection = _compile("vllm", recipe=recipe)
+
+    assert ("VLLM_NO_USAGE_STATS", "1") in projection.environment
+    assert ("VLLM_NVFP4_GEMM_BACKEND", "marlin") in projection.environment
+    assert ("VLLM_USE_FLASHINFER_MOE_FP4", "0") in projection.environment
+
+
 @pytest.mark.parametrize("slug", BUILTIN_HARNESS_SLUGS)
 def test_builtin_harness_rejects_unallowlisted_engine_flags(slug: str) -> None:
     recipe = _recipe(slug)
