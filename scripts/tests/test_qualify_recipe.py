@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import subprocess
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -166,6 +168,20 @@ def test_structural_qualification_validates_both_native_recipes() -> None:
         assert payload["status"] == "passed"
         assert payload["passed"] is True
         assert payload["recipe"] == recipe.name
+
+
+def test_structural_qualification_accepts_media_artifact_checks() -> None:
+    loader = SourceFileLoader("qualify_recipe", str(SCRIPT))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[loader.name] = module
+    spec.loader.exec_module(module)
+
+    assert "artifact.mime.image-png" in module.SUPPORTED_CHECKS
+    assert "artifact.mime.audio-wav" in module.SUPPORTED_CHECKS
+    assert "artifact.mime.video-mp4" in module.SUPPORTED_CHECKS
+    assert "artifact.mime.model-gltf-binary" in module.SUPPORTED_CHECKS
 
 
 def test_structural_qualification_compiles_the_selected_harness(
