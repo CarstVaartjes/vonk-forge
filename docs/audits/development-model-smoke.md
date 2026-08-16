@@ -1,14 +1,14 @@
-# Native v1 DS4 development qualification
+# Native v1 DS4 structural qualification
 
 Date: 2026-08-16
 
-Status: structural and behaviorally faked container gates complete; physical
-linux/arm64 GPU acceptance remains Task 9.
+Status: structural qualification and behaviorally faked lifecycle gates
+complete. This record does not claim the Spark hardware gate.
 
 ## Selected lane
 
 The development single-node lane is the native v1 recipe
-`config/recipes/deepseek-v4-flash-0731-ds4-single.json`. It runs on
+`../vonk-forge-recipes/recipes/deepseek-v4-flash-0731-ds4-single.json`. It runs on
 `linux/arm64` and uses DS4's current 128-GB default: the imatrix mixed
 quantization with IQ2_XXS gate/up and Q2_K down projections. It is not NVFP4.
 
@@ -36,43 +36,55 @@ are offline after installation.
 
 ## Qualification behavior
 
-Structural qualification is portable:
+Structural qualification is portable and resolves the model entities and
+build context from the separate standard recipe library:
 
 ```bash
-scripts/qualify-development-model \
-  --recipe config/recipes/deepseek-v4-flash-0731-ds4-single.json \
+scripts/qualify-recipe \
+  --recipe ../vonk-forge-recipes/recipes/deepseek-v4-flash-0731-ds4-single.json \
+  --library-root ../vonk-forge-recipes \
+  --platform-root . \
   --level structural \
-  --output .state/development-acceptance/ds4-structural.json
+  > .state/development-acceptance/ds4-structural.json
 ```
 
-Container qualification is an executable build, start, health, invocation,
-bounded stop, restart, and cleanup path. Run it on a linux/arm64 Spark with the
-two exact model files installed beneath the artifact root:
+The full container and Spark acceptance path is the controller-backed runner
+documented in [Development agent workload acceptance](../runbooks/development-agent-workloads.md).
+It receives the exact external recipe and library explicitly:
 
 ```bash
 scripts/run-development-slices \
   --phase model-single \
-  --level container \
-  --engine docker \
-  --artifact-root /var/lib/vonk/models \
+  --recipe ../vonk-forge-recipes/recipes/deepseek-v4-flash-0731-ds4-single.json \
+  --library-root ../vonk-forge-recipes \
+  --qualification-file .state/development-acceptance/ds4-structural.json \
+  --api-base 'http://127.0.0.1:<LOCAL_API_PORT>' \
+  --inference-base 'http://127.0.0.1:<LOCAL_INFERENCE_PORT>' \
+  --admin-token-file '<EVIDENCE_DIRECTORY>/admin-token' \
+  --inference-token-file '<LOCAL_SECRETS_DIR>/litellm-master-key' \
+  --builder-node '<SPARK_NODE_ID>' \
+  --target-node '<SPARK_NODE_ID>' \
   --evidence-file .state/development-acceptance/ds4-container.json \
-  --timeout-seconds 1800
+  --timeout-seconds 1800 \
+  --stop-after inference-ok
 ```
 
-Evidence is canonical JSON written atomically with mode `0600`. Qualification
+Evidence is canonical JSON written atomically with mode `0600`. The runner
 fails closed on unsupported architecture, mutable image resolution, contract
 failure, engine failure, unhealthy service, invocation failure, or cleanup
-failure.
+failure. Resume with the identical command after the documented restart and
+cleanup checkpoints.
 
 ## Current publication gate
 
 The x86_64 development host can execute structural qualification and the
-bounded fake-engine behavior suite. A local container run exits 3 with
-`status: environment-limited` because the recipes require linux/arm64. This is
-an environment statement, not successful container qualification.
+bounded fake-engine behavior suite. It cannot claim the container or Spark
+gate because these recipes require linux/arm64 and NVIDIA hardware. That is an
+environment statement, not successful container qualification.
 
-## Physical acceptance still required
+## Spark acceptance still required
 
-Task 9 must run the real container path on DGX Spark hardware and retain GPU,
-memory, latency, restart, and cleanup evidence. This audit does not claim
-physical ARM64/GPU acceptance.
+The real container path must run on DGX Spark hardware and retain GPU, memory,
+latency, restart, and cleanup evidence before this recipe can move from
+candidate/structurally-verified to `spark-accepted` and then `default`. This
+audit does not claim physical ARM64/GPU acceptance.

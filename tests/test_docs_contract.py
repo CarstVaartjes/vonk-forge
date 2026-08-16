@@ -171,6 +171,16 @@ def test_standard_recipe_library_documents_the_authority_split() -> None:
         assert required in text
 
 
+def test_current_ds4_audit_uses_v1_external_library_commands() -> None:
+    text = _normalized_text(ROOT / "docs/audits/development-model-smoke.md")
+
+    assert "scripts/qualify-recipe" in text
+    assert "../vonk-forge-recipes/recipes/deepseek-v4-flash-0731-ds4-single.json" in text
+    assert "--library-root ../vonk-forge-recipes" in text
+    assert "scripts/qualify-development-model" not in text
+    assert "--artifact-root /var/lib/vonk/models" not in text
+
+
 def test_current_docs_do_not_advertise_prototype_model_operations() -> None:
     forbidden = (
         "vonkctl-legacy",
