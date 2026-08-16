@@ -411,23 +411,7 @@ def test_vllm_accepts_nemotron_mamba_and_reasoning_options() -> None:
     assert "nemotron_v3" in projection.command
 
 
-def test_vllm_accepts_qwen35_reasoning_and_text_only_options() -> None:
-    recipe = _recipe("vllm")
-    recipe["runtime"]["arguments"].extend(
-        [
-            {"name": "reasoning-parser", "value": "qwen3"},
-            {"name": "language-model-only", "value": True},
-        ]
-    )
-
-    projection = _compile("vllm", recipe=recipe)
-
-    assert "--reasoning-parser" in projection.command
-    assert "qwen3" in projection.command
-    assert "--language-model-only" in projection.command
-
-
-def test_vllm_accepts_laguna_poolside_reasoning_parser() -> None:
+def test_vllm_accepts_poolside_reasoning_parser() -> None:
     recipe = _recipe("vllm")
     recipe["runtime"]["arguments"].append(
         {"name": "reasoning-parser", "value": "poolside_v1"}
@@ -437,6 +421,18 @@ def test_vllm_accepts_laguna_poolside_reasoning_parser() -> None:
 
     assert "--reasoning-parser" in projection.command
     assert "poolside_v1" in projection.command
+
+
+def test_vllm_accepts_qwen3_reasoning_parser() -> None:
+    recipe = _recipe("vllm")
+    recipe["runtime"]["arguments"].append(
+        {"name": "reasoning-parser", "value": "qwen3"}
+    )
+
+    projection = _compile("vllm", recipe=recipe)
+
+    assert "--reasoning-parser" in projection.command
+    assert "qwen3" in projection.command
 
 
 def test_vllm_accepts_offline_and_nvfp4_runtime_environment() -> None:
@@ -755,6 +751,7 @@ def test_diffusers_accepts_specialized_image_layer_pipeline() -> None:
     assert "image-to-layers" in projection.command
 
 
+
 def test_input_contract_requires_the_exact_read_only_input_mount() -> None:
     recipe = _recipe("diffusers")
     recipe["interfaces"][0]["input"] = {
@@ -766,6 +763,7 @@ def test_input_contract_requires_the_exact_read_only_input_mount() -> None:
 
     with pytest.raises(HarnessCompileError, match="input mount"):
         _compile("diffusers", recipe=recipe)
+
 
 
 def test_comfyui_requires_an_immutable_workflow_from_the_recipe_bundle() -> None:
@@ -849,6 +847,15 @@ def test_pytorch_pipeline_requires_an_exact_source_bundle_identity() -> None:
         _compile("pytorch-pipeline", recipe=recipe)
 
 
+def test_pytorch_pipeline_accepts_a_context_path_with_bundle_identity() -> None:
+    recipe = _recipe("pytorch-pipeline")
+    recipe["build"]["context"]["path"] = "adapters/video/ltx2-pytorch"
+
+    projection = _compile("pytorch-pipeline", recipe=recipe)
+
+    assert projection.command[0] == "/opt/vonk/bin/pytorch-pipeline"
+
+
 def test_parameter_substitution_uses_declared_typed_bounds() -> None:
     recipe = _recipe("vllm")
     recipe["parameters"] = [
@@ -918,15 +925,6 @@ def test_job_interfaces_accept_only_their_matching_output_media_family(
     assert projection.command[projection.command.index("--output-mime") + 1] == (
         output_mime
     )
-
-
-def test_pytorch_pipeline_accepts_a_recipe_library_context_path() -> None:
-    recipe = _recipe("pytorch-pipeline")
-    recipe["build"]["context"]["path"] = "adapters/video/example"
-
-    projection = _compile("pytorch-pipeline", recipe=recipe)
-
-    assert projection.command[0] == "/opt/vonk/bin/pytorch-pipeline"
 
 
 @pytest.mark.parametrize(

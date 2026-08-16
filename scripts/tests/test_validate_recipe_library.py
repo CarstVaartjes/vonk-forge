@@ -107,6 +107,56 @@ def test_library_validation_rejects_a_missing_exact_model_parent(tmp_path: Path)
     assert "missing exact catalog dependency" in result.stderr
 
 
+def test_library_validation_rejects_a_nonblocked_target_without_a_recipe(
+    tmp_path: Path,
+) -> None:
+    library = tmp_path / "library"
+    for directory in (
+        "model-groups",
+        "models",
+        "model-versions",
+        "runtime-distributions",
+        "patch-bundles",
+        "recipes",
+    ):
+        shutil.copytree(ROOT / "config" / directory, library / directory)
+    shutil.copytree(ROOT / "adapters", library / "adapters")
+    (library / "model-targets").mkdir()
+    (library / "model-targets/coverage.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "model-target-set",
+                "identity": {"publisher": "vonk-forge", "slug": "coverage"},
+                "metadata": {"title": "Coverage", "updated": "2026-08-16"},
+                "targets": [
+                    {
+                        "modality": "language",
+                        "group": "Example",
+                        "model": "Example",
+                        "version": "candidate",
+                        "status": "candidate",
+                        "source": "https://example.com/model",
+                        "harnesses": ["vllm"],
+                        "topologies": ["single"],
+                        "recipe_slugs": [],
+                    }
+                ],
+            }
+        )
+    )
+
+    result = _run(
+        "--library-root",
+        str(library),
+        "--platform-root",
+        str(ROOT),
+    )
+
+    assert result.returncode != 0
+    assert "non-blocked target has no recipe" in result.stderr
+
+
 def test_library_validation_compiles_each_recipe_harness(tmp_path: Path) -> None:
     library = tmp_path / "library"
     for directory in (

@@ -49,14 +49,12 @@ SUPPORTED_CHECKS = frozenset(
         "container.started",
         "endpoint.healthy",
         "inference.completed",
+        "rank-loss.withdrawal",
+        "rank-recovery.healthy",
         "artifact.mime.image-png",
-        "artifact.mime.image-jpeg",
         "artifact.mime.audio-wav",
         "artifact.mime.video-mp4",
         "artifact.mime.model-gltf-binary",
-        "artifact.mime.application-octet-stream",
-        "rank-loss.withdrawal",
-        "rank-recovery.healthy",
     }
 )
 
