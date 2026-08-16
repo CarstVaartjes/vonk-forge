@@ -1,4 +1,4 @@
-import {render, screen} from "@testing-library/react";
+import {render, screen, within} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {CatalogPage} from "./catalog";
 
@@ -19,6 +19,23 @@ test("separates local, WorkloadRun, and global recipe origins", async () => {
   expect(screen.getByText("up to 80.0 GB RAM / node")).toBeVisible();
   expect(screen.getByText("tensor-pair · 2 nodes")).toBeVisible();
   expect(screen.getByRole("link", {name: "Create local recipe"})).toHaveAttribute("href", "/catalog/new");
+});
+
+test("presents catalog health and filters the local recipe window", async () => {
+  const user = userEvent.setup();
+  render(<CatalogPage api={{catalogRecipes: async () => ({recipes, next_cursor: null})}}/>);
+
+  const overview = await screen.findByRole("region", {name: "Catalog summary"});
+  expect(within(overview).getByRole("group", {name: "3 recipes"})).toBeVisible();
+  expect(within(overview).getByRole("group", {name: "2 resolved"})).toBeVisible();
+  expect(within(overview).getByRole("group", {name: "1 distributed"})).toBeVisible();
+
+  const search = screen.getByRole("searchbox", {name: "Search catalog"});
+  await user.type(search, "DeepSeek");
+  expect(screen.getByRole("article", {name: /DeepSeek/})).toBeVisible();
+  expect(screen.queryByRole("article", {name: /Local Qwen/})).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", {name: "Clear catalog search"}));
+  expect(screen.getByRole("article", {name: /Local Qwen/})).toBeVisible();
 });
 
 test("reviews an exact public revision before importing it locally", async () => {

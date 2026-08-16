@@ -11,7 +11,7 @@ function renderAuthority() {
 test("previews exact catalog identities without prototype runtime adapters", async () => {
   renderAuthority();
   const user = userEvent.setup();
-  const runtime = screen.getByRole("region", {name: "Model and runtime"});
+  const runtime = screen.getByRole("region", {name: "Recipe identity"});
   expect(runtime).toHaveTextContent(`qwen/qwen3@${"e".repeat(64)}`);
   expect(runtime).toHaveTextContent(`vonk-forge/vllm-openai@${"f".repeat(64)}`);
   expect(runtime).toHaveTextContent(`vonk-forge/python-312-cuda@${"1".repeat(64)}`);
@@ -35,5 +35,5 @@ test("keeps the last valid local preview when a strict visual identity is invali
   fireEvent.change(editor, {target: {value: JSON.stringify(changed)}});
   fireEvent.change(editor, {target: {value: JSON.stringify({...changed, model: {...changed.model, content_sha256: "not-a-digest"}})}});
   expect(within(advanced).getByRole("alert")).toHaveTextContent("$.model.content_sha256 must be 64 lowercase hexadecimal characters.");
-  expect(screen.getByRole("region", {name: "Model and runtime"})).toHaveTextContent("vonk-forge/python-preview@");
+  expect(screen.getByRole("region", {name: "Recipe identity"})).toHaveTextContent("vonk-forge/python-preview@");
 });

@@ -125,6 +125,7 @@ export function LibraryPage({api, path, onNavigate}: {
   const [paginationWindowed, setPaginationWindowed] = useState(false);
   const [snapshotAttempt, setSnapshotAttempt] = useState(0);
   const [detailAttempt, setDetailAttempt] = useState(0);
+  const [query, setQuery] = useState("");
   const loadMoreController = useRef<AbortController | undefined>(undefined);
   const routeParents = useRef(new Map<string, RouteParent>());
   const heading = useRef<HTMLHeadingElement>(null);
@@ -223,6 +224,10 @@ export function LibraryPage({api, path, onNavigate}: {
   const browserSnapshot = snapshot && route.kind === "recipe"
     ? restoreRouteParent(snapshot, route.recipeId, routeParents.current.get(route.recipeId))
     : snapshot;
+  const modelCount = snapshot?.models.length ?? 0;
+  const linkedRecipeCount = snapshot?.models.reduce((total, model) => total + model.recipes.length, 0) ?? 0;
+  const unlinkedRecipeCount = snapshot?.unlinked_recipes.length ?? 0;
+  const recipeCount = linkedRecipeCount + unlinkedRecipeCount;
 
   return <div className="library-page">
     <header className="fleet-hero">
@@ -231,7 +236,28 @@ export function LibraryPage({api, path, onNavigate}: {
         <h2 ref={heading} tabIndex={-1}>Library</h2>
         <p className="fleet-introduction">Choose a model, its exact recipe, and one complete placement group before reviewing any change.</p>
       </div>
+      <div className="library-hero-action">
+        <span>Ready to shape the fleet?</span>
+        <a className="button" href="/catalog" onClick={event => onNavigate(event, "/catalog")}>Manage recipes</a>
+      </div>
     </header>
+    {snapshot && <>
+      <section className="library-overview" aria-label="Library summary">
+        <div className="library-stat library-stat-accent" role="group" aria-label={`${modelCount} model version${modelCount === 1 ? "" : "s"}`}><span>Model versions</span><strong>{modelCount}</strong><small>Exact immutable identities</small></div>
+        <div className="library-stat" role="group" aria-label={`${recipeCount} recipes`}><span>Recipes in view</span><strong>{recipeCount}</strong><small>{paginationWindowed ? "Bounded loaded window" : "Available locally"}</small></div>
+        <div className="library-stat" role="group" aria-label={`${linkedRecipeCount} linked`}><span>Linked recipes</span><strong>{linkedRecipeCount}</strong><small>Ready to choose a model</small></div>
+        <div className={`library-stat${unlinkedRecipeCount > 0 ? " library-stat-warning" : ""}`} role="group" aria-label={`${unlinkedRecipeCount} needs a model version`}><span>Needs model version</span><strong>{unlinkedRecipeCount}</strong><small>{unlinkedRecipeCount > 0 ? "Review before install" : "Everything has an exact model"}</small></div>
+      </section>
+      <div className="library-toolbar">
+        <label className="library-search">
+          <span>Find a model or recipe</span>
+          <input type="search" aria-label="Search Library" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search names, slugs, capabilities…" />
+        </label>
+        <div className="library-search-meta" aria-live="polite">
+          {query.trim() ? <><span>Filtering the loaded window</span><button type="button" className="button secondary" onClick={() => setQuery("")}>Clear Library search</button></> : <span>Browse exact versions and their accepted recipes</span>}
+        </div>
+      </div>
+    </>}
     {error && <section className="fleet-error" role="alert"><h3>Library unavailable</h3><p>{error}</p><button type="button" onClick={() => setSnapshotAttempt(value => value + 1)}>Retry Library</button></section>}
     {!error && !snapshot && <section className="fleet-loading" role="status" aria-label="Loading Library"><span className="loading-orb" aria-hidden="true"/><div><h3>Opening Library</h3><p>Loading model, recipe, and placement authority…</p></div></section>}
     {snapshot && snapshot.models.length === 0 && snapshot.unlinked_recipes.length === 0 && <section className="fleet-empty"><h3>No recipes in the Library</h3><p>Create or import a recipe through the advanced catalog workflow.</p><a className="button" href="/catalog" onClick={event => onNavigate(event, "/catalog")}>Open advanced catalog</a></section>}
@@ -243,6 +269,7 @@ export function LibraryPage({api, path, onNavigate}: {
       onNavigate={onNavigate}
       onRefresh={refreshDetail}
       onRetryDetail={() => setDetailAttempt(value => value + 1)}
+      query={query}
       route={route}
       snapshot={browserSnapshot}
       windowed={paginationWindowed}

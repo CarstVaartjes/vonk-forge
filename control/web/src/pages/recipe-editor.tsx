@@ -72,6 +72,14 @@ function recipeDocument(fields: Fields, sourceSha256: string, archiveBytes: numb
   };
 }
 
+function EditorRoadmap() {
+  return <section className="editor-roadmap" aria-label="Recipe authoring steps">
+    <div><strong>01</strong><span>Describe</span><small>Model, runtime, topology</small></div>
+    <div><strong>02</strong><span>Verify</span><small>Hash the source bundle</small></div>
+    <div><strong>03</strong><span>Resolve</span><small>Lock the exact revision</small></div>
+  </section>;
+}
+
 export function RecipeEditorPage({api, recipeId}: {api: EditorApi; recipeId?: string}) {
   const [fields, setFields] = useState(initial);
   const [dockerfile, setDockerfile] = useState(starterDockerfile);
@@ -124,7 +132,8 @@ export function RecipeEditorPage({api, recipeId}: {api: EditorApi; recipeId?: st
   }
 
   if (recipeId) return <>
-    <div className="page-heading"><div><h2>Recipe details</h2><p>The database stores the typed recipe separately from its content-addressed source bundle and cluster mapping.</p></div></div>
+    <header className="editor-hero"><div><p className="fleet-kicker">Recipe authoring</p><h2>Recipe details</h2><p className="fleet-introduction">Review the typed v1 document, lock its exact revision, and send it through the security and placement gates.</p></div></header>
+    <EditorRoadmap />
     {error && <p role="alert">{error}</p>}{message && <p role="status">{message}</p>}
     <form className="recipe-editor" onSubmit={save}><fieldset><legend>Canonical recipe document</legend><label className="wide">Recipe JSON<textarea aria-label="Recipe JSON" rows={30} value={documentText} disabled={recipe?.lifecycle === "resolved"} onChange={event => setDocumentText(event.target.value)}/></label></fieldset><div className="actions">{recipe?.lifecycle !== "resolved" && <><button type="submit">Save draft</button><button type="button" onClick={() => setConfirmResolve(true)}>Resolve recipe</button></>}</div></form>
     {confirmResolve && <section className="confirmation"><h3>Create immutable revision?</h3><p>Resolution locks the recipe metadata and exact source digest. The source still must pass the security gate before a build can be sent.</p><button onClick={() => void resolve()}>Confirm immutable revision</button><button onClick={() => setConfirmResolve(false)}>Cancel</button></section>}
@@ -134,7 +143,8 @@ export function RecipeEditorPage({api, recipeId}: {api: EditorApi; recipeId?: st
 
   const metadataFields: [string, string][] = [["slug", "Recipe slug"], ["title", "Title"], ["description", "Description"], ["modelVersion", "Model-version slug"], ["modelDigest", "Model-version content sha256"], ["executionHarness", "Execution-harness slug"], ["harnessDigest", "Execution-harness content sha256"], ["runtimeDistribution", "Runtime-distribution slug"], ["runtimeDigest", "Runtime-distribution content sha256"], ["repository", "Artifact repository"], ["revision", "Artifact revision"], ["artifactBytes", "Artifact bytes"], ["nodeCount", "Topology node count"], ["memoryBytes", "Runtime memory bytes per node"], ["imageBytes", "Expected image bytes per node"]];
   return <>
-    <div className="page-heading"><div><h2>Create local recipe</h2><p>Start from a source template, import WorkloadRun, or describe a fully custom OCI build. No prebuilt image is required.</p></div><a className="button" href="/catalog/import/workload_run">Import WorkloadRun instead</a></div>
+    <header className="editor-hero"><div><p className="fleet-kicker">Recipe authoring</p><h2>Create local recipe</h2><p className="fleet-introduction">Start from a source template, import WorkloadRun, or describe a fully custom OCI build. No prebuilt image is required.</p></div><a className="button" href="/catalog/import/workload_run">Import WorkloadRun instead</a></header>
+    <EditorRoadmap />
     {error && <p role="alert">{error}</p>}{message && <p role="status">{message}</p>}
     <form className="recipe-editor" onSubmit={save}>
       <fieldset><legend>Recipe and capacity</legend>{metadataFields.map(([name, label]) => <label className={name === "description" ? "wide" : undefined} key={name}>{label}{name === "description" ? <textarea value={fields[name]} onChange={event => set(name, event.target.value)} required/> : <input aria-label={label} value={fields[name]} onChange={event => set(name, event.target.value)} required/>}</label>)}<label className="wide">Entrypoint, one argument per line<textarea value={fields.entrypoint} onChange={event => set("entrypoint", event.target.value)} required/></label></fieldset>

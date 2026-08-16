@@ -19,6 +19,7 @@ test("uploads source first and authors a source-first typed recipe", async () =>
   const user = userEvent.setup();
 
   expect(screen.getByRole("heading", {name: "Create local recipe"})).toBeVisible();
+  expect(screen.getByRole("region", {name: "Recipe authoring steps"})).toBeVisible();
   expect((screen.getByLabelText("Dockerfile") as HTMLTextAreaElement).value).toContain("USER 65532:65532");
 
   await user.type(screen.getByLabelText("Recipe slug"), "my-model");

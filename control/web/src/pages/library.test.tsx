@@ -12,6 +12,37 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+test("summarizes the loaded Library window and filters recipes without changing the route", async () => {
+  history.replaceState(null, "", "/library");
+  const api = {librarySnapshot: async () => librarySnapshot} as unknown as ControlApi;
+  const user = userEvent.setup();
+  render(<App api={api}/>);
+
+  expect(await screen.findByRole("heading", {name: "Library"})).toBeVisible();
+  const summary = screen.getByRole("region", {name: "Library summary"});
+  expect(within(summary).getByRole("group", {name: "1 model version"})).toBeVisible();
+  expect(within(summary).getByRole("group", {name: "3 recipes"})).toBeVisible();
+  expect(within(summary).getByRole("group", {name: "2 linked"})).toBeVisible();
+  expect(within(summary).getByRole("group", {name: "1 needs a model version"})).toBeVisible();
+
+  await user.click(screen.getByRole("link", {name: /qwen\/3/}));
+
+  const search = screen.getByRole("searchbox", {name: "Search Library"});
+  await user.type(search, "Qwen Code");
+
+  const models = screen.getByRole("region", {name: "Models"});
+  expect(within(models).getByRole("link", {name: /qwen\/3/})).toBeVisible();
+  const recipes = screen.getByRole("region", {name: /Recipes for/});
+  expect(within(recipes).getByRole("link", {name: /Qwen Code/})).toBeVisible();
+  expect(within(recipes).queryByRole("link", {name: /Qwen Chat/})).not.toBeInTheDocument();
+  expect(screen.getByRole("button", {name: "Clear Library search"})).toBeVisible();
+
+  await user.click(screen.getByRole("button", {name: "Clear Library search"}));
+  expect(within(recipes).getByRole("link", {name: /Qwen Chat/})).toBeVisible();
+  expect(history.state).toBeNull();
+  expect(location.pathname).toBe(qwenModelPath);
+});
+
 test("shows visual recipe truth and selects only one complete placement group on activation", async () => {
   // Break caught: the UI reduces placement to node checkboxes, hides stale or
   // reservation evidence, calls a bounded search optimal, or omits typed
@@ -29,6 +60,11 @@ test("shows visual recipe truth and selects only one complete placement group on
   expect(within(detail).getByText(`qwen/qwen3@${"e".repeat(64)}`)).toBeVisible();
   expect(within(detail).getByText(`vonk-forge/vllm-openai@${"f".repeat(64)}`)).toBeVisible();
   expect(within(detail).getByText(`vonk-forge/python-312-cuda@${"1".repeat(64)}`)).toBeVisible();
+  const identity = within(detail).getByRole("region", {name: "Recipe identity"});
+  expect(within(identity).getByText("Model version")).toBeVisible();
+  expect(within(identity).getByText("Execution harness")).toBeVisible();
+  expect(within(identity).getByText("Runtime distribution")).toBeVisible();
+  expect(within(detail).getByRole("region", {name: "Lifecycle overview"})).toBeVisible();
   const topology = within(detail).getByRole("region", {name: "Topology and resources"});
   expect(within(topology).getByText("2 nodes · tensor_parallel")).toBeVisible();
   expect(within(topology).getByText("Rank 0 · leader · endpoint owner")).toBeVisible();

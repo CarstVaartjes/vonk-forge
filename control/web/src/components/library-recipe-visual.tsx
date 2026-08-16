@@ -16,11 +16,14 @@ function identity(value: {publisher: string; slug: string; content_sha256: strin
 
 export function LibraryRecipeVisual({document}: {document: VisualRecipeDocument}) {
   return <>
-    <section className="library-section recipe-essentials" aria-label="Model and runtime">
-      <div><span>Model version</span><strong>{identity(document.model)}</strong></div>
-      <div><span>Execution harness</span><strong>{identity(document.execution.harness)}</strong></div>
-      <div><span>Runtime distribution</span><strong>{identity(document.runtime.distribution)}</strong></div>
-      <div><span>Patch bundle</span><strong>{document.execution.patch_bundle ? identity(document.execution.patch_bundle) : "None"}</strong></div>
+    <section className="library-section recipe-identity" aria-label="Recipe identity">
+      <div className="section-heading"><div><p className="fleet-kicker">Exact runtime chain</p><h4>What will run</h4></div><span className="identity-note">Every identity is digest-bound</span></div>
+      <div className="recipe-identity-grid">
+        <div className="recipe-identity-card"><span className="identity-index">01</span><span>Model version</span><strong>{identity(document.model)}</strong><small>Immutable model artifact and format</small></div>
+        <div className="recipe-identity-card"><span className="identity-index">02</span><span>Execution harness</span><strong>{identity(document.execution.harness)}</strong><small>Lifecycle compiler and interface contract</small></div>
+        <div className="recipe-identity-card"><span className="identity-index">03</span><span>Runtime distribution</span><strong>{identity(document.runtime.distribution)}</strong><small>Signed image and dependency boundary</small></div>
+        <div className="recipe-identity-card recipe-identity-card-muted"><span className="identity-index">04</span><span>Patch bundle</span><strong>{document.execution.patch_bundle ? identity(document.execution.patch_bundle) : "None"}</strong><small>{document.execution.patch_bundle ? "Targeted immutable source changes" : "No recipe-local patch applied"}</small></div>
+      </div>
     </section>
 
     <section className="library-section visual-document-section" aria-label="Build and artifacts">
