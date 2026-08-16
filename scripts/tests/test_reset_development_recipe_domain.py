@@ -1,29 +1,53 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import stat
 import subprocess
+import sys
 import threading
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from importlib.machinery import SourceFileLoader
+from importlib.util import module_from_spec, spec_from_loader
 from pathlib import Path
 
 import pytest
+import yaml
+from vonk_control.fleet_projection import FleetSnapshot
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/reset-development-recipe-domain"
 NODE = "spk_0123456789abcdef0123456789abcdef"
 TOKEN = "reset-test-administrator-token"
 HARNESSES = {
-    "comfyui",
-    "diffusers",
-    "ds4",
-    "llama-cpp",
-    "pytorch-pipeline",
-    "sglang",
-    "tensorrt-llm",
-    "vllm",
+    "comfyui": "0d97fceaa9a7ab64bf3d826b5d9ca427ea10be79b54a8d4fe9190711c9bf70d6",
+    "diffusers": "9776b37f1bf4596bf4a0c75c3e9fd6da8b25050aa2cefded2ffd5e35baa583b2",
+    "ds4": "ac139f771cc97b27c1cf6fd97404b6a4db56d6d1725b4282cc5af0289a5421b3",
+    "llama-cpp": "484c90559183e54bd6371db47cdccb5722dc799edda68a1e89e9cf6a8afe7615",
+    "pytorch-pipeline": "29977e349e97f34a2f4f7d6a033abcc9383b0763278192c05e148b2a09cdf01c",
+    "sglang": "9d3c4770fbcde4658d57312b38e82b43c09fa577e93950b860cc215938709f4c",
+    "tensorrt-llm": "946575ac01969eb8b150dd0ecf6e49f86d4d3fde055a4babadde75a9325ff2a1",
+    "vllm": "c0d297318f223378fe573964291bc90fc950242e0d16d1d301c7d3cb4251487d",
 }
+PUBLISHED_COMPOSE = ROOT / "deploy/compose/compose.dev.images.yaml"
+_publisher_loader = SourceFileLoader(
+    "task9_dev_runtime_project", str(ROOT / "scripts/dev-runtime-project")
+)
+_publisher_spec = spec_from_loader(_publisher_loader.name, _publisher_loader)
+assert _publisher_spec is not None
+_publisher = module_from_spec(_publisher_spec)
+sys.modules[_publisher_spec.name] = _publisher
+_publisher_loader.exec_module(_publisher)
+PUBLISHED_COMPOSE_DOCUMENT = yaml.safe_load(
+    _publisher._render_compose(
+        PUBLISHED_COMPOSE.read_bytes(),
+        enroll="enroll.vonk-forge.lan",
+        agent="agents.vonk-forge.lan",
+        direct_fabric_cidrs=("192.168.100.0/24", "192.168.101.0/24"),
+    )
+)
 SERVICES = {
     "postgres",
     "dev-cohort-reset",
@@ -72,12 +96,21 @@ def _append(path: Path, line: str) -> None:
 
 
 class ResetServer(ThreadingHTTPServer):
-    def __init__(self, address, *, events: Path, reset_marker: Path):
+    def __init__(
+        self,
+        address,
+        *,
+        events: Path,
+        reset_marker: Path,
+        teardown_marker: Path,
+    ):
         super().__init__(address, ResetHandler)
         self.events = events
         self.reset_marker = reset_marker
+        self.teardown_marker = teardown_marker
         self.run_active = True
         self.installation_active = True
+        self.force_verification_failure = False
 
 
 class ResetHandler(BaseHTTPRequestHandler):
@@ -110,6 +143,12 @@ class ResetHandler(BaseHTTPRequestHandler):
         if not self._authorized():
             return
         _append(self.server.events, f"api GET {self.path}")
+        if (
+            self.server.teardown_marker.exists()
+            and not self.server.reset_marker.exists()
+        ):
+            self._json(503, {"detail": "control API unavailable during reset"})
+            return
         if self.path == "/api/v1/fleet":
             loaded = (
                 [
@@ -161,38 +200,68 @@ class ResetHandler(BaseHTTPRequestHandler):
                 and not self.server.reset_marker.exists()
                 else []
             )
-            nodes = (
-                []
-                if self.server.reset_marker.exists()
-                else [_fleet_node(loaded, installed)]
-            )
-            self._json(
-                200,
-                {
+            nodes = [
+                _fleet_node(
+                    loaded,
+                    installed,
+                    registered=not self.server.reset_marker.exists(),
+                )
+            ]
+            snapshot = FleetSnapshot.model_validate_json(
+                json.dumps(
+                    {
                     "schema_version": 1,
                     "event_cursor": 7,
                     "generated_at": "2026-08-16T10:00:00+00:00",
                     "repository_commit": "a" * 40,
                     "nodes": nodes,
+                    }
+                )
+            )
+            self._json(200, snapshot.model_dump(mode="json"))
+            return
+        if self.path == "/api/v1/agents":
+            self._json(
+                200,
+                {
+                    "agents": (
+                        []
+                        if self.server.reset_marker.exists()
+                        and not self.server.force_verification_failure
+                        else [{"node_id": NODE, "state": "active"}]
+                    )
                 },
             )
             return
         if self.path.startswith("/api/v1/catalog/entities"):
-            entities = (
+            all_entities = (
                 [
                     {
                         "kind": "execution-harness",
                         "publisher": "vonk-forge",
                         "slug": slug,
                         "lifecycle": "resolved",
-                        "content_sha256": f"{index:064x}",
+                        "content_sha256": digest,
                     }
-                    for index, slug in enumerate(sorted(HARNESSES), start=1)
+                    for slug, digest in sorted(HARNESSES.items())
                 ]
                 if self.server.reset_marker.exists()
                 else []
             )
-            self._json(200, {"entities": entities, "next_cursor": None})
+            second_page = "cursor=second-page" in self.path
+            entities = all_entities[4:] if second_page else all_entities[:4]
+            self._json(
+                200,
+                {
+                    "entities": entities,
+                    "next_cursor": (
+                        None if second_page or not all_entities else "second-page"
+                    ),
+                },
+            )
+            return
+        if self.path.startswith("/api/v1/catalog/recipes"):
+            self._json(200, {"recipes": [], "next_cursor": None})
             return
         self._json(404, {"detail": "not found"})
 
@@ -243,21 +312,24 @@ class ResetHandler(BaseHTTPRequestHandler):
 
 
 def _fleet_node(
-    loaded: list[dict[str, object]], installed: list[dict[str, object]]
+    loaded: list[dict[str, object]],
+    installed: list[dict[str, object]],
+    *,
+    registered: bool,
 ) -> dict[str, object]:
     return {
         "id": NODE,
-        "display_name": "dgx-spark-1",
-        "hostname": "dgx-spark-1.example.test",
-        "lifecycle": "active",
+        "display_name": "DGX Spark 1",
+        "hostname": "spark-3542",
+        "lifecycle": "ready",
         "labels": {},
         "connection": {
-            "agent_state": "active",
-            "certificate_state": "active",
-            "online_state": "online",
-            "offline_reason": None,
-            "last_seen_at": "2026-08-16T09:59:59+00:00",
-            "last_seen_age_seconds": 1.0,
+            "agent_state": "active" if registered else "unregistered",
+            "certificate_state": "valid" if registered else "missing",
+            "online_state": "online" if registered else "unregistered",
+            "offline_reason": None if registered else "unregistered",
+            "last_seen_at": "2026-08-16T09:59:59+00:00" if registered else None,
+            "last_seen_age_seconds": 1.0 if registered else None,
         },
         "inventory": None,
         "telemetry": None,
@@ -280,6 +352,7 @@ def reset_server(tmp_path: Path):
         ("127.0.0.1", 0),
         events=tmp_path / "events.log",
         reset_marker=tmp_path / "reset-complete",
+        teardown_marker=tmp_path / "teardown-complete",
     )
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -296,13 +369,18 @@ def _project(
     *,
     extra_volume: bool = False,
     redirected_volume: bool = False,
-    project_name: str = "vonk-forge-dev",
+    project_name: str = "vonk-forge",
 ) -> tuple[Path, Path]:
     project = tmp_path / "project"
-    project.mkdir()
-    (project / "secrets").mkdir()
-    (project / "docker-compose.yaml").write_text("services: {}\n", encoding="utf-8")
-    volumes = {name: {"name": f"{project_name}_{name}"} for name in sorted(VOLUMES)}
+    project.mkdir(exist_ok=True)
+    (project / "secrets").mkdir(exist_ok=True)
+    compose = project / "docker-compose.yaml"
+    if not compose.exists():
+        compose.write_text("services: {}\n", encoding="utf-8")
+    volumes = {
+        name: {"name": f"{project_name}_{name}"}
+        for name in sorted(PUBLISHED_COMPOSE_DOCUMENT["volumes"])
+    }
     if extra_volume:
         volumes["customer-data"] = {"name": "customer-data"}
     if redirected_volume:
@@ -317,7 +395,7 @@ def _project(
                     else {}
                 )
             }
-            for name in sorted(SERVICES)
+            for name in sorted(PUBLISHED_COMPOSE_DOCUMENT["services"])
         },
         "volumes": volumes,
     }
@@ -326,12 +404,79 @@ def _project(
     return project, config
 
 
+def test_reset_boundary_matches_published_nameless_compose_artifact() -> None:
+    assert "name" not in PUBLISHED_COMPOSE_DOCUMENT
+    assert set(PUBLISHED_COMPOSE_DOCUMENT["services"]) == SERVICES
+    assert set(PUBLISHED_COMPOSE_DOCUMENT["volumes"]) == VOLUMES
+
+
 def _fake_docker(
-    tmp_path: Path, *, revision: str = "0027_execution_harness_catalog"
+    tmp_path: Path,
+    *,
+    orphan: bool = False,
+    anonymous_volume: bool = False,
 ) -> Path:
+    state_path = tmp_path / "docker-state.json"
+    if not state_path.exists():
+        volumes = {
+            f"vonk-forge_{name}": {
+                "Name": f"vonk-forge_{name}",
+                "Labels": {
+                    "com.docker.compose.project": "vonk-forge",
+                    "com.docker.compose.volume": name,
+                },
+            }
+            for name in sorted(VOLUMES)
+        }
+        containers = [
+            {
+                "Id": f"container-{name}",
+                "Config": {
+                    "Labels": {
+                        "com.docker.compose.project": "vonk-forge",
+                        "com.docker.compose.service": name,
+                    }
+                },
+                "Mounts": [],
+            }
+            for name in sorted(SERVICES)
+        ]
+        containers[0]["Mounts"] = [
+            {
+                "Type": "volume",
+                "Name": "vonk-forge_dev-postgres-data",
+                "Destination": "/var/lib/postgresql",
+            }
+        ]
+        if orphan:
+            containers.append(
+                {
+                    "Id": "container-orphan",
+                    "Config": {
+                        "Labels": {
+                            "com.docker.compose.project": "vonk-forge",
+                            "com.docker.compose.service": "prototype-orphan",
+                        }
+                    },
+                    "Mounts": [],
+                }
+            )
+        if anonymous_volume:
+            containers[0]["Mounts"].append(
+                {
+                    "Type": "volume",
+                    "Name": "d34db33fanonymous",
+                    "Destination": "/prototype",
+                }
+            )
+        state_path.write_text(
+            json.dumps({"containers": containers, "volumes": volumes}),
+            encoding="utf-8",
+        )
     executable = tmp_path / "docker"
     executable.write_text(
         """#!/usr/bin/env python3
+import json
 import os
 import sys
 from pathlib import Path
@@ -340,16 +485,77 @@ arguments = sys.argv[1:]
 events = Path(os.environ["RESET_TEST_EVENTS"])
 with events.open("a", encoding="utf-8") as stream:
     stream.write("docker " + " ".join(arguments) + "\\n")
-if "config" in arguments:
-    sys.stdout.write(Path(os.environ["RESET_TEST_CONFIG"]).read_text())
-elif "down" in arguments:
-    if not Path(os.environ["RESET_TEST_DRAINED"]).exists():
-        raise SystemExit(19)
-    Path(os.environ["RESET_TEST_RESET_MARKER"]).touch()
-elif "run" in arguments:
-    print(os.environ["RESET_TEST_REVISION"])
-elif "up" in arguments and "postgres" not in arguments:
-    Path(os.environ["RESET_TEST_STARTED"]).touch()
+state_path = Path(os.environ["RESET_TEST_DOCKER_STATE"])
+state = json.loads(state_path.read_text())
+
+def save():
+    state_path.write_text(json.dumps(state, sort_keys=True))
+
+def fail_once(stage):
+    if os.environ.get("RESET_TEST_FAIL_AT") != stage:
+        return
+    marker = Path(os.environ["RESET_TEST_FAILURE_MARKERS"]) / stage
+    if not marker.exists():
+        marker.touch()
+        raise SystemExit(91)
+
+if arguments and arguments[0] == "compose":
+    if "--project-name" not in arguments or arguments[arguments.index("--project-name") + 1] != "vonk-forge":
+        raise SystemExit(40)
+    compose_file = Path(arguments[arguments.index("--file") + 1])
+    if "config" in arguments:
+        sys.stdout.write(Path(os.environ["RESET_TEST_CONFIG"]).read_text())
+        if os.environ.get("RESET_TEST_SWAP_GRAPH") == "1":
+            Path(os.environ["RESET_TEST_PROJECT_COMPOSE"]).write_text("services:\\n  attacker: {}\\n")
+    elif "stop" in arguments:
+        fail_once("stop")
+        if compose_file == Path(os.environ["RESET_TEST_PROJECT_COMPOSE"]):
+            raise SystemExit(41)
+    elif "down" in arguments:
+        fail_once("down")
+        if "--volumes" in arguments or "--remove-orphans" in arguments:
+            raise SystemExit(42)
+        if compose_file == Path(os.environ["RESET_TEST_PROJECT_COMPOSE"]):
+            raise SystemExit(43)
+        state["containers"] = []
+        save()
+        Path(os.environ["RESET_TEST_TEARDOWN_MARKER"]).touch()
+    elif "run" in arguments:
+        fail_once("migrate")
+        print(os.environ["RESET_TEST_REVISION"])
+    elif "up" in arguments and "postgres" in arguments:
+        fail_once("postgres")
+    elif "up" in arguments:
+        fail_once("stack")
+        Path(os.environ["RESET_TEST_STARTED"]).touch()
+        Path(os.environ["RESET_TEST_RESET_MARKER"]).touch()
+elif arguments[:1] == ["ps"]:
+    for container in state["containers"]:
+        print(container["Id"])
+elif arguments[:2] == ["container", "inspect"]:
+    selected = set(arguments[2:])
+    print(json.dumps([item for item in state["containers"] if item["Id"] in selected]))
+elif arguments[:2] == ["volume", "ls"]:
+    name_filters = [
+        value.removeprefix("name=")
+        for index, value in enumerate(arguments)
+        if index and arguments[index - 1] == "--filter" and value.startswith("name=")
+    ]
+    for name, item in state["volumes"].items():
+        if name_filters:
+            if name in name_filters:
+                print(name)
+        elif item["Labels"].get("com.docker.compose.project") == "vonk-forge":
+            print(name)
+elif arguments[:2] == ["volume", "inspect"]:
+    print(json.dumps([state["volumes"][name] for name in arguments[2:] if name in state["volumes"]]))
+elif arguments[:2] == ["volume", "rm"]:
+    fail_once("volumes")
+    for name in arguments[2:]:
+        state["volumes"].pop(name, None)
+    save()
+else:
+    raise SystemExit(44)
 """,
         encoding="utf-8",
     )
@@ -393,8 +599,12 @@ def _run(
     redirected_volume: bool = False,
     revision: str = "0027_execution_harness_catalog",
     symlink_project: bool = False,
-    project_name: str = "vonk-forge-dev",
+    project_name: str = "vonk-forge",
     docker_mode: str = "direct",
+    orphan: bool = False,
+    anonymous_volume: bool = False,
+    swap_graph: bool = False,
+    fail_at: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     project, config = _project(
         tmp_path,
@@ -406,8 +616,16 @@ def _run(
         linked_project = tmp_path / "linked-project"
         linked_project.symlink_to(project, target_is_directory=True)
         project = linked_project
-    docker = _fake_docker(tmp_path, revision=revision)
+    docker = _fake_docker(
+        tmp_path,
+        orphan=orphan,
+        anonymous_volume=anonymous_volume,
+    )
     _fake_sudo(tmp_path)
+    failure_markers = tmp_path / "failure-markers"
+    failure_markers.mkdir(exist_ok=True)
+    reset_state = tmp_path / "reset-state"
+    reset_state.mkdir(mode=0o700, exist_ok=True)
     drained = tmp_path / "drained"
     original_append = reset_server.events
     environment = os.environ.copy()
@@ -417,11 +635,21 @@ def _run(
             "RESET_TEST_DRAINED": str(drained),
             "RESET_TEST_EVENTS": str(original_append),
             "RESET_TEST_RESET_MARKER": str(reset_server.reset_marker),
+            "RESET_TEST_TEARDOWN_MARKER": str(reset_server.teardown_marker),
             "RESET_TEST_REVISION": revision,
             "RESET_TEST_STARTED": str(tmp_path / "started"),
+            "RESET_TEST_DOCKER_STATE": str(tmp_path / "docker-state.json"),
+            "RESET_TEST_FAILURE_MARKERS": str(failure_markers),
+            "RESET_TEST_PROJECT_COMPOSE": str(project / "docker-compose.yaml"),
+            "RESET_TEST_SWAP_GRAPH": "1" if swap_graph else "0",
             "PATH": f"{tmp_path}{os.pathsep}{environment['PATH']}",
         }
     )
+    if fail_at is None:
+        environment.pop("RESET_TEST_FAIL_AT", None)
+    else:
+        environment["RESET_TEST_FAIL_AT"] = fail_at
+    reset_server.force_verification_failure = fail_at == "verify"
     # The handler and fake Docker share this marker; the real observable is that
     # down refuses to run until both API operations have completed.
     reset_server.drained_marker = drained  # type: ignore[attr-defined]
@@ -431,6 +659,10 @@ def _run(
             *arguments,
             "--project-directory",
             str(project),
+            "--project-name",
+            project_name,
+            "--journal-file",
+            str(tmp_path / "reset-state" / "journal.json"),
             "--api-base",
             f"http://127.0.0.1:{reset_server.server_port}",
             "--admin-token-file",
@@ -550,12 +782,189 @@ def test_reset_refuses_foreign_compose_project_with_matching_volume_suffixes(
     )
 
     assert result.returncode != 0
-    assert (
-        "development Compose graph is not the bounded reset contract" in result.stderr
+    assert "project name must be exactly vonk-forge" in result.stderr
+    assert not reset_server.events.exists()
+
+
+def test_reset_rejects_orphan_project_container_before_stop_or_deletion(
+    tmp_path: Path, reset_server: ResetServer
+) -> None:
+    result = _run(
+        tmp_path,
+        reset_server,
+        "--environment",
+        "development",
+        "--confirm-destructive-preproduction-reset",
+        orphan=True,
     )
+
+    assert result.returncode != 0
+    assert "orphan Compose container" in result.stderr
     events = reset_server.events.read_text().splitlines()
-    assert len(events) == 1
-    assert " config --format json" in events[0]
+    assert not any(" compose " in event and " stop" in event for event in events)
+    assert not any("volume rm" in event for event in events)
+
+
+def test_reset_rejects_anonymous_container_volume_before_stop_or_deletion(
+    tmp_path: Path, reset_server: ResetServer
+) -> None:
+    result = _run(
+        tmp_path,
+        reset_server,
+        "--environment",
+        "development",
+        "--confirm-destructive-preproduction-reset",
+        anonymous_volume=True,
+    )
+
+    assert result.returncode != 0
+    assert "anonymous or foreign container volume" in result.stderr
+    events = reset_server.events.read_text().splitlines()
+    assert not any(" compose " in event and " stop" in event for event in events)
+    assert not any("volume rm" in event for event in events)
+
+
+def test_reset_uses_frozen_snapshot_when_project_compose_changes_after_validation(
+    tmp_path: Path, reset_server: ResetServer
+) -> None:
+    result = _run(
+        tmp_path,
+        reset_server,
+        "--environment",
+        "development",
+        "--confirm-destructive-preproduction-reset",
+        swap_graph=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    journal = json.loads((tmp_path / "reset-state/journal.json").read_text())
+    snapshot = Path(journal["compose_snapshot_path"])
+    assert snapshot.parent == tmp_path / "reset-state"
+    assert snapshot != tmp_path / "project/docker-compose.yaml"
+    assert (
+        snapshot.read_bytes()
+        == (
+            json.dumps(
+                json.loads((tmp_path / "compose-config.json").read_text()),
+                allow_nan=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            + "\n"
+        ).encode()
+    )
+    mutating = [
+        event
+        for event in reset_server.events.read_text().splitlines()
+        if " compose " in event
+        and any(command in event for command in (" stop", " down", " up", " run"))
+    ]
+    assert mutating
+    assert all(f"--file {snapshot}" in event for event in mutating)
+    assert all(
+        "--volumes" not in event and "--remove-orphans" not in event
+        for event in mutating
+    )
+
+
+@pytest.mark.parametrize(
+    "failure_boundary",
+    ("stop", "down", "volumes", "postgres", "migrate", "stack", "verify"),
+)
+def test_reset_journal_resumes_each_destructive_boundary_without_requiring_api(
+    tmp_path: Path,
+    reset_server: ResetServer,
+    failure_boundary: str,
+) -> None:
+    first = _run(
+        tmp_path,
+        reset_server,
+        "--environment",
+        "development",
+        "--confirm-destructive-preproduction-reset",
+        fail_at=failure_boundary,
+    )
+    assert first.returncode != 0
+    journal_path = tmp_path / "reset-state/journal.json"
+    first_journal = json.loads(journal_path.read_text())
+    first_api_posts = [
+        event
+        for event in reset_server.events.read_text().splitlines()
+        if event.startswith("api POST")
+    ]
+
+    second = _run(
+        tmp_path,
+        reset_server,
+        "--environment",
+        "development",
+        "--confirm-destructive-preproduction-reset",
+    )
+
+    assert second.returncode == 0, second.stderr
+    completed = json.loads(journal_path.read_text())
+    assert completed["reset_id"] == first_journal["reset_id"]
+    assert completed["completed_phases"][-1] == "verified"
+    second_api_posts = [
+        event
+        for event in reset_server.events.read_text().splitlines()
+        if event.startswith("api POST")
+    ]
+    assert second_api_posts == first_api_posts
+
+
+def test_reset_journal_and_snapshot_are_private_hash_bound_and_outside_project(
+    tmp_path: Path, reset_server: ResetServer
+) -> None:
+    result = _run(
+        tmp_path,
+        reset_server,
+        "--environment",
+        "development",
+        "--confirm-destructive-preproduction-reset",
+    )
+
+    assert result.returncode == 0, result.stderr
+    journal_path = tmp_path / "reset-state/journal.json"
+    journal = json.loads(journal_path.read_text())
+    snapshot = Path(journal["compose_snapshot_path"])
+    assert stat.S_IMODE(journal_path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(snapshot.stat().st_mode) == 0o400
+    assert (
+        hashlib.sha256(snapshot.read_bytes()).hexdigest()
+        == journal["compose_snapshot_sha256"]
+    )
+    assert {path.name for path in (tmp_path / "project").iterdir()} == {
+        "docker-compose.yaml",
+        "secrets",
+    }
+    events = reset_server.events.read_text().splitlines()
+    removed = next(event for event in events if "volume rm" in event)
+    assert set(removed.split()[3:]) == {f"vonk-forge_{name}" for name in VOLUMES}
+
+
+def test_reset_resume_rejects_exact_named_volume_whose_project_labels_changed(
+    tmp_path: Path, reset_server: ResetServer
+) -> None:
+    reset_arguments = (
+        "--environment",
+        "development",
+        "--confirm-destructive-preproduction-reset",
+    )
+    interrupted = _run(tmp_path, reset_server, *reset_arguments, fail_at="volumes")
+    assert interrupted.returncode == 1
+    state_path = tmp_path / "docker-state.json"
+    state = json.loads(state_path.read_text())
+    state["volumes"]["vonk-forge_dev-postgres-data"]["Labels"] = {}
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    before = reset_server.events.read_text()
+
+    resumed = _run(tmp_path, reset_server, *reset_arguments)
+
+    assert resumed.returncode == 1
+    assert "volume labels are invalid" in resumed.stderr
+    assert "volume rm" not in reset_server.events.read_text()[len(before) :]
+    assert not (tmp_path / "started").exists()
 
 
 def test_reset_drains_workloads_recreates_exact_head_and_verifies_fresh_catalog(

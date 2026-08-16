@@ -519,8 +519,12 @@ scripts/run-development-slices \
   --stop-after inference-ok
 ```
 
-Restart the NAS stack and agent, wait for fresh inventory, then resume with
-the identical command and evidence file without `--stop-after`. The
+Record the checkpoint's Fleet telemetry boot ID and `/api/v1/agents`
+supervisor generation, reboot the Spark offline, restart the NAS stack, and
+wait for fresh inventory. Resume with the identical command and evidence file
+without `--stop-after`. A heartbeat or changed Fleet generation timestamp is
+not restart evidence: the boot ID must differ and the supervisor generation
+must strictly increase before cleanup can begin. The
 86,720,111,488-byte target and
 5,989,114,272-byte support model remain separate immutable cache objects. An
 exact verified cache hit must not download either model again.
@@ -659,7 +663,8 @@ dedicated [MIA DeepSeek V4 Flash two-Spark runbook](mia-deepseek-v4-flash.md)
 for its exact qualification, host-network firewall, build, run, recovery, and
 cleanup commands.
 
-For the single-node checkpoint, restart the target agent supervisor, then use
+For the single-node checkpoint, reboot the target Spark offline so both its
+host boot ID and agent supervisor generation advance, then use
 the NAS UI durability action **Stop project**, wait until the project is
 stopped, and then **Start project**. Its CLI equivalent, run from the project
 directory, is the ordered project stop followed by the full Compose start:
@@ -671,7 +676,7 @@ docker compose up -d --wait
 
 Do not combine `docker compose restart` with a dependency-reconciling
 `docker compose up`: the cohort reset can then run after API/worker have
-already started. For the multi-node checkpoint, restart both supervisors and
+already started. For the multi-node checkpoint, reboot both Sparks offline and
 repeat the same NAS project durability action after recovered inference. Keep
 all named volumes and do not pull a different cohort during this gate.
 

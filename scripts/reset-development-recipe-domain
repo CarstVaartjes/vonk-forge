@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import ipaddress
 import json
 import os
@@ -11,6 +12,7 @@ import re
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -20,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 EXPECTED_REVISION = "0027_execution_harness_catalog"
-EXPECTED_COMPOSE_PROJECT = "vonk-forge-dev"
+EXPECTED_PROJECT_NAME = "vonk-forge"
 EXPECTED_SERVICES = {
     "postgres",
     "dev-cohort-reset",
@@ -62,23 +64,129 @@ EXPECTED_VOLUMES = {
     "dev-worker-secrets",
 }
 EXPECTED_HARNESSES = {
-    "comfyui",
-    "diffusers",
-    "ds4",
-    "llama-cpp",
-    "pytorch-pipeline",
-    "sglang",
-    "tensorrt-llm",
-    "vllm",
+    "comfyui": "0d97fceaa9a7ab64bf3d826b5d9ca427ea10be79b54a8d4fe9190711c9bf70d6",
+    "diffusers": "9776b37f1bf4596bf4a0c75c3e9fd6da8b25050aa2cefded2ffd5e35baa583b2",
+    "ds4": "ac139f771cc97b27c1cf6fd97404b6a4db56d6d1725b4282cc5af0289a5421b3",
+    "llama-cpp": "484c90559183e54bd6371db47cdccb5722dc799edda68a1e89e9cf6a8afe7615",
+    "pytorch-pipeline": "29977e349e97f34a2f4f7d6a033abcc9383b0763278192c05e148b2a09cdf01c",
+    "sglang": "9d3c4770fbcde4658d57312b38e82b43c09fa577e93950b860cc215938709f4c",
+    "tensorrt-llm": "946575ac01969eb8b150dd0ecf6e49f86d4d3fde055a4babadde75a9325ff2a1",
+    "vllm": "c0d297318f223378fe573964291bc90fc950242e0d16d1d301c7d3cb4251487d",
 }
+RESET_PHASES = (
+    "validated",
+    "drained",
+    "stopped",
+    "down",
+    "volumes-deleted",
+    "postgres-started",
+    "migrated",
+    "stack-started",
+    "verified",
+)
 MAXIMUM_TOKEN_BYTES = 16 * 1024
 MAXIMUM_RESPONSE_BYTES = 2 * 1024 * 1024
 MAXIMUM_COMPOSE_BYTES = 4 * 1024 * 1024
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
+DOCKER_ID = re.compile(r"[A-Za-z0-9_.-]{1,128}\Z")
 
 
 class ResetError(RuntimeError):
     """A bounded reset could not prove its next action safe."""
+
+
+def _canonical(value: object) -> bytes:
+    return (
+        json.dumps(
+            value,
+            allow_nan=False,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n"
+    ).encode()
+
+
+def _safe_file(path: Path, *, maximum: int, mode: int) -> bytes:
+    descriptor = -1
+    try:
+        listed = path.stat(follow_symlinks=False)
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        opened = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or (listed.st_dev, listed.st_ino) != (opened.st_dev, opened.st_ino)
+            or opened.st_uid != os.geteuid()
+            or opened.st_nlink != 1
+            or stat.S_IMODE(opened.st_mode) != mode
+            or not 0 < opened.st_size <= maximum
+        ):
+            raise ResetError("reset state file is unsafe")
+        content = bytearray()
+        while len(content) <= maximum:
+            chunk = os.read(descriptor, min(64 * 1024, maximum + 1 - len(content)))
+            if not chunk:
+                break
+            content.extend(chunk)
+        after = os.fstat(descriptor)
+        if len(content) != opened.st_size or (
+            opened.st_dev,
+            opened.st_ino,
+            opened.st_size,
+            opened.st_mtime_ns,
+        ) != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
+            raise ResetError("reset state file changed while read")
+        return bytes(content)
+    except ResetError:
+        raise
+    except OSError as error:
+        raise ResetError("reset state file is unavailable") from error
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def _atomic_private(path: Path, content: bytes) -> None:
+    parent = path.parent
+    try:
+        metadata = parent.stat(follow_symlinks=False)
+    except OSError as error:
+        raise ResetError("reset state directory is unavailable") from error
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or metadata.st_uid != os.geteuid()
+        or stat.S_IMODE(metadata.st_mode) & 0o077
+    ):
+        raise ResetError("reset state directory is unsafe")
+    if path.exists() or path.is_symlink():
+        existing = path.lstat()
+        if (
+            not stat.S_ISREG(existing.st_mode)
+            or existing.st_uid != os.geteuid()
+            or existing.st_nlink != 1
+            or stat.S_IMODE(existing.st_mode) != 0o600
+        ):
+            raise ResetError("reset journal is unsafe")
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=parent)
+    temporary = Path(temporary_name)
+    try:
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "wb", closefd=True) as stream:
+            descriptor = -1
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        directory = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        temporary.unlink(missing_ok=True)
 
 
 def _base_url(value: str) -> str:
@@ -209,15 +317,20 @@ class Client:
         return value
 
 
-def _compose_prefix(args: argparse.Namespace, compose: Path) -> list[str]:
-    docker = (
+def _docker_prefix(args: argparse.Namespace) -> list[str]:
+    return (
         ["sudo", "-n", args.docker_command]
         if args.docker_mode == "sudo"
         else [args.docker_command]
     )
+
+
+def _compose_prefix(args: argparse.Namespace, compose: Path) -> list[str]:
     return [
-        *docker,
+        *_docker_prefix(args),
         "compose",
+        "--project-name",
+        args.project_name,
         "--project-directory",
         str(args.project_directory),
         "--file",
@@ -243,38 +356,13 @@ def _command(
     return result
 
 
-def _development_project(args: argparse.Namespace) -> tuple[Path, list[str]]:
-    project = args.project_directory
-    try:
-        project_status = project.stat(follow_symlinks=False)
-        compose = project / "docker-compose.yaml"
-        compose_status = compose.stat(follow_symlinks=False)
-        secrets_status = (project / "secrets").stat(follow_symlinks=False)
-    except OSError as error:
-        raise ResetError("development Compose project is unavailable") from error
-    if (
-        not stat.S_ISDIR(project_status.st_mode)
-        or not stat.S_ISREG(compose_status.st_mode)
-        or compose_status.st_nlink != 1
-        or not stat.S_ISDIR(secrets_status.st_mode)
-    ):
-        raise ResetError("development Compose project is unsafe")
-    prefix = _compose_prefix(args, compose)
-    result = _command(
-        [*prefix, "config", "--format", "json"],
-        timeout=args.timeout_seconds,
-        label="development Compose validation",
-    )
-    if len(result.stdout.encode()) > MAXIMUM_COMPOSE_BYTES:
-        raise ResetError("development Compose graph is too large")
-    try:
-        document = json.loads(result.stdout)
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise ResetError("development Compose graph is invalid") from error
+def _validate_graph(document: object, args: argparse.Namespace) -> dict[str, str]:
     services = document.get("services") if isinstance(document, dict) else None
     volumes = document.get("volumes") if isinstance(document, dict) else None
+    expected_names = {name: f"{args.project_name}_{name}" for name in EXPECTED_VOLUMES}
     if (
-        document.get("name") != EXPECTED_COMPOSE_PROJECT
+        not isinstance(document, dict)
+        or document.get("name") != args.project_name
         or not isinstance(services, dict)
         or set(services) != EXPECTED_SERVICES
         or not isinstance(volumes, dict)
@@ -282,7 +370,7 @@ def _development_project(args: argparse.Namespace) -> tuple[Path, list[str]]:
         or any(
             not isinstance(volume, dict)
             or volume.get("external") is True
-            or volume.get("name") != f"{EXPECTED_COMPOSE_PROJECT}_{name}"
+            or volume.get("name") != expected_names[name]
             for name, volume in volumes.items()
         )
     ):
@@ -301,7 +389,336 @@ def _development_project(args: argparse.Namespace) -> tuple[Path, list[str]]:
             raise ResetError(
                 "development Compose graph is not the bounded reset contract"
             )
-    return compose, prefix
+    return expected_names
+
+
+def _write_snapshot(path: Path, content: bytes) -> None:
+    if path.exists() or path.is_symlink():
+        if _safe_file(path, maximum=MAXIMUM_COMPOSE_BYTES, mode=0o400) != content:
+            raise ResetError("validated Compose snapshot digest mismatch")
+        return
+    descriptor = -1
+    try:
+        descriptor = os.open(
+            path,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+            0o400,
+        )
+        remaining = memoryview(content)
+        while remaining:
+            written = os.write(descriptor, remaining)
+            if written <= 0:
+                raise ResetError("validated Compose snapshot write was incomplete")
+            remaining = remaining[written:]
+        os.fchmod(descriptor, 0o400)
+        os.fsync(descriptor)
+    except ResetError:
+        raise
+    except OSError as error:
+        raise ResetError("validated Compose snapshot cannot be created") from error
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def _contract(journal: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "project_directory": journal["project_directory"],
+        "project_name": journal["project_name"],
+        "api_base": journal["api_base"],
+        "compose_snapshot_path": journal["compose_snapshot_path"],
+        "compose_snapshot_sha256": journal["compose_snapshot_sha256"],
+        "volume_names": journal["volume_names"],
+    }
+
+
+def _write_journal(args: argparse.Namespace, journal: dict[str, Any]) -> None:
+    _atomic_private(args.journal_file, _canonical(journal))
+
+
+def _load_journal(args: argparse.Namespace) -> dict[str, Any]:
+    raw = _safe_file(args.journal_file, maximum=MAXIMUM_RESPONSE_BYTES, mode=0o600)
+    try:
+        journal = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ResetError("reset journal is invalid") from error
+    phases = journal.get("completed_phases") if isinstance(journal, dict) else None
+    if (
+        not isinstance(journal, dict)
+        or raw != _canonical(journal)
+        or journal.get("schema_version") != 1
+        or not isinstance(journal.get("reset_id"), str)
+        or not isinstance(phases, list)
+        or phases != list(RESET_PHASES[: len(phases)])
+        or journal.get("project_directory") != str(args.project_directory)
+        or journal.get("project_name") != args.project_name
+        or journal.get("api_base") != _base_url(args.api_base)
+        or journal.get("contract_sha256")
+        != hashlib.sha256(_canonical(_contract(journal))).hexdigest()
+    ):
+        raise ResetError("reset journal is invalid or belongs to another invocation")
+    snapshot = Path(str(journal.get("compose_snapshot_path", "")))
+    if snapshot.parent != args.journal_file.parent:
+        raise ResetError("validated Compose snapshot is outside reset state")
+    content = _safe_file(snapshot, maximum=MAXIMUM_COMPOSE_BYTES, mode=0o400)
+    if hashlib.sha256(content).hexdigest() != journal.get("compose_snapshot_sha256"):
+        raise ResetError("validated Compose snapshot digest mismatch")
+    try:
+        document = json.loads(content)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ResetError("validated Compose snapshot is invalid") from error
+    names = _validate_graph(document, args)
+    if journal.get("volume_names") != names:
+        raise ResetError("reset journal volume identity is invalid")
+    return journal
+
+
+def _development_project(args: argparse.Namespace) -> tuple[dict[str, Any], list[str]]:
+    if args.journal_file.exists() or args.journal_file.is_symlink():
+        journal = _load_journal(args)
+        return journal, _compose_prefix(
+            args, Path(str(journal["compose_snapshot_path"]))
+        )
+    project = args.project_directory
+    try:
+        project_status = project.stat(follow_symlinks=False)
+        compose = project / "docker-compose.yaml"
+        compose_status = compose.stat(follow_symlinks=False)
+        secrets_status = (project / "secrets").stat(follow_symlinks=False)
+        top_level = {path.name for path in project.iterdir()}
+    except OSError as error:
+        raise ResetError("development Compose project is unavailable") from error
+    if (
+        not stat.S_ISDIR(project_status.st_mode)
+        or not stat.S_ISREG(compose_status.st_mode)
+        or compose_status.st_nlink != 1
+        or not stat.S_ISDIR(secrets_status.st_mode)
+        or top_level != {"docker-compose.yaml", "secrets"}
+        or args.journal_file.is_relative_to(project)
+    ):
+        raise ResetError("development Compose project is unsafe")
+    source_prefix = _compose_prefix(args, compose)
+    result = _command(
+        [*source_prefix, "config", "--format", "json"],
+        timeout=args.timeout_seconds,
+        label="development Compose validation",
+    )
+    if len(result.stdout.encode()) > MAXIMUM_COMPOSE_BYTES:
+        raise ResetError("development Compose graph is too large")
+    try:
+        document = json.loads(result.stdout)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ResetError("development Compose graph is invalid") from error
+    volume_names = _validate_graph(document, args)
+    snapshot_content = _canonical(document)
+    snapshot_digest = hashlib.sha256(snapshot_content).hexdigest()
+    snapshot = args.journal_file.parent / f"compose-{snapshot_digest}.json"
+    _write_snapshot(snapshot, snapshot_content)
+    journal: dict[str, Any] = {
+        "schema_version": 1,
+        "reset_id": str(uuid.uuid4()),
+        "project_directory": str(args.project_directory),
+        "project_name": args.project_name,
+        "api_base": _base_url(args.api_base),
+        "compose_snapshot_path": str(snapshot),
+        "compose_snapshot_sha256": snapshot_digest,
+        "volume_names": volume_names,
+        "completed_phases": ["validated"],
+    }
+    journal["contract_sha256"] = hashlib.sha256(
+        _canonical(_contract(journal))
+    ).hexdigest()
+    _write_journal(args, journal)
+    return journal, _compose_prefix(args, snapshot)
+
+
+def _complete_phase(
+    args: argparse.Namespace, journal: dict[str, Any], phase: str
+) -> None:
+    completed = journal["completed_phases"]
+    if phase in completed:
+        return
+    if phase != RESET_PHASES[len(completed)]:
+        raise ResetError("reset journal phase transition is invalid")
+    completed.append(phase)
+    _write_journal(args, journal)
+
+
+def _json_command(command: list[str], *, timeout: float, label: str) -> object:
+    result = _command(command, timeout=timeout, label=label)
+    if len(result.stdout.encode()) > MAXIMUM_COMPOSE_BYTES:
+        raise ResetError(f"{label} response is too large")
+    try:
+        return json.loads(result.stdout)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ResetError(f"{label} response is invalid") from error
+
+
+def _project_container_ids(args: argparse.Namespace) -> list[str]:
+    result = _command(
+        [
+            *_docker_prefix(args),
+            "ps",
+            "-a",
+            "--filter",
+            f"label=com.docker.compose.project={args.project_name}",
+            "--format",
+            "{{.ID}}",
+        ],
+        timeout=args.timeout_seconds,
+        label="Compose project container listing",
+    )
+    identifiers = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    if len(identifiers) > len(EXPECTED_SERVICES) + 1 or any(
+        DOCKER_ID.fullmatch(identifier) is None for identifier in identifiers
+    ):
+        raise ResetError("Compose project container listing is invalid")
+    return identifiers
+
+
+def _inspect_containers(
+    args: argparse.Namespace, volume_names: set[str], *, require_exact: bool
+) -> bool:
+    identifiers = _project_container_ids(args)
+    if not identifiers:
+        if require_exact:
+            return False
+        return False
+    value = _json_command(
+        [*_docker_prefix(args), "container", "inspect", *identifiers],
+        timeout=args.timeout_seconds,
+        label="Compose project container inspection",
+    )
+    if not isinstance(value, list) or len(value) != len(identifiers):
+        raise ResetError("Compose project container inspection is invalid")
+    services: set[str] = set()
+    for container in value:
+        config = container.get("Config") if isinstance(container, dict) else None
+        labels = config.get("Labels") if isinstance(config, dict) else None
+        mounts = container.get("Mounts") if isinstance(container, dict) else None
+        service = (
+            labels.get("com.docker.compose.service")
+            if isinstance(labels, dict)
+            else None
+        )
+        if (
+            not isinstance(labels, dict)
+            or labels.get("com.docker.compose.project") != args.project_name
+            or not isinstance(service, str)
+            or service not in EXPECTED_SERVICES
+        ):
+            raise ResetError("orphan Compose container is present")
+        if service in services or not isinstance(mounts, list):
+            raise ResetError("Compose project container inspection is invalid")
+        services.add(service)
+        for mount in mounts:
+            if (
+                isinstance(mount, dict)
+                and mount.get("Type") == "volume"
+                and mount.get("Name") not in volume_names
+            ):
+                raise ResetError("anonymous or foreign container volume is present")
+    if require_exact and services != EXPECTED_SERVICES:
+        raise ResetError("Compose project container set is incomplete")
+    return True
+
+
+def _project_volume_names(args: argparse.Namespace) -> set[str]:
+    result = _command(
+        [
+            *_docker_prefix(args),
+            "volume",
+            "ls",
+            "--filter",
+            f"label=com.docker.compose.project={args.project_name}",
+            "--format",
+            "{{.Name}}",
+        ],
+        timeout=args.timeout_seconds,
+        label="Compose project volume listing",
+    )
+    names = {line.strip() for line in result.stdout.splitlines() if line.strip()}
+    if len(names) > len(EXPECTED_VOLUMES) or any(
+        DOCKER_ID.fullmatch(name) is None for name in names
+    ):
+        raise ResetError("Compose project volume listing is invalid")
+    return names
+
+
+def _exact_named_volumes(
+    args: argparse.Namespace, expected_names: set[str]
+) -> set[str]:
+    present: set[str] = set()
+    for name in sorted(expected_names):
+        result = _command(
+            [
+                *_docker_prefix(args),
+                "volume",
+                "ls",
+                "--filter",
+                f"name={name}",
+                "--format",
+                "{{.Name}}",
+            ],
+            timeout=args.timeout_seconds,
+            label="exact Compose volume lookup",
+        )
+        names = {line.strip() for line in result.stdout.splitlines() if line.strip()}
+        if not names <= {name}:
+            raise ResetError("exact Compose volume lookup is ambiguous")
+        present.update(names)
+    return present
+
+
+def _inspect_volumes(
+    args: argparse.Namespace,
+    expected: dict[str, str],
+    *,
+    allow_missing: bool,
+) -> set[str]:
+    expected_names = set(expected.values())
+    labeled = _project_volume_names(args)
+    present = _exact_named_volumes(args, expected_names)
+    if labeled != present:
+        raise ResetError("Compose project volume labels are invalid")
+    if not present <= expected_names or (
+        not allow_missing and present != expected_names
+    ):
+        raise ResetError("Compose project volume set is not exact")
+    if not present:
+        return present
+    value = _json_command(
+        [*_docker_prefix(args), "volume", "inspect", *sorted(present)],
+        timeout=args.timeout_seconds,
+        label="Compose project volume inspection",
+    )
+    if not isinstance(value, list) or len(value) != len(present):
+        raise ResetError("Compose project volume inspection is invalid")
+    by_name = {item.get("Name"): item for item in value if isinstance(item, dict)}
+    if set(by_name) != present:
+        raise ResetError("Compose project volume inspection is invalid")
+    reverse = {volume_name: key for key, volume_name in expected.items()}
+    for name, item in by_name.items():
+        labels = item.get("Labels")
+        if (
+            not isinstance(labels, dict)
+            or labels.get("com.docker.compose.project") != args.project_name
+            or labels.get("com.docker.compose.volume") != reverse[name]
+        ):
+            raise ResetError("Compose project volume labels are invalid")
+    return present
+
+
+def _delete_volumes(args: argparse.Namespace, expected: dict[str, str]) -> None:
+    present = _inspect_volumes(args, expected, allow_missing=True)
+    if present:
+        _command(
+            [*_docker_prefix(args), "volume", "rm", *sorted(present)],
+            timeout=args.timeout_seconds,
+            label="exact Compose project volume deletion",
+        )
+    if _project_volume_names(args):
+        raise ResetError("exact Compose project volumes remain after deletion")
 
 
 def _fleet(client: Client) -> dict[str, Any]:
@@ -439,46 +856,138 @@ with create_engine(url).connect() as connection:
 """
 
 
-def _recreate(args: argparse.Namespace, prefix: list[str]) -> None:
-    _command(
-        [*prefix, "down", "--volumes", "--remove-orphans"],
-        timeout=args.timeout_seconds,
-        label="development Compose teardown",
-    )
-    _command(
-        [*prefix, "up", "-d", "--wait", "postgres"],
-        timeout=args.timeout_seconds,
-        label="fresh PostgreSQL startup",
-    )
-    migration = _command(
-        [
-            *prefix,
-            "run",
-            "--rm",
-            "migrate",
-            "python",
-            "-m",
-            "vonk_control.dev_cohort",
-            "run-selected",
-            "--role",
-            "api",
-            "--",
-            "python",
-            "-c",
-            MIGRATE_AND_REPORT,
-        ],
-        timeout=args.timeout_seconds,
-        label="fresh database migration",
-    )
-    revision_lines = [
-        line.strip() for line in migration.stdout.splitlines() if line.strip()
-    ]
-    if not revision_lines or revision_lines[-1] != EXPECTED_REVISION:
-        raise ResetError(f"fresh database revision is not {EXPECTED_REVISION}")
-    _command(
-        [*prefix, "up", "-d", "--wait"],
-        timeout=args.timeout_seconds,
-        label="fresh development Compose startup",
+def _recreate(
+    args: argparse.Namespace, journal: dict[str, Any], prefix: list[str]
+) -> None:
+    completed = journal["completed_phases"]
+    expected_volumes = journal["volume_names"]
+    volume_names = set(expected_volumes.values())
+
+    if "stopped" not in completed:
+        containers_present = _inspect_containers(args, volume_names, require_exact=True)
+        if containers_present:
+            _inspect_volumes(args, expected_volumes, allow_missing=False)
+            _command(
+                [*prefix, "stop"],
+                timeout=args.timeout_seconds,
+                label="development Compose stop",
+            )
+        _complete_phase(args, journal, "stopped")
+
+    if "down" not in completed:
+        if _project_container_ids(args):
+            _inspect_containers(args, volume_names, require_exact=True)
+            _command(
+                [*prefix, "down"],
+                timeout=args.timeout_seconds,
+                label="development Compose teardown",
+            )
+        if _project_container_ids(args):
+            raise ResetError("Compose project containers remain after teardown")
+        _complete_phase(args, journal, "down")
+
+    if "volumes-deleted" not in completed:
+        if _project_container_ids(args):
+            raise ResetError("Compose project containers exist before volume deletion")
+        _delete_volumes(args, expected_volumes)
+        _complete_phase(args, journal, "volumes-deleted")
+
+    if "postgres-started" not in completed:
+        _command(
+            [*prefix, "up", "-d", "--wait", "postgres"],
+            timeout=args.timeout_seconds,
+            label="fresh PostgreSQL startup",
+        )
+        _complete_phase(args, journal, "postgres-started")
+
+    if "migrated" not in completed:
+        migration = _command(
+            [
+                *prefix,
+                "run",
+                "--rm",
+                "migrate",
+                "python",
+                "-m",
+                "vonk_control.dev_cohort",
+                "run-selected",
+                "--role",
+                "api",
+                "--",
+                "python",
+                "-c",
+                MIGRATE_AND_REPORT,
+            ],
+            timeout=args.timeout_seconds,
+            label="fresh database migration",
+        )
+        revision_lines = [
+            line.strip() for line in migration.stdout.splitlines() if line.strip()
+        ]
+        if not revision_lines or revision_lines[-1] != EXPECTED_REVISION:
+            raise ResetError(f"fresh database revision is not {EXPECTED_REVISION}")
+        _complete_phase(args, journal, "migrated")
+
+    if "stack-started" not in completed:
+        _command(
+            [*prefix, "up", "-d", "--wait"],
+            timeout=args.timeout_seconds,
+            label="fresh development Compose startup",
+        )
+        _complete_phase(args, journal, "stack-started")
+
+
+def _page_all(
+    client: Client,
+    path: str,
+    key: str,
+    *,
+    query: dict[str, str | int] | None = None,
+) -> list[dict[str, Any]]:
+    values: list[dict[str, Any]] = []
+    cursor: str | None = None
+    seen: set[str] = set()
+    for _ in range(100):
+        parameters = {**(query or {}), "limit": 100}
+        if cursor is not None:
+            parameters["cursor"] = cursor
+        page = client.request("GET", path, query=parameters)
+        items = page.get(key)
+        next_cursor = page.get("next_cursor")
+        if not isinstance(items, list) or any(
+            not isinstance(item, dict) for item in items
+        ):
+            raise ResetError("fresh catalog page is invalid")
+        values.extend(items)
+        if next_cursor is None:
+            return values
+        if not isinstance(next_cursor, str) or not next_cursor or next_cursor in seen:
+            raise ResetError("fresh catalog pagination is invalid")
+        seen.add(next_cursor)
+        cursor = next_cursor
+    raise ResetError("fresh catalog pagination is unbounded")
+
+
+def _unregistered_repository_node(node: object) -> bool:
+    if not isinstance(node, dict):
+        return False
+    connection = node.get("connection")
+    reservations = node.get("reservations")
+    return bool(
+        node.get("lifecycle") == "ready"
+        and isinstance(connection, dict)
+        and connection.get("agent_state") == "unregistered"
+        and connection.get("certificate_state") == "missing"
+        and connection.get("online_state") == "unregistered"
+        and connection.get("offline_reason") == "unregistered"
+        and connection.get("last_seen_at") is None
+        and connection.get("last_seen_age_seconds") is None
+        and node.get("inventory") is None
+        and node.get("telemetry") is None
+        and node.get("installed") == []
+        and node.get("loaded") == []
+        and isinstance(reservations, dict)
+        and set(reservations.values()) == {0}
     )
 
 
@@ -488,32 +997,27 @@ def _verify_fresh(client: Client, args: argparse.Namespace) -> None:
     while True:
         try:
             fleet = _fleet(client)
-            catalog = client.request(
-                "GET",
-                "/api/v1/catalog/entities",
-                query={
-                    "kind": "execution-harness",
-                    "publisher": "vonk-forge",
-                    "limit": 100,
-                },
-            )
-            entities = catalog.get("entities")
-            if fleet.get("nodes") != []:
+            agents = client.request("GET", "/api/v1/agents")
+            entities = _page_all(client, "/api/v1/catalog/entities", "entities")
+            recipes = _page_all(client, "/api/v1/catalog/recipes", "recipes")
+            if agents.get("agents") != []:
                 raise ResetError("fresh reset retained agent enrollments")
-            if not isinstance(entities, list):
-                raise ResetError("fresh catalog response is invalid")
-            harnesses = {
-                str(entity["slug"])
+            if not all(_unregistered_repository_node(node) for node in fleet["nodes"]):
+                raise ResetError("fresh Fleet retained registration or runtime state")
+            identities = {
+                str(entity.get("slug")): str(entity.get("content_sha256"))
                 for entity in entities
-                if isinstance(entity, dict)
-                and entity.get("kind") == "execution-harness"
+                if entity.get("kind") == "execution-harness"
                 and entity.get("publisher") == "vonk-forge"
                 and entity.get("lifecycle") == "resolved"
+                and SHA256.fullmatch(str(entity.get("content_sha256"))) is not None
             }
-            if harnesses != EXPECTED_HARNESSES or len(entities) != len(
+            if identities != EXPECTED_HARNESSES or len(entities) != len(
                 EXPECTED_HARNESSES
             ):
                 raise ResetError("fresh supported v1 catalog is not exact")
+            if recipes:
+                raise ResetError("fresh reset retained prototype recipe state")
             return
         except ResetError as error:
             last_error = error
@@ -538,6 +1042,8 @@ def _arguments() -> argparse.Namespace:
             )
         ),
     )
+    parser.add_argument("--project-name", required=True)
+    parser.add_argument("--journal-file", required=True, type=Path)
     parser.add_argument(
         "--api-base",
         default=os.environ.get("VONK_DEVELOPMENT_API_BASE", "http://127.0.0.1:8080"),
@@ -553,9 +1059,7 @@ def _arguments() -> argparse.Namespace:
         ),
     )
     parser.add_argument("--docker-command", default="docker")
-    parser.add_argument(
-        "--docker-mode", choices=("sudo", "direct"), default="sudo"
-    )
+    parser.add_argument("--docker-mode", choices=("sudo", "direct"), default="sudo")
     parser.add_argument("--timeout-seconds", type=float, default=900.0)
     parser.add_argument("--poll-seconds", type=float, default=1.0)
     args = parser.parse_args()
@@ -565,20 +1069,32 @@ def _arguments() -> argparse.Namespace:
         parser.error("--confirm-destructive-preproduction-reset is required")
     if not 0 < args.timeout_seconds <= 3600 or not 0 < args.poll_seconds <= 30:
         parser.error("timeouts are outside the bounded reset contract")
+    if args.project_name != EXPECTED_PROJECT_NAME:
+        parser.error(f"project name must be exactly {EXPECTED_PROJECT_NAME}")
     args.project_directory = Path(os.path.abspath(args.project_directory))
     args.admin_token_file = Path(os.path.abspath(args.admin_token_file))
+    args.journal_file = Path(os.path.abspath(args.journal_file))
+    if args.journal_file.is_relative_to(args.project_directory):
+        parser.error("reset journal must be outside the permanent NAS project")
     return args
 
 
 def main() -> int:
     args = _arguments()
     try:
-        _compose, prefix = _development_project(args)
-        token = _private_token(args.admin_token_file)
-        client = Client(_base_url(args.api_base), token, args.timeout_seconds)
-        _drain(client, args)
-        _recreate(args, prefix)
-        _verify_fresh(client, args)
+        journal, prefix = _development_project(args)
+        completed = journal["completed_phases"]
+        if "drained" not in completed:
+            token = _private_token(args.admin_token_file)
+            client = Client(_base_url(args.api_base), token, args.timeout_seconds)
+            _drain(client, args)
+            _complete_phase(args, journal, "drained")
+        _recreate(args, journal, prefix)
+        if "verified" not in completed:
+            token = _private_token(args.admin_token_file)
+            client = Client(_base_url(args.api_base), token, args.timeout_seconds)
+            _verify_fresh(client, args)
+            _complete_phase(args, journal, "verified")
     except ResetError as error:
         print(f"development recipe-domain reset failed: {error}", file=sys.stderr)
         return 1

@@ -6,11 +6,15 @@ import os
 import re
 import stat
 import subprocess
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from importlib.machinery import SourceFileLoader
+from importlib.util import module_from_spec, spec_from_loader
 from pathlib import Path
 
 import pytest
+from vonk_control.fleet_projection import FleetSnapshot
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/accept-recipe"
@@ -18,6 +22,8 @@ DS4 = ROOT / "config/recipes/deepseek-v4-flash-0731-ds4-single.json"
 MIA = ROOT / "config/recipes/deepseek-v4-flash-0731-mia-dual.json"
 NODE = "spk_0123456789abcdef0123456789abcdef"
 NODE_2 = "spk_fedcba9876543210fedcba9876543210"
+FLEET_SELECTORS = ("spark-3542", "spark-2297")
+SSH_TARGETS = ("vonk-node-1", "vonk-node-2")
 TOKEN = "acceptance-admin-token"
 INFERENCE_TOKEN = "acceptance-inference-token"
 MODEL_STATES = [
@@ -118,9 +124,9 @@ class FleetHandler(BaseHTTPRequestHandler):
             self._json(401, {"detail": "authentication required"})
             return
         if self.path == "/api/v1/fleet":
-            self._json(
-                200,
-                {
+            snapshot = FleetSnapshot.model_validate_json(
+                json.dumps(
+                    {
                     "schema_version": 1,
                     "event_cursor": self.server.supervisor_generation,
                     "generated_at": "2026-08-16T12:00:00+00:00",
@@ -129,8 +135,10 @@ class FleetHandler(BaseHTTPRequestHandler):
                         _fleet_node(self.server, node_id, index)
                         for index, node_id in enumerate(self.server.node_ids)
                     ],
-                },
+                    }
+                )
             )
+            self._json(200, snapshot.model_dump(mode="json"))
             return
         if self.path == "/api/v1/agents":
             self._json(
@@ -169,13 +177,13 @@ class FleetHandler(BaseHTTPRequestHandler):
 def _fleet_node(server: FleetServer, node_id: str, index: int) -> dict[str, object]:
     return {
         "id": node_id,
-        "display_name": f"dgx-spark-{index + 1}",
-        "hostname": f"dgx-spark-{index + 1}.example.test",
-        "lifecycle": "active",
+        "display_name": f"DGX Spark {index + 1}",
+        "hostname": FLEET_SELECTORS[index],
+        "lifecycle": "ready",
         "labels": {},
         "connection": {
             "agent_state": "active",
-            "certificate_state": "active",
+            "certificate_state": "valid",
             "online_state": "online",
             "offline_reason": None,
             "last_seen_at": "2026-08-16T11:59:59+00:00",
@@ -308,6 +316,28 @@ sys.stdout.buffer.write(Path(os.environ["ACCEPT_TEST_HOST_EVIDENCE"]).read_bytes
     return executable, log
 
 
+def _fake_fabric_validator(tmp_path: Path) -> tuple[Path, Path]:
+    log = tmp_path / "fabric.log"
+    executable = tmp_path / "validate-fabric"
+    executable.write_text(
+        """#!/usr/bin/env python3
+import json
+import os
+import sys
+from pathlib import Path
+
+with Path(os.environ["ACCEPT_TEST_FABRIC_LOG"]).open("a", encoding="utf-8") as stream:
+    stream.write(" ".join(sys.argv[1:]) + "\\n")
+output = Path(sys.argv[sys.argv.index("--output") + 1])
+expected = [value for index, value in enumerate(sys.argv) if index and sys.argv[index - 1] == "--expected-node"]
+output.write_text(json.dumps({"schema_version": 2, "status": "preflight_passed", "evidence_scope": "live_read_only_preflight", "selected_nodes": expected}, sort_keys=True) + "\\n")
+""",
+        encoding="utf-8",
+    )
+    executable.chmod(0o755)
+    return executable, log
+
+
 def _run(
     tmp_path: Path,
     fleet_server: FleetServer,
@@ -315,7 +345,8 @@ def _run(
     recipe: Path = DS4,
     evidence: Path | None = None,
     host_architecture: str = "linux-arm64",
-    nodes: str = "dgx-spark-1",
+    nodes: str = FLEET_SELECTORS[0],
+    ssh_targets: list[str] | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
     evidence = evidence or tmp_path / "acceptance.json"
     image, artifacts = _host_contract(recipe)
@@ -326,13 +357,23 @@ def _run(
         artifacts=artifacts,
     )
     ssh, ssh_log = _fake_ssh(tmp_path, host)
+    fabric_validator, fabric_log = _fake_fabric_validator(tmp_path)
     environment = os.environ.copy()
     environment.update(
         {
             "ACCEPT_TEST_HOST_EVIDENCE": str(host),
             "ACCEPT_TEST_SSH_LOG": str(ssh_log),
+            "ACCEPT_TEST_FABRIC_LOG": str(fabric_log),
         }
     )
+    selectors = nodes.split(",")
+    if ssh_targets is None:
+        ssh_targets = list(SSH_TARGETS[: len(selectors)])
+    mapping_arguments = [
+        argument
+        for selector, target in zip(selectors, ssh_targets)
+        for argument in ("--ssh-target", f"{selector}={target}")
+    ]
     result = subprocess.run(
         (
             str(SCRIPT),
@@ -352,10 +393,15 @@ def _run(
             str(evidence),
             "--ssh-command",
             str(ssh),
+            "--fabric-validator",
+            str(fabric_validator),
+            "--fabric-inventory",
+            str(ROOT / "inventory/cluster.toml"),
             "--timeout-seconds",
             "2",
             "--poll-seconds",
             "0.01",
+            *mapping_arguments,
             *arguments,
         ),
         cwd=ROOT,
@@ -408,7 +454,8 @@ def test_preflight_records_exact_recipe_entity_node_and_host_identities_canonica
         "publisher": "vonk-forge",
         "slug": "deepseek-v4-flash-0731-ds4-single",
     }
-    assert evidence["nodes"][0]["selector"] == "dgx-spark-1"
+    assert evidence["nodes"][0]["selector"] == FLEET_SELECTORS[0]
+    assert evidence["nodes"][0]["ssh_target"] == SSH_TARGETS[0]
     assert evidence["nodes"][0]["node_id"] == NODE
     assert evidence["nodes"][0]["agent_build_digest"] == "sha256:" + "b" * 64
     assert evidence["nodes"][0]["supervisor_generation"] == 1
@@ -452,7 +499,7 @@ def test_mia_preflight_binds_two_distinct_fabric_nodes_and_peak_memory_contract(
         fleet_server,
         "--preflight-only",
         recipe=MIA,
-        nodes="dgx-spark-1,dgx-spark-2",
+        nodes=",".join(FLEET_SELECTORS),
     )
 
     assert result.returncode == 0, result.stderr
@@ -464,8 +511,63 @@ def test_mia_preflight_binds_two_distinct_fabric_nodes_and_peak_memory_contract(
     )
     ssh_calls = ssh_log.read_text()
     assert ssh_calls.count("StrictHostKeyChecking=yes") == 2
-    assert "dgx-spark-1" in ssh_calls
-    assert "dgx-spark-2" in ssh_calls
+    assert FLEET_SELECTORS[0] not in ssh_calls
+    assert FLEET_SELECTORS[1] not in ssh_calls
+    assert SSH_TARGETS[0] in ssh_calls
+    assert SSH_TARGETS[1] in ssh_calls
+    fabric = evidence["preflight"]["fabric"]
+    assert fabric["selected_nodes"] == [
+        f"{NODE}={SSH_TARGETS[0]}",
+        f"{NODE_2}={SSH_TARGETS[1]}",
+    ]
+    assert re.fullmatch(r"[0-9a-f]{64}", fabric["evidence_sha256"])
+
+
+def test_preflight_requires_complete_selector_to_ssh_mapping_before_network(
+    tmp_path: Path, fleet_server: FleetServer
+) -> None:
+    result, _evidence_path, ssh_log = _run(
+        tmp_path,
+        fleet_server,
+        "--preflight-only",
+        ssh_targets=[],
+    )
+
+    assert result.returncode == 1
+    assert "SSH target mapping must exactly cover Fleet selectors" in result.stderr
+    assert fleet_server.requests == []
+    assert not ssh_log.exists()
+
+
+def test_mia_checkpoint_emits_label_verified_rank_container_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.syspath_prepend(str(ROOT / "scripts"))
+    loader = SourceFileLoader("accept_recipe_checkpoint", str(SCRIPT))
+    spec = spec_from_loader(loader.name, loader)
+    assert spec is not None
+    module = module_from_spec(spec)
+    sys.modules[spec.name] = module
+    loader.exec_module(module)
+
+    action = module._rank_checkpoint_action(
+        run_id="50000000-0000-4000-8000-000000000001",
+        runtime_request_sha256="d" * 64,
+        ssh_target=SSH_TARGETS[1],
+        start=False,
+    )
+
+    assert action["agent_action"] == "keep-running"
+    assert action["container_name"] == (
+        "vonk-50000000-0000-4000-8000-000000000001"
+    )
+    assert action["expected_labels"] == {
+        "ai.vonkforge.managed": "true",
+        "ai.vonkforge.run-id": "50000000-0000-4000-8000-000000000001",
+        "ai.vonkforge.runtime-request-sha256": "d" * 64,
+    }
+    assert action["operation"] == "stop"
+    assert action["ssh_target"] == SSH_TARGETS[1]
 
 
 def test_preflight_rejects_wrong_host_architecture_without_runner_mutation(
@@ -620,6 +722,23 @@ def _complete_runner_evidence(
     recipe_digest: str,
     include_image: bool = True,
 ) -> None:
+    restart_checkpoint = {
+        NODE: {
+            "boot_id": "11111111-1111-4111-8111-111111111111",
+            "supervisor_generation": 1,
+        }
+    }
+    restart_identity = {
+        NODE: {
+            "boot_id": "22222222-2222-4222-8222-222222222222",
+            "supervisor_generation": 2,
+        }
+    }
+    restart_binding = {
+        "fleet_evidence_digest": "b" * 64,
+        "inference_response_sha256": "c" * 64,
+        "restart_identity": restart_identity,
+    }
     outputs: dict[str, object] = {
         "fleet_evidence_digest": "1" * 64,
         "initial_agent_last_seen": {NODE: "2026-08-16T11:00:00+00:00"},
@@ -646,9 +765,14 @@ def _complete_runner_evidence(
         "run_node_evidence_digests": {NODE: "8" * 64},
         "run_evidence_sha256": "9" * 64,
         "inference_response_sha256": "a" * 64,
+        "restart_checkpoint": restart_checkpoint,
         "restart_fleet_evidence_digest": "b" * 64,
         "restart_agent_last_seen": {NODE: "2026-08-16T12:00:00+00:00"},
+        "restart_identity": restart_identity,
         "restart_inference_response_sha256": "c" * 64,
+        "restart_binding_sha256": hashlib.sha256(
+            _canonical(restart_binding)
+        ).hexdigest(),
         "stop_operation_id": "60000000-0000-4000-8000-000000000001",
         "uninstall_operation_id": "70000000-0000-4000-8000-000000000001",
     }

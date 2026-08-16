@@ -38,6 +38,53 @@ def test_inventory_uses_two_fabric_functions_per_host(validate_module):
     assert [function.name for function in worker.rails] == ["function100", "function101"]
 
 
+def test_expected_fleet_nodes_bind_to_exact_inventory_ssh_aliases(validate_module):
+    head, worker = validate_module.load_hosts(ROOT / "inventory" / "cluster.toml")
+
+    selected = validate_module.validate_expected_nodes(
+        [
+            "spk_0123456789abcdef0123456789abcdef=vonk-node-1",
+            "spk_fedcba9876543210fedcba9876543210=vonk-node-2",
+        ],
+        head,
+        worker,
+    )
+
+    assert selected == {
+        "spk_0123456789abcdef0123456789abcdef": "vonk-node-1",
+        "spk_fedcba9876543210fedcba9876543210": "vonk-node-2",
+    }
+    with pytest.raises(validate_module.GateError, match="inventory SSH aliases"):
+        validate_module.validate_expected_nodes(
+            [
+                "spk_0123456789abcdef0123456789abcdef=vonk-node-2",
+                "spk_fedcba9876543210fedcba9876543210=vonk-node-1",
+            ],
+            head,
+            worker,
+        )
+
+
+def test_read_only_preflight_probes_each_exact_peer_on_its_bound_interface(
+    validate_module,
+):
+    head, _worker = aggregate_hosts(validate_module)
+
+    class Runner:
+        def __init__(self):
+            self.commands = []
+
+        def remote(self, host, command):
+            self.commands.append((host, command))
+
+    runner = Runner()
+    validate_module.remote_preflight(runner, head, via_fabric=False)
+
+    command = runner.commands[0][1]
+    assert "timeout 5 ping -n -I enp1s0f1np1 -c 1 -W 2 192.168.100.11" in command
+    assert "timeout 5 ping -n -I enP2p1s0f1np1 -c 1 -W 2 192.168.101.11" in command
+
+
 def test_local_fabric_boundary_uses_explicit_ssh_override(
     validate_module, monkeypatch
 ):

@@ -19,6 +19,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 import pytest
+from vonk_control.fleet_projection import FleetSnapshot
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNNER = ROOT / "scripts" / "run-development-slices"
@@ -35,6 +36,11 @@ STATES = [
     "stopped",
     "route-withdrawn",
     "uninstalled",
+]
+MODEL_SINGLE_STATES = [
+    *STATES[:9],
+    "restart-persistence-observed",
+    *STATES[9:],
 ]
 MODEL_MULTINODE_STATES = [
     *STATES[:9],
@@ -117,6 +123,12 @@ class SliceServer(ThreadingHTTPServer):
             NODE_2: "2026-08-11T10:00:00+00:00",
         }
         self.fleet_event_cursor = 1
+        self.fleet_generated_at = "2026-08-11T10:00:01+00:00"
+        self.supervisor_generations = {NODE: 1, NODE_2: 1}
+        self.boot_ids = {
+            NODE: "11111111-1111-4111-8111-111111111111",
+            NODE_2: "22222222-2222-4222-8222-222222222222",
+        }
         self.last_fleet_document: dict[str, object] | None = None
         self.artifact_set_digests = {NODE: "7" * 64, NODE_2: "7" * 64}
         self.rank_states = {NODE: "running", NODE_2: "running"}
@@ -244,22 +256,50 @@ class SliceHandler(BaseHTTPRequestHandler):
                 self._json(404, {"detail": "not found"})
             else:
                 self._json(200, self._entity_response(record))
+        elif self.path == "/api/v1/agents":
+            self._json(
+                200,
+                {
+                    "agents": [
+                        {
+                            "node_id": node,
+                            "state": "active",
+                            "agent_implementation": "rust",
+                            "migration_state": "complete",
+                            "protocol_version": 1,
+                            "platform_version": "0.1.0",
+                            "build_digest": "sha256:" + "b" * 64,
+                            "active_slot": "A",
+                            "agent_sha256": "c" * 64,
+                            "supervisor_generation": self.server.supervisor_generations[
+                                node
+                            ],
+                            "capabilities": self.server.inventory_capabilities[node],
+                            "last_seen_at": self.server.last_seen[node],
+                            "last_seen_age_seconds": 1.0,
+                            "stale": False,
+                            "certificate_expires_at": "2026-09-16T12:00:00+00:00",
+                        }
+                        for node in self.server.nodes
+                    ]
+                },
+            )
         elif self.path == "/api/v1/fleet":
             document = {
                 "schema_version": 1,
                 "event_cursor": self.server.fleet_event_cursor,
-                "generated_at": "2026-08-11T10:00:01+00:00",
+                "generated_at": self.server.fleet_generated_at,
                 "repository_commit": "a" * 40,
                 "nodes": [
                     {
                         "id": node,
                         "display_name": f"spark-{node[-1]}",
                         "hostname": f"spark-{node[-1]}.example.test",
-                        "lifecycle": "active",
+                        "lifecycle": "ready",
                         "labels": {},
                         "connection": {
                             "agent_state": "active",
-                            "certificate_state": "active",
+                            "certificate_state": "valid",
                             "online_state": (
                                 "online" if self.server.online[node] else "offline"
                             ),
@@ -294,7 +334,38 @@ class SliceHandler(BaseHTTPRequestHandler):
                             "nvidia_driver_version": "580.65.06",
                             "container_runtime_version": "28.3.3",
                         },
-                        "telemetry": None,
+                        "telemetry": {
+                            "age_seconds": 1.0,
+                            "freshness": "live",
+                            "sample": {
+                                "id": str(
+                                    uuid.uuid5(uuid.NAMESPACE_URL, f"sample:{node}")
+                                ),
+                                "node_id": node,
+                                "boot_id": self.server.boot_ids[node],
+                                "sequence": self.server.fleet_event_cursor,
+                                "observed_at": self.server.last_seen[node],
+                                "received_at": self.server.last_seen[node],
+                                "cpu_utilization_percent": 1.0,
+                                "load_average_1m": 0.1,
+                                "memory_total_bytes": 128_000_000_000,
+                                "memory_available_bytes": 120_000_000_000,
+                                "disk_total_bytes": 2_000_000_000_000,
+                                "disk_free_bytes": 1_000_000_000_000,
+                                "gpu_utilization_percent": 1.0,
+                                "gpu_memory_total_bytes": 128_000_000_000,
+                                "gpu_memory_free_bytes": 120_000_000_000,
+                                "temperature_c": 35.0,
+                                "power_watts": 30.0,
+                                "network_receive_bytes_per_second": 1.0,
+                                "network_transmit_bytes_per_second": 1.0,
+                                "gap_samples": 0,
+                                "details": {
+                                    "accelerator_name": "GB10",
+                                    "accelerator_performance_state": "P8",
+                                },
+                            },
+                        },
                         "installed": [],
                         "loaded": [],
                         "reservations": {
@@ -309,8 +380,10 @@ class SliceHandler(BaseHTTPRequestHandler):
                     for node in self.server.nodes
                 ],
             }
-            self.server.last_fleet_document = document
-            self._json(200, document)
+            snapshot = FleetSnapshot.model_validate_json(json.dumps(document))
+            serialized = snapshot.model_dump(mode="json")
+            self.server.last_fleet_document = serialized
+            self._json(200, serialized)
         elif self.path == (
             "/api/v1/catalog/recipes/10000000-0000-4000-8000-000000000001"
         ):
@@ -1810,6 +1883,11 @@ def test_model_multinode_runner_proves_failure_recovery_restart_and_cleanup(
         NODE: "2026-08-11T10:02:00+00:00",
         NODE_2: "2026-08-11T10:02:00+00:00",
     }
+    server.supervisor_generations = {NODE: 2, NODE_2: 2}
+    server.boot_ids = {
+        NODE: "33333333-3333-4333-8333-333333333333",
+        NODE_2: "44444444-4444-4444-8444-444444444444",
+    }
     server.fleet_event_cursor = 3
     completed, _ = _run_model(tmp_path, server)
 
@@ -1829,6 +1907,61 @@ def test_model_multinode_runner_proves_failure_recovery_restart_and_cleanup(
         path == "/api/v1/endpoints/deepseek-v4-flash-0731-mia-dual"
         for _method, path, _authorization in server.requests
     )
+
+
+def test_model_restart_gate_rejects_heartbeat_then_retries_without_cleanup(
+    tmp_path: Path, server: SliceServer
+) -> None:
+    initial, evidence_path = _run_model_single(
+        tmp_path, server, "--stop-after", "inference-ok"
+    )
+    assert initial.returncode == 0, initial.stderr
+    checkpoint = json.loads(evidence_path.read_text())
+    assert checkpoint["completed_states"] == MODEL_SINGLE_STATES[:9]
+    assert checkpoint["outputs"]["restart_checkpoint"] == {
+        NODE: {
+            "boot_id": "11111111-1111-4111-8111-111111111111",
+            "supervisor_generation": 1,
+        }
+    }
+
+    server.last_seen[NODE] = "2026-08-11T10:01:00+00:00"
+    server.fleet_event_cursor = 2
+    server.fleet_generated_at = "2026-08-11T10:01:01+00:00"
+    no_restart, _ = _run_model_single(tmp_path, server)
+
+    assert no_restart.returncode == 1
+    assert "restart checkpoint identity did not advance" in no_restart.stderr
+    retained = json.loads(evidence_path.read_text())
+    assert retained["completed_states"] == MODEL_SINGLE_STATES[:9]
+    assert retained["outputs"]["restart_checkpoint"] == checkpoint["outputs"][
+        "restart_checkpoint"
+    ]
+    assert not any(
+        method == "POST" and path.endswith("/stop")
+        for method, path, _body in server.request_bodies
+    )
+    assert not any(
+        method == "POST" and path.endswith("/uninstall")
+        for method, path, _body in server.request_bodies
+    )
+
+    server.supervisor_generations[NODE] = 2
+    server.boot_ids[NODE] = "33333333-3333-4333-8333-333333333333"
+    server.last_seen[NODE] = "2026-08-11T10:02:00+00:00"
+    server.fleet_event_cursor = 3
+    server.fleet_generated_at = "2026-08-11T10:02:01+00:00"
+    restarted, _ = _run_model_single(tmp_path, server)
+
+    assert restarted.returncode == 0, restarted.stderr
+    accepted = json.loads(evidence_path.read_text())
+    assert accepted["completed_states"] == MODEL_SINGLE_STATES
+    assert accepted["outputs"]["restart_identity"] == {
+        NODE: {
+            "boot_id": "33333333-3333-4333-8333-333333333333",
+            "supervisor_generation": 2,
+        }
+    }
 
 
 def test_model_inference_allows_a_bounded_reasoning_budget(

@@ -21,6 +21,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from fleet_snapshot_contract import active_agents, is_ready_node
+
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "scripts/run-development-slices"
 QUALIFIER = ROOT / "scripts/qualify-recipe"
@@ -73,6 +75,8 @@ MAXIMUM_PRIVATE_BYTES = 4 * 1024 * 1024
 MAXIMUM_TOKEN_BYTES = 16 * 1024
 MAXIMUM_HTTP_BYTES = 4 * 1024 * 1024
 MAXIMUM_SSH_BYTES = 4 * 1024 * 1024
+DEFAULT_FABRIC_VALIDATOR = ROOT / "scripts/validate_fabric.py"
+DEFAULT_FABRIC_INVENTORY = ROOT / "inventory/cluster.toml"
 
 
 class AcceptanceError(RuntimeError):
@@ -551,12 +555,12 @@ print(json.dumps(result, allow_nan=False, sort_keys=True, separators=(",", ":"))
 
 def _host_preflight(
     args: argparse.Namespace,
-    selector: str,
+    ssh_target: str,
     image: str,
     artifacts: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    if SELECTOR.fullmatch(selector) is None or selector.startswith("-"):
-        raise AcceptanceError("SSH node selector is invalid")
+    if SELECTOR.fullmatch(ssh_target) is None or ssh_target.startswith("-"):
+        raise AcceptanceError("SSH target is invalid")
     request = {"images": [image], "artifacts": artifacts}
     remote_command = f"python3 -c {shlex.quote(REMOTE_PREFLIGHT)}"
     command = [
@@ -568,7 +572,7 @@ def _host_preflight(
         "ForwardAgent=no",
         "-o",
         "StrictHostKeyChecking=yes",
-        selector,
+        ssh_target,
         remote_command,
     ]
     try:
@@ -580,19 +584,19 @@ def _host_preflight(
             timeout=args.timeout_seconds,
         )
     except (OSError, subprocess.SubprocessError) as error:
-        raise AcceptanceError(f"host preflight failed for {selector}") from error
+        raise AcceptanceError(f"host preflight failed for {ssh_target}") from error
     if (
         result.returncode != 0
         or not result.stdout
         or len(result.stdout) > MAXIMUM_SSH_BYTES
     ):
-        raise AcceptanceError(f"host preflight failed for {selector}")
+        raise AcceptanceError(f"host preflight failed for {ssh_target}")
     try:
         evidence = json.loads(result.stdout)
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise AcceptanceError(f"host preflight is invalid for {selector}") from error
+        raise AcceptanceError(f"host preflight is invalid for {ssh_target}") from error
     if not isinstance(evidence, dict) or result.stdout != _canonical(evidence):
-        raise AcceptanceError(f"host preflight is not canonical for {selector}")
+        raise AcceptanceError(f"host preflight is not canonical for {ssh_target}")
     return evidence
 
 
@@ -624,21 +628,33 @@ def _fleet(client: Client) -> tuple[dict[str, Any], dict[str, dict[str, Any]], s
 
 
 def _agents(client: Client) -> dict[str, dict[str, Any]]:
-    response = client.get("/api/v1/agents")
-    agents = response.get("agents")
-    if not isinstance(agents, list):
-        raise AcceptanceError("agent response is invalid")
-    by_id: dict[str, dict[str, Any]] = {}
-    for agent in agents:
-        node_id = agent.get("node_id") if isinstance(agent, dict) else None
+    try:
+        return active_agents(client.get("/api/v1/agents"))
+    except (TypeError, ValueError) as error:
+        raise AcceptanceError("agent response is invalid") from error
+
+
+def _ssh_target_mapping(
+    values: list[str] | None, selectors: list[str]
+) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    for value in values or []:
+        selector, separator, target = value.partition("=")
         if (
-            not isinstance(agent, dict)
-            or NODE_ID.fullmatch(str(node_id)) is None
-            or node_id in by_id
+            separator != "="
+            or not selector
+            or SELECTOR.fullmatch(selector) is None
+            or SELECTOR.fullmatch(target) is None
+            or selector.startswith("-")
+            or target.startswith("-")
+            or selector in mapping
+            or target in mapping.values()
         ):
-            raise AcceptanceError("agent response is invalid")
-        by_id[str(node_id)] = agent
-    return by_id
+            raise AcceptanceError("SSH target mapping is invalid")
+        mapping[selector] = target
+    if list(mapping) != selectors:
+        raise AcceptanceError("SSH target mapping must exactly cover Fleet selectors")
+    return mapping
 
 
 def _resolve_nodes(
@@ -701,13 +717,16 @@ def _resource_preflight(
         inventory = node.get("inventory")
         reservations = node.get("reservations")
         if (
-            node.get("lifecycle") != "active"
+            not is_ready_node(
+                node,
+                required_capabilities=(
+                    "build.rootless-podman.v1",
+                    "recipe.operations.v1",
+                    "runtime.spark-docker-nvidia.v1",
+                ),
+            )
             or not isinstance(connection, dict)
-            or connection.get("agent_state") != "active"
-            or connection.get("certificate_state") != "active"
-            or connection.get("online_state") != "online"
             or not isinstance(inventory, dict)
-            or inventory.get("freshness") != "fresh"
             or inventory.get("artifact_store_read_only") is not False
             or not isinstance(reservations, dict)
             or agent.get("state") != "active"
@@ -823,7 +842,10 @@ def _resource_preflight(
 
 
 def _node_record(
-    selector: str, node: dict[str, Any], agent: dict[str, Any]
+    selector: str,
+    ssh_target: str,
+    node: dict[str, Any],
+    agent: dict[str, Any],
 ) -> dict[str, Any]:
     build_digest = agent.get("build_digest")
     agent_sha256 = agent.get("agent_sha256")
@@ -844,6 +866,7 @@ def _node_record(
         raise AcceptanceError("agent exact identity is incomplete")
     return {
         "selector": selector,
+        "ssh_target": ssh_target,
         "node_id": node["id"],
         "display_name": node["display_name"],
         "hostname": node["hostname"],
@@ -857,6 +880,7 @@ def _node_record(
 def _same_node_binding(initial: dict[str, Any], current: dict[str, Any]) -> bool:
     stable = {
         "selector",
+        "ssh_target",
         "node_id",
         "display_name",
         "hostname",
@@ -899,11 +923,13 @@ def _load_acceptance(
     recipe_identity: dict[str, Any],
     selectors: list[str],
     entity_references: list[dict[str, Any]],
+    ssh_targets: dict[str, str],
 ) -> dict[str, Any]:
     expected = {
         "recipe": recipe_identity,
         "requested_nodes": selectors,
         "entity_references": entity_references,
+        "ssh_targets": ssh_targets,
     }
     if not path.exists() and not path.is_symlink():
         evidence: dict[str, Any] = {
@@ -1007,6 +1033,53 @@ def _require_uuid(outputs: dict[str, Any], *keys: str) -> None:
         raise AcceptanceError("runner evidence is incomplete")
 
 
+def _rank_checkpoint_action(
+    *,
+    run_id: str,
+    runtime_request_sha256: str | None,
+    ssh_target: str,
+    start: bool,
+) -> dict[str, Any]:
+    if not _canonical_uuid(run_id) or SELECTOR.fullmatch(ssh_target) is None:
+        raise AcceptanceError("rank checkpoint identity is invalid")
+    if runtime_request_sha256 is not None and SHA256.fullmatch(
+        runtime_request_sha256
+    ) is None:
+        raise AcceptanceError("rank checkpoint identity is invalid")
+    container_name = f"vonk-{run_id}"
+    request_label = runtime_request_sha256 or "<64-lowercase-hex>"
+    return {
+        "agent_action": "keep-running",
+        "ssh_target": ssh_target,
+        "container_name": container_name,
+        "expected_labels": {
+            "ai.vonkforge.managed": "true",
+            "ai.vonkforge.run-id": run_id,
+            "ai.vonkforge.runtime-request-sha256": request_label,
+        },
+        "inspect_argv": [
+            "sudo",
+            "docker",
+            "container",
+            "inspect",
+            "--format",
+            (
+                '{{index .Config.Labels "ai.vonkforge.managed"}} '
+                '{{index .Config.Labels "ai.vonkforge.run-id"}} '
+                '{{index .Config.Labels "ai.vonkforge.runtime-request-sha256"}}'
+            ),
+            container_name,
+        ],
+        "operation": "start" if start else "stop",
+        "operation_argv": [
+            "sudo",
+            "docker",
+            "start" if start else "stop",
+            container_name,
+        ],
+    }
+
+
 def _validate_runner_outputs(
     document: dict[str, Any],
     *,
@@ -1080,14 +1153,47 @@ def _validate_runner_outputs(
             outputs,
             "restart_fleet_evidence_digest",
             "restart_inference_response_sha256",
+            "restart_binding_sha256",
         )
         restarted = outputs.get("restart_agent_last_seen")
+        checkpoint = outputs.get("restart_checkpoint")
+        identities = outputs.get("restart_identity")
         if (
-            outputs.get("restart_fleet_evidence_digest")
-            == outputs.get("fleet_evidence_digest")
-            or not isinstance(restarted, dict)
+            not isinstance(restarted, dict)
             or set(restarted) != set(node_ids)
+            or not isinstance(checkpoint, dict)
+            or set(checkpoint) != set(node_ids)
+            or not isinstance(identities, dict)
+            or set(identities) != set(node_ids)
         ):
+            raise AcceptanceError("runner evidence is incomplete")
+        for node_id in node_ids:
+            before = checkpoint[node_id]
+            after = identities[node_id]
+            if (
+                not isinstance(before, dict)
+                or not isinstance(after, dict)
+                or not _canonical_uuid(before.get("boot_id"))
+                or not _canonical_uuid(after.get("boot_id"))
+                or before["boot_id"] == after["boot_id"]
+                or not isinstance(before.get("supervisor_generation"), int)
+                or isinstance(before.get("supervisor_generation"), bool)
+                or not isinstance(after.get("supervisor_generation"), int)
+                or isinstance(after.get("supervisor_generation"), bool)
+                or after["supervisor_generation"]
+                <= before["supervisor_generation"]
+            ):
+                raise AcceptanceError("runner evidence is incomplete")
+        binding = {
+            "fleet_evidence_digest": outputs["restart_fleet_evidence_digest"],
+            "inference_response_sha256": outputs[
+                "restart_inference_response_sha256"
+            ],
+            "restart_identity": identities,
+        }
+        if outputs["restart_binding_sha256"] != hashlib.sha256(
+            _canonical(binding)
+        ).hexdigest():
             raise AcceptanceError("runner evidence is incomplete")
     if "stopped" in reached:
         _require_uuid(outputs, "stop_operation_id")
@@ -1102,10 +1208,12 @@ class Acceptance:
         self,
         args: argparse.Namespace,
         selectors: list[str],
+        ssh_targets: dict[str, str],
         recipe: dict[str, Any],
     ) -> None:
         self.args = args
         self.selectors = selectors
+        self.ssh_targets = ssh_targets
         self.recipe = recipe
         self.recipe_digest = _content_sha256(recipe)
         self.model_version, self.distribution, references = _inputs(recipe, selectors)
@@ -1120,6 +1228,7 @@ class Acceptance:
             recipe_identity=self.recipe_identity,
             selectors=selectors,
             entity_references=references,
+            ssh_targets=ssh_targets,
         )
 
     def _write(self) -> None:
@@ -1142,7 +1251,8 @@ class Acceptance:
         agents = _agents(client)
         selected = _resolve_nodes(self.selectors, fleet_nodes, agents)
         current_records = [
-            _node_record(selector, node, agent) for selector, node, agent in selected
+            _node_record(selector, self.ssh_targets[selector], node, agent)
+            for selector, node, agent in selected
         ]
         initial_records = self.evidence.get("nodes")
         if initial_records:
@@ -1165,7 +1275,9 @@ class Acceptance:
         artifacts = _artifact_inputs(self.model_version)
         hosts: dict[str, dict[str, Any]] = {}
         for selector, node, _agent in selected:
-            host = _host_preflight(self.args, selector, image, artifacts)
+            host = _host_preflight(
+                self.args, self.ssh_targets[selector], image, artifacts
+            )
             _host_evidence(
                 host,
                 node=node,
@@ -1173,6 +1285,7 @@ class Acceptance:
                 artifacts=artifacts,
             )
             hosts[str(node["id"])] = host
+        fabric = self._fabric_preflight(selected)
         self.evidence["preflight"] = {
             "fleet_evidence_sha256": fleet_digest,
             "fleet_event_cursor": fleet["event_cursor"],
@@ -1180,9 +1293,73 @@ class Acceptance:
             "resources": resources,
             "hosts": hosts,
         }
+        if fabric is not None:
+            self.evidence["preflight"]["fabric"] = fabric
         self.evidence["status"] = "preflight-passed"
         self._write()
         return [str(node[1]["id"]) for node in selected], agents
+
+    def _fabric_preflight(
+        self,
+        selected: list[tuple[str, dict[str, Any], dict[str, Any]]],
+    ) -> dict[str, Any] | None:
+        if len(selected) == 1:
+            return None
+        try:
+            descriptor, output_name = tempfile.mkstemp(
+                prefix=f".{self.args.evidence_file.stem}.fabric-",
+                suffix=".json",
+                dir=self.args.evidence_file.parent,
+            )
+            os.fchmod(descriptor, 0o600)
+            os.close(descriptor)
+            output = Path(output_name)
+        except OSError as error:
+            raise AcceptanceError("fabric preflight output is unavailable") from error
+        expected = [
+            f"{node['id']}={self.ssh_targets[selector]}"
+            for selector, node, _agent in selected
+        ]
+        command = [
+            str(self.args.fabric_validator),
+            "--inventory",
+            str(self.args.fabric_inventory),
+            "--output",
+            str(output),
+            "--preflight-only",
+        ]
+        for binding in expected:
+            command.extend(("--expected-node", binding))
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                check=False,
+                timeout=self.args.timeout_seconds,
+            )
+            if result.returncode != 0:
+                raise AcceptanceError("fabric preflight failed")
+            document, raw = _json_file(output, private=True)
+            if (
+                document.get("schema_version") != 2
+                or document.get("status") != "preflight_passed"
+                or document.get("evidence_scope") != "live_read_only_preflight"
+                or document.get("selected_nodes") != expected
+            ):
+                raise AcceptanceError("fabric preflight evidence is invalid")
+            inventory = _safe_read(self.args.fabric_inventory, private=False)
+            return {
+                "selected_nodes": expected,
+                "inventory_sha256": hashlib.sha256(inventory).hexdigest(),
+                "evidence_sha256": hashlib.sha256(raw).hexdigest(),
+            }
+        except (OSError, subprocess.SubprocessError) as error:
+            raise AcceptanceError("fabric preflight failed") from error
+        finally:
+            try:
+                output.unlink()
+            except FileNotFoundError:
+                pass
 
     def _runner_command(
         self, node_ids: list[str], qualification_sha256: str
@@ -1303,15 +1480,46 @@ class Acceptance:
         if completed != list(states):
             self.evidence["runner_evidence_sha256"] = hashlib.sha256(raw).hexdigest()
             self.evidence["status"] = "checkpoint-required"
-            self._write()
+            self.evidence.pop("checkpoint_action", None)
             if phase == "model-single":
                 action = "restart the accepted Spark offline, then rerun this command"
             elif "route-withdrawn-after-failure" not in completed:
-                action = "stop the failure-rank agent, then rerun this command"
+                failure_node = node_ids[1]
+                ssh_target = next(
+                    node["ssh_target"]
+                    for node in self.evidence["nodes"]
+                    if node["node_id"] == failure_node
+                )
+                self.evidence["checkpoint_action"] = _rank_checkpoint_action(
+                    run_id=outputs["run_id"],
+                    runtime_request_sha256=None,
+                    ssh_target=ssh_target,
+                    start=False,
+                )
+                action = (
+                    "keep the agent running; verify the emitted exact container "
+                    "labels, stop only that rank container, then rerun this command"
+                )
             elif "inference-recovered" not in completed:
-                action = "restart the failure-rank agent, then rerun this command"
+                failure_node = node_ids[1]
+                ssh_target = next(
+                    node["ssh_target"]
+                    for node in self.evidence["nodes"]
+                    if node["node_id"] == failure_node
+                )
+                self.evidence["checkpoint_action"] = _rank_checkpoint_action(
+                    run_id=outputs["run_id"],
+                    runtime_request_sha256=None,
+                    ssh_target=ssh_target,
+                    start=True,
+                )
+                action = (
+                    "keep the agent running; verify the emitted exact container "
+                    "labels, start only that rank container, then rerun this command"
+                )
             else:
                 action = "restart both accepted Sparks offline, then rerun this command"
+            self._write()
             raise AcceptanceCheckpoint(action)
         current_agents = _agents(client)
         for initial in self.evidence["nodes"]:
@@ -1341,6 +1549,8 @@ class Acceptance:
                 "run_evidence_sha256",
                 "restart_fleet_evidence_digest",
                 "restart_inference_response_sha256",
+                "restart_identity",
+                "restart_binding_sha256",
             )
         }
         self.evidence["status"] = "spark-accepted"
@@ -1406,6 +1616,17 @@ def _arguments() -> argparse.Namespace:
     )
     parser.add_argument("--evidence-file", type=Path)
     parser.add_argument("--ssh-command", default="ssh")
+    parser.add_argument(
+        "--ssh-target",
+        action="append",
+        help="exact Fleet selector=SSH alias mapping; repeat in --nodes order",
+    )
+    parser.add_argument(
+        "--fabric-validator", type=Path, default=DEFAULT_FABRIC_VALIDATOR
+    )
+    parser.add_argument(
+        "--fabric-inventory", type=Path, default=DEFAULT_FABRIC_INVENTORY
+    )
     parser.add_argument("--timeout-seconds", type=float, default=900.0)
     parser.add_argument("--poll-seconds", type=float, default=1.0)
     args = parser.parse_args()
@@ -1414,6 +1635,8 @@ def _arguments() -> argparse.Namespace:
     args.recipe = Path(os.path.abspath(args.recipe))
     args.admin_token_file = Path(os.path.abspath(args.admin_token_file))
     args.inference_token_file = Path(os.path.abspath(args.inference_token_file))
+    args.fabric_validator = Path(os.path.abspath(args.fabric_validator))
+    args.fabric_inventory = Path(os.path.abspath(args.fabric_inventory))
     return args
 
 
@@ -1422,6 +1645,7 @@ def main() -> int:
     try:
         selectors = _selectors(args.nodes)
         recipe = _recipe(args.recipe, selectors)
+        ssh_targets = _ssh_target_mapping(args.ssh_target, selectors)
         if args.evidence_file is None:
             identity = recipe["identity"]
             node_digest = hashlib.sha256(",".join(selectors).encode()).hexdigest()[:16]
@@ -1432,7 +1656,7 @@ def main() -> int:
             )
             args.evidence_file.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         args.evidence_file = Path(os.path.abspath(args.evidence_file))
-        Acceptance(args, selectors, recipe).run()
+        Acceptance(args, selectors, ssh_targets, recipe).run()
     except AcceptanceCheckpoint as checkpoint:
         print(f"acceptance checkpoint: {checkpoint}", file=sys.stderr)
         return 4

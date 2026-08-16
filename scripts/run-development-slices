@@ -22,6 +22,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from fleet_snapshot_contract import active_agents, is_ready_node, restart_identity
+
 ROOT = Path(__file__).resolve().parents[1]
 SYNTHETIC_ROOT = ROOT / "control/tests/fixtures/recipes/dev-http-smoke"
 NATIVE_INPUTS = {
@@ -965,23 +967,37 @@ class Runner:
 
     @staticmethod
     def _node_ready(node: dict[str, Any] | None) -> bool:
-        connection = node.get("connection") if node else None
-        inventory = node.get("inventory") if node else None
-        capabilities = (
-            inventory.get("capabilities", ()) if isinstance(inventory, dict) else ()
+        return is_ready_node(
+            node,
+            required_capabilities=(
+                "build.rootless-podman.v1",
+                "runtime.spark-docker-nvidia.v1",
+            ),
         )
-        return bool(
-            node is not None
-            and node.get("lifecycle") == "active"
-            and isinstance(connection, dict)
-            and connection.get("agent_state") == "active"
-            and connection.get("certificate_state") == "active"
-            and connection.get("online_state") == "online"
-            and isinstance(inventory, dict)
-            and inventory.get("freshness") == "fresh"
-            and "build.rootless-podman.v1" in capabilities
-            and "runtime.spark-docker-nvidia.v1" in capabilities
-        )
+
+    def _restart_identities(
+        self, by_id: dict[str, dict[str, Any]] | None = None
+    ) -> dict[str, dict[str, object]]:
+        if by_id is None:
+            _fleet, by_id, _digest = self._fleet()
+        _, payload = self.control.request("GET", "/api/v1/agents")
+        try:
+            agents = active_agents(payload)
+            if set(self.targets) - set(agents):
+                raise ValueError("required agent is missing")
+            return {
+                node_id: restart_identity(
+                    by_id.get(node_id),
+                    agents[node_id],
+                    required_capabilities=(
+                        "build.rootless-podman.v1",
+                        "runtime.spark-docker-nvidia.v1",
+                    ),
+                )
+                for node_id in self.targets
+            }
+        except (TypeError, ValueError) as exc:
+            raise SliceError("restart checkpoint identity is invalid") from exc
 
     def recipe_resolved(self) -> None:
         self._ensure_catalog_entities()
@@ -1586,13 +1602,16 @@ class Runner:
 
     def inference_ok(self) -> None:
         response = self._inference()
+        outputs: dict[str, Any] = {
+            "inference_response_sha256": hashlib.sha256(
+                _canonical(response)
+            ).hexdigest()
+        }
+        if self.args.phase == "model-single":
+            outputs["restart_checkpoint"] = self._restart_identities()
         self.complete(
             "inference-ok",
-            {
-                "inference_response_sha256": hashlib.sha256(
-                    _canonical(response)
-                ).hexdigest()
-            },
+            outputs,
         )
 
     def _inference(self) -> dict[str, Any]:
@@ -1708,12 +1727,30 @@ class Runner:
             {
                 "recovered_inference_response_sha256": hashlib.sha256(
                     _canonical(response)
-                ).hexdigest()
+                ).hexdigest(),
+                "restart_checkpoint": self._restart_identities(),
             },
         )
 
     def restart_persistence_observed(self) -> None:
         _fleet, by_id, digest = self._fleet()
+        checkpoint = self.outputs.get("restart_checkpoint")
+        if not isinstance(checkpoint, dict) or set(checkpoint) != set(self.targets):
+            raise SliceError("restart checkpoint identity is missing")
+        identities = self._restart_identities(by_id)
+        for node_id in self.targets:
+            before = checkpoint.get(node_id)
+            current_identity = identities[node_id]
+            if (
+                not isinstance(before, dict)
+                or not isinstance(before.get("supervisor_generation"), int)
+                or isinstance(before.get("supervisor_generation"), bool)
+                or not isinstance(before.get("boot_id"), str)
+                or current_identity["supervisor_generation"]
+                <= before["supervisor_generation"]
+                or current_identity["boot_id"] == before["boot_id"]
+            ):
+                raise SliceError("restart checkpoint identity did not advance")
         initial = self.outputs.get("initial_agent_last_seen")
         if not isinstance(initial, dict):
             raise SliceError("initial agent freshness evidence is missing")
@@ -1732,15 +1769,21 @@ class Runner:
             current[node_id] = value
         self._await_endpoint(published=True)
         response = self._inference()
-        if digest == self.outputs["fleet_evidence_digest"]:
-            raise SliceError("restart persistence fleet evidence did not advance")
+        inference_digest = hashlib.sha256(_canonical(response)).hexdigest()
+        binding = {
+            "fleet_evidence_digest": digest,
+            "inference_response_sha256": inference_digest,
+            "restart_identity": identities,
+        }
         self.complete(
             "restart-persistence-observed",
             {
                 "restart_fleet_evidence_digest": digest,
                 "restart_agent_last_seen": current,
-                "restart_inference_response_sha256": hashlib.sha256(
-                    _canonical(response)
+                "restart_identity": identities,
+                "restart_inference_response_sha256": inference_digest,
+                "restart_binding_sha256": hashlib.sha256(
+                    _canonical(binding)
                 ).hexdigest(),
             },
         )
