@@ -10,10 +10,15 @@ import selectors
 import shutil
 import stat
 import subprocess
+import sys
 import time
+import types
+import urllib.error
+import urllib.request
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -38,6 +43,7 @@ def _litellm_supervisor():
     spec = importlib.util.spec_from_file_location("test_litellm_supervisor", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -88,12 +94,14 @@ def _active_litellm_bundle(
     config: bytes,
     *,
     now: datetime,
+    expires_at: datetime | None = None,
+    generation: int = 1,
 ) -> Path:
     routes = b'{"routes":{"chat":{}},"state":"published"}\n'
     manifest = {
         "evidence_set_digest": "b" * 64,
-        "expires_at": (now + timedelta(seconds=120)).isoformat(),
-        "generation": 1,
+        "expires_at": (expires_at or now + timedelta(seconds=120)).isoformat(),
+        "generation": generation,
         "issued_at": (now - timedelta(seconds=1)).isoformat(),
         "litellm_sha256": hashlib.sha256(config).hexdigest(),
         "plan_digest": "a" * 64,
@@ -104,7 +112,7 @@ def _active_litellm_bundle(
     }
     manifest_content = _canonical_json(manifest)
     manifest_sha = hashlib.sha256(manifest_content).hexdigest()
-    directory_name = f"00000001-{manifest_sha}"
+    directory_name = f"{generation:08d}-{manifest_sha}"
     root = tmp_path / "routes"
     generation = root / "generations" / directory_name
     generation.mkdir(parents=True)
@@ -122,6 +130,91 @@ def _active_litellm_bundle(
     supervisor.ACTIVATION = root / "activation.json"
     supervisor.GENERATIONS = root / "generations"
     return selected
+
+
+def test_development_route_lease_authority_matches_production_boundaries(
+    tmp_path: Path,
+) -> None:
+    supervisor = _litellm_supervisor()
+    now = datetime(2026, 8, 16, 12, 0, tzinfo=UTC)
+    _active_litellm_bundle(
+        supervisor,
+        tmp_path,
+        _canonical_json(_litellm_document()),
+        now=now,
+    )
+    request = supervisor._active_request(now=now)
+    assert request is not None
+    expires_at = datetime.fromisoformat(str(request.marker["expires_at"]))
+    authority = supervisor._RouteLeaseAuthority()
+
+    authority.deny()
+    assert authority.authorized(now) is False
+    authority.allow_bootstrap()
+    assert authority.authorized(now) is True
+    authority.activate(request)
+    request.marker["expires_at"] = now.isoformat()
+    assert authority.authorized(expires_at - timedelta(microseconds=1)) is True
+    assert authority.authorized(expires_at) is False
+    assert authority.authorized(now.replace(tzinfo=None)) is False
+    authority.activate(types.SimpleNamespace(marker={}))
+    assert authority.authorized(now) is False
+
+
+def _development_route_lease_status(
+    server: object,
+    *,
+    path: str = "/vonk/route-lease",
+    method: str = "GET",
+) -> tuple[int, bytes, object]:
+    host, port = server.server_address
+    request = urllib.request.Request(f"http://{host}:{port}{path}", method=method)
+    try:
+        response = urllib.request.urlopen(request, timeout=1)
+    except urllib.error.HTTPError as error:
+        return error.code, error.read(), error.headers
+    with response:
+        return response.status, response.read(), response.headers
+
+
+def test_development_route_lease_http_matches_production_boundaries(
+    tmp_path: Path,
+) -> None:
+    supervisor = _litellm_supervisor()
+    now = datetime.now(UTC)
+    _active_litellm_bundle(
+        supervisor,
+        tmp_path,
+        _canonical_json(_litellm_document()),
+        now=now,
+    )
+    request = supervisor._active_request(now=now)
+    assert request is not None
+    authority = supervisor._RouteLeaseAuthority()
+    server = supervisor._start_route_lease_server(
+        authority,
+        host="127.0.0.1",
+        port=0,
+    )
+    try:
+        status, body, headers = _development_route_lease_status(server)
+        assert (status, body) == (503, b"")
+        assert headers["Cache-Control"] == "no-store"
+        assert "Server" not in headers
+
+        authority.activate(request)
+        assert _development_route_lease_status(server)[:2] == (204, b"")
+        assert _development_route_lease_status(server, path="/health")[0] == 404
+        assert _development_route_lease_status(server, method="POST")[0] == 404
+        status, body, headers = _development_route_lease_status(server, method="BREW")
+        assert (status, body) == (404, b"")
+        assert "Server" not in headers
+
+        authority.deny()
+        assert _development_route_lease_status(server)[0] == 503
+    finally:
+        server.shutdown()
+        server.server_close()
 
 
 def test_development_resources_are_complete_bounded_regular_files() -> None:
@@ -431,7 +524,7 @@ def test_caddy_entrypoint_stages_runtime_files_as_uid_10000(
         "VONK_CONTROL_HOSTNAME=vonk-forge.tailnet.test.ts.net"
     ):
         absent_index = absent_command.index("--env", absent_index + 1)
-    del absent_command[absent_index:absent_index + 2]
+    del absent_command[absent_index : absent_index + 2]
     absent = subprocess.run(
         absent_command,
         stdin=subprocess.DEVNULL,
@@ -444,9 +537,9 @@ def test_caddy_entrypoint_stages_runtime_files_as_uid_10000(
     assert "VONK_CONTROL_HOSTNAME" in absent.stderr
 
     invalid_command = list(command)
-    invalid_command[invalid_command.index(
-        "VONK_CONTROL_HOSTNAME=vonk-forge.tailnet.test.ts.net"
-    )] = "VONK_CONTROL_HOSTNAME=control.test.example"
+    invalid_command[
+        invalid_command.index("VONK_CONTROL_HOSTNAME=vonk-forge.tailnet.test.ts.net")
+    ] = "VONK_CONTROL_HOSTNAME=control.test.example"
     invalid = subprocess.run(
         invalid_command,
         stdin=subprocess.DEVNULL,
@@ -462,8 +555,7 @@ def test_caddy_entrypoint_stages_runtime_files_as_uid_10000(
     hostname_root.mkdir(mode=0o755)
     hostname_file = hostname_root / "control-hostname.ready"
     hostname_file.write_text(
-        "11111111-1111-4111-8111-111111111111 "
-        "vonk-forge.discovered-tailnet.ts.net\n",
+        "11111111-1111-4111-8111-111111111111 vonk-forge.discovered-tailnet.ts.net\n",
         encoding="utf-8",
     )
     hostname_file.chmod(0o444)
@@ -581,8 +673,8 @@ def test_caddy_entrypoint_requires_fresh_generation_and_reacts_to_real_file_even
     fake_caddy.write_text(
         "#!/bin/sh\n"
         "config=\n"
-        "while [ \"$#\" -gt 0 ]; do\n"
-        "  if [ \"$1\" = --config ]; then config=$2; shift 2; else shift; fi\n"
+        'while [ "$#" -gt 0 ]; do\n'
+        '  if [ "$1" = --config ]; then config=$2; shift 2; else shift; fi\n'
         "done\n"
         "if grep -Fq ':8080 {' \"$config\"; then\n"
         "  printf 'browser:%s\\n' \"$VONK_CONTROL_HOSTNAME\"\n"
@@ -644,12 +736,13 @@ def test_caddy_entrypoint_requires_fresh_generation_and_reacts_to_real_file_even
     selector.register(process.stdout, selectors.EVENT_READ)
     try:
         assert _next_handoff_mode(process, selector, timeout=10) == "agent-only"
-        assert not selector.select(1.5), "persisted authority must not enable browser mode"
+        assert not selector.select(1.5), (
+            "persisted authority must not enable browser mode"
+        )
 
         _atomic_text(
             authority,
-            "22222222-2222-4222-8222-222222222222 "
-            "vonk-forge.current-tailnet.ts.net\n",
+            "22222222-2222-4222-8222-222222222222 vonk-forge.current-tailnet.ts.net\n",
         )
         assert _next_handoff_mode(process, selector, timeout=10) == (
             "browser:vonk-forge.current-tailnet.ts.net"
@@ -657,8 +750,7 @@ def test_caddy_entrypoint_requires_fresh_generation_and_reacts_to_real_file_even
 
         _atomic_text(
             authority,
-            "22222222-2222-4222-8222-222222222222 "
-            "vonk-forge.replaced-tailnet.ts.net\n",
+            "22222222-2222-4222-8222-222222222222 vonk-forge.replaced-tailnet.ts.net\n",
         )
         assert _next_handoff_mode(process, selector, timeout=10) == (
             "browser:vonk-forge.replaced-tailnet.ts.net"
@@ -683,15 +775,12 @@ def test_caddy_health_requires_browser_authority_and_probes_the_browser_route(
 ) -> None:
     entrypoint = Path(
         os.fspath(
-            importlib.resources.files(RESOURCE_PACKAGE).joinpath(
-                "caddy-entrypoint.sh"
-            )
+            importlib.resources.files(RESOURCE_PACKAGE).joinpath("caddy-entrypoint.sh")
         )
     )
     authority = tmp_path / "control-hostname.ready"
     authority.write_text(
-        "11111111-1111-4111-8111-111111111111 "
-        "vonk-forge.test-tailnet.ts.net\n",
+        "11111111-1111-4111-8111-111111111111 vonk-forge.test-tailnet.ts.net\n",
         encoding="ascii",
     )
     fake_bin = tmp_path / "bin"
@@ -699,8 +788,7 @@ def test_caddy_health_requires_browser_authority_and_probes_the_browser_route(
     calls = tmp_path / "wget.calls"
     wget = fake_bin / "wget"
     wget.write_text(
-        "#!/bin/sh\n"
-        "printf '%s\\n' \"$*\" >>\"$WGET_CALLS\"\n",
+        '#!/bin/sh\nprintf \'%s\\n\' "$*" >>"$WGET_CALLS"\n',
         encoding="ascii",
     )
     wget.chmod(0o755)
@@ -798,6 +886,259 @@ def test_litellm_supervisor_allows_first_run_database_migrations() -> None:
     supervisor = _litellm_supervisor()
 
     assert supervisor.STARTUP_SECONDS == 120
+
+
+def test_development_supervisor_renews_same_config_route_lease_without_restart(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    supervisor = _litellm_supervisor()
+    issued_at = datetime.now(UTC)
+    old_expires_at = issued_at + timedelta(seconds=120)
+    new_expires_at = issued_at + timedelta(seconds=240)
+    config = _canonical_json(_litellm_document())
+    _active_litellm_bundle(
+        supervisor,
+        tmp_path,
+        config,
+        now=issued_at,
+        expires_at=old_expires_at,
+    )
+    first_request = supervisor._active_request(now=issued_at)
+    _active_litellm_bundle(
+        supervisor,
+        tmp_path,
+        config,
+        now=issued_at,
+        expires_at=new_expires_at,
+        generation=2,
+    )
+    second_request = supervisor._active_request(now=issued_at)
+    assert first_request is not None and second_request is not None
+    assert first_request.config_bytes == second_request.config_bytes
+    supervisor.ACK_ROOT = tmp_path / "supervisor"
+    supervisor.ACK = supervisor.ACK_ROOT / "ack.json"
+
+    class Child:
+        pid = 654
+        returncode = None
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self) -> None:
+            self.returncode = 0
+
+        def kill(self) -> None:
+            self.returncode = -9
+
+        def wait(self, timeout=None):
+            del timeout
+            return self.returncode
+
+    class Server:
+        def shutdown(self) -> None:
+            return
+
+        def server_close(self) -> None:
+            return
+
+    class Timer:
+        instances: ClassVar[list[Timer]] = []
+
+        def __init__(self, interval, function) -> None:
+            self.interval = interval
+            self.function = function
+            self.cancelled = False
+            self.daemon = False
+            self.instances.append(self)
+
+        def start(self) -> None:
+            return
+
+        def cancel(self) -> None:
+            self.cancelled = True
+
+    child = Child()
+    requests = iter((first_request, second_request))
+    authorities = []
+    spawn_count = 0
+    renewal_observations: dict[str, object] = {}
+    original_write_ack = supervisor._write_ack
+
+    def start_server(authority, **_kwargs):
+        authorities.append(authority)
+        return Server()
+
+    def spawn(*_args, **_kwargs):
+        nonlocal spawn_count
+        spawn_count += 1
+        assert spawn_count == 1, "same-config renewal restarted child"
+        return child
+
+    def write_ack(request, loaded_child, *, now):
+        original_write_ack(request, loaded_child, now=now)
+        if request.marker["generation"] == 2:
+            renewal_observations["authorized_after_old_expiry"] = authorities[
+                0
+            ].authorized(old_expires_at + timedelta(microseconds=1))
+            renewal_observations["ack_generation"] = json.loads(
+                supervisor.ACK.read_bytes()
+            )["generation"]
+            renewal_observations["timers"] = tuple(Timer.instances)
+            child.returncode = 29
+
+    monkeypatch.setattr(
+        supervisor,
+        "_active_request",
+        lambda **_kwargs: next(requests),
+    )
+    monkeypatch.setattr(supervisor, "_await_healthy", lambda _child: True)
+    monkeypatch.setattr(supervisor, "_healthy", lambda _child: True)
+    monkeypatch.setattr(supervisor, "_materialize_config", lambda _source: tmp_path)
+    monkeypatch.setattr(supervisor, "_start_route_lease_server", start_server)
+    monkeypatch.setattr(supervisor, "_write_ack", write_ack)
+    monkeypatch.setattr(supervisor.subprocess, "Popen", spawn)
+    monkeypatch.setattr(supervisor.signal, "signal", lambda *_args: None)
+    monkeypatch.setattr(supervisor.threading, "Timer", Timer)
+    monkeypatch.setattr(supervisor.time, "sleep", lambda _seconds: None)
+
+    assert supervisor.main() == 29
+    assert spawn_count == 1
+    assert renewal_observations["authorized_after_old_expiry"] is True
+    assert renewal_observations["ack_generation"] == 2
+    timers = renewal_observations["timers"]
+    assert isinstance(timers, tuple) and len(timers) == 2
+    assert timers[0].cancelled is True
+    assert timers[1].interval > timers[0].interval
+
+
+def test_development_supervisor_denies_malformed_activation_before_cleanup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    supervisor = _litellm_supervisor()
+    now = datetime.now(UTC)
+    bootstrap = _canonical_json(_litellm_document(model_name=""))
+    _active_litellm_bundle(
+        supervisor,
+        tmp_path,
+        _canonical_json(_litellm_document()),
+        now=now,
+    )
+    supervisor.ACTIVATION.write_bytes(b"not-json\n")
+
+    class Child:
+        pid = 789
+        returncode = None
+
+        def poll(self):
+            return self.returncode
+
+    class Server:
+        def shutdown(self) -> None:
+            return
+
+        def server_close(self) -> None:
+            return
+
+    child = Child()
+    authorities = []
+    authorization_at_cleanup: list[bool] = []
+
+    def start_server(authority, **_kwargs):
+        authorities.append(authority)
+        return Server()
+
+    def clear_ack() -> None:
+        authorization_at_cleanup.append(authorities[0].authorized(now))
+        child.returncode = 11
+
+    monkeypatch.setattr(supervisor, "_start_route_lease_server", start_server)
+    monkeypatch.setattr(supervisor, "_selected", lambda **_kwargs: bootstrap)
+    monkeypatch.setattr(supervisor, "_materialize_config", lambda _source: tmp_path)
+    monkeypatch.setattr(supervisor, "_await_healthy", lambda _child: True)
+    monkeypatch.setattr(supervisor, "_clear_ack", clear_ack)
+    monkeypatch.setattr(
+        supervisor.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: child,
+    )
+    monkeypatch.setattr(supervisor.signal, "signal", lambda *_args: None)
+
+    assert supervisor.main() == 11
+    assert authorization_at_cleanup[0] is False
+
+
+def test_development_expiry_denies_authority_before_ack_or_process_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    supervisor = _litellm_supervisor()
+    expires_at = datetime(2026, 8, 16, 12, 0, tzinfo=UTC)
+    request = types.SimpleNamespace(marker={"expires_at": expires_at.isoformat()})
+    authority = supervisor._RouteLeaseAuthority()
+    authority.allow_bootstrap()
+    events: list[tuple[str, bool]] = []
+
+    class Child:
+        @staticmethod
+        def poll():
+            return None
+
+        @staticmethod
+        def kill() -> None:
+            events.append(("kill", authority.authorized(expires_at)))
+
+    monkeypatch.setattr(
+        supervisor,
+        "_clear_ack",
+        lambda: events.append(("clear", authority.authorized(expires_at))),
+    )
+    guard = supervisor._ServingLeaseGuard(
+        request,
+        Child(),
+        authority=authority,
+        clock=lambda: expires_at,
+    )
+
+    guard.start()
+
+    assert events == [("clear", False), ("kill", False)]
+
+
+def test_development_expired_serving_guard_cannot_be_renewed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    supervisor = _litellm_supervisor()
+    expires_at = datetime(2026, 8, 16, 12, 0, tzinfo=UTC)
+    expired = types.SimpleNamespace(marker={"expires_at": expires_at.isoformat()})
+    renewed = types.SimpleNamespace(
+        marker={"expires_at": (expires_at + timedelta(seconds=1)).isoformat()}
+    )
+
+    class Child:
+        @staticmethod
+        def poll():
+            return None
+
+        @staticmethod
+        def kill() -> None:
+            return
+
+    monkeypatch.setattr(supervisor, "_clear_ack", lambda: None)
+    guard = supervisor._ServingLeaseGuard(
+        expired,
+        Child(),
+        clock=lambda: expires_at,
+    )
+    guard.start()
+    assert guard.expired is True
+
+    try:
+        with pytest.raises(RuntimeError, match="already expired"):
+            guard.renew(renewed)
+    finally:
+        guard.cancel()
 
 
 @pytest.mark.parametrize(

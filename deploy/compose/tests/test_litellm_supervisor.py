@@ -8,10 +8,14 @@ import socket
 import subprocess
 import sys
 import time
+import types
 import urllib.error
 import urllib.request
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import ClassVar
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
 SUPERVISOR = ROOT / "deploy/compose/litellm/config_supervisor.py"
@@ -23,6 +27,7 @@ def _module():
     )
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -33,13 +38,104 @@ def test_supervisor_allows_first_run_database_migrations() -> None:
     assert module.STARTUP_SECONDS == 120
 
 
-def _bundle(module, tmp_path: Path, *, now: datetime, expires_at: datetime):
+def test_route_lease_authority_enforces_immutable_exact_expiry(
+    tmp_path: Path,
+) -> None:
+    module = _module()
+    now = datetime(2026, 8, 16, 12, 0, tzinfo=UTC)
+    expires_at = now + timedelta(seconds=1)
+    _bundle(module, tmp_path, now=now, expires_at=expires_at)
+    request = module._active_request(now=now)
+    assert request is not None
+    authority = module._RouteLeaseAuthority()
+
+    authority.deny()
+    assert authority.authorized(now) is False
+    authority.allow_bootstrap()
+    assert authority.authorized(now) is True
+    authority.activate(request)
+    request.marker["expires_at"] = now.isoformat()
+    assert authority.authorized(expires_at - timedelta(microseconds=1)) is True
+    assert authority.authorized(expires_at) is False
+    assert authority.authorized(now.replace(tzinfo=None)) is False
+    authority.activate(types.SimpleNamespace(marker={}))
+    assert authority.authorized(now) is False
+
+
+def _route_lease_status(
+    server: object,
+    *,
+    path: str = "/vonk/route-lease",
+    method: str = "GET",
+) -> tuple[int, bytes, object]:
+    host, port = server.server_address
+    request = urllib.request.Request(f"http://{host}:{port}{path}", method=method)
+    try:
+        response = urllib.request.urlopen(request, timeout=1)
+    except urllib.error.HTTPError as error:
+        return error.code, error.read(), error.headers
+    with response:
+        return response.status, response.read(), response.headers
+
+
+def test_route_lease_http_fails_closed_without_metadata_or_server_banner(
+    tmp_path: Path,
+) -> None:
+    module = _module()
+    now = datetime.now(UTC)
+    _bundle(
+        module,
+        tmp_path,
+        now=now - timedelta(seconds=1),
+        expires_at=now + timedelta(seconds=30),
+    )
+    request = module._active_request(now=now)
+    assert request is not None
+    authority = module._RouteLeaseAuthority()
+    server = module._start_route_lease_server(
+        authority,
+        host="127.0.0.1",
+        port=0,
+    )
+    try:
+        status, body, headers = _route_lease_status(server)
+        assert (status, body) == (503, b"")
+        assert headers["Cache-Control"] == "no-store"
+        assert "Server" not in headers
+
+        authority.activate(request)
+        status, body, headers = _route_lease_status(server)
+        assert (status, body) == (204, b"")
+        assert headers["Cache-Control"] == "no-store"
+        assert request.activation_sha256.encode() not in body
+
+        assert _route_lease_status(server, path="/health")[0] == 404
+        assert _route_lease_status(server, method="POST")[0] == 404
+        status, body, headers = _route_lease_status(server, method="BREW")
+        assert (status, body) == (404, b"")
+        assert "Server" not in headers
+
+        authority.deny()
+        assert _route_lease_status(server)[0] == 503
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def _bundle(
+    module,
+    tmp_path: Path,
+    *,
+    now: datetime,
+    expires_at: datetime,
+    generation: int = 1,
+):
     root = tmp_path / "routes"
     config = b'{"model_list":[{"model_name":"chat"}]}\n'
     routes = b'{"routes":{"chat":{}},"state":"published"}\n'
     manifest = {
         "schema_version": 1,
-        "generation": 1,
+        "generation": generation,
         "state": "published",
         "reconciliation_id": "bb7aac18-edbf-4cc1-bafd-15e282557c53",
         "plan_digest": "a" * 64,
@@ -53,7 +149,7 @@ def _bundle(module, tmp_path: Path, *, now: datetime, expires_at: datetime):
         json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n"
     ).encode()
     manifest_digest = hashlib.sha256(manifest_bytes).hexdigest()
-    directory_name = "00000001-" + manifest_digest
+    directory_name = f"{generation:08d}-{manifest_digest}"
     directory = root / "generations" / directory_name
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "litellm.json").write_bytes(config)
@@ -325,6 +421,245 @@ def test_live_supervisor_stops_published_child_at_exact_lease_expiry(
     assert commands[0][2] == str(generated)
     assert commands[1][2] == str(bootstrap)
     assert not module.ACK.exists()
+
+
+def test_live_supervisor_renews_same_config_route_lease_without_restart(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    module = _module()
+    issued_at = datetime.now(UTC)
+    old_expires_at = issued_at + timedelta(seconds=120)
+    new_expires_at = issued_at + timedelta(seconds=240)
+    _bundle(
+        module,
+        tmp_path,
+        now=issued_at,
+        expires_at=old_expires_at,
+    )
+    first_request = module._active_request(now=issued_at)
+    _bundle(
+        module,
+        tmp_path,
+        now=issued_at,
+        expires_at=new_expires_at,
+        generation=2,
+    )
+    second_request = module._active_request(now=issued_at)
+    assert first_request is not None and second_request is not None
+    assert first_request.config.read_bytes() == second_request.config.read_bytes()
+    module.ACK_ROOT = tmp_path / "supervisor"
+    module.ACK = module.ACK_ROOT / "ack.json"
+
+    class Child:
+        pid = 456
+        returncode = None
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self) -> None:
+            self.returncode = 0
+
+        def kill(self) -> None:
+            self.returncode = -9
+
+        def wait(self, timeout=None):
+            del timeout
+            return self.returncode
+
+    class Server:
+        def shutdown(self) -> None:
+            return
+
+        def server_close(self) -> None:
+            return
+
+    class Timer:
+        instances: ClassVar[list[Timer]] = []
+
+        def __init__(self, interval, function) -> None:
+            self.interval = interval
+            self.function = function
+            self.cancelled = False
+            self.daemon = False
+            self.instances.append(self)
+
+        def start(self) -> None:
+            return
+
+        def cancel(self) -> None:
+            self.cancelled = True
+
+    child = Child()
+    requests = iter((first_request, second_request))
+    authorities = []
+    spawn_count = 0
+    renewal_observations: dict[str, object] = {}
+    original_write_ack = module._write_ack
+
+    def start_server(authority, **_kwargs):
+        authorities.append(authority)
+        return Server()
+
+    def spawn(*_args, **_kwargs):
+        nonlocal spawn_count
+        spawn_count += 1
+        assert spawn_count == 1, "same-config renewal restarted child"
+        return child
+
+    def write_ack(request, loaded_child, *, now):
+        original_write_ack(request, loaded_child, now=now)
+        if request.marker["generation"] == 2:
+            renewal_observations["authorized_after_old_expiry"] = authorities[
+                0
+            ].authorized(old_expires_at + timedelta(microseconds=1))
+            renewal_observations["ack_generation"] = json.loads(
+                module.ACK.read_bytes()
+            )["generation"]
+            renewal_observations["timers"] = tuple(Timer.instances)
+            child.returncode = 19
+
+    monkeypatch.setattr(module, "_active_request", lambda **_kwargs: next(requests))
+    monkeypatch.setattr(module, "_await_healthy", lambda _child: True)
+    monkeypatch.setattr(module, "_healthy", lambda _child: True)
+    monkeypatch.setattr(module, "_start_route_lease_server", start_server)
+    monkeypatch.setattr(module, "_write_ack", write_ack)
+    monkeypatch.setattr(module.subprocess, "Popen", spawn)
+    monkeypatch.setattr(module.signal, "signal", lambda *_args: None)
+    monkeypatch.setattr(module.threading, "Timer", Timer)
+    monkeypatch.setattr(module.time, "sleep", lambda _seconds: None)
+
+    assert module.main() == 19
+    assert spawn_count == 1
+    assert renewal_observations["authorized_after_old_expiry"] is True
+    assert renewal_observations["ack_generation"] == 2
+    timers = renewal_observations["timers"]
+    assert isinstance(timers, tuple) and len(timers) == 2
+    assert timers[0].cancelled is True
+    assert timers[1].interval > timers[0].interval
+
+
+def test_live_supervisor_denies_malformed_activation_before_cleanup(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    module = _module()
+    now = datetime.now(UTC)
+    _generated, bootstrap, _directory = _bundle(
+        module,
+        tmp_path,
+        now=now,
+        expires_at=now + timedelta(seconds=120),
+    )
+    module.ACTIVATION.write_bytes(b"not-json\n")
+
+    class Child:
+        pid = 987
+        returncode = None
+
+        def poll(self):
+            return self.returncode
+
+    class Server:
+        def shutdown(self) -> None:
+            return
+
+        def server_close(self) -> None:
+            return
+
+    child = Child()
+    authorities = []
+    authorization_at_cleanup: list[bool] = []
+
+    def start_server(authority, **_kwargs):
+        authorities.append(authority)
+        return Server()
+
+    def clear_ack() -> None:
+        authorization_at_cleanup.append(authorities[0].authorized(now))
+        child.returncode = 7
+
+    monkeypatch.setattr(module, "_start_route_lease_server", start_server)
+    monkeypatch.setattr(module, "_selected", lambda **_kwargs: bootstrap)
+    monkeypatch.setattr(module, "_await_healthy", lambda _child: True)
+    monkeypatch.setattr(module, "_clear_ack", clear_ack)
+    monkeypatch.setattr(module.subprocess, "Popen", lambda *_args, **_kwargs: child)
+    monkeypatch.setattr(module.signal, "signal", lambda *_args: None)
+
+    assert module.main() == 7
+    assert authorization_at_cleanup[0] is False
+
+
+def test_expiry_denies_authority_before_ack_or_process_cleanup(
+    monkeypatch,
+) -> None:
+    module = _module()
+    expires_at = datetime(2026, 8, 16, 12, 0, tzinfo=UTC)
+    request = types.SimpleNamespace(marker={"expires_at": expires_at.isoformat()})
+    authority = module._RouteLeaseAuthority()
+    authority.allow_bootstrap()
+    events: list[tuple[str, bool]] = []
+
+    class Child:
+        @staticmethod
+        def poll():
+            return None
+
+        @staticmethod
+        def kill() -> None:
+            events.append(("kill", authority.authorized(expires_at)))
+
+    monkeypatch.setattr(
+        module,
+        "_clear_ack",
+        lambda: events.append(("clear", authority.authorized(expires_at))),
+    )
+    guard = module._ServingLeaseGuard(
+        request,
+        Child(),
+        authority=authority,
+        clock=lambda: expires_at,
+    )
+
+    guard.start()
+
+    assert events == [("clear", False), ("kill", False)]
+
+
+def test_expired_serving_guard_cannot_be_renewed(
+    monkeypatch,
+) -> None:
+    module = _module()
+    expires_at = datetime(2026, 8, 16, 12, 0, tzinfo=UTC)
+    expired = types.SimpleNamespace(marker={"expires_at": expires_at.isoformat()})
+    renewed = types.SimpleNamespace(
+        marker={"expires_at": (expires_at + timedelta(seconds=1)).isoformat()}
+    )
+
+    class Child:
+        @staticmethod
+        def poll():
+            return None
+
+        @staticmethod
+        def kill() -> None:
+            return
+
+    monkeypatch.setattr(module, "_clear_ack", lambda: None)
+    guard = module._ServingLeaseGuard(
+        expired,
+        Child(),
+        clock=lambda: expires_at,
+    )
+    guard.start()
+    assert guard.expired is True
+
+    try:
+        with pytest.raises(RuntimeError, match="already expired"):
+            guard.renew(renewed)
+    finally:
+        guard.cancel()
 
 
 def test_expiry_guard_stops_a_real_serving_process_at_the_exact_deadline(
