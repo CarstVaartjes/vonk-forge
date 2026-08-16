@@ -172,21 +172,26 @@ The current prototype shortcomings that require replacement are:
 - engine distribution and recipe-local patch lineage are not first-class;
 - output validation cannot honestly represent images, audio, video, or meshes.
 
-The v1 catalog is split into independently validated documents:
+The v1 catalog is split into independently validated documents in the public
+`vonk-forge-recipes` repository:
 
 ```text
-config/model-groups/
-config/models/
-config/model-versions/
-config/execution-harnesses/
-config/runtime-distributions/
-config/patch-bundles/
-config/recipes/
-config/model-targets/
+model-groups/
+models/
+model-versions/
+recipes/
+runtime-distributions/
+patch-bundles/
+model-targets/
+adapters/
 ```
 
-The implementation may refine filenames, but these identities must not be
-collapsed back into one monolithic recipe document.
+Execution-harness implementations and their trusted built-in contracts remain
+in `vonk-forge` under `config/execution-harnesses/` and
+`control/src/vonk_control/harnesses/`. The recipe repository references those
+harnesses by immutable identity and is validated against a pinned platform
+commit. The implementation may refine filenames, but these identities must
+not be collapsed back into one monolithic recipe document.
 
 ### Standard recipe-library boundary
 
@@ -606,13 +611,16 @@ The implementation order is fixed:
 1. Replace the recipe schema and identity model.
 2. Implement shared lifecycle conformance fixtures.
 3. Implement the target-driven execution harnesses.
-4. Replace and freshly accept DS4.
-5. Replace and freshly accept Mia.
-6. Add language and multimodal-understanding model versions and recipes.
-7. Add image model versions and recipes.
-8. Add video and audio model versions and recipes.
-9. Add 3D and rigging model versions and recipes.
-10. Publish the curated catalog, alternatives, blocked tracker, provenance,
+4. Publish the standard recipe library with exact DS4 and Mia entries.
+5. Structurally qualify the library through the pinned platform harness
+   compilers.
+6. Replace and freshly accept DS4.
+7. Replace and freshly accept Mia.
+8. Add language and multimodal-understanding model versions and recipes.
+9. Add image model versions and recipes.
+10. Add video and audio model versions and recipes.
+11. Add 3D and rigging model versions and recipes.
+12. Publish the curated catalog, alternatives, blocked tracker, provenance,
     architecture diagrams, and fresh-install/operator documentation.
 
 Each slice is test-driven and ends with reviewable evidence. Large weight
@@ -650,4 +658,4 @@ The website and repository documentation explain:
 - [MOVA](https://github.com/OpenMOSS/MOVA)
 - [HunyuanVideo 1.5](https://github.com/Tencent-Hunyuan/HunyuanVideo-1.5)
 - [HunyuanVideo-Foley](https://github.com/Tencent-Hunyuan/HunyuanVideo-Foley)
-- [MiniMax H3](https://github.com/MiniMax-AI/MiniMax-H3)
+- [MiniMax H3](https://huggingface.co/MiniMaxAI/MiniMax-H3)
