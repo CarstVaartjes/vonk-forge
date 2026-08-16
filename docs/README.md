@@ -55,6 +55,11 @@ Normal administration uses the stable private Tailscale HTTPS
   Library, recipe placement, resource previews, and safe action semantics
 - [Model catalog](operators/model-catalog.md) — model identity, recipes,
   topology, install/update, and exact-revision rollback
+- [Model target ledger](operators/model-targets.md) — current defaults,
+  candidates, blocked upstreams, and the path from research to an accepted
+  recipe
+- [Standard recipe library](operators/recipe-library.md) — the public recipe
+  repository, authority split, immutable imports, and validation commands
 - [Execution harness operations](operators/execution-harnesses.md) — built-in
   harnesses, interface publication, clean reset, and canonical acceptance
 - [Control-plane telemetry](runbooks/control-plane-telemetry.md) — metrics,

@@ -20,6 +20,16 @@ The layers are deliberately separate. Two recipes can use the same model
 version with different runtimes or topology, and a new model artifact revision
 does not silently rewrite an accepted recipe.
 
+The broader discovery list is maintained separately in the
+[model target ledger](model-targets.md). It distinguishes accepted recipes from
+candidate and blocked upstreams, so the Library can remain trustworthy while
+the project continues to add defaults.
+
+The reviewed public recipe source is the separate [standard recipe
+library](recipe-library.md). The local catalog imports an exact library
+snapshot, then remains authoritative for installation, placement, runs, and
+fleet evidence.
+
 ## Exact immutable identity
 
 Every direct reference is the tuple `kind`, `publisher`, `slug`, and

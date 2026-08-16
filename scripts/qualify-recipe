@@ -71,6 +71,18 @@ class QualificationInputs:
 def _arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--recipe", required=True, type=Path)
+    parser.add_argument(
+        "--library-root",
+        type=Path,
+        default=ROOT,
+        help="recipe-library checkout containing model entities, recipes, and adapters",
+    )
+    parser.add_argument(
+        "--platform-root",
+        type=Path,
+        default=ROOT,
+        help="vonk-forge checkout containing harness implementations and harness entities",
+    )
     parser.add_argument("--level", choices=("structural", "container"), required=True)
     parser.add_argument("--engine", default="docker")
     parser.add_argument("--endpoint-host", default="127.0.0.1")
@@ -89,23 +101,50 @@ def _load(path: Path) -> dict[str, object]:
     return value
 
 
-def _resolve(reference: Mapping[str, object]) -> dict[str, object]:
-    kind = str(reference.get("kind"))
-    slug = str(reference.get("slug"))
-    root = KIND_ROOT.get(kind)
-    if root is None:
-        raise QualificationError("catalog reference kind is invalid")
-    document = _load(ROOT / "config" / root / f"{slug}.json")
-    validate_catalog_document(document)
-    identity = document.get("identity")
-    if (
-        not isinstance(identity, Mapping)
-        or identity.get("publisher") != reference.get("publisher")
-        or identity.get("slug") != reference.get("slug")
-        or catalog_content_sha256(document) != reference.get("content_sha256")
-    ):
-        raise QualificationError("catalog reference digest mismatch")
-    return document
+def _content_root(root: Path) -> Path:
+    config = root / "config"
+    if (config / "model-groups").is_dir():
+        return config
+    return root
+
+
+class _CatalogResolver:
+    def __init__(self, library_root: Path, platform_root: Path) -> None:
+        self.library_root = library_root.resolve()
+        self.platform_root = platform_root.resolve()
+        self.library_content_root = _content_root(self.library_root)
+        self.platform_content_root = _content_root(self.platform_root)
+
+    def resolve(self, reference: Mapping[str, object]) -> dict[str, object]:
+        kind = str(reference.get("kind"))
+        slug = str(reference.get("slug"))
+        directory = KIND_ROOT.get(kind)
+        if directory is None:
+            raise QualificationError("catalog reference kind is invalid")
+        roots = (
+            (self.platform_content_root / directory,)
+            if kind == "execution-harness"
+            else (
+                self.library_content_root / directory,
+                self.platform_content_root / directory,
+            )
+        )
+        for root in roots:
+            path = root / f"{slug}.json"
+            if not path.is_file():
+                continue
+            document = _load(path)
+            validate_catalog_document(document)
+            identity = document.get("identity")
+            if (
+                not isinstance(identity, Mapping)
+                or identity.get("publisher") != reference.get("publisher")
+                or identity.get("slug") != reference.get("slug")
+                or catalog_content_sha256(document) != reference.get("content_sha256")
+            ):
+                raise QualificationError("catalog reference digest mismatch")
+            return document
+        raise QualificationError("catalog reference is unavailable")
 
 
 def _context_files(context: Path) -> dict[str, bytes]:
@@ -122,33 +161,39 @@ def _context_files(context: Path) -> dict[str, bytes]:
     return files
 
 
-def _structural(path: Path) -> QualificationInputs:
+def _structural(path: Path, *, library_root: Path, platform_root: Path) -> QualificationInputs:
+    resolver = _CatalogResolver(library_root, platform_root)
     recipe = _load(path)
     validate_recipe(recipe)
-    version = _resolve(recipe["model"])
-    model = _resolve(version["model"])
-    _resolve(model["model_group"])
+    version = resolver.resolve(recipe["model"])
+    model = resolver.resolve(version["model"])
+    resolver.resolve(model["model_group"])
     execution = recipe["execution"]
     runtime = recipe["runtime"]
     build = recipe["build"]
     assert isinstance(execution, Mapping)
     assert isinstance(runtime, Mapping)
     assert isinstance(build, Mapping)
-    harness = _resolve(execution["harness"])
-    distribution = _resolve(runtime["distribution"])
+    harness = resolver.resolve(execution["harness"])
+    distribution = resolver.resolve(runtime["distribution"])
     patch_reference = execution.get("patch_bundle")
-    patch = _resolve(patch_reference) if isinstance(patch_reference, Mapping) else None
+    patch = resolver.resolve(patch_reference) if isinstance(patch_reference, Mapping) else None
     context_contract = build.get("context")
     context_value = (
         context_contract.get("path") if isinstance(context_contract, Mapping) else None
     )
     if not isinstance(context_value, str):
         raise QualificationError("recipe build context path is missing")
-    context = (ROOT / context_value).resolve()
+    context = (library_root.resolve() / context_value).resolve()
+    if not context.is_dir():
+        context = (platform_root.resolve() / context_value).resolve()
     try:
-        context.relative_to(ROOT)
+        context.relative_to(library_root.resolve())
     except ValueError as error:
-        raise QualificationError("recipe build context escapes the workspace") from error
+        try:
+            context.relative_to(platform_root.resolve())
+        except ValueError:
+            raise QualificationError("recipe build context escapes the recipe/platform roots") from error
     if not context.is_dir():
         raise QualificationError("recipe build context is unavailable")
     bundle = generate_source_bundle(_context_files(context))
@@ -533,7 +578,11 @@ def _print(value: Mapping[str, object]) -> None:
 def main() -> int:
     args = _arguments()
     try:
-        inputs = _structural(args.recipe.resolve())
+        inputs = _structural(
+            args.recipe.resolve(),
+            library_root=args.library_root,
+            platform_root=args.platform_root,
+        )
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         _print({"error": str(error), "passed": False, "status": "failed"})
         return 1

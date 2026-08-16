@@ -188,6 +188,17 @@ config/model-targets/
 The implementation may refine filenames, but these identities must not be
 collapsed back into one monolithic recipe document.
 
+### Standard recipe-library boundary
+
+The public standard-library source for these directories is the separate
+`CarstVaartjes/vonk-forge-recipes` repository. The platform repository owns the
+schema, harness implementations, control-plane authority, and acceptance
+tools; the recipe repository owns reviewed model/recipe material and public
+build contexts. A development checkout may be supplied through
+`--library-root`, but a production import records the exact signed
+recipe-library commit. Local PostgreSQL remains authoritative for installed
+state and runs after import. No runtime path reads a mutable branch or tag.
+
 ## Universal execution contract
 
 Every execution harness implements the same state machine:

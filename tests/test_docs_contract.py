@@ -40,6 +40,7 @@ ROUTE_LEASE_PLAN = (
 )
 EXECUTION_HARNESSES = ROOT / "docs/operators/execution-harnesses.md"
 MODEL_CATALOG = ROOT / "docs/operators/model-catalog.md"
+RECIPE_LIBRARY = ROOT / "docs/operators/recipe-library.md"
 
 GENERIC_ONBOARDING_DOCS = (
     README,
@@ -145,6 +146,20 @@ def test_architecture_explains_one_two_and_many_node_shapes() -> None:
     assert "GPU nodes never receive Tailscale OAuth" in html
     assert "LiteLLM never discovers containers" in html
     assert "agents.vonk.lan" not in html
+
+
+def test_standard_recipe_library_documents_the_authority_split() -> None:
+    text = _normalized_text(RECIPE_LIBRARY)
+    for required in (
+        "vonk-forge-recipes",
+        "exact library commit",
+        "GitHub Actions-only",
+        "never turns a branch",
+        "--library-root",
+        "--platform-root",
+        "Custom libraries",
+    ):
+        assert required in text
 
 
 def test_mia_runbook_distinguishes_image_receipts_from_model_loading() -> None:

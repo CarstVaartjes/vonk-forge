@@ -1,6 +1,6 @@
 # Vonk Forge GPU node Model Capacity Overview
 
-Last researched: 2026-08-03
+Last researched: 2026-08-16
 
 ## At a glance
 
@@ -9,7 +9,7 @@ Last researched: 2026-08-03
 - Every other required model is expected to run on one GPU node individually.
 - Fitting individually does not imply that arbitrary models may remain loaded together. Every recipe starts as exclusive and becomes shareable only after its exact N-way placement passes co-residency acceptance.
 - The user-facing Library selects an accepted immutable recipe revision and mapping. There is no separate cluster-profile authority or hidden model fallback.
-- The active qualification pass is LLM-only. Image/3D rows remain cataloged design intent and are not part of the current serving pass.
+- The active physical qualification pass currently covers the two DeepSeek recipes. Image, 3D, video, and audio rows are tracked in the [model target ledger](operators/model-targets.md) and are not presented as runnable defaults until their exact recipes pass acceptance.
 
 Each GPU node is marketed as having 128 GB of unified memory shared by the
 operating system, CPU, and GPU. The cluster inventory exposes
@@ -25,7 +25,7 @@ recovered memory after shutdown.
 
 | Required model | Official release and published capacity evidence | Preferred Vonk Forge GPU node-optimized path | Placement | Initial residency | Evidence status |
 | --- | --- | --- | --- | --- | --- |
-| DeepSeek-V4-Flash-0731 | The [official checkpoint](https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731) snapshot is about 155.44 GiB of weights, before KV cache and runtime workspaces. | The default is the audited [MiaAI-Lab dual-GPU node recipe](https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark). The verified single-GPU node alternative is DS4 v0.5.3 with the Q2-imatrix base plus DSpark drafter pair (93,691,352,992 bytes). MXFP4 remains deferred. | Both GPU nodes for the default service; one GPU node for the DS4 alternative | `dual-exclusive`; DS4 is `single-exclusive` initially | Mia is accepted after canonical throughput, 15-minute thermal, three-cycle lifecycle, and reboot/no-autostart gates. DS4 remains operational and `verified`; its profile admission remains blocked. |
+| DeepSeek-V4-Flash-0731 | The [official checkpoint](https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731) snapshot is about 155.44 GiB of weights, before KV cache and runtime workspaces. | The default is the audited [MiaAI-Lab dual-Spark recipe](https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark). The accepted single-Spark alternative is DS4 v0.5.3 with the Q2-imatrix base plus DSpark drafter pair (93,691,352,992 bytes). MXFP4 remains deferred. | Both Sparks for the default service; one Spark for the DS4 alternative | `distributed` for Mia; `single` for DS4 | Both definitions are represented by exact v1 recipes; physical evidence remains definition-specific. |
 | Nemotron 3 Super 120B-A12B | 120B total/12B active; the NVFP4 repository is about 80 GB and lists one DGX Spark as the minimum. | NVIDIA's exact [Nemotron 3 Super NVFP4](https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4) with the official [DGX Spark Nemotron playbook](https://build.nvidia.com/spark/nemotron); compare vLLM and TensorRT-LLM. | One GPU node | `single-exclusive` | Official GPU node path; cluster context, KV, MTP, and throughput acceptance pending. |
 | Nemotron 3 Nano Omni 30B-A3B | NVIDIA publishes BF16 at 62 GB, FP8 at 33 GB, and NVFP4 at 21 GB; one GPU node is supported. | Official [Nano Omni NVFP4](https://huggingface.co/nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4) through NVIDIA's [DGX Spark vLLM playbook](https://build.nvidia.com/spark/vllm/instructions); FP8 remains a measured comparison definition. | One GPU node | `single-exclusive`, then co-residency candidate | Official GPU node path; multimodal and exact-set acceptance pending. |
 | Qwen-Image | Official [Qwen-Image](https://github.com/QwenLM/Qwen-Image) is a 20B MMDiT model. The generic peak-memory requirement is not the GPU node admission result. | [ModelOpt NVFP4 for SGLang](https://huggingface.co/lmsys/qwen-image-modelopt-nvfp4-sglang), served persistently through a GB10-native SGLang Diffusion build. | One GPU node | `single-exclusive` initially | Blackwell-optimized artifact exists; Vonk Forge GPU node build, output parity, and peak memory require cluster acceptance. |
@@ -67,15 +67,15 @@ this table until the physical evidence is accepted.
 Dual-GPU node default agent:
   GPU node 1 [DeepSeek TP rank 0] <== NCCL/RoCE ==> GPU node 2 [DeepSeek TP rank 1]
 
-Single-GPU node or mixed profiles:
-  GPU node 1 [one or more Model Definitions]      GPU node 2 [one or more Model Definitions]
-           ^ exact accepted set                          ^ exact accepted set
+Single-Spark recipe or mixed assignments:
+  Spark 1 [one or more exact recipe runs]      Spark 2 [one or more exact recipe runs]
+          ^ exact accepted set                         ^ exact accepted set
 ```
 
-The initial mixed arrangement keeps the single-GPU node DeepSeek Model Definition
-on GPU node 1 while GPU node 2 runs the exact creative set declared by the selected
-accepted recipe mapping. Nemotron Nano Omni is another future lightweight resident
-candidate. These are target configurations, not accepted combinations. Each
+The initial mixed arrangement keeps an exact single-Spark DeepSeek recipe on one
+Spark while the other runs another exact accepted recipe. Nemotron Nano Omni is
+another future lightweight resident candidate. These are target configurations,
+not accepted combinations. Each
 exact N-way set must pass combined startup, peak-memory, concurrent and
 sustained inference, thermal, output-quality, memory-recovery, and clean-
 shutdown tests before the controller permits it. Pairwise evidence never
