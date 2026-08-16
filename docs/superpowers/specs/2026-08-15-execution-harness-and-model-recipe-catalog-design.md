@@ -355,6 +355,15 @@ Validators are composable and modality-specific:
   expected output format;
 - generic artifact digest, size, and media type.
 
+Input-dependent jobs use a recipe-declared input contract rather than an
+arbitrary host bind or runtime URL. A non-OpenAI job interface may declare the
+`/inputs` path, accepted media types, and maximum input bytes. The agent stages
+each request as a content-addressed per-job artifact, mounts that directory
+read-only and isolated from `/models` and `/outputs`, and removes it according
+to the job retention policy. The recipe must declare the matching `inputs`
+security mount. A recipe cannot declare filesystem inputs on an OpenAI serving
+interface, and the runtime remains offline after installation.
+
 The validation layer must not require a separate execution harness merely
 because a result is a file instead of a chat response.
 

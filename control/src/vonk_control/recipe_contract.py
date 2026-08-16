@@ -375,6 +375,37 @@ def _validate_recipe_semantics(document: Mapping[str, object]) -> None:
                 f"validation.validators.{index}.interface",
                 "validator interface is not declared",
             )
+    input_interfaces = [
+        (index, interface)
+        for index, interface in enumerate(interfaces)
+        if interface.get("input") is not None
+    ]
+    for index, interface in input_interfaces:
+        if interface.get("adapter") == "openai":
+            raise RecipeContractError(
+                "recipe.input_interface",
+                f"interfaces.{index}.input",
+                "OpenAI interfaces cannot declare filesystem job inputs",
+            )
+        mounts = security.get("mounts")
+        if not isinstance(mounts, Sequence) or isinstance(mounts, (str, bytes)):
+            raise RecipeContractError(
+                "recipe.input_mount",
+                "runtime.security.mounts",
+                "input jobs require a declared input mount",
+            )
+        if not any(
+            isinstance(mount, Mapping)
+            and mount.get("source") == "inputs"
+            and mount.get("target") == "/inputs"
+            and mount.get("read_only") is True
+            for mount in mounts
+        ):
+            raise RecipeContractError(
+                "recipe.input_mount",
+                "runtime.security.mounts",
+                "input jobs require a read-only /inputs mount",
+            )
 
 
 def _mapping(value: object, path: str) -> Mapping[str, object]:
