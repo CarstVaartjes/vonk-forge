@@ -50,17 +50,6 @@
 def test_root_tests_do_not_import_control_implementation() -> None:
     offenders = [path for path in (ROOT / "tests").rglob("test_*.py") if "control/src" in path.read_text()]
     assert offenders == []
-
-
-def test_prototype_model_authority_is_absent() -> None:
-    forbidden = (
-        ROOT / "config/workloads",
-        ROOT / "config/cluster-profiles",
-        ROOT / "locks/model-definitions.toml",
-        ROOT / "inventory/reports/model-definitions.json",
-        ROOT / "inventory/reports/accepted-cluster-profiles.json",
-    )
-    assert [str(path.relative_to(ROOT)) for path in forbidden if path.exists()] == []
 ```
 
 - [ ] **Step 2: Capture the current CI RED state**
@@ -81,7 +70,7 @@ Expected: `21 passed`.
 
 Run: `uv run --python 3.12 --frozen --with pytest==9.1.1 pytest --collect-only -q`
 
-Expected: collection progresses beyond the four original errors; the new absence guard remains RED until Task 2.
+Expected: collection succeeds with no import errors.
 
 - [ ] **Step 5: Commit**
 
@@ -118,6 +107,17 @@ git commit -m "test: move v1 recipes to control ownership"
 - [ ] **Step 1: Expand the failing guard to exact retained/deleted boundaries**
 
 ```python
+def test_prototype_model_authority_is_absent() -> None:
+    forbidden = (
+        ROOT / "config/workloads",
+        ROOT / "config/cluster-profiles",
+        ROOT / "locks/model-definitions.toml",
+        ROOT / "inventory/reports/model-definitions.json",
+        ROOT / "inventory/reports/accepted-cluster-profiles.json",
+    )
+    assert [str(path.relative_to(ROOT)) for path in forbidden if path.exists()] == []
+
+
 def test_only_native_v1_model_adapter_roots_remain() -> None:
     files = {path.relative_to(ROOT).as_posix() for path in (ROOT / "adapters").rglob("*") if path.is_file()}
     assert files
