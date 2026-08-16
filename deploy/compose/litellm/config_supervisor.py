@@ -10,6 +10,7 @@ import re
 import signal
 import subprocess
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -57,6 +58,60 @@ class ActiveRequest:
         self.config = config
         self.marker = marker
         self.activation_sha256 = activation_sha256
+
+
+class _ServingLeaseGuard:
+    """Kill the exact loaded serving process when its route lease expires."""
+
+    def __init__(
+        self,
+        request: ActiveRequest | None,
+        child: subprocess.Popen[bytes],
+        *,
+        clock=lambda: datetime.now(UTC),
+    ) -> None:
+        self._child = child
+        self._clock = clock
+        self._expires = (
+            _parse_timestamp(request.marker.get("expires_at"))
+            if request is not None
+            else None
+        )
+        if request is not None and self._expires is None:
+            raise RuntimeError("LiteLLM serving lease is invalid")
+        self._timer: threading.Timer | None = None
+        self._expired = threading.Event()
+
+    @property
+    def expired(self) -> bool:
+        return self._expired.is_set()
+
+    def start(self) -> None:
+        if self._expires is None:
+            return
+        remaining = (self._expires - self._clock().astimezone(UTC)).total_seconds()
+        if remaining <= 0:
+            self._expire()
+            return
+        self._timer = threading.Timer(remaining, self._expire)
+        self._timer.daemon = True
+        self._timer.start()
+
+    def cancel(self) -> None:
+        if self._timer is not None:
+            self._timer.cancel()
+
+    def _expire(self) -> None:
+        self._expired.set()
+        try:
+            if self._child.poll() is None:
+                self._child.kill()
+        except OSError:
+            pass
+        try:
+            _clear_ack()
+        except RuntimeError:
+            pass
 
 
 def _parse_timestamp(value: object) -> datetime | None:
@@ -229,6 +284,14 @@ def _write_ack(
     if child.poll() is not None or not isinstance(child.pid, int) or child.pid <= 0:
         raise RuntimeError("LiteLLM process is not live")
     marker = request.marker
+    expires = _parse_timestamp(marker.get("expires_at"))
+    if expires is None or now.astimezone(UTC) >= expires:
+        try:
+            if child.poll() is None:
+                child.kill()
+        except OSError:
+            pass
+        raise RuntimeError("LiteLLM serving lease expired before acknowledgement")
     acknowledgement = {
         "acknowledged_at": now.astimezone(UTC).isoformat(),
         "activation_sha256": request.activation_sha256,
@@ -317,9 +380,16 @@ def main() -> int:
             ],
             stdin=subprocess.DEVNULL,
         )
+        serving_lease = _ServingLeaseGuard(request, child)
+        serving_lease.start()
         if not _await_healthy(child):
+            serving_lease.cancel()
             _clear_ack()
             _stop(child)
+            if serving_lease.expired:
+                request = _active_request(now=datetime.now(UTC))
+                selected = request.config if request is not None else _selected()
+                continue
             return 1
         if request is None:
             _clear_ack()
@@ -336,6 +406,7 @@ def main() -> int:
             )
             if candidate != selected or _digest(candidate) != active_digest:
                 reload_requested = True
+                serving_lease.cancel()
                 _clear_ack()
                 _stop(child)
                 selected = candidate
@@ -346,11 +417,13 @@ def main() -> int:
             else:
                 _write_ack(candidate_request, child, now=datetime.now(UTC))
         if stopping:
+            serving_lease.cancel()
             _clear_ack()
             _stop(child)
             return 0
         if reload_requested:
             continue
+        serving_lease.cancel()
         _clear_ack()
         return int(child.returncode or 1)
     return 0

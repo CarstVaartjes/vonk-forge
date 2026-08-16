@@ -4,7 +4,12 @@ import hashlib
 import importlib.util
 import json
 import os
+import socket
 import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -209,7 +214,7 @@ def test_live_supervisor_removes_ack_when_the_acknowledged_child_crashes(
     monkeypatch,
 ) -> None:
     module = _module()
-    now = datetime(2026, 8, 5, 12, 0, tzinfo=UTC)
+    now = datetime.now(UTC)
     _bundle(
         module,
         tmp_path,
@@ -247,7 +252,7 @@ def test_live_supervisor_stops_published_child_at_exact_lease_expiry(
     monkeypatch,
 ) -> None:
     module = _module()
-    issued_at = datetime(2026, 8, 5, 12, 0, tzinfo=UTC)
+    issued_at = datetime.now(UTC)
     expires_at = issued_at + timedelta(seconds=120)
     generated, bootstrap, _directory = _bundle(
         module,
@@ -320,6 +325,74 @@ def test_live_supervisor_stops_published_child_at_exact_lease_expiry(
     assert commands[0][2] == str(generated)
     assert commands[1][2] == str(bootstrap)
     assert not module.ACK.exists()
+
+
+def test_expiry_guard_stops_a_real_serving_process_at_the_exact_deadline(
+    tmp_path: Path,
+) -> None:
+    module = _module()
+    issued_at = datetime.now(UTC)
+    expires_at = issued_at + timedelta(seconds=1)
+    _bundle(module, tmp_path, now=issued_at, expires_at=expires_at)
+    request = module._active_request(now=issued_at)
+    assert request is not None
+
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    port = listener.getsockname()[1]
+    listener.close()
+    child = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "http.server",
+            str(port),
+            "--bind",
+            "127.0.0.1",
+        ],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    guard = module._ServingLeaseGuard(
+        request,
+        child,
+        clock=lambda: datetime.now(UTC),
+    )
+    try:
+        guard.start()
+        startup_deadline = time.monotonic() + 0.75
+        while True:
+            try:
+                with urllib.request.urlopen(
+                    f"http://127.0.0.1:{port}/", timeout=0.1
+                ) as response:
+                    assert response.status == 200
+                break
+            except (OSError, urllib.error.URLError):
+                if time.monotonic() >= startup_deadline:
+                    raise
+                time.sleep(0.01)
+
+        timeout = time.monotonic() + 1.5
+        while child.poll() is None and time.monotonic() < timeout:
+            time.sleep(0.01)
+        stopped_at = datetime.now(UTC)
+        assert stopped_at >= expires_at
+        assert stopped_at < expires_at + timedelta(milliseconds=500)
+        assert child.poll() is not None
+        assert guard.expired is True
+        try:
+            urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=0.1)
+        except (OSError, urllib.error.URLError):
+            pass
+        else:
+            raise AssertionError("expired serving process still accepted a request")
+    finally:
+        guard.cancel()
+        if child.poll() is None:
+            child.kill()
+        child.wait(timeout=5)
 
 
 def test_compose_mounts_one_read_only_route_volume_and_starts_bounded_supervisor() -> (

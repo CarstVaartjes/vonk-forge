@@ -60,6 +60,7 @@ from vonk_control.recipe_routes import AtomicRecipeRoutePublisher, RecipeRouteSe
 from vonk_control.route_runtime import (
     RECIPE_ROUTE_AUTHORITY_ID,
     AtomicRouteBundlePublisher,
+    FileSupervisorAcknowledger,
     RouteRuntimeError,
     verify_active_route_bundle,
 )
@@ -2752,6 +2753,132 @@ def test_expired_recovery_route_is_unusable_when_compensating_withdrawal_fails(
     assert failing.withdrawal_attempts == 1
 
     failing.fail_withdrawal = False
+    assert routes.maintain() is True
+    with sessions() as session:
+        publication = session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)
+        assert publication is not None
+        assert publication.state == "routes-withdrawn"
+
+
+def test_recovery_expiry_inside_real_supervisor_ack_commits_cleanup_retry(
+    tmp_path: Path,
+) -> None:
+    (
+        sessions,
+        service,
+        routes,
+        _publisher,
+        started,
+        restart,
+        worker_start,
+        nodes,
+    ) = _queued_distributed_recovery_restart(tmp_path)
+    service.record_node_result(
+        restart.id,
+        nodes[1],
+        succeeded=True,
+        evidence=start_evidence(worker_start.payload),
+    )
+    with sessions() as session:
+        owner_start = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == restart.id,
+                AgentOperation.node_id == nodes[0],
+            )
+        )
+    service.record_node_result(
+        restart.id,
+        nodes[0],
+        succeeded=True,
+        evidence=start_evidence(owner_start.payload),
+    )
+
+    current = {"now": NOW + timedelta(seconds=29)}
+    live_root = tmp_path / "ack-routes"
+    ack_path = tmp_path / "supervisor/ack.json"
+    ack_path.parent.mkdir()
+
+    def expire_while_waiting_for_ack(marker) -> None:
+        acknowledgement = {
+            "acknowledged_at": current["now"].isoformat(),
+            "activation_sha256": marker.digest,
+            "child_pid": 4321,
+            "expires_at": marker.expires_at,
+            "generation": marker.generation,
+            "litellm_sha256": marker.litellm_sha256,
+            "schema_version": 1,
+            "state": marker.state,
+        }
+        acknowledgement_bytes = (
+            json.dumps(acknowledgement, sort_keys=True, separators=(",", ":")) + "\n"
+        ).encode()
+
+        def acknowledge_at_exact_deadline(_seconds: float) -> None:
+            ack_path.write_bytes(acknowledgement_bytes)
+            current["now"] = NOW + timedelta(seconds=30)
+
+        moments = iter((0.0, 0.1))
+        FileSupervisorAcknowledger(
+            ack_path,
+            clock=lambda: current["now"],
+            timeout_seconds=0.5,
+            poll_seconds=0.1,
+            monotonic=lambda: next(moments),
+            sleep=acknowledge_at_exact_deadline,
+        )(marker)
+
+    runtime = AtomicRouteBundlePublisher(
+        live_root,
+        management_policy=ManagementAddressPolicy.parse("192.168.1.0/24"),
+        clock=lambda: current["now"],
+        await_supervisor_ack=expire_while_waiting_for_ack,
+    )
+    atomic = AtomicRecipeRoutePublisher(runtime, clock=lambda: current["now"])
+
+    class AcknowledgementCrossingWithdrawalFailure:
+        def __init__(self) -> None:
+            self.withdrawal_attempts = 0
+            self.fail_withdrawal = True
+
+        def publish_recipe(self, candidate):
+            return atomic.publish_recipe(candidate)
+
+        def publish_empty(self, route_digest):
+            self.withdrawal_attempts += 1
+            if self.fail_withdrawal:
+                raise RuntimeError("synthetic route withdrawal failure")
+            return atomic.publish_empty(
+                route_digest,
+                expires_at=current["now"] + timedelta(seconds=300),
+            )
+
+    failing = AcknowledgementCrossingWithdrawalFailure()
+    routes._publisher = failing
+    routes._clock = lambda: current["now"]
+
+    with pytest.raises(RuntimeError, match="expired|deadline"):
+        routes.publish_run(started.owner_id)
+
+    with pytest.raises(RouteRuntimeError, match="expired"):
+        verify_active_route_bundle(live_root, clock=lambda: current["now"])
+    with sessions() as session:
+        run = session.get(RecipeRun, started.owner_id)
+        recovery = session.get(Job, restart.id)
+        publication = session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)
+        assert run.state == "failed"
+        assert run.route_state == "withdrawn"
+        assert recovery.state == "failed"
+        assert "deadline" in recovery.result["recovery_error"]
+        assert recovery.result.get("recovery_route_published") is not True
+        assert publication is not None
+        assert publication.state == "withdrawal-pending"
+        assert publication.lease_expires_at.replace(tzinfo=UTC) == (
+            NOW + timedelta(seconds=30)
+        )
+    assert failing.withdrawal_attempts == 1
+
+    failing.fail_withdrawal = False
+    runtime._await_supervisor_ack = None
     assert routes.maintain() is True
     with sessions() as session:
         publication = session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)

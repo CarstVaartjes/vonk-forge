@@ -1603,3 +1603,229 @@ performance, or physical acceptance result is claimed. Those remain Task 9.
 Concern: this x86_64 environment cannot provide the physical linux/arm64, GPU,
 two-DGX-Spark, RoCE, or performance evidence reserved for Task 9. No such
 acceptance is claimed here.
+
+## Fix round 5 — final breaker round (2026-08-16)
+
+Round 5 started from the required clean base
+`c9f848148be1a6cc19ebb83afb25efaed9c2d56f`. It is limited to the three
+residuals in `# Task 8 re-review — fix round 5`; the descriptor-relative trust
+root from round 4, immutable identities, clean-schema fence, offline build
+authority, and the committed Task 9 reset-plan correction are preserved.
+
+### RED evidence
+
+Serving-boundary tests were added before the implementation:
+
+```text
+uv run --project control --frozen python -m pytest -q \
+  control/tests/test_recipe_operations.py::test_recovery_expiry_inside_real_supervisor_ack_commits_cleanup_retry
+
+FAILED: the real FileSupervisorAcknowledger reported
+"live LiteLLM supervisor acknowledgement timed out" instead of making the
+lease deadline authoritative, and the recovery publication had no committed
+acknowledgement-failure cleanup path.
+
+uv run --project control --frozen python -m pytest -q \
+  deploy/compose/tests/test_litellm_supervisor.py::test_expiry_guard_stops_a_real_serving_process_at_the_exact_deadline
+
+FAILED AttributeError: module had no _ServingLeaseGuard; the only expiry
+enforcement was the two-second supervisor poll.
+```
+
+The first real OCI import exposed the synthetic fixture rather than accepting
+it:
+
+```text
+cargo test -p vonk-agent --test recipe_builder \
+  faithful_oci_layout_imports_into_a_real_private_content_store -- --exact
+
+FAILED: ctr: mismatched image rootfs and manifest layers
+```
+
+After making `rootfs.diff_ids` consistent with the actual uncompressed layer,
+a real unpack by the unprivileged private daemon reached the host mount
+permission boundary. The final executable fixture therefore separates the two
+authorities: private containerd performs real OCI archive import and exact
+descriptor resolution with `--no-unpack`, while the real Docker loader creates
+and exports the equivalent graph to prove the layer is consumable. The
+substituted-content RED also demonstrated that `ctr images import` may return
+success while exact content resolution fails, so the regression checks
+descriptor resolution and bytes, not command status alone.
+
+The shared Unicode vector was then added before changing Python:
+
+```text
+uv run --project agent_protocol --frozen python -m pytest -q \
+  agent_protocol/tests/test_contracts.py::test_recipe_build_claim_matches_shared_python_rust_vectors
+
+FAILED: DID NOT RAISE for "dockerfile above 512 UTF-8 bytes"
+
+cargo test -p vonk-agent-protocol --test recipe_builds \
+  build_claim_matches_shared_python_rust_vectors -- --exact
+
+PASSED (Rust already applied the bound to UTF-8 bytes)
+```
+
+### GREEN implementation
+
+- `FileSupervisorAcknowledger` now samples the lease clock before accepting
+  any acknowledgement and rejects `now >= expires_at`, including expiry while
+  `_publish` is blocked in the real file acknowledgement loop.
+- The atomic publisher preserves the exact activated generation when
+  supervisor acknowledgement raises. Recovery activation, publication,
+  acknowledgement, and post-publication deadline errors all enter one durable
+  path: project `withdrawal-pending` when activation occurred, mark the run
+  failed/withdrawn, mark the recovery job failed without a publication-success
+  marker, attempt compensation, and retain maintenance retry intent even when
+  compensation raises. The transaction commits that state before the error is
+  returned.
+- Both production and embedded-development LiteLLM supervisors arm an
+  independent deadline timer for the exact loaded process. At lease expiry the
+  timer kills that process and clears its acknowledgement without waiting for
+  the two-second reconciliation poll. A real local HTTP server is reachable
+  before expiry, is stopped within 500 ms of the deadline, and cannot accept a
+  post-deadline request.
+- The OCI fixture now has an internally consistent manifest/config/layer graph
+  whose config binds the actual uncompressed layer digest. A uniquely rooted
+  real local containerd imports the OCI archive into a private content store
+  and returns each manifest, config, and layer by exact digest. The real Docker
+  archive loader then loads the same config/layer graph, reports the exact
+  `RootFS.Layers`, creates the arm64 container, exports its rootfs, and exposes
+  the declared layer file. Missing archives and bytes substituted under the
+  old layer descriptor fail complete private-store resolution.
+- Python now applies the 512-byte dockerfile wire limit to
+  `value.encode("utf-8")`, matching Rust. The shared invalid vector contains
+  182 Unicode characters but 524 UTF-8 bytes and is rejected by both readers.
+- The protocol wheel, both consuming lockfiles, the affected Python SBOMs, and
+  the supply manifest were regenerated. No package version, external route
+  identity, image identity, or schema/migration identity changed.
+
+Focused GREEN evidence:
+
+```text
+uv run --project control --frozen python -m pytest -q \
+  control/tests/test_recipe_operations.py::test_recovery_expiry_inside_real_supervisor_ack_commits_cleanup_retry \
+  control/tests/test_recipe_operations.py::test_recovery_publication_crossing_deadline_is_immediately_withdrawn \
+  control/tests/test_recipe_operations.py::test_expired_recovery_route_is_unusable_when_compensating_withdrawal_fails
+3 passed
+
+uv run --project control --frozen python -m pytest -q \
+  control/tests/test_dev_runtime_assets.py deploy/compose/tests/test_litellm_supervisor.py
+33 passed in 9.21s
+
+cargo test -p vonk-agent --test recipe_builder \
+  faithful_oci_layout_imports_into_a_real_private_content_store -- --exact
+cargo test -p vonk-agent --test recipe_builder \
+  real_private_content_store_rejects_absent_and_substituted_oci_content -- --exact
+2 passed; 0 failed
+
+uv run --project agent_protocol --frozen python -m pytest -q \
+  agent_protocol/tests/test_contracts.py::test_recipe_build_claim_matches_shared_python_rust_vectors
+cargo test -p vonk-agent-protocol --test recipe_builds \
+  build_claim_matches_shared_python_rust_vectors -- --exact
+2 passed; 0 failed
+```
+
+### Complete retained verification
+
+The final controller selection covers recovery publication, atomic route
+runtime, source/build policy, development catalog/runtime, the live supervisor,
+qualifier/source-bundle scripts, distributed lifecycle, and both recipe
+contracts:
+
+```text
+uv run --project control --frozen python -m pytest -q \
+  control/tests/test_recipe_operations.py control/tests/test_recipe_routes.py \
+  control/tests/test_route_runtime.py control/tests/test_recipe_builds.py \
+  control/tests/test_source_policy.py \
+  control/tests/test_development_recipe_fixture.py \
+  control/tests/test_builtin_harnesses.py \
+  control/tests/test_recipe_runtime_specs.py \
+  control/tests/test_distributed_lifecycle.py \
+  control/tests/test_development_catalog.py \
+  deploy/compose/tests/test_litellm_supervisor.py \
+  scripts/tests/test_qualify_recipe.py \
+  scripts/tests/test_recipe_source_bundle.py \
+  scripts/tests/test_native_development_entrypoints.py \
+  tests/recipes/test_deepseek_v4_flash_ds4.py \
+  tests/recipes/test_mia_deepseek_v4_flash.py
+
+328 passed in 35.48s
+```
+
+Full Rust and protocol verification, including the real OCI integrations:
+
+```text
+cargo test -p vonk-agent-protocol -p vonk-agent \
+  -p vonk-agent-helper --all-targets
+166 passed; 0 failed
+
+uv run --project agent_protocol --frozen python -m pytest -q agent_protocol/tests
+451 passed in 0.47s
+```
+
+Additional retained suites:
+
+```text
+uv run --project control --frozen python -m pytest -q \
+  scripts/tests/test_run_development_slices.py
+59 passed in 35.75s
+
+uv run --project control --frozen python -m pytest -q \
+  tests/runbooks/test_development_nas_installation.py tests/test_docs_contract.py
+53 passed in 0.06s
+
+uv run --project control --frozen python -m pytest -q \
+  control/tests/security/test_agent_protocol.py \
+  tests/scripts/test_verify_supply_chain.py
+61 passed in 23.20s
+```
+
+Final static, lock, and generated-evidence gates:
+
+```text
+uvx --from ruff==0.16.1 ruff check <all changed Python source/tests>
+uvx --from ruff==0.16.1 ruff format --check <changed formatted Python files>
+cargo fmt --all -- --check
+cargo clippy -p vonk-agent-protocol -p vonk-agent \
+  -p vonk-agent-helper --tests -- -D warnings
+uv lock --project agent --check
+uv lock --project control --check
+jq empty <shared vector and all changed SBOM JSON documents>
+git diff --check
+
+All exited 0. Ruff reported all checks passed; Clippy emitted no warnings.
+
+scripts/verify-supply-chain --json
+{"errors":[],"images":7,"manifest_sha256":"bba10c8eb56fd21acd4731e3e531ab164bc19b395d6cf1cc5e780b23c1915155","ok":true,...}
+```
+
+Generated artifact identities:
+
+- protocol wheel SHA-256:
+  `97c9deb581aae78be5ee0eeba69b7e729d83790f4075d6e09db560e13139be77`;
+  both consuming lockfiles bind this exact local wheel;
+- shared vector SHA-256:
+  `60490179ed85ce893af45e5d3b0bbfd9ce5c0e83add49dc109d407cc92d4b295`;
+- supply manifest SHA-256:
+  `bba10c8eb56fd21acd4731e3e531ab164bc19b395d6cf1cc5e780b23c1915155`;
+- wheel inspection contains the changed `contracts.py` and shared
+  `recipe-build-claim-v1.json` vector.
+
+### Physical qualification boundary and concerns
+
+Both retained real qualifier commands returned the intended environment gate
+on this x86_64 host:
+
+```text
+scripts/qualify-recipe --recipe config/recipes/deepseek-v4-flash-0731-ds4-single.json --level container
+scripts/qualify-recipe --recipe config/recipes/deepseek-v4-flash-0731-mia-dual.json --level container
+
+{"detail":"container qualification requires a native linux/arm64 host","detected_architecture":"x86_64","passed":false,"required_architecture":"arm64","status":"environment-limited"}
+ds4_exit=3; mia_exit=3
+```
+
+No unresolved round-5 correctness concern remains. Physical ARM64 base
+import/build, GPU inference, two-Spark collective, RoCE, performance, and
+physical acceptance remain explicitly assigned to Task 9 and are not claimed
+by Task 8.

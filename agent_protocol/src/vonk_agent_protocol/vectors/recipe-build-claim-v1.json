@@ -147,6 +147,13 @@
       ]
     },
     {
+      "name": "dockerfile above 512 UTF-8 bytes",
+      "valid": false,
+      "changes": [
+        {"op": "set", "path": ["dockerfile"], "value": "界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界/Dockerfile"}
+      ]
+    },
+    {
       "name": "zero source bundle bytes",
       "valid": false,
       "changes": [

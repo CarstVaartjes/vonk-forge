@@ -52,6 +52,16 @@ class RecipeRecoveryDeadlineError(RecipeRouteError):
     pass
 
 
+class RecipeRecoveryPublicationError(RecipeRouteError):
+    pass
+
+
+class _ActivatedRecipeRouteError(RecipeRouteError):
+    def __init__(self, message: str, *, generation: LiteLlmGeneration) -> None:
+        super().__init__(message)
+        self.generation = generation
+
+
 @dataclass(frozen=True)
 class _RecipeEndpoint:
     node_id: str
@@ -224,6 +234,7 @@ class AtomicRecipeRoutePublisher:
                 "atomic recipe route publisher lacks compiled route support"
             )
         self._publisher._identity(self._AUTHORITY_ID, route_digest, route_digest)
+        acknowledgement_error: Exception | None = None
         with self._publisher._locked():
             self._publisher._require_update_boundary(None)
             issued, expires = self._publisher._lease(expires_at)
@@ -256,7 +267,10 @@ class AtomicRecipeRoutePublisher:
                 issued=issued,
                 expires=expires,
             )
-            self._publisher._require_supervisor_ack(marker)
+            try:
+                self._publisher._require_supervisor_ack(marker)
+            except Exception as error:  # noqa: BLE001
+                acknowledgement_error = error
         config_sha256 = hashlib.sha256(litellm).hexdigest()
         root = getattr(self._publisher, "_root", None)
         path = (
@@ -264,13 +278,20 @@ class AtomicRecipeRoutePublisher:
             if hasattr(root, "joinpath")
             else marker.directory
         )
-        return _AtomicRecipeGeneration(
+        result = _AtomicRecipeGeneration(
             marker.generation,
             route_digest,
             config_sha256,
             path,
             marker,
         )
+        if acknowledgement_error is not None:
+            raise _ActivatedRecipeRouteError(
+                "recipe route activation acknowledgement failed: "
+                f"{acknowledgement_error}",
+                generation=result,
+            ) from acknowledgement_error
+        return result
 
 
 class RecipeRouteService:
@@ -293,14 +314,17 @@ class RecipeRouteService:
         self._maximum_age = timedelta(seconds=maximum_age_seconds)
 
     def publish_run(self, run_id: str) -> LiteLlmGeneration:
-        deadline_error: RecipeRecoveryDeadlineError | None = None
+        committed_error: RecipeRouteError | None = None
         with self.publication_transaction() as session:
             try:
                 return self.publish_run_in_session(session, run_id)
-            except RecipeRecoveryDeadlineError as error:
-                deadline_error = error
-        assert deadline_error is not None
-        raise deadline_error
+            except (
+                RecipeRecoveryDeadlineError,
+                RecipeRecoveryPublicationError,
+            ) as error:
+                committed_error = error
+        assert committed_error is not None
+        raise committed_error
 
     def publication_transaction(self) -> AbstractContextManager[Session]:
         return route_publication_transaction(self.sessions)
@@ -327,55 +351,47 @@ class RecipeRouteService:
                 candidate,
                 expires_at=min(candidate.expires_at, recovery.deadline),
             )
-        generation = self._publish(candidate)
+        try:
+            generation = self._publish(candidate)
+        except Exception as publication_error:
+            if recovery is None:
+                raise
+            try:
+                self._enforce_recovery_publication_deadline(session, run)
+            except RecipeRecoveryDeadlineError as deadline_error:
+                failure: RecipeRouteError = deadline_error
+            else:
+                failure = RecipeRecoveryPublicationError(
+                    "recovery route publication failed: "
+                    f"{type(publication_error).__name__}",
+                    run_id=run_id,
+                )
+            generation = (
+                publication_error.generation
+                if isinstance(publication_error, _ActivatedRecipeRouteError)
+                else None
+            )
+            self._fail_recovery_publication_in_session(
+                session,
+                run,
+                recovery,
+                failure,
+                generation=generation,
+            )
+            raise failure from publication_error
         if recovery is not None:
             try:
                 # External activation can cross the bounded recovery window.
                 # Recheck before projecting success or recording the marker.
                 self._enforce_recovery_publication_deadline(session, run)
             except RecipeRecoveryDeadlineError as deadline_error:
-                # The routing authority enforces the recovery deadline on the
-                # just-activated generation. Persist that expired generation
-                # and retry intent before attempting best-effort cleanup so a
-                # cleanup error cannot roll the safety state back.
-                self.projection_in_session(
-                    session, generation, state="withdrawal-pending"
+                self._fail_recovery_publication_in_session(
+                    session,
+                    run,
+                    recovery,
+                    deadline_error,
+                    generation=generation,
                 )
-                recovery_result = (
-                    dict(recovery.job.result)
-                    if isinstance(recovery.job.result, Mapping)
-                    else {}
-                )
-                recovery.job.state = "failed"
-                recovery.job.result = {
-                    **recovery_result,
-                    "recovery_error": str(deadline_error),
-                }
-                recovery.job.updated_at = self._clock()
-                cleanup_error: Exception | None = None
-                try:
-                    self._withdraw_runs_in_session(session, frozenset({run_id}))
-                # External publishers are plug-ins and may fail with any
-                # ordinary exception; every such failure must leave retry
-                # intent committed instead of masking the deadline failure.
-                except Exception as error:  # noqa: BLE001
-                    cleanup_error = error
-                run.state = "failed"
-                run.route_state = "withdrawn"
-                run.route_error = str(deadline_error)[:512]
-                if cleanup_error is not None:
-                    run.route_generation = generation.generation
-                    run.route_digest = generation.route_digest
-                    publication = session.get(
-                        RoutePublication, RECIPE_ROUTE_AUTHORITY_ID
-                    )
-                    if publication is not None:
-                        publication.state = "withdrawal-pending"
-                    run.route_error = (
-                        f"{deadline_error}; route withdrawal retry pending: "
-                        f"{type(cleanup_error).__name__}"
-                    )[:512]
-                run.updated_at = self._clock()
                 raise
         self.projection_in_session(session, generation, state="completed")
         if recovery is not None:
@@ -396,6 +412,53 @@ class RecipeRouteService:
             included.route_error = None
             included.updated_at = self._clock()
         return generation
+
+    def _fail_recovery_publication_in_session(
+        self,
+        session: Session,
+        run: RecipeRun,
+        recovery: _RecoveryPublication,
+        failure: RecipeRouteError,
+        *,
+        generation: LiteLlmGeneration | None,
+    ) -> None:
+        """Commit one fail-closed state for activation, ack, or deadline failure."""
+
+        if generation is not None:
+            self.projection_in_session(session, generation, state="withdrawal-pending")
+        recovery_result = (
+            dict(recovery.job.result)
+            if isinstance(recovery.job.result, Mapping)
+            else {}
+        )
+        recovery.job.state = "failed"
+        recovery.job.result = {
+            **recovery_result,
+            "recovery_error": str(failure),
+        }
+        recovery.job.updated_at = self._clock()
+        cleanup_error: Exception | None = None
+        try:
+            self._withdraw_runs_in_session(session, frozenset({run.id}))
+        # External publishers are plug-ins and may fail with any ordinary
+        # exception. Persist retry intent instead of rolling safety state back.
+        except Exception as error:  # noqa: BLE001
+            cleanup_error = error
+        run.state = "failed"
+        run.route_state = "withdrawn"
+        run.route_error = str(failure)[:512]
+        if cleanup_error is not None:
+            if generation is not None:
+                run.route_generation = generation.generation
+                run.route_digest = generation.route_digest
+            publication = session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)
+            if publication is not None:
+                publication.state = "withdrawal-pending"
+            run.route_error = (
+                f"{failure}; route withdrawal retry pending: "
+                f"{type(cleanup_error).__name__}"
+            )[:512]
+        run.updated_at = self._clock()
 
     def _enforce_recovery_publication_deadline(
         self, session: Session, run: RecipeRun

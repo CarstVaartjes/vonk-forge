@@ -223,7 +223,7 @@ def _typed_build_string(path: tuple[str | int, ...], value: str) -> bool:
         return value == "linux/arm64"
     if path == ("dockerfile",):
         return (
-            0 < len(value) <= 512
+            0 < len(value.encode("utf-8")) <= 512
             and not value.startswith("/")
             and "\\" not in value
             and "\x00" not in value

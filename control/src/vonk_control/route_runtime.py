@@ -285,8 +285,14 @@ class FileSupervisorAcknowledger:
 
     def __call__(self, marker: ActivationMarker) -> None:
         deadline = self._monotonic() + self._timeout_seconds
+        expires = _parse_time(marker.expires_at, "expiry timestamp")
         while True:
-            if self._matches(marker):
+            now = _aware(self._clock(), "supervisor acknowledgement clock")
+            if now >= expires:
+                raise RouteRuntimeError(
+                    "active route lease expired during supervisor acknowledgement"
+                )
+            if self._matches(marker, now=now):
                 return
             if self._monotonic() >= deadline:
                 raise RouteRuntimeError(
@@ -294,7 +300,7 @@ class FileSupervisorAcknowledger:
                 )
             self._sleep(self._poll_seconds)
 
-    def _matches(self, marker: ActivationMarker) -> bool:
+    def _matches(self, marker: ActivationMarker, *, now: datetime) -> bool:
         path = self._path
         if path.is_symlink() or not path.is_file() or path.parent.is_symlink():
             return False
@@ -325,7 +331,6 @@ class FileSupervisorAcknowledger:
             )
             issued = _parse_time(marker.issued_at, "issued timestamp")
             expires = _parse_time(marker.expires_at, "expiry timestamp")
-            now = _aware(self._clock(), "supervisor acknowledgement clock")
         except RouteRuntimeError:
             return False
         return (
