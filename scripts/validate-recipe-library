@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
+import subprocess
 import sys
 from collections.abc import Mapping
 from pathlib import Path
@@ -14,7 +14,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "control" / "src"))
 
-from vonk_control.catalog_contract import (  # noqa: E402
+from vonk_control.catalog_contract import (
     CatalogContractError,
     CatalogKind,
     CatalogReference,
@@ -23,14 +23,13 @@ from vonk_control.catalog_contract import (  # noqa: E402
     parse_catalog_reference,
     validate_catalog_document,
 )
-from vonk_control.recipe_contract import (  # noqa: E402
+from vonk_control.recipe_contract import (
     RecipeContractError,
     parse_recipe_json,
     recipe_content_sha256,
     recipe_references,
     validate_recipe,
 )
-
 
 _SECRET_MARKERS = (
     b"BEGIN PRIVATE KEY",
@@ -232,6 +231,36 @@ def _validate_recipe(
             raise LibraryValidationError(f"{path}: build context escapes both roots") from error
     if not context.is_dir():
         raise LibraryValidationError(f"{path}: build context is unavailable: {context_path}")
+    qualifier = platform_root / "scripts" / "qualify-recipe"
+    if not qualifier.is_file():
+        raise LibraryValidationError(
+            f"{path}: platform structural qualifier is unavailable"
+        )
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(qualifier),
+            "--recipe",
+            str(path),
+            "--library-root",
+            str(library_root),
+            "--platform-root",
+            str(platform_root),
+            "--level",
+            "structural",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    if result.returncode != 0:
+        try:
+            detail = json.loads(result.stdout).get("error")
+        except (json.JSONDecodeError, AttributeError):
+            detail = None
+        detail = detail or result.stderr.strip() or "structural qualification failed"
+        raise LibraryValidationError(f"{path}: {detail}")
     return recipe_content_sha256(document)
 
 

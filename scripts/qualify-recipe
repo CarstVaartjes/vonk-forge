@@ -224,6 +224,39 @@ def _structural(path: Path, *, library_root: Path, platform_root: Path) -> Quali
         }
         if not required <= checks:
             raise QualificationError("distributed qualification checks are incomplete")
+    if not isinstance(topology, Mapping):
+        raise QualificationError("recipe topology is invalid")
+    roles: list[str] = []
+    raw_roles = topology.get("roles")
+    if not isinstance(raw_roles, list):
+        raise QualificationError("recipe topology roles are invalid")
+    for item in raw_roles:
+        if not isinstance(item, Mapping) or type(item.get("name")) is not str:
+            raise QualificationError("recipe topology role is invalid")
+        count = item.get("count")
+        if type(count) is not int or count < 1:
+            raise QualificationError("recipe topology role count is invalid")
+        roles.extend([item["name"]] * count)
+    parameters = recipe.get("parameters")
+    defaults = {
+        item["name"]: item["default"]
+        for item in parameters or ()
+        if isinstance(item, Mapping)
+        and type(item.get("name")) is str
+        and "default" in item
+    }
+    registry = HarnessRegistry.with_builtins()
+    for rank, role in enumerate(roles):
+        registry.compile(
+            harness,
+            recipe,
+            distribution,
+            patch,
+            defaults,
+            topology,
+            role,
+            rank,
+        )
     return QualificationInputs(recipe, harness, distribution, patch, context)
 
 

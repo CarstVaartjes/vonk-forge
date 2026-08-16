@@ -65,6 +65,13 @@ _ARGUMENTS = {
         "--enable-chunked-prefill", takes_value=False
     ),
     "async-scheduling": ArgumentSpec("--async-scheduling", takes_value=False),
+    "mamba-backend": ArgumentSpec(
+        "--mamba-backend", validate=one_of("triton", "flashinfer")
+    ),
+    "mamba-ssm-cache-dtype": ArgumentSpec(
+        "--mamba-ssm-cache-dtype",
+        validate=one_of("auto", "bfloat16", "float16", "float32"),
+    ),
     "enable-flashinfer-autotune": ArgumentSpec(
         "--enable-flashinfer-autotune", takes_value=False
     ),
@@ -72,7 +79,7 @@ _ARGUMENTS = {
     "tokenizer-mode": ArgumentSpec("--tokenizer-mode", validate=one_of("deepseek_v4")),
     "moe-backend": ArgumentSpec("--moe-backend", validate=one_of("flashinfer_b12x")),
     "reasoning-parser": ArgumentSpec(
-        "--reasoning-parser", validate=one_of("deepseek_v4")
+        "--reasoning-parser", validate=one_of("deepseek_v4", "nemotron_v3")
     ),
     "reasoning-config": ArgumentSpec("--reasoning-config"),
     "default-chat-template-kwargs": ArgumentSpec("--default-chat-template-kwargs"),
@@ -241,10 +248,13 @@ class VllmHarnessCompiler:
                     "TRANSFORMERS_OFFLINE",
                     "VLLM_ALLOW_LONG_MAX_MODEL_LEN",
                     "VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS",
+                    "VLLM_NO_USAGE_STATS",
+                    "VLLM_NVFP4_GEMM_BACKEND",
                     "VLLM_PREFIX_CACHE_RETENTION_INTERVAL",
                     "VLLM_SPARSE_INDEXER_MAX_LOGITS_MB",
                     "VLLM_USE_B12X_MOE",
                     "VLLM_USE_FLASHINFER_SAMPLER",
+                    "VLLM_USE_FLASHINFER_MOE_FP4",
                 }
             ),
         )

@@ -5,7 +5,6 @@ import shutil
 import subprocess
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "validate-recipe-library"
 
@@ -106,6 +105,35 @@ def test_library_validation_rejects_a_missing_exact_model_parent(tmp_path: Path)
 
     assert result.returncode != 0
     assert "missing exact catalog dependency" in result.stderr
+
+
+def test_library_validation_compiles_each_recipe_harness(tmp_path: Path) -> None:
+    library = tmp_path / "library"
+    for directory in (
+        "model-groups",
+        "models",
+        "model-versions",
+        "runtime-distributions",
+        "patch-bundles",
+        "recipes",
+    ):
+        shutil.copytree(ROOT / "config" / directory, library / directory)
+    shutil.copytree(ROOT / "adapters", library / "adapters")
+
+    recipe_path = library / "recipes/deepseek-v4-flash-0731-ds4-single.json"
+    recipe = json.loads(recipe_path.read_text())
+    recipe["runtime"]["entrypoint"] = ["/opt/vonk/bin/not-the-selected-harness"]
+    recipe_path.write_text(json.dumps(recipe))
+
+    result = _run(
+        "--library-root",
+        str(library),
+        "--platform-root",
+        str(ROOT),
+    )
+
+    assert result.returncode != 0
+    assert "harness recipe entrypoint is invalid" in result.stderr
 
 
 def test_structural_qualification_accepts_a_recipe_checked_out_separately(
