@@ -26,7 +26,7 @@ from vonk_control.catalog_service import (
     RecipeDraftInput,
 )
 from vonk_control.global_catalog import GlobalRecipeRevision
-from vonk_control.models import Base, RecipeSourceBundle
+from vonk_control.models import Base, RecipeImport, RecipeSourceBundle
 from vonk_control.recipe_contract import recipe_content_sha256
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 
@@ -124,6 +124,39 @@ def test_resolve_creates_immutable_revision_and_repeated_resolve_is_idempotent(
     assert repeated.id == resolved.id
     assert repeated.content_sha256 == resolved.content_sha256
     assert len(resolved.content_sha256 or "") == 64
+
+
+def test_recipe_library_import_records_exact_commit_and_is_idempotent(
+    service: CatalogService, recipe_document: dict[str, object]
+) -> None:
+    _seed_recipe_dependencies(service, recipe_document)
+    digest = recipe_content_sha256(recipe_document)
+
+    imported = service.import_recipe_library(
+        "admin",
+        library_commit="a" * 40,
+        source_path="recipes/synthetic-tiny-openai.json",
+        document=recipe_document,
+        expected_content_sha256=digest,
+    )
+    repeated = service.import_recipe_library(
+        "admin",
+        library_commit="a" * 40,
+        source_path="recipes/synthetic-tiny-openai.json",
+        document=recipe_document,
+        expected_content_sha256=digest,
+    )
+
+    assert imported.lifecycle == "resolved"
+    assert imported.source_kind == "recipe_library"
+    assert repeated.id == imported.id
+    with service._sessions() as session:
+        receipt = session.query(RecipeImport).one()
+        assert receipt.source_kind == "recipe_library"
+        assert receipt.source_reference.endswith(
+            "@" + "a" * 40 + ":recipes/synthetic-tiny-openai.json"
+        )
+        assert receipt.redacted_source["commit"] == "a" * 40
 
 
 def test_resolved_recipe_can_start_a_new_draft_without_mutating_the_resolution(

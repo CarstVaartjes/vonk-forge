@@ -28,6 +28,11 @@ controller resolves every recipe dependency by `kind`, `publisher`, `slug`,
 and content digest; it never turns a branch, display name, or `latest` tag into
 execution authority.
 
+An administrator imports a validated checkout with the platform's
+`/api/v1/catalog/imports/recipe-library` operation. The import receipt records
+the exact library commit and recipe path; re-importing the same recipe digest
+is idempotent. The checkout is never mounted into a running workload.
+
 The recipe library's GitHub Actions workflow calls the reusable validator in
 this repository. Before publishing a production recipe-library release, pin
 the validator to an exact `vonk-forge` commit or release tag. Publication is
@@ -52,6 +57,28 @@ To run structural qualification for one recipe from the external checkout:
   --library-root ../vonk-forge-recipes \
   --platform-root . \
   --level structural
+```
+
+To preview the recipes that a fresh local control plane would receive:
+
+```bash
+./scripts/import-recipe-library \
+  --library-root ../vonk-forge-recipes \
+  --platform-root .
+```
+
+The preview imports only recipes whose target ledger status is `accepted`.
+Use `--include-candidates` or an explicit `--recipe` only when deliberately
+testing a candidate. Applying the plan additionally requires an administrator
+token file and the control-plane URL:
+
+```bash
+./scripts/import-recipe-library \
+  --library-root ../vonk-forge-recipes \
+  --platform-root . \
+  --control-url https://forge.example.test \
+  --token-file .dev/admin-token \
+  --apply
 ```
 
 Container and Spark qualification still require the native ARM64/NVIDIA

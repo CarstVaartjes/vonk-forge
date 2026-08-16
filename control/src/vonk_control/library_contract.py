@@ -80,7 +80,7 @@ class LibraryRecipeIdentity(_StrictModel):
     slug: Text128
     title: Text200
     description: Annotated[str, StringConstraints(max_length=4_096)]
-    source_kind: Literal["local", "workload_run", "global"]
+    source_kind: Literal["local", "workload_run", "global", "recipe_library"]
 
 
 class LibraryInstallationSummary(_StrictModel):

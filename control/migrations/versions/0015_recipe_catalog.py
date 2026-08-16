@@ -64,7 +64,7 @@ def upgrade() -> None:
         sa.Column("created_by", sa.String(200), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.CheckConstraint("source_kind IN ('local','workload_run','global')", name="ck_local_recipes_source_kind"),
+        sa.CheckConstraint("source_kind IN ('local','workload_run','global','recipe_library')", name="ck_local_recipes_source_kind"),
         sa.CheckConstraint("slug = lower(slug) AND length(slug) BETWEEN 2 AND 128", name="ck_local_recipes_slug"),
     )
     op.create_index("ix_local_recipes_source_kind", "local_recipes", ["source_kind"])
@@ -100,7 +100,7 @@ def upgrade() -> None:
         sa.Column("redacted_source", sa.JSON, nullable=False),
         sa.Column("created_by", sa.String(200), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.CheckConstraint("source_kind IN ('local','workload_run','global')", name="ck_recipe_imports_source_kind"),
+        sa.CheckConstraint("source_kind IN ('local','workload_run','global','recipe_library')", name="ck_recipe_imports_source_kind"),
         sa.CheckConstraint(_lower_hex("source_sha256", 64), name="ck_recipe_imports_source_digest"),
         sa.UniqueConstraint("source_kind", "source_sha256", name="uq_recipe_import_source"),
     )

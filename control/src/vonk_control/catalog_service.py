@@ -264,7 +264,12 @@ class CatalogService:
 
     def create_recipe(self, actor: str, draft: RecipeDraftInput) -> RecipeRevisionView:
         document = self._validated_document(draft.document, slug=draft.slug)
-        if draft.source_kind not in {"local", "workload_run", "global"}:
+        if draft.source_kind not in {
+            "local",
+            "workload_run",
+            "global",
+            "recipe_library",
+        }:
             raise CatalogValidationError("catalog.source_kind", "unknown source kind")
         metadata = _mapping(document["metadata"])
         now = self._clock()
@@ -622,6 +627,127 @@ class CatalogService:
                 link.global_content_sha256 = remote.content_sha256
                 link.sync_state = "current"
                 link.synced_at = now
+            session.flush()
+            return _view(recipe, revision)
+
+    def import_recipe_library(
+        self,
+        actor: str,
+        *,
+        library_commit: str,
+        source_path: str,
+        document: Mapping[str, object],
+        expected_content_sha256: str,
+    ) -> RecipeRevisionView:
+        """Import one exact recipe from the public Git recipe library."""
+
+        actor = _actor(actor)
+        raw_identity = _mapping(document.get("identity"))
+        clean = self._validated_document(
+            document, slug=str(raw_identity.get("slug", ""))
+        )
+        actual = recipe_content_sha256(clean)
+        if actual != expected_content_sha256:
+            raise CatalogValidationError(
+                "recipe_library.hash_mismatch",
+                "recipe content does not match the supplied digest",
+            )
+        identity = _mapping(clean["identity"])
+        publisher = str(identity["publisher"])
+        slug = str(identity["slug"])
+        source_reference = (
+            "https://github.com/CarstVaartjes/vonk-forge-recipes@"
+            f"{library_commit}:{source_path}"
+        )
+        with self._sessions.begin() as session:
+            imported = session.scalar(
+                select(RecipeImport).where(
+                    RecipeImport.source_kind == "recipe_library",
+                    RecipeImport.source_sha256 == actual,
+                )
+            )
+            if imported is not None:
+                recipe = self._require_recipe(session, imported.recipe_id)
+                revision = session.scalar(
+                    select(LocalRecipeRevision).where(
+                        LocalRecipeRevision.recipe_id == recipe.id,
+                        LocalRecipeRevision.content_sha256 == actual,
+                        LocalRecipeRevision.lifecycle == "resolved",
+                    )
+                )
+                if revision is None:
+                    raise CatalogConflict(
+                        "recipe_library.history_inconsistent",
+                        "recipe library import history is inconsistent",
+                    )
+                return _view(recipe, revision)
+
+            recipe = self._repository.recipe_by_slug(session, slug)
+            now = self._clock()
+            if recipe is None:
+                metadata = _mapping(clean["metadata"])
+                recipe = LocalRecipe(
+                    slug=slug,
+                    title=str(metadata["title"]),
+                    description=str(metadata["description"]),
+                    source_kind="recipe_library",
+                    created_by=actor,
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(recipe)
+                session.flush()
+            elif recipe.source_kind != "recipe_library":
+                raise CatalogConflict(
+                    "recipe_library.slug_conflict",
+                    "a non-library recipe already uses this slug",
+                )
+
+            revision = session.scalar(
+                select(LocalRecipeRevision).where(
+                    LocalRecipeRevision.recipe_id == recipe.id,
+                    LocalRecipeRevision.content_sha256 == actual,
+                    LocalRecipeRevision.lifecycle == "resolved",
+                )
+            )
+            if revision is None:
+                self._resolve_recipe_revision(session, clean, actor=actor)
+                metadata = _mapping(clean["metadata"])
+                revision = LocalRecipeRevision(
+                    recipe_id=recipe.id,
+                    revision_number=self._repository.next_revision_number(
+                        session, recipe.id
+                    ),
+                    lifecycle="resolved",
+                    schema_version=1,
+                    document=clean,
+                    content_sha256=actual,
+                    created_by=actor,
+                    created_at=now,
+                )
+                recipe.title = str(metadata["title"])
+                recipe.description = str(metadata["description"])
+                recipe.updated_at = now
+                session.add(revision)
+                session.flush()
+
+            session.add(
+                RecipeImport(
+                    recipe_id=recipe.id,
+                    source_kind="recipe_library",
+                    source_reference=source_reference,
+                    source_sha256=actual,
+                    redacted_source={
+                        "repository": "CarstVaartjes/vonk-forge-recipes",
+                        "commit": library_commit,
+                        "path": source_path,
+                        "publisher": publisher,
+                        "slug": slug,
+                    },
+                    created_by=actor,
+                    created_at=now,
+                )
+            )
             session.flush()
             return _view(recipe, revision)
 

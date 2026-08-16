@@ -1,0 +1,365 @@
+#!/usr/bin/env python3
+"""Validate and import the standard vonk-forge-recipes checkout."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import subprocess
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+from typing import Any
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "control/src"))
+
+from vonk_control.source_bundles import generate_source_bundle
+
+ENTITY_DIRECTORIES = (
+    "model-groups",
+    "models",
+    "model-versions",
+    "runtime-distributions",
+    "patch-bundles",
+)
+ENTITY_KINDS = {
+    "model-groups": "model-group",
+    "models": "model",
+    "model-versions": "model-version",
+    "runtime-distributions": "runtime-distribution",
+    "patch-bundles": "patch-bundle",
+}
+MAX_RESPONSE_BYTES = 512 * 1024
+
+
+class ImportError(RuntimeError):
+    pass
+
+
+def _args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--library-root", type=Path, default=ROOT.parent / "vonk-forge-recipes"
+    )
+    parser.add_argument("--platform-root", type=Path, default=ROOT)
+    parser.add_argument(
+        "--control-url", help="local control-plane URL; required with --apply"
+    )
+    parser.add_argument(
+        "--token-file", type=Path, help="administrator bearer token file"
+    )
+    parser.add_argument(
+        "--apply", action="store_true", help="perform the import after validation"
+    )
+    parser.add_argument(
+        "--include-candidates",
+        action="store_true",
+        help="also import recipes not marked accepted",
+    )
+    parser.add_argument(
+        "--recipe",
+        action="append",
+        dest="recipes",
+        help="recipe slug to import; may be repeated",
+    )
+    return parser.parse_args()
+
+
+def _json(path: Path) -> dict[str, object]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ImportError(f"cannot read JSON document: {path}") from error
+    if not isinstance(value, dict):
+        raise ImportError(f"JSON document must be an object: {path}")
+    return value
+
+
+def _commit(root: Path) -> str:
+    try:
+        value = subprocess.check_output(
+            ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
+        ).strip()
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise ImportError("recipe library must be a Git checkout") from error
+    if len(value) != 40 or any(
+        character not in "0123456789abcdef" for character in value
+    ):
+        raise ImportError("recipe library HEAD is not a full immutable commit")
+    return value
+
+
+def _validate(root: Path, platform: Path) -> None:
+    command = [
+        str(platform / "scripts/validate-recipe-library"),
+        "--library-root",
+        str(root),
+        "--platform-root",
+        str(platform),
+        "--json",
+    ]
+    try:
+        subprocess.run(command, check=True, stdout=subprocess.PIPE, text=True)
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise ImportError("recipe library validation failed") from error
+
+
+def _accepted_slugs(root: Path) -> set[str]:
+    accepted: set[str] = set()
+    for path in sorted((root / "model-targets").glob("*.json")):
+        document = _json(path)
+        targets = document.get("targets")
+        if not isinstance(targets, list):
+            continue
+        for target in targets:
+            if not isinstance(target, dict) or target.get("status") != "accepted":
+                continue
+            slugs = target.get("recipe_slugs")
+            if isinstance(slugs, list):
+                accepted.update(value for value in slugs if isinstance(value, str))
+    return accepted
+
+
+def _files(context: Path) -> dict[str, bytes]:
+    if not context.is_dir():
+        raise ImportError(f"recipe build context does not exist: {context}")
+    result: dict[str, bytes] = {}
+    for path in sorted(context.rglob("*"), key=lambda item: item.as_posix().encode()):
+        relative = path.relative_to(context).as_posix()
+        if (
+            path.is_symlink()
+            or not path.is_file()
+            or "__pycache__" in path.parts
+            or path.suffix == ".pyc"
+        ):
+            raise ImportError(f"unsafe recipe build-context entry: {relative}")
+        result[relative] = path.read_bytes()
+    return result
+
+
+def _bundle(root: Path, recipe: dict[str, object]) -> tuple[str, bytes]:
+    build = recipe.get("build")
+    context = build.get("context") if isinstance(build, dict) else None
+    if not isinstance(context, dict):
+        raise ImportError("recipe build context is invalid")
+    relative = context.get("path")
+    expected = context.get("sha256")
+    if not isinstance(relative, str) or not isinstance(expected, str):
+        raise ImportError("recipe build context identity is invalid")
+    generated = generate_source_bundle(_files(root / relative))
+    if generated.sha256 != expected:
+        raise ImportError(f"source bundle digest mismatch for {relative}")
+    return expected, generated.archive
+
+
+class ControlClient:
+    def __init__(self, base_url: str, token: str):
+        self.base_url = base_url.rstrip("/")
+        self.token = token
+
+    def request(
+        self, method: str, path: str, body: object | None = None
+    ) -> tuple[int, dict[str, Any] | bytes]:
+        payload = (
+            None if body is None else json.dumps(body, separators=(",", ":")).encode()
+        )
+        request = urllib.request.Request(
+            self.base_url + path,
+            data=payload,
+            method=method,
+            headers={
+                "Authorization": f"Bearer {self.token}",
+                "Accept": "application/json",
+                **({"Content-Type": "application/json"} if payload is not None else {}),
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                content = response.read(MAX_RESPONSE_BYTES + 1)
+                if len(content) > MAX_RESPONSE_BYTES:
+                    raise ImportError("control-plane response is too large")
+                return response.status, json.loads(content)
+        except urllib.error.HTTPError as error:
+            content = error.read(MAX_RESPONSE_BYTES + 1)
+            try:
+                value = json.loads(content)
+            except json.JSONDecodeError:
+                value = content
+            return error.code, value
+        except (urllib.error.URLError, TimeoutError, OSError) as error:
+            raise ImportError(
+                f"control-plane request failed: {method} {path}"
+            ) from error
+
+
+def _load_entities(root: Path) -> list[dict[str, object]]:
+    result: list[dict[str, object]] = []
+    for directory in ENTITY_DIRECTORIES:
+        for path in sorted((root / directory).glob("*.json")):
+            document = _json(path)
+            if document.get("kind") != ENTITY_KINDS[directory]:
+                raise ImportError(f"entity kind does not match directory: {path}")
+            result.append({"path": f"{directory}/{path.name}", "document": document})
+    return result
+
+
+def _load_recipes(
+    root: Path, selected: set[str] | None, include_candidates: bool
+) -> list[dict[str, object]]:
+    accepted = _accepted_slugs(root)
+    result: list[dict[str, object]] = []
+    for path in sorted((root / "recipes").glob("*.json")):
+        slug = path.stem
+        if selected is not None and slug not in selected:
+            continue
+        if selected is None and not include_candidates and slug not in accepted:
+            continue
+        result.append({"path": f"recipes/{path.name}", "document": _json(path)})
+    if selected and len(result) != len(selected):
+        missing = sorted(selected - {str(item["path"])[8:-5] for item in result})
+        raise ImportError(f"requested recipe does not exist: {', '.join(missing)}")
+    return result
+
+
+def _token(path: Path) -> str:
+    try:
+        value = path.read_text(encoding="ascii").strip()
+    except OSError as error:
+        raise ImportError("administrator token file is unavailable") from error
+    if not value or any(character.isspace() for character in value):
+        raise ImportError("administrator token file is invalid")
+    return value
+
+
+def _apply_entity(client: ControlClient, document: dict[str, object]) -> None:
+    identity = document["identity"]
+    assert isinstance(identity, dict)
+    kind = str(document["kind"])
+    publisher = str(identity["publisher"])
+    slug = str(identity["slug"])
+    query = urllib.parse.urlencode({"kind": kind, "publisher": publisher, "limit": 100})
+    status, payload = client.request("GET", f"/api/v1/catalog/entities?{query}")
+    if status != 200 or not isinstance(payload, dict):
+        raise ImportError(f"cannot list catalog entities for {kind}/{publisher}")
+    matches = [
+        item
+        for item in payload.get("entities", [])
+        if isinstance(item, dict) and item.get("slug") == slug
+    ]
+    digest = hashlib.sha256(
+        json.dumps(
+            document, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode()
+    ).hexdigest()
+    current = matches[0] if matches else None
+    if current is None:
+        status, current = client.request(
+            "POST", "/api/v1/catalog/entities", {"document": document}
+        )
+        if status == 409:
+            status, payload = client.request("GET", f"/api/v1/catalog/entities?{query}")
+            matches = (
+                [
+                    item
+                    for item in payload.get("entities", [])
+                    if isinstance(item, dict) and item.get("slug") == slug
+                ]
+                if isinstance(payload, dict)
+                else []
+            )
+            current = matches[0] if matches else None
+        if status not in (200, 201) or not isinstance(current, dict):
+            raise ImportError(f"cannot create catalog entity {kind}/{publisher}/{slug}")
+    if (
+        current.get("content_sha256") == digest
+        and current.get("lifecycle") == "resolved"
+    ):
+        return
+    entity_id = str(current["entity_id"])
+    revision = int(current["revision_number"])
+    status, current = client.request(
+        "PUT",
+        f"/api/v1/catalog/entities/{entity_id}/draft",
+        {"expected_revision": revision, "document": document},
+    )
+    if status not in (200, 201) or not isinstance(current, dict):
+        raise ImportError(f"cannot revise catalog entity {kind}/{publisher}/{slug}")
+    status, _ = client.request(
+        "POST",
+        f"/api/v1/catalog/entities/{entity_id}/resolve",
+        {"expected_revision": int(current["revision_number"])},
+    )
+    if status not in (200, 201):
+        raise ImportError(f"cannot resolve catalog entity {kind}/{publisher}/{slug}")
+
+
+def main() -> int:
+    args = _args()
+    try:
+        library = args.library_root.resolve()
+        platform = args.platform_root.resolve()
+        commit = _commit(library)
+        _validate(library, platform)
+        entities = _load_entities(library)
+        selected = set(args.recipes) if args.recipes else None
+        recipes = _load_recipes(library, selected, args.include_candidates)
+        print(
+            json.dumps(
+                {
+                    "library_commit": commit,
+                    "entities": len(entities),
+                    "recipes": [item["path"] for item in recipes],
+                },
+                sort_keys=True,
+            )
+        )
+        if not args.apply:
+            return 0
+        if not args.control_url or not args.token_file:
+            raise ImportError("--apply requires --control-url and --token-file")
+        client = ControlClient(args.control_url, _token(args.token_file))
+        for item in entities:
+            _apply_entity(client, item["document"])
+        for item in recipes:
+            recipe = item["document"]
+            source_sha256, archive = _bundle(library, recipe)
+            upload = urllib.request.Request(
+                client.base_url + f"/api/v1/catalog/source-bundles/{source_sha256}",
+                data=archive,
+                method="PUT",
+                headers={
+                    "Authorization": f"Bearer {client.token}",
+                    "Content-Type": "application/vnd.vonk-forge.source-bundle.v1+tar",
+                },
+            )
+            with urllib.request.urlopen(upload, timeout=60):
+                pass
+            digest = hashlib.sha256(
+                json.dumps(
+                    recipe, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+                ).encode()
+            ).hexdigest()
+            status, payload = client.request(
+                "POST",
+                "/api/v1/catalog/imports/recipe-library",
+                {
+                    "library_commit": commit,
+                    "source_path": item["path"],
+                    "expected_content_sha256": digest,
+                    "document": recipe,
+                },
+            )
+            if status not in (200, 201):
+                raise ImportError(f"cannot import {item['path']}: {payload}")
+        return 0
+    except ImportError as error:
+        print(f"import-recipe-library: {error}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

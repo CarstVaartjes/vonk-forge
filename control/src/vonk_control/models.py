@@ -1880,7 +1880,7 @@ class LocalRecipe(Base):
     __tablename__ = "local_recipes"
     __table_args__ = (
         CheckConstraint(
-            "source_kind IN ('local','workload_run','global')",
+            "source_kind IN ('local','workload_run','global','recipe_library')",
             name="ck_local_recipes_source_kind",
         ),
         CheckConstraint(
@@ -1963,7 +1963,7 @@ class RecipeImport(Base):
             "source_kind", "source_sha256", name="uq_recipe_import_source"
         ),
         CheckConstraint(
-            "source_kind IN ('local','workload_run','global')",
+            "source_kind IN ('local','workload_run','global','recipe_library')",
             name="ck_recipe_imports_source_kind",
         ),
         CheckConstraint(

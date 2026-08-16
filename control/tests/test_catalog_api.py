@@ -618,6 +618,43 @@ def test_preview_and_explicit_global_import_are_separate(bridge_api) -> None:
     assert any(event.action == "catalog.global.import" for event in audits.list())
 
 
+def test_explicit_recipe_library_import_records_commit_and_requires_admin(
+    bridge_api,
+) -> None:
+    client, headers, audits, _service, remote = bridge_api
+    body = {
+        "library_commit": "a" * 40,
+        "source_path": "recipes/library-copy.json",
+        "expected_content_sha256": remote.content_sha256,
+        "document": remote.document,
+    }
+
+    denied = client.post(
+        "/api/v1/catalog/imports/recipe-library",
+        headers=headers("viewer"),
+        json=body,
+    )
+    imported = client.post(
+        "/api/v1/catalog/imports/recipe-library",
+        headers=headers("administrator"),
+        json=body,
+    )
+    repeated = client.post(
+        "/api/v1/catalog/imports/recipe-library",
+        headers=headers("administrator"),
+        json=body,
+    )
+
+    assert denied.status_code == 403
+    assert imported.status_code == 201, imported.text
+    assert repeated.status_code == 201, repeated.text
+    assert imported.json()["origin"] == "recipe_library"
+    assert repeated.json()["content_sha256"] == remote.content_sha256
+    assert any(
+        event.action == "catalog.recipe_library.import" for event in audits.list()
+    )
+
+
 def test_publication_report_and_export_are_local_json_only(
     bridge_api, recipe_document
 ) -> None:

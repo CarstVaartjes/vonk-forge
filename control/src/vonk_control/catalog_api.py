@@ -59,6 +59,7 @@ CATALOG_OPERATION_IDS = {
     ): "uploadLocalRecipeSourceBundle",
     ("post", "/api/v1/catalog/imports/global/preview"): "previewGlobalRecipeImport",
     ("post", "/api/v1/catalog/imports/global"): "importGlobalRecipe",
+    ("post", "/api/v1/catalog/imports/recipe-library"): "importRecipeLibrary",
     (
         "put",
         "/api/v1/catalog/recipes/{recipe_id}/publication-report",
@@ -128,6 +129,13 @@ class GlobalImportRequest(GlobalImportPreviewRequest):
     expected_content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+class RecipeLibraryImportRequest(StrictModel):
+    library_commit: str = Field(pattern=r"^[0-9a-f]{40}$")
+    source_path: str = Field(pattern=r"^recipes/[a-z0-9][a-z0-9-]{1,62}\.json$")
+    expected_content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    document: dict[str, object]
+
+
 class TestReportRequest(StrictModel):
     report: dict[str, object]
 
@@ -151,7 +159,7 @@ class RecipeSummaryResponse(StrictModel):
     recipe_id: str = Field(pattern=_UUID)
     slug: str = Field(pattern=_SLUG)
     title: str = Field(min_length=1, max_length=120)
-    origin: Literal["local", "workload_run", "global"]
+    origin: Literal["local", "workload_run", "global", "recipe_library"]
     revision_number: int = Field(ge=1)
     lifecycle: Literal["draft", "blocked", "resolved", "deprecated"]
     content_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
@@ -911,6 +919,40 @@ def install_catalog_routes(
                 "catalog.global.import",
                 None,
                 (result.recipe_id, fetched.revision_id, fetched.content_sha256),
+            )
+        )
+        return _revision(result)
+
+    @app.post(
+        "/api/v1/catalog/imports/recipe-library",
+        response_model=RecipeRevisionResponse,
+        status_code=status.HTTP_201_CREATED,
+        operation_id="importRecipeLibrary",
+    )
+    def import_recipe_library(
+        body: RecipeLibraryImportRequest,
+        request: Request,
+        actor: Actor = authenticated,
+    ):
+        administrator(actor)
+        try:
+            _bounded(body.document)
+            result = catalog().import_recipe_library(
+                actor.subject,
+                library_commit=body.library_commit,
+                source_path=body.source_path,
+                document=body.document,
+                expected_content_sha256=body.expected_content_sha256,
+            )
+        except CatalogError as error:
+            return _problem(request, error)
+        audits.append(
+            AuditRecord(
+                request.state.request_id,
+                actor.subject,
+                "catalog.recipe_library.import",
+                None,
+                (result.recipe_id, result.content_sha256 or ""),
             )
         )
         return _revision(result)

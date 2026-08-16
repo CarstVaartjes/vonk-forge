@@ -110,6 +110,12 @@ MUTATION_ROLES = {
     ("POST", "/api/v1/catalog/imports/workload_run"): frozenset({"administrator"}),
     ("POST", "/api/v1/catalog/imports/global/preview"): frozenset({"administrator"}),
     ("POST", "/api/v1/catalog/imports/global"): frozenset({"administrator"}),
+    ("POST", "/api/v1/catalog/imports/recipe-library"): frozenset(
+        {"administrator"}
+    ),
+    ("POST", "/api/v1/catalog/imports/recipe-library"): frozenset(
+        {"administrator"}
+    ),
     ("PUT", "/api/v1/catalog/recipes/{recipe_id}/publication-report"): frozenset(
         {"administrator"}
     ),
