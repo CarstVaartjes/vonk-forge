@@ -10,6 +10,7 @@
     "identity": {"$ref": "#/$defs/identity"},
     "metadata": {"$ref": "#/$defs/metadata"},
     "model": {"$ref": "#/$defs/modelVersionReference"},
+    "dependencies": {"type": "array", "maxItems": 32, "uniqueItems": true, "items": {"$ref": "#/$defs/modelVersionReference"}},
     "execution": {"$ref": "#/$defs/execution"},
     "build": {"$ref": "#/$defs/build"},
     "parameters": {"type": "array", "maxItems": 128, "items": {"$ref": "#/$defs/parameter"}},

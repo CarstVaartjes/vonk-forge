@@ -44,6 +44,8 @@ from .models import (
 from .recipe_contract import (
     RecipeContractError,
     recipe_content_sha256,
+    recipe_model_dependencies,
+    recipe_patch_bundle,
     recipe_references,
     recipe_topology,
     validate_recipe,
@@ -438,7 +440,7 @@ class CatalogService:
         )
         references = recipe_references(document)
         model_version_ref, harness_ref, distribution_ref = references[:3]
-        patch_ref = references[3] if len(references) == 4 else None
+        patch_ref = recipe_patch_bundle(document)
         model_version = entity_service.lookup_exact(
             *model_version_ref.portable_identity
         )
@@ -470,8 +472,18 @@ class CatalogService:
             if applies_to != distribution_ref:
                 raise CatalogConflict(
                     "catalog.patch_distribution_mismatch",
-                    "patch bundle does not declare the recipe's exact distribution",
-                )
+                "patch bundle does not declare the recipe's exact distribution",
+            )
+        for dependency_ref in recipe_model_dependencies(document):
+            dependency = entity_service.lookup_exact(*dependency_ref.portable_identity)
+            model_ref = _catalog_reference(
+                dependency.document, "model", CatalogKind.MODEL
+            )
+            model = entity_service.lookup_exact(*model_ref.portable_identity)
+            group_ref = _catalog_reference(
+                model.document, "model_group", CatalogKind.MODEL_GROUP
+            )
+            entity_service.lookup_exact(*group_ref.portable_identity)
         return recipe_content_sha256(document)
 
     def fork(
