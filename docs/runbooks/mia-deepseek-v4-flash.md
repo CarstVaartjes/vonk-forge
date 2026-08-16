@@ -4,10 +4,10 @@ This runbook covers the native v1 two-node Mia recipe. It is genuine vLLM
 multiprocessing tensor parallelism with TP=2. It is not a claim that the generic
 vLLM harness supports arbitrary distributed execution.
 
-Physical ARM64/GPU acceptance remains Task 9. The commands below are the real
-executable qualification path, but `--level container` must be run on a
-linux/arm64 DGX Spark host with Docker, both GPUs, and the exact model snapshot
-already installed.
+Spark acceptance remains a required gate for this v1 recipe. The commands
+below are the real executable qualification path, but `--level container` must
+be run on a linux/arm64 DGX Spark host with Docker, both GPUs, and the exact
+model snapshot already installed.
 
 ## Pinned release
 
@@ -117,4 +117,5 @@ shared content to hide a failure. A second failure requires operator diagnosis.
 Qualification evidence is non-secret canonical JSON, written atomically with
 mode `0600`. Retain it with the exact recipe and environment inventory. Do not
 claim physical acceptance from the bounded fake-engine tests or an x86_64
-`environment-limited` result; that evidence belongs to Task 9.
+`environment-limited` result; that evidence does not satisfy the Spark
+acceptance gate.

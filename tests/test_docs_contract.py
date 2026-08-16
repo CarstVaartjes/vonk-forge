@@ -214,7 +214,7 @@ def test_mia_runbook_distinguishes_image_receipts_from_model_loading() -> None:
         "166,898,666,055-byte model checkpoint",
         "does not redownload",
         "full digest verification",
-        "Task 9",
+        "Spark acceptance remains a required gate",
     ):
         assert required in text
 
