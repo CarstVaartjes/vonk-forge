@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import runpy
 import subprocess
 import sys
 import threading
@@ -12,6 +13,14 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/qualify-recipe"
 DS4 = ROOT / "config/recipes/deepseek-v4-flash-0731-ds4-single.json"
 MIA = ROOT / "config/recipes/deepseek-v4-flash-0731-mia-dual.json"
+
+
+def test_structural_qualification_supports_standard_media_outputs() -> None:
+    namespace = runpy.run_path(str(SCRIPT))
+    supported = namespace["SUPPORTED_CHECKS"]
+
+    assert "artifact.mime.image-png" in supported
+    assert "artifact.mime.video-mp4" in supported
 
 
 def _fake_engine(path: Path, architecture: str) -> Path:

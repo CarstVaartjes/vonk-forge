@@ -591,15 +591,31 @@ def source_bundle_file(value: str) -> bool:
 def require_source_bundle_identity(recipe: Mapping[str, object]) -> None:
     build = recipe.get("build")
     context = build.get("context") if isinstance(build, Mapping) else None
+    required = {"sha256", "expected_bytes", "media_type"}
+    allowed = required | {"path"}
+    path = context.get("path") if isinstance(context, Mapping) else None
+    path_is_valid = (
+        path is None
+        or (
+            type(path) is str
+            and bool(path)
+            and not path.startswith("/")
+            and "\\" not in path
+            and all(part not in {"", ".", ".."} for part in path.split("/"))
+            and PurePosixPath(path).as_posix() == path
+        )
+    )
     if (
         not isinstance(context, Mapping)
-        or set(context) != {"sha256", "expected_bytes", "media_type"}
+        or not required <= set(context)
+        or not set(context) <= allowed
         or type(context.get("sha256")) is not str
         or not sha256(str(context["sha256"]))
         or type(context.get("expected_bytes")) is not int
         or context["expected_bytes"] < 1
         or context.get("media_type")
         != "application/vnd.vonk-forge.source-bundle.v1+tar"
+        or not path_is_valid
     ):
         raise HarnessCompileError("PyTorch pipeline source bundle identity is invalid")
 

@@ -411,6 +411,18 @@ def test_vllm_accepts_nemotron_mamba_and_reasoning_options() -> None:
     assert "nemotron_v3" in projection.command
 
 
+def test_vllm_accepts_poolside_reasoning_parser() -> None:
+    recipe = _recipe("vllm")
+    recipe["runtime"]["arguments"].append(
+        {"name": "reasoning-parser", "value": "poolside_v1"}
+    )
+
+    projection = _compile("vllm", recipe=recipe)
+
+    assert "--reasoning-parser" in projection.command
+    assert "poolside_v1" in projection.command
+
+
 def test_vllm_accepts_offline_and_nvfp4_runtime_environment() -> None:
     recipe = _recipe("vllm")
     recipe["runtime"]["environment"] = [
@@ -755,6 +767,15 @@ def test_pytorch_pipeline_requires_an_exact_source_bundle_identity() -> None:
 
     with pytest.raises(HarnessCompileError, match="source bundle"):
         _compile("pytorch-pipeline", recipe=recipe)
+
+
+def test_pytorch_pipeline_accepts_a_context_path_with_bundle_identity() -> None:
+    recipe = _recipe("pytorch-pipeline")
+    recipe["build"]["context"]["path"] = "adapters/video/ltx2-pytorch"
+
+    projection = _compile("pytorch-pipeline", recipe=recipe)
+
+    assert projection.command[0] == "/opt/vonk/bin/pytorch-pipeline"
 
 
 def test_parameter_substitution_uses_declared_typed_bounds() -> None:

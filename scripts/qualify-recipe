@@ -51,6 +51,8 @@ SUPPORTED_CHECKS = frozenset(
         "inference.completed",
         "rank-loss.withdrawal",
         "rank-recovery.healthy",
+        "artifact.mime.image-png",
+        "artifact.mime.video-mp4",
     }
 )
 
