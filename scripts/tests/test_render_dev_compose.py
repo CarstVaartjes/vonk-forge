@@ -123,20 +123,36 @@ def test_dev_render_is_bare_mutable_and_removes_pinned_compatibility_input(
     assert "__VONK_" not in text
 
 
-def test_litellm_loopback_port_has_a_noninternal_network(tmp_path: Path) -> None:
+def test_litellm_loopback_port_terminates_at_caddy_lease_edge(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VONK_DEV_INFERENCE_PORT", "45678")
     _, output = _rendered_dev(tmp_path)
 
-    service = _compose_service(output, "litellm")
-    assert set(service["networks"]) == {"application", "data", "ingress"}
-    assert service["ports"] == [
+    litellm = _compose_service(output, "litellm")
+    caddy = _compose_service(output, "caddy")
+    assert set(litellm["networks"]) == {
+        "cluster-egress",
+        "data",
+        "litellm-edge",
+    }
+    assert litellm.get("ports") in (None, [])
+    assert caddy["ports"] == [
         {
             "mode": "ingress",
-            "target": 4000,
-            "published": "4000",
+            "target": 8443,
+            "published": "8443",
+            "protocol": "tcp",
+        },
+        {
+            "mode": "ingress",
+            "target": 8081,
+            "published": "45678",
             "protocol": "tcp",
             "host_ip": "127.0.0.1",
         }
     ]
+    assert "litellm-edge" in caddy["networks"]
 
 
 def _compose_service(output: Path, service: str) -> dict[str, object]:

@@ -105,11 +105,11 @@ def test_compose_hermes_is_unpublished_bounded_and_segmented() -> None:
     assert volumes["/opt/data/home/.cache"]["source"] == "/srv/vonk-forge/hermes/cache"
 
 
-def test_hermes_uses_only_local_litellm_and_authenticated_gateway() -> None:
+def test_hermes_uses_only_caddy_lease_edge_and_authenticated_gateway() -> None:
     service = _rendered()["services"]["hermes-agent"]
     environment = service["environment"]
 
-    assert environment["OPENAI_BASE_URL"] == "http://litellm:4000/v1"
+    assert environment["OPENAI_BASE_URL"] == "http://caddy:8081/v1"
     assert environment["API_SERVER_MODEL_NAME"] == "hermes-agent"
     assert environment["API_SERVER_ENABLED"] == "true"
     assert environment["API_SERVER_HOST"] == "0.0.0.0"
@@ -117,6 +117,18 @@ def test_hermes_uses_only_local_litellm_and_authenticated_gateway() -> None:
     assert environment["HERMES_DASHBOARD_BASIC_AUTH_USERNAME"] == "hermes"
     assert environment["MESSAGING_CWD"] == "/workspace"
     assert environment["API_SERVER_CORS_ORIGINS"] == "https://hermes.test.example"
+    assert service["depends_on"] == {
+        "caddy": {
+            "condition": "service_started",
+            "required": True,
+            "restart": True,
+        },
+        "litellm": {
+            "condition": "service_healthy",
+            "required": True,
+            "restart": True,
+        },
+    }
     assert "OPENAI_API_KEY" not in environment
     assert "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD" not in environment
     assert "HERMES_DASHBOARD_BASIC_AUTH_SECRET" not in environment
@@ -137,6 +149,16 @@ def test_setup_profile_shares_state_without_exposing_an_ingress() -> None:
     assert service["stdin_open"] is True
     assert service["tty"] is True
     assert service["command"] == ["setup"]
+    assert service["depends_on"] == {
+        "caddy": {
+            "condition": "service_started",
+            "required": True,
+        },
+        "litellm": {
+            "condition": "service_healthy",
+            "required": True,
+        },
+    }
     assert {item["target"] for item in service["volumes"]} == {
         "/opt/data",
         "/workspace",

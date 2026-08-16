@@ -121,11 +121,14 @@ def test_caddy_publishes_only_reserved_nas_backend_listener() -> None:
 
 
 def test_database_has_only_data_network_and_ingress_is_segmented() -> None:
-    services = _rendered()["services"]
+    rendered = _rendered()
+    services = rendered["services"]
     assert set(services["postgres"]["networks"]) == {"data"}
     assert set(services["caddy"]["networks"]) == {
         "agent-proxy",
+        "hermes-inference",
         "ingress",
+        "litellm-edge",
         "registry-edge",
         "tailnet-web-edge",
     }
@@ -141,13 +144,19 @@ def test_database_has_only_data_network_and_ingress_is_segmented() -> None:
         "data",
         "worker-authority",
     }
-    assert _rendered()["networks"]["worker-authority"]["internal"] is True
+    assert rendered["networks"]["worker-authority"]["internal"] is True
     assert set(services["litellm"]["networks"]) == {
         "cluster-egress",
         "data",
-        "hermes-inference",
-        "ingress",
+        "litellm-edge",
     }
+    assert services["litellm"].get("ports") in (None, [])
+    assert rendered["networks"]["litellm-edge"]["internal"] is True
+    assert {
+        name
+        for name, service in services.items()
+        if "litellm-edge" in service.get("networks", {})
+    } == {"caddy", "litellm"}
     assert set(services["prometheus"]["networks"]) == {"application"}
     for service in ("control-api", "control-worker"):
         assert services[service]["environment"]["VONK_MANAGEMENT_CIDRS"] == (

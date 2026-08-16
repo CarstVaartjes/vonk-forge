@@ -29,7 +29,7 @@ x-hermes-service: &hermes-service
     HERMES_GID: ${HERMES_GID:-1100}
     HERMES_UID: ${HERMES_UID:-1100}
     MESSAGING_CWD: /workspace
-    OPENAI_BASE_URL: http://litellm:4000/v1
+    OPENAI_BASE_URL: http://caddy:8081/v1
   secrets:
     - hermes-api-key
   volumes: &hermes-volumes
@@ -53,6 +53,9 @@ services:
       - hermes-inference
       - hermes-egress
     depends_on:
+      caddy:
+        condition: service_started
+        restart: true
       litellm:
         condition: service_healthy
         restart: true
@@ -80,6 +83,8 @@ services:
       - hermes-inference
       - hermes-egress
     depends_on:
+      caddy:
+        condition: service_started
       litellm:
         condition: service_healthy
 

@@ -343,7 +343,7 @@ services:
       - route-publications:/routes:ro
       - litellm-supervisor-state:/supervisor:rw
     tmpfs: [/tmp]
-    networks: [data, ingress, cluster-egress, hermes-inference]
+    networks: [data, cluster-egress, litellm-edge]
     depends_on:
       postgres: {condition: service_healthy}
       route-publication-init: {condition: service_completed_successfully}
@@ -421,7 +421,7 @@ services:
       VONK_REGISTRY_HOSTNAME: ${VONK_REGISTRY_HOSTNAME:?set Caddy registry hostname}
       VONK_BACKEND_PORT: ${VONK_BACKEND_PORT:-8443}
     secrets: [agent-client-ca, agent-proxy-auth]
-    networks: [ingress, agent-proxy, registry-edge, tailnet-web-edge]
+    networks: [ingress, agent-proxy, registry-edge, tailnet-web-edge, hermes-inference, litellm-edge]
     depends_on:
       control-api: {condition: service_started}
       registry: {condition: service_healthy}
@@ -504,6 +504,7 @@ networks:
   worker-authority: {internal: true}
   data: {internal: true}
   cluster-egress: {}
+  litellm-edge: {internal: true}
   registry-edge: {internal: true}
   # No standing service joins this network. A Docker-daemon administrator may
   # attach a digest-pinned one-shot ORAS publisher as documented in registry/README.md.
