@@ -21,6 +21,17 @@ API_IMAGE = "ghcr.io/example/vonk-forge-api@sha256:" + "a" * 64
 WORKER_IMAGE = "ghcr.io/example/vonk-forge-worker@sha256:" + "b" * 64
 
 
+def test_pinned_database_revision_matches_the_fresh_development_cohort() -> None:
+    generation = dev_init._pinned_generation_identity(
+        "a" * 40,
+        API_IMAGE,
+        WORKER_IMAGE,
+    )
+
+    assert generation.database_revision == "0027_execution_harness_catalog"
+    assert generation.database_revision == dev_cohort.DEVELOPMENT_DATABASE_REVISION
+
+
 def _selected_cohort(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

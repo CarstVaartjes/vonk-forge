@@ -8,6 +8,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from vonk_control import dev_cohort, dev_init
 
 ROOT = Path(__file__).resolve().parents[3]
 COMPOSE = ROOT / "deploy/compose/compose.dev.yaml"
@@ -133,8 +134,17 @@ def test_source_compose_advertises_the_actual_alembic_head(tmp_path: Path) -> No
         services[name]["environment"]["VONK_DATABASE_REVISION"]
         for name in ("control-api", "control-worker")
     }
+    alembic_heads = _alembic_heads()
 
-    assert advertised_revisions == _alembic_heads()
+    assert alembic_heads == {"0027_execution_harness_catalog"}
+    assert {
+        *advertised_revisions,
+        dev_cohort.DEVELOPMENT_DATABASE_REVISION,
+        dev_init._DATABASE_REVISION,
+        dev_cohort.build_identity(
+            role="api", source_commit=EXPECTED_COMMIT
+        ).database_revision,
+    } == alembic_heads
 
 
 def test_local_source_compose_remains_distinct_from_published_image_template() -> None:

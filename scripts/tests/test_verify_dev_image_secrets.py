@@ -8,6 +8,7 @@ import uuid
 from pathlib import Path
 
 import pytest
+from vonk_control.dev_cohort import DevelopmentImageIdentity
 
 ROOT = Path(__file__).resolve().parents[2]
 SCANNER = ROOT / "scripts" / "verify-dev-image-secrets"
@@ -21,14 +22,14 @@ SOURCE_COMMIT = "0123456789abcdef0123456789abcdef01234567"
 OTHER_COMMIT = "fedcba9876543210fedcba9876543210fedcba98"
 SOURCE_REPOSITORY = "https://github.com/CarstVaartjes/vonk-forge"
 OTHER_REPOSITORY = "https://github.com/example/fork"
-BUILD_DIGEST = "sha256:417d194fbdb2ae0359258796aed4b84f4a15466697774f633bf6c0ca94b10c5d"
+BUILD_DIGEST = "sha256:6175d9ed69ec10f2c4903e3d0466e2dd5cf41f547f4787a3f4de06de9037f872"
 
 
 def _embedded_identity_document(**overrides: object) -> dict[str, object]:
     document: dict[str, object] = {
         "build_digest": BUILD_DIGEST,
         "channel": "development",
-        "database_revision": "0021_browser_authentication",
+        "database_revision": "0027_execution_harness_catalog",
         "image_role": "api",
         "platform_version": "0.1.0",
         "protocol_maximum": 3,
@@ -50,6 +51,14 @@ def _canonical_identity_output(**overrides: object) -> str:
         )
         + "\n"
     )
+
+
+def test_image_identity_fixture_uses_the_fresh_database_revision() -> None:
+    raw = _canonical_identity_output().encode("ascii")
+
+    identity = DevelopmentImageIdentity.from_bytes(raw, expected_role="api")
+
+    assert identity.database_revision == "0027_execution_harness_catalog"
 
 
 def _accepted_image_inspection() -> dict[str, object]:
