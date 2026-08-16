@@ -66,7 +66,9 @@ def _fenced_blocks(path: Path, *languages: str) -> list[str]:
 def _section(path: Path, heading: str) -> str:
     text = path.read_text()
     start = text.index(f"## {heading}")
-    following_heading = re.search(r"^## ", text[start + len(heading) + 3 :], re.MULTILINE)
+    following_heading = re.search(
+        r"^## ", text[start + len(heading) + 3 :], re.MULTILINE
+    )
     if following_heading is None:
         return text[start:]
     end = start + len(heading) + 3 + following_heading.start()
@@ -132,7 +134,9 @@ def test_mia_runbook_distinguishes_image_receipts_from_model_loading() -> None:
         assert required in text
 
 
-def test_active_agent_install_examples_keep_pairing_and_controller_inputs_together() -> None:
+def test_active_agent_install_examples_keep_pairing_and_controller_inputs_together() -> (
+    None
+):
     agent_configs = []
     for block in _fenced_blocks(INSTALL_AGENT, "toml"):
         config = tomllib.loads(block)
@@ -148,7 +152,9 @@ def test_active_agent_install_examples_keep_pairing_and_controller_inputs_togeth
         assert config["node_id"] == "<NODE_ID>"
 
 
-def test_agent_ca_fingerprint_is_derived_from_der_and_used_without_command_output_noise() -> None:
+def test_agent_ca_fingerprint_is_derived_from_der_and_used_without_command_output_noise() -> (
+    None
+):
     install_blocks = _fenced_blocks(INSTALL_AGENT, "bash", "sh", "shell")
     fingerprint_block = next(
         block for block in install_blocks if "openssl x509" in block
@@ -168,9 +174,7 @@ def test_agent_urls_have_distinct_pairing_and_post_identity_roles() -> None:
     sentences = re.split(r"(?<=[.!])\s+", _normalized_text(INSTALL_AGENT))
 
     assert any(
-        "`enrollment_url`" in sentence
-        and "only" in sentence
-        and "`pair`" in sentence
+        "`enrollment_url`" in sentence and "only" in sentence and "`pair`" in sentence
         for sentence in sentences
     )
     assert any(
@@ -248,7 +252,9 @@ def test_onboarding_preserves_the_one_use_grant_pair_approve_pair_sequence() -> 
     assert "Repeat the same `pair` command" in steps[3]
 
 
-def test_generic_path_covers_secret_safe_backup_identity_recovery_and_package_removal() -> None:
+def test_generic_path_covers_secret_safe_backup_identity_recovery_and_package_removal() -> (
+    None
+):
     onboarding = _section(NODE_ONBOARDING, "Clean-machine prerequisites")
     agent_lifecycle = _section(INSTALL_AGENT, "Rotation, recovery, and removal")
     pki_recovery = _section(AGENT_PKI, "Backup and restore consistency")
@@ -302,7 +308,9 @@ def test_generic_onboarding_uses_hosts_placeholders_for_nas_and_agent_nodes() ->
     assert "192.168.1.231" not in combined
 
 
-def test_generic_docs_exclude_task_11_site_constants_and_physical_acceptance_results() -> None:
+def test_generic_docs_exclude_task_11_site_constants_and_physical_acceptance_results() -> (
+    None
+):
     combined = "\n".join(path.read_text() for path in GENERIC_ONBOARDING_DOCS)
     forbidden = (
         "192.168.1.231",
@@ -321,13 +329,18 @@ def test_generic_docs_exclude_task_11_site_constants_and_physical_acceptance_res
             assert not re.search(r"/volume\d+(?:/|$)", block)
 
 
-def test_development_nas_contract_keeps_only_compose_file_and_secrets_directory() -> None:
+def test_development_nas_contract_keeps_only_compose_file_and_secrets_directory() -> (
+    None
+):
     text = _normalized_text(DEV_NAS)
 
     assert "Its contents must be exactly:" in text
     assert "├── docker-compose.yaml" in text
     assert "└── secrets/" in text
-    assert "No `current/`, source tree, Dockerfiles, or `.env` file belongs in this project." in text
+    assert (
+        "No `current/`, source tree, Dockerfiles, or `.env` file belongs in this project."
+        in text
+    )
 
     for name in (
         "agent-ca-certificate",
@@ -352,7 +365,9 @@ def test_development_nas_contract_keeps_only_compose_file_and_secrets_directory(
     )
 
 
-def test_development_and_production_docs_separate_mutable_dev_from_authoritative_production() -> None:
+def test_development_and_production_docs_separate_mutable_dev_from_authoritative_production() -> (
+    None
+):
     readme = _normalized_text(README)
     compose = _normalized_text(COMPOSE_README)
     supply_chain = _normalized_text(SUPPLY_CHAIN)
@@ -510,7 +525,9 @@ def test_design_records_intentionally_database_free_litellm_runtime() -> None:
     assert "LiteLLM database URL is derived" not in design
 
 
-def test_complete_runbook_keeps_access_loopback_tokens_private_and_evidence_local() -> None:
+def test_complete_runbook_keeps_access_loopback_tokens_private_and_evidence_local() -> (
+    None
+):
     text = DEV_WORKLOADS.read_text()
     normalized = _normalized_text(DEV_WORKLOADS)
 

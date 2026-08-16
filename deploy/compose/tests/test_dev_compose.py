@@ -806,7 +806,9 @@ def _script_repository(tmp_path: Path) -> tuple[Path, Path]:
     package = repository / "control/src/vonk_control"
     package.mkdir(parents=True)
     shutil.copy2(ROOT / "control/src/vonk_control/__init__.py", package / "__init__.py")
-    shutil.copy2(ROOT / "control/src/vonk_control/passwords.py", package / "passwords.py")
+    shutil.copy2(
+        ROOT / "control/src/vonk_control/passwords.py", package / "passwords.py"
+    )
     local_compose = repository / "deploy/compose/compose.dev.images.yaml"
     local_compose.parent.mkdir(parents=True)
     shutil.copy2(IMAGE_TEMPLATE, local_compose)

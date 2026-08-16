@@ -1022,9 +1022,7 @@ def stage_runtime_secrets(
     controller_server_key = _read_source_secret(source, "controller-server-key")
     litellm_master_key = _read_source_secret(source, "litellm-master-key")
     litellm_upstream_key = _read_source_secret(source, "litellm-upstream-key")
-    litellm_database_password = _read_source_secret(
-        source, "litellm-database-password"
-    )
+    litellm_database_password = _read_source_secret(source, "litellm-database-password")
     if _LITELLM_DATABASE_PASSWORD.fullmatch(litellm_database_password) is None:
         raise DevInitError("development LiteLLM database password is invalid")
     litellm_database_url = (

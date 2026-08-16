@@ -977,7 +977,9 @@ def test_acceptance_diagnostics_are_bounded_and_avoid_raw_secret_output() -> Non
     assert "[redacted]" in text
 
 
-def test_acceptance_generates_synthetic_oauth_inputs_and_checks_only_projection_metadata() -> None:
+def test_acceptance_generates_synthetic_oauth_inputs_and_checks_only_projection_metadata() -> (
+    None
+):
     text = SCRIPT.read_text(encoding="utf-8")
 
     assert 'oauth_inputs="$acceptance_root/oauth-inputs"' in text
