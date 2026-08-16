@@ -589,6 +589,9 @@ git commit -m "refactor: replace prototype recipe state"
 
 ### Task 8: Recreate DS4 and Mia as native v1 recipes
 
+**Status:** Complete. Request-time lease remediation passed clean independent
+follow-up review for `de248c2..957e460`; physical acceptance remains Task 9.
+
 **Files:**
 - Rewrite: `adapters/deepseek/ds4/`
 - Rewrite: `adapters/deepseek/mia-vllm/`
@@ -687,6 +690,8 @@ git commit -m "feat: recreate DS4 and Mia as v1 recipes"
 ```
 
 ### Task 9: Fresh reset, physical acceptance, and operator documentation
+
+**Status:** In progress.
 
 **Files:**
 - Create: `scripts/reset-development-recipe-domain`

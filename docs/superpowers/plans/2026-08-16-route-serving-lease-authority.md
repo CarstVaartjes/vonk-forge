@@ -1,5 +1,8 @@
 # Route Serving Lease Authority Implementation Plan
 
+**Status:** Complete. The first review findings were fixed in
+`27db102..f9182b3`; follow-up review of `de248c2..957e460` was clean.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use
 > superpowers:subagent-driven-development (recommended) or
 > superpowers:executing-plans to implement this plan task-by-task. Steps use

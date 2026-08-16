@@ -1879,5 +1879,9 @@ manifest SHA-256
 Ruff, Cargo format/Clippy, lock, JSON, Caddy validation, and diff gates also
 exited zero.
 
-Task 8 remains pending a clean follow-up review of the remediation range
-beginning at `de248c2`; physical Spark acceptance is still exclusively Task 9.
+The clean follow-up review covered exact range `de248c2..957e460` and found no
+Critical, Important, or Minor issue. It independently confirmed the rendered
+network isolation, stale-callback lock ordering, current supply manifest and
+runtime-image identity, and the absence of new schema or physical-acceptance
+claims. Task 8 is complete. Physical Spark acceptance remains exclusively
+Task 9.
