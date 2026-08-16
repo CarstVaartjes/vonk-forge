@@ -856,6 +856,15 @@ def test_job_interfaces_accept_only_their_matching_output_media_family(
     )
 
 
+def test_pytorch_pipeline_accepts_a_recipe_library_context_path() -> None:
+    recipe = _recipe("pytorch-pipeline")
+    recipe["build"]["context"]["path"] = "adapters/video/example"
+
+    projection = _compile("pytorch-pipeline", recipe=recipe)
+
+    assert projection.command[0] == "/opt/vonk/bin/pytorch-pipeline"
+
+
 @pytest.mark.parametrize(
     ("slug", "interface", "output_mime"),
     [

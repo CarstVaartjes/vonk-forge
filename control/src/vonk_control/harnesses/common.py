@@ -593,7 +593,10 @@ def require_source_bundle_identity(recipe: Mapping[str, object]) -> None:
     context = build.get("context") if isinstance(build, Mapping) else None
     if (
         not isinstance(context, Mapping)
-        or set(context) != {"sha256", "expected_bytes", "media_type"}
+        or set(context) not in (
+            {"sha256", "expected_bytes", "media_type"},
+            {"path", "sha256", "expected_bytes", "media_type"},
+        )
         or type(context.get("sha256")) is not str
         or not sha256(str(context["sha256"]))
         or type(context.get("expected_bytes")) is not int
