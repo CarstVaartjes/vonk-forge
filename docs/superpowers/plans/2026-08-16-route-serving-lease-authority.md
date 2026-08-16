@@ -246,7 +246,7 @@ published port or client network.
 ```bash
 docker run --rm -v "$PWD/deploy/compose/Caddyfile:/etc/caddy/Caddyfile:ro" \
   caddy:2.11.4@sha256:844f60b64e4724a5aa8245e019dace0d3f199f7433ce6c57676cb30a920dbad9 \
-  validate --config /etc/caddy/Caddyfile --adapter caddyfile
+  caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 uvx --from ruff==0.16.1 ruff check deploy/compose/tests scripts/tests
 uvx --from ruff==0.16.1 ruff format --check deploy/compose/tests scripts/tests
 git diff --check
@@ -258,6 +258,13 @@ git commit -m "fix: enforce route leases at every inference edge"
 ### Task 3: Close the Task 8 gate and update operator guidance
 
 **Files:**
+- Modify: `control/src/vonk_control/dev_cohort.py`
+- Modify: `control/src/vonk_control/dev_init.py`
+- Modify: `deploy/compose/compose.dev.yaml`
+- Modify: `scripts/tests/test_dev_image_acceptance.py`
+- Modify: `scripts/tests/test_verify_dev_image_secrets.py`
+- Modify: `deploy/compose/tests/test_dev_compose.py`
+- Modify: `deploy/compose/tests/test_dev_complete_stack.py`
 - Modify: `docs/runbooks/development-nas-installation.md`
 - Modify: `docs/runbooks/development-agent-workloads.md`
 - Modify: `docs/runbooks/fresh-development-install.md`
@@ -271,14 +278,59 @@ git commit -m "fix: enforce route leases at every inference edge"
 - Produces: accurate fresh-install/tunnel/Hermes guidance and a reopened Task 8
   completion gate before Task 9.
 
-- [ ] **Step 1: Write failing documentation contracts**
+- [ ] **Step 1: Prove and fix one fresh development database identity**
+
+Write/extend the development identity contract so Alembic's actual single head,
+`DEVELOPMENT_DATABASE_REVISION`, `_DATABASE_REVISION`, source development
+Compose, development-image acceptance fixtures, and secret-verifier fixtures
+must all equal `0027_execution_harness_catalog`. Run it first and observe the
+existing `0021_browser_authentication` mismatch. Replace those stale constants
+directly; do not add an alias, compatibility reader, or data translation.
+
+Run:
+
+```bash
+uv run --project control --frozen python -m pytest -q \
+  deploy/compose/tests/test_dev_compose.py \
+  control/tests/test_dev_init.py \
+  control/tests/test_dev_cohort.py \
+  scripts/tests/test_dev_image_acceptance.py \
+  scripts/tests/test_verify_dev_image_secrets.py \
+  -k 'database_revision or alembic_head or image_identity'
+```
+
+Expected after edits: PASS with one exact fresh-schema identity.
+
+- [ ] **Step 2: Rebuild branch-current local images and diagnose the full stack**
+
+Build both current control targets before the image-only complete-stack test so
+stale `dev-local` images cannot masquerade as a source failure:
+
+```bash
+docker build -f control/Dockerfile --target api \
+  --build-arg VONK_DEV_SOURCE_COMMIT="$(git rev-parse HEAD)" \
+  -t vonk-forge-api:dev-local .
+docker build -f control/Dockerfile --target worker \
+  --build-arg VONK_DEV_SOURCE_COMMIT="$(git rev-parse HEAD)" \
+  -t vonk-forge-worker:dev-local .
+scripts/verify-dev-image-secrets \
+  vonk-forge-api:dev-local vonk-forge-worker:dev-local
+uv run --project control --frozen python -m pytest -q \
+  deploy/compose/tests/test_dev_complete_stack.py
+```
+
+Expected: PASS. If repository initialization still fails, capture its exact
+container output, identify the source/image identity boundary that differs,
+write a focused failing regression, and fix the root cause before continuing.
+
+- [ ] **Step 3: Write failing documentation contracts**
 
 Update documentation tests to require that the operator-facing loopback port is
 Caddy-gated, Hermes uses `caddy:8081`, no guide recommends direct LiteLLM
 access, and the clean-reset language says users/sessions/enrollments are
 recreated.
 
-- [ ] **Step 2: Update runbooks and architecture wording**
+- [ ] **Step 4: Update runbooks and architecture wording**
 
 Keep the existing SSH tunnel port and Pi/OpenAI-compatible URL instructions,
 but state that the port terminates at Caddy's lease gate. Replace internal
@@ -286,7 +338,7 @@ Hermes URLs with `http://caddy:8081/v1`. Document the admission guarantee,
 fail-closed authority outage, and same-config renewal behavior. Do not add any
 migration or legacy preservation instructions.
 
-- [ ] **Step 3: Run retained Task 8 and documentation suites**
+- [ ] **Step 5: Run retained Task 8 and documentation suites**
 
 ```bash
 uv run --project control --frozen python -m pytest -q \
@@ -318,7 +370,7 @@ scripts/verify-supply-chain --json
 git diff --check
 ```
 
-- [ ] **Step 4: Record evidence, commit, and request independent review**
+- [ ] **Step 6: Record evidence, commit, and request independent review**
 
 Append exact RED/GREEN commands and outputs to the Task 8 report. Record the
 new focused-task commits in the existing SDD ledger, then generate one review
@@ -331,7 +383,7 @@ git add docs
 git commit -m "docs: document the route lease edge"
 ```
 
-- [ ] **Step 5: Resume Task 9 only after review is clean**
+- [ ] **Step 7: Resume Task 9 only after review is clean**
 
 Mark Task 8 complete in the ledger, update the parent implementation plan, and
 start the fresh destructive pre-production reset, administrator recreation,
