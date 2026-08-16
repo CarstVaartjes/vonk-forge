@@ -97,6 +97,15 @@ def _deployment_document(*, node_count: int = 1) -> dict[str, object]:
     }
 
 
+def test_package_family_binds_an_explicit_validation_deployment() -> None:
+    document = _family_document()
+    document["validation_deployment"] = "future-stack-canary"
+
+    family = PackageFamily.load(document)
+
+    assert family.validation_deployment_id == "future-stack-canary"
+
+
 def test_family_defaults_to_manual_promotion_and_freezes_nested_state() -> None:
     # Removing the default or retaining caller-owned mutable maps must fail this.
     document = _family_document()

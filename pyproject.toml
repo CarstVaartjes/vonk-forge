@@ -29,11 +29,7 @@ packages = ["src/cluster_profiles"]
 [tool.hatch.build.targets.wheel.force-include]
 "src/cluster_profiles/schemas/workload.schema.json" = "cluster_profiles/schemas/workload.schema.json"
 "src/cluster_profiles/schemas/cluster-profile.schema.json" = "cluster_profiles/schemas/cluster-profile.schema.json"
-"src/cluster_profiles/schemas/model-definitions.schema.json" = "cluster_profiles/schemas/model-definitions.schema.json"
 "src/cluster_profiles/schemas/model-definition-evidence.schema.json" = "cluster_profiles/schemas/model-definition-evidence.schema.json"
-"src/cluster_profiles/schemas/accepted-cluster-profiles.schema.json" = "cluster_profiles/schemas/accepted-cluster-profiles.schema.json"
-"src/cluster_profiles/schemas/node-health-raw.schema.json" = "cluster_profiles/schemas/node-health-raw.schema.json"
-"src/cluster_profiles/schemas/node-health.schema.json" = "cluster_profiles/schemas/node-health.schema.json"
 "src/cluster_profiles/schemas/fleet.schema.json" = "cluster_profiles/schemas/fleet.schema.json"
 "src/cluster_profiles/schemas/topology.schema.json" = "cluster_profiles/schemas/topology.schema.json"
 "src/cluster_profiles/schemas/platform-release-evidence.schema.json" = "cluster_profiles/schemas/platform-release-evidence.schema.json"

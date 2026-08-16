@@ -14,8 +14,7 @@ from types import SimpleNamespace
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-for source_root in (ROOT / "agent/src", ROOT / "agent_protocol/src"):
-    sys.path.insert(0, str(source_root))
+sys.path.insert(0, str(ROOT / "agent/src"))
 
 
 FIXTURES = ROOT / "tests/fixtures/workload-packages/synthetic-upstream"

@@ -8,10 +8,8 @@ from .contracts import (
     WorkloadPackageError,
     validate_deployment,
 )
-from .legacy import LegacyWorkloadReader
 
 __all__ = [
-    "LegacyWorkloadReader",
     "PackageFamily",
     "PromotionPolicy",
     "ReleaseIndexEntry",
