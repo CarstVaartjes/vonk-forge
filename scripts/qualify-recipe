@@ -52,7 +52,9 @@ SUPPORTED_CHECKS = frozenset(
         "rank-loss.withdrawal",
         "rank-recovery.healthy",
         "artifact.mime.image-png",
+        "artifact.mime.audio-wav",
         "artifact.mime.video-mp4",
+        "artifact.mime.model-gltf-binary",
     }
 )
 

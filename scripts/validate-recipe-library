@@ -282,6 +282,52 @@ def _scan_secrets(root: Path) -> None:
                 raise LibraryValidationError(f"{path}: possible private credential in recipe library")
 
 
+def _validate_target_recipe_coverage(
+    root: Path,
+    recipe_slugs: set[str],
+) -> None:
+    # The standalone public library owns the complete target ledger.  The
+    # platform checkout may contain a deliberately smaller imported snapshot;
+    # its config/model-targets files are not the publication authority.
+    target_root = root / "model-targets"
+    if not target_root.is_dir():
+        return
+    for path in sorted(target_root.glob("*.json")):
+        try:
+            document = json.loads(path.read_bytes())
+        except (OSError, json.JSONDecodeError) as error:
+            raise LibraryValidationError(f"{path}: target ledger is invalid") from error
+        targets = document.get("targets") if isinstance(document, Mapping) else None
+        if not isinstance(targets, list):
+            raise LibraryValidationError(f"{path}: target ledger targets are required")
+        for index, target in enumerate(targets):
+            if not isinstance(target, Mapping):
+                raise LibraryValidationError(f"{path}: target {index} is invalid")
+            status = target.get("status")
+            slugs = target.get("recipe_slugs", [])
+            if not isinstance(slugs, list) or any(
+                not isinstance(slug, str) or not slug for slug in slugs
+            ):
+                raise LibraryValidationError(
+                    f"{path}: target {index} recipe_slugs are invalid"
+                )
+            if status == "blocked":
+                if slugs:
+                    raise LibraryValidationError(
+                        f"{path}: blocked target {index} must not advertise a recipe"
+                    )
+                continue
+            if not slugs:
+                raise LibraryValidationError(
+                    f"{path}: non-blocked target has no recipe (index {index})"
+                )
+            missing = sorted(set(slugs) - recipe_slugs)
+            if missing:
+                raise LibraryValidationError(
+                    f"{path}: target {index} references missing recipes: {', '.join(missing)}"
+                )
+
+
 def validate(library_root: Path, platform_root: Path) -> dict[str, Any]:
     library_root = library_root.resolve()
     platform_root = platform_root.resolve()
@@ -293,10 +339,16 @@ def validate(library_root: Path, platform_root: Path) -> dict[str, Any]:
     if not recipe_root.is_dir():
         raise LibraryValidationError("required recipe-library directory is missing: recipes")
     recipes = []
+    recipe_slugs: set[str] = set()
     for path in sorted(recipe_root.glob("*.json")):
+        recipe_document = parse_recipe_json(path.read_bytes())
+        identity = recipe_document.get("identity")
+        if isinstance(identity, Mapping) and isinstance(identity.get("slug"), str):
+            recipe_slugs.add(identity["slug"])
         recipes.append(_validate_recipe(path, library_root, platform_root, entities))
     if not recipes:
         raise LibraryValidationError("recipe-library contains no recipes")
+    _validate_target_recipe_coverage(library_root, recipe_slugs)
     return {
         "schema_version": 1,
         "catalog_entity_count": entity_count,

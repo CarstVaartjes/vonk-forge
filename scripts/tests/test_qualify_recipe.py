@@ -20,7 +20,9 @@ def test_structural_qualification_supports_standard_media_outputs() -> None:
     supported = namespace["SUPPORTED_CHECKS"]
 
     assert "artifact.mime.image-png" in supported
+    assert "artifact.mime.audio-wav" in supported
     assert "artifact.mime.video-mp4" in supported
+    assert "artifact.mime.model-gltf-binary" in supported
 
 
 def _fake_engine(path: Path, architecture: str) -> Path:
