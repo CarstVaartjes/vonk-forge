@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import stat
 import subprocess
 import sys
@@ -568,6 +569,54 @@ def test_mia_checkpoint_emits_label_verified_rank_container_action(
     }
     assert action["operation"] == "stop"
     assert action["ssh_target"] == SSH_TARGETS[1]
+
+
+def test_catalog_inputs_resolve_entities_from_external_library_root(
+    tmp_path: Path,
+) -> None:
+    monkeypatch = pytest.MonkeyPatch()
+    try:
+        monkeypatch.syspath_prepend(str(ROOT / "scripts"))
+        loader = SourceFileLoader("accept_recipe_external_library", str(SCRIPT))
+        spec = spec_from_loader(loader.name, loader)
+        assert spec is not None
+        module = module_from_spec(spec)
+        sys.modules[spec.name] = module
+        loader.exec_module(module)
+
+        library_root = tmp_path / "recipe-library"
+        for directory in (
+            "model-groups",
+            "models",
+            "model-versions",
+            "execution-harnesses",
+            "runtime-distributions",
+            "patch-bundles",
+        ):
+            shutil.copytree(ROOT / "config" / directory, library_root / directory)
+
+        recipe = json.loads(DS4.read_text(encoding="utf-8"))
+        _model_version, _distribution, references, documents = module._inputs(
+            recipe,
+            [],
+            library_root=library_root,
+            platform_root=ROOT,
+        )
+
+        assert {document["kind"] for document in documents} == {
+            "model-group",
+            "model",
+            "model-version",
+            "execution-harness",
+            "runtime-distribution",
+        }
+        assert all(reference["content_sha256"] for reference in references)
+        assert all(
+            (library_root / module.KIND_ROOTS[document["kind"]]).is_dir()
+            for document in documents
+        )
+    finally:
+        monkeypatch.undo()
 
 
 def test_preflight_rejects_wrong_host_architecture_without_runner_mutation(
