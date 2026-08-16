@@ -146,7 +146,8 @@ jobs:
         run: npm ci --prefix control/web
       - name: Run focused repository contracts
         run: >-
-          uv run --python 3.12 --frozen --with pytest==9.1.1 pytest -q
+          uv run --python 3.12 --project control --frozen --with-editable .
+          --with pytest==9.1.1 pytest -q
           tests/runbooks/test_development_nas_installation.py
           tests/runbooks/test_workload_packages.py
           tests/test_ci_platform_boundaries.py
