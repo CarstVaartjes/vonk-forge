@@ -79,12 +79,16 @@ _ARGUMENTS = {
     "tokenizer-mode": ArgumentSpec("--tokenizer-mode", validate=one_of("deepseek_v4")),
     "moe-backend": ArgumentSpec("--moe-backend", validate=one_of("flashinfer_b12x")),
     "reasoning-parser": ArgumentSpec(
-        "--reasoning-parser", validate=one_of("deepseek_v4", "nemotron_v3")
+        "--reasoning-parser",
+        validate=one_of("deepseek_v4", "nemotron_v3", "qwen3"),
     ),
     "reasoning-config": ArgumentSpec("--reasoning-config"),
     "default-chat-template-kwargs": ArgumentSpec("--default-chat-template-kwargs"),
     "generation-config": ArgumentSpec("--generation-config", validate=one_of("vllm")),
     "trust-remote-code": ArgumentSpec("--trust-remote-code", takes_value=False),
+    "language-model-only": ArgumentSpec(
+        "--language-model-only", takes_value=False
+    ),
     "host": ArgumentSpec("--host", emit=False, validate=one_of("0.0.0.0")),
     "port": ArgumentSpec("--port", emit=False, validate=integer(1024, 65_535)),
 }
