@@ -137,6 +137,40 @@ def test_route_lease_http_maps_parser_errors_to_empty_404(
     assert body == b""
 
 
+def test_route_lease_http_suppresses_interim_continue() -> None:
+    module = _module()
+    authority = module._RouteLeaseAuthority()
+    authority.allow_bootstrap()
+    server = module._start_route_lease_server(
+        authority,
+        host="127.0.0.1",
+        port=0,
+    )
+    try:
+        response = _raw_route_lease_response(
+            server,
+            b"GET /vonk/route-lease HTTP/1.1\r\n"
+            b"Host: x\r\n"
+            b"Connection: close\r\n"
+            b"Expect: 100-continue\r\n"
+            b"Content-Length: 1\r\n\r\n",
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    status, separator, remainder = response.partition(b"\r\n")
+    headers, header_separator, body = remainder.partition(b"\r\n\r\n")
+    assert response.count(b"HTTP/1.1 ") == 1
+    assert status == b"HTTP/1.1 404 Not Found"
+    assert separator == b"\r\n"
+    assert header_separator == b"\r\n\r\n"
+    assert b"Cache-Control: no-store\r\n" in headers + b"\r\n"
+    assert b"Content-Length: 0\r\n" in headers + b"\r\n"
+    assert b"Server:" not in headers
+    assert body == b""
+
+
 def test_route_lease_http_fails_closed_without_metadata_or_server_banner(
     tmp_path: Path,
 ) -> None:

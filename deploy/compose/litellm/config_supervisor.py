@@ -163,6 +163,11 @@ def _start_route_lease_server(
         def _not_found(self) -> None:
             self._respond(404)
 
+        def handle_expect_100(self) -> bool:
+            self.close_connection = True
+            self._not_found()
+            return False
+
         def send_error(
             self,
             code: int,
