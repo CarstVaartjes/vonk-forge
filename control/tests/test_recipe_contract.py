@@ -10,6 +10,7 @@ from vonk_control.recipe_contract import (
     canonical_recipe,
     parse_recipe_json,
     recipe_content_sha256,
+    recipe_model_dependencies,
     recipe_references,
     recipe_topology,
     validate_recipe,
@@ -179,8 +180,6 @@ def test_recipe_rejects_filesystem_inputs_on_an_openai_interface() -> None:
 
     with pytest.raises(RecipeContractError, match="OpenAI interfaces"):
         validate_recipe(document)
-
-
 
 def test_recipe_digest_changes_with_patch_identity() -> None:
     unpatched = recipe_document()

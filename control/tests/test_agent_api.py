@@ -2036,11 +2036,14 @@ def test_agent_runtime_spec_requires_exact_dependencies_and_registry_projection(
     )
     assert resolved.status_code == 200
     assert set(resolved.json()) == {
+        "identity",
+        "model_dependencies",
         "runtime",
         "artifacts",
         "endpoint",
         "security",
         "lifecycle",
+        "topology",
     }
     assert resolved.json()["runtime"]["entrypoint"] == [
         "/opt/vonk/bin/vllm",

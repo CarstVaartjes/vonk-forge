@@ -19,6 +19,9 @@ from .harnesses import HarnessRegistry
 from .harnesses.common import HarnessCompileError
 from .models import CatalogEntity, CatalogEntityRevision
 from .recipe_contract import (
+    recipe_content_sha256,
+    recipe_model_dependencies,
+    recipe_patch_bundle,
     recipe_references,
     recipe_topology,
     validate_recipe,
@@ -49,6 +52,18 @@ def compile_runtime_spec(
     references = recipe_references(document)
     model_version = references[0]
     _require_resolved_entity(resolved_entities, "model_version", model_version)
+    model_dependencies = recipe_model_dependencies(document)
+    resolved_dependencies = resolved_entities.get("model_dependencies", ())
+    if not isinstance(resolved_dependencies, (tuple, list)):
+        raise RecipeRuntimeSpecError("resolved model dependencies are invalid")
+    if len(resolved_dependencies) != len(model_dependencies):
+        raise RecipeRuntimeSpecError("resolved model dependencies are incomplete")
+    for index, reference in enumerate(model_dependencies):
+        _require_resolved_entity(
+            {"model_version": resolved_dependencies[index]},
+            "model_version",
+            reference,
+        )
     topology = recipe_topology(document)
     try:
         projection = _BUILTIN_HARNESS_REGISTRY.compile(
@@ -141,6 +156,30 @@ def compile_runtime_spec(
     if not isinstance(lifecycle, Mapping):
         raise RecipeRuntimeSpecError("recipe lifecycle is invalid")
     return {
+        "identity": {
+            "recipe_revision_sha256": recipe_content_sha256(document),
+            "model_version_sha256": model_version.content_sha256,
+            "harness_sha256": _resolved_content_sha256(
+                resolved_entities.get("harness")
+            ),
+            "runtime_distribution_sha256": _resolved_content_sha256(
+                resolved_entities.get("runtime_distribution")
+            ),
+            "patch_bundle_sha256": (
+                None
+                if resolved_entities.get("patch_bundle") is None
+                else _resolved_content_sha256(resolved_entities.get("patch_bundle"))
+            ),
+        },
+        "model_dependencies": [
+            {
+                "kind": reference.kind.value,
+                "publisher": reference.publisher,
+                "slug": reference.slug,
+                "content_sha256": reference.content_sha256,
+            }
+            for reference in model_dependencies
+        ],
         "runtime": compiled_runtime,
         "artifacts": role_artifacts,
         "endpoint": {
@@ -162,24 +201,29 @@ def compile_runtime_spec(
             "post_stop": copy.deepcopy(lifecycle["post_stop"]),
             "stop_timeout_seconds": lifecycle["stop_timeout_seconds"],
         },
+        "topology": {
+            "name": topology["name"],
+            "node_count": topology["node_count"],
+            "rank": rank,
+            "role": role,
+        },
     }
 
 
 def resolve_recipe_entities(
     session: Session, document: Mapping[str, object]
-) -> dict[str, CatalogEntityRevision | None]:
+) -> dict[str, object]:
     """Load and cross-check the recipe's exact immutable entity graph."""
 
     references = recipe_references(document)
     model_version_ref, harness_ref, distribution_ref = references[:3]
-    patch_ref = references[3] if len(references) == 4 else None
-    model_version = _lookup_exact(session, model_version_ref)
-    model_ref = _entity_reference(model_version.document, "model", CatalogKind.MODEL)
-    model = _lookup_exact(session, model_ref)
-    group_ref = _entity_reference(
-        model.document, "model_group", CatalogKind.MODEL_GROUP
+    model_dependencies = recipe_model_dependencies(document)
+    patch_ref = recipe_patch_bundle(document)
+    model_version = _resolve_model_version(session, model_version_ref)
+    auxiliary_model_versions = tuple(
+        _resolve_model_version(session, reference)
+        for reference in model_dependencies
     )
-    _lookup_exact(session, group_ref)
     harness = _lookup_exact(session, harness_ref)
     distribution = _lookup_exact(session, distribution_ref)
     implemented_harness = _entity_reference(
@@ -197,10 +241,24 @@ def resolve_recipe_entities(
             raise RecipeRuntimeSpecError("patch bundle does not apply to distribution")
     return {
         "model_version": model_version,
+        "model_dependencies": auxiliary_model_versions,
         "harness": harness,
         "runtime_distribution": distribution,
         "patch_bundle": patch,
     }
+
+
+def _resolve_model_version(
+    session: Session, reference: CatalogReference
+) -> CatalogEntityRevision:
+    model_version = _lookup_exact(session, reference)
+    model_ref = _entity_reference(model_version.document, "model", CatalogKind.MODEL)
+    model = _lookup_exact(session, model_ref)
+    group_ref = _entity_reference(
+        model.document, "model_group", CatalogKind.MODEL_GROUP
+    )
+    _lookup_exact(session, group_ref)
+    return model_version
 
 
 def _require_resolved_entity(
@@ -209,6 +267,13 @@ def _require_resolved_entity(
     value = resolved_entities.get(key)
     if getattr(value, "content_sha256", None) != reference.content_sha256:
         raise RecipeRuntimeSpecError(f"resolved {key} identity is invalid")
+
+
+def _resolved_content_sha256(value: object) -> str:
+    digest = getattr(value, "content_sha256", None)
+    if not isinstance(digest, str):
+        raise RecipeRuntimeSpecError("resolved catalog identity is missing")
+    return digest
 
 
 def _lookup_exact(

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 from vonk_control.catalog_contract import catalog_content_sha256
+from vonk_control.recipe_contract import recipe_content_sha256
 from vonk_control.recipe_runtime_specs import (
     RecipeRuntimeSpecError,
     compile_runtime_spec,
@@ -100,7 +101,32 @@ def test_runtime_spec_is_compiled_from_the_trusted_builtin_projection() -> None:
         image_digest="sha256:" + "d" * 64,
     )
 
-    assert set(spec) == {"runtime", "artifacts", "endpoint", "security", "lifecycle"}
+    assert set(spec) == {
+        "identity",
+        "model_dependencies",
+        "runtime",
+        "artifacts",
+        "endpoint",
+        "security",
+        "lifecycle",
+        "topology",
+    }
+    assert spec["model_dependencies"] == []
+    assert spec["identity"] == {
+        "recipe_revision_sha256": recipe_content_sha256(document),
+        "model_version_sha256": document["model"]["content_sha256"],
+        "harness_sha256": resolved_entities["harness"].content_sha256,
+        "runtime_distribution_sha256": resolved_entities[
+            "runtime_distribution"
+        ].content_sha256,
+        "patch_bundle_sha256": None,
+    }
+    assert spec["topology"] == {
+        "name": document["topology"]["name"],
+        "node_count": 1,
+        "rank": 0,
+        "role": "entrypoint",
+    }
     assert set(spec["runtime"]) == {
         "interface",
         "adapter",
@@ -160,6 +186,33 @@ def test_runtime_spec_is_compiled_from_the_trusted_builtin_projection() -> None:
         "post_stop": [],
         "stop_timeout_seconds": 30,
     }
+
+
+def test_runtime_spec_binds_exact_auxiliary_model_versions() -> None:
+    document, resolved_entities = _exact_builtin_inputs()
+    dependency = {
+        "kind": "model-version",
+        "publisher": "vonk-forge",
+        "slug": "synthetic-auxiliary-fp16",
+        "content_sha256": "f" * 64,
+    }
+    document["dependencies"] = [dependency]
+    resolved_entities["model_dependencies"] = (
+        SimpleNamespace(content_sha256="f" * 64),
+    )
+    parameters = {item["name"]: item["default"] for item in document["parameters"]}
+
+    spec = compile_runtime_spec(
+        document,
+        resolved_entities=resolved_entities,
+        parameters=parameters,
+        role="entrypoint",
+        rank=0,
+        recipe_build_id="00000000-0000-4000-8000-000000000001",
+        image_digest="sha256:" + "d" * 64,
+    )
+
+    assert spec["model_dependencies"] == [dependency]
 
 
 def test_runtime_spec_rejects_recipe_authored_shell_authority() -> None:

@@ -140,19 +140,76 @@ def recipe_references(document: Mapping[str, object]) -> tuple[CatalogReference,
                 distribution, expected_kind=CatalogKind.RUNTIME_DISTRIBUTION
             ),
         ]
-        patch_bundle = execution.get("patch_bundle")
+        patch_bundle = recipe_patch_bundle(document)
         if patch_bundle is not None:
-            references.append(
-                parse_catalog_reference(
-                    _mapping(patch_bundle, "execution.patch_bundle"),
-                    expected_kind=CatalogKind.PATCH_BUNDLE,
-                )
-            )
-        return tuple(references)
+            references.append(patch_bundle)
+        return (*references, *recipe_model_dependencies(document))
     except ValueError as error:
         raise RecipeContractError(
             "recipe.reference", "references", str(error)
         ) from error
+
+
+def recipe_patch_bundle(
+    document: Mapping[str, object],
+) -> CatalogReference | None:
+    execution = _mapping(document.get("execution"), "execution")
+    patch_bundle = execution.get("patch_bundle")
+    if patch_bundle is None:
+        return None
+    try:
+        return parse_catalog_reference(
+            _mapping(patch_bundle, "execution.patch_bundle"),
+            expected_kind=CatalogKind.PATCH_BUNDLE,
+        )
+    except (TypeError, ValueError) as error:
+        raise RecipeContractError(
+            "recipe.reference", "execution.patch_bundle", str(error)
+        ) from error
+
+
+def recipe_model_dependencies(
+    document: Mapping[str, object],
+) -> tuple[CatalogReference, ...]:
+    """Return the exact auxiliary model versions selected by a recipe."""
+
+    primary = parse_catalog_reference(
+        _mapping(document.get("model"), "model"),
+        expected_kind=CatalogKind.MODEL_VERSION,
+    )
+    raw_dependencies = document.get("dependencies", ())
+    if not isinstance(raw_dependencies, Sequence) or isinstance(
+        raw_dependencies, (str, bytes)
+    ):
+        raise RecipeContractError(
+            "recipe.dependencies", "dependencies", "model dependencies must be an array"
+        )
+    result: list[CatalogReference] = []
+    for index, value in enumerate(raw_dependencies):
+        try:
+            reference = parse_catalog_reference(
+                value, expected_kind=CatalogKind.MODEL_VERSION
+            )
+        except (TypeError, ValueError) as error:
+            raise RecipeContractError(
+                "recipe.reference",
+                f"dependencies.{index}",
+                str(error),
+            ) from error
+        if reference == primary:
+            raise RecipeContractError(
+                "recipe.dependencies_primary",
+                f"dependencies.{index}",
+                "the primary model version cannot also be an auxiliary dependency",
+            )
+        if reference in result:
+            raise RecipeContractError(
+                "recipe.dependencies_unique",
+                f"dependencies.{index}",
+                "auxiliary model dependencies must be unique",
+            )
+        result.append(reference)
+    return tuple(result)
 
 
 def _validate_recipe_semantics(document: Mapping[str, object]) -> None:
