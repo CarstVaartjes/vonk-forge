@@ -56,6 +56,132 @@ def test_recipe_patch_bundle_is_nullable_and_part_of_exact_references() -> None:
     ]
 
 
+def test_recipe_supports_exact_auxiliary_model_versions() -> None:
+    document = recipe_document()
+    dependency = {
+        "kind": "model-version",
+        "publisher": "vonk-forge",
+        "slug": "synthetic-auxiliary-fp16",
+        "content_sha256": "f" * 64,
+    }
+    document["dependencies"] = [dependency]
+
+    validate_recipe(document)
+
+    dependencies = recipe_model_dependencies(document)
+    assert len(dependencies) == 1
+    assert dependencies[0].portable_identity == (
+        "model-version",
+        "vonk-forge",
+        "synthetic-auxiliary-fp16",
+        "f" * 64,
+    )
+    assert [reference.kind for reference in recipe_references(document)] == [
+        CatalogKind.MODEL_VERSION,
+        CatalogKind.EXECUTION_HARNESS,
+        CatalogKind.RUNTIME_DISTRIBUTION,
+        CatalogKind.MODEL_VERSION,
+    ]
+
+
+def test_recipe_rejects_the_primary_model_as_an_auxiliary_dependency() -> None:
+    document = recipe_document()
+    document["dependencies"] = [document["model"]]
+
+    with pytest.raises(RecipeContractError, match="primary model version"):
+        validate_recipe(document)
+
+
+def test_recipe_keeps_patch_binding_distinct_from_auxiliary_models() -> None:
+    document = recipe_document()
+    document["execution"]["patch_bundle"] = {
+        "kind": "patch-bundle",
+        "publisher": "vonk-forge",
+        "slug": "vllm-fix",
+        "content_sha256": "e" * 64,
+    }
+    document["dependencies"] = [
+        {
+            "kind": "model-version",
+            "publisher": "vonk-forge",
+            "slug": "synthetic-auxiliary-fp16",
+            "content_sha256": "f" * 64,
+        }
+    ]
+
+    validate_recipe(document)
+
+    assert [reference.kind for reference in recipe_references(document)] == [
+        CatalogKind.MODEL_VERSION,
+        CatalogKind.EXECUTION_HARNESS,
+        CatalogKind.RUNTIME_DISTRIBUTION,
+        CatalogKind.PATCH_BUNDLE,
+        CatalogKind.MODEL_VERSION,
+    ]
+
+
+def test_job_interface_can_declare_a_read_only_input_contract() -> None:
+    document = recipe_document()
+    document["interfaces"] = [
+        {
+            "adapter": "image-job",
+            "path": "/outputs",
+            "input": {
+                "path": "/inputs",
+                "required": True,
+                "media_types": ["image/png", "image/jpeg"],
+                "max_bytes": 32 * 1024 * 1024,
+            },
+        }
+    ]
+    document["validation"]["validators"] = [
+        {"interface": "image-job", "checks": ["artifact.mime.image-png"]}
+    ]
+    document["runtime"]["security"]["mounts"] = [
+        {"source": "model", "target": "/models", "read_only": True},
+        {"source": "inputs", "target": "/inputs", "read_only": True},
+        {"source": "outputs", "target": "/outputs", "read_only": False},
+    ]
+
+    validate_recipe(document)
+
+
+def test_recipe_rejects_an_input_contract_without_a_matching_mount() -> None:
+    document = recipe_document()
+    document["interfaces"] = [
+        {
+            "adapter": "image-job",
+            "path": "/outputs",
+            "input": {
+                "path": "/inputs",
+                "required": True,
+                "media_types": ["image/png"],
+                "max_bytes": 1024,
+            },
+        }
+    ]
+    document["validation"]["validators"] = [
+        {"interface": "image-job", "checks": ["artifact.mime.image-png"]}
+    ]
+
+    with pytest.raises(RecipeContractError, match="read-only /inputs mount"):
+        validate_recipe(document)
+
+
+def test_recipe_rejects_filesystem_inputs_on_an_openai_interface() -> None:
+    document = recipe_document()
+    document["interfaces"][0]["input"] = {
+        "path": "/inputs",
+        "required": True,
+        "media_types": ["image/png"],
+        "max_bytes": 1024,
+    }
+
+    with pytest.raises(RecipeContractError, match="OpenAI interfaces"):
+        validate_recipe(document)
+
+
+
 def test_recipe_digest_changes_with_patch_identity() -> None:
     unpatched = recipe_document()
     patched = recipe_document()

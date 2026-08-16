@@ -739,6 +739,7 @@ def test_diffusers_accepts_specialized_image_layer_pipeline() -> None:
     assert "image-to-layers" in projection.command
 
 
+
 def test_input_contract_requires_the_exact_read_only_input_mount() -> None:
     recipe = _recipe("diffusers")
     recipe["interfaces"][0]["input"] = {

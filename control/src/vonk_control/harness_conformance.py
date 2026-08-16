@@ -172,6 +172,10 @@ class _ProjectionLifecycleExecutor:
                 "model_mounts_read_only": all(
                     mount.read_only for mount in projection.model_mounts
                 ),
+                "input_mount_read_only": (
+                    projection.input_mount is None
+                    or projection.input_mount.read_only
+                ),
                 "mount_paths_isolated": _mount_paths_are_isolated(projection),
                 "network_mode": projection.network_mode,
                 "no_new_privileges": projection.no_new_privileges,
@@ -442,6 +446,9 @@ def _validated_security(
         "model_mounts_read_only": all(
             mount.read_only for mount in projection.model_mounts
         ),
+        "input_mount_read_only": (
+            projection.input_mount is None or projection.input_mount.read_only
+        ),
         "mount_paths_isolated": _mount_paths_are_isolated(projection),
         "network_mode": projection.network_mode,
         "no_new_privileges": projection.no_new_privileges,
@@ -454,7 +461,11 @@ def _validated_security(
 def _has_container_runtime_socket(projection: HarnessProjection) -> bool:
     return any(
         name in path.lower()
-        for mount in (*projection.model_mounts, projection.output_mount)
+        for mount in (
+            *projection.model_mounts,
+            *((projection.input_mount,) if projection.input_mount else ()),
+            projection.output_mount,
+        )
         for path in (mount.source, mount.target)
         for name in (
             "docker.sock",
@@ -466,7 +477,11 @@ def _has_container_runtime_socket(projection: HarnessProjection) -> bool:
 
 
 def _mount_paths_are_isolated(projection: HarnessProjection) -> bool:
-    mounts = (*projection.model_mounts, projection.output_mount)
+    mounts = (
+        *projection.model_mounts,
+        *((projection.input_mount,) if projection.input_mount else ()),
+        projection.output_mount,
+    )
     paths = tuple(path for mount in mounts for path in (mount.source, mount.target))
     return len(paths) == len(set(paths)) and all(path != "/" for path in paths)
 
