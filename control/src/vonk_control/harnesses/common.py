@@ -143,7 +143,19 @@ def validate_projection(projection: HarnessProjection) -> None:
         or not projection.output_mount.isolated
     ):
         raise HarnessCompileError("harness outputs must be isolated and writable")
-    mounts = (*projection.model_mounts, projection.output_mount)
+    input_mount = projection.input_mount
+    if input_mount is not None and (
+        type(input_mount) is not HarnessMount
+        or input_mount.read_only is not True
+        or input_mount.isolated is not True
+        or input_mount.target != "/inputs"
+    ):
+        raise HarnessCompileError("harness inputs must be isolated and read-only")
+    mounts = (
+        *projection.model_mounts,
+        *((input_mount,) if input_mount else ()),
+        projection.output_mount,
+    )
     for mount in mounts:
         _mount_path(mount.source)
         _mount_path(mount.target)
@@ -342,6 +354,40 @@ def require_job_interface(recipe: Mapping[str, object], allowed: frozenset[str])
     return adapter
 
 
+def job_input_contract(recipe: Mapping[str, object]) -> Mapping[str, object] | None:
+    """Return the exact per-job input contract, if this recipe declares one."""
+    interfaces = recipe.get("interfaces")
+    if type(interfaces) is not list or len(interfaces) != 1:
+        raise HarnessCompileError("harness interface is invalid")
+    interface = interfaces[0]
+    if not isinstance(interface, Mapping):
+        raise HarnessCompileError("harness interface is invalid")
+    value = interface.get("input")
+    if value is None:
+        return None
+    if (
+        not isinstance(value, Mapping)
+        or set(value) != {"path", "required", "media_types", "max_bytes"}
+        or value.get("path") != "/inputs"
+        or type(value.get("required")) is not bool
+        or type(value.get("media_types")) is not list
+        or not value["media_types"]
+        or any(
+            type(media_type) is not str
+            or re.fullmatch(
+                r"[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+", media_type
+            ) is None
+            for media_type in value["media_types"]
+        )
+        or len(set(value["media_types"])) != len(value["media_types"])
+        or len(value["media_types"]) > 16
+        or type(value.get("max_bytes")) is not int
+        or value["max_bytes"] < 1
+    ):
+        raise HarnessCompileError("harness input contract is invalid")
+    return value
+
+
 def require_mime_validator(
     recipe: Mapping[str, object], interface: str, output_mime: str
 ) -> None:
@@ -521,6 +567,11 @@ def projection(
         and isinstance(topology, Mapping)
         and topology.get("mode") == "distributed",
     )
+    input_mount = (
+        HarnessMount("/run/vonk/inputs", "/inputs", read_only=True, isolated=True)
+        if job_input_contract(recipe) is not None
+        else None
+    )
     value = HarnessProjection(
         slug=slug,
         contract_version=1,
@@ -535,6 +586,7 @@ def projection(
         output_mount=HarnessMount(
             "/run/vonk/outputs", "/outputs", read_only=False, isolated=True
         ),
+        input_mount=input_mount,
         environment=environment,
     )
     return value
@@ -679,6 +731,13 @@ def _require_recipe_mounts(
     runtime = recipe.get("runtime")
     security = runtime.get("security") if isinstance(runtime, Mapping) else None
     mounts = security.get("mounts") if isinstance(security, Mapping) else None
+    input_contract = job_input_contract(recipe)
+    expected_mounts = {
+        ("model", "/models", True),
+        ("outputs", "/outputs", False),
+    }
+    if input_contract is not None:
+        expected_mounts.add(("inputs", "/inputs", True))
     if (
         type(artifacts) is not list
         or not artifacts
@@ -707,12 +766,9 @@ def _require_recipe_mounts(
             for mount in mounts
             if isinstance(mount, Mapping)
         }
-        != {
-            ("model", "/models", True),
-            ("outputs", "/outputs", False),
-        }
+        != expected_mounts
     ):
-        raise HarnessCompileError("harness recipe mounts or security are invalid")
+        raise HarnessCompileError("harness recipe mounts or input mount are invalid")
 
 
 class SyntheticHarnessCompiler:

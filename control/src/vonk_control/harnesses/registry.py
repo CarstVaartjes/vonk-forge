@@ -32,6 +32,7 @@ from ..source_bundles import (
 from .common import (
     HarnessCompileError,
     custom_adapter_command,
+    job_input_contract,
     validate_projection,
 )
 from .contracts import HarnessBinding, HarnessCompiler, HarnessMount, HarnessProjection
@@ -81,6 +82,7 @@ class _AdapterSpec:
     allowed_parameters: frozenset[str]
     allowed_environment: frozenset[str]
     model_mount: HarnessMount
+    input_mount: HarnessMount | None
     output_mount: HarnessMount
     minimum_nodes: int
     maximum_nodes: int
@@ -131,6 +133,9 @@ class _BundleHarnessCompiler:
             for item in environment
         ):
             raise HarnessCompileError("adapter environment is not allowed")
+        recipe_input = job_input_contract(recipe)
+        if (recipe_input is None) != (self.spec.input_mount is None):
+            raise HarnessCompileError("adapter input mount does not match recipe")
         node_count = (
             topology.get("node_count") if isinstance(topology, Mapping) else None
         )
@@ -176,6 +181,7 @@ class _BundleHarnessCompiler:
             capabilities=(),
             model_mounts=(self.spec.model_mount,),
             output_mount=self.spec.output_mount,
+            input_mount=self.spec.input_mount,
         )
 
 
@@ -565,7 +571,7 @@ def _parse_adapter_spec(bundle: _VerifiedSourceBundle) -> _AdapterSpec:
     distribution = document.get("distribution")
     if (
         not isinstance(mounts, Mapping)
-        or set(mounts) != {"models", "outputs"}
+        or set(mounts) not in ({"models", "outputs"}, {"models", "inputs", "outputs"})
         or not isinstance(topology, Mapping)
         or set(topology) != {"minimum_nodes", "maximum_nodes", "roles"}
         or not interfaces
@@ -582,7 +588,12 @@ def _parse_adapter_spec(bundle: _VerifiedSourceBundle) -> _AdapterSpec:
     ):
         raise HarnessCompileError("source bundle adapter document is invalid")
     model_mount = _adapter_mount(mounts["models"], model=True)
-    output_mount = _adapter_mount(mounts["outputs"], model=False)
+    input_mount = (
+        _adapter_mount(mounts["inputs"], role="input")
+        if "inputs" in mounts
+        else None
+    )
+    output_mount = _adapter_mount(mounts["outputs"], role="output")
     minimum_nodes = topology.get("minimum_nodes")
     maximum_nodes = topology.get("maximum_nodes")
     roles = _string_tuple(topology.get("roles"), "adapter roles")
@@ -629,6 +640,7 @@ def _parse_adapter_spec(bundle: _VerifiedSourceBundle) -> _AdapterSpec:
                 capabilities=(),
                 model_mounts=(model_mount,),
                 output_mount=output_mount,
+                input_mount=input_mount,
                 binding=HarnessBinding("0" * 64, "0" * 64, minimum_nodes, roles[0], 0),
             )
         )
@@ -643,6 +655,7 @@ def _parse_adapter_spec(bundle: _VerifiedSourceBundle) -> _AdapterSpec:
         allowed_parameters=parameters,
         allowed_environment=environment,
         model_mount=model_mount,
+        input_mount=input_mount,
         output_mount=output_mount,
         minimum_nodes=minimum_nodes,
         maximum_nodes=maximum_nodes,
@@ -653,9 +666,18 @@ def _parse_adapter_spec(bundle: _VerifiedSourceBundle) -> _AdapterSpec:
     )
 
 
-def _adapter_mount(value: object, *, model: bool) -> HarnessMount:
+def _adapter_mount(
+    value: object, *, model: bool | None = None, role: str | None = None
+) -> HarnessMount:
+    if model is not None:
+        if model is not True or role is not None:
+            raise HarnessCompileError("source bundle adapter mount is invalid")
+        role = "model"
+    elif role not in {"input", "output"}:
+        raise HarnessCompileError("source bundle adapter mount is invalid")
+    assert role is not None
     expected = {"source", "target", "read_only"}
-    if not model:
+    if role in {"input", "output"}:
         expected = {*expected, "isolated"}
     if not isinstance(value, Mapping) or set(value) != expected:
         raise HarnessCompileError("source bundle adapter mount is invalid")
@@ -667,9 +689,11 @@ def _adapter_mount(value: object, *, model: bool) -> HarnessMount:
         type(source) is not str
         or type(target) is not str
         or type(read_only) is not bool
-        or read_only is not model
+        or read_only is not (role != "output")
         or type(isolated) is not bool
-        or isolated is not (not model)
+        or isolated is not (role != "model")
+        or (role == "input" and target != "/inputs")
+        or (role == "output" and target != "/outputs")
     ):
         raise HarnessCompileError("source bundle adapter mount is invalid")
     return HarnessMount(source, target, read_only=read_only, isolated=isolated)

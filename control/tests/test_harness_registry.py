@@ -393,9 +393,9 @@ def test_registry_rejects_wrong_length_trusted_signer_bytes(
 
 
 def adapter_document(
-    slug: str, *, argv_template: list[str] | None = None
+    slug: str, *, argv_template: list[str] | None = None, include_inputs: bool = False
 ) -> dict[str, object]:
-    return {
+    document = {
         "schema_version": 1,
         "slug": slug,
         "contract_version": 1,
@@ -430,6 +430,14 @@ def adapter_document(
             },
         },
     }
+    if include_inputs:
+        document["mounts"]["inputs"] = {
+            "source": "/run/vonk/inputs",
+            "target": "/inputs",
+            "read_only": True,
+            "isolated": True,
+        }
+    return document
 
 
 def adapter_bundle(slug: str, *, document: dict[str, object] | None = None):
@@ -844,6 +852,61 @@ def test_custom_adapter_output_is_determined_by_its_signed_document(
         "/models",
     )
     assert second_projection.command == ("/opt/vonk/adapters/bin/alternate",)
+
+
+def test_custom_adapter_can_bind_a_signed_read_only_input_mount(
+    tmp_path: Path,
+) -> None:
+    document = adapter_document("custom-input", include_inputs=True)
+    document["interfaces"] = ["artifact-job"]
+    bundle = adapter_bundle("custom-input", document=document)
+    store = SourceBundleStore(tmp_path / "source-bundles")
+    stored = store.put(bundle.sha256, io.BytesIO(bundle.archive))
+    issuer = PackageObjectReceiptIssuer(Ed25519PrivateKey.generate())
+    registry = custom_registry(store, issuer)
+    identity = _source_identity(bundle)
+    registry.register(
+        source_bundle=identity,
+        receipt=issuer.issue_object_receipt(
+            object_digest=hashlib.sha256(stored.path.read_bytes()).hexdigest(),
+            size=len(bundle.archive),
+        ),
+    )
+    harness = harness_document("custom-input", source_bundle=identity)
+    harness["adapters"] = ["artifact-job"]
+    distribution = distribution_document("custom-input")
+    distribution["implements_harness"]["content_sha256"] = catalog_content_sha256(
+        harness
+    )
+    recipe = recipe_document(harness, distribution)
+    recipe["interfaces"] = [
+        {
+            "adapter": "artifact-job",
+            "path": "/outputs",
+            "input": {
+                "path": "/inputs",
+                "required": True,
+                "media_types": ["image/png"],
+                "max_bytes": 1024,
+            },
+        }
+    ]
+
+    projection = registry.compile(
+        harness,
+        recipe=recipe,
+        distribution=distribution,
+        patch=None,
+        parameters={},
+        topology=recipe["topology"],
+        role="entrypoint",
+        rank=0,
+    )
+
+    assert projection.input_mount is not None
+    assert projection.input_mount.target == "/inputs"
+    assert projection.input_mount.read_only is True
+    assert projection.input_mount.isolated is True
 
 
 @pytest.mark.parametrize(

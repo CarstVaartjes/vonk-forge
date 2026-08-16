@@ -51,6 +51,14 @@ and certificate-bound `spk_…` node identities. Mutable image tags, display
 names, host IP addresses, and “latest” model revisions cannot substitute for
 those identities.
 
+Input-dependent jobs may declare a non-OpenAI interface input contract with
+accepted media types and a byte limit. The harness projects each request's
+content-addressed input staging directory as a read-only, isolated `/inputs`
+mount alongside `/models` and `/outputs`. Operators provide input artifacts
+through the job boundary; recipes never receive arbitrary host paths or
+runtime URLs. Such a recipe must also declare the matching `inputs` security
+mount.
+
 ## One Spark, many Sparks, and replicas
 
 A one-Spark recipe has topology mode `single`: one node owns the model endpoint
