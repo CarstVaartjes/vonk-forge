@@ -1,12 +1,12 @@
-# Model catalog
+# Model and recipe identities
 
-The local catalog answers two different questions: what model material exists,
-and how an exact revision can run on this fleet. Resolved catalog documents are
-immutable and content-addressed. PostgreSQL is authoritative for local catalog,
-installation, placement, and run state; the optional global catalog can supply
-documents but does not own local workloads, images, or model files.
+Vonk Forge separates model material identity from runnable recipe identity.
+Resolved recipe documents are immutable and content-addressed. PostgreSQL is
+authoritative for local recipe records, installation, placement, and run
+state; an optional external source may supply recipe documents but does not own
+local workloads, images, or model files.
 
-## Four catalog layers
+## Four identity layers
 
 A **model group** is the human product family, such as DeepSeek. A **model** is
 one member of that family with a stable upstream identity, such as DeepSeek V4
@@ -25,12 +25,12 @@ resolved by the same exact content-addressed identity; an adapter must not
 silently fetch a mutable companion checkpoint.
 
 The broader discovery list is maintained separately in the
-[model target ledger](model-targets.md). It distinguishes accepted recipes from
-candidate and blocked upstreams, so the Library can remain trustworthy while
-the project continues to add defaults.
+[model target ledger](model-targets.md). It distinguishes accepted recipes
+from candidate and blocked upstreams, so the Library can remain trustworthy
+while the project continues to add defaults.
 
 The reviewed public recipe source is the separate [standard recipe
-library](recipe-library.md). The local catalog imports an exact library
+library](recipe-library.md). The local Library imports an exact library
 snapshot, then remains authoritative for installation, placement, runs, and
 fleet evidence.
 
@@ -77,7 +77,7 @@ decides.
 ## Custom recipes and license responsibility
 
 An operator may author a custom recipe against the same v1 contracts. Keep
-secrets out of every catalog document, pin all upstream revisions and digests,
+secrets out of every recipe document, pin all upstream revisions and digests,
 declare full resource and topology requirements, use one of the built-in
 harnesses where it implements the lifecycle, and run structural plus physical
 qualification before treating the recipe as accepted. A recipe-local patch
@@ -90,10 +90,10 @@ of rights. The operator remains responsible for model, dataset, runtime,
 dependency, redistribution, export, and acceptable-use terms before download,
 installation, publication, or sharing.
 
-## Catalog operations
+## Library operations
 
-Use the Library and plan APIs for normal work. First resolve exact catalog and
-recipe revisions. Then preview placement, build, distribution, installation,
+Use the Library and plan APIs for normal work. First resolve exact recipe
+revisions. Then preview placement, build, distribution, installation,
 and run actions against current Fleet inventory. Apply only the digest returned
 by the matching preview. The controller records operations and node evidence;
 operators do not create parallel installation state in files or by starting a
@@ -117,7 +117,7 @@ Stop preview identifies the exact active run and returns a plan digest. Applying
 that digest withdraws the route and stops the ranks. Uninstall is a separate
 preview/apply operation against the exact installation and is allowed only
 after its run is stopped. Uninstall removes runtime installation state but
-retains immutable catalog history. Deleting model or build caches is a separate
+retains immutable recipe history. Deleting model or build caches is a separate
 bounded operation; never infer it from “stop.”
 
 ## Update and exact-revision rollback

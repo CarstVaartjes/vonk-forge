@@ -366,26 +366,27 @@ scp '<LOCAL_SECRETS_DIR>/host-runtime-grant-public-key' \
 ```
 
 On each node, install the CA and helper public key as documented in
-[Install the Vonk Forge agent](../operations/install-vonk-agent.md), then use
-the generated bootstrap command from Fleet. Registration generates the
-node-specific runtime inputs, including the two explicit `:8443` origins, the
-DER `ca_sha256`, that node's unique `node_id`, and any required
-`fabric_address` plus `fabric_bandwidth_mbps = 200000`. Manual `agent.toml`
-editing is unsupported.
+[Install the Vonk Forge agent](../operations/install-vonk-agent.md).
+Registration is the authority. Fleet **Add Spark** is the next implementation
+step: it records the node-bound bootstrap grant and the node-specific runtime
+inputs, including the two explicit `:8443` origins, the DER `ca_sha256`, that
+node's unique `node_id`, and any required `fabric_address` plus
+`fabric_bandwidth_mbps = 200000`. That next implementation step is not an
+operator command currently available. Manual `agent.toml` editing is
+unsupported.
 
 Pair one node at a time in this strict order:
 
-1. Create the node-bound bootstrap grant in the administrator interface.
-2. Deliver the generated bootstrap command to that node without exposing the
-   one-use token in shell history.
-3. Run the generated bootstrap command; it uses the generated runtime inputs
-   and records the pending enrollment.
-4. Approve the pending enrollment after comparing the node, CSR, host-key,
+1. Create the node-bound registration intent in the administrator interface.
+2. Review the Fleet-issued runtime inputs and pending enrollment evidence.
+3. Approve the pending enrollment after comparing the node, CSR, host-key,
    hardware, agent, and boot evidence.
-5. Re-run the same generated bootstrap command if it pauses waiting for the
-   issued certificate, then remove the consumed token material.
-6. Enable the package-helper socket and supervisor, and confirm the controller
-   reports the certificate-bound `spk_` identity.
+4. Leave the node at that reviewed registration boundary until the Fleet
+   bootstrap emitter exists; do not script a substitute or hand-author
+   `agent.toml`.
+5. After the emitter lands, resume this step with the Fleet-issued bootstrap
+   action, then enable the package-helper socket and supervisor and confirm
+   the controller reports the certificate-bound `spk_` identity.
 
 Hostnames and IP addresses are observations; the certificate-bound `spk_`
 value is identity.

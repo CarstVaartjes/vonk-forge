@@ -82,18 +82,12 @@ match again.
 
 After the host record is accepted, install the package and pair the agent by
 following [Install the Vonk Forge agent](../operations/install-vonk-agent.md).
-Use the generated bootstrap command from Fleet after **Add Spark** creates the
-node-bound bootstrap grant. Registration generates the node-specific runtime
-inputs, and manual `agent.toml` editing is unsupported. The controller-side
-ordering is always:
 
-1. Create one node-bound bootstrap grant.
-2. Run the generated bootstrap command with the generated runtime inputs.
-3. Approve the pending enrollment.
-4. Repeat the same generated bootstrap command once to collect the issued
-   certificate when required.
-5. Start or restart the supervisor and verify the node reports inventory under
-   its certificate-bound `spk_` identity.
+1. Registration is the authority: manual `agent.toml` editing is unsupported,
+   and Fleet **Add Spark** is the next implementation step. It records the
+   node-bound bootstrap grant and runtime inputs, but the bootstrap action is
+   not an operator command currently available, so the supported runbook stops
+   at that reviewed registration boundary until the emitter lands.
 
 ## How an accepted GPU node appears online
 

@@ -114,34 +114,32 @@ The DER SHA-256 fingerprint command prints one line in the form
 `<64-lowercase-hex>  -`. Copy only the first field into `ca_sha256`; do not
 paste the certificate, token, or any secret into notes or logs.
 
-Registration generates the node-specific runtime inputs. The supported flow is
-Fleet-backed and generated: the operator receives a generated bootstrap command
-or protected bootstrap file from **Add Spark**, not a hand-edited local
-configuration checklist. Manual `agent.toml` editing is unsupported.
+Registration is the authority. The supported flow ends at Fleet-backed
+registration intent and reviewed runtime inputs, not at an operator-authored
+local configuration checklist. Manual `agent.toml` editing is unsupported.
 
-The next Fleet bootstrap implementation contract is:
-
-1. Fleet creates the node-bound bootstrap grant and registration intent.
-2. Fleet emits the generated bootstrap command together with the exact
-   non-secret runtime inputs: `enrollment_url`,
-   `controller_url = "https://<CONTROLLER_HOSTNAME>:8443/"`,
-   `ca_path = "/etc/vonk-forge-agent/controller-ca.pem"`,
-   `ca_sha256`, the assigned `node_id`, and—when multi-node admission is in
-   scope—the node's direct-fabric address plus
-   `fabric_bandwidth_mbps = 200000`.
-3. Running that generated bootstrap command writes
-   `/etc/vonk-forge-agent/agent.toml`, stores the one-use token without
-   exposing it in shell history, submits enrollment evidence, waits for
-   approval, repeats collection when needed, removes the consumed token, and
-   leaves the authenticated runtime ready for validation.
-
-Until the bootstrap emitter lands, this section is the implementation
-contract. The packaged placeholder `agent.toml` is a materialization target for
-registration output, not an operator-authored document. The development origins
-remain the exact roots `https://<ENROLLMENT_HOSTNAME>:8443/` and
+`enrollment_url` is used only for first-contact registration against
+`https://<ENROLLMENT_HOSTNAME>:8443/`. `controller_url` is used only after the
+certificate is issued for the authenticated service at
 `https://<CONTROLLER_HOSTNAME>:8443/`; do not rely on HTTPS port 443 defaults.
 Keep `data_dir` at `/var/lib/vonk-forge-agent` unless a reviewed packaging
 change says otherwise.
+
+Fleet **Add Spark** is the next implementation step. It will remain the source
+of the node-bound registration intent, the one-use bootstrap grant, and the
+exact non-secret runtime inputs: `enrollment_url`, `controller_url`,
+`ca_path = "/etc/vonk-forge-agent/controller-ca.pem"`, `ca_sha256`, the
+assigned `node_id`, and—when multi-node admission is in scope—the node's
+direct-fabric address plus `fabric_bandwidth_mbps = 200000`. That bootstrap
+action is not an operator command currently available.
+
+Until the emitter lands, this section is the implementation contract only. The
+packaged placeholder `agent.toml` is a materialization target for registration
+output, not an operator-authored document. The next implementation step is for
+Fleet Add Spark to write the runtime file, store the one-use token without
+exposing it in shell history, submit enrollment evidence, wait for approval,
+repeat collection when needed, remove the consumed token, and leave the
+authenticated runtime ready for validation.
 
 ## Validate and start
 
@@ -223,8 +221,8 @@ publications.
   command above, update `ca_sha256`, then restart the supervisor and confirm
   the controller still reports the same `node_id`.
 - Identity-loss recovery: for expiry, key loss, or storage replacement, create
-  a fresh one-use grant and repeat the original grant/pair/approve/pair
-  sequence. Recovery is always a new local key plus a new certificate.
+  a fresh one-use grant and repeat the original registration and approval flow
+  from Fleet Add Spark. Recovery is always a new local key plus a new certificate.
 - Start-limit recovery: `Restart=on-failure` is deliberately bounded. If
   `systemctl status` reports `start-limit-hit`, first make the controller and
   its authenticated agent endpoint healthy, then inspect the node journal for

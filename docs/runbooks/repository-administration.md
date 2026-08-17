@@ -1,7 +1,7 @@
 # Repository-backed platform administration
 
 Git remains authoritative for platform source, fleet/topology policy, and
-release trust. PostgreSQL is authoritative for the local v1 recipe catalog,
+release trust. PostgreSQL is authoritative for the local v1 recipe records,
 immutable revisions, installations, placements, and runs. Do not turn a
 recipe edit or activation into a Git change.
 
@@ -27,9 +27,9 @@ required check is eligible for a platform change. The worker rechecks that
 eligibility immediately before mutation, leases stable node IDs in order, and
 fails closed if the commit, evidence, agent identity, or route lease changes.
 
-Model and runtime changes use the v1 Catalog and Library workflow instead:
+Model and runtime changes use the v1 Library workflow instead:
 
-1. Create or import a recipe draft in Catalog.
+1. Create or import a recipe draft in Library.
 2. Resolve the exact model-version, harness, runtime, patch, and topology
    identities into an immutable revision.
 3. Attach source/build and physical acceptance evidence.

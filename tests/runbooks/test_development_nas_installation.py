@@ -266,8 +266,10 @@ def test_fresh_install_is_the_concise_operator_entry_point() -> None:
         "scripts/dev-runtime-secrets.py",
         "scripts/dev-runtime-project",
         "APT `dev` channel setup",
-        "generated bootstrap command",
-        "registration generates the node-specific runtime inputs",
+        "registration is the authority",
+        "Add Spark",
+        "next implementation step",
+        "not an operator command currently available",
         "manual `agent.toml` editing is unsupported",
         "scripts/run-development-slices",
         "--phase synthetic",
@@ -279,6 +281,7 @@ def test_fresh_install_is_the_concise_operator_entry_point() -> None:
         "`tcp:443`",
     ):
         assert required.lower() in normalized
+    assert "generated bootstrap command" not in normalized
     assert "No GitHub, GHCR, R2, database, signing, or model credential" in text
     assert "Do not install a registry token on the NAS" in text
     assert setup.index("MagicDNS") < setup.index("`svc:vonk-forge`") < setup.index(

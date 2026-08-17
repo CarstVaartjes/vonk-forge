@@ -5,85 +5,166 @@ Branch: `refactor/clean-slate-control-plane`
 
 ## Scope completed
 
-- Rewrote the supported Spark installation/onboarding story to say registration generates the node-specific runtime inputs and a generated bootstrap command.
-- Removed the obsolete manual `agent.toml` editing guidance from supported runbooks.
-- Deleted tracked historical runbooks/plans that still described the removed Git-roster/manual-agent-TOML workflow.
-- Updated runbook tests first, ran the requested suite red, then rewrote docs to green.
+- Rewrote the reviewer-flagged supported runbooks to remove Catalog as an operator surface and keep Fleet/Library as the only supported product surfaces.
+- Rewrote the install/onboarding/development docs to stop advertising a usable generated bootstrap command before an emitter exists.
+- Documented the supported registration boundary instead: registration is the authority, manual `agent.toml` editing is unsupported, and Fleet **Add Spark** is the next implementation step rather than an operator command currently available.
+- Updated the documentation contract tests first, ran them red, then rewrote the docs to green.
+- Deleted one extra stale supported runbook that the follow-up sweep exposed: `docs/runbooks/global-catalog.md`.
 
 ## Reference inventory
 
-Exact command run first:
+Exact brief inventory command run:
 
 ```bash
 rg -n "inventory/fleet\.toml|config/package-families|config/workload-deployments|/packages|/deployments|Catalog page|Packages page|Deployments page|Jobs page|edit .*agent\.toml" README.md docs control agent scripts tests packaging
 ```
 
-Raw command notes:
+Inventory result notes:
 
-- The `/packages` and `/deployments` alternates also matched legitimate apt-package URLs, lockfiles, and package-runtime fixtures.
-- The supported-source files that mattered for Task 5 were:
-  - `docs/operations/install-vonk-agent.md`
-  - `docs/runbooks/fresh-development-install.md`
-  - `docs/runbooks/development-agent-workloads.md`
-  - `docs/runbooks/node-onboarding.md`
-  - `docs/runbooks/inventory.md`
-  - `docs/superpowers/plans/2026-08-03-per-node-onboarding.md`
-  - `docs/superpowers/plans/2026-08-07-vonk-rust-agent-and-debian-package.md`
-  - `docs/superpowers/plans/2026-08-10-development-agent-workload-slices.md`
-  - `docs/superpowers/plans/2026-08-17-clean-slate-cleanup.md`
-  - `docs/superpowers/specs/2026-08-17-fleet-library-product-simplification-design.md`
-  - `packaging/config/agent.toml`
-  - `tests/runbooks/test_node_onboarding.py`
+- The command produced a broad result set because `/packages` also matched legitimate apt-package URLs, package/runtime fixtures, and lockfiles.
+- It also intentionally matched preserved active cleanup/spec material that describes the removal itself.
+- Relevant post-fix observations from that exact inventory:
+  - supported operator docs no longer expose Catalog/Packages/Deployments page workflows;
+  - legitimate remaining `/packages` hits are package-release URLs and non-doc package/runtime fixtures;
+  - preserved active clean-slate design/plan files still mention removed workflows only as removal targets, which is expected.
 
-Post-scrub focused sweep result:
+Focused supported-doc/test sweeps run after the rewrite:
 
-- Remaining supported-source references are limited to:
-  - the preserved active cleanup plan,
-  - the preserved active Fleet/Library design spec,
-  - the rewritten installation/onboarding runbooks,
-  - the bootstrap-placeholder package config comment,
-  - legitimate apt package-release docs/URLs,
-  - test assertions that enforce the new generated-bootstrap wording.
+Catalog surface sweep:
+
+```bash
+rg -n '(`/catalog`|`Catalog`| Catalog )' docs/README.md docs/runbooks docs/operations docs/operators tests/test_docs_contract.py tests/runbooks
+```
+
+Output:
+
+```text
+tests/test_docs_contract.py:918:        " Catalog ",
+tests/test_docs_contract.py:919:        "`Catalog`",
+```
+
+Docs-only Catalog surface sweep:
+
+```bash
+rg -n '(`/catalog`|`Catalog`| Catalog )' docs/README.md docs/runbooks docs/operations docs/operators
+```
+
+Output:
+
+```text
+[no output]
+```
+
+Removed Packages/Deployments/Updates/Jobs page/route sweep:
+
+```bash
+rg -n '(`/packages`|`/deployments`|`/updates`|`/jobs`|`Packages`|`Deployments`|`Updates`|`Jobs`)' docs/README.md docs/runbooks docs/operations docs/operators tests/test_docs_contract.py tests/runbooks
+```
+
+Output:
+
+```text
+[no output]
+```
+
+Git roster sweep:
+
+```bash
+rg -n '(Git Spark roster|git spark roster|Git roster|git roster)' docs/README.md docs/runbooks docs/operations docs/operators tests/test_docs_contract.py tests/runbooks
+```
+
+Output:
+
+```text
+[no output]
+```
+
+Manual `agent.toml` editing sweep:
+
+```bash
+rg -n -i '(manual `agent.toml` editing|sudoedit /etc/vonk-forge-agent/agent.toml|/etc/vonk-forge-agent/agent.toml)' docs/README.md docs/runbooks docs/operations docs/operators tests/test_docs_contract.py tests/runbooks
+```
+
+Output:
+
+```text
+tests/runbooks/test_node_onboarding.py:19:        "manual `agent.toml` editing is unsupported",
+tests/runbooks/test_agent_installation.py:18:        "manual `agent.toml` editing is unsupported",
+tests/runbooks/test_agent_installation.py:21:    assert "sudoedit /etc/vonk-forge-agent/agent.toml" not in text
+tests/runbooks/test_agent_installation.py:33:        "manual `agent.toml` editing is unsupported",
+tests/runbooks/test_agent_installation.py:37:    assert "/etc/vonk-forge-agent/agent.toml" not in text
+tests/runbooks/test_agent_installation.py:49:        "manual `agent.toml` editing is unsupported",
+tests/runbooks/test_agent_installation.py:52:    assert "/etc/vonk-forge-agent/agent.toml" not in text
+tests/runbooks/test_development_nas_installation.py:273:        "manual `agent.toml` editing is unsupported",
+docs/operations/install-vonk-agent.md:119:local configuration checklist. Manual `agent.toml` editing is unsupported.
+docs/runbooks/development-agent-workloads.md:375:operator command currently available. Manual `agent.toml` editing is
+docs/runbooks/fresh-development-install.md:271:   inputs for that Spark. Manual `agent.toml` editing is unsupported, and the
+docs/runbooks/node-onboarding.md:86:1. Registration is the authority: manual `agent.toml` editing is unsupported,
+```
+
+Interpretation: supported docs now retain only explicit prohibitions against manual `agent.toml` editing; the old editable-file workflow is gone.
 
 ## Changed files
 
+- Modified: `docs/README.md`
 - Modified: `docs/operations/install-vonk-agent.md`
-- Modified: `docs/runbooks/fresh-development-install.md`
+- Modified: `docs/operators/execution-harnesses.md`
+- Modified: `docs/operators/model-catalog.md`
+- Modified: `docs/operators/recipe-library.md`
 - Modified: `docs/runbooks/development-agent-workloads.md`
+- Modified: `docs/runbooks/fresh-development-install.md`
+- Modified: `docs/runbooks/hermes-agent.md`
+- Modified: `docs/runbooks/model-switching.md`
 - Modified: `docs/runbooks/node-onboarding.md`
-- Modified: `packaging/config/agent.toml`
-- Modified: `tests/runbooks/test_node_onboarding.py`
+- Modified: `docs/runbooks/platform-update.md`
+- Modified: `docs/runbooks/repository-administration.md`
+- Modified: `docs/runbooks/runtime-release.md`
+- Modified: `docs/runbooks/vonkctl.md`
+- Modified: `tests/runbooks/test_agent_installation.py`
 - Modified: `tests/runbooks/test_development_nas_installation.py`
-- Added: `tests/runbooks/test_agent_installation.py`
+- Modified: `tests/runbooks/test_node_onboarding.py`
+- Modified: `tests/test_docs_contract.py`
+- Modified: `.superpowers/sdd/2026-08-17-clean-slate-cleanup/task-5-report.md`
 
 ## Deleted files
 
-- Deleted: `docs/runbooks/inventory.md`
-- Deleted: `docs/superpowers/plans/2026-08-03-per-node-onboarding.md`
-- Deleted: `docs/superpowers/plans/2026-08-07-vonk-rust-agent-and-debian-package.md`
-- Deleted: `docs/superpowers/plans/2026-08-10-development-agent-workload-slices.md`
+- Deleted: `docs/runbooks/global-catalog.md`
 
 ## TDD evidence
 
-Assertions updated before doc changes:
+Tests/assertions updated before doc changes:
 
-- `tests/runbooks/test_node_onboarding.py`
+- `tests/test_docs_contract.py`
 - `tests/runbooks/test_agent_installation.py`
 - `tests/runbooks/test_development_nas_installation.py`
+- `tests/runbooks/test_node_onboarding.py`
 
-Red run (meaningful failure after fixing the runner invocation):
+Focused red run executed before the doc rewrite:
 
-```text
-FAILED tests/runbooks/test_agent_installation.py::test_install_runbook_requires_registration_generated_bootstrap_inputs
-FAILED tests/runbooks/test_agent_installation.py::test_fresh_install_runbook_uses_generated_bootstrap_story
-FAILED tests/runbooks/test_agent_installation.py::test_development_agent_workloads_runbook_drops_manual_agent_toml_steps
-FAILED tests/runbooks/test_node_onboarding.py::test_node_onboarding_runbook_covers_safe_resumable_workflow
-4 failed, 51 passed, 1 skipped in 3.40s
+```bash
+uv run --project control --with-editable . --frozen python -m pytest -q tests/test_docs_contract.py tests/runbooks/test_agent_installation.py tests/runbooks/test_development_nas_installation.py tests/runbooks/test_node_onboarding.py
 ```
+
+Red result summary:
+
+- 11 failures, including the reviewer-flagged Catalog/operator-surface assertions and the bootstrap-boundary assertions.
 
 ## Verification commands and exact output
 
-Requested runbook/repository/proposal suite:
+Focused documentation contract/runbook rerun:
+
+```bash
+uv run --project control --with-editable . --frozen python -m pytest -q tests/test_docs_contract.py tests/runbooks/test_agent_installation.py tests/runbooks/test_development_nas_installation.py tests/runbooks/test_node_onboarding.py
+```
+
+Output:
+
+```text
+...................................................................      [100%]
+67 passed in 0.05s
+```
+
+Required runbook/repository/proposal suite rerun:
 
 ```bash
 uv run --project control --with-editable . --frozen python -m pytest -q tests/runbooks control/tests/test_repository.py control/tests/test_proposals.py
@@ -92,22 +173,10 @@ uv run --project control --with-editable . --frozen python -m pytest -q tests/ru
 Output:
 
 ```text
-55 passed, 1 skipped in 3.13s
+55 passed, 1 skipped in 2.82s
 ```
 
-Focused packaged-agent artifact check:
-
-```bash
-uv run --frozen python -m pytest -q tests/test_agent_release_workflow.py -k 'agent_package_builds_a_deb_with_both_controller_origins or reusable_agent_package_build_preserves_acceptance_gates'
-```
-
-Output:
-
-```text
-1 passed, 30 deselected in 0.05s
-```
-
-Static diff hygiene:
+Whitespace/diff hygiene:
 
 ```bash
 git diff --check
@@ -118,17 +187,6 @@ Output:
 ```text
 [no output]
 ```
-
-Focused legacy-reference sweep used after the rewrite:
-
-```bash
-rg -n "inventory/fleet\.toml|package-candidate|deployment-rollout|generated bootstrap command|Git roster|Git Spark" README.md docs control tests packaging scripts
-```
-
-Result summary:
-
-- `generated bootstrap command` appears only in the rewritten supported runbooks/tests.
-- `inventory/fleet.toml`, `Git roster`, and `package-candidate` now remain only in the preserved active cleanup plan/spec that describe the removal itself.
 
 ## Commit
 
@@ -141,10 +199,10 @@ docs: scrub superseded control-plane workflows
 Commit hash:
 
 ```text
-2a6b309594e10202b43f889e65223000a5ca99f9
+6db436e48ea16d41fa835137c9c00ae49607f7d8
 ```
 
 ## Concerns
 
-- The exact inventory regex intentionally overmatches lockfiles, package URLs, and runtime fixture paths because `/packages` and `/deployments` are broad literals; I treated those as false positives and scrubbed only the supported docs/contracts/artifact surface.
-- The generated Fleet bootstrap writer is still documented as a clean-slate implementation contract rather than a newly implemented mechanism in this docs-only task. The docs now explicitly mark manual `agent.toml` editing unsupported without inventing a concrete new bootstrap command syntax.
+- The exact brief inventory regex is intentionally noisy because `/packages` matches legitimate package URLs and package-related fixtures outside the supported operator-doc surface. The narrower post-fix sweeps are the authoritative proof that supported docs/tests no longer present removed Catalog/Packages/Deployments/Updates/Jobs/Git-roster workflows.
+- This was a docs/contracts scrub only. The Fleet **Add Spark** bootstrap emitter still does not exist, so the docs now accurately stop at the registration boundary and describe the bootstrap action as the next implementation step rather than a currently usable operator command.

@@ -6,7 +6,7 @@ build, distribute, install, run, health, route, stop, and uninstall operations.
 Operators act through those operations and their preview digests; they do not
 start a parallel container and then write catalog state by hand.
 
-See [Model catalog](model-catalog.md) for model identity and revision concepts.
+See [Model and recipe identities](model-catalog.md) for model identity and revision concepts.
 
 ## Harness, distribution, and patch
 

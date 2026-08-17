@@ -29,7 +29,7 @@ and content digest; it never turns a branch, display name, or `latest` tag into
 execution authority.
 
 An administrator imports a validated checkout with the platform's
-`/api/v1/catalog/imports/recipe-library` operation. The import receipt records
+recipe-library import operation. The import receipt records
 the exact library commit and recipe path; re-importing the same recipe digest
 is idempotent. The checkout is never mounted into a running workload.
 

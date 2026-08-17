@@ -103,8 +103,8 @@ The apply path holds the host-operation lock and invokes only the signed active
 generation's fixed `hermes-setup` profile. It cannot select another Compose
 file, profile, entrypoint, mount, environment file, or service.
 
-Resolve and install the exact recipe revision in the browser Catalog and
-Library. Start it under a temporary alias, run its source, placement, health,
+Resolve, map, and install the exact recipe revision in the browser Library
+workflow. Start it under a temporary alias, run its source, placement, health,
 and canary gates, and only then stop the previous `hermes-agent` run and start
 the accepted replacement with the exact alias `hermes-agent`. The route
 publisher rejects duplicate aliases and does not synthesize a fallback group.

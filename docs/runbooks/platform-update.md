@@ -7,8 +7,8 @@ procedure, and never use ad-hoc `apt` or `fwupdmgr` updates while the Dashboard
 path is available.
 
 This document covers the platform plane only. Model recipes, adapters,
-runtimes, images, and checkpoints are selected through Catalog and Library; do
-not use this runbook, SSH, or `agent.update` for a recipe revision or routine
+runtimes, images, and checkpoints are selected through Library; do not use
+this runbook, SSH, or `agent.update` for a recipe revision or routine
 recipe change.
 
 The authoritative NVIDIA references checked on 2026-08-01 are:
@@ -370,5 +370,5 @@ then fans out `agent.update` over each GPU node's outbound mTLS channel using th
 supervisor's A/B slots; SSH is not used for this standard path. A compatible
 older agent may continue serving active workloads while the operator reviews
 the skew. New models, adapters, runtimes, images, checkpoints, and environments
-are selected through Catalog and Library. A workload only requires a platform
+are selected through Library. A workload only requires a platform
 update when it declares a genuinely new privileged ABI or protocol capability.

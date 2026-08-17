@@ -265,13 +265,12 @@ On every Ubuntu 24.04 ARM64 node:
    `sudo apt update && sudo apt install vonk-forge-agent`.
    Require `Linger=yes`, the `vonk-agent` user bus, and rootless Podman with the
    systemd cgroup manager exactly as shown in that guide before pairing.
-3. In Fleet, create the node-bound bootstrap grant and registration intent for
-   that Spark.
-4. Use the generated bootstrap command from Fleet. Registration generates the
-   node-specific runtime inputs, copies only the public CA and
-   `host-runtime-grant-public-key`, and writes the node-local runtime file.
-   Manual `agent.toml` editing is unsupported.
-5. Create the root-owned `docker-firewall.conf`, including every accepted
+3. Registration is the authority. In Fleet, **Add Spark** is the next
+   implementation step: it records the node-bound bootstrap grant, copies only
+   the public CA and `host-runtime-grant-public-key`, and defines the runtime
+   inputs for that Spark. Manual `agent.toml` editing is unsupported, and the
+   bootstrap action is not an operator command currently available.
+4. Create the root-owned `docker-firewall.conf`, including every accepted
    bridge-published and host-network endpoint port, then enable the signed
    `vonk-forge-docker-firewall.service` before the package-helper socket. It
    installs persistent Docker-aware `DOCKER-USER` policy for every accepted
@@ -281,7 +280,7 @@ On every Ubuntu 24.04 ARM64 node:
    contract from the workload runbook and run the packaged check after Docker
    restart and host reboot.
 
-Use the exact commands and generated bootstrap contract in
+Use the exact installation commands and reviewed registration contract in
 [Install the Vonk Forge agent](../operations/install-vonk-agent.md). Do not add
 the agent account to Docker, sudo, or an NVIDIA administration group.
 
@@ -291,18 +290,16 @@ source-first two-Spark tensor-parallel workload.
 
 ## 6. Pair and start one node at a time
 
-For each node, complete this order without reusing its one-use token:
+For each node, complete this order without reusing its one-use grant:
 
-1. Create the node-bound bootstrap grant in Fleet.
-2. Deliver the generated bootstrap command to that node.
-3. Run the generated bootstrap command; the controller records a pending
-   enrollment from the generated runtime inputs.
-4. Compare the displayed node, CSR, host, hardware, agent, and boot evidence,
-   then approve it.
-5. Re-run the same generated bootstrap command if it is waiting to collect the
-   issued certificate, then remove the consumed token material.
-6. Enable the package-helper socket and agent supervisor as documented in the
-   agent installation guide.
+1. Create the node-bound registration intent in Fleet through **Add Spark**.
+2. Review the runtime inputs and approval evidence in Fleet; registration is
+   the authority and the bootstrap action remains the next implementation step,
+   not an operator command currently available.
+3. After the emitter lands, return here to materialize the local runtime file
+   and certificate collection through that Fleet-issued action.
+4. Until then, keep the node at the reviewed registration boundary and do not
+   hand-author `agent.toml` or substitute an SSH/bootstrap script.
 
 The controller must show the same certificate-bound node ID, Rust protocol 3,
 migration `complete`, and fresh inventory. Repeat for each additional node.
@@ -319,11 +316,11 @@ That procedure removes every control volume and verifies exact fresh head
 `0001_fleet_library_baseline`; it has no compatibility or prototype import
 path. Afterward, the initializer recreates administrator subject `admin` from
 the retained verifier, but the operator must establish a fresh browser session
-and repeat the one-use grant/pair/approve/pair sequence for every Spark. Use new
-acceptance paths. A pre-reset login, session, pairing token, enrollment, route,
-or evidence file is never proof for the fresh installation. Spark-local caches
-may survive only as untrusted candidates until their exact content digests are
-verified again.
+and repeat the reviewed registration and approval flow for every Spark. Use
+new acceptance paths. A pre-reset login, session, pairing token, enrollment,
+route, or evidence file is never proof for the fresh installation. Spark-local
+caches may survive only as untrusted candidates until their exact content
+digests are verified again.
 
 ## 7. Prove the installation
 

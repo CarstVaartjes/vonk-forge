@@ -15,7 +15,7 @@ digest recorded in a resolved recipe revision.
 
 ## Operator flow
 
-1. Maintain the draft in `Catalog`.
+1. Maintain the draft in `Library`.
 2. Resolve the revision and run the source/build gate.
 3. Attach the actual local or CI test report.
 4. Select a Spark builder with enough memory and disk.
@@ -25,5 +25,5 @@ digest recorded in a resolved recipe revision.
 The control service verifies source policy, image identity, artifact receipts,
 node compatibility, and route readiness. Runtime secrets are projected from
 the NAS secret files and are never baked into a published image or source
-bundle. See [the supply-chain runbook](supply-chain.md) and [the model catalog](../operators/model-catalog.md)
+bundle. See [the supply-chain runbook](supply-chain.md) and [the model and recipe identities guide](../operators/model-catalog.md)
 for the detailed gates.

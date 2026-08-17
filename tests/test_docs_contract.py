@@ -212,22 +212,25 @@ def test_mia_runbook_distinguishes_image_receipts_from_model_loading() -> None:
         assert required in text
 
 
-def test_active_agent_install_examples_keep_pairing_and_controller_inputs_together() -> (
+def test_active_agent_install_stops_at_registration_boundary_without_operator_authored_toml() -> (
     None
 ):
+    text = _normalized_text(INSTALL_AGENT)
     agent_configs = []
     for block in _fenced_blocks(INSTALL_AGENT, "toml"):
         config = tomllib.loads(block)
         if {"enrollment_url", "controller_url"} & config.keys():
             agent_configs.append(config)
 
-    assert agent_configs
-    for config in agent_configs:
-        assert config["enrollment_url"] == "https://<ENROLLMENT_HOSTNAME>:8443/"
-        assert config["controller_url"] == "https://<CONTROLLER_HOSTNAME>:8443/"
-        assert config["ca_path"] == "/etc/vonk-forge-agent/controller-ca.pem"
-        assert config["ca_sha256"] == "<64_LOWERCASE_HEX_FROM_SHA256SUM>"
-        assert config["node_id"] == "<NODE_ID>"
+    assert agent_configs == []
+    for required in (
+        "registration is the authority",
+        "Add Spark",
+        "next implementation step",
+        "not an operator command currently available",
+    ):
+        assert required.lower() in text.lower()
+    assert "generated bootstrap command" not in text.lower()
 
 
 def test_agent_ca_fingerprint_is_derived_from_der_and_used_without_command_output_noise() -> (
@@ -252,7 +255,9 @@ def test_agent_urls_have_distinct_pairing_and_post_identity_roles() -> None:
     sentences = re.split(r"(?<=[.!])\s+", _normalized_text(INSTALL_AGENT))
 
     assert any(
-        "`enrollment_url`" in sentence and "only" in sentence and "`pair`" in sentence
+        "`enrollment_url`" in sentence
+        and "only" in sentence
+        and "first-contact registration" in sentence
         for sentence in sentences
     )
     assert any(
@@ -324,10 +329,11 @@ def test_fresh_spark_install_does_not_claim_nvidia_platform_ownership() -> None:
 def test_onboarding_preserves_the_one_use_grant_pair_approve_pair_sequence() -> None:
     steps = _ordered_steps(_section(NODE_ONBOARDING, "Install and pair the agent"))
 
-    assert "one-use" in steps[0] and "grant" in steps[0]
-    assert "`vonk-agent pair`" in steps[1]
-    assert steps[2].startswith("Approve the pending enrollment")
-    assert "Repeat the same `pair` command" in steps[3]
+    assert len(steps) == 1
+    assert "add spark" in steps[0].lower()
+    assert "next implementation step" in steps[0].lower()
+    assert "not an operator command currently available" in steps[0].lower()
+    assert "`vonk-agent pair`" not in _section(NODE_ONBOARDING, "Install and pair the agent")
 
 
 def test_generic_path_covers_secret_safe_backup_identity_recovery_and_package_removal() -> (
@@ -490,7 +496,9 @@ def test_complete_development_workload_runbook_has_every_operator_phase() -> Non
     assert "scripts/dev-runtime-project" in text
     assert "scripts/dev-admin-token" in text
     assert "docs/operations/agent-package-release.md#install-the-dev-channel" in text
-    assert "vonk-agent pair" in text
+    assert "Add Spark" in text
+    assert "next implementation step" in text
+    assert "vonk-agent pair" not in text
     assert "scripts/qualify-recipe" in text
     for phase in ("model-single", "model-multinode"):
         assert f"--phase {phase}" in text
@@ -861,16 +869,16 @@ def test_quick_start_does_not_present_a_tunnel_as_normal_browser_access() -> Non
             assert claim not in text
 
 
-def test_operator_catalog_guides_expose_complete_navigable_concept_and_lifecycle_sections() -> (
+def test_operator_library_identity_guides_expose_complete_navigable_concept_and_lifecycle_sections() -> (
     None
 ):
     assert _headings(MODEL_CATALOG) == [
-        "Model catalog",
-        "Four catalog layers",
+        "Model and recipe identities",
+        "Four identity layers",
         "Exact immutable identity",
         "One Spark, many Sparks, and replicas",
         "Custom recipes and license responsibility",
-        "Catalog operations",
+        "Library operations",
         "Install and invoke",
         "Stop and uninstall",
         "Update and exact-revision rollback",
@@ -893,6 +901,32 @@ def test_operator_catalog_guides_expose_complete_navigable_concept_and_lifecycle
     }
     assert "operators/model-catalog.md" in index_links
     assert "operators/execution-harnesses.md" in index_links
+
+
+def test_supported_docs_do_not_present_catalog_as_an_operator_surface() -> None:
+    supported = (
+        VONKCTL,
+        ROOT / "docs/runbooks/repository-administration.md",
+        RUNTIME_RELEASE,
+        MODEL_SWITCHING,
+        HERMES_AGENT,
+        PLATFORM_UPDATE,
+        MODEL_CATALOG,
+    )
+
+    forbidden = (
+        " Catalog ",
+        "`Catalog`",
+        "/catalog",
+    )
+
+    offenders = {
+        path.relative_to(ROOT).as_posix(): token
+        for path in supported
+        for token in forbidden
+        if token in path.read_text()
+    }
+    assert offenders == {}
 
 
 def test_architecture_html_has_semantic_catalog_resolution_and_interface_publication_paths() -> (

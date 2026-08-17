@@ -13,7 +13,10 @@ def test_node_onboarding_runbook_covers_safe_resumable_workflow() -> None:
         "topology",
         "recovery",
         "does not modify Git",
-        "generated bootstrap command",
+        "add spark",
+        "next implementation step",
+        "not an operator command currently available",
         "manual `agent.toml` editing is unsupported",
     ):
         assert phrase.lower() in text.lower()
+    assert "generated bootstrap command" not in text.lower()
