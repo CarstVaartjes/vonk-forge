@@ -46,6 +46,12 @@ http://127.0.0.1:2019 {
 	import edge_headers
 }
 
+(litellm_route_lease) {
+	forward_auth litellm:4001 {
+		uri /vonk/route-lease
+	}
+}
+
 # BEGIN PRIVATE BROWSER EDGE
 (browser_proxy_headers) {
 	# Tailscale owns the browser's HTTPS boundary. Never forward caller-supplied
@@ -106,12 +112,6 @@ http://127.0.0.1:2019 {
 	respond 421
 }
 # END PRIVATE BROWSER EDGE
-
-(litellm_route_lease) {
-	forward_auth litellm:4001 {
-		uri /vonk/route-lease
-	}
-}
 
 # Internal inference clients use the same request-time lease authority without
 # exposing LiteLLM's native listener or management routes.
