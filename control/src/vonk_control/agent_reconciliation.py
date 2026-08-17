@@ -57,15 +57,6 @@ _WORKLOAD_ACTIONS = {
     "workload.health": "health",
     "workload.verify": "verify",
 }
-_PACKAGE_ACTIONS = {
-    "package.prepare": "prepare",
-    "package.activate": "activate",
-    "package.health": "health",
-    "package.stop": "stop",
-    "package.rollback": "rollback",
-    "package.remove": "remove",
-    "package.repair": "repair",
-}
 _MUTATIONS = frozenset(
     {
         "agent.rollback",
@@ -74,12 +65,6 @@ _MUTATIONS = frozenset(
         "workload.prepare",
         "workload.start",
         "workload.stop",
-        "package.prepare",
-        "package.activate",
-        "package.stop",
-        "package.rollback",
-        "package.remove",
-        "package.repair",
     }
 )
 _REQUIRED_AGENT_CAPABILITIES = frozenset(
@@ -228,8 +213,6 @@ def accepted_result_digests(
         _release_evidence(payload, evidence)
     elif kind in _WORKLOAD_ACTIONS:
         _workload_evidence(kind, payload, evidence)
-    elif kind in _PACKAGE_ACTIONS:
-        _package_evidence(kind, payload, evidence)
     elif kind == "node.probe":
         _probe_evidence(payload, evidence)
     else:
@@ -289,59 +272,6 @@ def _workload_evidence(
         raise ValueError("workload evidence does not match the request")
     if kind == "workload.verify" and evidence_digest != payload.get("expected_digest"):
         raise ValueError("workload verify evidence digest does not match the request")
-
-
-def _package_evidence(
-    kind: str,
-    payload: Mapping[str, object],
-    evidence: Mapping[str, object],
-) -> None:
-    """Authenticate the generic package-engine result contract.
-
-    The package engine intentionally returns only bounded lifecycle evidence;
-    the deployment digest remains request-bound and is not copied into the
-    result.  This prevents an agent from claiming a different desired state
-    while retaining the existing exact operation/fence checks.
-    """
-
-    required = {
-        "operation",
-        "deployment_id",
-        "release_digest",
-        "generation",
-        "status",
-        "evidence_digest",
-    }
-    if set(evidence) != required:
-        raise ValueError("package evidence is invalid")
-    deployment = payload.get("deployment_id")
-    release = payload.get("release_digest")
-    evidence_digest = evidence.get("evidence_digest")
-    operation = evidence.get("operation")
-    expected_statuses = {
-        "package.prepare": {"validated", "completed"},
-        "package.activate": {"active"},
-        "package.health": {"ok", "healthy", "active"},
-        "package.stop": {"ok", "stopped", "active", "removed"},
-        "package.rollback": {"active", "rolled-back"},
-        "package.remove": {"removed"},
-        "package.repair": {"validated", "repaired", "active", "healthy"},
-    }
-    if (
-        operation != kind
-        or evidence.get("deployment_id") != deployment
-        or evidence.get("release_digest") != release
-        or not isinstance(evidence.get("status"), str)
-        or evidence["status"] not in expected_statuses[kind]
-        or evidence.get("generation") is not None
-        and not isinstance(evidence.get("generation"), str)
-        or not isinstance(evidence_digest, str)
-        or _DIGEST.fullmatch(evidence_digest) is None
-        or not isinstance(deployment, str)
-        or not isinstance(release, str)
-        or _DIGEST.fullmatch(release) is None
-    ):
-        raise ValueError("package evidence does not match the request")
 
 
 def _probe_evidence(
@@ -2026,23 +1956,6 @@ class AgentReconciliationService:
     def _compensation_payload(
         payload: Mapping[str, object],
     ) -> dict[str, object]:
-        if payload.get("schema_version") == 1 and {
-            "deployment_id",
-            "release_digest",
-            "deployment_digest",
-        }.issubset(payload):
-            # Package rollback is a release-bound protocol operation.  The
-            # package engine resolves the retained predecessor generation from
-            # its journal; no mutable adapter/path is introduced here.
-            return {
-                key: payload[key]
-                for key in (
-                    "schema_version",
-                    "deployment_id",
-                    "release_digest",
-                    "deployment_digest",
-                )
-            }
         required = {"schema_version", "workload_id", "release_digest", "adapter_id"}
         if not required.issubset(payload):
             raise ValueError("workload compensation payload is incomplete")
@@ -2103,8 +2016,6 @@ class AgentReconciliationService:
                 "workload.start",
                 "workload.health",
                 "workload.verify",
-                AgentOperation.PACKAGE_ACTIVATE.value,
-                AgentOperation.PACKAGE_HEALTH.value,
             }
             and compensatable
         ):

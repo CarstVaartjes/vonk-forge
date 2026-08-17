@@ -6,6 +6,63 @@ from alembic.config import Config
 from alembic.migration import MigrationContext
 from sqlalchemy import create_engine, inspect
 
+EXPECTED_BASELINE_TABLES = {
+    "agent_certificate_rotations",
+    "agent_certificates",
+    "agent_enrollment_grants",
+    "agent_enrollments",
+    "agent_issued_certificate_revocations",
+    "agent_node_profiles",
+    "agent_nodes",
+    "agent_operation_attempts",
+    "agent_operations",
+    "agent_presence",
+    "audit_events",
+    "catalog_entities",
+    "catalog_entity_revisions",
+    "cluster_mapping_nodes",
+    "cluster_mappings",
+    "control_process_heartbeats",
+    "fleet_event_cursor",
+    "fleet_stream_events",
+    "installation_nodes",
+    "job_attempts",
+    "jobs",
+    "local_recipe_revisions",
+    "local_recipes",
+    "node_artifacts",
+    "node_inventory_snapshots",
+    "node_mutation_leases",
+    "node_telemetry_latest",
+    "node_telemetry_rollup_buckets",
+    "node_telemetry_rollup_dirty",
+    "node_telemetry_rollup_metrics",
+    "node_telemetry_samples",
+    "observations",
+    "recipe_builds",
+    "recipe_global_links",
+    "recipe_import_items",
+    "recipe_imports",
+    "recipe_installations",
+    "recipe_runs",
+    "recipe_source_bundles",
+    "recipe_test_reports",
+    "reconciliation_cancellations",
+    "reconciliation_completion_generation",
+    "reconciliation_operations",
+    "reconciliations",
+    "resource_reservations",
+    "route_publication_owner",
+    "route_publications",
+    "run_nodes",
+    "sessions",
+    "telemetry_maintenance_state",
+    "update_authorization_intents",
+    "update_rollout_nodes",
+    "update_rollouts",
+    "users",
+}
+
 
 def _config(database_url: str) -> Config:
     root = Path(__file__).resolve().parents[1]
@@ -27,20 +84,23 @@ def test_fresh_baseline_creates_retained_metadata_without_legacy_tables(
     engine = create_engine(url)
     tables = set(inspect(engine).get_table_names())
 
-    assert set(Base.metadata.tables) == tables - {"alembic_version"}
+    assert tables - {"alembic_version"} == EXPECTED_BASELINE_TABLES
+    assert set(Base.metadata.tables) == EXPECTED_BASELINE_TABLES
     assert "agent_node_profiles" in tables
-    assert not {
-        "package_" + "candidates",
-        "package_" + "resolutions",
-        "package_" + "validation_runs",
-        "package_" + "rollouts",
-        "package_" + "rollout_nodes",
-        "package_" + "observations",
-        "package_" + "action_plans",
-        "package_" + "families",
-    } & tables
+    assert not any(table.startswith("package_") for table in tables)
     with engine.connect() as connection:
         assert compare_metadata(MigrationContext.configure(connection), Base.metadata) == []
+
+
+def test_fresh_baseline_is_fixed_and_does_not_import_live_metadata() -> None:
+    migration = (
+        Path(__file__).resolve().parents[1]
+        / "migrations/versions/0001_fleet_library_baseline.py"
+    ).read_text()
+
+    assert "vonk_control.models" not in migration
+    assert "Base.metadata" not in migration
+    assert ".create_all(" not in migration
 
 
 def test_fresh_baseline_is_reversible(tmp_path: Path) -> None:

@@ -438,125 +438,46 @@ def test_python_cutover_requires_migration_certificate_and_retires_old_identity(
         )
 
 
-def test_package_operation_requires_protocol_v2_and_its_exact_capability(
+def test_package_operation_is_not_a_control_plane_queue_operation(service) -> None:
+    jobs, sessions, clock = service
+
+    with pytest.raises(ValueError, match="not supported"):
+        jobs.enqueue(
+            parent(sessions, clock).id,
+            NODE_A,
+            "package.prepare",
+            COMMIT,
+            {
+                "schema_version": 1,
+                "deployment_id": "legacy-package",
+                "release_digest": "a" * 64,
+                "deployment_digest": "b" * 64,
+            },
+        )
+
+
+def test_package_capabilities_are_not_control_plane_agent_capabilities(
     service,
 ) -> None:
-    jobs, sessions, clock = service
-    operation = jobs.enqueue(
-        parent(sessions, clock).id,
-        NODE_A,
-        "package.prepare",
-        COMMIT,
-        {
-            "schema_version": 1,
-            "deployment_id": "future-family",
-            "release_digest": "a" * 64,
-            "deployment_digest": "b" * 64,
-        },
-    )
-    legacy = [
-        "agent.rollback",
-        "agent.update",
-        "node.probe",
-        "release.install",
-        "workload.health",
-        "workload.prepare",
-        "workload.start",
-        "workload.stop",
-        "workload.verify",
-    ]
+    jobs, _sessions, _clock = service
 
-    assert jobs.claim(
-        NODE_A,
-        "serial-a",
-        30,
-        protocol_version=1,
-        capabilities=legacy,
-    ) is None
-    with sessions() as session:
-        stored = session.get(AgentOperation, operation.id)
-        assert stored is not None and stored.state == "queued"
-
-    package_capabilities = legacy + [
-        "package.activate",
-        "package.gc",
-        "package.health",
-        "package.prepare",
-        "package.remove",
-        "package.repair",
-        "package.rollback",
-        "package.stop",
-    ]
-    claim = jobs.claim(
-        NODE_A,
-        "serial-a",
-        30,
-        protocol_version=2,
-        capabilities=package_capabilities,
-    )
-
-    assert claim is not None
-    assert claim.operation.value == "package.prepare"
-
-
-def test_package_validation_result_is_not_sent_to_reconciliation_consumer(service) -> None:
-    _, sessions, clock = service
-    consumed: list[str] = []
-    jobs = AgentJobService(
-        sessions,
-        clock=clock,
-        result_consumer=lambda _session, operation, _attempt, _message: consumed.append(
-            operation.id
-        ),
-    )
-    validation_parent = parent(sessions, clock)
-    with sessions.begin() as session:
-        stored = session.get(Job, validation_parent.id)
-        assert stored is not None
-        stored.kind = "package.validation"
-    operation = jobs.enqueue(
-        validation_parent.id,
-        NODE_A,
-        "package.prepare",
-        COMMIT,
-        {
-            "schema_version": 1,
-            "deployment_id": "future-family",
-            "release_digest": "a" * 64,
-            "deployment_digest": "b" * 64,
-        },
-    )
-    claim = jobs.claim(
-        NODE_A,
-        "serial-a",
-        30,
-        protocol_version=2,
-        capabilities=[
-            "node.probe",
-            "release.install",
-            "workload.health",
-            "workload.prepare",
-            "workload.start",
-            "workload.stop",
-            "workload.verify",
-            "package.prepare",
-            "package.health",
-            "package.activate",
-            "package.stop",
-            "package.rollback",
-            "package.remove",
-            "package.gc",
-            "package.repair",
-        ],
-    )
-    assert claim is not None
-
-    jobs.succeed(claim, {"status": "ok"})
-
-    assert consumed == []
-    with sessions() as session:
-        stored_operation = session.get(AgentOperation, operation.id)
-        assert stored_operation is not None and stored_operation.state == "succeeded"
+    with pytest.raises(ValueError, match="agent capabilities"):
+        jobs.claim(
+            NODE_A,
+            "serial-a",
+            30,
+            protocol_version=2,
+            capabilities=[
+                "node.probe",
+                "release.install",
+                "workload.health",
+                "workload.prepare",
+                "workload.start",
+                "workload.stop",
+                "workload.verify",
+                "package.prepare",
+            ],
+        )
 
 
 def test_recipe_only_agent_is_not_forced_to_advertise_legacy_executors(service) -> None:

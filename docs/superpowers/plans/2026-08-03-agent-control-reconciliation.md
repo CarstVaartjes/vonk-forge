@@ -16,21 +16,13 @@
 - Agent operations are safe under lease expiry through explicit inspection, compensation, or operator-wait states.
 - Legacy SSH transport is accessible only through an explicitly selected compatibility entry point outside production settings.
 
-### Generalized workload-package follow-on boundary (2026-08-05)
+### Clean-slate boundary (2026-08-18)
 
-Tasks 1–5 describe the accepted legacy `release.install` plus fixed workload
-lifecycle path. They remain migration evidence, but they are not the authority
-for future workload releases. The independently approved generalized workload
-package design and W1–W20 plans replace the fixed release-before-prepare graph
-for newly authored package state with digest-driven `package.prepare`,
-`package.activate`, `package.health`, `package.stop`, and `package.rollback`
-operations.
-
-The compiled agent continues to own safe operation vocabulary and privileged
-backend policy. Model IDs, family IDs, adapter IDs, adapter releases, images,
-environments, and checkpoints come dynamically from NAS-admin-controlled,
-Git-backed, workload-TUF-authorized release locks. Neither `agent.update` nor a
-new Vonk Forge release is used for an ordinary workload package update.
+The Fleet/Library cleanup supersedes the old package/deployment control-plane
+follow-on. Control-plane reconciliation now accepts only retained Fleet,
+Library, and Spark-agent workload operations. Legacy package/deployment
+operation identifiers, rollout payloads, and deployment materialization records
+are deliberately rejected instead of translated or compatibility-wrapped.
 
 ---
 

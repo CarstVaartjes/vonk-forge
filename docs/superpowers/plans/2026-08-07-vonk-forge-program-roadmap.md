@@ -30,7 +30,7 @@
 | Order | Plan | Repository | Depends on | Independently testable result |
 |---|---|---|---|---|
 | 1 | `2026-08-07-vonk-public-contract-and-web-foundation.md` | `vonk-forge-web` | none | Public schema package, API/web skeleton, PostgreSQL migrations, Compose tests |
-| 2 | `2026-08-07-vonk-local-catalog-authority.md` | `vonk-forge` | public recipe schema v1 | Local DB authoring, immutable revisions, seeded families, API without Git gate |
+| 2 | clean-slate Fleet/Library authority (`2026-08-17-clean-slate-cleanup.md`) | `vonk-forge` | public recipe schema v1 | Local DB authoring, immutable revisions, Library records, API without Git gate or package/deployment compatibility |
 | 3 | `2026-08-07-vonk-workload_run-import-and-runtime.md` | `vonk-forge` | local catalog | Exhaustive WorkloadRun import report and typed vLLM/SGLang/llama.cpp compiler |
 | 4 | `2026-08-07-vonk-rust-agent-and-debian-package.md` | `vonk-forge` | stable protocol fixtures | Rust agent/helper/supervisor parity and installable signed ARM64 package |
 | 5 | `2026-08-07-vonk-install-admission-and-cluster-ux.md` | `vonk-forge` | catalog, importer, Rust operation contract | Disk/memory/topology planning, installation/run lifecycle, cluster UI |

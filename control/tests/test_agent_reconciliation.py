@@ -243,6 +243,29 @@ def test_workload_evidence_binds_action_identity_release_and_verify_digest(
             accepted_result_digests(kind, payload, bad)
 
 
+def test_package_evidence_is_not_a_retained_reconciliation_result() -> None:
+    payload = {
+        "schema_version": 1,
+        "deployment_id": "legacy-package",
+        "release_digest": "a" * 64,
+        "deployment_digest": "b" * 64,
+    }
+    result = {
+        "status": "ok",
+        "evidence": {
+            "operation": "package.prepare",
+            "deployment_id": "legacy-package",
+            "release_digest": "a" * 64,
+            "generation": None,
+            "status": "validated",
+            "evidence_digest": "e" * 64,
+        },
+    }
+
+    with pytest.raises(ValueError, match="operation"):
+        accepted_result_digests("package.prepare", payload, result)
+
+
 def test_node_gate_requires_exact_zero_compute_evidence() -> None:
     payload = {"require_active_nvidia_compute_processes": 0}
     result = {

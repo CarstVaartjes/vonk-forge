@@ -165,10 +165,10 @@ Cluster Profile so the abstraction does not hide operational identity.
 
 ## Runtime adapter contract
 
-The generalized workload package system approved on 2026-08-05 owns the common
-acquisition and materialization contract beneath these lifecycle operations.
-Every future adapter receives only verified generation paths and capabilities
-from the package engine. Resumable ranged transfer, durable progress, disk
+The retained Spark-agent workload runtime owns the common acquisition and
+materialization contract beneath these lifecycle operations. Every future
+adapter receives only verified generation paths and capabilities from the
+runtime engine. Resumable ranged transfer, durable progress, disk
 reservation, restart recovery, cancellation, partial quarantine, digest/size
 verification, atomic promotion, rollback generations, leases, repair, and
 garbage collection are mandatory shared engine behavior and must not be

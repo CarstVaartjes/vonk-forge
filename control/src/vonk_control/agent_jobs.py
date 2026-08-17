@@ -116,23 +116,8 @@ class StaleUpdateAuthorization(ValueError):
 _SAFE_AUTOMATIC_RECLAIM = frozenset(
     {
         AgentOperation.NODE_PROBE.value,
-        AgentOperation.PACKAGE_HEALTH.value,
         AgentOperation.WORKLOAD_HEALTH.value,
         AgentOperation.WORKLOAD_VERIFY.value,
-    }
-)
-_PACKAGE_CAPABILITIES = frozenset(
-    {
-        "package-abi-v1",
-        "package-backend-native-v1",
-        AgentOperation.PACKAGE_PREPARE.value,
-        AgentOperation.PACKAGE_ACTIVATE.value,
-        AgentOperation.PACKAGE_HEALTH.value,
-        AgentOperation.PACKAGE_STOP.value,
-        AgentOperation.PACKAGE_ROLLBACK.value,
-        AgentOperation.PACKAGE_REMOVE.value,
-        AgentOperation.PACKAGE_REPAIR.value,
-        AgentOperation.PACKAGE_GC.value,
     }
 )
 _RECIPE_CAPABILITIES = frozenset(
@@ -150,13 +135,6 @@ _MUTATING_OPERATIONS = frozenset(
         AgentOperation.AGENT_ROLLBACK.value,
         AgentOperation.AGENT_UPDATE.value,
         AgentOperation.RELEASE_INSTALL.value,
-        AgentOperation.PACKAGE_PREPARE.value,
-        AgentOperation.PACKAGE_ACTIVATE.value,
-        AgentOperation.PACKAGE_STOP.value,
-        AgentOperation.PACKAGE_ROLLBACK.value,
-        AgentOperation.PACKAGE_REMOVE.value,
-        AgentOperation.PACKAGE_REPAIR.value,
-        AgentOperation.PACKAGE_GC.value,
         AgentOperation.WORKLOAD_PREPARE.value,
         AgentOperation.WORKLOAD_START.value,
         AgentOperation.WORKLOAD_STOP.value,
@@ -193,9 +171,9 @@ _NEXT_CAPABILITIES = (
             "agent.runtime.rust.v1",
         }
     )
-    | _PACKAGE_CAPABILITIES
     | _RECIPE_CAPABILITIES
 )
+_CONTROL_OPERATIONS = _NEXT_CAPABILITIES - frozenset({"agent.runtime.rust.v1"})
 
 
 class StaleAgentAttempt(RuntimeError):
@@ -295,6 +273,8 @@ class AgentJobService:
         self._mark_started()
         now = self._clock()
         protocol_operation = AgentOperation(operation)
+        if protocol_operation.value not in _CONTROL_OPERATIONS:
+            raise ValueError("agent operation is not supported by the control plane")
         node = session.scalar(
             select(AgentNode)
             .where(AgentNode.node_id == node_id)
@@ -1090,7 +1070,7 @@ class AgentJobService:
                 excluded.append(operation.id)
             if capabilities is not None and operation.kind not in capabilities:
                 return None
-            if operation.kind in (_PACKAGE_CAPABILITIES | _RECIPE_CAPABILITIES) and (
+            if operation.kind in _RECIPE_CAPABILITIES and (
                 protocol_version is None or protocol_version < 2 or capabilities is None
             ):
                 return None
@@ -1725,15 +1705,7 @@ class AgentJobService:
             attempt.state = state
             operation.state = state
             operation.updated_at = now
-            # Package-validation attempts are projected by the worker-owned
-            # validation runner after the durable attempt is committed.  They
-            # are deliberately not reconciliation operations, so sending them
-            # through the reconciliation consumer would produce a false
-            # parent-job lookup/authority failure.
-            parent = session.get(Job, operation.parent_job_id)
-            if self._result_consumer is not None and (
-                parent is None or parent.kind != "package.validation"
-            ):
+            if self._result_consumer is not None:
                 self._result_consumer(session, operation, attempt, message)
             self._aggregate_parent(session, operation.parent_job_id)
         # A result consumer can atomically make the next durable recipe phase
