@@ -29,6 +29,7 @@ export function AdminMenu({
   const [events, setEvents] = useState<AuditSummary[] | null>(null);
   const menuTitleId = useId();
   const auditTitleId = useId();
+  const menuId = useId();
 
   async function openAudit(): Promise<void> {
     setAuditOpen(true);
@@ -49,7 +50,7 @@ export function AdminMenu({
     <button
       type="button"
       className="operator-summary"
-      aria-controls="operator-menu"
+      aria-controls={menuId}
       aria-expanded={menuOpen}
       onClick={() => setMenuOpen(open => !open)}
     >
@@ -60,25 +61,29 @@ export function AdminMenu({
       </div>
       <span className="environment-badge">{environment}</span>
     </button>
-    {menuOpen && <div id="operator-menu" role="dialog" aria-labelledby={menuTitleId}>
+    {menuOpen && <div id={menuId} role="dialog" aria-labelledby={menuTitleId} className="admin-menu-panel">
       <h2 id={menuTitleId}>Operator menu</h2>
-      <button type="button" onClick={() => void openAudit()}>Audit log</button>
-      <button type="button" disabled={loggingOut} onClick={onLogout}>{loggingOut ? "Signing out…" : "Logout"}</button>
+      <div className="admin-menu-actions">
+        <button type="button" className="secondary-button" onClick={() => void openAudit()}>Audit log</button>
+        <button type="button" className="logout" disabled={loggingOut} onClick={onLogout}>{loggingOut ? "Signing out…" : "Logout"}</button>
+      </div>
       {logoutError && <p role="alert">{logoutError}</p>}
-      {auditOpen && <section aria-labelledby={auditTitleId}>
-        <div>
-          <h3 id={auditTitleId}>Audit log</h3>
-          <button type="button" onClick={() => setAuditOpen(false)}>Close audit log</button>
-        </div>
-        {auditLoading && <p role="status">Loading audit log…</p>}
-        {auditError && <p role="alert">{auditError}</p>}
-        {!auditLoading && !auditError && events && <ul>
-          {events.map(event => <li key={event.request_id}>
-            <strong>{event.action}</strong>
-            <div>{`Actor ${event.actor}`}</div>
-          </li>)}
-        </ul>}
-      </section>}
+    </div>}
+    {auditOpen && <div className="audit-drawer" role="dialog" aria-labelledby={auditTitleId} aria-modal="false">
+      <div className="audit-drawer-header">
+        <h3 id={auditTitleId}>Audit log</h3>
+        <button type="button" className="secondary-button" onClick={() => setAuditOpen(false)}>Close audit log</button>
+      </div>
+      {auditLoading && <p role="status">Loading audit log…</p>}
+      {auditError && <p role="alert">{auditError}</p>}
+      {!auditLoading && !auditError && events && <ul className="audit-event-list">
+        {events.map(event => <li key={event.request_id} className="audit-event">
+          <strong>{event.action}</strong>
+          <div>{`Actor ${event.actor}`}</div>
+          {event.targets.length > 0 && <small>{`Target ${event.targets[0]}`}</small>}
+        </li>)}
+      </ul>}
+      {!auditLoading && !auditError && events?.length === 0 && <p>No audit events yet.</p>}
     </div>}
   </section>;
 }
