@@ -173,7 +173,7 @@ test("offers retry after an initial error and then shows the empty Fleet state",
   fireEvent.click(screen.getByRole("button", {name: "Retry Fleet"}));
   await flush();
 
-  expect(screen.getByRole("heading", {name: "No nodes in the repository Fleet"})).toBeVisible();
+  expect(screen.getByRole("heading", {name: "No registered Fleet nodes"})).toBeVisible();
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   expect(visualFleet).toHaveBeenCalledTimes(2);
 });

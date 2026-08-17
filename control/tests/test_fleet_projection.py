@@ -247,7 +247,7 @@ def test_fleet_excludes_revoked_agent_nodes() -> None:
     assert [node.id for node in projection.read().nodes] == []
 
 
-def test_read_uses_repository_membership_latest_rows_and_a_bounded_query_set() -> None:
+def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set() -> None:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
@@ -1342,16 +1342,16 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank() -> None:
         node.state = "revoked"
         node.revoked_at = NOW
 
-    repository_only = FleetProjection(
+    registered_visible = FleetProjection(
         Repository({NODE_A: nodes[NODE_A]}), sessions, clock=lambda: NOW
     ).read().nodes[0]
     external_install = next(
         value
-        for value in repository_only.installed
+        for value in registered_visible.installed
         if value.installation_id == complete_installation_id
     )
     external_run = next(
-        value for value in repository_only.loaded if value.run_id == healthy_run_id
+        value for value in registered_visible.loaded if value.run_id == healthy_run_id
     )
 
     assert (
@@ -1369,7 +1369,7 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank() -> None:
     ) == ([0], [NODE_A], False, "degraded", "external-member")
 
 
-def test_history_is_repository_authorized_raw_bounded_and_chronological() -> None:
+def test_history_is_postgresql_registration_authorized_raw_bounded_and_chronological() -> None:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)

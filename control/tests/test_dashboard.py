@@ -36,7 +36,7 @@ class PresenceRepository:
         raise AssertionError(f"unexpected document read: {commit} {path}")
 
 
-def test_dashboard_joins_repository_fleet_with_latest_observation(tmp_path) -> None:
+def test_dashboard_joins_registered_fleet_with_latest_observation(tmp_path) -> None:
     engine = create_engine(f"sqlite:///{tmp_path / 'dashboard.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)

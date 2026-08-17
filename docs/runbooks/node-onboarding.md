@@ -68,10 +68,11 @@ Use `retry NODE_ID --apply` only after correcting a recorded failure. Use
 bin/node-install node emit-record NODE_ID >node-record.toml
 ```
 
-This command does not modify Git. Review the sanitized record, then let the
-enrollment workflow persist the node in PostgreSQL. Keep physical links and
-fabric relationships in the separate topology document; adding a node must not
-invent topology.
+This command does not modify Git. PostgreSQL enrollment is authoritative for
+Fleet membership and display metadata. Review the sanitized record, then let
+the enrollment workflow persist the node in PostgreSQL. Keep physical links
+and fabric relationships in the separate topology document; adding a node must
+not invent topology.
 
 If verification or recovery access fails, stop. Restore access through the
 physical console, inspect the journal, and resume only after the trusted facts

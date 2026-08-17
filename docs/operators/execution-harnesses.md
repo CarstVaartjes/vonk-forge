@@ -83,11 +83,11 @@ The journal advances only after drain, stop, down, exact volume deletion,
 PostgreSQL startup, migration, stack startup, and verification. An interrupted
 run resumes from that hash-bound phase without assuming the API is available
 during teardown. Final verification requires `/api/v1/agents` to be empty;
-repository Fleet nodes may remain projected but must be unregistered with no
-inventory, telemetry, workload, or reservation state. Terminally paginated
-catalog reads must contain exactly the eight built-in harness identities and
-their checked-in content digests, no recipes, and no prototype state. Migration
-head must be exactly `0027_execution_harness_catalog`.
+PostgreSQL Fleet registrations are empty, so no nodes are projected and no
+inventory, telemetry, workload, or reservation state remains. Terminally
+paginated catalog reads must contain exactly the eight built-in harness
+identities and their checked-in content digests, no recipes, and no prototype
+state. Migration head must be exactly `0027_execution_harness_catalog`.
 
 This is a truly fresh control domain: all control database rows, users, browser
 sessions, agent enrollments, route publications, repository projection,

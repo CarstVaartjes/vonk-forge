@@ -208,7 +208,7 @@ def main(
         elif arguments.command == "verify":
             journal = deps.installer.status(node_id)
         elif arguments.command == "emit-record":
-            from .proposal import emit_node_record
+            from .records import emit_node_record
 
             journal = deps.installer.status(node_id)
             sys.stdout.buffer.write(emit_node_record(journal))

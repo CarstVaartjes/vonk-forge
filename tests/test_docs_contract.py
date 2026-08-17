@@ -911,3 +911,10 @@ def test_architecture_html_has_semantic_catalog_resolution_and_interface_publica
     assert {"catalog-resolution", "interface-publication"} <= document.ids
     assert "operators/model-catalog.md" in document.links
     assert "operators/execution-harnesses.md" in document.links
+
+
+def test_clean_development_reset_describes_postgresql_fleet_authority() -> None:
+    section = _section(EXECUTION_HARNESSES, "Clean development reset")
+
+    assert "PostgreSQL Fleet registrations are empty" in section
+    assert "repository" + " Fleet" not in section

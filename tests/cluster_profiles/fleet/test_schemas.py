@@ -23,52 +23,6 @@ def _validator(repository_root: Path, name: str) -> jsonschema.Draft202012Valida
     return jsonschema.Draft202012Validator(schema)
 
 
-def _fleet_document(count: int) -> dict[str, object]:
-    nodes = {}
-    for index in range(count):
-        node_id = f"spk_{index:032x}"
-        nodes[node_id] = {
-            "display_name": f"node-{index}",
-            "hostname": f"node-{index}",
-            "management": {
-                "host": f"node-{index}.local",
-                "user": "operator",
-                "port": 22,
-            },
-            "labels": {"rack": "lab"},
-            "lifecycle": "ready",
-        }
-    return {"schema_version": 2, "nodes": nodes}
-
-
-@pytest.mark.parametrize("count", [1, 16, 32])
-def test_fleet_schema_accepts_variable_node_counts(
-    repository_root: Path,
-    count: int,
-) -> None:
-    _validator(repository_root, "fleet.schema.json").validate(_fleet_document(count))
-
-
-def test_fleet_schema_rejects_fixed_name_identity(repository_root: Path) -> None:
-    document = _fleet_document(1)
-    node = document["nodes"].pop("spk_00000000000000000000000000000000")
-    document["nodes"]["node1"] = node
-
-    with pytest.raises(jsonschema.ValidationError):
-        _validator(repository_root, "fleet.schema.json").validate(document)
-
-
-def test_fleet_schema_rejects_embedded_credentials_and_unknown_fields(
-    repository_root: Path,
-) -> None:
-    document = _fleet_document(1)
-    node = document["nodes"]["spk_00000000000000000000000000000000"]
-    node["management"]["password"] = "not-allowed"
-
-    with pytest.raises(jsonschema.ValidationError):
-        _validator(repository_root, "fleet.schema.json").validate(document)
-
-
 def test_topology_schema_accepts_named_links_without_fixed_function_names(
     repository_root: Path,
 ) -> None:
