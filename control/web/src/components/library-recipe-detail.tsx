@@ -129,11 +129,6 @@ export function LibraryRecipeAuthority({api, detail, onRefresh, policy}: {
       onValidDocument={document => setPreview({document, canonicalKey: canonicalPreviewKey, local: true})}
       resetToken={canonicalPreviewKey}
     />}
-    <nav className="advanced-workflows" aria-label="Advanced recipe workflows">
-      <a href={`/catalog/${encodeURIComponent(detail.recipe.recipe_id)}/source`}>Source and build</a>
-      <a href={`/catalog/${encodeURIComponent(detail.recipe.recipe_id)}/map`}>Cluster mapping</a>
-      <a href={`/catalog/${encodeURIComponent(detail.recipe.recipe_id)}`}>Raw editor</a>
-    </nav>
     {review && <LibraryActionDialog alias={alias} api={api} evidence={review.evidence} onApplied={onApplied} onClose={closeReview} onRefresh={onRefresh} policy={policy} target={review.target}/>}
   </div>;
 }

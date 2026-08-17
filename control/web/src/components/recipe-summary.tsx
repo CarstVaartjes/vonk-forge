@@ -20,6 +20,6 @@ export function RecipeSummary({recipe}: {recipe: CatalogRecipeSummary}) {
     </dl>
     <p className="digest">Source sha256:{recipe.source_bundle_sha256.slice(0, 12)}…</p>
     <p className="digest">{recipe.content_sha256 ? `sha256:${recipe.content_sha256.slice(0, 12)}…` : `Draft revision ${recipe.revision_number}`}</p>
-    <a href={`/catalog/${encodeURIComponent(recipe.recipe_id)}`}>Open recipe</a>
+    <a href={`/library/recipes/${encodeURIComponent(recipe.recipe_id)}`}>Open recipe</a>
   </article>;
 }

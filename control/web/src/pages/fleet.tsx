@@ -108,7 +108,7 @@ export function FleetPage({api}: {api: ControlApi}) {
       <p>The NAS is running {bounded(skew.target.platform_version)} at <code>{bounded(skew.target.build_digest)}</code>. Review and explicitly confirm the signed rollout; this notice never updates a GPU node by itself.</p>
       <p>Affected GPU nodes: {skew.nodes.filter(node => skew.affected_nodes.includes(node.node_id)).slice(0, 1024).map(node => `${bounded(node.display_name)} (${bounded(node.node_id)})`).join(", ") || "none"}.</p>
       {skew.offline_pending.length > 0 && <p>Offline pending: {skew.offline_pending.map(bounded).join(", ")}.</p>}
-      <p className="update-actions"><a href="/updates">Review platform update</a><button type="button" onClick={dismissUpdate}>Dismiss this exact update notice</button></p>
+      <p className="update-actions"><span>Review this signed rollout through the maintenance workflow.</span><button type="button" onClick={dismissUpdate}>Dismiss this exact update notice</button></p>
     </section>}
 
     {summary && <section className="fleet-summary" aria-label="Fleet summary">
