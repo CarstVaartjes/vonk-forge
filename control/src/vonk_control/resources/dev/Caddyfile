@@ -60,12 +60,6 @@ http://127.0.0.1:2019 {
 	reverse_proxy control-api:8000
 }
 
-(litellm_route_lease) {
-	forward_auth litellm:4001 {
-		uri /vonk/route-lease
-	}
-}
-
 # Tailscale Services terminates HTTPS before this private Docker listener. The
 # service MagicDNS name is exactly vonk-forge.<tailnet-name>.ts.net; every
 # other Host fails before it can reach the browser API or UI.
@@ -112,6 +106,12 @@ http://127.0.0.1:2019 {
 	respond 421
 }
 # END PRIVATE BROWSER EDGE
+
+(litellm_route_lease) {
+	forward_auth litellm:4001 {
+		uri /vonk/route-lease
+	}
+}
 
 # Internal inference clients use the same request-time lease authority without
 # exposing LiteLLM's native listener or management routes.

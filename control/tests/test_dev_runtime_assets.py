@@ -6,6 +6,7 @@ import importlib.resources
 import importlib.util
 import json
 import os
+import re
 import selectors
 import shutil
 import socket
@@ -34,6 +35,24 @@ EXPECTED_RESOURCES = {
     "tailscale-configure.sh": 0o555,
 }
 MAXIMUM_RESOURCE_BYTES = 128 * 1024
+
+
+def test_agent_only_caddy_config_retains_route_lease_definition() -> None:
+    caddyfile = importlib.resources.files(RESOURCE_PACKAGE).joinpath("Caddyfile")
+    source = caddyfile.read_text(encoding="utf-8")
+    marker_start = "# BEGIN PRIVATE BROWSER EDGE"
+    marker_end = "# END PRIVATE BROWSER EDGE"
+    before, start_marker, remainder = source.partition(marker_start)
+    private_edge, end_marker, after = remainder.partition(marker_end)
+    assert start_marker == marker_start
+    assert private_edge
+    assert end_marker == marker_end
+
+    agent_only = before + after
+    definitions = set(re.findall(r"^\s*\(([A-Za-z0-9_-]+)\) \{$", agent_only, re.MULTILINE))
+    imports = set(re.findall(r"^\s*import ([A-Za-z0-9_-]+)$", agent_only, re.MULTILINE))
+    assert not imports - definitions
+    assert "litellm_route_lease" in definitions
 
 
 def _runtime_assets():
