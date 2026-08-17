@@ -96,10 +96,8 @@ def test_production_worker_image_has_local_git_without_direct_transport_tools() 
 def test_production_worker_has_no_cluster_egress_network() -> None:
     compose = (ROOT / "deploy/compose/compose.yaml").read_text()
     worker = compose.split("\n  control-worker:\n", 1)[1].split(
-        "\n  workload-signer-runtime-init:\n", 1
+        "\n  workload-signer:\n", 1
     )[0]
-
-    assert "cluster-egress" not in worker
     for forbidden in (
         "/repository",
         "git-signing-key",

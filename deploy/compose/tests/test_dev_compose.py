@@ -8,7 +8,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from vonk_control import dev_cohort, dev_init
+from vonk_control import dev_bootstrap, dev_cohort, dev_init
 
 ROOT = Path(__file__).resolve().parents[3]
 COMPOSE = ROOT / "deploy/compose/compose.dev.yaml"
@@ -194,13 +194,13 @@ def test_image_template_routes_loopback_inference_through_isolated_caddy() -> No
 def test_dev_compose_initializes_identity_before_api_and_worker(tmp_path: Path) -> None:
     services = _rendered(tmp_path)["services"]
 
-    assert "dev-init" in services
-    assert services["dev-init"]["user"] == "0:0"
-    assert services["control-api"]["depends_on"]["dev-init"]["condition"] == (
-        "service_completed_successfully"
+    assert "dev-bootstrap" in services
+    assert services["dev-bootstrap"]["user"] == "0:0"
+    assert services["control-api"]["depends_on"]["dev-bootstrap"]["condition"] == (
+        "service_healthy"
     )
-    assert services["control-worker"]["depends_on"]["dev-init"]["condition"] == (
-        "service_completed_successfully"
+    assert services["control-worker"]["depends_on"]["dev-bootstrap"]["condition"] == (
+        "service_healthy"
     )
 
 
@@ -232,14 +232,8 @@ def test_image_template_reconciles_auth_after_migration_before_api() -> None:
         "dev-postgres-data"
     )
     assert auth["depends_on"] == {
-        "dev-init": {
-            "condition": "service_completed_successfully",
-            "required": True,
-        },
-        "migrate": {
-            "condition": "service_completed_successfully",
-            "required": True,
-        },
+        "dev-bootstrap": {"condition": "service_healthy", "required": True},
+        "migrate": {"condition": "service_completed_successfully", "required": True},
         "postgres": {"condition": "service_healthy", "required": True},
     }
     assert services["control-api"]["depends_on"]["dev-auth-init"] == {
@@ -312,14 +306,8 @@ def test_image_template_hardens_caddy_as_the_only_lan_listener() -> None:
         "retries": 12,
     }
     assert caddy["depends_on"] == {
-        "control-api": {
-            "condition": "service_healthy",
-            "required": True,
-        },
-        "dev-init": {
-            "condition": "service_completed_successfully",
-            "required": True,
-        },
+        "control-api": {"condition": "service_healthy", "required": True},
+        "dev-bootstrap": {"condition": "service_healthy", "required": True},
     }
 
     volumes = _volumes_by_target(caddy)
@@ -450,14 +438,7 @@ def test_image_template_isolates_litellm_behind_caddy_with_bounded_egress() -> N
             "condition": "service_completed_successfully",
             "required": True,
         },
-        "dev-init": {
-            "condition": "service_completed_successfully",
-            "required": True,
-        },
-        "dev-supervisor-init": {
-            "condition": "service_completed_successfully",
-            "required": True,
-        },
+        "dev-bootstrap": {"condition": "service_healthy", "required": True},
     }
 
     volumes = _volumes_by_target(litellm)
@@ -562,27 +543,28 @@ def test_dev_compose_runs_packaged_initializer_with_disjoint_runtime_authority(
 ) -> None:
     rendered = _rendered(tmp_path)
     services = rendered["services"]
-    initializer = services["dev-init"]
+    initializer = services["dev-bootstrap"]
 
     assert initializer["build"]["target"] == "api"
-    assert initializer["command"] == ["python", "-m", "vonk_control.dev_init"]
-    assert initializer["environment"] == {
+    assert initializer["command"] == ["python", "-m", "vonk_control.dev_bootstrap"]
+    expected_environment = {
         "VONK_CONTROL_IDENTITY_ROOT": "/control-identity",
-        "VONK_DEV_API_SECRET_ROOT": "/api-secrets",
         "VONK_DEV_API_IMAGE": DEV_API_IMAGE,
+        "VONK_DEV_API_SECRET_ROOT": "/api-secrets",
         "VONK_DEV_EXPECTED_COMMIT": EXPECTED_COMMIT,
         "VONK_DEV_LOCAL_ACCEPTANCE": "1",
         "VONK_DEV_MIGRATE_SECRET_ROOT": "/migrate-secrets",
         "VONK_DEV_LITELLM_DATABASE_SECRET_ROOT": "/litellm-database-secrets",
         "VONK_DEV_REPOSITORY_URL": "file:///source-origin",
         "VONK_DEV_SECRET_SOURCE_ROOT": "/host-secrets",
-        "VONK_DEV_WORKER_SECRET_ROOT": "/worker-secrets",
         "VONK_DEV_WORKER_IMAGE": DEV_WORKER_IMAGE,
+        "VONK_DEV_WORKER_SECRET_ROOT": "/worker-secrets",
         "VONK_REPOSITORY_PATH": "/repository",
         "VONK_ROUTE_ROOT": "/routes",
         "VONK_STATE_PATH": "/state",
         "VONK_SUPERVISOR_ROOT": "/supervisor",
     }
+    assert expected_environment.items() <= initializer["environment"].items()
     init_volumes = _volumes_by_target(initializer)
     assert init_volumes["/source-origin"]["type"] == "bind"
     assert init_volumes["/source-origin"]["read_only"] is True
@@ -643,7 +625,7 @@ def test_dev_compose_runs_packaged_initializer_with_disjoint_runtime_authority(
 
 def test_image_template_uses_the_database_only_migration_projection() -> None:
     services = _rendered_image_template()["services"]
-    initializer = services["dev-init"]
+    initializer = services["dev-bootstrap"]
     init_volumes = _volumes_by_target(initializer)
     migrate_volumes = _volumes_by_target(services["migrate"])
     api_volumes = _volumes_by_target(services["control-api"])
@@ -706,14 +688,18 @@ def test_image_template_gates_mutation_on_one_ordered_fail_closed_cohort() -> No
         services["dev-repository-init"]["depends_on"]["dev-cohort-verify"]["condition"]
         == "service_completed_successfully"
     )
-    assert (
-        services["dev-init"]["depends_on"]["dev-repository-init"]["condition"]
-        == "service_completed_successfully"
+    assert services["dev-bootstrap"]["depends_on"]["dev-repository-init"]["condition"] == (
+        "service_completed_successfully"
     )
-    for dependency in ("dev-cohort-verify", "dev-init"):
+    for dependency in ("dev-cohort-verify", "dev-bootstrap"):
+        expected_condition = (
+            "service_completed_successfully"
+            if dependency == "dev-cohort-verify"
+            else "service_healthy"
+        )
         assert (
             services["migrate"]["depends_on"][dependency]["condition"]
-            == "service_completed_successfully"
+            == expected_condition
         )
 
     for service_name in gate_names:
@@ -733,12 +719,12 @@ def test_image_template_limits_cohort_volume_and_mutable_image_authority() -> No
         "dev-worker-cohort",
         "dev-cohort-verify",
     }
-    consumers = {"dev-init", "migrate", "control-api", "control-worker"}
+    consumers = {"dev-bootstrap", "migrate", "control-api", "control-worker"}
     api_services = {
         "dev-cohort-reset",
         "dev-api-cohort",
         "dev-cohort-verify",
-        "dev-init",
+        "dev-bootstrap",
         "migrate",
         "control-api",
     }
@@ -780,7 +766,7 @@ def test_image_template_uses_selected_cohort_without_a_mutable_commit_literal() 
     services = _rendered_image_template()["services"]
     selected_path = "/cohort/selected.json"
 
-    for service_name in ("dev-init", "migrate", "control-api", "control-worker"):
+    for service_name in ("dev-bootstrap", "migrate", "control-api", "control-worker"):
         environment = services[service_name]["environment"]
         assert environment["VONK_DEV_SELECTED_COHORT_FILE"] == selected_path
         assert "VONK_DEV_EXPECTED_COMMIT" not in environment

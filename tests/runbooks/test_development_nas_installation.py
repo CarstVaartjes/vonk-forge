@@ -40,7 +40,8 @@ def test_development_nas_runbook_documents_actual_startup_dependency_order() -> 
         "API and worker cohort reporters",
         "cohort verifier",
         "PostgreSQL",
-        "`dev-init`",
+        "`dev-repository-init`",
+        "`dev-bootstrap`",
         "`migrate`",
         "long-running API and worker",
     )
