@@ -146,7 +146,7 @@ git commit -m "feat: put audit access in the operator menu"
 - Modify: `control/src/vonk_control/dashboard.py`
 - Modify: `control/src/vonk_control/models.py`
 - Modify: `control/tests/test_fleet_projection.py`
-- Modify: `control/tests/test_fleet_projection.py`
+- Modify: `control/tests/test_operation_api.py`
 - Delete: `inventory/fleet.toml`
 - Delete: `control/tests/fixtures/fleet/generic.toml` if no retained loader consumes it
 - Modify/Delete: tests and onboarding documents that assert the Git Spark roster
