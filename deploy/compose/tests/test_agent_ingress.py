@@ -371,7 +371,7 @@ def test_development_image_compose_enables_complete_builtin_agent_settings(
     assert set(api["networks"]) == {"application", "data", "ingress"}
     assert set(services["litellm"]["networks"]) == {
         "cluster-egress",
-        "data",
+        "litellm-data",
         "litellm-edge",
     }
     assert services["litellm"].get("ports") in (None, [])
