@@ -547,6 +547,7 @@ def test_dev_compose_runs_packaged_initializer_with_disjoint_runtime_authority(
 
     assert initializer["build"]["target"] == "api"
     assert initializer["command"] == ["python", "-m", "vonk_control.dev_bootstrap"]
+    assert initializer["tmpfs"] == ["/tmp"]
     expected_environment = {
         "VONK_CONTROL_IDENTITY_ROOT": "/control-identity",
         "VONK_DEV_API_IMAGE": DEV_API_IMAGE,
@@ -631,6 +632,7 @@ def test_image_template_uses_the_database_only_migration_projection() -> None:
     api_volumes = _volumes_by_target(services["control-api"])
     worker_volumes = _volumes_by_target(services["control-worker"])
 
+    assert initializer["tmpfs"] == ["/tmp"]
     assert (
         initializer["environment"]["VONK_DEV_MIGRATE_SECRET_ROOT"] == "/migrate-secrets"
     )

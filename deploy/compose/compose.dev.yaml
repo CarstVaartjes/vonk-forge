@@ -66,6 +66,7 @@ services:
       target: api
     user: "0:0"
     command: [python, -m, vonk_control.dev_bootstrap]
+    tmpfs: [/tmp]
     environment:
       VONK_CONTROL_IDENTITY_ROOT: /control-identity
       VONK_DEV_API_IMAGE: vonk-forge-dev/control-api@sha256:0000000000000000000000000000000000000000000000000000000000000000
