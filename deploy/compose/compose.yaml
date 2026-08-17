@@ -62,9 +62,9 @@ x-worker-environment: &worker-environment
   VONK_CONTROL_PROCESS_IMAGE: ${CONTROL_WORKER_IMAGE:?set a digest-pinned control-worker image}
 
 services:
-  route-publication-init:
+  control-bootstrap:
     image: ${CONTROL_WORKER_IMAGE:?set a digest-pinned control-worker image}
-    restart: "no"
+    restart: unless-stopped
     logging: *bounded-logging
     user: "0:0"
     read_only: true
@@ -72,67 +72,23 @@ services:
     cap_drop: [ALL]
     cap_add: [CHOWN, FOWNER]
     security_opt: [no-new-privileges:true]
-    command:
-      - python
-      - -c
-      - >-
-        import os,pathlib;
-        os.chown('/routes', 0, 0);
-        os.chmod('/routes', 0o750);
-        os.makedirs('/routes/generations', mode=0o750, exist_ok=True);
-        os.chmod('/routes/generations', 0o750);
-        os.chown('/routes/generations', 10001, 10001);
-        os.chown('/routes', 10001, 10001);
-        os.makedirs('/supervisor', mode=0o750, exist_ok=True);
-        os.chmod('/supervisor', 0o750);
-        os.chown('/supervisor', 10002, 10001)
+    command: [python, -m, vonk_control.compose_bootstrap]
+    secrets: [admin-grant-private-key]
     volumes:
       - route-publications:/routes
       - litellm-supervisor-state:/supervisor
-
-  signer-runtime-init:
-    image: ${CONTROL_WORKER_IMAGE:?set a digest-pinned control-worker image}
-    restart: "no"
-    logging: *bounded-logging
-    user: "0:0"
-    read_only: true
-    network_mode: none
-    cap_drop: [ALL]
-    cap_add: [CHOWN, FOWNER]
-    security_opt: [no-new-privileges:true]
-    command:
-      - python
-      - -c
-      - >-
-        import os,pathlib;
-        os.chown('/socket',10003,10001);
-        os.chmod('/socket',0o710);
-        os.chown('/verifier',10003,10001);
-        os.chmod('/verifier',0o700);
-        os.chown('/publication',10001,10001);
-        os.chmod('/publication',0o750);
-        [pathlib.Path('/publication',n).mkdir(mode=0o750,exist_ok=True) for n in ('metadata','targets')];
-        [os.chown(pathlib.Path('/publication',n),10001,10001) for n in ('metadata','targets')]
-    volumes:
-      - update-signer-socket:/socket
+      - update-signer-socket:/update-socket
       - signer-tuf-verifier:/verifier
-      - agent-tuf-publication:/publication
-
-  api-admin-grant-init:
-    image: ${CONTROL_API_IMAGE:?set a digest-pinned control-api image}
-    restart: "no"
-    logging: *bounded-logging
-    user: "0:0"
-    read_only: true
-    network_mode: none
-    cap_drop: [ALL]
-    cap_add: [CHOWN, FOWNER]
-    security_opt: [no-new-privileges:true]
-    command: [python, -m, vonk_control.runtime_init]
-    secrets: [admin-grant-private-key]
-    volumes:
-      - api-admin-grant-runtime:/runtime
-
+      - agent-tuf-publication:/agent-publication
+      - workload-signer-socket:/workload-signer-socket
+      - workload-tuf-publication:/workload-publication
+      - api-admin-grant-runtime:/api-runtime
+    tmpfs: [/tmp]
+    healthcheck:
+      test: [CMD, test, -f, /tmp/bootstrap-ready]
+      interval: 5s
+      timeout: 3s
+      retries: 12
   postgres:
     image: ${POSTGRES_IMAGE:-postgres:18.3@sha256:7e32e9833a6fb1c92c32552794cb6ed569d51b445a54907d35fc112ef39684db}
     restart: unless-stopped
@@ -180,7 +136,7 @@ services:
     networks: [application, data, agent-proxy, worker-authority]
     depends_on:
       postgres: {condition: service_healthy}
-      api-admin-grant-init: {condition: service_completed_successfully}
+      control-bootstrap: {condition: service_healthy}
       workload-signer: {condition: service_healthy}
     healthcheck:
       test: [CMD, python, -m, vonk_control.healthcheck]
@@ -215,33 +171,8 @@ services:
     networks: [data, worker-authority]
     depends_on:
       postgres: {condition: service_healthy}
-      route-publication-init: {condition: service_completed_successfully}
+      control-bootstrap: {condition: service_healthy}
       control-signer: {condition: service_healthy}
-
-  workload-signer-runtime-init:
-    image: ${CONTROL_WORKER_IMAGE:?set a digest-pinned control-worker image}
-    restart: "no"
-    logging: *bounded-logging
-    user: "0:0"
-    read_only: true
-    network_mode: none
-    cap_drop: [ALL]
-    cap_add: [CHOWN, FOWNER]
-    security_opt: [no-new-privileges:true]
-    command:
-      - python
-      - -c
-      - >-
-        import os,pathlib;
-        os.chown('/socket',10003,10001);
-        os.chmod('/socket',0o710);
-        pathlib.Path('/publication/metadata').mkdir(mode=0o750,parents=True,exist_ok=True);
-        pathlib.Path('/publication/targets').mkdir(mode=0o750,parents=True,exist_ok=True);
-        [os.chown(pathlib.Path('/publication',n),10003,10001) for n in ('metadata','targets')];
-        [os.chmod(pathlib.Path('/publication',n),0o750) for n in ('metadata','targets')]
-    volumes:
-      - workload-signer-socket:/socket
-      - workload-tuf-publication:/publication
 
   workload-signer:
     image: ${CONTROL_WORKER_IMAGE:?set a digest-pinned control-worker image}
@@ -270,7 +201,7 @@ services:
       - workload-signer-socket:/run/vonk-workload-signer
     tmpfs: [/tmp]
     depends_on:
-      workload-signer-runtime-init: {condition: service_completed_successfully}
+      control-bootstrap: {condition: service_healthy}
     healthcheck:
       test: [CMD, python, -c, "import os,stat; assert stat.S_ISSOCK(os.stat('/run/vonk-workload-signer/signer.sock').st_mode)"]
       interval: 5s
@@ -314,7 +245,7 @@ services:
           create_host_path: false
     tmpfs: [/tmp]
     depends_on:
-      signer-runtime-init: {condition: service_completed_successfully}
+      control-bootstrap: {condition: service_healthy}
     healthcheck:
       test: [CMD, python, -c, "import os,stat; assert stat.S_ISSOCK(os.stat('/run/vonk-signer/signer.sock').st_mode)"]
       interval: 5s
@@ -346,7 +277,7 @@ services:
     networks: [litellm-data, cluster-egress, litellm-edge]
     depends_on:
       postgres: {condition: service_healthy}
-      route-publication-init: {condition: service_completed_successfully}
+      control-bootstrap: {condition: service_healthy}
     healthcheck:
       test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=3)"]
       interval: 15s

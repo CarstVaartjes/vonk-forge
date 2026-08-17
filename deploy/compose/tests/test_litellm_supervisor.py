@@ -1326,26 +1326,18 @@ def test_compose_initializes_route_volume_for_unprivileged_control_worker() -> N
         env=environment,
     )
     services = json.loads(rendered.stdout)["services"]
-    initializer = services["route-publication-init"]
-
-    assert initializer["network_mode"] == "none"
-    assert initializer["user"] == "0:0"
-    assert initializer["cap_drop"] == ["ALL"]
-    assert set(initializer["cap_add"]) == {"CHOWN", "FOWNER"}
-    command = initializer["command"][-1]
-    reclaim = "os.chown('/routes', 0, 0)"
-    child = "os.chown('/routes/generations', 10001, 10001)"
-    root = "os.chown('/routes', 10001, 10001)"
-    assert command.index(reclaim) < command.index("os.makedirs")
-    assert command.index(child) < command.index(root)
-    assert "os.chmod('/routes', 0o750)" in command
-    assert "os.chmod('/routes/generations', 0o750)" in command
-    assert services["control-worker"]["depends_on"]["route-publication-init"] == {
-        "condition": "service_completed_successfully",
+    bootstrap = services["control-bootstrap"]
+    assert bootstrap["network_mode"] == "none"
+    assert bootstrap["user"] == "0:0"
+    assert bootstrap["cap_drop"] == ["ALL"]
+    assert set(bootstrap["cap_add"]) == {"CHOWN", "FOWNER"}
+    assert bootstrap["healthcheck"]["test"] == ["CMD", "test", "-f", "/tmp/bootstrap-ready"]
+    assert services["control-worker"]["depends_on"]["control-bootstrap"] == {
+        "condition": "service_healthy",
         "required": True,
     }
-    assert services["litellm"]["depends_on"]["route-publication-init"] == {
-        "condition": "service_completed_successfully",
+    assert services["litellm"]["depends_on"]["control-bootstrap"] == {
+        "condition": "service_healthy",
         "required": True,
     }
     litellm = services["litellm"]

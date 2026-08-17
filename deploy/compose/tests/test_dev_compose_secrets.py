@@ -39,7 +39,7 @@ def _volumes_by_target(service: dict[str, object]) -> dict[str, dict[str, object
 def test_image_template_stages_exact_disjoint_runtime_secret_volumes() -> None:
     rendered = _rendered_image_template()
     services = rendered["services"]
-    initializer = services["dev-init"]
+    initializer = services["dev-bootstrap"]
     repository_initializer = services["dev-repository-init"]
 
     assert initializer["network_mode"] == "none"
@@ -137,30 +137,30 @@ def test_image_template_keeps_private_authority_with_its_exact_service() -> None
         for secret in service.get("secrets", []):
             secret_consumers.setdefault(secret["source"], set()).add(service_name)
 
-    assert volume_consumers["dev-api-secrets"] == {"control-api", "dev-init"}
-    assert volume_consumers["dev-auth-secrets"] == {"dev-auth-init", "dev-init"}
-    assert volume_consumers["dev-worker-secrets"] == {"control-worker", "dev-init"}
-    assert volume_consumers["dev-migrate-secrets"] == {"dev-init", "migrate"}
-    assert volume_consumers["dev-caddy-secrets"] == {"caddy", "dev-init"}
-    assert volume_consumers["dev-litellm-secrets"] == {"dev-init", "litellm"}
+    assert volume_consumers["dev-api-secrets"] == {"control-api", "dev-bootstrap"}
+    assert volume_consumers["dev-auth-secrets"] == {"dev-auth-init", "dev-bootstrap"}
+    assert volume_consumers["dev-worker-secrets"] == {"control-worker", "dev-bootstrap"}
+    assert volume_consumers["dev-migrate-secrets"] == {"dev-bootstrap", "migrate"}
+    assert volume_consumers["dev-caddy-secrets"] == {"caddy", "dev-bootstrap"}
+    assert volume_consumers["dev-litellm-secrets"] == {"dev-bootstrap", "litellm"}
     assert volume_consumers["dev-litellm-database-secrets"] == {
-        "dev-init",
+        "dev-bootstrap",
         "dev-litellm-database-init",
     }
     assert volume_consumers["dev-tailscale-secrets"] == {
-        "dev-init",
+        "dev-bootstrap",
         "tailscale-gateway",
     }
-    assert secret_consumers["agent-ca-key"] == {"dev-init"}
-    assert secret_consumers["controller-server-key"] == {"dev-init"}
-    assert secret_consumers["litellm-master-key"] == {"dev-init"}
-    assert secret_consumers["litellm-database-password"] == {"dev-init"}
-    assert secret_consumers["litellm-upstream-key"] == {"dev-init"}
-    assert secret_consumers["management-cidrs"] == {"dev-init"}
-    assert secret_consumers["token-signing-key"] == {"dev-init"}
-    assert secret_consumers["admin-password-verifier"] == {"dev-init"}
-    assert secret_consumers["tailscale-oauth-client-id"] == {"dev-init"}
-    assert secret_consumers["tailscale-oauth-client-secret"] == {"dev-init"}
+    assert secret_consumers["agent-ca-key"] == {"dev-bootstrap"}
+    assert secret_consumers["controller-server-key"] == {"dev-bootstrap"}
+    assert secret_consumers["litellm-master-key"] == {"dev-bootstrap"}
+    assert secret_consumers["litellm-database-password"] == {"dev-bootstrap"}
+    assert secret_consumers["litellm-upstream-key"] == {"dev-bootstrap"}
+    assert secret_consumers["management-cidrs"] == {"dev-bootstrap"}
+    assert secret_consumers["token-signing-key"] == {"dev-bootstrap"}
+    assert secret_consumers["admin-password-verifier"] == {"dev-bootstrap"}
+    assert secret_consumers["tailscale-oauth-client-id"] == {"dev-bootstrap"}
+    assert secret_consumers["tailscale-oauth-client-secret"] == {"dev-bootstrap"}
     assert services["control-api"]["environment"]["VONK_TOKEN_SIGNING_KEY_FILE"] == (
         "/run/secrets/token-signing-key"
     )
@@ -215,39 +215,29 @@ def test_image_template_preserves_existing_state_and_identity_volumes() -> None:
 
 def test_image_template_hands_acknowledgement_volume_to_litellm_only() -> None:
     services = _rendered_image_template()["services"]
-    initializer = services["dev-supervisor-init"]
+    bootstrap = services["dev-bootstrap"]
 
-    assert initializer["user"] == "0:0"
-    assert initializer["network_mode"] == "none"
-    assert initializer["read_only"] is True
-    assert initializer["cap_drop"] == ["ALL"]
-    assert initializer["cap_add"] == ["CHOWN"]
-    assert initializer["security_opt"] == ["no-new-privileges:true"]
-    assert initializer["depends_on"] == {
-        "dev-init": {
+    assert bootstrap["user"] == "0:0"
+    assert bootstrap["network_mode"] == "none"
+    assert bootstrap["read_only"] is True
+    assert bootstrap["cap_drop"] == ["ALL"]
+    assert bootstrap["cap_add"] == ["CHOWN", "DAC_OVERRIDE", "FOWNER"]
+    assert bootstrap["security_opt"] == ["no-new-privileges:true"]
+    assert bootstrap["depends_on"] == {
+        "dev-repository-init": {
             "condition": "service_completed_successfully",
             "required": True,
         }
     }
-    command = initializer["command"][-1]
-    assert command.count("os.chown('/supervisor',10002,10001)") == 1
-    assert (
-        "assert (metadata.st_uid,metadata.st_gid,stat.S_IMODE(metadata.st_mode)) "
-        "in {(10001,10001,0o750),(10002,10001,0o750)}"
-    ) in command
-    volumes = _volumes_by_target(initializer)
-    assert set(volumes) == {"/supervisor"}
-    assert volumes["/supervisor"]["source"].endswith("dev-supervisor-state")
-    assert volumes["/supervisor"].get("read_only", False) is False
+    assert bootstrap["command"] == ["python", "-m", "vonk_control.dev_bootstrap"]
 
+    volumes = _volumes_by_target(bootstrap)
+    assert volumes["/supervisor"]["source"].endswith("dev-supervisor-state")
     writers = set()
     readers = set()
     for service_name in ("control-api", "control-worker", "litellm"):
         supervisor = _volumes_by_target(services[service_name])["/supervisor"]
-        if supervisor.get("read_only", False):
-            readers.add(service_name)
-        else:
-            writers.add(service_name)
+        (readers if supervisor.get("read_only", False) else writers).add(service_name)
     assert readers == {"control-api", "control-worker"}
     assert writers == {"litellm"}
 

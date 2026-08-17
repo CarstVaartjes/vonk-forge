@@ -88,8 +88,6 @@ services:
     user: "0:0"
     read_only: true
     cap_drop: [ALL]
-    # Git is deliberately executed as nobody; SETUID/SETGID are used only for
-    # that child identity drop before the repository is reassigned to the API.
     cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
     security_opt: [no-new-privileges:true]
     command: [python, -m, vonk_control.dev_init]
@@ -107,7 +105,7 @@ services:
       dev-cohort-verify: {condition: service_completed_successfully}
     restart: "no"
 
-  dev-init:
+  dev-bootstrap:
     image: *api-image
     pull_policy: always
     user: "0:0"
@@ -116,7 +114,7 @@ services:
     cap_add: [CHOWN, DAC_OVERRIDE, FOWNER]
     security_opt: [no-new-privileges:true]
     network_mode: none
-    command: [python, -m, vonk_control.dev_init]
+    command: [python, -m, vonk_control.dev_bootstrap]
     environment:
       VONK_CONTROL_IDENTITY_ROOT: /control-identity
       VONK_DEV_AUTH_SECRET_ROOT: /auth-secrets
@@ -186,31 +184,12 @@ services:
         target: /host-secrets/token-signing-key
     depends_on:
       dev-repository-init: {condition: service_completed_successfully}
-    restart: "no"
-
-  dev-supervisor-init:
-    image: *api-image
-    pull_policy: always
-    user: "0:0"
-    read_only: true
-    cap_drop: [ALL]
-    cap_add: [CHOWN]
-    security_opt: [no-new-privileges:true]
-    command:
-      - python
-      - -c
-      - >-
-        import os,stat;
-        metadata=os.stat('/supervisor',follow_symlinks=False);
-        assert stat.S_ISDIR(metadata.st_mode);
-        assert (metadata.st_uid,metadata.st_gid,stat.S_IMODE(metadata.st_mode)) in {(10001,10001,0o750),(10002,10001,0o750)};
-        os.chown('/supervisor',10002,10001)
-    volumes:
-      - dev-supervisor-state:/supervisor
-    network_mode: none
-    depends_on:
-      dev-init: {condition: service_completed_successfully}
-    restart: "no"
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD, test, -f, /tmp/bootstrap-ready]
+      interval: 5s
+      timeout: 3s
+      retries: 12
 
   migrate:
     image: *api-image
@@ -240,7 +219,7 @@ services:
       - dev-image-cohort:/cohort:ro
     depends_on:
       postgres: {condition: service_healthy}
-      dev-init: {condition: service_completed_successfully}
+      dev-bootstrap: {condition: service_healthy}
       dev-cohort-verify: {condition: service_completed_successfully}
     networks: [data]
     restart: "no"
@@ -262,7 +241,7 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
       migrate: {condition: service_completed_successfully}
-      dev-init: {condition: service_completed_successfully}
+      dev-bootstrap: {condition: service_healthy}
     restart: "no"
 
   dev-litellm-database-init:
@@ -278,7 +257,7 @@ services:
     networks: [data]
     depends_on:
       postgres: {condition: service_healthy}
-      dev-init: {condition: service_completed_successfully}
+      dev-bootstrap: {condition: service_healthy}
     restart: "no"
 
   control-worker:
@@ -308,7 +287,7 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
       migrate: {condition: service_completed_successfully}
-      dev-init: {condition: service_completed_successfully}
+      dev-bootstrap: {condition: service_healthy}
       litellm: {condition: service_healthy}
 
   control-api:
@@ -350,7 +329,7 @@ services:
       postgres: {condition: service_healthy}
       migrate: {condition: service_completed_successfully}
       dev-auth-init: {condition: service_completed_successfully}
-      dev-init: {condition: service_completed_successfully}
+      dev-bootstrap: {condition: service_healthy}
       control-worker: {condition: service_started}
     healthcheck:
       test: [CMD, python, -m, vonk_control.healthcheck]
@@ -384,11 +363,10 @@ services:
     networks: [litellm-data, cluster-egress, litellm-edge]
     depends_on:
       dev-litellm-database-init: {condition: service_completed_successfully}
-      dev-init: {condition: service_completed_successfully}
-      dev-supervisor-init: {condition: service_completed_successfully}
+      dev-bootstrap: {condition: service_healthy}
     healthcheck:
-      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=3)"]
       interval: 15s
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=3)"]
       timeout: 5s
       retries: 10
       start_period: 120s
@@ -421,7 +399,7 @@ services:
     networks: [application, ingress, tailnet-web-edge, litellm-edge]
     depends_on:
       control-api: {condition: service_healthy}
-      dev-init: {condition: service_completed_successfully}
+      dev-bootstrap: {condition: service_healthy}
     healthcheck:
       test: [CMD, /bin/sh, /run/vonk-runtime/caddy-entrypoint.sh, health]
       interval: 10s

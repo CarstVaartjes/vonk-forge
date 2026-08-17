@@ -29,6 +29,15 @@ checkout build, manual copy, file replacement, or restart. Keep
 Signed releases publish `docker-compose.production.yml` from the full production
 graph, but it is selected only through the production host updater.
 
+The production graph uses one persistent, network-isolated `control-bootstrap`
+service for privileged shared-volume preparation. It remains healthy after
+creating the signer sockets, TUF publication directories, route state, and
+API-only admin-grant runtime key. This intentionally replaces several stopped
+one-shot init services because some NAS Docker UIs incorrectly mark successful
+`Exited (0)` init containers as a failed project. The long-running API, worker,
+signers, and LiteLLM services retain their restricted users and depend on the
+bootstrap health check; the helper does not serve application traffic.
+
 The complete NAS project contains only:
 
 ```text
