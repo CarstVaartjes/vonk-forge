@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import shlex
+import urllib.parse
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import PurePosixPath
@@ -18,6 +19,7 @@ _NON_ROOT_USER = re.compile(r"^[1-9][0-9]*(?::[1-9][0-9]*)?$")
 _COMPOSE_NAMES = frozenset(
     {"compose.yml", "compose.yaml", "docker-compose.yml", "docker-compose.yaml"}
 )
+_HTTPS_URL = re.compile(r"https://[^\s\"'<>]+")
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +54,17 @@ def inspect_build_source_policy(
     context = build.get("context") if isinstance(build, Mapping) else None
     dockerfile = build.get("dockerfile") if isinstance(build, Mapping) else None
     dockerfile_path = dockerfile if isinstance(dockerfile, str) else "Dockerfile"
+    network = build.get("network") if isinstance(build, Mapping) else None
+    network_mode = network.get("mode") if isinstance(network, Mapping) else None
+    allowed_hosts = (
+        frozenset(
+            host.lower()
+            for host in network.get("hosts", ())
+            if isinstance(host, str)
+        )
+        if isinstance(network, Mapping)
+        else frozenset()
+    )
     expected = context.get("sha256") if isinstance(context, Mapping) else None
     if expected != bundle.sha256:
         findings.append(
@@ -73,7 +86,14 @@ def inspect_build_source_policy(
             )
         )
     else:
-        findings.extend(_inspect_dockerfile(dockerfile_path, payload))
+        findings.extend(
+            _inspect_dockerfile(
+                dockerfile_path,
+                payload,
+                network_mode=network_mode,
+                allowed_hosts=allowed_hosts,
+            )
+        )
     for path, content in bundle.files.items():
         if PurePosixPath(path).name.lower() in _COMPOSE_NAMES:
             findings.extend(_inspect_compose(path, content))
@@ -92,7 +112,41 @@ def enforce_build_source_policy(
     return report
 
 
-def _inspect_dockerfile(path: str, payload: bytes) -> list[SourcePolicyFinding]:
+def dockerfile_base_images(payload: bytes) -> tuple[dict[str, str], ...]:
+    """Return the ordered, unique immutable FROM authorities in a checked file."""
+
+    text = payload.decode("utf-8")
+    images: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for _line, instruction, argument in _dockerfile_instructions(text):
+        if instruction.upper() != "FROM":
+            continue
+        tokens = [
+            token for token in argument.split() if not token.startswith("--platform=")
+        ]
+        reference = tokens[0] if tokens else ""
+        if reference == "scratch" or reference in seen:
+            continue
+        matched = _PINNED_IMAGE.fullmatch(reference)
+        if matched is None:
+            raise ValueError("Dockerfile base image authority is invalid")
+        images.append(
+            {
+                "manifest_digest": f"sha256:{matched.group(1)}",
+                "reference": reference,
+            }
+        )
+        seen.add(reference)
+    return tuple(images)
+
+
+def _inspect_dockerfile(
+    path: str,
+    payload: bytes,
+    *,
+    network_mode: object,
+    allowed_hosts: frozenset[str],
+) -> list[SourcePolicyFinding]:
     try:
         text = payload.decode("utf-8")
     except UnicodeDecodeError:
@@ -163,6 +217,21 @@ def _inspect_dockerfile(path: str, payload: bytes) -> list[SourcePolicyFinding]:
             )
         elif upper == "RUN":
             lowered = argument.lower()
+            for url in _HTTPS_URL.findall(argument):
+                host = urllib.parse.urlsplit(url).hostname
+                if (
+                    host is None
+                    or network_mode != "public"
+                    or host.lower() not in allowed_hosts
+                ):
+                    findings.append(
+                        _finding(
+                            "dockerfile.network_host",
+                            path,
+                            line_number,
+                            "Dockerfile URL host is outside the declared build allowlist",
+                        )
+                    )
             if re.search(r"--mount\s*=\s*type\s*=\s*(?:secret|ssh)", lowered):
                 findings.append(
                     _finding(

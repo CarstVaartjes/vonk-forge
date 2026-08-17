@@ -15,6 +15,7 @@ from vonk_control import operation_api
 from vonk_control.api import AdminServices, create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
+from vonk_control.fleet_projection import FleetSnapshot, TelemetryHistoryResponse
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
@@ -70,67 +71,54 @@ class Repository:
         return COMMIT
 
 
-class Reconciler:
+class ProjectedFleet:
     def __init__(self) -> None:
-        self.planned: list[tuple[str, str]] = []
+        self.history_calls: list[tuple[object, ...]] = []
 
-    def plan(self, commit, profile_id, *, fleet_evidence_digest):
-        del fleet_evidence_digest
-        self.planned.append((commit, profile_id))
-        return type(
-            "Plan",
-            (),
-            {
-                "commit": commit,
-                "digest": DIGEST,
-                "targets": (NODE_ID,),
-                "placements": {"model": (NODE_ID,)},
-                "routes": {},
-                "releases": {},
-                "input_digests": {"fleet": "f" * 64},
-                "operation_graph": type(
-                    "Graph",
-                    (),
-                    {
-                        "reconciliation_id": "22222222-2222-4222-8222-222222222222",
-                        "document": {
-                            "base_commit": commit,
-                            "nodes": [],
-                            "schema_version": 1,
-                            "targets": [NODE_ID],
-                        },
-                    },
-                )(),
-                "agent_protocol_range": (1, 1),
-            },
-        )()
+    def read(self) -> FleetSnapshot:
+        return FleetSnapshot(
+            event_cursor=11,
+            generated_at=datetime(2026, 8, 15, 12, tzinfo=UTC),
+            repository_commit=COMMIT,
+            nodes=[],
+        )
 
-    def enqueue(self, plan_digest, actor, request_id, **_kwargs):
-        if plan_digest != DIGEST:
-            raise ValueError("unknown reconciliation plan digest")
-        return {
-            "base_commit": COMMIT,
-            "job_id": "11111111-1111-4111-8111-111111111111",
-            "reconciliation_id": "22222222-2222-4222-8222-222222222222",
-            "state": "queued",
-        }
+    def telemetry_history(
+        self,
+        node_id: str,
+        *,
+        start: datetime,
+        end: datetime,
+        maximum_points: int,
+        resolution: str,
+    ) -> TelemetryHistoryResponse:
+        self.history_calls.append((node_id, start, end, maximum_points, resolution))
+        if node_id != NODE_ID:
+            raise KeyError(node_id)
+        return TelemetryHistoryResponse(
+            node_id=node_id,
+            start=start,
+            end=end,
+            resolution=resolution,
+            maximum_points=maximum_points,
+            points=[],
+        )
 
 
-def _client(*, fleet=None, operations=None, role="operator"):
+def _client(*, fleet=None, fleet_projection=None, operations=None, role="operator"):
     codec = TokenCodec(b"k" * 32)
-    reconciler = Reconciler()
     audits = MemoryAuditStore()
     app = create_app(
         jobs=Jobs(),
         tokens=codec,
         audits=audits,
         fleet=fleet or (lambda: {"commit": COMMIT, "nodes": []}),
+        fleet_projection=fleet_projection or ProjectedFleet(),
         now=lambda: 10,
         admin=AdminServices(
             repository=Repository(),
             proposals=None,
             changes=None,
-            reconciler=reconciler,
         ),
         operations=operations,
     )
@@ -138,116 +126,109 @@ def _client(*, fleet=None, operations=None, role="operator"):
     return (
         TestClient(app),
         {"Authorization": f"Bearer {token}"},
-        reconciler,
+        None,
         audits,
     )
 
 
-def test_profile_plan_is_a_strict_view_of_canonical_server_plan() -> None:
-    client, operator, reconciler, _audits = _client()
+def test_openapi_has_no_profile_reconciliation_or_legacy_document_editor() -> None:
+    client, *_ = _client()
 
-    canonical = client.post(
-        "/api/v1/reconciliations/plan",
-        headers=operator,
-        json={"commit": COMMIT, "profile_id": "agent"},
+    paths = client.app.openapi()["paths"]
+
+    assert not any(path.startswith("/api/v1/profiles/") for path in paths)
+    assert "/api/v1/reconciliations/plan" not in paths
+    assert "/api/v1/reconciliations" not in paths
+    assert not any(
+        path.startswith("/api/v1/reconciliations/") for path in paths
     )
-    scoped = client.post("/api/v1/profiles/agent/plan", headers=operator)
+    assert "/api/v1/documents" not in paths
 
-    assert scoped.status_code == 200
-    assert scoped.content == canonical.content
-    assert reconciler.planned == [(COMMIT, "agent"), (COMMIT, "agent")]
-    assert client.post(
-        "/api/v1/profiles/agent/plan",
+
+def test_fleet_is_typed_visual_state_while_nodes_status_remains_legacy_evidence() -> (
+    None
+):
+    client, operator, *_ = _client()
+
+    visual = client.get("/api/v1/fleet", headers=operator)
+    evidence = client.get("/api/v1/nodes/status", headers=operator)
+
+    assert visual.status_code == 200
+    assert visual.json() == {
+        "schema_version": 1,
+        "event_cursor": 11,
+        "generated_at": "2026-08-15T12:00:00Z",
+        "repository_commit": COMMIT,
+        "nodes": [],
+    }
+    assert "evidence_digest" not in visual.json()
+    assert evidence.status_code == 200
+    assert evidence.json()["commit"] == COMMIT
+    assert evidence.json()["nodes"] == []
+    assert len(evidence.json()["evidence_digest"]) == 64
+    assert "event_cursor" not in evidence.json()
+
+
+def test_node_telemetry_history_is_typed_authorized_and_capped() -> None:
+    projection = ProjectedFleet()
+    client, operator, *_ = _client(fleet_projection=projection)
+    params = {
+        "start": "2026-08-15T11:00:00Z",
+        "end": "2026-08-15T12:00:00Z",
+        "maximum_points": "1500",
+        "resolution": "raw",
+    }
+
+    response = client.get(
+        f"/api/v1/nodes/{NODE_ID}/telemetry",
         headers=operator,
-        json={"commit": "0" * 40},
-    ).status_code == 422
-
-
-def test_apply_requires_exact_server_plan_digest() -> None:
-    client, operator, _reconciler, audits = _client()
-    plan = client.post("/api/v1/profiles/agent/plan", headers=operator)
-    assert plan.status_code == 200
-    fleet = client.get("/api/v1/fleet", headers=operator)
-    assert fleet.status_code == 200
-    assert plan.json()["fleet_evidence_digest"] == fleet.json()["evidence_digest"]
-
-    stale = client.post(
-        "/api/v1/reconciliations",
-        headers=operator,
-        json={
-            "fleet_evidence_digest": plan.json()["fleet_evidence_digest"],
-            "plan_digest": "0" * 64,
-        },
-    )
-    accepted = client.post(
-        "/api/v1/reconciliations",
-        headers=operator,
-        json={
-            "fleet_evidence_digest": plan.json()["fleet_evidence_digest"],
-            "plan_digest": plan.json()["digest"],
-        },
-    )
-
-    assert stale.status_code == 409
-    assert stale.json() == {"detail": "reconciliation plan digest is stale"}
-    assert accepted.status_code == 202
-    assert accepted.json()["base_commit"] == COMMIT
-    assert audits.for_request(accepted.headers["x-request-id"]).action == (
-        "reconciliation.apply"
+        params=params,
     )
 
-
-def test_apply_rejects_live_evidence_changed_after_plan() -> None:
-    fleet_state = {"commit": COMMIT, "nodes": []}
-    client, operator, _reconciler, audits = _client(fleet=lambda: fleet_state)
-    plan = client.post("/api/v1/profiles/agent/plan", headers=operator)
-    assert plan.status_code == 200
-    planned_evidence = plan.json()["fleet_evidence_digest"]
-
-    fleet_state["nodes"] = [
-        {
-            "agent_online": False,
-            "agent_state": "unavailable",
-            "compatibility": "incompatible",
-            "disk_available_bytes": 0,
-            "display_name": "Unavailable",
-            "healthy": False,
-            "hostname": "unavailable.invalid",
-            "id": NODE_ID,
-            "labels": {},
-            "lifecycle": "managed",
-            "memory_available_bytes": 0,
-            "profile": "agent",
-            "stale": True,
-        }
+    assert response.status_code == 200
+    assert response.json() == {
+        "schema_version": 1,
+        "node_id": NODE_ID,
+        "start": "2026-08-15T11:00:00Z",
+        "end": "2026-08-15T12:00:00Z",
+        "resolution": "raw",
+        "maximum_points": 1500,
+        "points": [],
+    }
+    assert projection.history_calls == [
+        (
+            NODE_ID,
+            datetime(2026, 8, 15, 11, tzinfo=UTC),
+            datetime(2026, 8, 15, 12, tzinfo=UTC),
+            1500,
+            "raw",
+        )
     ]
-    changed = client.get("/api/v1/fleet", headers=operator).json()
-    assert changed["evidence_digest"] != planned_evidence
-
-    response = client.post(
-        "/api/v1/reconciliations",
-        headers=operator,
-        json={
-            "fleet_evidence_digest": planned_evidence,
-            "plan_digest": plan.json()["digest"],
-        },
+    assert (
+        client.get(
+            f"/api/v1/nodes/{NODE_ID}/telemetry",
+            headers=operator,
+            params={key: value for key, value in params.items() if key != "resolution"},
+        ).status_code
+        == 422
     )
-
-    assert response.status_code == 409
-    assert response.json() == {"detail": "fleet acceptance evidence is stale"}
-    with pytest.raises(KeyError):
-        audits.for_request(response.headers["x-request-id"])
-
-
-def test_fleet_evidence_digest_is_deterministic_over_validated_public_projection() -> None:
-    first_client, operator, *_ = _client()
-    second_client, second_operator, *_ = _client()
-
-    first = first_client.get("/api/v1/fleet", headers=operator).json()
-    second = second_client.get("/api/v1/nodes/status", headers=second_operator).json()
-
-    assert first["evidence_digest"] == second["evidence_digest"]
-    assert len(first["evidence_digest"]) == 64
+    assert (
+        client.get(
+            f"/api/v1/nodes/{NODE_ID}/telemetry",
+            headers=operator,
+            params={**params, "maximum_points": "1501"},
+        ).status_code
+        == 422
+    )
+    assert len(projection.history_calls) == 1
+    assert (
+        client.get(
+            f"/api/v1/nodes/{'spk_' + 'f' * 32}/telemetry",
+            headers=operator,
+            params=params,
+        ).status_code
+        == 404
+    )
 
 
 def test_nodes_status_marks_missing_observation_unknown_and_stale() -> None:
@@ -309,22 +290,23 @@ def test_job_status_has_typed_progress_fields_without_payloads() -> None:
         "current_attempt": 1,
         "id": "11111111-1111-4111-8111-111111111111",
         "kind": "reconcile",
-            "operations": [],
-            "operation_next_cursor": None,
-            "operation_total": 0,
+        "operations": [],
+        "operation_next_cursor": None,
+        "operation_total": 0,
         "progress": {"completed": 0, "failed": 0, "running": 0, "total": 0},
         "reconciliation_id": "22222222-2222-4222-8222-222222222222",
         "state": "queued",
         "status_reason": None,
-            "targets": [NODE_ID],
-            "target_next_cursor": None,
-            "target_total": 1,
+        "targets": [NODE_ID],
+        "target_next_cursor": None,
+        "target_total": 1,
     }
     encoded = json.dumps(response.json(), sort_keys=True)
     assert "payload" not in encoded
     assert "result" not in encoded
 
 
+@pytest.mark.skip(reason="legacy profile reconciliation projection retired in v1")
 def test_plan_response_whitelists_nested_route_release_and_dag_fields() -> None:
     public_digest = "1" * 64
     plan = SimpleNamespace(
@@ -434,9 +416,7 @@ def test_plan_response_whitelists_nested_route_release_and_dag_fields() -> None:
         "requests_per_minute": 10,
         "tokens_per_minute": 1000,
     }
-    assert response["releases"]["model"]["release_request"]["adapter_id"] == (
-        "systemd"
-    )
+    assert response["releases"]["model"]["release_request"]["adapter_id"] == ("systemd")
     assert response["operation_graph"]["nodes"] == [
         {
             "operation_id": "model:node.probe",
@@ -455,19 +435,25 @@ def test_job_operation_progress_projects_only_bounded_phase() -> None:
     operations = OperationApiServices(
         endpoint=lambda _alias: {},
         agents=lambda: (),
-        job_operations=lambda _job_id, _cursor, _limit: OperationPage(({
-                "attempt": 1,
-                "graph_operation_id": "model:node.probe",
-                "id": "44444444-4444-4444-8444-444444444444",
-                "kind": "node.probe",
-                "node_id": NODE_ID,
-                "progress": {
-                    "phase": "checking",
-                    "private_evidence": "must-not-cross-api",
+        job_operations=lambda _job_id, _cursor, _limit: OperationPage(
+            (
+                {
+                    "attempt": 1,
+                    "graph_operation_id": "model:node.probe",
+                    "id": "44444444-4444-4444-8444-444444444444",
+                    "kind": "node.probe",
+                    "node_id": NODE_ID,
+                    "progress": {
+                        "phase": "checking",
+                        "private_evidence": "must-not-cross-api",
+                    },
+                    "state": "running",
+                    "updated_at": "2026-08-05T12:00:00+00:00",
                 },
-                "state": "running",
-                "updated_at": "2026-08-05T12:00:00+00:00",
-            },), None, JobProgress(completed=0, failed=0, running=1, total=1)),
+            ),
+            None,
+            JobProgress(completed=0, failed=0, running=1, total=1),
+        ),
         resume_job=lambda _job_id: None,
     )
     client, operator, _reconciler, _audits = _client(operations=operations)
@@ -478,9 +464,7 @@ def test_job_operation_progress_projects_only_bounded_phase() -> None:
     )
 
     assert response.status_code == 200
-    assert response.json()["operations"][0]["progress"] == {
-        "phase": "checking"
-    }
+    assert response.json()["operations"][0]["progress"] == {"phase": "checking"}
     assert "private_evidence" not in response.text
 
 
@@ -659,14 +643,14 @@ def test_durable_projection_reads_only_current_activation_and_hides_agent_secret
             "last_seen_at": now.isoformat(),
             "agent_implementation": "python",
             "migration_state": "required",
-                "node_id": NODE_ID,
-                "protocol_version": 1,
-                "platform_version": None,
-                "build_digest": None,
-                "active_slot": None,
-                "agent_sha256": None,
-                "supervisor_generation": None,
-                "stale": False,
+            "node_id": NODE_ID,
+            "protocol_version": 1,
+            "platform_version": None,
+            "build_digest": None,
+            "active_slot": None,
+            "agent_sha256": None,
+            "supervisor_generation": None,
+            "stale": False,
             "state": "active",
         }
     ]
@@ -683,16 +667,10 @@ def test_durable_projection_reads_only_current_activation_and_hides_agent_secret
     assert agent_response.json() == {"agents": agents}
 
     (generation / "litellm.json").unlink()
-    endpoint_client, operator, _reconciler, _audits = _client(
-        operations=services
-    )
-    unavailable = endpoint_client.get(
-        "/api/v1/endpoints/model-a", headers=operator
-    )
+    endpoint_client, operator, _reconciler, _audits = _client(operations=services)
+    unavailable = endpoint_client.get("/api/v1/endpoints/model-a", headers=operator)
     assert unavailable.status_code == 503
-    assert unavailable.json() == {
-        "detail": "endpoint publication unavailable"
-    }
+    assert unavailable.json() == {"detail": "endpoint publication unavailable"}
     (generation / "litellm.json").write_bytes(litellm_bytes)
 
     with sessions.begin() as session:
@@ -935,8 +913,6 @@ def test_target_cursor_rejects_cross_job_and_cross_resource_replay() -> None:
         assert response.json() == {"detail": "job cursor is invalid"}
 
 
-
-
 def test_admin_operation_schema_declares_applicable_bounded_errors() -> None:
     services = OperationApiServices(
         endpoint=lambda _alias: {},
@@ -955,13 +931,10 @@ def test_admin_operation_schema_declares_applicable_bounded_errors() -> None:
         if method in {"delete", "get", "patch", "post", "put"}
     }
     expected = {
-        "applyReconciliation": {"401", "403", "409", "503"},
         "approveAgentEnrollment": {"401", "403", "409", "503"},
         "createEnrollmentGrant": {"401", "403", "503"},
         "getJobLog": {"401", "403", "404", "503"},
         "getPublishedEndpoint": {"401", "404", "503"},
-        "planProfileReconciliation": {"401", "403", "409", "503"},
-        "planReconciliation": {"401", "403", "409", "503"},
         "rejectAgentEnrollment": {"401", "403", "409", "503"},
         "resumeJob": {"401", "403", "404", "409", "503"},
         "revokeAgentNode": {"401", "403", "404", "503"},
@@ -1009,6 +982,85 @@ def test_admin_operation_schema_declares_applicable_bounded_errors() -> None:
         assert success["content"]["application/json"]["schema"] == {
             "$ref": f"#/components/schemas/{component}"
         }
-        assert schema["components"]["schemas"][component][
-            "additionalProperties"
-        ] is False
+        assert (
+            schema["components"]["schemas"][component]["additionalProperties"] is False
+        )
+
+
+def test_fleet_operation_registry_keeps_visual_and_evidence_contracts_distinct() -> (
+    None
+):
+    client, _operator, _reconciler, _audits = _client()
+
+    schema = operation_api.admin_openapi_schema(client.app)
+    paths = schema["paths"]
+
+    assert paths["/api/v1/fleet"]["get"]["operationId"] == "getFleetStatus"
+    assert paths["/api/v1/fleet"]["get"]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/FleetSnapshot"}
+    assert paths["/api/v1/nodes/status"]["get"]["operationId"] == ("getNodeStatuses")
+    assert paths["/api/v1/nodes/status"]["get"]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/FleetStatusResponse"}
+    assert paths["/api/v1/nodes/{node_id}/telemetry"]["get"]["operationId"] == (
+        "getNodeTelemetryHistory"
+    )
+    assert paths["/api/v1/fleet/stream"]["get"]["operationId"] == ("streamFleetEvents")
+    assert paths["/api/v1/fleet/stream"]["get"]["parameters"] == [
+        {
+            "description": (
+                "Optional durable Fleet cursor; duplicate and numeric validity "
+                "are checked from the raw header list."
+            ),
+            "in": "header",
+            "name": "Last-Event-ID",
+            "required": False,
+            "schema": {
+                "anyOf": [{"type": "string"}, {"type": "null"}],
+                "description": (
+                    "Optional durable Fleet cursor; duplicate and numeric validity "
+                    "are checked from the raw header list."
+                ),
+                "title": "Last-Event-Id",
+            },
+        }
+    ]
+    assert paths["/api/v1/fleet/stream"]["get"]["security"] == [{"BrowserSession": []}]
+    assert paths["/api/v1/fleet"]["get"]["security"] == [{"BearerAuth": []}]
+    assert paths["/api/v1/nodes/status"]["get"]["security"] == [{"BearerAuth": []}]
+
+
+def test_recipe_action_preview_registry_is_explicit_and_strict() -> None:
+    client, _operator, _reconciler, _audits = _client()
+
+    schema = operation_api.admin_openapi_schema(client.app)
+    paths = schema["paths"]
+
+    assert paths["/api/v1/recipes/stop-plans/preview"]["post"]["operationId"] == (
+        "previewRecipeStop"
+    )
+    assert (
+        paths["/api/v1/recipes/uninstall-plans/preview"]["post"]["operationId"]
+        == "previewRecipeUninstall"
+    )
+    assert paths["/api/v1/recipes/runs/{run_id}/stop"]["post"]["operationId"] == (
+        "stopRecipeRun"
+    )
+    assert (
+        paths["/api/v1/recipes/installations/{installation_id}/uninstall"]["post"][
+            "operationId"
+        ]
+        == "uninstallRecipe"
+    )
+    for component in (
+        "StopPreviewRequest",
+        "StopRequest",
+        "UninstallPreviewRequest",
+        "UninstallRequest",
+        "StopPlanResponse",
+        "UninstallPlanResponse",
+    ):
+        assert (
+            schema["components"]["schemas"][component]["additionalProperties"] is False
+        )

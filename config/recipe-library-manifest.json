@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "kind": "recipe-library-source",
+  "repository": "https://github.com/CarstVaartjes/vonk-forge-recipes.git",
+  "development_ref": "main",
+  "production_ref": "approved immutable release tag",
+  "validation_workflow": "CarstVaartjes/vonk-forge/.github/workflows/validate-recipe-library.yml",
+  "authority": {
+    "source": "recipe-library-commit",
+    "local_execution": "resolved-local-catalog",
+    "runtime": "vonk-forge-platform"
+  },
+  "contents": [
+    "model-groups",
+    "models",
+    "model-versions",
+    "model-targets",
+    "runtime-distributions",
+    "patch-bundles",
+    "recipes",
+    "adapters"
+  ]
+}

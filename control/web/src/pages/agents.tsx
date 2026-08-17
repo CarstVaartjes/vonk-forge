@@ -4,7 +4,7 @@ import type {
   ControlApi,
   EnrollmentGrantResponse,
   EnrollmentSummary,
-  FleetResponse,
+  FleetEvidenceResponse,
 } from "../api/types";
 import {EnrollmentReview} from "../components/enrollment-review";
 
@@ -147,7 +147,7 @@ function CertificateControls({
 export function AgentsPage({api}: {api: ControlApi}) {
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [enrollments, setEnrollments] = useState<EnrollmentSummary[]>([]);
-  const [fleet, setFleet] = useState<FleetResponse>();
+  const [fleet, setFleet] = useState<FleetEvidenceResponse>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
@@ -167,7 +167,7 @@ export function AgentsPage({api}: {api: ControlApi}) {
       const [agentResult, enrollmentResult, fleetResult] = await Promise.all([
         api.agents(),
         api.enrollments(),
-        api.fleet(),
+        api.fleetEvidence(),
       ]);
       setAgents(agentResult.agents);
       setAgentPage(0);

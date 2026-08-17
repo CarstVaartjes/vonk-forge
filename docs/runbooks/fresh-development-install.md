@@ -16,6 +16,21 @@ PowerShell forwarding process, bearer token, Windows hosts-file entry, or LAN
 browser port.
 There is no Windows hosts-file entry for the Tailscale Service.
 
+The optional NAS acceptance tunnel does not bypass route authority:
+`127.0.0.1:4000` terminates at Caddy's lease-gated internal `:8081` listener;
+no LiteLLM port is published to the host. Caddy evaluates the current
+route-serving lease at request admission. A request whose Caddy authorization
+begins at or after lease expiry is never forwarded to LiteLLM. If the
+supervisor authority is unavailable, Caddy fails closed without contacting
+LiteLLM. A same-config lease renewal replaces the deadline without restarting
+the healthy LiteLLM child.
+
+A fresh pre-production reset removes every user, browser session, and agent
+enrollment. Recreate the development administrator, sign in to establish a
+fresh browser session, and re-enroll every Spark before acceptance. No login,
+session cookie, pairing token, or enrollment from before the reset remains
+valid.
+
 Plan local NVMe capacity for images and model artifacts separately. The
 qualified DS4 wrapper image is about 2.59 GB. Its immutable base and drafter
 model files are separate cache objects of 86,720,111,488 and 6,971,241,504
@@ -218,6 +233,28 @@ Development marker, then use this authenticated browser for the pairing steps
 below. Tailnet membership is only the reachability gate; it does not replace
 the application login.
 
+Before selecting a model, clone the public standard recipe library beside the
+platform checkout on the administrator workstation and preview its exact
+contents:
+
+```bash
+git clone https://github.com/CarstVaartjes/vonk-forge-recipes ../vonk-forge-recipes
+cd vonk-forge
+./scripts/validate-recipe-library \
+  --library-root ../vonk-forge-recipes \
+  --platform-root . \
+  --json
+./scripts/import-recipe-library \
+  --library-root ../vonk-forge-recipes \
+  --platform-root .
+```
+
+The preview imports only accepted recipes and records the exact library commit
+when applied. Candidate recipes require an explicit opt-in; the library
+checkout is never copied to the NAS or mounted into a workload. See the
+[standard recipe library](../operators/recipe-library.md) guide for candidate
+qualification and production release-tag rules.
+
 ## 5. Install and configure each GPU node
 
 On every Ubuntu 24.04 ARM64 node:
@@ -281,13 +318,27 @@ installation guide's bounded
 [start-limit recovery](../operations/install-vonk-agent.md#rotation-recovery-and-removal);
 do not re-pair the node or delete its state.
 
+If this installation is replacing any earlier prototype or recipe-domain
+state, do not continue with a retained database or selected volumes. Run the
+development-only procedure in
+[Clean development reset](../operators/execution-harnesses.md#clean-development-reset).
+That procedure removes every control volume and verifies exact fresh head
+`0027_execution_harness_catalog`; it has no compatibility or prototype import
+path. Afterward, the initializer recreates administrator subject `admin` from
+the retained verifier, but the operator must establish a fresh browser session
+and repeat the one-use grant/pair/approve/pair sequence for every Spark. Use new
+acceptance paths. A pre-reset login, session, pairing token, enrollment, route,
+or evidence file is never proof for the fresh installation. Spark-local caches
+may survive only as untrusted candidates until their exact content digests are
+verified again.
+
 ## 7. Prove the installation
 
 The commands below are deterministic acceptance, not normal browser access.
 Create a private admin token, configure the guide's
 [restricted acceptance and break-glass loopback forwarding](development-nas-installation.md#restrict-acceptance-and-break-glass-loopback-forwarding),
-forward the NAS loopback API and inference ports, and run the synthetic
-lifecycle:
+forward the NAS loopback API and inference ports, and run the native-v1
+synthetic public-API lifecycle:
 
 ```bash
 install -d -m 0700 .state/development-acceptance
@@ -315,10 +366,11 @@ scripts/run-development-slices \
 
 Success proves source verification, isolated rootless image build, signed
 Docker import/start, install, route publication, inference, stop, route
-withdrawal, and uninstall.
-For real single-node and multi-node model qualification, restart persistence,
-and rank failure/recovery, continue with
-[Development agent workload acceptance](development-agent-workloads.md).
+withdrawal, and uninstall. For native DS4/Mia model qualification, restart
+persistence, and rank failure/recovery, continue with
+[Development agent workload acceptance](development-agent-workloads.md) and
+the canonical
+[recipe acceptance sequence](../operators/execution-harnesses.md#controller-execution-sequence).
 
 Finish the supported installation in the browser: open the stable private
 Tailscale HTTPS Service URL, log in as exact subject `admin`, and confirm the

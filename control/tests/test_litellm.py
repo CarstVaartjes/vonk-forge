@@ -132,7 +132,7 @@ def test_hermes_group_is_local_ordered_and_retry_bounded(tmp_path: Path) -> None
         deployments=(
             LiteLlmDeployment(
                 "hermes-agent",
-                "deepseek-agent-dual",
+                "recipe-run-canary",
                 "http://10.0.0.42:8888/v1",
                 1,
                 20,
@@ -140,7 +140,7 @@ def test_hermes_group_is_local_ordered_and_retry_bounded(tmp_path: Path) -> None
             ),
             LiteLlmDeployment(
                 "hermes-agent",
-                "deepseek-agent-single",
+                "recipe-run-primary",
                 "http://10.0.0.43:8888/v1",
                 2,
                 30,
@@ -155,8 +155,8 @@ def test_hermes_group_is_local_ordered_and_retry_bounded(tmp_path: Path) -> None
         if model["model_name"] == "hermes-agent"
     ]
     assert [model["litellm_params"]["model"] for model in hermes] == [
-        "openai/deepseek-agent-dual",
-        "openai/deepseek-agent-single",
+        "openai/recipe-run-canary",
+        "openai/recipe-run-primary",
     ]
     assert [model["litellm_params"]["order"] for model in hermes] == [1, 2]
     assert [model["litellm_params"]["api_base"] for model in hermes] == [

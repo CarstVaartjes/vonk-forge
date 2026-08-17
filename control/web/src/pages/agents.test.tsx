@@ -4,7 +4,6 @@ import type {components} from "../api/generated";
 import {ApiClient} from "../api/client";
 import {App} from "../app";
 import {AgentsPage} from "./agents";
-import {FleetPage} from "./fleet";
 
 type Agent = components["schemas"]["AgentSummary"];
 type Enrollment = components["schemas"]["EnrollmentSummary"];
@@ -123,7 +122,7 @@ function installApiFake(options: {
     if (request.method === "GET" && url.pathname === "/api/v1/agents") {
       return jsonResponse({agents: options.agents ?? [agent]});
     }
-    if (request.method === "GET" && url.pathname === "/api/v1/fleet") {
+    if (request.method === "GET" && url.pathname === "/api/v1/nodes/status") {
       return jsonResponse(options.fleet ?? fleet);
     }
     if (request.method === "GET" && url.pathname === "/api/v1/agents/enrollments") {
@@ -195,21 +194,6 @@ it("keeps the agents workflow reachable from the keyboard-operable primary navig
   expect(await screen.findByRole("heading", {name: "Agent enrollment and fleet"})).toBeVisible();
   expect(agentsLink).toHaveAttribute("aria-current", "page");
   expect(location.pathname).toBe("/agents");
-});
-
-it("keeps the current fleet page on the generated bounded node status contract", async () => {
-  // Break caught: reducing FleetPage to its legacy DTO would hide agent/certificate compatibility state.
-  installApiFake();
-  render(<FleetPage api={new ApiClient()}/>);
-
-  const table = await screen.findByRole("table", {name: "Vonk Forge GPU nodes"});
-  const row = within(table).getByRole("row", {name: /Alpha GPU node/});
-  expect(row).toHaveTextContent(nodeId);
-  expect(row).toHaveTextContent("active");
-  expect(row).toHaveTextContent("2026-08-05T09:59:48Z");
-  expect(row).toHaveTextContent("2026-09-01T12:00:00Z");
-  expect(row).toHaveTextContent("supported");
-  expect(row).not.toHaveTextContent("not-rendered.internal");
 });
 
 it("keeps fleet and enrollment evidence semantic, bounded, and secret-free", async () => {

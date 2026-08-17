@@ -200,6 +200,24 @@ def test_hermes_secret_mode_matches_the_authoritative_nas_guide() -> None:
     assert "root-owned mode `0600`" not in runbook
 
 
+def test_inference_runbooks_route_hermes_through_the_caddy_lease_edge() -> None:
+    hermes = " ".join(HERMES_RUNBOOK.read_text().split())
+
+    assert (
+        "OpenAI-compatible base URL: http://caddy:8081/v1" in HERMES_RUNBOOK.read_text()
+    )
+    assert "Hermes sends model requests only to LiteLLM" not in hermes
+
+    for path in (HERMES_RUNBOOK, CONTROL_BOOTSTRAP):
+        text = path.read_text()
+        normalized = " ".join(text.split())
+
+        assert "litellm:4000" not in text
+        assert "`hermes-inference`" in normalized
+        assert "`caddy:8081/v1`" in normalized
+        assert "`litellm-edge`" in normalized
+
+
 def test_auxiliary_service_runbooks_use_the_installed_maintenance_boundary() -> None:
     for path in (HERMES_RUNBOOK, TAILSCALE_RUNBOOK, AGENT_PKI_RUNBOOK):
         text = path.read_text()

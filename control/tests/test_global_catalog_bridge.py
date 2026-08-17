@@ -9,6 +9,8 @@ import httpx
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+from test_catalog_service import _seed_recipe_dependencies
+from vonk_control.auth import TokenCodec
 from vonk_control.catalog_service import CatalogService
 from vonk_control.global_catalog import (
     GlobalCatalogClient,
@@ -31,7 +33,9 @@ FIXTURE = Path(__file__).parent / "fixtures/global/recipe-v1-minimal.json"
 
 @pytest.fixture
 def recipe() -> dict[str, object]:
-    return json.loads(FIXTURE.read_text(encoding="utf-8"))
+    document = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    document["identity"] = {"publisher": "vonk", "slug": "qwen3-vllm"}
+    return document
 
 
 @pytest.fixture
@@ -39,7 +43,14 @@ def catalog(tmp_path: Path):
     engine = create_engine(f"sqlite:///{tmp_path / 'catalog.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    return CatalogService(sessions, clock=lambda: NOW), sessions
+    return (
+        CatalogService(
+            sessions,
+            clock=lambda: NOW,
+            cursors=TokenCodec(b"c" * 32).cursor_codec(),
+        ),
+        sessions,
+    )
 
 
 def _uri(document: dict[str, object]) -> str:
@@ -144,6 +155,7 @@ def test_global_import_is_idempotent_and_remains_local_after_remote_disappears(
     catalog, recipe
 ) -> None:
     service, sessions = catalog
+    _seed_recipe_dependencies(service, recipe)
     digest = recipe_content_sha256(recipe)
     remote = GlobalRecipeRevision(
         publisher="vonk",
@@ -177,6 +189,7 @@ def test_new_remote_revision_becomes_a_new_immutable_local_revision(
     catalog, recipe
 ) -> None:
     service, sessions = catalog
+    _seed_recipe_dependencies(service, recipe)
     first_document = copy.deepcopy(recipe)
     first = GlobalRecipeRevision(
         "vonk",
@@ -214,10 +227,10 @@ def _test_report(recipe_hash: str, image_digest: str) -> dict[str, object]:
     return {
         "schema_version": 1,
         "recipe_sha256": recipe_hash,
-        "source_bundle_sha256": "a" * 64,
+        "source_bundle_sha256": "c" * 64,
         "build_input_sha256": "b" * 64,
         "image_digest": image_digest,
-        "deployment_profile": "solo",
+        "topology_name": "solo",
         "node_count": 1,
         "runtime": {
             "agent_version": "1.0.0",
@@ -238,6 +251,7 @@ def test_publication_export_requires_bound_evidence_and_target_namespace(
     catalog, recipe
 ) -> None:
     service, sessions = catalog
+    _seed_recipe_dependencies(service, recipe)
     draft = service.create_recipe(
         "admin",
         type(
@@ -270,6 +284,7 @@ def test_publication_export_requires_bound_evidence_and_target_namespace(
 
 def test_test_report_rejects_failed_or_mismatched_claims(catalog, recipe) -> None:
     service, _sessions = catalog
+    _seed_recipe_dependencies(service, recipe)
     draft = service.create_recipe(
         "admin",
         type(

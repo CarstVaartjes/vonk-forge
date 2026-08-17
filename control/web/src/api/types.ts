@@ -2,7 +2,13 @@ import type {components} from "./generated";
 
 export type NodeSummary = components["schemas"]["NodeStatus"];
 export type AuthSession = components["schemas"]["AuthSession"];
-export type FleetResponse = components["schemas"]["FleetStatusResponse"];
+export type VisualFleetSnapshot = components["schemas"]["FleetSnapshot"];
+export type VisualFleetNode = components["schemas"]["FleetNode"];
+export type FleetEvidenceResponse = components["schemas"]["FleetStatusResponse"];
+export type TelemetryHistory = components["schemas"]["TelemetryHistoryResponse"];
+export type TelemetryPoint = components["schemas"]["TelemetryPoint"];
+export type TelemetryResolution = "raw" | "minute" | "fifteen-minute";
+export type TelemetryHistoryPoint = TelemetryHistory["points"][number];
 export type AgentSummary = components["schemas"]["AgentSummary"];
 export type AgentsResponse = components["schemas"]["AgentsResponse"];
 export type EnrollmentSummary = components["schemas"]["EnrollmentSummary"];
@@ -13,9 +19,6 @@ export type JobDetail = components["schemas"]["JobDetailResponse"];
 export type JobResumeResponse = components["schemas"]["JobResumeResponse"];
 export type JobSummary = components["schemas"]["JobSummary"];
 export type JobsResponse = components["schemas"]["JobsResponse"];
-export type ReconciliationAccepted = components["schemas"]["ReconciliationAcceptedResponse"];
-export type ReconciliationPlan = components["schemas"]["ReconciliationPlanResponse"];
-export type DocumentList = {commit: string; documents: string[]};
 export type ProposalInput = {base_commit: string; changes: {path: string; document: Record<string, unknown>}[]};
 export type ProposalPreview = {base_commit: string; digest: string; patch: string; affected_documents: string[]; validation_results: string[]};
 export type AuditSummary = {request_id: string; actor: string; action: string; base_commit?: string; targets: string[]};
@@ -94,9 +97,29 @@ export type CatalogRecipeDocument = Record<string, unknown>;
 export type SourceBundleReceipt = {sha256: string; archive_bytes: number; total_bytes: number; file_count: number; files: string[]};
 export type SourcePolicyFinding = {code: string; path: string; line: number | null; detail: string};
 export type SourcePolicyReport = {passed: boolean; source_bundle_sha256: string; dockerfile: string; findings: SourcePolicyFinding[]};
-export type RecipeMappingPlan = {recipe_revision_id: string; recipe_content_sha256: string; profile_name: string; generation: number; parameters: Record<string, unknown>; nodes: Array<{node_id: string; rank: number; role: string; endpoint_owner: boolean}>; placement_digest: string};
+export type RecipeMappingPlan = {recipe_revision_id: string; recipe_content_sha256: string; topology_name: string; generation: number; parameters: Record<string, unknown>; nodes: Array<{node_id: string; rank: number; role: string; endpoint_owner: boolean}>; placement_digest: string};
 export type RecipeBuildPlan = {build_id: string; recipe_revision_id: string; recipe_content_sha256: string; builder_node_id: string; source_bundle_sha256: string; build_input_sha256: string};
 export type RecipeOperation = {id: string; kind: string; owner_id: string; state: string; plan_digest: string; nodes: string[]; result: Record<string, unknown> | null};
+export type LibrarySnapshot = components["schemas"]["LibrarySnapshot"];
+export type LibraryRecipeDetail = components["schemas"]["LibraryRecipeDetail"];
+export type LibraryRecipeSummary = components["schemas"]["LibraryRecipeSummary"];
+export type LibraryModel = components["schemas"]["LibraryModel"];
+export type LibraryMappingPreviewInput = components["schemas"]["MappingPreviewRequest"];
+export type LibraryMappingPlan = components["schemas"]["MappingPlanResponse"];
+export type LibraryMappingApplyInput = components["schemas"]["MappingRequest"];
+export type LibraryMappingResult = components["schemas"]["MappingResponse"];
+export type LibraryInstallPreviewInput = components["schemas"]["InstallPreviewRequest"];
+export type LibraryInstallPlan = components["schemas"]["InstallPlanResponse"];
+export type LibraryInstallApplyInput = components["schemas"]["InstallRequest"];
+export type LibraryLoadPreviewInput = components["schemas"]["RunPreviewRequest"];
+export type LibraryLoadPlan = components["schemas"]["RunPlanResponse"];
+export type LibraryLoadApplyInput = components["schemas"]["RunRequest"];
+export type LibraryStopApplyInput = components["schemas"]["StopRequest"];
+export type LibraryUninstallApplyInput = components["schemas"]["UninstallRequest"];
+export type LibraryStopPlan = components["schemas"]["StopPlanResponse"];
+export type LibraryUninstallPlan = components["schemas"]["UninstallPlanResponse"];
+export type LibraryOperation = components["schemas"]["OperationResponse"];
+export type LibraryRunStatus = components["schemas"]["RunStatusResponse"];
 export type GlobalRecipeRevision = {
   publisher: string; slug: string; recipe_id: string; revision_number: number; revision_id: string;
   content_sha256: string; published_at: string; document: Record<string, unknown>;
@@ -116,7 +139,7 @@ export interface CatalogApi {
   checkRecipeSource(recipeRevisionId: string): Promise<SourcePolicyReport>;
   previewRecipeBuild(recipeRevisionId: string, builderNodeId: string): Promise<RecipeBuildPlan>;
   buildRecipe(plan: RecipeBuildPlan): Promise<RecipeOperation>;
-  previewRecipeMapping(recipeRevisionId: string, profileName: string, nodeIds: string[]): Promise<RecipeMappingPlan>;
+  previewRecipeMapping(recipeRevisionId: string, nodeIds: string[]): Promise<RecipeMappingPlan>;
   createRecipeMapping(plan: RecipeMappingPlan): Promise<{mapping_id: string; generation: number; placement_digest: string}>;
 }
 export type ImportDisposition = "imported" | "transformed" | "resolution_required" | "overlay_required" | "unsupported_blocking" | "dropped_redundant";
@@ -127,15 +150,34 @@ export interface WorkloadRunApi {
   previewWorkloadRun(sourceYaml: string): Promise<WorkloadRunPreview>;
   applyWorkloadRun(sourceYaml: string, sourceSha256: string, reportDigest: string): Promise<WorkloadRunApplied>;
 }
-export interface ControlApi {
-  fleet(): Promise<FleetResponse>; documents(kind: "models" | "profiles"): Promise<DocumentList>;
+export interface LibraryApi {
+  librarySnapshot(cursor?: string, signal?: AbortSignal): Promise<LibrarySnapshot>;
+  libraryRecipe(recipeId: string, signal?: AbortSignal): Promise<LibraryRecipeDetail>;
+  previewLibraryMapping(input: LibraryMappingPreviewInput, signal?: AbortSignal): Promise<LibraryMappingPlan>;
+  applyLibraryMapping(input: LibraryMappingApplyInput, signal?: AbortSignal): Promise<LibraryMappingResult>;
+  previewLibraryInstall(input: LibraryInstallPreviewInput, signal?: AbortSignal): Promise<LibraryInstallPlan>;
+  applyLibraryInstall(input: LibraryInstallApplyInput, signal?: AbortSignal): Promise<LibraryOperation>;
+  previewLibraryLoad(input: LibraryLoadPreviewInput, signal?: AbortSignal): Promise<LibraryLoadPlan>;
+  applyLibraryLoad(input: LibraryLoadApplyInput, signal?: AbortSignal): Promise<LibraryOperation>;
+  previewLibraryStop(runId: string, signal?: AbortSignal): Promise<LibraryStopPlan>;
+  applyLibraryStop(runId: string, input: LibraryStopApplyInput, signal?: AbortSignal): Promise<LibraryOperation>;
+  previewLibraryUninstall(installationId: string, signal?: AbortSignal): Promise<LibraryUninstallPlan>;
+  applyLibraryUninstall(installationId: string, input: LibraryUninstallApplyInput, signal?: AbortSignal): Promise<LibraryOperation>;
+  libraryOperation(operationId: string, signal?: AbortSignal): Promise<LibraryOperation>;
+  retryLibraryOperation(operationId: string, signal?: AbortSignal): Promise<LibraryOperation>;
+  libraryRunStatus(runId: string, signal?: AbortSignal): Promise<LibraryRunStatus>;
+  libraryJobProgress(jobId: string, signal?: AbortSignal): Promise<JobDetail>;
+}
+export interface ControlApi extends LibraryApi {
+  visualFleet(signal?: AbortSignal): Promise<VisualFleetSnapshot>;
+  fleetEvidence(signal?: AbortSignal): Promise<FleetEvidenceResponse>;
+  nodeStatuses(signal?: AbortSignal): Promise<FleetEvidenceResponse>;
+  nodeTelemetryHistory(nodeId: string, start: string, end: string, resolution: TelemetryResolution, maximumPoints: number, signal?: AbortSignal): Promise<TelemetryHistory>;
   jobs(cursor?: string): Promise<JobsResponse>;
   job(jobId: string, operationCursor?: string, targetCursor?: string): Promise<JobDetail>;
   resumeJob(jobId: string): Promise<JobResumeResponse>;
   audit(): Promise<{events: AuditSummary[]}>;
   preview(input: ProposalInput): Promise<ProposalPreview>; submit(digest: string): Promise<Record<string, unknown>>;
-  planProfile(profileId: string): Promise<ReconciliationPlan>;
-  applyReconciliation(digest: string, fleetEvidenceDigest: string): Promise<ReconciliationAccepted>;
   agents(): Promise<AgentsResponse>;
   enrollments(): Promise<EnrollmentListResponse>;
   createEnrollmentGrant(nodeId: string, ttlSeconds: number, signal?: AbortSignal): Promise<EnrollmentGrantResponse>;

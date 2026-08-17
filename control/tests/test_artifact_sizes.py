@@ -16,16 +16,14 @@ def test_declared_recipe_sizes_resolve_immutable_external_artifacts() -> None:
     artifacts = DeclaredArtifactSizeResolver().resolve(document)
 
     assert artifacts[0].source == (
-        "Qwen/Qwen3-30B-A3B-Instruct-2507@0123456789abcdef0123456789abcdef01234567"
+        "vonk-forge/synthetic-tiny@0123456789abcdef0123456789abcdef01234567"
     )
-    assert artifacts[0].size_bytes == 61_000_000_000
+    assert artifacts[0].size_bytes == 1024
     assert len(artifacts[0].digest) == 64
 
 
-def test_declared_sizes_reject_inconsistent_profile_artifact_totals() -> None:
+def test_declared_sizes_reject_inconsistent_topology_artifact_totals() -> None:
     document = recipe()
-    document["deployment_profiles"][0]["roles"][0]["resources"]["disk"][
-        "artifact_bytes"
-    ] = 1
+    document["topology"]["roles"][0]["resources"]["disk"]["artifact_bytes"] = 1
     with pytest.raises(ArtifactSizeError, match="smaller"):
         DeclaredArtifactSizeResolver().resolve(document)

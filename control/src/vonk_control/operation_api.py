@@ -10,9 +10,9 @@ from copy import deepcopy
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, Field, RootModel
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
@@ -44,17 +44,22 @@ _ADMIN_OPERATION_IDS = {
     ("post", "/api/v1/agents/enrollments/{enrollment_id}/reject"): "rejectAgentEnrollment",
     ("post", "/api/v1/agents/nodes/{node_id}/revoke"): "revokeAgentNode",
     ("get", "/api/v1/fleet"): "getFleetStatus",
+    ("get", "/api/v1/fleet/stream"): "streamFleetEvents",
+    ("get", "/api/v1/library"): "listLibrary",
+    (
+        "get",
+        "/api/v1/library/recipes/{recipe_id}",
+    ): "getLibraryRecipe",
     ("get", "/api/v1/nodes/status"): "getNodeStatuses",
+    (
+        "get",
+        "/api/v1/nodes/{node_id}/telemetry",
+    ): "getNodeTelemetryHistory",
     ("get", "/api/v1/endpoints/{alias}"): "getPublishedEndpoint",
     ("get", "/api/v1/agents"): "listAgents",
     ("get", "/api/v1/repository"): "getRepository",
-    ("get", "/api/v1/documents"): "listDocuments",
     ("post", "/api/v1/proposals"): "previewProposal",
     ("post", "/api/v1/changes"): "submitChange",
-    ("post", "/api/v1/reconciliations/plan"): "planReconciliation",
-    ("post", "/api/v1/profiles/{profile_id}/plan"): "planProfileReconciliation",
-    ("post", "/api/v1/reconciliations"): "applyReconciliation",
-    ("post", "/api/v1/reconciliations/{reconciliation_id}/cancel"): "cancelReconciliation",
     ("get", "/api/v1/jobs"): "listJobs",
     ("get", "/api/v1/audit"): "listAuditEvents",
     ("get", "/api/v1/jobs/{job_id}"): "getJob",
@@ -126,127 +131,6 @@ def bounded_error_responses(*status_codes: int) -> dict[int, dict[str, object]]:
         status_code: {"model": BoundedErrorResponse}
         for status_code in status_codes
     }
-
-
-class PlanPlacements(RootModel[dict[str, list[str]]]):
-    root: dict[str, list[str]] = Field(max_length=128)
-
-
-class PlanQuota(StrictModel):
-    requests_per_minute: int = Field(ge=1, le=100_000, strict=True)
-    tokens_per_minute: int = Field(ge=1, le=100_000_000, strict=True)
-
-
-class PlanRoute(StrictModel):
-    workload_id: str = Field(pattern=IDENTIFIER_PATTERN)
-    nodes: list[str] = Field(min_length=1, max_length=64)
-    entrypoint_node_id: str = Field(pattern=NODE_PATTERN)
-    scheme: Literal["http", "https"]
-    port: int = Field(ge=1, le=65535, strict=True)
-    path: str = Field(min_length=1, max_length=512, pattern=r"^/")
-    quota: PlanQuota
-    quota_digest: str = Field(pattern=DIGEST_PATTERN)
-
-
-class PlanRoutes(RootModel[dict[str, PlanRoute]]):
-    root: dict[str, PlanRoute] = Field(max_length=128)
-
-
-class PlanReleaseRequest(StrictModel):
-    schema_version: Literal[1]
-    target_name: str = Field(pattern=IDENTIFIER_PATTERN)
-    oci_manifest_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
-    target_digest: str = Field(pattern=DIGEST_PATTERN)
-    provenance_digest: str = Field(pattern=DIGEST_PATTERN)
-    adapter_id: str = Field(pattern=IDENTIFIER_PATTERN)
-
-
-class PlanWorkloadRequest(StrictModel):
-    schema_version: Literal[1]
-    workload_id: str = Field(pattern=IDENTIFIER_PATTERN)
-    release_digest: str = Field(pattern=DIGEST_PATTERN)
-    adapter_id: str = Field(pattern=IDENTIFIER_PATTERN)
-
-
-class PlanPrepareRequest(PlanWorkloadRequest):
-    profile_digest: str = Field(pattern=DIGEST_PATTERN)
-
-
-class PlanStartRequest(PlanWorkloadRequest):
-    preparation_digest: str = Field(pattern=DIGEST_PATTERN)
-
-
-class PlanVerifyRequest(PlanWorkloadRequest):
-    expected_digest: str = Field(pattern=DIGEST_PATTERN)
-
-
-class PlanWorkloadRequests(StrictModel):
-    prepare: PlanPrepareRequest
-    start: PlanStartRequest
-    stop: PlanWorkloadRequest
-    health: PlanWorkloadRequest
-    verify: PlanVerifyRequest
-
-
-class PlanEndpoint(StrictModel):
-    scheme: Literal["http", "https"]
-    port: int = Field(ge=1, le=65535, strict=True)
-    path: str = Field(min_length=1, max_length=512, pattern=r"^/")
-
-
-class PlanRelease(StrictModel):
-    manifest_path: str = Field(min_length=1, max_length=512)
-    manifest_sha256: str = Field(pattern=DIGEST_PATTERN)
-    definition_hash: str = Field(pattern=DIGEST_PATTERN)
-    release_request: PlanReleaseRequest
-    workload_requests: PlanWorkloadRequests
-    endpoint: PlanEndpoint
-
-
-class PlanReleases(RootModel[dict[str, PlanRelease]]):
-    root: dict[str, PlanRelease] = Field(max_length=128)
-
-
-class PlanInputDigests(RootModel[dict[str, str]]):
-    root: dict[str, str] = Field(max_length=512)
-
-
-class PlanOperation(StrictModel):
-    operation_id: str = Field(min_length=1, max_length=128)
-    node_id: str = Field(pattern=NODE_PATTERN)
-    workload_id: str = Field(pattern=IDENTIFIER_PATTERN)
-    kind: str = Field(min_length=1, max_length=80)
-    dependencies: list[str] = Field(max_length=512)
-    compensation_kind: str | None = Field(default=None, max_length=80)
-    payload_digest: str = Field(pattern=DIGEST_PATTERN)
-
-
-class PlanOperationGraph(StrictModel):
-    schema_version: Literal[1]
-    base_commit: str = Field(pattern=COMMIT_PATTERN)
-    targets: list[NodeIdentifier] = Field(max_length=512)
-    nodes: list[PlanOperation] = Field(max_length=4096)
-
-
-class ReconciliationPlanResponse(StrictModel):
-    commit: str = Field(pattern=COMMIT_PATTERN)
-    digest: str = Field(pattern=DIGEST_PATTERN)
-    fleet_evidence_digest: str = Field(pattern=DIGEST_PATTERN)
-    targets: list[NodeIdentifier] = Field(max_length=512)
-    placements: PlanPlacements
-    routes: PlanRoutes
-    releases: PlanReleases
-    input_digests: PlanInputDigests
-    reconciliation_id: str = Field(min_length=1, max_length=128)
-    operation_graph: PlanOperationGraph
-    agent_protocol_range: list[int] = Field(min_length=2, max_length=2)
-
-
-class ReconciliationAcceptedResponse(StrictModel):
-    base_commit: str = Field(pattern=COMMIT_PATTERN)
-    job_id: str
-    reconciliation_id: str | None = None
-    state: str
 
 
 class EndpointResponse(StrictModel):
@@ -783,6 +667,12 @@ class _DurableOperationProjection:
 
     def resume_job(self, job_id: str) -> None:
         with self._sessions.begin() as session:
+            job = session.get(Job, job_id)
+            if job is None:
+                raise KeyError(job_id)
+            if job.state != "waiting-for-operator":
+                raise ValueError("job is not waiting for operator")
+            now = self._clock()
             result = session.execute(
                 update(Job)
                 .where(
@@ -792,13 +682,15 @@ class _DurableOperationProjection:
                 .values(
                     state="queued",
                     status_reason=None,
-                    updated_at=self._clock(),
+                    updated_at=now,
                 )
+                .execution_options(synchronize_session=False)
             )
             if result.rowcount == 1:
+                job.state = "queued"
+                job.status_reason = None
+                job.updated_at = now
                 return
-            if session.get(Job, job_id) is None:
-                raise KeyError(job_id)
             raise ValueError("job is not waiting for operator")
 
 
@@ -836,6 +728,7 @@ def admin_openapi_schema(app: Any) -> dict[str, object]:
         "/api/v1/auth/login",
         "/api/v1/auth/logout",
         "/api/v1/auth/session",
+        "/api/v1/fleet/stream",
     }
     includes_browser_auth = any(
         path in source.get("paths", {}) for path in browser_auth_paths
@@ -957,138 +850,3 @@ def fleet_response(fleet_state: Mapping[str, object]) -> FleetStatusResponse:
     public = evidence.model_dump(mode="json")
     digest = hashlib.sha256(canonical_message(public)).hexdigest()
     return FleetStatusResponse(**public, evidence_digest=digest)
-
-
-def plan_response(
-    plan: Any, *, fleet_evidence_digest: str
-) -> ReconciliationPlanResponse:
-    """Project an accepted planner result without changing its canonical fields."""
-
-    routes = {
-        alias: _plan_route(value)
-        for alias, value in _plan_mapping(plan.routes, "plan routes").items()
-    }
-    releases = {
-        workload_id: _plan_release(value)
-        for workload_id, value in _plan_mapping(
-            plan.releases, "plan releases"
-        ).items()
-    }
-    graph = _plan_mapping(plan.operation_graph.document, "operation graph")
-    raw_nodes = graph.get("nodes")
-    if not isinstance(raw_nodes, (list, tuple)):
-        raise TypeError("operation graph nodes are invalid")
-    return ReconciliationPlanResponse(
-        commit=plan.commit,
-        digest=plan.digest,
-        fleet_evidence_digest=fleet_evidence_digest,
-        targets=list(plan.targets),
-        placements=PlanPlacements(root=dict(plan.placements)),
-        routes=PlanRoutes(root=routes),
-        releases=PlanReleases(root=releases),
-        input_digests=PlanInputDigests(root=dict(plan.input_digests)),
-        reconciliation_id=plan.operation_graph.reconciliation_id,
-        operation_graph=PlanOperationGraph(
-            schema_version=graph["schema_version"],
-            base_commit=graph["base_commit"],
-            targets=graph["targets"],
-            nodes=[_plan_operation(value) for value in raw_nodes],
-        ),
-        agent_protocol_range=list(plan.agent_protocol_range),
-    )
-
-
-def _plan_mapping(value: object, field: str) -> Mapping[str, object]:
-    if not isinstance(value, Mapping) or not all(
-        isinstance(key, str) for key in value
-    ):
-        raise TypeError(f"{field} is invalid")
-    return value
-
-
-def _plan_route(value: object) -> PlanRoute:
-    raw = _plan_mapping(value, "plan route")
-    quota = _plan_mapping(raw["quota"], "plan route quota")
-    return PlanRoute(
-        workload_id=raw["workload_id"],
-        nodes=raw["nodes"],
-        entrypoint_node_id=raw["entrypoint_node_id"],
-        scheme=raw["scheme"],
-        port=raw["port"],
-        path=raw["path"],
-        quota=PlanQuota(
-            requests_per_minute=quota["requests_per_minute"],
-            tokens_per_minute=quota["tokens_per_minute"],
-        ),
-        quota_digest=raw["quota_digest"],
-    )
-
-
-def _plan_release(value: object) -> PlanRelease:
-    raw = _plan_mapping(value, "plan release")
-    request = _plan_mapping(raw["release_request"], "release request")
-    requests = _plan_mapping(raw["workload_requests"], "workload requests")
-    prepare = _plan_mapping(requests["prepare"], "prepare request")
-    start = _plan_mapping(requests["start"], "start request")
-    stop = _plan_mapping(requests["stop"], "stop request")
-    health = _plan_mapping(requests["health"], "health request")
-    verify = _plan_mapping(requests["verify"], "verify request")
-    endpoint = _plan_mapping(raw["endpoint"], "release endpoint")
-    return PlanRelease(
-        manifest_path=raw["manifest_path"],
-        manifest_sha256=raw["manifest_sha256"],
-        definition_hash=raw["definition_hash"],
-        release_request=PlanReleaseRequest(
-            schema_version=request["schema_version"],
-            target_name=request["target_name"],
-            oci_manifest_digest=request["oci_manifest_digest"],
-            target_digest=request["target_digest"],
-            provenance_digest=request["provenance_digest"],
-            adapter_id=request["adapter_id"],
-        ),
-        workload_requests=PlanWorkloadRequests(
-            prepare=PlanPrepareRequest(
-                **_base_workload_request(prepare),
-                profile_digest=prepare["profile_digest"],
-            ),
-            start=PlanStartRequest(
-                **_base_workload_request(start),
-                preparation_digest=start["preparation_digest"],
-            ),
-            stop=PlanWorkloadRequest(**_base_workload_request(stop)),
-            health=PlanWorkloadRequest(**_base_workload_request(health)),
-            verify=PlanVerifyRequest(
-                **_base_workload_request(verify),
-                expected_digest=verify["expected_digest"],
-            ),
-        ),
-        endpoint=PlanEndpoint(
-            scheme=endpoint["scheme"],
-            port=endpoint["port"],
-            path=endpoint["path"],
-        ),
-    )
-
-
-def _base_workload_request(
-    raw: Mapping[str, object],
-) -> dict[str, object]:
-    return {
-        "schema_version": raw["schema_version"],
-        "workload_id": raw["workload_id"],
-        "release_digest": raw["release_digest"],
-        "adapter_id": raw["adapter_id"],
-    }
-
-
-def _plan_operation(value: object) -> PlanOperation:
-    raw = _plan_mapping(value, "plan operation")
-    return PlanOperation(
-        operation_id=raw["operation_id"],
-        node_id=raw["node_id"],
-        workload_id=raw["workload_id"],
-        kind=raw["kind"],
-        dependencies=raw["dependencies"],
-        compensation_kind=raw["compensation_kind"],
-        payload_digest=raw["payload_digest"],
-    )

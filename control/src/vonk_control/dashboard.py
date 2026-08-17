@@ -17,7 +17,6 @@ from .models import (
     PackageCandidate,
     PackageRollout,
     PackageValidationRun,
-    Reconciliation,
 )
 
 _PACKAGE_CANDIDATE_STATES = frozenset({
@@ -78,9 +77,36 @@ class DashboardService:
         parsed = document.parsed
         if not isinstance(parsed, Mapping) or not isinstance(parsed.get("nodes"), Mapping):
             raise TypeError("fleet document does not contain a node table")
+        fleet_node_ids = tuple(
+            node_id for node_id in parsed["nodes"] if isinstance(node_id, str)
+        )
         with self._sessions() as session:
-            observations = list(session.scalars(select(Observation).where(Observation.kind == "health").order_by(Observation.observed_at.desc())))
-            reconciliations = list(session.scalars(select(Reconciliation).where(Reconciliation.status == "succeeded").order_by(Reconciliation.created_at.desc()).limit(1)))
+            ranked_observations = select(
+                Observation.id.label("id"),
+                func.row_number()
+                .over(
+                    partition_by=Observation.node_id,
+                    order_by=(
+                        Observation.observed_at.desc(),
+                        Observation.id.desc(),
+                    ),
+                )
+                .label("position"),
+            ).where(
+                Observation.kind == "health",
+                Observation.node_id.in_(fleet_node_ids),
+            ).subquery()
+            observations = list(
+                session.scalars(
+                    select(Observation)
+                    .join(
+                        ranked_observations,
+                        Observation.id == ranked_observations.c.id,
+                    )
+                    .where(ranked_observations.c.position == 1)
+                    .order_by(Observation.node_id)
+                )
+            )
             agent_nodes = {
                 node.node_id: node
                 for node in session.scalars(select(AgentNode).order_by(AgentNode.node_id))
@@ -131,10 +157,6 @@ class DashboardService:
         latest = {}
         for observation in observations:
             latest.setdefault(observation.node_id, (observation.payload, observation.observed_at))
-        active_profiles = {}
-        if reconciliations and isinstance(reconciliations[0].summary, Mapping):
-            raw = reconciliations[0].summary.get("node_profiles", {})
-            if isinstance(raw, Mapping): active_profiles = raw
         nodes = []
         current = self._clock()
         if current.tzinfo is None or current.utcoffset() is None:
@@ -205,7 +227,6 @@ class DashboardService:
                     or probe_age > self._health_stale_after_seconds
                 ),
                 "labels": dict(raw.get("labels", {})) if isinstance(raw.get("labels"), Mapping) else {},
-                "profile": active_profiles.get(node_id),
                 "memory_available_bytes": health.get(
                     "memory_available_bytes",
                     0 if inventory is None else inventory.host_memory_free_bytes,

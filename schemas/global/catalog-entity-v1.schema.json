@@ -1,0 +1,185 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://api.vonkforge.ai/schemas/catalog-entity/v1.schema.json",
+  "title": "Vonk Forge immutable catalog entity v1",
+  "type": "object",
+  "oneOf": [
+    {"$ref": "#/$defs/modelGroup"},
+    {"$ref": "#/$defs/model"},
+    {"$ref": "#/$defs/modelVersion"},
+    {"$ref": "#/$defs/executionHarness"},
+    {"$ref": "#/$defs/runtimeDistribution"},
+    {"$ref": "#/$defs/patchBundle"}
+  ],
+  "$defs": {
+    "slug": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,62}$"},
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "publisher", "slug", "content_sha256"],
+      "properties": {
+        "kind": {"enum": ["model-group", "model", "model-version", "execution-harness", "runtime-distribution", "patch-bundle"]},
+        "publisher": {"$ref": "#/$defs/slug"},
+        "slug": {"$ref": "#/$defs/slug"},
+        "content_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "modelGroupReference": {
+      "allOf": [
+        {"$ref": "#/$defs/reference"},
+        {"properties": {"kind": {"const": "model-group"}}}
+      ]
+    },
+    "modelReference": {
+      "allOf": [
+        {"$ref": "#/$defs/reference"},
+        {"properties": {"kind": {"const": "model"}}}
+      ]
+    },
+    "modelVersionReference": {
+      "allOf": [
+        {"$ref": "#/$defs/reference"},
+        {"properties": {"kind": {"const": "model-version"}}}
+      ]
+    },
+    "executionHarnessReference": {
+      "allOf": [
+        {"$ref": "#/$defs/reference"},
+        {"properties": {"kind": {"const": "execution-harness"}}}
+      ]
+    },
+    "runtimeDistributionReference": {
+      "allOf": [
+        {"$ref": "#/$defs/reference"},
+        {"properties": {"kind": {"const": "runtime-distribution"}}}
+      ]
+    },
+    "patchBundleReference": {
+      "allOf": [
+        {"$ref": "#/$defs/reference"},
+        {"properties": {"kind": {"const": "patch-bundle"}}}
+      ]
+    },
+    "immutableSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "revision"],
+      "properties": {
+        "repository": {"type": "string", "format": "uri", "minLength": 1, "maxLength": 512},
+        "revision": {"type": "string", "pattern": "^[a-f0-9]{40}$"}
+      }
+    },
+    "sourceBundle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha256", "expected_bytes", "media_type"],
+      "properties": {
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "expected_bytes": {"type": "integer", "minimum": 1},
+        "media_type": {"const": "application/vnd.vonk-forge.source-bundle.v1+tar"}
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "description", "tags"],
+      "properties": {
+        "title": {"type": "string", "minLength": 1, "maxLength": 120},
+        "description": {"type": "string", "minLength": 1, "maxLength": 4000},
+        "tags": {"type": "array", "maxItems": 20, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9.-]{0,39}$"}}
+      }
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["publisher", "slug"],
+      "properties": {"publisher": {"$ref": "#/$defs/slug"}, "slug": {"$ref": "#/$defs/slug"}}
+    },
+    "base": {
+      "type": "object",
+      "required": ["schema_version", "kind", "identity", "metadata"],
+      "properties": {
+        "schema_version": {"const": 1},
+        "kind": {"enum": ["model-group", "model", "model-version", "execution-harness", "runtime-distribution", "patch-bundle"]},
+        "identity": {"$ref": "#/$defs/identity"},
+        "metadata": {"$ref": "#/$defs/metadata"}
+      }
+    },
+    "modelGroup": {
+      "allOf": [
+        {"$ref": "#/$defs/base"},
+        {"properties": {"kind": {"const": "model-group"}, "family": {"type": "string", "pattern": "^[a-z0-9][a-z0-9.-]{0,63}$"}}, "required": ["family"]}
+      ],
+      "unevaluatedProperties": false
+    },
+    "model": {
+      "allOf": [
+        {"$ref": "#/$defs/base"},
+        {"properties": {"kind": {"const": "model"}, "model_group": {"$ref": "#/$defs/modelGroupReference"}, "architecture": {"type": "string", "minLength": 1, "maxLength": 128}}, "required": ["model_group", "architecture"]}
+      ],
+      "unevaluatedProperties": false
+    },
+    "modelVersion": {
+      "allOf": [
+        {"$ref": "#/$defs/base"},
+        {"properties": {
+          "kind": {"const": "model-version"},
+          "model": {"$ref": "#/$defs/modelReference"},
+          "version": {"type": "string", "minLength": 1, "maxLength": 128},
+          "source": {"$ref": "#/$defs/immutableSource"},
+          "lineage": {"type": "object", "additionalProperties": false, "required": ["publisher", "relation", "source_model", "derivation"], "properties": {"publisher": {"type": "string", "minLength": 1, "maxLength": 128}, "relation": {"enum": ["official", "derived", "quantized"]}, "source_model": {"$ref": "#/$defs/modelReference"}, "derivation": {"type": "string", "minLength": 1, "maxLength": 2000}}},
+          "format": {"type": "object", "additionalProperties": false, "required": ["container", "precision", "quantization"], "properties": {"container": {"enum": ["gguf", "safetensors"]}, "precision": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"}, "quantization": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$"}}},
+          "parameters": {"type": "object", "additionalProperties": false, "required": ["total", "active"], "properties": {"total": {"type": ["integer", "null"], "minimum": 1}, "active": {"type": ["integer", "null"], "minimum": 1}}},
+          "limits": {"type": "object", "additionalProperties": false, "required": ["context_tokens"], "properties": {"context_tokens": {"type": ["integer", "null"], "minimum": 1}, "resolution_pixels": {"type": ["integer", "null"], "minimum": 1}, "frames": {"type": ["integer", "null"], "minimum": 1}, "sample_rate_hz": {"type": ["integer", "null"], "minimum": 1}}},
+          "sizes": {"type": "object", "additionalProperties": false, "required": ["download_bytes", "installed_bytes"], "properties": {"download_bytes": {"type": "integer", "minimum": 1}, "installed_bytes": {"type": "integer", "minimum": 1}}},
+          "license": {"type": "object", "additionalProperties": false, "required": ["spdx", "url", "attribution", "operator_acceptance_required"], "properties": {"spdx": {"type": "string", "minLength": 1, "maxLength": 128}, "url": {"type": "string", "format": "uri", "maxLength": 512}, "attribution": {"type": "array", "maxItems": 32, "items": {"type": "string", "minLength": 1, "maxLength": 512}}, "operator_acceptance_required": {"type": "boolean"}}},
+          "access": {"type": "object", "additionalProperties": false, "required": ["visibility", "gated", "authentication"], "properties": {"visibility": {"enum": ["public", "restricted", "private"]}, "gated": {"type": "boolean"}, "authentication": {"enum": ["none", "token", "manual"]}}},
+          "artifacts": {"type": "array", "minItems": 1, "maxItems": 256, "items": {"type": "object", "additionalProperties": false, "required": ["id", "path", "kind", "repository", "revision", "sha256", "download_bytes", "installed_bytes", "roles"], "properties": {"id": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"}, "path": {"type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\u0000]{1,512}$"}, "kind": {"enum": ["huggingface.file", "http.file", "oci.artifact"]}, "repository": {"type": "string", "minLength": 1, "maxLength": 512}, "revision": {"type": "string", "pattern": "^[a-f0-9]{40}$"}, "sha256": {"$ref": "#/$defs/sha256"}, "download_bytes": {"type": "integer", "minimum": 1}, "installed_bytes": {"type": "integer", "minimum": 1}, "roles": {"type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"}}}}},
+          "dependencies": {"type": "array", "maxItems": 32, "uniqueItems": true, "items": {"$ref": "#/$defs/modelVersionReference"}},
+          "availability": {"enum": ["active", "withdrawn", "superseded"]},
+          "supersedes": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/modelVersionReference"}]}
+        }, "required": ["model", "version", "source", "lineage", "format", "parameters", "limits", "sizes", "license", "access", "artifacts", "dependencies", "availability", "supersedes"]}
+      ],
+      "unevaluatedProperties": false
+    },
+    "executionHarness": {
+      "allOf": [
+        {"$ref": "#/$defs/base"},
+        {
+          "properties": {
+            "kind": {"const": "execution-harness"},
+            "runtime_interface": {"const": "vonk.runtime.v1"},
+            "adapters": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["openai", "image-job", "audio-job", "video-job", "mesh-job", "artifact-job"]}},
+            "source_bundle": {"$ref": "#/$defs/sourceBundle"},
+            "compiler_slug": {"enum": ["vllm", "sglang", "tensorrt-llm", "llama-cpp", "ds4", "diffusers", "comfyui", "pytorch-pipeline"]},
+            "contract_version": {"const": 1},
+            "topology_modes": {"type": "array", "minItems": 1, "maxItems": 7, "uniqueItems": true, "items": {"enum": ["single", "tensor_parallel", "pipeline_parallel", "data_parallel", "hybrid", "ray", "mpi"]}},
+            "capability_requirements": {"type": "array", "minItems": 1, "maxItems": 8, "uniqueItems": true, "items": {"enum": ["nvidia-gpu", "immutable-workflow", "signed-source-bundle"]}},
+            "security_exceptions": {"type": "array", "maxItems": 8, "uniqueItems": true, "items": {"enum": ["model.trust-remote-code"]}}
+          },
+          "required": ["runtime_interface", "adapters"],
+          "oneOf": [
+            {"required": ["source_bundle"], "not": {"anyOf": [{"required": ["compiler_slug"]}, {"required": ["contract_version"]}, {"required": ["topology_modes"]}, {"required": ["capability_requirements"]}, {"required": ["security_exceptions"]}]}},
+            {"required": ["compiler_slug", "contract_version", "topology_modes", "capability_requirements", "security_exceptions"], "not": {"required": ["source_bundle"]}}
+          ]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "runtimeDistribution": {
+      "allOf": [
+        {"$ref": "#/$defs/base"},
+        {"properties":{"kind":{"const":"runtime-distribution"},"implements_harness":{"$ref":"#/$defs/executionHarnessReference"},"platform":{"const":"linux/arm64"},"source":{"type":"object","additionalProperties":false,"required":["repository","revision","archive_sha256","license"],"properties":{"repository":{"type":"string","format":"uri","maxLength":512},"revision":{"type":"string","pattern":"^[a-f0-9]{40}$"},"archive_sha256":{"$ref":"#/$defs/sha256"},"license":{"type":"string","minLength":1,"maxLength":128}}},"image":{"type":"string","pattern":"^[a-z0-9][a-z0-9._:/-]*@sha256:[a-f0-9]{64}$"},"image_manifest":{"type":"object","additionalProperties":false,"required":["digest","size","config_digest","compressed_layers_bytes"],"properties":{"digest":{"$ref":"#/$defs/sha256"},"size":{"type":"integer","minimum":1},"config_digest":{"$ref":"#/$defs/sha256"},"compressed_layers_bytes":{"type":"integer","minimum":1}}},"dependencies":{"type":"array","maxItems":64,"items":{"type":"object","additionalProperties":false,"required":["name","version","source","license"],"properties":{"name":{"type":"string","minLength":1,"maxLength":128},"version":{"type":"string","minLength":1,"maxLength":128},"source":{"type":"string","minLength":1,"maxLength":512},"license":{"type":"string","minLength":1,"maxLength":128}}}},"build":{"type":"object","additionalProperties":false,"required":["network_hosts","offline_after_installation"],"properties":{"network_hosts":{"type":"array","maxItems":64,"uniqueItems":true,"items":{"type":"string","pattern":"^[A-Za-z0-9.-]+$"}},"offline_after_installation":{"const":true}}},"capabilities":{"type":"object","additionalProperties":false,"required":["distributed_vllm"],"properties":{"distributed_vllm":{"oneOf":[{"type":"null"},{"type":"object","additionalProperties":false,"required":["verified","mechanism","topology_mode","node_count","world_size","tensor_parallel_size","pipeline_parallel_size","data_parallel_size","fabric","endpoint_role","worker_role","rank_loss_withdraws_endpoint","launch"],"properties":{"verified":{"const":true},"mechanism":{"const":"vllm-mp"},"topology_mode":{"const":"distributed"},"node_count":{"type":"integer","minimum":2},"world_size":{"type":"integer","minimum":2},"tensor_parallel_size":{"type":"integer","minimum":2},"pipeline_parallel_size":{"type":"integer","minimum":1},"data_parallel_size":{"type":"integer","minimum":1},"fabric":{"type":"string","minLength":1,"maxLength":64},"endpoint_role":{"type":"string","pattern":"^[a-z][a-z0-9_-]{0,63}$"},"worker_role":{"type":"string","pattern":"^[a-z][a-z0-9_-]{0,63}$"},"rank_loss_withdraws_endpoint":{"const":true},"launch":{"type":"object","additionalProperties":false,"required":["rendezvous","rank_profiles"],"properties":{"rendezvous":{"type":"object","additionalProperties":false,"required":["local_address_environment","master_address_environment","master_port_environment","master_role"],"properties":{"local_address_environment":{"const":"VONK_LOCAL_ADDR"},"master_address_environment":{"const":"VONK_MASTER_ADDR"},"master_port_environment":{"const":"VONK_MASTER_PORT"},"master_role":{"type":"string","pattern":"^[a-z][a-z0-9_-]{0,63}$"}}},"rank_profiles":{"type":"array","minItems":2,"maxItems":32,"items":{"type":"object","additionalProperties":false,"required":["rank","role","environment"],"properties":{"rank":{"type":"integer","minimum":0},"role":{"type":"string","pattern":"^[a-z][a-z0-9_-]{0,63}$"},"environment":{"type":"object","additionalProperties":false,"required":["NCCL_SOCKET_IFNAME","NCCL_IB_HCA","NCCL_IB_GID_INDEX","TP_SOCKET_IFNAME","GLOO_SOCKET_IFNAME"],"properties":{"NCCL_SOCKET_IFNAME":{"type":"string","minLength":1,"maxLength":256},"NCCL_IB_HCA":{"type":"string","minLength":1,"maxLength":256},"NCCL_IB_GID_INDEX":{"type":"string","pattern":"^[0-9]{1,3}$"},"TP_SOCKET_IFNAME":{"type":"string","minLength":1,"maxLength":256},"GLOO_SOCKET_IFNAME":{"type":"string","minLength":1,"maxLength":256}}}}}}}}}}]}}},"security":{"type":"object","additionalProperties":false,"required":["network_mode","user","no_new_privileges","capabilities"],"properties":{"network_mode":{"const":"none"},"user":{"type":"string","pattern":"^(?!0(?::0)?$)[1-9][0-9]*(?::[1-9][0-9]*)?$"},"no_new_privileges":{"const":true},"capabilities":{"type":"array","maxItems":0}}}},"required":["implements_harness","platform","image","security"]}
+      ],
+      "unevaluatedProperties": false
+    },
+    "patchBundle": {
+      "allOf": [
+        {"$ref": "#/$defs/base"},
+        {"properties": {"kind": {"const": "patch-bundle"}, "applies_to": {"$ref": "#/$defs/runtimeDistributionReference"}, "source": {"type": "object", "additionalProperties": false, "required": ["repository", "revision", "archive_sha256"], "properties": {"repository": {"type": "string", "format": "uri", "maxLength": 512}, "revision": {"type": "string", "pattern": "^[a-f0-9]{40}$"}, "archive_sha256": {"$ref": "#/$defs/sha256"}}}, "base_source": {"$ref": "#/$defs/immutableSource"}, "patches": {"type": "array", "minItems": 1, "maxItems": 64, "items": {"type": "object", "additionalProperties": false, "required": ["order", "path", "sha256", "purpose", "upstream_reference", "license"], "properties": {"order": {"type": "integer", "minimum": 1}, "path": {"type": "string", "pattern": "^patches/[A-Za-z0-9._/-]+$", "maxLength": 256}, "sha256": {"$ref": "#/$defs/sha256"}, "purpose": {"type": "string", "minLength": 1, "maxLength": 1000}, "upstream_reference": {"type": "string", "minLength": 1, "maxLength": 512}, "license": {"type": "string", "minLength": 1, "maxLength": 128}}}}, "pre_patch_tree_sha256": {"$ref": "#/$defs/sha256"}, "post_patch_tree_sha256": {"$ref": "#/$defs/sha256"}, "compatible_model_versions": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"$ref": "#/$defs/modelVersionReference"}}, "capability_changes": {"type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9.-]{0,127}$"}}, "removal_condition": {"type": "string", "minLength": 1, "maxLength": 1000}, "license": {"type": "object", "additionalProperties": false, "required": ["spdx", "attribution"], "properties": {"spdx": {"type": "string", "minLength": 1, "maxLength": 128}, "attribution": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"type": "string", "minLength": 1, "maxLength": 512}}}}, "source_bundle": {"$ref": "#/$defs/sourceBundle"}, "sha256": {"$ref": "#/$defs/sha256"}}, "required": ["applies_to", "sha256"]}
+      ],
+      "unevaluatedProperties": false
+    }
+  }
+}

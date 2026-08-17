@@ -337,6 +337,186 @@
         "title": "BuildRequest",
         "type": "object"
       },
+      "CapacityReservations": {
+        "additionalProperties": false,
+        "properties": {
+          "disk_bytes": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Disk Bytes",
+            "type": "integer"
+          },
+          "gpu_memory_bytes": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Gpu Memory Bytes",
+            "type": "integer"
+          },
+          "host_memory_bytes": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Host Memory Bytes",
+            "type": "integer"
+          },
+          "port_count": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Port Count",
+            "type": "integer"
+          },
+          "unified_memory_bytes": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Unified Memory Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "disk_bytes",
+          "unified_memory_bytes",
+          "host_memory_bytes",
+          "gpu_memory_bytes",
+          "port_count"
+        ],
+        "title": "CapacityReservations",
+        "type": "object"
+      },
+      "CatalogEntityListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "entities": {
+            "items": {
+              "$ref": "#/components/schemas/CatalogEntityRevisionResponse"
+            },
+            "maxItems": 100,
+            "title": "Entities",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "entities"
+        ],
+        "title": "CatalogEntityListResponse",
+        "type": "object"
+      },
+      "CatalogEntityRevisionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "content_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Sha256"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Created By",
+            "type": "string"
+          },
+          "document": {
+            "additionalProperties": true,
+            "title": "Document",
+            "type": "object"
+          },
+          "entity_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Entity Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "model-group",
+              "model",
+              "model-version",
+              "execution-harness",
+              "runtime-distribution",
+              "patch-bundle"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "lifecycle": {
+            "enum": [
+              "draft",
+              "blocked",
+              "resolved",
+              "deprecated"
+            ],
+            "title": "Lifecycle",
+            "type": "string"
+          },
+          "publisher": {
+            "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+            "title": "Publisher",
+            "type": "string"
+          },
+          "revision_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Revision Id",
+            "type": "string"
+          },
+          "revision_number": {
+            "minimum": 1.0,
+            "title": "Revision Number",
+            "type": "integer"
+          },
+          "schema_version": {
+            "const": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "slug": {
+            "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+            "title": "Slug",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entity_id",
+          "kind",
+          "publisher",
+          "slug",
+          "title",
+          "revision_id",
+          "revision_number",
+          "lifecycle",
+          "schema_version",
+          "document",
+          "created_by",
+          "created_at"
+        ],
+        "title": "CatalogEntityRevisionResponse",
+        "type": "object"
+      },
       "CatalogProblem": {
         "additionalProperties": false,
         "properties": {
@@ -379,6 +559,21 @@
           "proposal_digest"
         ],
         "title": "ChangeRequest",
+        "type": "object"
+      },
+      "CreateCatalogEntityRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "document": {
+            "additionalProperties": true,
+            "title": "Document",
+            "type": "object"
+          }
+        },
+        "required": [
+          "document"
+        ],
+        "title": "CreateCatalogEntityRequest",
         "type": "object"
       },
       "CreateRecipeRequest": {
@@ -793,6 +988,156 @@
         "title": "EnrollmentSummary",
         "type": "object"
       },
+      "FleetNode": {
+        "additionalProperties": false,
+        "properties": {
+          "connection": {
+            "$ref": "#/components/schemas/NodeConnection"
+          },
+          "display_name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Display Name",
+            "type": "string"
+          },
+          "hostname": {
+            "maxLength": 255,
+            "title": "Hostname",
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "installed": {
+            "items": {
+              "$ref": "#/components/schemas/RecipePresence"
+            },
+            "maxItems": 512,
+            "title": "Installed",
+            "type": "array"
+          },
+          "inventory": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InventoryState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "labels": {
+            "additionalProperties": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxProperties": 64,
+            "propertyNames": {
+              "maxLength": 64,
+              "minLength": 1
+            },
+            "title": "Labels",
+            "type": "object"
+          },
+          "lifecycle": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Lifecycle",
+            "type": "string"
+          },
+          "loaded": {
+            "items": {
+              "$ref": "#/components/schemas/RunPresence"
+            },
+            "maxItems": 512,
+            "title": "Loaded",
+            "type": "array"
+          },
+          "reservations": {
+            "$ref": "#/components/schemas/CapacityReservations"
+          },
+          "telemetry": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TelemetryState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/vonk_control__fleet_projection__ProjectionReason"
+            },
+            "maxItems": 128,
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "display_name",
+          "hostname",
+          "lifecycle",
+          "labels",
+          "connection",
+          "inventory",
+          "telemetry",
+          "installed",
+          "loaded",
+          "reservations",
+          "warnings"
+        ],
+        "title": "FleetNode",
+        "type": "object"
+      },
+      "FleetSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "event_cursor": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Event Cursor",
+            "type": "integer"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/FleetNode"
+            },
+            "maxItems": 500,
+            "title": "Nodes",
+            "type": "array"
+          },
+          "repository_commit": {
+            "pattern": "^[0-9a-f]{40}$",
+            "title": "Repository Commit",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "event_cursor",
+          "generated_at",
+          "repository_commit",
+          "nodes"
+        ],
+        "title": "FleetSnapshot",
+        "type": "object"
+      },
       "FleetStatusResponse": {
         "additionalProperties": false,
         "properties": {
@@ -841,6 +1186,34 @@
           "slug"
         ],
         "title": "ForkRecipeRequest",
+        "type": "object"
+      },
+      "FreshnessPolicy": {
+        "additionalProperties": false,
+        "properties": {
+          "inventory_fresh_seconds": {
+            "default": 300,
+            "maximum": 3600.0,
+            "minimum": 1.0,
+            "title": "Inventory Fresh Seconds",
+            "type": "integer"
+          },
+          "telemetry_delayed_seconds": {
+            "default": 20,
+            "maximum": 300.0,
+            "minimum": 1.0,
+            "title": "Telemetry Delayed Seconds",
+            "type": "integer"
+          },
+          "telemetry_live_seconds": {
+            "default": 6,
+            "maximum": 60.0,
+            "minimum": 1.0,
+            "title": "Telemetry Live Seconds",
+            "type": "integer"
+          }
+        },
+        "title": "FreshnessPolicy",
         "type": "object"
       },
       "GlobalImportPreviewRequest": {
@@ -1171,6 +1544,27 @@
         "title": "InstallPlanResponse",
         "type": "object"
       },
+      "InstallPreviewInput": {
+        "additionalProperties": false,
+        "properties": {
+          "mapping_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Mapping Id",
+            "type": "string"
+          },
+          "recipe_build_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Recipe Build Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mapping_id",
+          "recipe_build_id"
+        ],
+        "title": "InstallPreviewInput",
+        "type": "object"
+      },
       "InstallPreviewRequest": {
         "additionalProperties": false,
         "properties": {
@@ -1190,6 +1584,25 @@
           "recipe_build_id"
         ],
         "title": "InstallPreviewRequest",
+        "type": "object"
+      },
+      "InstallPreviewTarget": {
+        "additionalProperties": false,
+        "properties": {
+          "input": {
+            "$ref": "#/components/schemas/InstallPreviewInput"
+          },
+          "kind": {
+            "const": "install",
+            "default": "install",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "input"
+        ],
+        "title": "InstallPreviewTarget",
         "type": "object"
       },
       "InstallRequest": {
@@ -1223,6 +1636,147 @@
           "request_key"
         ],
         "title": "InstallRequest",
+        "type": "object"
+      },
+      "InventoryState": {
+        "additionalProperties": false,
+        "properties": {
+          "age_seconds": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Age Seconds",
+            "type": "number"
+          },
+          "artifact_store_read_only": {
+            "title": "Artifact Store Read Only",
+            "type": "boolean"
+          },
+          "capabilities": {
+            "items": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Capabilities",
+            "type": "array"
+          },
+          "container_runtime_version": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Container Runtime Version",
+            "type": "string"
+          },
+          "disk_free_bytes": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Disk Free Bytes",
+            "type": "integer"
+          },
+          "disk_total_bytes": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Disk Total Bytes",
+            "type": "integer"
+          },
+          "fabric_address": {
+            "anyOf": [
+              {
+                "maxLength": 45,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fabric Address"
+          },
+          "fabric_bandwidth_mbps": {
+            "anyOf": [
+              {
+                "maximum": 9.223372036854776e+18,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fabric Bandwidth Mbps"
+          },
+          "freshness": {
+            "enum": [
+              "fresh",
+              "stale"
+            ],
+            "title": "Freshness",
+            "type": "string"
+          },
+          "gpu_count": {
+            "maximum": 2147483647.0,
+            "minimum": 0.0,
+            "title": "Gpu Count",
+            "type": "integer"
+          },
+          "gpu_memory_free_bytes": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Gpu Memory Free Bytes",
+            "type": "integer"
+          },
+          "gpu_memory_total_bytes": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Gpu Memory Total Bytes",
+            "type": "integer"
+          },
+          "host_memory_free_bytes": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Host Memory Free Bytes",
+            "type": "integer"
+          },
+          "host_memory_total_bytes": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Host Memory Total Bytes",
+            "type": "integer"
+          },
+          "nvidia_driver_version": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Nvidia Driver Version",
+            "type": "string"
+          },
+          "observed_at": {
+            "format": "date-time",
+            "title": "Observed At",
+            "type": "string"
+          },
+          "received_at": {
+            "format": "date-time",
+            "title": "Received At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "observed_at",
+          "received_at",
+          "age_seconds",
+          "freshness",
+          "disk_total_bytes",
+          "disk_free_bytes",
+          "host_memory_total_bytes",
+          "host_memory_free_bytes",
+          "gpu_memory_total_bytes",
+          "gpu_memory_free_bytes",
+          "gpu_count",
+          "artifact_store_read_only",
+          "capabilities",
+          "nvidia_driver_version",
+          "container_runtime_version"
+        ],
+        "title": "InventoryState",
         "type": "object"
       },
       "JobDetailResponse": {
@@ -1584,6 +2138,484 @@
         "title": "JobsResponse",
         "type": "object"
       },
+      "LibraryInstallationSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "complete": {
+            "title": "Complete",
+            "type": "boolean"
+          },
+          "expected_rank_count": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 1.0,
+            "title": "Expected Rank Count",
+            "type": "integer"
+          },
+          "installation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Installation Id",
+            "type": "string"
+          },
+          "installed_rank_count": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Installed Rank Count",
+            "type": "integer"
+          },
+          "recipe_revision_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Recipe Revision Id",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "planned",
+              "installing",
+              "installed",
+              "partial",
+              "failed"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "installation_id",
+          "recipe_revision_id",
+          "state",
+          "installed_rank_count",
+          "expected_rank_count",
+          "complete"
+        ],
+        "title": "LibraryInstallationSummary",
+        "type": "object"
+      },
+      "LibraryModel": {
+        "additionalProperties": false,
+        "properties": {
+          "model": {
+            "$ref": "#/components/schemas/ModelVersionIdentity"
+          },
+          "page_local": {
+            "const": true,
+            "default": true,
+            "title": "Page Local",
+            "type": "boolean"
+          },
+          "recipes": {
+            "items": {
+              "$ref": "#/components/schemas/LibraryRecipeSummary"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Recipes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "model",
+          "recipes"
+        ],
+        "title": "LibraryModel",
+        "type": "object"
+      },
+      "LibraryRecipeDetail": {
+        "additionalProperties": false,
+        "properties": {
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "operational_state": {
+            "$ref": "#/components/schemas/OperationalState"
+          },
+          "placement": {
+            "items": {
+              "$ref": "#/components/schemas/TopologyPlacement"
+            },
+            "maxItems": 1,
+            "title": "Placement",
+            "type": "array"
+          },
+          "reasons": {
+            "items": {
+              "$ref": "#/components/schemas/vonk_control__library_contract__ProjectionReason"
+            },
+            "maxItems": 16,
+            "title": "Reasons",
+            "type": "array"
+          },
+          "recipe": {
+            "$ref": "#/components/schemas/LibraryRecipeIdentity"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "selected_revision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecipeRevisionSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "topology": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecipeTopology"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "visual_recipe": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VisualRecipeDocument"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "generated_at",
+          "recipe",
+          "selected_revision",
+          "visual_recipe",
+          "topology",
+          "operational_state",
+          "placement",
+          "reasons"
+        ],
+        "title": "LibraryRecipeDetail",
+        "type": "object"
+      },
+      "LibraryRecipeIdentity": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "maxLength": 4096,
+            "title": "Description",
+            "type": "string"
+          },
+          "recipe_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Recipe Id",
+            "type": "string"
+          },
+          "slug": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Slug",
+            "type": "string"
+          },
+          "source_kind": {
+            "enum": [
+              "local",
+              "workload_run",
+              "global",
+              "recipe_library"
+            ],
+            "title": "Source Kind",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "recipe_id",
+          "slug",
+          "title",
+          "description",
+          "source_kind"
+        ],
+        "title": "LibraryRecipeIdentity",
+        "type": "object"
+      },
+      "LibraryRecipeSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "capabilities": {
+            "items": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Capabilities",
+            "type": "array"
+          },
+          "description": {
+            "maxLength": 4096,
+            "title": "Description",
+            "type": "string"
+          },
+          "installation_returned_count": {
+            "maximum": 64.0,
+            "minimum": 0.0,
+            "title": "Installation Returned Count",
+            "type": "integer"
+          },
+          "installation_total_count": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Installation Total Count",
+            "type": "integer"
+          },
+          "installations": {
+            "items": {
+              "$ref": "#/components/schemas/LibraryInstallationSummary"
+            },
+            "maxItems": 64,
+            "title": "Installations",
+            "type": "array"
+          },
+          "installations_truncated": {
+            "title": "Installations Truncated",
+            "type": "boolean"
+          },
+          "reasons": {
+            "items": {
+              "$ref": "#/components/schemas/vonk_control__library_contract__ProjectionReason"
+            },
+            "maxItems": 16,
+            "title": "Reasons",
+            "type": "array"
+          },
+          "recipe_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Recipe Id",
+            "type": "string"
+          },
+          "run_returned_count": {
+            "maximum": 64.0,
+            "minimum": 0.0,
+            "title": "Run Returned Count",
+            "type": "integer"
+          },
+          "run_total_count": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Run Total Count",
+            "type": "integer"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/LibraryRunSummary"
+            },
+            "maxItems": 64,
+            "title": "Runs",
+            "type": "array"
+          },
+          "runs_truncated": {
+            "title": "Runs Truncated",
+            "type": "boolean"
+          },
+          "selected_revision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecipeRevisionSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "slug": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Slug",
+            "type": "string"
+          },
+          "source_kind": {
+            "enum": [
+              "local",
+              "workload_run",
+              "global",
+              "recipe_library"
+            ],
+            "title": "Source Kind",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          },
+          "topology_name": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topology Name"
+          }
+        },
+        "required": [
+          "recipe_id",
+          "slug",
+          "title",
+          "description",
+          "source_kind",
+          "selected_revision",
+          "capabilities",
+          "topology_name",
+          "installations",
+          "installation_total_count",
+          "installation_returned_count",
+          "installations_truncated",
+          "runs",
+          "run_total_count",
+          "run_returned_count",
+          "runs_truncated",
+          "reasons"
+        ],
+        "title": "LibraryRecipeSummary",
+        "type": "object"
+      },
+      "LibraryRunSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_rank_count": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Expected Rank Count",
+            "type": "integer"
+          },
+          "healthy": {
+            "title": "Healthy",
+            "type": "boolean"
+          },
+          "healthy_rank_count": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Healthy Rank Count",
+            "type": "integer"
+          },
+          "installation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Installation Id",
+            "type": "string"
+          },
+          "recipe_revision_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Recipe Revision Id",
+            "type": "string"
+          },
+          "route_state": {
+            "enum": [
+              "withdrawn",
+              "pending",
+              "published",
+              "failed"
+            ],
+            "title": "Route State",
+            "type": "string"
+          },
+          "run_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "planned",
+              "starting",
+              "running",
+              "stopping"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "installation_id",
+          "recipe_revision_id",
+          "state",
+          "route_state",
+          "healthy_rank_count",
+          "expected_rank_count",
+          "healthy"
+        ],
+        "title": "LibraryRunSummary",
+        "type": "object"
+      },
+      "LibrarySnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "freshness_policy": {
+            "$ref": "#/components/schemas/FreshnessPolicy"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/LibraryModel"
+            },
+            "maxItems": 100,
+            "title": "Models",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "unlinked_recipes": {
+            "items": {
+              "$ref": "#/components/schemas/LibraryRecipeSummary"
+            },
+            "maxItems": 100,
+            "title": "Unlinked Recipes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "generated_at",
+          "models",
+          "unlinked_recipes",
+          "next_cursor",
+          "freshness_policy"
+        ],
+        "title": "LibrarySnapshot",
+        "type": "object"
+      },
       "LoginRequest": {
         "additionalProperties": false,
         "properties": {
@@ -1673,10 +2705,6 @@
             "title": "Placement Digest",
             "type": "string"
           },
-          "profile_name": {
-            "title": "Profile Name",
-            "type": "string"
-          },
           "recipe_content_sha256": {
             "title": "Recipe Content Sha256",
             "type": "string"
@@ -1684,18 +2712,71 @@
           "recipe_revision_id": {
             "title": "Recipe Revision Id",
             "type": "string"
+          },
+          "topology_name": {
+            "title": "Topology Name",
+            "type": "string"
           }
         },
         "required": [
           "recipe_revision_id",
           "recipe_content_sha256",
-          "profile_name",
+          "topology_name",
           "generation",
           "parameters",
           "nodes",
           "placement_digest"
         ],
         "title": "MappingPlanResponse",
+        "type": "object"
+      },
+      "MappingPreviewInput": {
+        "additionalProperties": false,
+        "properties": {
+          "node_ids": {
+            "items": {
+              "pattern": "^spk_[0-9a-f]{32}$",
+              "type": "string"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Node Ids",
+            "type": "array"
+          },
+          "parameters": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "maxProperties": 128,
+            "propertyNames": {
+              "maxLength": 64,
+              "minLength": 1
+            },
+            "title": "Parameters",
+            "type": "object"
+          },
+          "recipe_revision_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Recipe Revision Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "recipe_revision_id",
+          "node_ids",
+          "parameters"
+        ],
+        "title": "MappingPreviewInput",
         "type": "object"
       },
       "MappingPreviewRequest": {
@@ -1716,11 +2797,6 @@
             "title": "Parameters",
             "type": "object"
           },
-          "profile_name": {
-            "pattern": "^[a-z][a-z0-9_.-]{0,63}$",
-            "title": "Profile Name",
-            "type": "string"
-          },
           "recipe_revision_id": {
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
             "title": "Recipe Revision Id",
@@ -1729,10 +2805,28 @@
         },
         "required": [
           "recipe_revision_id",
-          "profile_name",
           "node_ids"
         ],
         "title": "MappingPreviewRequest",
+        "type": "object"
+      },
+      "MappingPreviewTarget": {
+        "additionalProperties": false,
+        "properties": {
+          "input": {
+            "$ref": "#/components/schemas/MappingPreviewInput"
+          },
+          "kind": {
+            "const": "mapping",
+            "default": "mapping",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "input"
+        ],
+        "title": "MappingPreviewTarget",
         "type": "object"
       },
       "MappingRequest": {
@@ -1758,11 +2852,6 @@
             "title": "Placement Digest",
             "type": "string"
           },
-          "profile_name": {
-            "pattern": "^[a-z][a-z0-9_.-]{0,63}$",
-            "title": "Profile Name",
-            "type": "string"
-          },
           "recipe_revision_id": {
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
             "title": "Recipe Revision Id",
@@ -1776,7 +2865,6 @@
         },
         "required": [
           "recipe_revision_id",
-          "profile_name",
           "node_ids",
           "placement_digest",
           "request_key"
@@ -1820,6 +2908,137 @@
           }
         },
         "title": "MigrationGrantRequest",
+        "type": "object"
+      },
+      "ModelVersionIdentity": {
+        "additionalProperties": false,
+        "properties": {
+          "content_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Content Sha256",
+            "type": "string"
+          },
+          "kind": {
+            "const": "model-version",
+            "title": "Kind",
+            "type": "string"
+          },
+          "publisher": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Publisher",
+            "type": "string"
+          },
+          "slug": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "publisher",
+          "slug",
+          "content_sha256"
+        ],
+        "title": "ModelVersionIdentity",
+        "type": "object"
+      },
+      "NodeConnection": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_state": {
+            "enum": [
+              "unregistered",
+              "pending",
+              "active",
+              "retired",
+              "revoked"
+            ],
+            "title": "Agent State",
+            "type": "string"
+          },
+          "certificate_state": {
+            "enum": [
+              "valid",
+              "missing",
+              "not-yet-valid",
+              "expired",
+              "revoked",
+              "inactive"
+            ],
+            "title": "Certificate State",
+            "type": "string"
+          },
+          "last_seen_age_seconds": {
+            "anyOf": [
+              {
+                "maximum": 9.223372036854776e+18,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Seen Age Seconds"
+          },
+          "last_seen_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Seen At"
+          },
+          "offline_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "unregistered",
+                  "agent-inactive",
+                  "agent-revoked",
+                  "never-seen",
+                  "last-seen-in-future",
+                  "stale",
+                  "certificate-missing",
+                  "certificate-not-yet-valid",
+                  "certificate-expired",
+                  "certificate-revoked",
+                  "certificate-inactive"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Offline Reason"
+          },
+          "online_state": {
+            "enum": [
+              "online",
+              "offline",
+              "unregistered"
+            ],
+            "title": "Online State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_state",
+          "certificate_state",
+          "online_state",
+          "offline_reason",
+          "last_seen_at",
+          "last_seen_age_seconds"
+        ],
+        "title": "NodeConnection",
         "type": "object"
       },
       "NodeStatus": {
@@ -2151,6 +3370,321 @@
           "result"
         ],
         "title": "OperationResponse",
+        "type": "object"
+      },
+      "OperationalBuild": {
+        "additionalProperties": false,
+        "properties": {
+          "image_bytes": {
+            "anyOf": [
+              {
+                "maximum": 9.223372036854776e+18,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Bytes"
+          },
+          "image_digest": {
+            "anyOf": [
+              {
+                "pattern": "^sha256:[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Digest"
+          },
+          "recipe_build_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Recipe Build Id",
+            "type": "string"
+          },
+          "recipe_revision_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Recipe Revision Id",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "planned",
+              "building",
+              "succeeded",
+              "failed"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "recipe_build_id",
+          "recipe_revision_id",
+          "state",
+          "image_digest"
+        ],
+        "title": "OperationalBuild",
+        "type": "object"
+      },
+      "OperationalInstallation": {
+        "additionalProperties": false,
+        "properties": {
+          "installation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Installation Id",
+            "type": "string"
+          },
+          "mapping_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Mapping Id",
+            "type": "string"
+          },
+          "node_ids": {
+            "items": {
+              "pattern": "^spk_[0-9a-f]{32}$",
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Node Ids",
+            "type": "array"
+          },
+          "recipe_build_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Recipe Build Id",
+            "type": "string"
+          },
+          "recipe_revision_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Recipe Revision Id",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "planned",
+              "installing",
+              "installed",
+              "partial",
+              "failed",
+              "uninstalled"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "installation_id",
+          "recipe_revision_id",
+          "mapping_id",
+          "recipe_build_id",
+          "state",
+          "node_ids"
+        ],
+        "title": "OperationalInstallation",
+        "type": "object"
+      },
+      "OperationalMapping": {
+        "additionalProperties": false,
+        "properties": {
+          "generation": {
+            "maximum": 2147483647.0,
+            "minimum": 1.0,
+            "title": "Generation",
+            "type": "integer"
+          },
+          "mapping_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Mapping Id",
+            "type": "string"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/OperationalMappingNode"
+            },
+            "maxItems": 32,
+            "title": "Nodes",
+            "type": "array"
+          },
+          "recipe_revision_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Recipe Revision Id",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "planned",
+              "ready",
+              "stale"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "topology_name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Topology Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mapping_id",
+          "recipe_revision_id",
+          "topology_name",
+          "generation",
+          "state",
+          "nodes"
+        ],
+        "title": "OperationalMapping",
+        "type": "object"
+      },
+      "OperationalMappingNode": {
+        "additionalProperties": false,
+        "properties": {
+          "endpoint_owner": {
+            "title": "Endpoint Owner",
+            "type": "boolean"
+          },
+          "node_id": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "rank": {
+            "maximum": 31.0,
+            "minimum": 0.0,
+            "title": "Rank",
+            "type": "integer"
+          },
+          "role": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "rank",
+          "role",
+          "endpoint_owner"
+        ],
+        "title": "OperationalMappingNode",
+        "type": "object"
+      },
+      "OperationalRun": {
+        "additionalProperties": false,
+        "properties": {
+          "installation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Installation Id",
+            "type": "string"
+          },
+          "mapping_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Mapping Id",
+            "type": "string"
+          },
+          "node_ids": {
+            "items": {
+              "pattern": "^spk_[0-9a-f]{32}$",
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Node Ids",
+            "type": "array"
+          },
+          "recipe_revision_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Recipe Revision Id",
+            "type": "string"
+          },
+          "route_state": {
+            "enum": [
+              "withdrawn",
+              "pending",
+              "published",
+              "failed"
+            ],
+            "title": "Route State",
+            "type": "string"
+          },
+          "run_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "planned",
+              "starting",
+              "running",
+              "stopping",
+              "stopped",
+              "failed",
+              "lost"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "installation_id",
+          "mapping_id",
+          "recipe_revision_id",
+          "state",
+          "route_state",
+          "node_ids"
+        ],
+        "title": "OperationalRun",
+        "type": "object"
+      },
+      "OperationalState": {
+        "additionalProperties": false,
+        "properties": {
+          "builds": {
+            "items": {
+              "$ref": "#/components/schemas/OperationalBuild"
+            },
+            "maxItems": 512,
+            "title": "Builds",
+            "type": "array"
+          },
+          "installations": {
+            "items": {
+              "$ref": "#/components/schemas/OperationalInstallation"
+            },
+            "maxItems": 512,
+            "title": "Installations",
+            "type": "array"
+          },
+          "mappings": {
+            "items": {
+              "$ref": "#/components/schemas/OperationalMapping"
+            },
+            "maxItems": 512,
+            "title": "Mappings",
+            "type": "array"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/OperationalRun"
+            },
+            "maxItems": 512,
+            "title": "Runs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "builds",
+          "mappings",
+          "installations",
+          "runs"
+        ],
+        "title": "OperationalState",
         "type": "object"
       },
       "PackageCandidateResponse": {
@@ -3704,220 +5238,515 @@
         "title": "PackageRolloutResourceEnvelope",
         "type": "object"
       },
-      "PlanEndpoint": {
+      "PlacementEvidenceCounts": {
         "additionalProperties": false,
         "properties": {
-          "path": {
-            "maxLength": 512,
-            "minLength": 1,
-            "pattern": "^/",
-            "title": "Path",
-            "type": "string"
-          },
-          "port": {
-            "maximum": 65535.0,
-            "minimum": 1.0,
-            "title": "Port",
+          "builds": {
+            "maximum": 513.0,
+            "minimum": 0.0,
+            "title": "Builds",
             "type": "integer"
           },
-          "scheme": {
-            "enum": [
-              "http",
-              "https"
-            ],
-            "title": "Scheme",
-            "type": "string"
+          "installation_members": {
+            "maximum": 16385.0,
+            "minimum": 0.0,
+            "title": "Installation Members",
+            "type": "integer"
+          },
+          "installations": {
+            "maximum": 513.0,
+            "minimum": 0.0,
+            "title": "Installations",
+            "type": "integer"
+          },
+          "mapping_members": {
+            "maximum": 16385.0,
+            "minimum": 0.0,
+            "title": "Mapping Members",
+            "type": "integer"
+          },
+          "mappings": {
+            "maximum": 513.0,
+            "minimum": 0.0,
+            "title": "Mappings",
+            "type": "integer"
+          },
+          "run_members": {
+            "maximum": 16385.0,
+            "minimum": 0.0,
+            "title": "Run Members",
+            "type": "integer"
+          },
+          "runs": {
+            "maximum": 513.0,
+            "minimum": 0.0,
+            "title": "Runs",
+            "type": "integer"
+          },
+          "truncated_collections": {
+            "items": {
+              "enum": [
+                "builds",
+                "mappings",
+                "mapping_members",
+                "installations",
+                "installation_members",
+                "runs",
+                "run_members"
+              ],
+              "type": "string"
+            },
+            "maxItems": 7,
+            "title": "Truncated Collections",
+            "type": "array"
           }
         },
         "required": [
-          "scheme",
-          "port",
-          "path"
+          "builds",
+          "mappings",
+          "mapping_members",
+          "installations",
+          "installation_members",
+          "runs",
+          "run_members",
+          "truncated_collections"
         ],
-        "title": "PlanEndpoint",
+        "title": "PlacementEvidenceCounts",
         "type": "object"
       },
-      "PlanInputDigests": {
-        "additionalProperties": {
-          "type": "string"
-        },
-        "maxProperties": 512,
-        "title": "PlanInputDigests",
-        "type": "object"
-      },
-      "PlanOperation": {
+      "PlacementLimits": {
         "additionalProperties": false,
         "properties": {
-          "compensation_kind": {
+          "artifact_evidence_per_node_limit": {
+            "const": 512,
+            "default": 512,
+            "title": "Artifact Evidence Per Node Limit",
+            "type": "integer"
+          },
+          "candidate_node_limit": {
+            "const": 32,
+            "default": 32,
+            "title": "Candidate Node Limit",
+            "type": "integer"
+          },
+          "examined_group_limit": {
+            "const": 512,
+            "default": 512,
+            "title": "Examined Group Limit",
+            "type": "integer"
+          },
+          "operational_member_evidence_limit": {
+            "const": 16384,
+            "default": 16384,
+            "title": "Operational Member Evidence Limit",
+            "type": "integer"
+          },
+          "operational_row_evidence_limit": {
+            "const": 512,
+            "default": 512,
+            "title": "Operational Row Evidence Limit",
+            "type": "integer"
+          },
+          "recommendation_limit": {
+            "const": 16,
+            "default": 16,
+            "title": "Recommendation Limit",
+            "type": "integer"
+          },
+          "rejected_group_evidence_limit": {
+            "const": 16,
+            "default": 16,
+            "title": "Rejected Group Evidence Limit",
+            "type": "integer"
+          },
+          "rejected_node_evidence_limit": {
+            "const": 32,
+            "default": 32,
+            "title": "Rejected Node Evidence Limit",
+            "type": "integer"
+          }
+        },
+        "title": "PlacementLimits",
+        "type": "object"
+      },
+      "PlacementNode": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_reuse_bytes": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Artifact Reuse Bytes",
+            "type": "integer"
+          },
+          "disk_free_after_bytes": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": -9.223372036854776e+18,
+            "title": "Disk Free After Bytes",
+            "type": "integer"
+          },
+          "disk_free_bytes": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Disk Free Bytes",
+            "type": "integer"
+          },
+          "disk_required_bytes": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Disk Required Bytes",
+            "type": "integer"
+          },
+          "disk_reserved_bytes": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Disk Reserved Bytes",
+            "type": "integer"
+          },
+          "endpoint_owner": {
+            "title": "Endpoint Owner",
+            "type": "boolean"
+          },
+          "fabric_address": {
             "anyOf": [
               {
-                "maxLength": 80,
+                "maxLength": 45,
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Compensation Kind"
+            "title": "Fabric Address"
           },
-          "dependencies": {
-            "items": {
-              "type": "string"
-            },
-            "maxItems": 512,
-            "title": "Dependencies",
-            "type": "array"
+          "fabric_bandwidth_mbps": {
+            "anyOf": [
+              {
+                "maximum": 9.223372036854776e+18,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fabric Bandwidth Mbps"
           },
-          "kind": {
-            "maxLength": 80,
-            "minLength": 1,
-            "title": "Kind",
+          "inventory_age_seconds": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Inventory Age Seconds",
+            "type": "number"
+          },
+          "inventory_observed_at": {
+            "format": "date-time",
+            "title": "Inventory Observed At",
             "type": "string"
+          },
+          "memory_available_bytes": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Memory Available Bytes",
+            "type": "integer"
+          },
+          "memory_free_after_bytes": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": -9.223372036854776e+18,
+            "title": "Memory Free After Bytes",
+            "type": "integer"
+          },
+          "memory_kind": {
+            "enum": [
+              "unified",
+              "host",
+              "accelerator"
+            ],
+            "title": "Memory Kind",
+            "type": "string"
+          },
+          "memory_required_bytes": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Memory Required Bytes",
+            "type": "integer"
+          },
+          "memory_reserved_bytes": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Memory Reserved Bytes",
+            "type": "integer"
           },
           "node_id": {
             "pattern": "^spk_[0-9a-f]{32}$",
             "title": "Node Id",
             "type": "string"
           },
-          "operation_id": {
-            "maxLength": 128,
+          "rank": {
+            "maximum": 31.0,
+            "minimum": 0.0,
+            "title": "Rank",
+            "type": "integer"
+          },
+          "role": {
+            "maxLength": 64,
             "minLength": 1,
-            "title": "Operation Id",
+            "title": "Role",
             "type": "string"
           },
-          "payload_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Payload Digest",
-            "type": "string"
+          "telemetry_age_seconds": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Telemetry Age Seconds",
+            "type": "number"
           },
-          "workload_id": {
-            "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
-            "title": "Workload Id",
+          "telemetry_observed_at": {
+            "format": "date-time",
+            "title": "Telemetry Observed At",
             "type": "string"
           }
         },
         "required": [
-          "operation_id",
           "node_id",
-          "workload_id",
-          "kind",
-          "dependencies",
-          "payload_digest"
+          "rank",
+          "role",
+          "endpoint_owner",
+          "inventory_observed_at",
+          "telemetry_observed_at",
+          "inventory_age_seconds",
+          "telemetry_age_seconds",
+          "disk_free_bytes",
+          "disk_reserved_bytes",
+          "disk_required_bytes",
+          "disk_free_after_bytes",
+          "memory_kind",
+          "memory_available_bytes",
+          "memory_reserved_bytes",
+          "memory_required_bytes",
+          "memory_free_after_bytes",
+          "artifact_reuse_bytes",
+          "fabric_address"
         ],
-        "title": "PlanOperation",
+        "title": "PlacementNode",
         "type": "object"
       },
-      "PlanOperationGraph": {
+      "PlacementRecommendation": {
         "additionalProperties": false,
         "properties": {
-          "base_commit": {
-            "pattern": "^[0-9a-f]{40}$",
-            "title": "Base Commit",
+          "eligible": {
+            "title": "Eligible",
+            "type": "boolean"
+          },
+          "group_complete": {
+            "const": true,
+            "default": true,
+            "title": "Group Complete",
+            "type": "boolean"
+          },
+          "install_state": {
+            "enum": [
+              "complete",
+              "partial",
+              "not_present",
+              "unknown"
+            ],
+            "title": "Install State",
             "type": "string"
           },
-          "nodes": {
+          "installation_ids": {
             "items": {
-              "$ref": "#/components/schemas/PlanOperation"
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
             },
-            "maxItems": 4096,
-            "title": "Nodes",
+            "maxItems": 16,
+            "title": "Installation Ids",
             "type": "array"
           },
-          "schema_version": {
-            "const": 1,
-            "title": "Schema Version",
-            "type": "integer"
+          "load_state": {
+            "enum": [
+              "loaded",
+              "not_loaded",
+              "unknown"
+            ],
+            "title": "Load State",
+            "type": "string"
           },
-          "targets": {
+          "mapping_id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mapping Id"
+          },
+          "node_ids": {
             "items": {
               "pattern": "^spk_[0-9a-f]{32}$",
               "type": "string"
             },
-            "maxItems": 512,
-            "title": "Targets",
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Node Ids",
             "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/PlacementNode"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Nodes",
+            "type": "array"
+          },
+          "preview_targets": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "install": "#/components/schemas/InstallPreviewTarget",
+                  "mapping": "#/components/schemas/MappingPreviewTarget",
+                  "run": "#/components/schemas/RunPreviewTarget"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/MappingPreviewTarget"
+                },
+                {
+                  "$ref": "#/components/schemas/InstallPreviewTarget"
+                },
+                {
+                  "$ref": "#/components/schemas/RunPreviewTarget"
+                }
+              ]
+            },
+            "maxItems": 3,
+            "title": "Preview Targets",
+            "type": "array"
+          },
+          "ranking_scope": {
+            "const": "bounded-advisory",
+            "default": "bounded-advisory",
+            "title": "Ranking Scope",
+            "type": "string"
+          },
+          "reasons": {
+            "items": {
+              "$ref": "#/components/schemas/vonk_control__library_contract__ProjectionReason"
+            },
+            "maxItems": 64,
+            "title": "Reasons",
+            "type": "array"
+          },
+          "recipe_build_id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recipe Build Id"
+          },
+          "recipe_revision_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Recipe Revision Id",
+            "type": "string"
+          },
+          "run_ids": {
+            "items": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "maxItems": 16,
+            "title": "Run Ids",
+            "type": "array"
+          },
+          "score": {
+            "$ref": "#/components/schemas/PlacementScore"
+          },
+          "topology_name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Topology Name",
+            "type": "string"
           }
         },
         "required": [
-          "schema_version",
-          "base_commit",
-          "targets",
-          "nodes"
+          "recipe_revision_id",
+          "topology_name",
+          "node_ids",
+          "nodes",
+          "eligible",
+          "score",
+          "install_state",
+          "load_state",
+          "mapping_id",
+          "recipe_build_id",
+          "installation_ids",
+          "run_ids",
+          "preview_targets",
+          "reasons"
         ],
-        "title": "PlanOperationGraph",
+        "title": "PlacementRecommendation",
         "type": "object"
       },
-      "PlanPlacements": {
-        "additionalProperties": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "maxProperties": 128,
-        "title": "PlanPlacements",
-        "type": "object"
-      },
-      "PlanPrepareRequest": {
+      "PlacementScore": {
         "additionalProperties": false,
         "properties": {
-          "adapter_id": {
-            "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
-            "title": "Adapter Id",
-            "type": "string"
-          },
-          "profile_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Profile Digest",
-            "type": "string"
-          },
-          "release_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Release Digest",
-            "type": "string"
-          },
-          "schema_version": {
-            "const": 1,
-            "title": "Schema Version",
+          "active_run_count": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Active Run Count",
             "type": "integer"
           },
-          "workload_id": {
-            "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
-            "title": "Workload Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "schema_version",
-          "workload_id",
-          "release_digest",
-          "adapter_id",
-          "profile_digest"
-        ],
-        "title": "PlanPrepareRequest",
-        "type": "object"
-      },
-      "PlanQuota": {
-        "additionalProperties": false,
-        "properties": {
-          "requests_per_minute": {
-            "maximum": 100000.0,
-            "minimum": 1.0,
-            "title": "Requests Per Minute",
+          "artifact_reuse_bytes": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Artifact Reuse Bytes",
             "type": "integer"
           },
-          "tokens_per_minute": {
-            "maximum": 100000000.0,
-            "minimum": 1.0,
-            "title": "Tokens Per Minute",
+          "exact_install_complete": {
+            "title": "Exact Install Complete",
+            "type": "boolean"
+          },
+          "exact_install_partial": {
+            "title": "Exact Install Partial",
+            "type": "boolean"
+          },
+          "maximum_telemetry_age_seconds": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Maximum Telemetry Age Seconds",
+            "type": "number"
+          },
+          "minimum_disk_headroom_bytes": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": -9.223372036854776e+18,
+            "title": "Minimum Disk Headroom Bytes",
+            "type": "integer"
+          },
+          "minimum_memory_headroom_bytes": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": -9.223372036854776e+18,
+            "title": "Minimum Memory Headroom Bytes",
             "type": "integer"
           }
         },
         "required": [
-          "requests_per_minute",
-          "tokens_per_minute"
+          "exact_install_complete",
+          "exact_install_partial",
+          "active_run_count",
+          "artifact_reuse_bytes",
+          "minimum_disk_headroom_bytes",
+          "minimum_memory_headroom_bytes",
+          "maximum_telemetry_age_seconds"
         ],
-        "title": "PlanQuota",
+        "title": "PlacementScore",
         "type": "object"
       },
       "PlanReason": {
@@ -3941,312 +5770,6 @@
           "detail"
         ],
         "title": "PlanReason",
-        "type": "object"
-      },
-      "PlanRelease": {
-        "additionalProperties": false,
-        "properties": {
-          "definition_hash": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Definition Hash",
-            "type": "string"
-          },
-          "endpoint": {
-            "$ref": "#/components/schemas/PlanEndpoint"
-          },
-          "manifest_path": {
-            "maxLength": 512,
-            "minLength": 1,
-            "title": "Manifest Path",
-            "type": "string"
-          },
-          "manifest_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Manifest Sha256",
-            "type": "string"
-          },
-          "release_request": {
-            "$ref": "#/components/schemas/PlanReleaseRequest"
-          },
-          "workload_requests": {
-            "$ref": "#/components/schemas/PlanWorkloadRequests"
-          }
-        },
-        "required": [
-          "manifest_path",
-          "manifest_sha256",
-          "definition_hash",
-          "release_request",
-          "workload_requests",
-          "endpoint"
-        ],
-        "title": "PlanRelease",
-        "type": "object"
-      },
-      "PlanReleaseRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "adapter_id": {
-            "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
-            "title": "Adapter Id",
-            "type": "string"
-          },
-          "oci_manifest_digest": {
-            "pattern": "^sha256:[0-9a-f]{64}$",
-            "title": "Oci Manifest Digest",
-            "type": "string"
-          },
-          "provenance_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Provenance Digest",
-            "type": "string"
-          },
-          "schema_version": {
-            "const": 1,
-            "title": "Schema Version",
-            "type": "integer"
-          },
-          "target_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Target Digest",
-            "type": "string"
-          },
-          "target_name": {
-            "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
-            "title": "Target Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "schema_version",
-          "target_name",
-          "oci_manifest_digest",
-          "target_digest",
-          "provenance_digest",
-          "adapter_id"
-        ],
-        "title": "PlanReleaseRequest",
-        "type": "object"
-      },
-      "PlanReleases": {
-        "additionalProperties": {
-          "$ref": "#/components/schemas/PlanRelease"
-        },
-        "maxProperties": 128,
-        "title": "PlanReleases",
-        "type": "object"
-      },
-      "PlanRoute": {
-        "additionalProperties": false,
-        "properties": {
-          "entrypoint_node_id": {
-            "pattern": "^spk_[0-9a-f]{32}$",
-            "title": "Entrypoint Node Id",
-            "type": "string"
-          },
-          "nodes": {
-            "items": {
-              "type": "string"
-            },
-            "maxItems": 64,
-            "minItems": 1,
-            "title": "Nodes",
-            "type": "array"
-          },
-          "path": {
-            "maxLength": 512,
-            "minLength": 1,
-            "pattern": "^/",
-            "title": "Path",
-            "type": "string"
-          },
-          "port": {
-            "maximum": 65535.0,
-            "minimum": 1.0,
-            "title": "Port",
-            "type": "integer"
-          },
-          "quota": {
-            "$ref": "#/components/schemas/PlanQuota"
-          },
-          "quota_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Quota Digest",
-            "type": "string"
-          },
-          "scheme": {
-            "enum": [
-              "http",
-              "https"
-            ],
-            "title": "Scheme",
-            "type": "string"
-          },
-          "workload_id": {
-            "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
-            "title": "Workload Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "workload_id",
-          "nodes",
-          "entrypoint_node_id",
-          "scheme",
-          "port",
-          "path",
-          "quota",
-          "quota_digest"
-        ],
-        "title": "PlanRoute",
-        "type": "object"
-      },
-      "PlanRoutes": {
-        "additionalProperties": {
-          "$ref": "#/components/schemas/PlanRoute"
-        },
-        "maxProperties": 128,
-        "title": "PlanRoutes",
-        "type": "object"
-      },
-      "PlanStartRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "adapter_id": {
-            "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
-            "title": "Adapter Id",
-            "type": "string"
-          },
-          "preparation_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Preparation Digest",
-            "type": "string"
-          },
-          "release_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Release Digest",
-            "type": "string"
-          },
-          "schema_version": {
-            "const": 1,
-            "title": "Schema Version",
-            "type": "integer"
-          },
-          "workload_id": {
-            "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
-            "title": "Workload Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "schema_version",
-          "workload_id",
-          "release_digest",
-          "adapter_id",
-          "preparation_digest"
-        ],
-        "title": "PlanStartRequest",
-        "type": "object"
-      },
-      "PlanVerifyRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "adapter_id": {
-            "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
-            "title": "Adapter Id",
-            "type": "string"
-          },
-          "expected_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Expected Digest",
-            "type": "string"
-          },
-          "release_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Release Digest",
-            "type": "string"
-          },
-          "schema_version": {
-            "const": 1,
-            "title": "Schema Version",
-            "type": "integer"
-          },
-          "workload_id": {
-            "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
-            "title": "Workload Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "schema_version",
-          "workload_id",
-          "release_digest",
-          "adapter_id",
-          "expected_digest"
-        ],
-        "title": "PlanVerifyRequest",
-        "type": "object"
-      },
-      "PlanWorkloadRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "adapter_id": {
-            "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
-            "title": "Adapter Id",
-            "type": "string"
-          },
-          "release_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Release Digest",
-            "type": "string"
-          },
-          "schema_version": {
-            "const": 1,
-            "title": "Schema Version",
-            "type": "integer"
-          },
-          "workload_id": {
-            "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
-            "title": "Workload Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "schema_version",
-          "workload_id",
-          "release_digest",
-          "adapter_id"
-        ],
-        "title": "PlanWorkloadRequest",
-        "type": "object"
-      },
-      "PlanWorkloadRequests": {
-        "additionalProperties": false,
-        "properties": {
-          "health": {
-            "$ref": "#/components/schemas/PlanWorkloadRequest"
-          },
-          "prepare": {
-            "$ref": "#/components/schemas/PlanPrepareRequest"
-          },
-          "start": {
-            "$ref": "#/components/schemas/PlanStartRequest"
-          },
-          "stop": {
-            "$ref": "#/components/schemas/PlanWorkloadRequest"
-          },
-          "verify": {
-            "$ref": "#/components/schemas/PlanVerifyRequest"
-          }
-        },
-        "required": [
-          "prepare",
-          "start",
-          "stop",
-          "health",
-          "verify"
-        ],
-        "title": "PlanWorkloadRequests",
         "type": "object"
       },
       "PreviewRequest": {
@@ -4327,6 +5850,117 @@
         "title": "PublicationExportRequest",
         "type": "object"
       },
+      "RecipeDiskRequirements": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_bytes": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Artifact Bytes",
+            "type": "integer"
+          },
+          "cache_bytes": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Cache Bytes",
+            "type": "integer"
+          },
+          "image_bytes": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Image Bytes",
+            "type": "integer"
+          },
+          "rollback_bytes": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Rollback Bytes",
+            "type": "integer"
+          },
+          "safety_margin_bytes": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Safety Margin Bytes",
+            "type": "integer"
+          },
+          "staging_bytes": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Staging Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "image_bytes",
+          "artifact_bytes",
+          "staging_bytes",
+          "cache_bytes",
+          "rollback_bytes",
+          "safety_margin_bytes"
+        ],
+        "title": "RecipeDiskRequirements",
+        "type": "object"
+      },
+      "RecipeFabric": {
+        "additionalProperties": false,
+        "properties": {
+          "connectivity": {
+            "enum": [
+              "none",
+              "connected",
+              "full_mesh",
+              "switch"
+            ],
+            "title": "Connectivity",
+            "type": "string"
+          },
+          "minimum_bandwidth_mbps": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Minimum Bandwidth Mbps",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "connectivity",
+          "minimum_bandwidth_mbps"
+        ],
+        "title": "RecipeFabric",
+        "type": "object"
+      },
+      "RecipeLibraryImportRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "document": {
+            "additionalProperties": true,
+            "title": "Document",
+            "type": "object"
+          },
+          "expected_content_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Expected Content Sha256",
+            "type": "string"
+          },
+          "library_commit": {
+            "pattern": "^[0-9a-f]{40}$",
+            "title": "Library Commit",
+            "type": "string"
+          },
+          "source_path": {
+            "pattern": "^recipes/[a-z0-9][a-z0-9-]{1,62}\\.json$",
+            "title": "Source Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "library_commit",
+          "source_path",
+          "expected_content_sha256",
+          "document"
+        ],
+        "title": "RecipeLibraryImportRequest",
+        "type": "object"
+      },
       "RecipeListResponse": {
         "additionalProperties": false,
         "properties": {
@@ -4355,6 +5989,228 @@
           "recipes"
         ],
         "title": "RecipeListResponse",
+        "type": "object"
+      },
+      "RecipeMemoryRequirements": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "unified",
+              "host",
+              "accelerator"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "runtime_growth_bytes": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Runtime Growth Bytes",
+            "type": "integer"
+          },
+          "startup_peak_bytes": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Startup Peak Bytes",
+            "type": "integer"
+          },
+          "steady_state_bytes": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Steady State Bytes",
+            "type": "integer"
+          },
+          "system_reserve_bytes": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "System Reserve Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "startup_peak_bytes",
+          "steady_state_bytes",
+          "runtime_growth_bytes",
+          "system_reserve_bytes"
+        ],
+        "title": "RecipeMemoryRequirements",
+        "type": "object"
+      },
+      "RecipeParallelism": {
+        "additionalProperties": false,
+        "properties": {
+          "backend": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Backend",
+            "type": "string"
+          },
+          "data": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 1.0,
+            "title": "Data",
+            "type": "integer"
+          },
+          "pipeline": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 1.0,
+            "title": "Pipeline",
+            "type": "integer"
+          },
+          "tensor": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 1.0,
+            "title": "Tensor",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tensor",
+          "pipeline",
+          "data",
+          "backend"
+        ],
+        "title": "RecipeParallelism",
+        "type": "object"
+      },
+      "RecipePresence": {
+        "additionalProperties": false,
+        "properties": {
+          "complete": {
+            "title": "Complete",
+            "type": "boolean"
+          },
+          "degraded_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "external-member",
+                  "mapping-incomplete",
+                  "missing-ranks",
+                  "unexpected-ranks",
+                  "rank-membership-mismatch",
+                  "installation-not-installed",
+                  "rank-not-installed",
+                  "rank-incomplete-bytes"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Degraded Reason"
+          },
+          "expected_rank_count": {
+            "maximum": 500.0,
+            "minimum": 1.0,
+            "title": "Expected Rank Count",
+            "type": "integer"
+          },
+          "group_state": {
+            "enum": [
+              "planned",
+              "installing",
+              "installed",
+              "partial",
+              "failed",
+              "uninstalled"
+            ],
+            "title": "Group State",
+            "type": "string"
+          },
+          "installation_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Installation Id",
+            "type": "string"
+          },
+          "member_node_ids": {
+            "items": {
+              "pattern": "^spk_[0-9a-f]{32}$",
+              "type": "string"
+            },
+            "maxItems": 500,
+            "title": "Member Node Ids",
+            "type": "array"
+          },
+          "present_ranks": {
+            "items": {
+              "maximum": 499.0,
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "maxItems": 500,
+            "title": "Present Ranks",
+            "type": "array"
+          },
+          "rank": {
+            "maximum": 499.0,
+            "minimum": 0.0,
+            "title": "Rank",
+            "type": "integer"
+          },
+          "rank_state": {
+            "enum": [
+              "planned",
+              "installing",
+              "installed",
+              "partial",
+              "failed",
+              "uninstalled"
+            ],
+            "title": "Rank State",
+            "type": "string"
+          },
+          "recipe_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Recipe Id",
+            "type": "string"
+          },
+          "recipe_revision_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Recipe Revision Id",
+            "type": "string"
+          },
+          "role": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Role",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          },
+          "topology_name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Topology Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "installation_id",
+          "recipe_id",
+          "recipe_revision_id",
+          "title",
+          "topology_name",
+          "expected_rank_count",
+          "present_ranks",
+          "member_node_ids",
+          "rank",
+          "role",
+          "group_state",
+          "rank_state",
+          "complete"
+        ],
+        "title": "RecipePresence",
         "type": "object"
       },
       "RecipeRevisionResponse": {
@@ -4399,6 +6255,11 @@
             "title": "Document",
             "type": "object"
           },
+          "execution_harness": {
+            "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+            "title": "Execution Harness",
+            "type": "string"
+          },
           "expected_download_bytes": {
             "minimum": 1.0,
             "title": "Expected Download Bytes",
@@ -4429,22 +6290,20 @@
             "title": "Maximum Runtime Memory Bytes Per Node",
             "type": "integer"
           },
+          "node_count": {
+            "minimum": 1.0,
+            "title": "Node Count",
+            "type": "integer"
+          },
           "origin": {
             "enum": [
               "local",
               "workload_run",
-              "global"
+              "global",
+              "recipe_library"
             ],
             "title": "Origin",
             "type": "string"
-          },
-          "profile_node_counts": {
-            "items": {
-              "type": "integer"
-            },
-            "minItems": 1,
-            "title": "Profile Node Counts",
-            "type": "array"
           },
           "recipe_id": {
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
@@ -4456,10 +6315,9 @@
             "title": "Revision Number",
             "type": "integer"
           },
-          "runtime_family": {
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Runtime Family",
+          "runtime_distribution": {
+            "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+            "title": "Runtime Distribution",
             "type": "string"
           },
           "schema_version": {
@@ -4482,6 +6340,18 @@
             "minLength": 1,
             "title": "Title",
             "type": "string"
+          },
+          "topology_mode": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Topology Mode",
+            "type": "string"
+          },
+          "topology_name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Topology Name",
+            "type": "string"
           }
         },
         "required": [
@@ -4491,11 +6361,14 @@
           "origin",
           "revision_number",
           "lifecycle",
-          "runtime_family",
+          "execution_harness",
+          "runtime_distribution",
           "source_bundle_sha256",
           "artifact_count",
           "expected_download_bytes",
-          "profile_node_counts",
+          "topology_name",
+          "topology_mode",
+          "node_count",
           "maximum_installed_bytes_per_node",
           "maximum_runtime_memory_bytes_per_node",
           "id",
@@ -4506,6 +6379,111 @@
           "created_at"
         ],
         "title": "RecipeRevisionResponse",
+        "type": "object"
+      },
+      "RecipeRevisionSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "content_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Sha256"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "lifecycle": {
+            "enum": [
+              "draft",
+              "blocked",
+              "resolved",
+              "deprecated"
+            ],
+            "title": "Lifecycle",
+            "type": "string"
+          },
+          "revision_number": {
+            "maximum": 2147483647.0,
+            "minimum": 1.0,
+            "title": "Revision Number",
+            "type": "integer"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "revision_number",
+          "lifecycle",
+          "content_sha256",
+          "created_at"
+        ],
+        "title": "RecipeRevisionSummary",
+        "type": "object"
+      },
+      "RecipeRole": {
+        "additionalProperties": false,
+        "properties": {
+          "artifacts": {
+            "items": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 128,
+            "title": "Artifacts",
+            "type": "array"
+          },
+          "count": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 1.0,
+            "title": "Count",
+            "type": "integer"
+          },
+          "disk": {
+            "$ref": "#/components/schemas/RecipeDiskRequirements"
+          },
+          "endpoint_owner": {
+            "title": "Endpoint Owner",
+            "type": "boolean"
+          },
+          "memory": {
+            "$ref": "#/components/schemas/RecipeMemoryRequirements"
+          },
+          "name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "count",
+          "endpoint_owner",
+          "artifacts",
+          "disk",
+          "memory"
+        ],
+        "title": "RecipeRole",
         "type": "object"
       },
       "RecipeSummaryResponse": {
@@ -4528,6 +6506,11 @@
               }
             ],
             "title": "Content Sha256"
+          },
+          "execution_harness": {
+            "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+            "title": "Execution Harness",
+            "type": "string"
           },
           "expected_download_bytes": {
             "minimum": 1.0,
@@ -4554,22 +6537,20 @@
             "title": "Maximum Runtime Memory Bytes Per Node",
             "type": "integer"
           },
+          "node_count": {
+            "minimum": 1.0,
+            "title": "Node Count",
+            "type": "integer"
+          },
           "origin": {
             "enum": [
               "local",
               "workload_run",
-              "global"
+              "global",
+              "recipe_library"
             ],
             "title": "Origin",
             "type": "string"
-          },
-          "profile_node_counts": {
-            "items": {
-              "type": "integer"
-            },
-            "minItems": 1,
-            "title": "Profile Node Counts",
-            "type": "array"
           },
           "recipe_id": {
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
@@ -4581,10 +6562,9 @@
             "title": "Revision Number",
             "type": "integer"
           },
-          "runtime_family": {
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Runtime Family",
+          "runtime_distribution": {
+            "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+            "title": "Runtime Distribution",
             "type": "string"
           },
           "slug": {
@@ -4602,6 +6582,18 @@
             "minLength": 1,
             "title": "Title",
             "type": "string"
+          },
+          "topology_mode": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Topology Mode",
+            "type": "string"
+          },
+          "topology_name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Topology Name",
+            "type": "string"
           }
         },
         "required": [
@@ -4611,183 +6603,88 @@
           "origin",
           "revision_number",
           "lifecycle",
-          "runtime_family",
+          "execution_harness",
+          "runtime_distribution",
           "source_bundle_sha256",
           "artifact_count",
           "expected_download_bytes",
-          "profile_node_counts",
+          "topology_name",
+          "topology_mode",
+          "node_count",
           "maximum_installed_bytes_per_node",
           "maximum_runtime_memory_bytes_per_node"
         ],
         "title": "RecipeSummaryResponse",
         "type": "object"
       },
-      "ReconciliationAcceptedResponse": {
+      "RecipeTopology": {
         "additionalProperties": false,
         "properties": {
-          "base_commit": {
-            "pattern": "^[0-9a-f]{40}$",
-            "title": "Base Commit",
-            "type": "string"
+          "fabric": {
+            "$ref": "#/components/schemas/RecipeFabric"
           },
-          "job_id": {
-            "title": "Job Id",
-            "type": "string"
-          },
-          "reconciliation_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reconciliation Id"
-          },
-          "state": {
-            "title": "State",
-            "type": "string"
-          }
-        },
-        "required": [
-          "base_commit",
-          "job_id",
-          "state"
-        ],
-        "title": "ReconciliationAcceptedResponse",
-        "type": "object"
-      },
-      "ReconciliationCancelRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "reason": {
-            "maxLength": 1024,
+          "mode": {
+            "maxLength": 64,
             "minLength": 1,
-            "title": "Reason",
-            "type": "string"
-          }
-        },
-        "required": [
-          "reason"
-        ],
-        "title": "ReconciliationCancelRequest",
-        "type": "object"
-      },
-      "ReconciliationPlanRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "commit": {
-            "pattern": "^[0-9a-f]{40}$",
-            "title": "Commit",
+            "title": "Mode",
             "type": "string"
           },
-          "profile_id": {
-            "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
-            "title": "Profile Id",
+          "name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Name",
             "type": "string"
-          }
-        },
-        "required": [
-          "commit",
-          "profile_id"
-        ],
-        "title": "ReconciliationPlanRequest",
-        "type": "object"
-      },
-      "ReconciliationPlanResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "agent_protocol_range": {
+          },
+          "node_count": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 1.0,
+            "title": "Node Count",
+            "type": "integer"
+          },
+          "parallelism": {
+            "$ref": "#/components/schemas/RecipeParallelism"
+          },
+          "roles": {
             "items": {
-              "type": "integer"
+              "$ref": "#/components/schemas/RecipeRole"
             },
-            "maxItems": 2,
-            "minItems": 2,
-            "title": "Agent Protocol Range",
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Roles",
             "type": "array"
           },
-          "commit": {
-            "pattern": "^[0-9a-f]{40}$",
-            "title": "Commit",
-            "type": "string"
-          },
-          "digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Digest",
-            "type": "string"
-          },
-          "fleet_evidence_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Fleet Evidence Digest",
-            "type": "string"
-          },
-          "input_digests": {
-            "$ref": "#/components/schemas/PlanInputDigests"
-          },
-          "operation_graph": {
-            "$ref": "#/components/schemas/PlanOperationGraph"
-          },
-          "placements": {
-            "$ref": "#/components/schemas/PlanPlacements"
-          },
-          "reconciliation_id": {
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Reconciliation Id",
-            "type": "string"
-          },
-          "releases": {
-            "$ref": "#/components/schemas/PlanReleases"
-          },
-          "routes": {
-            "$ref": "#/components/schemas/PlanRoutes"
-          },
-          "targets": {
+          "start_order": {
             "items": {
-              "pattern": "^spk_[0-9a-f]{32}$",
+              "maxLength": 64,
+              "minLength": 1,
               "type": "string"
             },
-            "maxItems": 512,
-            "title": "Targets",
+            "maxItems": 32,
+            "title": "Start Order",
+            "type": "array"
+          },
+          "stop_order": {
+            "items": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Stop Order",
             "type": "array"
           }
         },
         "required": [
-          "commit",
-          "digest",
-          "fleet_evidence_digest",
-          "targets",
-          "placements",
-          "routes",
-          "releases",
-          "input_digests",
-          "reconciliation_id",
-          "operation_graph",
-          "agent_protocol_range"
+          "name",
+          "mode",
+          "node_count",
+          "parallelism",
+          "roles",
+          "fabric",
+          "start_order",
+          "stop_order"
         ],
-        "title": "ReconciliationPlanResponse",
-        "type": "object"
-      },
-      "ReconciliationRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "fleet_evidence_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Fleet Evidence Digest",
-            "type": "string"
-          },
-          "plan_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Plan Digest",
-            "type": "string"
-          }
-        },
-        "required": [
-          "plan_digest",
-          "fleet_evidence_digest"
-        ],
-        "title": "ReconciliationRequest",
+        "title": "RecipeTopology",
         "type": "object"
       },
       "RejectRequest": {
@@ -4806,6 +6703,31 @@
         "title": "RejectRequest",
         "type": "object"
       },
+      "RejectedNode": {
+        "additionalProperties": false,
+        "properties": {
+          "node_id": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "reasons": {
+            "items": {
+              "$ref": "#/components/schemas/vonk_control__library_contract__ProjectionReason"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Reasons",
+            "type": "array"
+          }
+        },
+        "required": [
+          "node_id",
+          "reasons"
+        ],
+        "title": "RejectedNode",
+        "type": "object"
+      },
       "RequestKey": {
         "additionalProperties": false,
         "properties": {
@@ -4819,6 +6741,21 @@
           "request_key"
         ],
         "title": "RequestKey",
+        "type": "object"
+      },
+      "ResolveCatalogEntityRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_revision": {
+            "minimum": 1.0,
+            "title": "Expected Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "expected_revision"
+        ],
+        "title": "ResolveCatalogEntityRequest",
         "type": "object"
       },
       "ResolveImportRequest": {
@@ -4855,6 +6792,27 @@
           "expected_revision"
         ],
         "title": "ResolveRecipeRequest",
+        "type": "object"
+      },
+      "ReviseCatalogEntityRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "document": {
+            "additionalProperties": true,
+            "title": "Document",
+            "type": "object"
+          },
+          "expected_revision": {
+            "minimum": 1.0,
+            "title": "Expected Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "document",
+          "expected_revision"
+        ],
+        "title": "ReviseCatalogEntityRequest",
         "type": "object"
       },
       "RunNodePlanResponse": {
@@ -5008,6 +6966,11 @@
       "RunPlanResponse": {
         "additionalProperties": false,
         "properties": {
+          "alias": {
+            "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
+            "title": "Alias",
+            "type": "string"
+          },
           "allowed": {
             "title": "Allowed",
             "type": "boolean"
@@ -5042,6 +7005,7 @@
         },
         "required": [
           "installation_id",
+          "alias",
           "mapping_id",
           "mapping_generation",
           "recipe_revision_id",
@@ -5052,7 +7016,187 @@
         "title": "RunPlanResponse",
         "type": "object"
       },
-      "RunPreviewRequest": {
+      "RunPresence": {
+        "additionalProperties": false,
+        "properties": {
+          "alias": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Alias",
+            "type": "string"
+          },
+          "degraded_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "external-member",
+                  "mapping-incomplete",
+                  "missing-ranks",
+                  "unexpected-ranks",
+                  "rank-membership-mismatch",
+                  "run-not-running",
+                  "rank-not-running",
+                  "rank-stale",
+                  "route-not-published"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Degraded Reason"
+          },
+          "expected_rank_count": {
+            "maximum": 500.0,
+            "minimum": 1.0,
+            "title": "Expected Rank Count",
+            "type": "integer"
+          },
+          "group_state": {
+            "enum": [
+              "healthy",
+              "degraded"
+            ],
+            "title": "Group State",
+            "type": "string"
+          },
+          "healthy": {
+            "title": "Healthy",
+            "type": "boolean"
+          },
+          "installation_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Installation Id",
+            "type": "string"
+          },
+          "member_node_ids": {
+            "items": {
+              "pattern": "^spk_[0-9a-f]{32}$",
+              "type": "string"
+            },
+            "maxItems": 500,
+            "title": "Member Node Ids",
+            "type": "array"
+          },
+          "present_ranks": {
+            "items": {
+              "maximum": 499.0,
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "maxItems": 500,
+            "title": "Present Ranks",
+            "type": "array"
+          },
+          "rank": {
+            "maximum": 499.0,
+            "minimum": 0.0,
+            "title": "Rank",
+            "type": "integer"
+          },
+          "rank_age_seconds": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Rank Age Seconds",
+            "type": "number"
+          },
+          "rank_fresh": {
+            "title": "Rank Fresh",
+            "type": "boolean"
+          },
+          "rank_state": {
+            "enum": [
+              "planned",
+              "starting",
+              "running",
+              "stopping",
+              "stopped",
+              "failed",
+              "lost"
+            ],
+            "title": "Rank State",
+            "type": "string"
+          },
+          "recipe_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Recipe Id",
+            "type": "string"
+          },
+          "recipe_revision_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Recipe Revision Id",
+            "type": "string"
+          },
+          "role": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Role",
+            "type": "string"
+          },
+          "route_state": {
+            "enum": [
+              "withdrawn",
+              "pending",
+              "published",
+              "failed"
+            ],
+            "title": "Route State",
+            "type": "string"
+          },
+          "run_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Run Id",
+            "type": "string"
+          },
+          "run_state": {
+            "enum": [
+              "planned",
+              "starting",
+              "running",
+              "stopping",
+              "stopped",
+              "failed",
+              "lost"
+            ],
+            "title": "Run State",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "installation_id",
+          "recipe_id",
+          "recipe_revision_id",
+          "title",
+          "alias",
+          "expected_rank_count",
+          "present_ranks",
+          "member_node_ids",
+          "rank",
+          "role",
+          "run_state",
+          "route_state",
+          "rank_state",
+          "rank_age_seconds",
+          "rank_fresh",
+          "group_state",
+          "healthy"
+        ],
+        "title": "RunPresence",
+        "type": "object"
+      },
+      "RunPreviewInput": {
         "additionalProperties": false,
         "properties": {
           "installation_id": {
@@ -5064,7 +7208,47 @@
         "required": [
           "installation_id"
         ],
+        "title": "RunPreviewInput",
+        "type": "object"
+      },
+      "RunPreviewRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "alias": {
+            "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
+            "title": "Alias",
+            "type": "string"
+          },
+          "installation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Installation Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "installation_id",
+          "alias"
+        ],
         "title": "RunPreviewRequest",
+        "type": "object"
+      },
+      "RunPreviewTarget": {
+        "additionalProperties": false,
+        "properties": {
+          "input": {
+            "$ref": "#/components/schemas/RunPreviewInput"
+          },
+          "kind": {
+            "const": "run",
+            "default": "run",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "input"
+        ],
+        "title": "RunPreviewTarget",
         "type": "object"
       },
       "RunRankStatusResponse": {
@@ -5326,6 +7510,659 @@
         "title": "SourcePolicyResponse",
         "type": "object"
       },
+      "StopNodeImpactResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "active_memory_reservation_bytes": {
+            "minimum": 0.0,
+            "title": "Active Memory Reservation Bytes",
+            "type": "integer"
+          },
+          "node_id": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "rank": {
+            "minimum": 0.0,
+            "title": "Rank",
+            "type": "integer"
+          },
+          "reserved_memory_bytes": {
+            "minimum": 0.0,
+            "title": "Reserved Memory Bytes",
+            "type": "integer"
+          },
+          "role": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Role",
+            "type": "string"
+          },
+          "state": {
+            "maxLength": 24,
+            "minLength": 1,
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "rank",
+          "role",
+          "state",
+          "reserved_memory_bytes",
+          "active_memory_reservation_bytes"
+        ],
+        "title": "StopNodeImpactResponse",
+        "type": "object"
+      },
+      "StopPlanResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "alias": {
+            "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
+            "title": "Alias",
+            "type": "string"
+          },
+          "allowed": {
+            "title": "Allowed",
+            "type": "boolean"
+          },
+          "authority_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Authority Digest",
+            "type": "string"
+          },
+          "blockers": {
+            "items": {
+              "$ref": "#/components/schemas/PlanReason"
+            },
+            "maxItems": 32,
+            "title": "Blockers",
+            "type": "array"
+          },
+          "installation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Installation Id",
+            "type": "string"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/StopNodeImpactResponse"
+            },
+            "maxItems": 1024,
+            "title": "Nodes",
+            "type": "array"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "recipe_revision_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Recipe Revision Id",
+            "type": "string"
+          },
+          "route_digest": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Route Digest"
+          },
+          "route_generation": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Route Generation"
+          },
+          "route_state": {
+            "pattern": "^(withdrawn|pending|published|failed)$",
+            "title": "Route State",
+            "type": "string"
+          },
+          "route_withdrawal": {
+            "title": "Route Withdrawal",
+            "type": "boolean"
+          },
+          "run_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "run_state": {
+            "maxLength": 24,
+            "minLength": 1,
+            "title": "Run State",
+            "type": "string"
+          },
+          "total_active_memory_reservation_bytes": {
+            "minimum": 0.0,
+            "title": "Total Active Memory Reservation Bytes",
+            "type": "integer"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/PlanReason"
+            },
+            "maxItems": 32,
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "run_id",
+          "installation_id",
+          "recipe_revision_id",
+          "alias",
+          "run_state",
+          "route_state",
+          "authority_digest",
+          "allowed",
+          "route_withdrawal",
+          "nodes",
+          "total_active_memory_reservation_bytes",
+          "blockers",
+          "warnings",
+          "plan_digest"
+        ],
+        "title": "StopPlanResponse",
+        "type": "object"
+      },
+      "StopPreviewRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "run_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id"
+        ],
+        "title": "StopPreviewRequest",
+        "type": "object"
+      },
+      "StopRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "request_key": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Request Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plan_digest",
+          "request_key"
+        ],
+        "title": "StopRequest",
+        "type": "object"
+      },
+      "TelemetryDetails": {
+        "additionalProperties": false,
+        "properties": {
+          "accelerator_name": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accelerator Name"
+          },
+          "accelerator_performance_state": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accelerator Performance State"
+          }
+        },
+        "title": "TelemetryDetails",
+        "type": "object"
+      },
+      "TelemetryHistoryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "end": {
+            "format": "date-time",
+            "title": "End",
+            "type": "string"
+          },
+          "maximum_points": {
+            "maximum": 1500.0,
+            "minimum": 1.0,
+            "title": "Maximum Points",
+            "type": "integer"
+          },
+          "node_id": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "points": {
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/TelemetryPoint"
+                },
+                {
+                  "$ref": "#/components/schemas/TelemetryRollupPoint"
+                }
+              ]
+            },
+            "maxItems": 1500,
+            "title": "Points",
+            "type": "array"
+          },
+          "resolution": {
+            "enum": [
+              "raw",
+              "minute",
+              "fifteen-minute"
+            ],
+            "title": "Resolution",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "start": {
+            "format": "date-time",
+            "title": "Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "start",
+          "end",
+          "resolution",
+          "maximum_points",
+          "points"
+        ],
+        "title": "TelemetryHistoryResponse",
+        "type": "object"
+      },
+      "TelemetryMetricSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 1.0,
+            "title": "Count",
+            "type": "integer"
+          },
+          "maximum": {
+            "title": "Maximum",
+            "type": "number"
+          },
+          "mean": {
+            "title": "Mean",
+            "type": "number"
+          },
+          "minimum": {
+            "title": "Minimum",
+            "type": "number"
+          }
+        },
+        "required": [
+          "count",
+          "minimum",
+          "mean",
+          "maximum"
+        ],
+        "title": "TelemetryMetricSummary",
+        "type": "object"
+      },
+      "TelemetryPoint": {
+        "additionalProperties": false,
+        "properties": {
+          "boot_id": {
+            "pattern": "^(?!00000000-0000-0000-0000-000000000000$)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Boot Id",
+            "type": "string"
+          },
+          "cpu_utilization_percent": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpu Utilization Percent"
+          },
+          "details": {
+            "$ref": "#/components/schemas/TelemetryDetails"
+          },
+          "disk_free_bytes": {
+            "anyOf": [
+              {
+                "maximum": 17592186044416.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disk Free Bytes"
+          },
+          "disk_total_bytes": {
+            "anyOf": [
+              {
+                "maximum": 17592186044416.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disk Total Bytes"
+          },
+          "gap_samples": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Gap Samples",
+            "type": "integer"
+          },
+          "gpu_memory_free_bytes": {
+            "anyOf": [
+              {
+                "maximum": 17592186044416.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gpu Memory Free Bytes"
+          },
+          "gpu_memory_total_bytes": {
+            "anyOf": [
+              {
+                "maximum": 17592186044416.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gpu Memory Total Bytes"
+          },
+          "gpu_utilization_percent": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gpu Utilization Percent"
+          },
+          "id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "load_average_1m": {
+            "anyOf": [
+              {
+                "maximum": 1000000.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Load Average 1M"
+          },
+          "memory_available_bytes": {
+            "anyOf": [
+              {
+                "maximum": 17592186044416.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Available Bytes"
+          },
+          "memory_total_bytes": {
+            "anyOf": [
+              {
+                "maximum": 17592186044416.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Total Bytes"
+          },
+          "network_receive_bytes_per_second": {
+            "anyOf": [
+              {
+                "maximum": 1000000000000000.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Network Receive Bytes Per Second"
+          },
+          "network_transmit_bytes_per_second": {
+            "anyOf": [
+              {
+                "maximum": 1000000000000000.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Network Transmit Bytes Per Second"
+          },
+          "node_id": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "observed_at": {
+            "format": "date-time",
+            "title": "Observed At",
+            "type": "string"
+          },
+          "power_watts": {
+            "anyOf": [
+              {
+                "maximum": 100000.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Power Watts"
+          },
+          "received_at": {
+            "format": "date-time",
+            "title": "Received At",
+            "type": "string"
+          },
+          "sequence": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "temperature_c": {
+            "anyOf": [
+              {
+                "maximum": 300.0,
+                "minimum": -100.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temperature C"
+          }
+        },
+        "required": [
+          "id",
+          "node_id",
+          "boot_id",
+          "sequence",
+          "observed_at",
+          "received_at",
+          "gap_samples",
+          "details"
+        ],
+        "title": "TelemetryPoint",
+        "type": "object"
+      },
+      "TelemetryRollupPoint": {
+        "additionalProperties": false,
+        "properties": {
+          "bucket_end": {
+            "format": "date-time",
+            "title": "Bucket End",
+            "type": "string"
+          },
+          "bucket_start": {
+            "format": "date-time",
+            "title": "Bucket Start",
+            "type": "string"
+          },
+          "gap_samples": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Gap Samples",
+            "type": "integer"
+          },
+          "metrics": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/TelemetryMetricSummary"
+            },
+            "maxProperties": 64,
+            "title": "Metrics",
+            "type": "object"
+          },
+          "node_id": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "resolution": {
+            "enum": [
+              "minute",
+              "fifteen-minute"
+            ],
+            "title": "Resolution",
+            "type": "string"
+          },
+          "source_sample_count": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Source Sample Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "node_id",
+          "resolution",
+          "bucket_start",
+          "bucket_end",
+          "source_sample_count",
+          "gap_samples",
+          "metrics"
+        ],
+        "title": "TelemetryRollupPoint",
+        "type": "object"
+      },
+      "TelemetryState": {
+        "additionalProperties": false,
+        "properties": {
+          "age_seconds": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Age Seconds",
+            "type": "number"
+          },
+          "freshness": {
+            "enum": [
+              "live",
+              "delayed",
+              "stale"
+            ],
+            "title": "Freshness",
+            "type": "string"
+          },
+          "sample": {
+            "$ref": "#/components/schemas/TelemetryPoint"
+          }
+        },
+        "required": [
+          "age_seconds",
+          "freshness",
+          "sample"
+        ],
+        "title": "TelemetryState",
+        "type": "object"
+      },
       "TestReportRequest": {
         "additionalProperties": false,
         "properties": {
@@ -5339,6 +8176,373 @@
           "report"
         ],
         "title": "TestReportRequest",
+        "type": "object"
+      },
+      "TopologyPlacement": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate_node_ids": {
+            "items": {
+              "pattern": "^spk_[0-9a-f]{32}$",
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Candidate Node Ids",
+            "type": "array"
+          },
+          "evaluated_group_count": {
+            "maximum": 512.0,
+            "minimum": 0.0,
+            "title": "Evaluated Group Count",
+            "type": "integer"
+          },
+          "evidence_counts": {
+            "$ref": "#/components/schemas/PlacementEvidenceCounts"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/PlacementLimits"
+          },
+          "node_count": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 1.0,
+            "title": "Node Count",
+            "type": "integer"
+          },
+          "reasons": {
+            "items": {
+              "$ref": "#/components/schemas/vonk_control__library_contract__ProjectionReason"
+            },
+            "maxItems": 16,
+            "title": "Reasons",
+            "type": "array"
+          },
+          "recommendations": {
+            "items": {
+              "$ref": "#/components/schemas/PlacementRecommendation"
+            },
+            "maxItems": 16,
+            "title": "Recommendations",
+            "type": "array"
+          },
+          "rejected_evidence_truncated": {
+            "title": "Rejected Evidence Truncated",
+            "type": "boolean"
+          },
+          "rejected_groups": {
+            "items": {
+              "$ref": "#/components/schemas/PlacementRecommendation"
+            },
+            "maxItems": 16,
+            "title": "Rejected Groups",
+            "type": "array"
+          },
+          "rejected_nodes": {
+            "items": {
+              "$ref": "#/components/schemas/RejectedNode"
+            },
+            "maxItems": 32,
+            "title": "Rejected Nodes",
+            "type": "array"
+          },
+          "search_complete": {
+            "title": "Search Complete",
+            "type": "boolean"
+          },
+          "topology_name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Topology Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "topology_name",
+          "node_count",
+          "candidate_node_ids",
+          "recommendations",
+          "rejected_nodes",
+          "rejected_groups",
+          "evaluated_group_count",
+          "search_complete",
+          "rejected_evidence_truncated",
+          "limits",
+          "evidence_counts",
+          "reasons"
+        ],
+        "title": "TopologyPlacement",
+        "type": "object"
+      },
+      "UninstallActiveRunResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "alias": {
+            "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
+            "title": "Alias",
+            "type": "string"
+          },
+          "route_state": {
+            "pattern": "^(withdrawn|pending|published|failed)$",
+            "title": "Route State",
+            "type": "string"
+          },
+          "run_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "state": {
+            "maxLength": 24,
+            "minLength": 1,
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "alias",
+          "state",
+          "route_state"
+        ],
+        "title": "UninstallActiveRunResponse",
+        "type": "object"
+      },
+      "UninstallConsequencesResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "automatic_stop": {
+            "title": "Automatic Stop",
+            "type": "boolean"
+          },
+          "catalog_retained": {
+            "title": "Catalog Retained",
+            "type": "boolean"
+          },
+          "reinstall_required": {
+            "title": "Reinstall Required",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "catalog_retained",
+          "automatic_stop",
+          "reinstall_required"
+        ],
+        "title": "UninstallConsequencesResponse",
+        "type": "object"
+      },
+      "UninstallNodeImpactResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "installed_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installed Bytes"
+          },
+          "node_id": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "rank": {
+            "minimum": 0.0,
+            "title": "Rank",
+            "type": "integer"
+          },
+          "role": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Role",
+            "type": "string"
+          },
+          "state": {
+            "maxLength": 24,
+            "minLength": 1,
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "rank",
+          "role",
+          "state"
+        ],
+        "title": "UninstallNodeImpactResponse",
+        "type": "object"
+      },
+      "UninstallPlanResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "active_run_count": {
+            "minimum": 0.0,
+            "title": "Active Run Count",
+            "type": "integer"
+          },
+          "active_runs": {
+            "items": {
+              "$ref": "#/components/schemas/UninstallActiveRunResponse"
+            },
+            "maxItems": 128,
+            "title": "Active Runs",
+            "type": "array"
+          },
+          "active_runs_truncated": {
+            "title": "Active Runs Truncated",
+            "type": "boolean"
+          },
+          "allowed": {
+            "title": "Allowed",
+            "type": "boolean"
+          },
+          "blockers": {
+            "items": {
+              "$ref": "#/components/schemas/PlanReason"
+            },
+            "maxItems": 32,
+            "title": "Blockers",
+            "type": "array"
+          },
+          "bytes_removed": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bytes Removed"
+          },
+          "consequences": {
+            "$ref": "#/components/schemas/UninstallConsequencesResponse"
+          },
+          "installation_authority_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Installation Authority Digest",
+            "type": "string"
+          },
+          "installation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Installation Id",
+            "type": "string"
+          },
+          "installation_state": {
+            "maxLength": 24,
+            "minLength": 1,
+            "title": "Installation State",
+            "type": "string"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/UninstallNodeImpactResponse"
+            },
+            "maxItems": 1024,
+            "title": "Nodes",
+            "type": "array"
+          },
+          "original_plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Original Plan Digest",
+            "type": "string"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "recipe_content": {
+            "additionalProperties": true,
+            "title": "Recipe Content",
+            "type": "object"
+          },
+          "recipe_content_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Recipe Content Sha256",
+            "type": "string"
+          },
+          "recipe_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Recipe Id",
+            "type": "string"
+          },
+          "recipe_revision_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Recipe Revision Id",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/PlanReason"
+            },
+            "maxItems": 32,
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "installation_id",
+          "recipe_id",
+          "recipe_revision_id",
+          "recipe_content_sha256",
+          "recipe_content",
+          "installation_authority_digest",
+          "original_plan_digest",
+          "installation_state",
+          "allowed",
+          "nodes",
+          "active_runs",
+          "active_run_count",
+          "active_runs_truncated",
+          "blockers",
+          "warnings",
+          "consequences",
+          "plan_digest"
+        ],
+        "title": "UninstallPlanResponse",
+        "type": "object"
+      },
+      "UninstallPreviewRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "installation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Installation Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "installation_id"
+        ],
+        "title": "UninstallPreviewRequest",
+        "type": "object"
+      },
+      "UninstallRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "request_key": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Request Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plan_digest",
+          "request_key"
+        ],
+        "title": "UninstallRequest",
         "type": "object"
       },
       "UpdateApplyRequest": {
@@ -5438,6 +8642,612 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "VisualArtifact": {
+        "additionalProperties": false,
+        "properties": {
+          "download_bytes": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Download Bytes",
+            "type": "integer"
+          },
+          "id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "installed_bytes": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Installed Bytes",
+            "type": "integer"
+          },
+          "kind": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Kind",
+            "type": "string"
+          },
+          "repository": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Repository",
+            "type": "string"
+          },
+          "revision": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Revision",
+            "type": "string"
+          },
+          "roles": {
+            "items": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Roles",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "repository",
+          "revision",
+          "download_bytes",
+          "installed_bytes",
+          "roles"
+        ],
+        "title": "VisualArtifact",
+        "type": "object"
+      },
+      "VisualBuild": {
+        "additionalProperties": false,
+        "properties": {
+          "context": {
+            "$ref": "#/components/schemas/VisualBuildContext"
+          },
+          "dockerfile": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Dockerfile",
+            "type": "string"
+          },
+          "download_bytes": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Download Bytes",
+            "type": "integer"
+          },
+          "memory_bytes": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Memory Bytes",
+            "type": "integer"
+          },
+          "network_hosts": {
+            "items": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Network Hosts",
+            "type": "array"
+          },
+          "network_mode": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Network Mode",
+            "type": "string"
+          },
+          "platform": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Platform",
+            "type": "string"
+          },
+          "temporary_bytes": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Temporary Bytes",
+            "type": "integer"
+          },
+          "timeout_seconds": {
+            "maximum": 86400.0,
+            "minimum": 1.0,
+            "title": "Timeout Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "context",
+          "dockerfile",
+          "platform",
+          "network_mode",
+          "network_hosts",
+          "download_bytes",
+          "temporary_bytes",
+          "memory_bytes",
+          "timeout_seconds"
+        ],
+        "title": "VisualBuild",
+        "type": "object"
+      },
+      "VisualBuildContext": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_bytes": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Expected Bytes",
+            "type": "integer"
+          },
+          "media_type": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Media Type",
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sha256",
+          "expected_bytes",
+          "media_type"
+        ],
+        "title": "VisualBuildContext",
+        "type": "object"
+      },
+      "VisualCatalogIdentity": {
+        "additionalProperties": false,
+        "properties": {
+          "content_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Content Sha256",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "model-version",
+              "execution-harness",
+              "runtime-distribution",
+              "patch-bundle"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "publisher": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Publisher",
+            "type": "string"
+          },
+          "slug": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "publisher",
+          "slug",
+          "content_sha256"
+        ],
+        "title": "VisualCatalogIdentity",
+        "type": "object"
+      },
+      "VisualExecution": {
+        "additionalProperties": false,
+        "properties": {
+          "harness": {
+            "$ref": "#/components/schemas/VisualCatalogIdentity"
+          },
+          "patch_bundle": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VisualCatalogIdentity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "harness",
+          "patch_bundle"
+        ],
+        "title": "VisualExecution",
+        "type": "object"
+      },
+      "VisualIdentity": {
+        "additionalProperties": false,
+        "properties": {
+          "publisher": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Publisher",
+            "type": "string"
+          },
+          "slug": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "publisher",
+          "slug"
+        ],
+        "title": "VisualIdentity",
+        "type": "object"
+      },
+      "VisualInterface": {
+        "additionalProperties": false,
+        "properties": {
+          "adapter": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Adapter",
+            "type": "string"
+          },
+          "health_path": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Health Path"
+          },
+          "model_aliases": {
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Model Aliases",
+            "type": "array"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path"
+          },
+          "port": {
+            "anyOf": [
+              {
+                "maximum": 65535.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Port"
+          }
+        },
+        "required": [
+          "adapter"
+        ],
+        "title": "VisualInterface",
+        "type": "object"
+      },
+      "VisualMetadata": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Tags",
+            "type": "array"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "description",
+          "tags"
+        ],
+        "title": "VisualMetadata",
+        "type": "object"
+      },
+      "VisualProvenance": {
+        "additionalProperties": false,
+        "properties": {
+          "attribution": {
+            "items": {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Attribution",
+            "type": "array"
+          },
+          "source_kind": {
+            "enum": [
+              "local",
+              "workload_run",
+              "global",
+              "fork"
+            ],
+            "title": "Source Kind",
+            "type": "string"
+          },
+          "source_reference": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Reference"
+          }
+        },
+        "required": [
+          "source_kind",
+          "source_reference",
+          "attribution"
+        ],
+        "title": "VisualProvenance",
+        "type": "object"
+      },
+      "VisualRecipeDocument": {
+        "additionalProperties": false,
+        "properties": {
+          "artifacts": {
+            "items": {
+              "$ref": "#/components/schemas/VisualArtifact"
+            },
+            "maxItems": 128,
+            "title": "Artifacts",
+            "type": "array"
+          },
+          "build": {
+            "$ref": "#/components/schemas/VisualBuild"
+          },
+          "execution": {
+            "$ref": "#/components/schemas/VisualExecution"
+          },
+          "identity": {
+            "$ref": "#/components/schemas/VisualIdentity"
+          },
+          "interfaces": {
+            "items": {
+              "$ref": "#/components/schemas/VisualInterface"
+            },
+            "maxItems": 64,
+            "title": "Interfaces",
+            "type": "array"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/VisualMetadata"
+          },
+          "model": {
+            "$ref": "#/components/schemas/VisualCatalogIdentity"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/VisualProvenance"
+          },
+          "runtime": {
+            "$ref": "#/components/schemas/VisualRuntime"
+          },
+          "schema_version": {
+            "const": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "validation": {
+            "$ref": "#/components/schemas/VisualValidation"
+          }
+        },
+        "required": [
+          "schema_version",
+          "identity",
+          "metadata",
+          "model",
+          "execution",
+          "build",
+          "artifacts",
+          "runtime",
+          "interfaces",
+          "validation",
+          "provenance"
+        ],
+        "title": "VisualRecipeDocument",
+        "type": "object"
+      },
+      "VisualRuntime": {
+        "additionalProperties": false,
+        "properties": {
+          "distribution": {
+            "$ref": "#/components/schemas/VisualCatalogIdentity"
+          },
+          "entrypoint": {
+            "items": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Entrypoint",
+            "type": "array"
+          },
+          "lifecycle_post_stop_count": {
+            "maximum": 64.0,
+            "minimum": 0.0,
+            "title": "Lifecycle Post Stop Count",
+            "type": "integer"
+          },
+          "lifecycle_pre_start_count": {
+            "maximum": 64.0,
+            "minimum": 0.0,
+            "title": "Lifecycle Pre Start Count",
+            "type": "integer"
+          },
+          "stop_timeout_seconds": {
+            "maximum": 86400.0,
+            "minimum": 1.0,
+            "title": "Stop Timeout Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "distribution",
+          "entrypoint",
+          "lifecycle_pre_start_count",
+          "lifecycle_post_stop_count",
+          "stop_timeout_seconds"
+        ],
+        "title": "VisualRuntime",
+        "type": "object"
+      },
+      "VisualValidation": {
+        "additionalProperties": false,
+        "properties": {
+          "benchmark_count": {
+            "maximum": 32.0,
+            "minimum": 0.0,
+            "title": "Benchmark Count",
+            "type": "integer"
+          },
+          "checks": {
+            "items": {
+              "maxLength": 80,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 64,
+            "minItems": 1,
+            "title": "Checks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "checks",
+          "benchmark_count"
+        ],
+        "title": "VisualValidation",
+        "type": "object"
+      },
+      "vonk_control__fleet_projection__ProjectionReason": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "enum": [
+              "node.offline",
+              "inventory.missing",
+              "inventory.stale",
+              "telemetry.missing",
+              "telemetry.delayed",
+              "telemetry.stale",
+              "install.partial",
+              "run.degraded"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Detail",
+            "type": "string"
+          },
+          "severity": {
+            "enum": [
+              "info",
+              "warning",
+              "error"
+            ],
+            "title": "Severity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "detail",
+          "severity"
+        ],
+        "title": "ProjectionReason",
+        "type": "object"
+      },
+      "vonk_control__library_contract__ProjectionReason": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Detail",
+            "type": "string"
+          },
+          "severity": {
+            "enum": [
+              "info",
+              "warning",
+              "error"
+            ],
+            "title": "Severity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "detail",
+          "severity"
+        ],
+        "title": "LibraryProjectionReason",
         "type": "object"
       }
     },
@@ -6134,6 +9944,440 @@
         "summary": "Session"
       }
     },
+    "/api/v1/catalog/entities": {
+      "get": {
+        "operationId": "listCatalogEntities",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 32,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "publisher",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Publisher"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogEntityListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProblem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProblem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "List Entities"
+      },
+      "post": {
+        "operationId": "createCatalogEntityDraft",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCatalogEntityRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogEntityRevisionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProblem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProblem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProblem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProblem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Create Entity"
+      }
+    },
+    "/api/v1/catalog/entities/{entity_id}": {
+      "get": {
+        "operationId": "getCatalogEntity",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entity_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Entity Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogEntityRevisionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProblem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProblem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Get Entity"
+      }
+    },
+    "/api/v1/catalog/entities/{entity_id}/draft": {
+      "put": {
+        "operationId": "reviseCatalogEntity",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entity_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Entity Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviseCatalogEntityRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogEntityRevisionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProblem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProblem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProblem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProblem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProblem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Revise Entity"
+      }
+    },
+    "/api/v1/catalog/entities/{entity_id}/resolve": {
+      "post": {
+        "operationId": "resolveCatalogEntity",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entity_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Entity Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveCatalogEntityRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogEntityRevisionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProblem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProblem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProblem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProblem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogProblem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Resolve Entity"
+      }
+    },
     "/api/v1/catalog/imports/global": {
       "post": {
         "operationId": "importGlobalRecipe",
@@ -6218,6 +10462,49 @@
           }
         ],
         "summary": "Preview Global Import"
+      }
+    },
+    "/api/v1/catalog/imports/recipe-library": {
+      "post": {
+        "operationId": "importRecipeLibrary",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecipeLibraryImportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecipeRevisionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Import Recipe Library"
       }
     },
     "/api/v1/catalog/imports/workload_run": {
@@ -8035,91 +12322,6 @@
         "summary": "Preview Rollback"
       }
     },
-    "/api/v1/documents": {
-      "get": {
-        "operationId": "listDocuments",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "commit",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Commit"
-            }
-          },
-          {
-            "in": "query",
-            "name": "path",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Path"
-            }
-          },
-          {
-            "in": "query",
-            "name": "kind",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Kind"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Document View Api V1 Documents Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "summary": "Document View"
-      }
-    },
     "/api/v1/endpoints/{alias}": {
       "get": {
         "operationId": "getPublishedEndpoint",
@@ -8203,7 +12405,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FleetStatusResponse"
+                  "$ref": "#/components/schemas/FleetSnapshot"
                 }
               }
             },
@@ -8218,6 +12420,16 @@
               }
             },
             "description": "Unauthorized"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [
@@ -8226,6 +12438,89 @@
           }
         ],
         "summary": "Fleet View"
+      }
+    },
+    "/api/v1/fleet/stream": {
+      "get": {
+        "operationId": "streamFleetEvents",
+        "parameters": [
+          {
+            "description": "Optional durable Fleet cursor; duplicate and numeric validity are checked from the raw header list.",
+            "in": "header",
+            "name": "Last-Event-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional durable Fleet cursor; duplicate and numeric validity are checked from the raw header list.",
+              "title": "Last-Event-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Durable Fleet event stream"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "BrowserSession": []
+          }
+        ],
+        "summary": "Fleet Event Stream"
       }
     },
     "/api/v1/jobs": {
@@ -8725,6 +13020,165 @@
         "summary": "Resume Job"
       }
     },
+    "/api/v1/library": {
+      "get": {
+        "operationId": "listLibrary",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 1024,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibrarySnapshot"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "List Library"
+      }
+    },
+    "/api/v1/library/recipes/{recipe_id}": {
+      "get": {
+        "operationId": "getLibraryRecipe",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "recipe_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Recipe Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryRecipeDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Get Library Recipe"
+      }
+    },
     "/api/v1/nodes/status": {
       "get": {
         "operationId": "getNodeStatuses",
@@ -8756,6 +13210,127 @@
           }
         ],
         "summary": "Node Status View"
+      }
+    },
+    "/api/v1/nodes/{node_id}/telemetry": {
+      "get": {
+        "operationId": "getNodeTelemetryHistory",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "pattern": "^spk_[0-9a-f]{32}$",
+              "title": "Node Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "title": "Start",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": true,
+            "schema": {
+              "format": "date-time",
+              "title": "End",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "resolution",
+            "required": true,
+            "schema": {
+              "enum": [
+                "raw",
+                "minute",
+                "fifteen-minute"
+              ],
+              "title": "Resolution",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "maximum_points",
+            "required": false,
+            "schema": {
+              "default": 1500,
+              "maximum": 1500,
+              "minimum": 1,
+              "title": "Maximum Points",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TelemetryHistoryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Node Telemetry History"
       }
     },
     "/api/v1/packages/candidates": {
@@ -10103,101 +14678,6 @@
         "summary": "Get Validation"
       }
     },
-    "/api/v1/profiles/{profile_id}/plan": {
-      "post": {
-        "operationId": "planProfileReconciliation",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "profile_id",
-            "required": true,
-            "schema": {
-              "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
-              "title": "Profile Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "title": "Body",
-                "type": "null"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReconciliationPlanResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Service Unavailable"
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "summary": "Profile Reconcile Plan"
-      }
-    },
     "/api/v1/proposals": {
       "post": {
         "operationId": "previewProposal",
@@ -10477,7 +14957,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RequestKey"
+                "$ref": "#/components/schemas/UninstallRequest"
               }
             }
           },
@@ -10849,7 +15329,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RequestKey"
+                "$ref": "#/components/schemas/StopRequest"
               }
             }
           },
@@ -10928,97 +15408,14 @@
         "summary": "Check Source"
       }
     },
-    "/api/v1/reconciliations": {
+    "/api/v1/recipes/stop-plans/preview": {
       "post": {
-        "operationId": "applyReconciliation",
+        "operationId": "previewRecipeStop",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ReconciliationRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "202": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReconciliationAcceptedResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Service Unavailable"
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "summary": "Reconcile"
-      }
-    },
-    "/api/v1/reconciliations/plan": {
-      "post": {
-        "operationId": "planReconciliation",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ReconciliationPlanRequest"
+                "$ref": "#/components/schemas/StopPreviewRequest"
               }
             }
           },
@@ -11029,41 +15426,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ReconciliationPlanResponse"
+                  "$ref": "#/components/schemas/StopPlanResponse"
                 }
               }
             },
             "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Conflict"
           },
           "422": {
             "content": {
@@ -11074,16 +15441,6 @@
               }
             },
             "description": "Validation Error"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Service Unavailable"
           }
         },
         "security": [
@@ -11091,87 +15448,32 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Reconcile Plan"
+        "summary": "Preview Stop"
       }
     },
-    "/api/v1/reconciliations/{reconciliation_id}/cancel": {
+    "/api/v1/recipes/uninstall-plans/preview": {
       "post": {
-        "operationId": "cancelReconciliation",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "reconciliation_id",
-            "required": true,
-            "schema": {
-              "title": "Reconciliation Id",
-              "type": "string"
-            }
-          }
-        ],
+        "operationId": "previewRecipeUninstall",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ReconciliationCancelRequest"
+                "$ref": "#/components/schemas/UninstallPreviewRequest"
               }
             }
           },
           "required": true
         },
         "responses": {
-          "202": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Cancel Reconciliation Api V1 Reconciliations  Reconciliation Id  Cancel Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/UninstallPlanResponse"
                 }
               }
             },
             "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Conflict"
           },
           "422": {
             "content": {
@@ -11182,16 +15484,6 @@
               }
             },
             "description": "Validation Error"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Service Unavailable"
           }
         },
         "security": [
@@ -11199,7 +15491,7 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Cancel Reconciliation"
+        "summary": "Preview Uninstall"
       }
     },
     "/api/v1/repository": {

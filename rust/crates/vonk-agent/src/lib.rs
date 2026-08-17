@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod base_images;
 pub mod build_source;
 pub mod client;
 pub mod config;
@@ -17,4 +18,5 @@ pub mod rotation;
 pub mod source_policy;
 pub mod state;
 pub mod supervisor_readiness;
+pub mod telemetry;
 pub mod workloads;

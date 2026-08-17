@@ -1,0 +1,103 @@
+import {render, screen, within} from "@testing-library/react";
+import type {VisualFleetNode} from "../api/types";
+import {NodeCard} from "./node-card";
+
+const GIB = 1024 ** 3;
+const NOW = new Date("2026-08-15T12:00:00Z");
+
+function completeNode(): VisualFleetNode {
+  return {
+    id: "spk_0123456789abcdef0123456789abcdef",
+    display_name: "Spark One",
+    hostname: "spark-one.internal",
+    lifecycle: "managed",
+    labels: {role: "inference", rack: "left"},
+    connection: {agent_state: "active", certificate_state: "valid", online_state: "online", offline_reason: null, last_seen_at: "2026-08-15T11:59:59Z", last_seen_age_seconds: 1},
+    inventory: {
+      observed_at: "2026-08-15T11:59:50Z", received_at: "2026-08-15T11:59:51Z", age_seconds: 10, freshness: "fresh",
+      disk_total_bytes: 200 * GIB, disk_free_bytes: 120 * GIB,
+      host_memory_total_bytes: 100 * GIB, host_memory_free_bytes: 80 * GIB,
+      gpu_memory_total_bytes: 100 * GIB, gpu_memory_free_bytes: 70 * GIB,
+      gpu_count: 1, artifact_store_read_only: false, capabilities: ["runtime.vonk.v1"], fabric_address: "10.0.0.1", fabric_bandwidth_mbps: 100_000, nvidia_driver_version: "580.1", container_runtime_version: "1.2.3",
+    },
+    telemetry: {
+      age_seconds: 2, freshness: "live", sample: {
+        id: "00000000-0000-4000-8000-000000000001", node_id: "spk_0123456789abcdef0123456789abcdef", boot_id: "00000000-0000-0000-0000-000000000001", sequence: 2,
+        observed_at: "2026-08-15T11:59:58Z", received_at: "2026-08-15T11:59:59Z",
+        cpu_utilization_percent: 12.5, load_average_1m: 1.5,
+        memory_total_bytes: 100 * GIB, memory_available_bytes: 80 * GIB,
+        disk_total_bytes: 200 * GIB, disk_free_bytes: 120 * GIB,
+        gpu_utilization_percent: 73, gpu_memory_total_bytes: 100 * GIB, gpu_memory_free_bytes: 70 * GIB,
+        temperature_c: 42.5, power_watts: 18.25,
+        network_receive_bytes_per_second: 1024, network_transmit_bytes_per_second: 512,
+        gap_samples: 0, details: {accelerator_name: "NVIDIA GB10", accelerator_performance_state: "P0"},
+      },
+    },
+    installed: [{
+      installation_id: "install-1", recipe_id: "recipe-1", recipe_revision_id: "revision-1", title: "Qwen pair", topology_name: "pair", expected_rank_count: 2, present_ranks: [0, 1], member_node_ids: ["node-a", "node-b"], rank: 0, role: "leader", rank_state: "installed", group_state: "installed", complete: true, degraded_reason: null,
+    }, {
+      installation_id: "install-2", recipe_id: "recipe-2", recipe_revision_id: "revision-2", title: "Vision pair", topology_name: "pair", expected_rank_count: 2, present_ranks: [0], member_node_ids: ["node-a"], rank: 0, role: "leader", rank_state: "installed", group_state: "partial", complete: false, degraded_reason: "missing-ranks",
+    }],
+    loaded: [{
+      run_id: "run-1", installation_id: "install-1", recipe_id: "recipe-1", recipe_revision_id: "revision-1", title: "Qwen pair", alias: "chat", expected_rank_count: 2, present_ranks: [0, 1], member_node_ids: ["node-a", "node-b"], rank: 0, role: "leader", rank_state: "running", rank_age_seconds: 2, rank_fresh: true, run_state: "running", route_state: "published", group_state: "healthy", healthy: true, degraded_reason: null,
+    }, {
+      run_id: "run-2", installation_id: "install-2", recipe_id: "recipe-2", recipe_revision_id: "revision-2", title: "Vision pair", alias: "vision", expected_rank_count: 2, present_ranks: [0, 1], member_node_ids: ["node-a", "node-b"], rank: 0, role: "leader", rank_state: "running", rank_age_seconds: 2, rank_fresh: true, run_state: "running", route_state: "failed", group_state: "degraded", healthy: false, degraded_reason: "route-not-published",
+    }],
+    reservations: {disk_bytes: 2 * GIB, unified_memory_bytes: GIB, host_memory_bytes: 0, gpu_memory_bytes: 0, port_count: 1},
+    warnings: [{code: "run.degraded", detail: "Vision pair route is not published.", severity: "error"}],
+  };
+}
+
+test("renders the complete node telemetry hierarchy and distinct recipe groups", () => {
+  render(<NodeCard node={completeNode()} now={NOW} selected={false} onSelect={() => undefined}/>);
+  const card = screen.getByRole("article", {name: "Spark One — Live"});
+
+  expect(within(card).getByText("NVIDIA GB10 · P0")).toBeVisible();
+  expect(within(card).getByText("73.0%")).toBeVisible();
+  expect(within(within(card).getByText("Unified memory").parentElement!).getByText("70.0 GiB available / 100.0 GiB")).toBeVisible();
+  expect(within(within(card).getByText("Host memory").parentElement!).getByText("80.0 GiB available / 100.0 GiB")).toBeVisible();
+  expect(within(card).getByText("120.0 GiB free / 200.0 GiB")).toBeVisible();
+  expect(within(card).getByText("12.5% · load 1.50")).toBeVisible();
+  expect(within(card).getByText("42.5 °C")).toBeVisible();
+  expect(within(card).getByText("18.3 W")).toBeVisible();
+  expect(within(card).getByText("↓ 1.0 KiB/s · ↑ 512 B/s")).toBeVisible();
+  expect(within(card).getByText("Updated 2 seconds ago")).toBeVisible();
+
+  const installed = within(card).getByRole("region", {name: "Installed recipes on Spark One"});
+  const loaded = within(card).getByRole("region", {name: "Loaded recipes on Spark One"});
+  const installationState = within(card).getByRole("region", {name: "Installation state on Spark One"});
+  const runState = within(card).getByRole("region", {name: "Run state on Spark One"});
+  expect(installed).toHaveTextContent("Qwen pair");
+  expect(installed).toHaveTextContent("Complete · 2 of 2 ranks");
+  expect(installed).not.toHaveTextContent("Vision pair");
+  expect(installationState).toHaveTextContent("Vision pair");
+  expect(installationState).toHaveTextContent("Partial · 1 of 2 ranks · missing ranks");
+  expect(installationState).toHaveTextContent("Group partial · Rank installed");
+  expect(loaded).toHaveTextContent("Healthy · 2 of 2 ranks");
+  expect(loaded).not.toHaveTextContent("Vision pair");
+  expect(runState).toHaveTextContent("Vision pair");
+  expect(runState).toHaveTextContent("Degraded · 2 of 2 ranks · route not published");
+  expect(runState).toHaveTextContent("Group degraded · Run running · Rank running · Route failed");
+  expect(within(card).getByText("Vision pair route is not published.")).toBeVisible();
+});
+
+test("renders offline certificate reasons and absent metrics honestly", () => {
+  const node = completeNode();
+  node.connection = {...node.connection, certificate_state: "expired", online_state: "offline", offline_reason: "certificate-expired"};
+  node.telemetry = null;
+  node.inventory = null;
+  node.installed = [];
+  node.loaded = [];
+  node.warnings = [];
+
+  render(<NodeCard node={node} now={NOW} selected={false} onSelect={() => undefined}/>);
+  const card = screen.getByRole("article", {name: "Spark One — Offline"});
+
+  expect(within(card).getByText("Certificate expired")).toBeVisible();
+  expect(within(card).getAllByText("Not reported").length).toBeGreaterThanOrEqual(8);
+  expect(within(card).queryByText("0.0%")).not.toBeInTheDocument();
+  expect(within(card).getByText("No complete installations reported")).toBeVisible();
+  expect(within(card).getByText("Nothing is loaded now")).toBeVisible();
+  expect(within(card).getByText("No incomplete installation states")).toBeVisible();
+  expect(within(card).getByText("No inactive or degraded run states")).toBeVisible();
+});

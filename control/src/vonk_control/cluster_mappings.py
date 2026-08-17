@@ -1,4 +1,4 @@
-"""Bind portable recipe profiles to exact local GPU node identities and ranks."""
+"""Bind a recipe's exact topology to local GPU node identities and ranks."""
 
 from __future__ import annotations
 
@@ -14,7 +14,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .models import AgentNode, ClusterMapping, ClusterMappingNode, LocalRecipeRevision
-from .recipe_contract import RecipeContractError, deployment_profile
+from .recipe_contract import RecipeContractError, recipe_topology
+from .topology import Placement, TopologyError, validate_topology
 
 
 class ClusterMappingError(ValueError):
@@ -35,7 +36,7 @@ class ClusterMappingPlacement:
 class ClusterMappingPlan:
     recipe_revision_id: str
     recipe_content_sha256: str
-    profile_name: str
+    topology_name: str
     generation: int
     parameters: dict[str, object]
     nodes: tuple[ClusterMappingPlacement, ...]
@@ -46,14 +47,14 @@ class ClusterMappingService:
     def __init__(self, sessions: sessionmaker[Session]) -> None:
         self._sessions = sessions
 
-    def plan(
+    def preview(
         self,
         recipe_revision_id: str,
-        profile_name: str,
         node_ids: tuple[str, ...],
-        *,
         parameters: Mapping[str, object],
+        actor: str,
     ) -> ClusterMappingPlan:
+        _mapping_actor(actor)
         with self._sessions() as session:
             revision = session.get(LocalRecipeRevision, recipe_revision_id)
             if revision is None:
@@ -65,59 +66,66 @@ class ClusterMappingService:
             document = copy.deepcopy(revision.document)
             nodes = _active_nodes(session, node_ids)
         try:
-            profile = deployment_profile(document, profile_name)
+            topology = recipe_topology(document)
         except RecipeContractError as error:
-            raise ClusterMappingError("mapping.profile_unknown", str(error)) from error
-        expected_count = profile.get("node_count")
+            raise ClusterMappingError("mapping.topology_invalid", str(error)) from error
+        expected_count = topology.get("node_count")
         if expected_count != len(nodes):
             raise ClusterMappingError(
                 "mapping.node_count",
-                "selected GPU node count does not match the exact deployment profile",
+                "selected GPU node count does not match the exact topology",
             )
-        effective = _effective_parameters(document, profile, parameters)
-        roles = profile.get("roles")
+        effective = _effective_parameters(document, parameters)
+        roles = topology.get("roles")
         if not isinstance(roles, list):
             raise ClusterMappingError(
-                "mapping.profile_invalid", "profile roles are invalid"
+                "mapping.topology_invalid", "topology roles are invalid"
             )
         expanded: list[tuple[str, bool]] = []
         for raw_role in roles:
             if not isinstance(raw_role, Mapping):
                 raise ClusterMappingError(
-                    "mapping.profile_invalid", "profile role is invalid"
+                    "mapping.topology_invalid", "topology role is invalid"
                 )
             expanded.extend(
                 (str(raw_role["name"]), bool(raw_role["endpoint_owner"]))
                 for _ in range(int(raw_role["count"]))
             )
-        ordered_nodes = sorted(nodes)
+        ordered_nodes = sorted(node.node_id for node in nodes)
         placements = tuple(
             ClusterMappingPlacement(node_id, rank, role, endpoint_owner)
             for rank, (node_id, (role, endpoint_owner)) in enumerate(
                 zip(ordered_nodes, expanded, strict=True)
             )
         )
-        identity = {
-            "schema_version": 1,
-            "recipe_revision_id": revision.id,
-            "recipe_content_sha256": revision.content_sha256,
-            "profile_name": profile_name,
-            "generation": 1,
-            "parameters": effective,
-            "nodes": [
-                {
-                    "node_id": item.node_id,
-                    "rank": item.rank,
-                    "role": item.role,
-                    "endpoint_owner": item.endpoint_owner,
-                }
-                for item in placements
-            ],
-        }
+        try:
+            validate_topology(
+                document,
+                tuple(
+                    Placement(
+                        item.node_id,
+                        item.rank,
+                        item.role,
+                        item.endpoint_owner,
+                    )
+                    for item in placements
+                ),
+                {node.node_id: tuple(node.capabilities) for node in nodes},
+            )
+        except TopologyError as error:
+            raise ClusterMappingError(error.code, str(error)) from error
+        identity = _plan_identity(
+            revision.id,
+            revision.content_sha256,
+            str(topology["name"]),
+            1,
+            effective,
+            placements,
+        )
         return ClusterMappingPlan(
             recipe_revision_id=revision.id,
             recipe_content_sha256=revision.content_sha256,
-            profile_name=profile_name,
+            topology_name=str(topology["name"]),
             generation=1,
             parameters=effective,
             nodes=placements,
@@ -127,9 +135,7 @@ class ClusterMappingService:
     def materialize(
         self, plan: ClusterMappingPlan, *, actor: str, now: datetime
     ) -> str:
-        actor = actor.strip()
-        if not actor:
-            raise ClusterMappingError("mapping.actor", "mapping actor is invalid")
+        actor = _mapping_actor(actor)
         with self._sessions.begin() as session:
             revision = session.get(
                 LocalRecipeRevision, plan.recipe_revision_id, with_for_update=True
@@ -142,9 +148,42 @@ class ClusterMappingService:
                 raise ClusterMappingError(
                     "mapping.stale_plan", "recipe changed after mapping preview"
                 )
-            _active_nodes(
+            nodes = _active_nodes(
                 session, tuple(item.node_id for item in plan.nodes), lock=True
             )
+            document = copy.deepcopy(revision.document)
+            try:
+                validate_topology(
+                    document,
+                    tuple(
+                        Placement(
+                            item.node_id,
+                            item.rank,
+                            item.role,
+                            item.endpoint_owner,
+                        )
+                        for item in plan.nodes
+                    ),
+                    {node.node_id: tuple(node.capabilities) for node in nodes},
+                )
+            except TopologyError as error:
+                raise ClusterMappingError(error.code, str(error)) from error
+            topology = recipe_topology(document)
+            if plan.topology_name != str(
+                topology["name"]
+            ) or plan.placement_digest != _digest(
+                _plan_identity(
+                    plan.recipe_revision_id,
+                    plan.recipe_content_sha256,
+                    plan.topology_name,
+                    plan.generation,
+                    plan.parameters,
+                    plan.nodes,
+                )
+            ):
+                raise ClusterMappingError(
+                    "mapping.stale_plan", "mapping plan identity is invalid"
+                )
             existing = session.scalar(
                 select(ClusterMapping).where(
                     ClusterMapping.placement_digest == plan.placement_digest
@@ -159,7 +198,7 @@ class ClusterMappingService:
                 )
             mapping = ClusterMapping(
                 recipe_revision_id=plan.recipe_revision_id,
-                profile_name=plan.profile_name,
+                topology_name=plan.topology_name,
                 generation=plan.generation,
                 node_count=len(plan.nodes),
                 state="ready",
@@ -189,7 +228,7 @@ class ClusterMappingService:
 
 def _active_nodes(
     session: Session, node_ids: tuple[str, ...], *, lock: bool = False
-) -> tuple[str, ...]:
+) -> tuple[AgentNode, ...]:
     if not node_ids or len(node_ids) != len(set(node_ids)):
         raise ClusterMappingError(
             "mapping.nodes_invalid", "mapping nodes must be unique and non-empty"
@@ -199,7 +238,9 @@ def _active_nodes(
         statement = statement.with_for_update()
     rows = tuple(session.scalars(statement))
     if len(rows) != len(node_ids):
-        raise ClusterMappingError("mapping.node_unknown", "a selected GPU node is unknown")
+        raise ClusterMappingError(
+            "mapping.node_unknown", "a selected GPU node is unknown"
+        )
     if any(
         row.state != "active"
         or row.revoked_at is not None
@@ -207,19 +248,54 @@ def _active_nodes(
         for row in rows
     ):
         raise ClusterMappingError(
-            "mapping.node_incompatible", "a selected GPU node is inactive or incompatible"
+            "mapping.node_incompatible",
+            "a selected GPU node is inactive or incompatible",
         )
-    return tuple(row.node_id for row in rows)
+    return rows
+
+
+def _mapping_actor(actor: str) -> str:
+    if not isinstance(actor, str):
+        raise ClusterMappingError("mapping.actor", "mapping actor is invalid")
+    actor = actor.strip()
+    if not actor or len(actor) > 200:
+        raise ClusterMappingError("mapping.actor", "mapping actor is invalid")
+    return actor
+
+
+def _plan_identity(
+    recipe_revision_id: str,
+    recipe_content_sha256: str,
+    topology_name: str,
+    generation: int,
+    parameters: Mapping[str, object],
+    nodes: tuple[ClusterMappingPlacement, ...],
+) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "recipe_revision_id": recipe_revision_id,
+        "recipe_content_sha256": recipe_content_sha256,
+        "topology_name": topology_name,
+        "generation": generation,
+        "parameters": dict(parameters),
+        "nodes": [
+            {
+                "node_id": item.node_id,
+                "rank": item.rank,
+                "role": item.role,
+                "endpoint_owner": item.endpoint_owner,
+            }
+            for item in nodes
+        ],
+    }
 
 
 def _effective_parameters(
     document: Mapping[str, object],
-    profile: Mapping[str, object],
     supplied: Mapping[str, object],
 ) -> dict[str, object]:
     raw_parameters = document.get("parameters")
-    overrides = profile.get("parameter_overrides")
-    if not isinstance(raw_parameters, list) or not isinstance(overrides, Mapping):
+    if not isinstance(raw_parameters, list):
         raise ClusterMappingError(
             "mapping.parameters_invalid", "recipe parameters are invalid"
         )
@@ -234,7 +310,6 @@ def _effective_parameters(
         name: copy.deepcopy(definition["default"])
         for name, definition in definitions.items()
     }
-    effective.update(copy.deepcopy(dict(overrides)))
     effective.update(copy.deepcopy(dict(supplied)))
     for name, value in effective.items():
         definition = definitions[name]

@@ -1,0 +1,376 @@
+#!/usr/bin/env python3
+"""Validate a standalone Vonk Forge v1 recipe-library snapshot."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "control" / "src"))
+
+from vonk_control.catalog_contract import (
+    CatalogContractError,
+    CatalogKind,
+    CatalogReference,
+    catalog_content_sha256,
+    parse_catalog_json,
+    parse_catalog_reference,
+    validate_catalog_document,
+)
+from vonk_control.recipe_contract import (
+    RecipeContractError,
+    parse_recipe_json,
+    recipe_content_sha256,
+    recipe_references,
+    validate_recipe,
+)
+
+_SECRET_MARKERS = (
+    b"BEGIN PRIVATE KEY",
+    b"BEGIN OPENSSH PRIVATE KEY",
+    b"ghp_",
+    b"github_pat_",
+    b"-----BEGIN RSA PRIVATE KEY-----",
+)
+_DIRECTORIES = {
+    "model-groups": "model-group",
+    "models": "model",
+    "model-versions": "model-version",
+    "runtime-distributions": "runtime-distribution",
+    "patch-bundles": "patch-bundle",
+}
+
+
+class LibraryValidationError(ValueError):
+    pass
+
+
+def _arguments() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--library-root", type=Path, required=True)
+    parser.add_argument("--platform-root", type=Path, default=ROOT)
+    parser.add_argument("--json", action="store_true", dest="as_json")
+    return parser.parse_args()
+
+
+def _content_root(root: Path) -> Path:
+    config = root / "config"
+    if (config / "model-groups").is_dir():
+        return config
+    return root
+
+
+def _documents(root: Path, directory: str) -> list[tuple[Path, Mapping[str, object]]]:
+    source = root / directory
+    if not source.is_dir():
+        raise LibraryValidationError(f"required recipe-library directory is missing: {directory}")
+    result: list[tuple[Path, Mapping[str, object]]] = []
+    for path in sorted(source.glob("*.json")):
+        try:
+            document = parse_catalog_json(path.read_bytes())
+            validate_catalog_document(document)
+        except (OSError, CatalogContractError) as error:
+            raise LibraryValidationError(f"{path}: {error}") from error
+        result.append((path, document))
+    if not result:
+        raise LibraryValidationError(f"required recipe-library directory is empty: {directory}")
+    return result
+
+
+def _identity(document: Mapping[str, object], path: Path) -> tuple[str, str, str, str]:
+    identity = document.get("identity")
+    if not isinstance(identity, Mapping):
+        raise LibraryValidationError(f"{path}: identity is missing")
+    kind = document.get("kind")
+    publisher = identity.get("publisher")
+    slug = identity.get("slug")
+    if not all(isinstance(value, str) for value in (kind, publisher, slug)):
+        raise LibraryValidationError(f"{path}: catalog identity is invalid")
+    return str(kind), str(publisher), str(slug), catalog_content_sha256(document)
+
+
+def _catalog_map(
+    root: Path, platform_root: Path
+) -> tuple[dict[tuple[str, str, str, str], Mapping[str, object]], int]:
+    entities: dict[tuple[str, str, str, str], Mapping[str, object]] = {}
+    count = 0
+    for directory, expected_kind in _DIRECTORIES.items():
+        for path, document in _documents(root, directory):
+            if document.get("kind") != expected_kind:
+                raise LibraryValidationError(
+                    f"{path}: expected kind {expected_kind!r}, got {document.get('kind')!r}"
+                )
+            key = _identity(document, path)
+            if key in entities:
+                raise LibraryValidationError(f"{path}: duplicate exact catalog entity")
+            entities[key] = document
+            count += 1
+
+    harness_root = _content_root(platform_root) / "execution-harnesses"
+    if not harness_root.is_dir():
+        raise LibraryValidationError("platform execution-harnesses directory is missing")
+    for path in sorted(harness_root.glob("*.json")):
+        try:
+            document = parse_catalog_json(path.read_bytes())
+            validate_catalog_document(document)
+        except (OSError, CatalogContractError) as error:
+            raise LibraryValidationError(f"{path}: {error}") from error
+        if document.get("kind") != "execution-harness":
+            raise LibraryValidationError(f"{path}: execution harness kind is required")
+        key = _identity(document, path)
+        if key in entities:
+            raise LibraryValidationError(f"{path}: duplicate exact catalog entity")
+        entities[key] = document
+        count += 1
+    _validate_entity_dependencies(entities)
+    return entities, count
+
+
+def _reference_key(reference: CatalogReference) -> tuple[str, str, str, str]:
+    return reference.portable_identity
+
+
+def _entity_references(document: Mapping[str, object]) -> tuple[CatalogReference, ...]:
+    kind = document.get("kind")
+    references: list[CatalogReference] = []
+    if kind == "model":
+        references.append(
+            parse_catalog_reference(
+                document["model_group"], expected_kind=CatalogKind.MODEL_GROUP
+            )
+        )
+    elif kind == "model-version":
+        references.append(
+            parse_catalog_reference(document["model"], expected_kind=CatalogKind.MODEL)
+        )
+        lineage = document.get("lineage")
+        if isinstance(lineage, Mapping):
+            references.append(
+                parse_catalog_reference(
+                    lineage["source_model"], expected_kind=CatalogKind.MODEL
+                )
+            )
+    elif kind == "runtime-distribution":
+        references.append(
+            parse_catalog_reference(
+                document["implements_harness"],
+                expected_kind=CatalogKind.EXECUTION_HARNESS,
+            )
+        )
+    elif kind == "patch-bundle":
+        references.append(
+            parse_catalog_reference(
+                document["applies_to"],
+                expected_kind=CatalogKind.RUNTIME_DISTRIBUTION,
+            )
+        )
+        for version in document.get("compatible_model_versions", ()):
+            references.append(
+                parse_catalog_reference(
+                    version, expected_kind=CatalogKind.MODEL_VERSION
+                )
+            )
+    return tuple(references)
+
+
+def _validate_entity_dependencies(
+    entities: Mapping[tuple[str, str, str, str], Mapping[str, object]],
+) -> None:
+    for document in entities.values():
+        try:
+            references = _entity_references(document)
+        except (KeyError, TypeError, ValueError) as error:
+            raise LibraryValidationError(
+                "catalog entity dependency reference is invalid"
+            ) from error
+        for reference in references:
+            if _reference_key(reference) not in entities:
+                raise LibraryValidationError(
+                    f"missing exact catalog dependency {reference.portable_identity}"
+                )
+
+
+def _validate_recipe(
+    path: Path,
+    library_root: Path,
+    platform_root: Path,
+    entities: Mapping[tuple[str, str, str, str], Mapping[str, object]],
+) -> str:
+    try:
+        document = parse_recipe_json(path.read_bytes())
+        validate_recipe(document)
+        references = recipe_references(document)
+    except (OSError, RecipeContractError) as error:
+        raise LibraryValidationError(f"{path}: {error}") from error
+    for reference in references:
+        if _reference_key(reference) not in entities:
+            raise LibraryValidationError(
+                f"{path}: missing exact catalog dependency {reference.portable_identity}"
+            )
+
+    build = document.get("build")
+    context = build.get("context") if isinstance(build, Mapping) else None
+    context_path = context.get("path") if isinstance(context, Mapping) else None
+    if not isinstance(context_path, str) or not context_path:
+        raise LibraryValidationError(f"{path}: build context path is missing")
+    context = (library_root / context_path).resolve()
+    if not context.is_dir():
+        context = (platform_root / context_path).resolve()
+    try:
+        context.relative_to(library_root.resolve())
+    except ValueError:
+        try:
+            context.relative_to(platform_root.resolve())
+        except ValueError as error:
+            raise LibraryValidationError(f"{path}: build context escapes both roots") from error
+    if not context.is_dir():
+        raise LibraryValidationError(f"{path}: build context is unavailable: {context_path}")
+    qualifier = platform_root / "scripts" / "qualify-recipe"
+    if not qualifier.is_file():
+        raise LibraryValidationError(
+            f"{path}: platform structural qualifier is unavailable"
+        )
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(qualifier),
+            "--recipe",
+            str(path),
+            "--library-root",
+            str(library_root),
+            "--platform-root",
+            str(platform_root),
+            "--level",
+            "structural",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    if result.returncode != 0:
+        try:
+            detail = json.loads(result.stdout).get("error")
+        except (json.JSONDecodeError, AttributeError):
+            detail = None
+        detail = detail or result.stderr.strip() or "structural qualification failed"
+        raise LibraryValidationError(f"{path}: {detail}")
+    return recipe_content_sha256(document)
+
+
+def _scan_secrets(root: Path) -> None:
+    scan_roots = [root / directory for directory in (*_DIRECTORIES, "recipes", "adapters")]
+    for scan_root in scan_roots:
+        if not scan_root.exists():
+            continue
+        for path in scan_root.rglob("*"):
+            if not path.is_file() or ".git" in path.parts or "__pycache__" in path.parts:
+                continue
+            if path.suffix.lower() in {".gz", ".tar", ".png", ".jpg", ".jpeg", ".bin", ".safetensors"}:
+                continue
+            try:
+                payload = path.read_bytes()
+            except OSError as error:
+                raise LibraryValidationError(f"{path}: cannot read for secret scan") from error
+            if any(marker in payload for marker in _SECRET_MARKERS):
+                raise LibraryValidationError(f"{path}: possible private credential in recipe library")
+
+
+def _validate_target_recipe_coverage(
+    root: Path,
+    recipe_slugs: set[str],
+) -> None:
+    # The standalone public library owns the complete target ledger.  The
+    # platform checkout may contain a deliberately smaller imported snapshot;
+    # its config/model-targets files are not the publication authority.
+    target_root = root / "model-targets"
+    if not target_root.is_dir():
+        return
+    for path in sorted(target_root.glob("*.json")):
+        try:
+            document = json.loads(path.read_bytes())
+        except (OSError, json.JSONDecodeError) as error:
+            raise LibraryValidationError(f"{path}: target ledger is invalid") from error
+        targets = document.get("targets") if isinstance(document, Mapping) else None
+        if not isinstance(targets, list):
+            raise LibraryValidationError(f"{path}: target ledger targets are required")
+        for index, target in enumerate(targets):
+            if not isinstance(target, Mapping):
+                raise LibraryValidationError(f"{path}: target {index} is invalid")
+            status = target.get("status")
+            slugs = target.get("recipe_slugs", [])
+            if not isinstance(slugs, list) or any(
+                not isinstance(slug, str) or not slug for slug in slugs
+            ):
+                raise LibraryValidationError(
+                    f"{path}: target {index} recipe_slugs are invalid"
+                )
+            if status == "blocked":
+                if slugs:
+                    raise LibraryValidationError(
+                        f"{path}: blocked target {index} must not advertise a recipe"
+                    )
+                continue
+            if not slugs:
+                raise LibraryValidationError(
+                    f"{path}: non-blocked target has no recipe (index {index})"
+                )
+            missing = sorted(set(slugs) - recipe_slugs)
+            if missing:
+                raise LibraryValidationError(
+                    f"{path}: target {index} references missing recipes: {', '.join(missing)}"
+                )
+
+
+def validate(library_root: Path, platform_root: Path) -> dict[str, Any]:
+    library_root = library_root.resolve()
+    platform_root = platform_root.resolve()
+    if not library_root.is_dir():
+        raise LibraryValidationError(f"recipe-library root is unavailable: {library_root}")
+    _scan_secrets(library_root)
+    entities, entity_count = _catalog_map(_content_root(library_root), platform_root)
+    recipe_root = _content_root(library_root) / "recipes"
+    if not recipe_root.is_dir():
+        raise LibraryValidationError("required recipe-library directory is missing: recipes")
+    recipes = []
+    recipe_slugs: set[str] = set()
+    for path in sorted(recipe_root.glob("*.json")):
+        recipe_document = parse_recipe_json(path.read_bytes())
+        identity = recipe_document.get("identity")
+        if isinstance(identity, Mapping) and isinstance(identity.get("slug"), str):
+            recipe_slugs.add(identity["slug"])
+        recipes.append(_validate_recipe(path, library_root, platform_root, entities))
+    if not recipes:
+        raise LibraryValidationError("recipe-library contains no recipes")
+    _validate_target_recipe_coverage(library_root, recipe_slugs)
+    return {
+        "schema_version": 1,
+        "catalog_entity_count": entity_count,
+        "recipe_count": len(recipes),
+        "recipe_content_sha256": recipes,
+        "secret_scan": "passed",
+    }
+
+
+def main() -> int:
+    args = _arguments()
+    try:
+        report = validate(args.library_root, args.platform_root)
+    except (LibraryValidationError, OSError) as error:
+        print(f"validate-recipe-library: {error}", file=sys.stderr)
+        return 2
+    if args.as_json:
+        print(json.dumps(report, sort_keys=True, separators=(",", ":")))
+    else:
+        print(f"validated {report['recipe_count']} recipes and {report['catalog_entity_count']} catalog entities")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

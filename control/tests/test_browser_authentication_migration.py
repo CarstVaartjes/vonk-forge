@@ -15,9 +15,8 @@ def config(database_url: str) -> Config:
     return value
 
 
-def test_browser_authentication_is_the_linear_head() -> None:
+def test_browser_authentication_follows_catalog_bridge() -> None:
     script = ScriptDirectory.from_config(config("sqlite://"))
-    assert script.get_heads() == ["0021_browser_authentication"]
     assert script.get_revision("0021_browser_authentication").down_revision == (
         "0020_recipe_catalog_bridge"
     )
@@ -38,7 +37,7 @@ def test_password_verifier_migration_preserves_users_and_downgrades_only_its_col
             )
         )
 
-    command.upgrade(migration_config, "head")
+    command.upgrade(migration_config, "0021_browser_authentication")
     columns = {column["name"]: column for column in inspect(engine).get_columns("users")}
     assert columns["password_verifier"]["type"].length == 255
     assert columns["password_verifier"]["nullable"] is True

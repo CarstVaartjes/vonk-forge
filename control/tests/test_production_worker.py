@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from vonk_control import telemetry_maintenance
 from vonk_control.jobs import JobService
 from vonk_control.models import Base
 from vonk_control.package_rollout_worker import PackageRolloutWorker
@@ -105,6 +106,14 @@ def test_production_builder_wires_signer_queue_route_boundary_and_update_worker(
     assert worker._updates._routes is worker._updates._orchestrator._routes
     assert worker._reconciliations._agent_jobs is agent_jobs
     assert worker._reconciliations._publisher is publisher
+    assert isinstance(
+        worker._housekeeping,
+        telemetry_maintenance.TelemetryMaintenanceCadence,
+    )
+    assert isinstance(
+        worker._housekeeping._maintenance,
+        telemetry_maintenance.TelemetryMaintenance,
+    )
 
 
 def test_production_worker_settings_load_only_worker_authority_secrets(

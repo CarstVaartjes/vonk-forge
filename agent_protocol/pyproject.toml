@@ -20,6 +20,7 @@ packages = ["src/vonk_agent_protocol"]
 "src/vonk_agent_protocol/schemas/agent-result.schema.json" = "vonk_agent_protocol/schemas/agent-result.schema.json"
 "src/vonk_agent_protocol/schemas/workload-release-lock.schema.json" = "vonk_agent_protocol/schemas/workload-release-lock.schema.json"
 "src/vonk_agent_protocol/schemas/agent-directive.schema.json" = "vonk_agent_protocol/schemas/agent-directive.schema.json"
+"src/vonk_agent_protocol/vectors/recipe-build-claim-v1.json" = "vonk_agent_protocol/vectors/recipe-build-claim-v1.json"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

@@ -18,20 +18,45 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
+    Float,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
+    SmallInteger,
     String,
     Text,
     UniqueConstraint,
     event,
+    inspect,
+    literal_column,
+    select,
     text,
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship
+from sqlalchemy.sql.functions import FunctionElement
 
 
 class Base(DeclarativeBase):
     pass
+
+
+class _Utf8ByteLength(FunctionElement[int]):
+    type = Integer()
+    inherit_cache = True
+
+
+@compiles(_Utf8ByteLength, "sqlite")
+def _compile_sqlite_utf8_byte_length(element, compiler, **kwargs) -> str:
+    value = compiler.process(next(iter(element.clauses)), **kwargs)
+    return f"length(CAST({value} AS BLOB))"
+
+
+@compiles(_Utf8ByteLength)
+def _compile_utf8_byte_length(element, compiler, **kwargs) -> str:
+    value = compiler.process(next(iter(element.clauses)), **kwargs)
+    return f"octet_length(CAST({value} AS TEXT))"
 
 
 def _lower_hex(column: str, length: int) -> str:
@@ -119,6 +144,14 @@ class AuditEvent(Base):
 
 class Observation(Base):
     __tablename__ = "observations"
+    __table_args__ = (
+        Index(
+            "ix_observations_kind_node_observed",
+            "kind",
+            "node_id",
+            "observed_at",
+        ),
+    )
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )
@@ -1717,11 +1750,137 @@ class RecipeSourceBundle(Base):
     )
 
 
+class CatalogEntity(Base):
+    __tablename__ = "catalog_entities"
+    __table_args__ = (
+        UniqueConstraint(
+            "kind", "publisher", "slug", name="uq_catalog_entities_identity"
+        ),
+        CheckConstraint(
+            "kind IN ('model-group','model','model-version','execution-harness',"
+            "'runtime-distribution','patch-bundle')",
+            name="ck_catalog_entities_kind",
+        ),
+        CheckConstraint(
+            "publisher = lower(publisher) AND length(publisher) BETWEEN 2 AND 63",
+            name="ck_catalog_entities_publisher",
+        ),
+        CheckConstraint(
+            "slug = lower(slug) AND length(slug) BETWEEN 2 AND 63",
+            name="ck_catalog_entities_slug",
+        ),
+        CheckConstraint(
+            "length(title) BETWEEN 1 AND 120", name="ck_catalog_entities_title"
+        ),
+    )
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    kind: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    publisher: Mapped[str] = mapped_column(String(63), nullable=False, index=True)
+    slug: Mapped[str] = mapped_column(String(63), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(120), nullable=False)
+    created_by: Mapped[str] = mapped_column(String(200), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+
+
+class CatalogEntityRevision(Base):
+    __tablename__ = "catalog_entity_revisions"
+    __table_args__ = (
+        UniqueConstraint(
+            "entity_id", "revision_number", name="uq_catalog_entity_revision_number"
+        ),
+        CheckConstraint(
+            "revision_number >= 1", name="ck_catalog_entity_revisions_number"
+        ),
+        CheckConstraint(
+            "schema_version = 1", name="ck_catalog_entity_revisions_schema"
+        ),
+        CheckConstraint(
+            "lifecycle IN ('draft','blocked','resolved','deprecated')",
+            name="ck_catalog_entity_revisions_lifecycle",
+        ),
+        CheckConstraint(
+            "lifecycle != 'resolved' OR content_sha256 IS NOT NULL",
+            name="ck_catalog_entity_revisions_resolved_digest",
+        ),
+        CheckConstraint(
+            _nullable_lower_hex("content_sha256", 64),
+            name="ck_catalog_entity_revisions_content_digest",
+        ),
+    )
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    entity_id: Mapped[str] = mapped_column(
+        ForeignKey("catalog_entities.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    revision_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    lifecycle: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    document: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    content_sha256: Mapped[str | None] = mapped_column(String(64), index=True)
+    created_by: Mapped[str] = mapped_column(String(200), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    entity: Mapped[CatalogEntity] = relationship(lazy="joined")
+
+
+@event.listens_for(CatalogEntity, "before_delete")
+def _catalog_entity_with_revisions_cannot_be_deleted(
+    _mapper, connection, target: CatalogEntity
+) -> None:
+    revision_id = connection.scalar(
+        select(CatalogEntityRevision.id)
+        .where(CatalogEntityRevision.entity_id == target.id)
+        .limit(1)
+    )
+    if revision_id is not None:
+        raise ValueError("catalog entities with revisions cannot be deleted")
+
+
+@event.listens_for(CatalogEntityRevision, "before_update")
+@event.listens_for(CatalogEntityRevision, "before_delete")
+def _resolved_catalog_entity_revision_is_immutable(
+    _mapper, _connection, target: CatalogEntityRevision
+) -> None:
+    lifecycle_history = inspect(target).attrs.lifecycle.history
+    previous = lifecycle_history.deleted[0] if lifecycle_history.deleted else None
+    if target.lifecycle == "resolved" or previous == "resolved":
+        raise ValueError("resolved catalog entity revisions are immutable")
+
+
+@event.listens_for(Session, "before_commit")
+def _resolved_catalog_entity_document_is_immutable(session: Session) -> None:
+    for value in session.identity_map.values():
+        if not isinstance(value, CatalogEntityRevision):
+            continue
+        if value.lifecycle != "resolved" or value.content_sha256 is None:
+            continue
+        encoded = json.dumps(
+            value.document,
+            ensure_ascii=False,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        if hashlib.sha256(encoded).hexdigest() != value.content_sha256:
+            raise ValueError("resolved catalog entity revisions are immutable")
+
+
 class LocalRecipe(Base):
     __tablename__ = "local_recipes"
     __table_args__ = (
         CheckConstraint(
-            "source_kind IN ('local','workload_run','global')",
+            "source_kind IN ('local','workload_run','global','recipe_library')",
             name="ck_local_recipes_source_kind",
         ),
         CheckConstraint(
@@ -1804,7 +1963,7 @@ class RecipeImport(Base):
             "source_kind", "source_sha256", name="uq_recipe_import_source"
         ),
         CheckConstraint(
-            "source_kind IN ('local','workload_run','global')",
+            "source_kind IN ('local','workload_run','global','recipe_library')",
             name="ck_recipe_imports_source_kind",
         ),
         CheckConstraint(
@@ -1994,7 +2153,7 @@ class ClusterMapping(Base):
         nullable=False,
         index=True,
     )
-    profile_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    topology_name: Mapped[str] = mapped_column(String(64), nullable=False)
     generation: Mapped[int] = mapped_column(Integer, nullable=False)
     node_count: Mapped[int] = mapped_column(Integer, nullable=False)
     state: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
@@ -2043,6 +2202,20 @@ class ClusterMappingNode(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
+
+
+def _reject_ready_mapping_node_mutation(
+    _mapper: object, connection: object, target: ClusterMappingNode
+) -> None:
+    state = connection.execute(
+        select(ClusterMapping.state).where(ClusterMapping.id == target.mapping_id)
+    ).scalar_one_or_none()
+    if state == "ready":
+        raise ValueError("mapping.ready_immutable")
+
+
+event.listen(ClusterMappingNode, "before_update", _reject_ready_mapping_node_mutation)
+event.listen(ClusterMappingNode, "before_delete", _reject_ready_mapping_node_mutation)
 
 
 class NodeInventorySnapshot(Base):
@@ -2099,6 +2272,313 @@ class NodeInventorySnapshot(Base):
     capabilities: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     evidence_digest: Mapped[str] = mapped_column(
         String(64), nullable=False, unique=True
+    )
+
+
+class NodeTelemetrySample(Base):
+    __tablename__ = "node_telemetry_samples"
+    __table_args__ = (
+        UniqueConstraint(
+            "node_id", "boot_id", "sequence", name="uq_telemetry_node_boot_sequence"
+        ),
+        UniqueConstraint("node_id", "id", name="uq_telemetry_node_sample"),
+        CheckConstraint(_uuid_shape("boot_id"), name="ck_telemetry_boot_id_shape"),
+        CheckConstraint(
+            "sequence BETWEEN 0 AND 9223372036854775807 AND "
+            "gap_samples BETWEEN 0 AND 9223372036854775807",
+            name="ck_telemetry_sequences",
+        ),
+        CheckConstraint(
+            "(cpu_utilization_percent IS NULL OR "
+            "cpu_utilization_percent BETWEEN 0 AND 100) AND "
+            "(gpu_utilization_percent IS NULL OR "
+            "gpu_utilization_percent BETWEEN 0 AND 100)",
+            name="ck_telemetry_utilization",
+        ),
+        CheckConstraint(
+            "load_average_1m IS NULL OR load_average_1m BETWEEN 0 AND 1000000",
+            name="ck_telemetry_load",
+        ),
+        CheckConstraint(
+            "(memory_total_bytes IS NULL AND memory_available_bytes IS NULL) OR "
+            "(memory_total_bytes IS NOT NULL AND memory_available_bytes IS NOT NULL AND "
+            "memory_total_bytes >= 0 AND memory_available_bytes >= 0 AND "
+            "memory_total_bytes <= 17592186044416 AND "
+            "memory_available_bytes <= 17592186044416 AND "
+            "memory_available_bytes <= memory_total_bytes)",
+            name="ck_telemetry_memory",
+        ),
+        CheckConstraint(
+            "(disk_total_bytes IS NULL AND disk_free_bytes IS NULL) OR "
+            "(disk_total_bytes IS NOT NULL AND disk_free_bytes IS NOT NULL AND "
+            "disk_total_bytes >= 0 AND disk_free_bytes >= 0 AND "
+            "disk_total_bytes <= 17592186044416 AND "
+            "disk_free_bytes <= 17592186044416 AND "
+            "disk_free_bytes <= disk_total_bytes)",
+            name="ck_telemetry_disk",
+        ),
+        CheckConstraint(
+            "(gpu_memory_total_bytes IS NULL AND gpu_memory_free_bytes IS NULL) OR "
+            "(gpu_memory_total_bytes IS NOT NULL AND gpu_memory_free_bytes IS NOT NULL AND "
+            "gpu_memory_total_bytes >= 0 AND gpu_memory_free_bytes >= 0 AND "
+            "gpu_memory_total_bytes <= 17592186044416 AND "
+            "gpu_memory_free_bytes <= 17592186044416 AND "
+            "gpu_memory_free_bytes <= gpu_memory_total_bytes)",
+            name="ck_telemetry_gpu_memory",
+        ),
+        CheckConstraint(
+            "(temperature_c IS NULL OR temperature_c BETWEEN -100 AND 300) "
+            "AND (power_watts IS NULL OR power_watts BETWEEN 0 AND 100000) AND "
+            "(network_receive_bytes_per_second IS NULL OR "
+            "network_receive_bytes_per_second BETWEEN 0 AND 1000000000000000) AND "
+            "(network_transmit_bytes_per_second IS NULL OR "
+            "network_transmit_bytes_per_second BETWEEN 0 AND 1000000000000000)",
+            name="ck_telemetry_physical_metrics",
+        ),
+        CheckConstraint(
+            "length(CAST(details AS TEXT)) BETWEEN 2 AND 4096",
+            name="ck_telemetry_details",
+        ),
+        Index("ix_telemetry_node_observed", "node_id", "observed_at"),
+    )
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    node_id: Mapped[str] = mapped_column(
+        ForeignKey("agent_nodes.node_id", ondelete="CASCADE"), nullable=False
+    )
+    boot_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    cpu_utilization_percent: Mapped[float | None] = mapped_column(Float)
+    load_average_1m: Mapped[float | None] = mapped_column(Float)
+    memory_total_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    memory_available_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    disk_total_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    disk_free_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    gpu_utilization_percent: Mapped[float | None] = mapped_column(Float)
+    gpu_memory_total_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    gpu_memory_free_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    temperature_c: Mapped[float | None] = mapped_column(Float)
+    power_watts: Mapped[float | None] = mapped_column(Float)
+    network_receive_bytes_per_second: Mapped[float | None] = mapped_column(Float)
+    network_transmit_bytes_per_second: Mapped[float | None] = mapped_column(Float)
+    gap_samples: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    details: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+
+
+class NodeTelemetryLatest(Base):
+    __tablename__ = "node_telemetry_latest"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ("node_id", "sample_id"),
+            ("node_telemetry_samples.node_id", "node_telemetry_samples.id"),
+            name="fk_telemetry_latest_node_sample",
+            ondelete="RESTRICT",
+        ),
+    )
+    node_id: Mapped[str] = mapped_column(
+        ForeignKey("agent_nodes.node_id", ondelete="CASCADE"), primary_key=True
+    )
+    sample_id: Mapped[str] = mapped_column(
+        nullable=False,
+        unique=True,
+    )
+
+
+class NodeTelemetryRollupBucket(Base):
+    __tablename__ = "node_telemetry_rollup_buckets"
+    __table_args__ = (
+        CheckConstraint(
+            "resolution_seconds IN (60, 900)",
+            name="ck_telemetry_rollup_buckets_resolution",
+        ),
+        CheckConstraint(
+            "source_sample_count BETWEEN 0 AND 9223372036854775807 AND "
+            "gap_samples BETWEEN 0 AND 9223372036854775807",
+            name="ck_telemetry_rollup_buckets_counts",
+        ),
+        Index(
+            "ix_telemetry_rollup_buckets_resolution_start",
+            "resolution_seconds",
+            "bucket_start",
+            "node_id",
+        ),
+    )
+    resolution_seconds: Mapped[int] = mapped_column(
+        SmallInteger, primary_key=True
+    )
+    node_id: Mapped[str] = mapped_column(
+        ForeignKey(
+            "agent_nodes.node_id",
+            name="fk_telemetry_rollup_buckets_node",
+            ondelete="CASCADE",
+        ),
+        primary_key=True,
+    )
+    bucket_start: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), primary_key=True
+    )
+    source_sample_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    gap_samples: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+
+class NodeTelemetryRollupMetric(Base):
+    __tablename__ = "node_telemetry_rollup_metrics"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ("resolution_seconds", "node_id", "bucket_start"),
+            (
+                "node_telemetry_rollup_buckets.resolution_seconds",
+                "node_telemetry_rollup_buckets.node_id",
+                "node_telemetry_rollup_buckets.bucket_start",
+            ),
+            name="fk_telemetry_rollup_metrics_bucket",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint(
+            "resolution_seconds IN (60, 900)",
+            name="ck_telemetry_rollup_metrics_resolution",
+        ),
+        CheckConstraint(
+            "length(metric_name) BETWEEN 1 AND 64",
+            name="ck_telemetry_rollup_metrics_name",
+        ),
+        CheckConstraint(
+            "sample_count BETWEEN 0 AND 9223372036854775807",
+            name="ck_telemetry_rollup_metrics_count",
+        ),
+        CheckConstraint(
+            "minimum BETWEEN -1e308 AND 1e308 AND "
+            "mean BETWEEN -1e308 AND 1e308 AND "
+            "maximum BETWEEN -1e308 AND 1e308 AND "
+            "minimum <= mean AND mean <= maximum",
+            name="ck_telemetry_rollup_metrics_values",
+        ),
+    )
+    resolution_seconds: Mapped[int] = mapped_column(
+        SmallInteger, primary_key=True
+    )
+    node_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    bucket_start: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), primary_key=True
+    )
+    metric_name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    sample_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    minimum: Mapped[float] = mapped_column(Float, nullable=False)
+    mean: Mapped[float] = mapped_column(Float, nullable=False)
+    maximum: Mapped[float] = mapped_column(Float, nullable=False)
+
+
+class NodeTelemetryRollupDirty(Base):
+    __tablename__ = "node_telemetry_rollup_dirty"
+    __table_args__ = (
+        CheckConstraint(
+            "resolution_seconds IN (60, 900)",
+            name="ck_telemetry_rollup_dirty_resolution",
+        ),
+        Index(
+            "ix_telemetry_rollup_dirty_resolution_start",
+            "resolution_seconds",
+            "bucket_start",
+            "node_id",
+        ),
+    )
+    resolution_seconds: Mapped[int] = mapped_column(
+        SmallInteger, primary_key=True
+    )
+    node_id: Mapped[str] = mapped_column(
+        ForeignKey(
+            "agent_nodes.node_id",
+            name="fk_telemetry_rollup_dirty_node",
+            ondelete="CASCADE",
+        ),
+        primary_key=True,
+    )
+    bucket_start: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), primary_key=True
+    )
+
+
+class TelemetryMaintenanceState(Base):
+    """Durable singleton used to coordinate bounded rollup fairness."""
+
+    __tablename__ = "telemetry_maintenance_state"
+    __table_args__ = (
+        CheckConstraint(
+            "singleton_id = 1", name="ck_telemetry_maintenance_state_singleton"
+        ),
+        CheckConstraint(
+            "next_resolution_seconds IN (60, 900)",
+            name="ck_telemetry_maintenance_state_resolution",
+        ),
+    )
+    singleton_id: Mapped[int] = mapped_column(SmallInteger, primary_key=True)
+    next_resolution_seconds: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+
+
+@event.listens_for(TelemetryMaintenanceState.__table__, "after_create")
+def _seed_telemetry_maintenance_state(_target, connection, **_kw) -> None:
+    connection.execute(
+        TelemetryMaintenanceState.__table__.insert().values(
+            singleton_id=1,
+            next_resolution_seconds=60,
+        )
+    )
+
+
+class FleetEventCursor(Base):
+    __tablename__ = "fleet_event_cursor"
+    __table_args__ = (
+        CheckConstraint(
+            "singleton_id = 1", name="ck_fleet_event_cursor_singleton"
+        ),
+        CheckConstraint("last_id >= 0", name="ck_fleet_event_cursor_last_id"),
+    )
+    singleton_id: Mapped[int] = mapped_column(SmallInteger, primary_key=True)
+    last_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+
+@event.listens_for(FleetEventCursor.__table__, "after_create")
+def _seed_fleet_event_cursor(_target, connection, **_kw) -> None:
+    connection.execute(
+        FleetEventCursor.__table__.insert().values(singleton_id=1, last_id=0)
+    )
+
+
+class FleetStreamEvent(Base):
+    __tablename__ = "fleet_stream_events"
+    __table_args__ = (
+        CheckConstraint(
+            "event_type IN ('node-telemetry','recipe-state','operation-state')",
+            name="ck_fleet_stream_events_event_type",
+        ),
+        CheckConstraint(
+            "expires_at > occurred_at", name="ck_fleet_stream_events_expiry"
+        ),
+        CheckConstraint(
+            _Utf8ByteLength(literal_column("payload")).between(2, 8192),
+            name="ck_fleet_stream_events_payload_size",
+        ),
+        Index("ix_fleet_stream_events_expires_id", "expires_at", "id"),
+        Index("ix_fleet_stream_events_node_id", "node_id", "id"),
+    )
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    node_id: Mapped[str | None] = mapped_column(String(36))
+    entity_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    entity_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
     )
 
 

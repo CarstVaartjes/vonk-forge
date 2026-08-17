@@ -13,15 +13,24 @@
       "smoke"
     ]
   },
-  "workload": {
-    "family": "dev-http-smoke",
-    "capabilities": [
-      "openai.chat"
-    ]
+  "model": {
+    "kind": "model-version",
+    "publisher": "vonk",
+    "slug": "dev-http-smoke-version",
+    "content_sha256": "d867ee65812ec1e0f22d40d862f44f24c9c9d204c08fa45d7eeacbb0a6d9c6a0"
+  },
+  "execution": {
+    "harness": {
+      "kind": "execution-harness",
+      "publisher": "vonk-forge",
+      "slug": "vllm",
+      "content_sha256": "c0d297318f223378fe573964291bc90fc950242e0d16d1d301c7d3cb4251487d"
+    },
+    "patch_bundle": null
   },
   "build": {
     "context": {
-      "sha256": "3bcb427bb551833bfece49d1724935d7ddf5e93bd802aa74a3e806023da39caf",
+      "sha256": "61086ce766236b70045c7c45dbc7615a24e4cef96e0cad424de808d5f0861f94",
       "expected_bytes": 10240,
       "media_type": "application/vnd.vonk-forge.source-bundle.v1+tar"
     },
@@ -58,39 +67,46 @@
     }
   ],
   "runtime": {
-    "interface": "vonk.runtime.v1",
-    "adapter": "dev_http_smoke",
-    "adapter_version": 1,
-    "entrypoint": [
-      "python",
-      "/app/server.py"
-    ],
-    "arguments": [],
-    "environment": [],
-    "endpoint": {
-      "protocol": "openai",
-      "port": 8000,
-      "model_aliases": [
-        "dev-http-smoke"
-      ],
-      "health_path": "/health"
+    "distribution": {
+      "kind": "runtime-distribution",
+      "publisher": "vonk",
+      "slug": "development-vllm-shim-arm64",
+      "content_sha256": "40a2e2be4069930f3e903afff0fb1efcb23fae75aedf4a57380cedbb3b96c68b"
     },
+    "entrypoint": [
+      "/opt/vonk/bin/vllm",
+      "serve",
+      "/models"
+    ],
+    "arguments": [
+      {
+        "name": "max-model-len",
+        "value": 1
+      },
+      {
+        "name": "tensor-parallel-size",
+        "value": 1
+      }
+    ],
+    "environment": [],
     "security": {
-      "devices": [],
+      "devices": [
+        "nvidia.com/gpu=all"
+      ],
       "capabilities": [],
       "host_network": false,
       "privileged": false,
       "user": "10001:10001",
       "mounts": [
         {
-          "source": "state",
-          "target": "/state",
-          "read_only": false
-        },
-        {
           "source": "model",
           "target": "/models",
           "read_only": true
+        },
+        {
+          "source": "outputs",
+          "target": "/outputs",
+          "read_only": false
         }
       ]
     },
@@ -100,13 +116,12 @@
       "stop_timeout_seconds": 10
     }
   },
-  "deployment_profiles": [
-    {
+  "topology": {
       "name": "solo",
-      "description": "Single-node deterministic development smoke profile.",
+      "mode": "single",
       "node_count": 1,
-      "strategy": "single",
       "parallelism": {
+        "world_size": 1,
         "tensor": 1,
         "pipeline": 1,
         "data": 1,
@@ -143,15 +158,29 @@
         "connectivity": "none",
         "minimum_bandwidth_mbps": 0
       },
-      "parameter_overrides": {},
-      "measurement": "measured"
+      "start_order": ["entrypoint"],
+      "stop_order": ["entrypoint"]
+  },
+  "interfaces": [
+    {
+      "adapter": "openai",
+      "port": 8000,
+      "model_aliases": [
+        "dev-http-smoke"
+      ],
+      "health_path": "/health"
     }
   ],
   "validation": {
-    "checks": [
-      "container.started",
-      "endpoint.healthy",
-      "inference.completed"
+    "validators": [
+      {
+        "interface": "openai",
+        "checks": [
+          "container.started",
+          "endpoint.healthy",
+          "inference.completed"
+        ]
+      }
     ],
     "benchmarks": []
   },

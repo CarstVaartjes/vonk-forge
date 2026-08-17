@@ -2,12 +2,16 @@ import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
 from sqlalchemy import create_engine, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
+from test_catalog_service import _seed_recipe_dependencies
 from vonk_control.artifact_sizes import ArtifactSize, StaticArtifactSizeResolver
+from vonk_control.auth import TokenCodec
 from vonk_control.catalog_service import CatalogService, RecipeDraftInput
 from vonk_control.cluster_mappings import ClusterMappingService
-from vonk_control.install_admission import InstallAdmissionService
+from vonk_control.install_admission import InstallAdmissionService, InstallPlanConflict
 from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
@@ -15,15 +19,14 @@ from vonk_control.inventory_repository import (
 from vonk_control.models import (
     AgentNode,
     Base,
+    ClusterMappingNode,
     NodeArtifact,
     RecipeBuild,
     RecipeInstallation,
     ResourceReservation,
 )
 
-MODEL_SOURCE = (
-    "Qwen/Qwen3-30B-A3B-Instruct-2507@0123456789abcdef0123456789abcdef01234567"
-)
+MODEL_SOURCE = "vonk-forge/synthetic-tiny@0123456789abcdef0123456789abcdef01234567"
 
 
 def setup(tmp_path, *, free=200, read_only=False, observed_age=0):
@@ -60,7 +63,8 @@ def setup(tmp_path, *, free=200, read_only=False, observed_age=0):
     document = json.loads(
         (Path(__file__).parent / "fixtures/global/recipe-v1-minimal.json").read_text()
     )
-    disk = document["deployment_profiles"][0]["roles"][0]["resources"]["disk"]
+    document["identity"]["slug"] = "qwen3-vllm"
+    disk = document["topology"]["roles"][0]["resources"]["disk"]
     disk.update(
         {
             "image_bytes": 30,
@@ -71,11 +75,14 @@ def setup(tmp_path, *, free=200, read_only=False, observed_age=0):
             "safety_margin_bytes": 10,
         }
     )
-    catalog = CatalogService(sessions, clock=lambda: now)
+    catalog = CatalogService(
+        sessions, clock=lambda: now, cursors=TokenCodec(b"c" * 32).cursor_codec()
+    )
+    _seed_recipe_dependencies(catalog, document)
     draft = catalog.create_recipe("admin", RecipeDraftInput("qwen3-vllm", document))
     resolved = catalog.resolve(draft.recipe_id, 1, "admin")
     mappings = ClusterMappingService(sessions)
-    mapping_plan = mappings.plan(resolved.id, "solo", (node_id,), parameters={})
+    mapping_plan = mappings.preview(resolved.id, (node_id,), {}, "admin")
     mapping_id = mappings.materialize(mapping_plan, actor="admin", now=now)
     with sessions.begin() as session:
         build = RecipeBuild(
@@ -174,6 +181,35 @@ def test_accepted_plan_persists_mapping_build_and_disk_reservation(tmp_path) -> 
         assert reservation.amount_bytes == plan.nodes[0].required_bytes
 
 
+def test_queue_rejects_artifact_or_reservation_mutation_after_preview(tmp_path) -> None:
+    sessions, now, node, mapping, build, sizes = setup(tmp_path, free=200)
+    service = InstallAdmissionService(
+        sessions, sizes=sizes, inventory_max_age=300, disk_floor_bytes=10
+    )
+    plan = service.plan_install(mapping, build, now=now)
+    with sessions.begin() as session:
+        artifact = session.scalar(
+            select(NodeArtifact).where(NodeArtifact.node_id == node)
+        )
+        assert artifact is not None
+        artifact.state = "missing"
+        session.add(
+            ResourceReservation(
+                node_id=node,
+                kind="disk",
+                resource_key="between-preview-and-queue",
+                amount_bytes=200,
+                owner_kind="installation",
+                owner_id="1" * 36,
+                state="active",
+                plan_digest="a" * 64,
+                created_at=now,
+            )
+        )
+    with pytest.raises(InstallPlanConflict, match="install.plan_stale_or_blocked"):
+        service.accept_install(plan, actor="admin", now=now)
+
+
 def test_stale_and_read_only_inventory_are_blocking(tmp_path) -> None:
     sessions, now, _node, mapping, build, sizes = setup(
         tmp_path, free=200, observed_age=301
@@ -195,3 +231,24 @@ def test_stale_and_read_only_inventory_are_blocking(tmp_path) -> None:
         item.code == "install.artifact_store_read_only"
         for item in blocked.nodes[0].blockers
     )
+
+
+def test_database_rejects_mutable_built_image_identity(tmp_path) -> None:
+    sessions, _now, _node, _mapping, build, _sizes = setup(tmp_path, free=200)
+    with pytest.raises(IntegrityError), sessions.begin() as session:
+        row = session.get(RecipeBuild, build)
+        assert row is not None
+        row.image_digest = "latest"
+
+
+def test_install_rejects_mapping_with_wrong_endpoint_owner(tmp_path) -> None:
+    sessions, _now, _node, mapping, _build, _sizes = setup(tmp_path, free=200)
+    with (
+        pytest.raises(ValueError, match="mapping.ready_immutable"),
+        sessions.begin() as session,
+    ):
+        node = session.scalar(
+            select(ClusterMappingNode).where(ClusterMappingNode.mapping_id == mapping)
+        )
+        assert node is not None
+        node.endpoint_owner = False

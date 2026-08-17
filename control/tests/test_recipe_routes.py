@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import sessionmaker
+from vonk_control import recipe_routes
 from vonk_control.auth import TokenCodec
 from vonk_control.litellm import LiteLlmPolicyError, LiteLlmPublisher
 from vonk_control.models import (
@@ -46,6 +50,42 @@ class MutableClock:
         return self.now
 
 
+class OverlapPublisher:
+    """Expose crossed candidates without deadlocking a serialized publisher."""
+
+    def __init__(self, generation: int) -> None:
+        self._generation = generation
+        self._guard = threading.Lock()
+        self._second_publish = threading.Event()
+        self.aliases: list[tuple[str, ...]] = []
+
+    def publish(self, state, _policy):
+        with self._guard:
+            self._generation += 1
+            generation = self._generation
+            publish_index = len(self.aliases)
+            self.aliases.append(tuple(sorted(state.aliases)))
+            if publish_index == 1:
+                self._second_publish.set()
+        if publish_index == 0:
+            self._second_publish.wait(timeout=0.25)
+        return type(
+            "Generation",
+            (),
+            {
+                "generation": generation,
+                "route_digest": state.digest,
+                "config_sha256": state.digest,
+                "path": "memory",
+            },
+        )()
+
+    def publish_empty(self, route_digest):
+        return self.publish(
+            type("State", (), {"aliases": {}, "digest": route_digest})(), None
+        )
+
+
 def setup(
     tmp_path: Path,
     *,
@@ -56,6 +96,7 @@ def setup(
     clock=None,
     run_alias="qwen",
     runtime_model_aliases=("qwen",),
+    interfaces=None,
 ):
     tmp_path.mkdir(parents=True, exist_ok=True)
     engine = create_engine(f"sqlite:///{tmp_path / 'routes.sqlite'}")
@@ -89,11 +130,14 @@ def setup(
             lifecycle="resolved",
             schema_version=1,
             document={
-                "runtime": {
-                    "endpoint": {
+                "interfaces": interfaces
+                if interfaces is not None
+                else [
+                    {
+                        "adapter": "openai",
                         "model_aliases": list(runtime_model_aliases),
                     }
-                }
+                ]
             },
             content_sha256="a" * 64,
             created_by="admin",
@@ -103,7 +147,7 @@ def setup(
         session.flush()
         mapping = ClusterMapping(
             recipe_revision_id=revision.id,
-            profile_name=f"{ranks}-node",
+            topology_name=f"{ranks}-node",
             generation=1,
             node_count=ranks,
             state="ready",
@@ -314,12 +358,42 @@ def test_public_alias_routes_to_primary_runtime_model_alias(tmp_path: Path) -> N
     assert model["litellm_params"]["model"] == "openai/internal-qwen"
 
 
-def test_missing_runtime_model_authority_blocks_route_publication(
+def test_hermes_alias_comes_only_from_published_v1_recipe_run(
     tmp_path: Path,
 ) -> None:
     service, _publisher, applied, run_id = setup(
-        tmp_path, runtime_model_aliases=()
+        tmp_path,
+        run_alias="hermes-agent",
+        runtime_model_aliases=("deepseek-v4-flash-dspark",),
     )
+
+    service.publish_run(run_id)
+
+    document = json.loads(applied[-1])
+    assert [row["model_name"] for row in document["model_list"]] == [
+        "hermes-agent"
+    ]
+    assert (
+        document["model_list"][0]["litellm_params"]["model"]
+        == "openai/deepseek-v4-flash-dspark"
+    )
+
+
+def test_artifact_interface_never_publishes_a_litellm_route(tmp_path: Path) -> None:
+    service, _publisher, applied, run_id = setup(
+        tmp_path, interfaces=[{"adapter": "video-job"}]
+    )
+
+    with pytest.raises(RecipeRouteError, match="LiteLLM interface"):
+        service.publish_run(run_id)
+
+    assert applied == []
+
+
+def test_missing_runtime_model_authority_blocks_route_publication(
+    tmp_path: Path,
+) -> None:
+    service, _publisher, applied, run_id = setup(tmp_path, runtime_model_aliases=())
 
     with pytest.raises(RecipeRouteError, match="model authority"):
         service.publish_run(run_id)
@@ -401,6 +475,56 @@ def test_withdraw_publishes_empty_generation_before_workload_stop(
     assert empty.generation == 2
     assert json.loads(applied[-1])["model_list"] == []
     assert publisher.active() == empty
+
+
+def test_disjoint_sqlite_withdrawals_serialize_one_global_candidate(
+    tmp_path: Path,
+) -> None:
+    service, _publisher, _applied, first_run = setup(tmp_path)
+    second_run = add_running_run(
+        service,
+        first_run,
+        alias="second",
+        route_state="pending",
+        identity=3,
+    )
+    service.publish_run(first_run)
+    second_generation = service.publish_run(second_run)
+    overlap = OverlapPublisher(second_generation.generation)
+    service._publisher = overlap
+    start = threading.Barrier(2)
+
+    def withdraw(run_id: str) -> None:
+        start.wait()
+        service.withdraw_run(run_id)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(withdraw, run_id) for run_id in (first_run, second_run)]
+        for future in futures:
+            future.result(timeout=5)
+
+    with service.sessions() as session:
+        assert [
+            session.get(RecipeRun, run_id).route_state
+            for run_id in (first_run, second_run)
+        ] == ["withdrawn", "withdrawn"]
+    assert overlap.aliases[-1] == ()
+
+
+def test_route_publication_owner_lock_compiles_for_postgresql() -> None:
+    statement_factory = getattr(
+        recipe_routes, "route_publication_owner_lock_statement", None
+    )
+    assert callable(statement_factory)
+
+    sql = str(
+        statement_factory().compile(
+            dialect=postgresql.dialect(),
+            compile_kwargs={"literal_binds": True},
+        )
+    )
+
+    assert "FOR UPDATE OF route_publication_owner" in sql
 
 
 def test_candidate_contains_published_runs_and_explicit_pending_run_only(

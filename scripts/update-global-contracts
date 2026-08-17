@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 from __future__ import annotations
 
 import argparse
@@ -8,17 +9,11 @@ import re
 import subprocess
 from pathlib import Path
 
-
 SCHEMAS = {
     "schemas/container-runtime-policy/v1.json": "schemas/global/container-runtime-policy-v1.json",
-    "schemas/recipe/v1.schema.json": "schemas/global/recipe-v1.schema.json",
     "schemas/problem/v1.schema.json": "schemas/global/problem-v1.schema.json",
-    "schemas/test-report/v1.schema.json": "schemas/global/test-report-v1.schema.json",
 }
-FIXTURES = (
-    "recipe-v1-minimal.json",
-    "recipe-v1-multinode.json",
-)
+FIXTURES: tuple[str, ...] = ()
 
 
 def git(repo: Path, *arguments: str) -> bytes:
@@ -30,9 +25,15 @@ def git(repo: Path, *arguments: str) -> bytes:
 
 
 def canonical_hash(payload: bytes) -> str:
-    document = json.loads(payload, parse_float=lambda _: (_ for _ in ()).throw(ValueError("float")))
+    document = json.loads(
+        payload, parse_float=lambda _: (_ for _ in ()).throw(ValueError("float"))
+    )
     canonical = json.dumps(
-        document, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":")
+        document,
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
     ).encode()
     return hashlib.sha256(canonical).hexdigest()
 
@@ -45,16 +46,24 @@ def atomic_write(path: Path, payload: bytes) -> None:
 
 
 def main() -> None:
+    root = Path(__file__).resolve().parents[1]
+    lock = json.loads((root / "schemas/global/contract.lock.json").read_text())
+    repository_root = (
+        Path(git(root, "rev-parse", "--git-common-dir").decode().strip())
+        .resolve()
+        .parent
+    )
     parser = argparse.ArgumentParser()
-    parser.add_argument("--repo", required=True, type=Path)
-    parser.add_argument("--commit", required=True)
+    parser.add_argument(
+        "--repo", type=Path, default=repository_root.parent / "vonk-forge-web"
+    )
+    parser.add_argument("--commit", default=lock["source_commit"])
     arguments = parser.parse_args()
     if re.fullmatch(r"[0-9a-f]{40}", arguments.commit) is None:
         raise SystemExit("--commit must be a full lowercase Git commit")
     if git(arguments.repo, "status", "--porcelain"):
         raise SystemExit("global contract source tree must be clean")
     git(arguments.repo, "cat-file", "-e", f"{arguments.commit}^{{commit}}")
-    root = Path(__file__).resolve().parents[1]
     files: dict[str, dict[str, str]] = {}
     for source, destination in SCHEMAS.items():
         payload = git(arguments.repo, "show", f"{arguments.commit}:{source}")
@@ -82,7 +91,9 @@ def main() -> None:
     }
     atomic_write(
         root / "schemas/global/contract.lock.json",
-        json.dumps(lock, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+        json.dumps(
+            lock, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode()
         + b"\n",
     )
 

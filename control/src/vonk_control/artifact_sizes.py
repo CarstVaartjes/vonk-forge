@@ -7,6 +7,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
+from .recipe_contract import RecipeContractError, recipe_topology
+
 
 class ArtifactSizeError(RuntimeError):
     pass
@@ -56,8 +58,13 @@ class DeclaredArtifactSizeResolver:
 
     def resolve(self, recipe: Mapping[str, object]) -> tuple[ArtifactSize, ...]:
         artifacts = recipe.get("artifacts")
-        profiles = recipe.get("deployment_profiles")
-        if not isinstance(artifacts, list) or not isinstance(profiles, list):
+        try:
+            topology = recipe_topology(recipe)
+        except RecipeContractError as error:
+            raise ArtifactSizeError(
+                "recipe topology artifact sizes are invalid"
+            ) from error
+        if not isinstance(artifacts, list):
             raise ArtifactSizeError("recipe artifact sizes are invalid")
         resolved: list[ArtifactSize] = []
         installed_by_id: dict[str, int] = {}
@@ -85,28 +92,24 @@ class DeclaredArtifactSizeResolver:
             identity = hashlib.sha256(f"{source}\0{expected}".encode()).hexdigest()
             resolved.append(ArtifactSize(source, identity, expected))
             installed_by_id[artifact_id] = expected
-        for profile in profiles:
-            if not isinstance(profile, Mapping) or not isinstance(
-                profile.get("roles"), list
+        roles = topology.get("roles")
+        if not isinstance(roles, list):
+            raise ArtifactSizeError("recipe topology artifact sizes are invalid")
+        for role in roles:
+            if not isinstance(role, Mapping) or not isinstance(
+                role.get("artifacts"), list
             ):
-                raise ArtifactSizeError("recipe profile artifact sizes are invalid")
-            for role in profile["roles"]:
-                if not isinstance(role, Mapping) or not isinstance(
-                    role.get("artifacts"), list
-                ):
-                    raise ArtifactSizeError("recipe role artifact sizes are invalid")
-                resources = role.get("resources")
-                disk = resources.get("disk") if isinstance(resources, Mapping) else None
-                declared = (
-                    disk.get("artifact_bytes") if isinstance(disk, Mapping) else None
+                raise ArtifactSizeError("recipe role artifact sizes are invalid")
+            resources = role.get("resources")
+            disk = resources.get("disk") if isinstance(resources, Mapping) else None
+            declared = disk.get("artifact_bytes") if isinstance(disk, Mapping) else None
+            required = sum(
+                installed_by_id.get(str(item), 0) for item in role["artifacts"]
+            )
+            if not isinstance(declared, int) or isinstance(declared, bool):
+                raise ArtifactSizeError("recipe role artifact size is invalid")
+            if declared < required:
+                raise ArtifactSizeError(
+                    "topology artifact size is smaller than the declared artifact total"
                 )
-                required = sum(
-                    installed_by_id.get(str(item), 0) for item in role["artifacts"]
-                )
-                if not isinstance(declared, int) or isinstance(declared, bool):
-                    raise ArtifactSizeError("recipe role artifact size is invalid")
-                if declared < required:
-                    raise ArtifactSizeError(
-                        "profile artifact size is smaller than the declared artifact total"
-                    )
         return tuple(sorted(resolved, key=lambda item: item.source))

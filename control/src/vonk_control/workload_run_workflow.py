@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import io
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from .catalog_entities import CatalogError
 from .import_report import ImportDisposition, ImportReportItem
 from .import_resolution import resolve_import
 from .model_resolution import ModelTransport
@@ -61,12 +62,14 @@ class WorkloadRunWorkflow:
         bundles: SourceBundleStore,
         registry: RegistryTransport | None = None,
         models: ModelTransport | None = None,
+        recipe_resolver: Callable[[Mapping[str, object], str], str] | None = None,
     ) -> None:
         self._sessions = sessions
         self._clock = clock
         self._bundles = bundles
         self._registry = registry
         self._models = models
+        self._recipe_resolver = recipe_resolver
 
     def preview(self, raw: bytes) -> WorkloadRunImportResult:
         return import_workload_run(parse_workload_run_yaml(raw))
@@ -185,7 +188,11 @@ class WorkloadRunWorkflow:
         overlays: dict[str, object],
         actor: str,
     ) -> ResolvedWorkloadRunImport:
-        if self._registry is None or self._models is None:
+        if (
+            self._registry is None
+            or self._models is None
+            or self._recipe_resolver is None
+        ):
             raise WorkloadRunWorkflowError(
                 "workload_run.resolution_unavailable",
                 "external metadata resolution is unavailable",
@@ -252,12 +259,20 @@ class WorkloadRunWorkflow:
         if not resolved.runnable:
             codes = ", ".join(item.reason_code for item in resolved.blockers[:5])
             raise WorkloadRunWorkflowError(
-                "workload_run.import_blocked", f"WorkloadRun import remains blocked: {codes}"
+                "workload_run.import_blocked",
+                f"WorkloadRun import remains blocked: {codes}",
             )
         stored_bundle = self._bundles.put(
             resolved.bundle.sha256, io.BytesIO(resolved.bundle.archive)
         )
-        digest = recipe_content_sha256(resolved.document)
+        try:
+            digest = self._recipe_resolver(resolved.document, actor)
+        except CatalogError as error:
+            raise WorkloadRunWorkflowError(error.code, error.detail) from error
+        if digest != recipe_content_sha256(resolved.document):
+            raise WorkloadRunWorkflowError(
+                "catalog.digest_mismatch", "catalog recipe digest is inconsistent"
+            )
         now = self._clock()
         with self._sessions.begin() as session:
             current_recipe = session.scalar(

@@ -24,7 +24,8 @@ from .models import (
     AuditEvent,
     Job,
     NodeMutationLease,
-    Observation,
+    RecipeRun,
+    RunNode,
     UpdateRollout,
     UpdateRolloutNode,
 )
@@ -394,6 +395,72 @@ class DistributedWorkload:
             or {item.node_id for item in self.replicas} != set(self.members)
         ):
             raise ValueError("workload replica observations are incomplete")
+
+
+def durable_recipe_workloads(
+    sessions: sessionmaker[Session],
+    clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+) -> tuple[DistributedWorkload, ...]:
+    """Project running v1 recipe runs into update-safety workload bounds."""
+
+    now = _aware(clock())
+    with sessions() as session:
+        runs = session.scalars(
+            select(RecipeRun)
+            .where(RecipeRun.state == "running")
+            .order_by(RecipeRun.id)
+        ).all()
+        result: list[DistributedWorkload] = []
+        aliases: set[str] = set()
+        for run in runs:
+            if run.alias in aliases:
+                raise RuntimeError("running recipe aliases are not unique")
+            aliases.add(run.alias)
+            nodes = session.scalars(
+                select(RunNode)
+                .where(RunNode.run_id == run.id)
+                .order_by(RunNode.rank, RunNode.node_id)
+            ).all()
+            if not nodes:
+                raise RuntimeError("running recipe has no assigned nodes")
+            members = tuple(node.node_id for node in nodes)
+            replicas = tuple(
+                WorkloadReplicaObservation(
+                    node_id=node.node_id,
+                    healthy=(
+                        node.state == "running"
+                        and _aware(node.updated_at)
+                        >= now - timedelta(seconds=_AGENT_FRESHNESS_SECONDS)
+                    ),
+                    serving=(
+                        node.state == "running"
+                        and _aware(node.updated_at)
+                        >= now - timedelta(seconds=_AGENT_FRESHNESS_SECONDS)
+                    ),
+                    observed_at=_aware(node.updated_at),
+                    evidence_digest=hashlib.sha256(
+                        canonical_message(
+                            {
+                                "alias": run.alias,
+                                "healthy": node.state == "running",
+                                "node_id": node.node_id,
+                                "observed_at": _aware(node.updated_at).isoformat(),
+                                "serving": node.state == "running",
+                            }
+                        )
+                    ).hexdigest(),
+                )
+                for node in nodes
+            )
+            result.append(
+                DistributedWorkload(
+                    workload_id=run.alias,
+                    members=members,
+                    minimum_available=max(0, len(members) - 1),
+                    replicas=replicas,
+                )
+            )
+    return tuple(result)
 
 
 @dataclass(frozen=True)
@@ -2338,9 +2405,16 @@ class UpdateOrchestrator:
                 raise TypeError("persisted update workload is invalid")
             current_workloads: dict[str, object] | None = None
             if replicas:
-                from .desired_state import _accepted_current_workloads
-
-                current_workloads = _accepted_current_workloads(session)
+                current_workloads = {}
+                for active_run in session.scalars(
+                    select(RecipeRun).where(RecipeRun.state == "running")
+                ):
+                    for active_node in session.scalars(
+                        select(RunNode).where(RunNode.run_id == active_run.id)
+                    ):
+                        current_workloads.setdefault(active_node.node_id, set()).add(
+                            active_run.alias
+                        )
             available = 0
             for node_id in members:
                 if node_id in batch_targets:
@@ -2349,24 +2423,8 @@ class UpdateOrchestrator:
                 lease = session.get(NodeMutationLease, node_id)
                 workload_healthy = True
                 if current_workloads is not None:
-                    health = session.scalar(
-                        select(Observation)
-                        .where(
-                            Observation.node_id == node_id,
-                            Observation.kind == "health",
-                        )
-                        .order_by(
-                            Observation.observed_at.desc(),
-                            Observation.id.desc(),
-                        )
-                        .limit(1)
-                    )
                     workload_healthy = (
-                        health is not None
-                        and _aware(health.observed_at)
-                        >= now - timedelta(seconds=_AGENT_FRESHNESS_SECONDS)
-                        and isinstance(health.payload, dict)
-                        and health.payload.get("status") in {"healthy", "warning"}
+                        node_id in current_workloads
                         and workload_id
                         in current_workloads.get(node_id, {})
                     )

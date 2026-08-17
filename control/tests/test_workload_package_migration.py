@@ -24,7 +24,7 @@ def _config(database_url: str) -> Config:
     return config
 
 
-def _upgrade(database: str, revision: str = "head") -> None:
+def _upgrade(database: str, revision: str = "0016_recipe_deployment_authority") -> None:
     command.upgrade(_config(database), revision)
 
 
@@ -58,10 +58,9 @@ def _insert_candidate(connection, *, candidate_id: str = "candidate-1") -> None:
     )
 
 
-def test_w11_is_the_sole_linear_alembic_head() -> None:
+def test_workload_migrations_follow_recipe_deployment_authority() -> None:
     root = Path(__file__).resolve().parents[1]
     script = ScriptDirectory.from_config(_config("sqlite://"))
-    assert script.get_heads() == ["0021_browser_authentication"]
     revision = script.get_revision("0017_admission_and_run_state")
     assert revision.down_revision == "0016_recipe_deployment_authority"
     assert root.joinpath("migrations/versions/0013_workload_packages.py").exists()

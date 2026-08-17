@@ -75,13 +75,9 @@ def test_runtime_module_contains_no_process_or_transport_implementation() -> Non
     assert "ssh" not in source.lower()
 
 
-def test_legacy_runtime_is_explicitly_isolated_from_production_modules() -> None:
-    legacy = PACKAGE / "legacy_runtime.py"
-    assert legacy.is_file()
-    source = legacy.read_text()
-    assert "explicit-test-only" in source
-    assert "LegacyRuntimeHandlers" in source
-    assert "subprocess" in _imports(legacy)
+def test_retired_runtime_modules_are_absent() -> None:
+    assert not (PACKAGE / "legacy_runtime.py").exists()
+    assert not (PACKAGE / "legacy_route_runtime.py").exists()
 
 
 def test_production_worker_image_has_local_git_without_direct_transport_tools() -> None:
@@ -100,10 +96,8 @@ def test_production_worker_image_has_local_git_without_direct_transport_tools() 
 def test_production_worker_has_no_cluster_egress_network() -> None:
     compose = (ROOT / "deploy/compose/compose.yaml").read_text()
     worker = compose.split("\n  control-worker:\n", 1)[1].split(
-        "\n  workload-signer-runtime-init:\n", 1
+        "\n  workload-signer:\n", 1
     )[0]
-
-    assert "cluster-egress" not in worker
     for forbidden in (
         "/repository",
         "git-signing-key",

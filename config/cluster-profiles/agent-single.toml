@@ -1,9 +1,0 @@
-id = "agent-single"
-accepted_evidence = "inventory/reports/accepted-cluster-profiles.json"
-
-[placements]
-node1 = ["deepseek-agent-single"]
-node2 = []
-
-[endpoints]
-deepseek = "deepseek-agent-single"

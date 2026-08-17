@@ -4,16 +4,22 @@ import hashlib
 import io
 import json
 import os
+import re
+import shutil
 import stat
 import subprocess
 import sys
 import tarfile
 import threading
+import urllib.parse
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 
 import pytest
+from vonk_control.fleet_projection import FleetSnapshot
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNNER = ROOT / "scripts" / "run-development-slices"
@@ -31,6 +37,11 @@ STATES = [
     "route-withdrawn",
     "uninstalled",
 ]
+MODEL_SINGLE_STATES = [
+    *STATES[:9],
+    "restart-persistence-observed",
+    *STATES[9:],
+]
 MODEL_MULTINODE_STATES = [
     *STATES[:9],
     "rank-failure-observed",
@@ -45,7 +56,7 @@ NODE = "spk_0123456789abcdef0123456789abcdef"
 NODE_2 = "spk_fedcba9876543210fedcba9876543210"
 ADMIN_TOKEN = "admin-secret-marker"
 INFERENCE_TOKEN = "inference-secret-marker"
-RECIPE_DIGEST = "585b83a971181a32e3605463ce7f7f3eb5c94ac4658b207da1d4ef7de378a947"
+RECIPE_DIGEST = "90396dc5d736ad8083ddfa23f90b2ecef5c05ea1c3129da5375455ddd684413a"
 
 
 class SliceServer(ThreadingHTTPServer):
@@ -59,7 +70,7 @@ class SliceServer(ThreadingHTTPServer):
         self.recipe_digest = RECIPE_DIGEST
         self.recipe_revision = 1
         self.source_digest = (
-            "7a65752ee1a950b3b358c66ceaf2007d0eb824a7842d0a67a5b1e3726957eb80"
+            "61086ce766236b70045c7c45dbc7615a24e4cef96e0cad424de808d5f0861f94"
         )
         self.slug = "dev-http-smoke"
         self.route_published = False
@@ -74,6 +85,12 @@ class SliceServer(ThreadingHTTPServer):
         self.distribution_operation_state = "succeeded"
         self.install_operation_state = "succeeded"
         self.install_preview_blockers: list[str] = []
+        self.stop_preview_blockers: list[str] = []
+        self.stop_plan_digest = "a" * 64
+        self.stop_preview_issued = False
+        self.uninstall_preview_blockers: list[str] = []
+        self.uninstall_plan_digest = "b" * 64
+        self.uninstall_preview_issued = False
         self.retry_operation_state = "succeeded"
         self.start_operation_states: list[str] = []
         self.run_plan_digest = "f" * 64
@@ -82,6 +99,8 @@ class SliceServer(ThreadingHTTPServer):
         self.interrupt_run_creation_number: int | None = None
         self.commit_interrupted_run_creation = False
         self.run_operations_by_request_key: dict[str, dict[str, object]] = {}
+        self.run_authority_by_request_key: dict[str, tuple[str, str, str]] = {}
+        self.run_preview_authority_by_digest: dict[str, tuple[str, str]] = {}
         self.run_states: dict[str, tuple[str, str]] = {}
         self.add_empty_provider_metadata = False
         self.nodes = [NODE]
@@ -103,9 +122,19 @@ class SliceServer(ThreadingHTTPServer):
             NODE: "2026-08-11T10:00:00+00:00",
             NODE_2: "2026-08-11T10:00:00+00:00",
         }
-        self.fleet_digest = "b" * 64
+        self.fleet_event_cursor = 1
+        self.fleet_generated_at = "2026-08-11T10:00:01+00:00"
+        self.supervisor_generations = {NODE: 1, NODE_2: 1}
+        self.boot_ids = {
+            NODE: "11111111-1111-4111-8111-111111111111",
+            NODE_2: "22222222-2222-4222-8222-222222222222",
+        }
+        self.last_fleet_document: dict[str, object] | None = None
         self.artifact_set_digests = {NODE: "7" * 64, NODE_2: "7" * 64}
         self.rank_states = {NODE: "running", NODE_2: "running"}
+        self.entity_mismatch = False
+        self.entity = 0
+        self.entities: dict[tuple[str, str, str], dict[str, object]] = {}
 
 
 class SliceHandler(BaseHTTPRequestHandler):
@@ -148,35 +177,213 @@ class SliceHandler(BaseHTTPRequestHandler):
             raise RuntimeError("handled failure")
         return body
 
+    @staticmethod
+    def _entity_response(record: dict[str, object]) -> dict[str, object]:
+        document = record["document"]
+        assert isinstance(document, dict)
+        identity = document["identity"]
+        metadata = document["metadata"]
+        assert isinstance(identity, dict)
+        assert isinstance(metadata, dict)
+        return {
+            "entity_id": record["entity_id"],
+            "kind": document["kind"],
+            "publisher": identity["publisher"],
+            "slug": identity["slug"],
+            "title": metadata["title"],
+            "revision_id": record["revision_id"],
+            "revision_number": record["revision_number"],
+            "lifecycle": record["lifecycle"],
+            "schema_version": document["schema_version"],
+            "document": document,
+            "content_sha256": record["content_sha256"],
+            "created_by": "development-runner",
+            "created_at": "2026-08-15T12:00:00+00:00",
+        }
+
     def do_GET(self) -> None:
         try:
             self._record()
         except RuntimeError:
             return
-        if self.path == "/api/v1/fleet":
+        parsed = urllib.parse.urlsplit(self.path)
+        if parsed.path == "/api/v1/catalog/entities":
+            query = urllib.parse.parse_qs(parsed.query)
+            kind = query.get("kind", [None])[0]
+            publisher = query.get("publisher", [None])[0]
+            if self.server.entity_mismatch and not self.server.entities:
+                document = json.loads(
+                    (
+                        ROOT
+                        / "control/tests/fixtures/recipes/dev-http-smoke/entities/01-model-group.json"
+                    ).read_text()
+                )
+                document["metadata"]["title"] = "Mismatched development fixture"
+                record = {
+                    "entity_id": "50000000-0000-4000-8000-000000000001",
+                    "revision_id": "50000000-0000-4000-8001-000000000001",
+                    "revision_number": 2,
+                    "lifecycle": "resolved",
+                    "document": document,
+                    "content_sha256": "f" * 64,
+                }
+                identity = document["identity"]
+                self.server.entities[
+                    (document["kind"], identity["publisher"], identity["slug"])
+                ] = record
+            entities = [
+                self._entity_response(record)
+                for (
+                    entity_kind,
+                    entity_publisher,
+                    _slug,
+                ), record in self.server.entities.items()
+                if (kind is None or entity_kind == kind)
+                and (publisher is None or entity_publisher == publisher)
+            ]
+            self._json(200, {"entities": entities, "next_cursor": None})
+        elif parsed.path.startswith("/api/v1/catalog/entities/"):
+            entity_id = parsed.path.rsplit("/", 1)[-1]
+            record = next(
+                (
+                    value
+                    for value in self.server.entities.values()
+                    if value["entity_id"] == entity_id
+                ),
+                None,
+            )
+            if record is None:
+                self._json(404, {"detail": "not found"})
+            else:
+                self._json(200, self._entity_response(record))
+        elif self.path == "/api/v1/agents":
             self._json(
                 200,
                 {
-                    "commit": "a" * 40,
-                    "evidence_digest": self.server.fleet_digest,
-                    "nodes": [
+                    "agents": [
                         {
-                            "id": node,
-                            "healthy": True,
+                            "node_id": node,
+                            "state": "active",
+                            "agent_implementation": "rust",
+                            "migration_state": "complete",
+                            "protocol_version": 1,
+                            "platform_version": "0.1.0",
+                            "build_digest": "sha256:" + "b" * 64,
+                            "active_slot": "A",
+                            "agent_sha256": "c" * 64,
+                            "supervisor_generation": self.server.supervisor_generations[
+                                node
+                            ],
+                            "capabilities": self.server.inventory_capabilities[node],
+                            "last_seen_at": self.server.last_seen[node],
+                            "last_seen_age_seconds": 1.0,
                             "stale": False,
-                            "agent_online": self.server.online[node],
-                            "agent_state": "active",
-                            "compatibility": "supported",
-                            "inventory_stale": self.server.inventory_stale[node],
-                            "inventory_capabilities": (
-                                self.server.inventory_capabilities[node]
-                            ),
-                            "agent_last_seen_at": self.server.last_seen[node],
+                            "certificate_expires_at": "2026-09-16T12:00:00+00:00",
                         }
                         for node in self.server.nodes
-                    ],
+                    ]
                 },
             )
+        elif self.path == "/api/v1/fleet":
+            document = {
+                "schema_version": 1,
+                "event_cursor": self.server.fleet_event_cursor,
+                "generated_at": self.server.fleet_generated_at,
+                "repository_commit": "a" * 40,
+                "nodes": [
+                    {
+                        "id": node,
+                        "display_name": f"spark-{node[-1]}",
+                        "hostname": f"spark-{node[-1]}.example.test",
+                        "lifecycle": "ready",
+                        "labels": {},
+                        "connection": {
+                            "agent_state": "active",
+                            "certificate_state": "valid",
+                            "online_state": (
+                                "online" if self.server.online[node] else "offline"
+                            ),
+                            "offline_reason": (
+                                None if self.server.online[node] else "stale"
+                            ),
+                            "last_seen_at": self.server.last_seen[node],
+                            "last_seen_age_seconds": 1.0,
+                        },
+                        "inventory": {
+                            "observed_at": self.server.last_seen[node],
+                            "received_at": self.server.last_seen[node],
+                            "age_seconds": 1.0,
+                            "freshness": (
+                                "stale"
+                                if self.server.inventory_stale[node]
+                                else "fresh"
+                            ),
+                            "disk_total_bytes": 2_000_000_000_000,
+                            "disk_free_bytes": 1_000_000_000_000,
+                            "host_memory_total_bytes": 128_000_000_000,
+                            "host_memory_free_bytes": 120_000_000_000,
+                            "gpu_memory_total_bytes": 128_000_000_000,
+                            "gpu_memory_free_bytes": 120_000_000_000,
+                            "gpu_count": 1,
+                            "artifact_store_read_only": False,
+                            "capabilities": self.server.inventory_capabilities[node],
+                            "fabric_address": (
+                                "192.0.2.10" if node == NODE else "192.0.2.11"
+                            ),
+                            "fabric_bandwidth_mbps": 200_000,
+                            "nvidia_driver_version": "580.65.06",
+                            "container_runtime_version": "28.3.3",
+                        },
+                        "telemetry": {
+                            "age_seconds": 1.0,
+                            "freshness": "live",
+                            "sample": {
+                                "id": str(
+                                    uuid.uuid5(uuid.NAMESPACE_URL, f"sample:{node}")
+                                ),
+                                "node_id": node,
+                                "boot_id": self.server.boot_ids[node],
+                                "sequence": self.server.fleet_event_cursor,
+                                "observed_at": self.server.last_seen[node],
+                                "received_at": self.server.last_seen[node],
+                                "cpu_utilization_percent": 1.0,
+                                "load_average_1m": 0.1,
+                                "memory_total_bytes": 128_000_000_000,
+                                "memory_available_bytes": 120_000_000_000,
+                                "disk_total_bytes": 2_000_000_000_000,
+                                "disk_free_bytes": 1_000_000_000_000,
+                                "gpu_utilization_percent": 1.0,
+                                "gpu_memory_total_bytes": 128_000_000_000,
+                                "gpu_memory_free_bytes": 120_000_000_000,
+                                "temperature_c": 35.0,
+                                "power_watts": 30.0,
+                                "network_receive_bytes_per_second": 1.0,
+                                "network_transmit_bytes_per_second": 1.0,
+                                "gap_samples": 0,
+                                "details": {
+                                    "accelerator_name": "GB10",
+                                    "accelerator_performance_state": "P8",
+                                },
+                            },
+                        },
+                        "installed": [],
+                        "loaded": [],
+                        "reservations": {
+                            "disk_bytes": 0,
+                            "unified_memory_bytes": 0,
+                            "host_memory_bytes": 0,
+                            "gpu_memory_bytes": 0,
+                            "port_count": 0,
+                        },
+                        "warnings": [],
+                    }
+                    for node in self.server.nodes
+                ],
+            }
+            snapshot = FleetSnapshot.model_validate_json(json.dumps(document))
+            serialized = snapshot.model_dump(mode="json")
+            self.server.last_fleet_document = serialized
+            self._json(200, serialized)
         elif self.path == (
             "/api/v1/catalog/recipes/10000000-0000-4000-8000-000000000001"
         ):
@@ -363,8 +570,50 @@ class SliceHandler(BaseHTTPRequestHandler):
         except RuntimeError:
             return
         payload = json.loads(body) if body else {}
-        path = self.path
-        if path == "/api/v1/catalog/recipes":
+        path = urllib.parse.urlsplit(self.path).path
+        if path == "/api/v1/catalog/entities":
+            document = payload["document"]
+            identity = document["identity"]
+            key = (document["kind"], identity["publisher"], identity["slug"])
+            if key in self.server.entities:
+                self._json(409, {"detail": "catalog entity identity already exists"})
+                return
+            self.server.entity += 1
+            record = {
+                "entity_id": f"50000000-0000-4000-8000-{self.server.entity:012d}",
+                "revision_id": f"50000000-0000-4000-8001-{self.server.entity:012d}",
+                "revision_number": 1,
+                "lifecycle": "draft",
+                "document": document,
+                "content_sha256": None,
+            }
+            self.server.entities[key] = record
+            self._json(201, self._entity_response(record))
+        elif path.startswith("/api/v1/catalog/entities/") and path.endswith("/resolve"):
+            entity_id = path.rsplit("/", 2)[-2]
+            record = next(
+                (
+                    value
+                    for value in self.server.entities.values()
+                    if value["entity_id"] == entity_id
+                ),
+                None,
+            )
+            if record is None:
+                self._json(404, {"detail": "not found"})
+                return
+            if payload.get("expected_revision") != record["revision_number"]:
+                self._json(409, {"detail": "stale revision"})
+                return
+            record["revision_number"] = int(record["revision_number"]) + 1
+            record["lifecycle"] = "resolved"
+            record["content_sha256"] = hashlib.sha256(
+                json.dumps(
+                    record["document"], sort_keys=True, separators=(",", ":")
+                ).encode()
+            ).hexdigest()
+            self._json(200, self._entity_response(record))
+        elif path == "/api/v1/catalog/recipes":
             self.server.recipe_created = True
             document = payload["document"]
             self.server.slug = payload["slug"]
@@ -402,7 +651,7 @@ class SliceHandler(BaseHTTPRequestHandler):
                 200,
                 {
                     "passed": True,
-                    "source_bundle_sha256": "7a65752ee1a950b3b358c66ceaf2007d0eb824a7842d0a67a5b1e3726957eb80",
+                    "source_bundle_sha256": self.server.source_digest,
                     "dockerfile": "Dockerfile",
                     "findings": [],
                 },
@@ -430,7 +679,7 @@ class SliceHandler(BaseHTTPRequestHandler):
                 200,
                 {"build_input_sha256": "e" * 64, "source_bundle_sha256": "f" * 64},
             )
-        elif path.endswith("install-plans/preview"):
+        elif path == "/api/v1/recipes/install-plans/preview":
             blocker = (
                 self.server.install_preview_blockers.pop(0)
                 if self.server.install_preview_blockers
@@ -457,7 +706,66 @@ class SliceHandler(BaseHTTPRequestHandler):
             )
         elif path.endswith("run-plans/preview"):
             plan_digest = self.server.run_plan_digest
-            self._json(200, {"allowed": True, "plan_digest": plan_digest, "nodes": []})
+            installation_id = payload.get("installation_id")
+            alias = payload.get("alias")
+            if not isinstance(installation_id, str) or not isinstance(alias, str):
+                self._json(422, {"detail": "run preview alias is required"})
+                return
+            self.server.run_preview_authority_by_digest[plan_digest] = (
+                installation_id,
+                alias,
+            )
+            self._json(
+                200,
+                {
+                    "alias": alias,
+                    "allowed": True,
+                    "plan_digest": plan_digest,
+                    "nodes": [],
+                },
+            )
+        elif path == "/api/v1/recipes/stop-plans/preview":
+            blocker = (
+                self.server.stop_preview_blockers.pop(0)
+                if self.server.stop_preview_blockers
+                else None
+            )
+            self.server.stop_preview_issued = blocker is None
+            self._json(
+                200,
+                {
+                    "allowed": blocker is None,
+                    "plan_digest": self.server.stop_plan_digest,
+                    "nodes": [],
+                    "blockers": (
+                        []
+                        if blocker is None
+                        else [{"code": blocker, "detail": "test blocker"}]
+                    ),
+                    "warnings": [],
+                },
+            )
+        elif path == "/api/v1/recipes/uninstall-plans/preview":
+            blocker = (
+                self.server.uninstall_preview_blockers.pop(0)
+                if self.server.uninstall_preview_blockers
+                else None
+            )
+            self.server.uninstall_preview_issued = blocker is None
+            self._json(
+                200,
+                {
+                    "allowed": blocker is None,
+                    "plan_digest": self.server.uninstall_plan_digest,
+                    "nodes": [],
+                    "blockers": (
+                        []
+                        if blocker is None
+                        else [{"code": blocker, "detail": "test blocker"}]
+                    ),
+                    "warnings": [],
+                },
+            )
         elif path == "/v1/chat/completions":
             if payload.get("model") == "dev-http-smoke":
                 response = json.loads(
@@ -489,11 +797,29 @@ class SliceHandler(BaseHTTPRequestHandler):
                 }
             self._json(200, response)
         elif path.endswith("/stop"):
+            if (
+                not self.server.stop_preview_issued
+                or payload.get("plan_digest") != self.server.stop_plan_digest
+            ):
+                self._json(
+                    409,
+                    {"detail": "submitted stop plan digest does not match preview"},
+                )
+                return
             self.server.route_published = False
             run_id = path.rsplit("/", 2)[-2]
             self.server.run_states[run_id] = ("stopped", "withdrawn")
             self._operation("20000000-0000-4000-8000-000000000004", self.server.nodes)
         elif path.endswith("/uninstall"):
+            if (
+                not self.server.uninstall_preview_issued
+                or payload.get("plan_digest") != self.server.uninstall_plan_digest
+            ):
+                self._json(
+                    409,
+                    {"detail": "submitted uninstall plan digest does not match preview"},
+                )
+                return
             self._operation("20000000-0000-4000-8000-000000000005", self.server.nodes)
         elif path.startswith("/api/v1/recipes/operations/") and path.endswith("/retry"):
             original_operation_id = self.path.rsplit("/", 2)[-2]
@@ -519,19 +845,35 @@ class SliceHandler(BaseHTTPRequestHandler):
             if path == "/api/v1/recipes/runs":
                 request_key = payload["request_key"]
                 existing = self.server.run_operations_by_request_key.get(request_key)
-                if existing is not None:
-                    if existing["plan_digest"] != payload["plan_digest"]:
-                        self._json(
-                            409,
-                            {"detail": "request key was already used differently"},
-                        )
-                    else:
-                        self._json(202, existing)
+                submitted_authority = (
+                    payload.get("installation_id"),
+                    payload.get("alias"),
+                    payload.get("plan_digest"),
+                )
+                if (
+                    existing is not None
+                    and self.server.run_authority_by_request_key.get(request_key)
+                    == submitted_authority
+                ):
+                    self._json(202, existing)
                     return
-                if payload["plan_digest"] != self.server.run_plan_digest:
+                preview_authority = self.server.run_preview_authority_by_digest.get(
+                    payload.get("plan_digest")
+                )
+                if (
+                    payload.get("plan_digest") != self.server.run_plan_digest
+                    or preview_authority
+                    != (payload.get("installation_id"), payload.get("alias"))
+                ):
                     self._json(
                         409,
                         {"detail": "submitted plan digest does not match preview"},
+                    )
+                    return
+                if existing is not None:
+                    self._json(
+                        409,
+                        {"detail": "request key was already used differently"},
                     )
                     return
                 self.server.run_creation_attempts += 1
@@ -579,6 +921,11 @@ class SliceHandler(BaseHTTPRequestHandler):
             if path == "/api/v1/recipes/runs":
                 self.server.run_operations_by_request_key[payload["request_key"]] = (
                     operation
+                )
+                self.server.run_authority_by_request_key[payload["request_key"]] = (
+                    payload["installation_id"],
+                    payload["alias"],
+                    payload["plan_digest"],
                 )
                 if interrupt:
                     self.server.interrupt_run_creation_number = None
@@ -663,32 +1010,26 @@ def _canonical(value: object) -> bytes:
     return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
 
-def _qualification(path: Path) -> Path:
-    source = json.loads(
-        (ROOT / "config/recipes/development/model-smoke-source.json").read_text()
-    )
-    artifact_document = json.loads(
-        (ROOT / "config/recipes/development/model-smoke-artifacts.json").read_text()
-    )
-    topology = json.loads(
-        (ROOT / "config/recipes/development/model-smoke-multinode.json").read_text()
-    )
+def _qualification(path: Path, recipe_name: str) -> Path:
     document = {
-        "schema_version": 1,
-        "status": "qualified",
-        "runtime_image": source["runtime_image"],
-        "source_sha256": hashlib.sha256(_canonical(source)).hexdigest(),
-        "artifact_set_sha256": hashlib.sha256(
-            _canonical(artifact_document["artifacts"])
-        ).hexdigest(),
-        "topology_sha256": hashlib.sha256(_canonical(topology)).hexdigest(),
-        "evidence_sha256": "a" * 64,
-        "single_node": NODE,
-        "multinode_nodes": [NODE, NODE_2],
+        "passed": True,
+        "recipe": recipe_name,
+        "status": "passed",
     }
     path.write_bytes(_canonical(document))
     path.chmod(0o600)
     return path
+
+
+def _synthetic_source_context(tmp_path: Path) -> Path:
+    context = tmp_path / "source-context"
+    if not context.exists():
+        shutil.copytree(
+            ROOT / "control/tests/fixtures/recipes/dev-http-smoke/context",
+            context,
+            ignore=shutil.ignore_patterns("__pycache__"),
+        )
+    return context
 
 
 def _run(tmp_path: Path, server: SliceServer, *extra: str):
@@ -711,6 +1052,8 @@ def _run(tmp_path: Path, server: SliceServer, *extra: str):
             NODE,
             "--target-node",
             NODE,
+            "--source-context",
+            str(_synthetic_source_context(tmp_path)),
             "--evidence-file",
             str(evidence),
             "--timeout-seconds",
@@ -735,7 +1078,10 @@ def _run_model(
 ):
     admin = _token(tmp_path / "admin-token", ADMIN_TOKEN)
     inference = _token(tmp_path / "inference-token", INFERENCE_TOKEN)
-    qualification = qualification or _qualification(tmp_path / "qualification.json")
+    qualification = qualification or _qualification(
+        tmp_path / "qualification.json",
+        "deepseek-v4-flash-0731-mia-dual.json",
+    )
     evidence = tmp_path / "model-evidence.json"
     result = subprocess.run(
         (
@@ -775,6 +1121,66 @@ def _run_model(
     return result, evidence
 
 
+def _run_model_single(
+    tmp_path: Path,
+    server: SliceServer,
+    *extra: str,
+    qualification: Path | None = None,
+):
+    admin = _token(tmp_path / "admin-token", ADMIN_TOKEN)
+    inference = _token(tmp_path / "inference-token", INFERENCE_TOKEN)
+    qualification = qualification or _qualification(
+        tmp_path / "qualification.json",
+        "deepseek-v4-flash-0731-ds4-single.json",
+    )
+    evidence = tmp_path / "model-single-evidence.json"
+    result = subprocess.run(
+        (
+            sys.executable,
+            str(RUNNER),
+            "--api-base",
+            f"http://127.0.0.1:{server.server_port}",
+            "--admin-token-file",
+            str(admin),
+            "--inference-token-file",
+            str(inference),
+            "--phase",
+            "model-single",
+            "--qualification-file",
+            str(qualification),
+            "--builder-node",
+            NODE,
+            "--target-node",
+            NODE,
+            "--evidence-file",
+            str(evidence),
+            "--timeout-seconds",
+            "2",
+            "--poll-seconds",
+            "0.01",
+            *extra,
+        ),
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return result, evidence
+
+
+def _contains_sensitive_key(value: object) -> bool:
+    if isinstance(value, dict):
+        return any(
+            key.lower()
+            in {"authorization", "credential", "password", "secret", "token"}
+            or _contains_sensitive_key(child)
+            for key, child in value.items()
+        )
+    if isinstance(value, list):
+        return any(_contains_sensitive_key(child) for child in value)
+    return False
+
+
 def test_runner_help_exposes_restart_and_failure_checkpoints() -> None:
     result = subprocess.run(
         (sys.executable, str(RUNNER), "--help"),
@@ -787,6 +1193,119 @@ def test_runner_help_exposes_restart_and_failure_checkpoints() -> None:
     assert result.returncode == 0
     assert "--stop-after" in result.stdout
     assert "Pause after an accepted state" in result.stdout
+
+
+def test_runner_authors_exact_entities_in_dependency_order_before_recipe(
+    tmp_path: Path, server: SliceServer
+) -> None:
+    result, _evidence = _run(tmp_path, server, "--stop-after", "recipe-resolved")
+
+    assert result.returncode == 0, result.stderr
+    entity_creates = [
+        (index, json.loads(body))
+        for index, (method, path, body) in enumerate(server.request_bodies)
+        if method == "POST" and path == "/api/v1/catalog/entities"
+    ]
+    assert [payload["document"]["kind"] for _index, payload in entity_creates] == [
+        "model-group",
+        "model",
+        "model-version",
+        "execution-harness",
+        "runtime-distribution",
+    ]
+    recipe_index = next(
+        index
+        for index, (method, path, _body) in enumerate(server.request_bodies)
+        if method == "POST" and path == "/api/v1/catalog/recipes"
+    )
+    assert all(index < recipe_index for index, _payload in entity_creates)
+    entity_resolves = [
+        index
+        for index, (method, path, _body) in enumerate(server.request_bodies)
+        if method == "POST"
+        and path.startswith("/api/v1/catalog/entities/")
+        and path.endswith("/resolve")
+    ]
+    assert len(entity_resolves) == 5
+    assert all(index < recipe_index for index in entity_resolves)
+    assert all(
+        not _contains_sensitive_key(payload) for _index, payload in entity_creates
+    )
+    encoded_entities = json.dumps([payload for _index, payload in entity_creates])
+    assert ADMIN_TOKEN not in encoded_entities
+    assert INFERENCE_TOKEN not in encoded_entities
+
+
+def test_runner_entity_authoring_is_idempotent(
+    tmp_path: Path, server: SliceServer
+) -> None:
+    first_root = tmp_path / "first"
+    second_root = tmp_path / "second"
+    first_root.mkdir()
+    second_root.mkdir()
+
+    first, _ = _run(first_root, server, "--stop-after", "recipe-resolved")
+    second, _ = _run(second_root, server, "--stop-after", "recipe-resolved")
+
+    assert first.returncode == 0, first.stderr
+    assert second.returncode == 0, second.stderr
+    entity_creates = [
+        body
+        for method, path, body in server.request_bodies
+        if method == "POST" and path == "/api/v1/catalog/entities"
+    ]
+    assert len(entity_creates) == 5
+
+
+def test_runner_refuses_mismatched_existing_entity_before_recipe(
+    tmp_path: Path, server: SliceServer
+) -> None:
+    server.entity_mismatch = True
+
+    result, _evidence = _run(tmp_path, server, "--stop-after", "recipe-resolved")
+
+    assert result.returncode == 1
+    assert result.stderr.strip() == (
+        "development slice failed: existing catalog entity does not match checked-in input"
+    )
+    assert not any(
+        path.startswith("/api/v1/catalog/recipes")
+        for _method, path, _authorization in server.requests
+    )
+
+
+def test_model_phases_select_native_single_and_pair_recipes(
+    tmp_path: Path, server: SliceServer
+) -> None:
+    server.nodes = [NODE]
+    single_root = tmp_path / "single"
+    pair_root = tmp_path / "pair"
+    single_root.mkdir()
+    pair_root.mkdir()
+
+    single, _ = _run_model_single(
+        single_root, server, "--stop-after", "recipe-resolved"
+    )
+    assert single.returncode == 0, single.stderr
+    single_document = next(
+        json.loads(body)["document"]
+        for method, path, body in server.request_bodies
+        if method == "POST" and path == "/api/v1/catalog/recipes"
+    )
+    assert single_document["topology"]["node_count"] == 1
+
+    server.requests.clear()
+    server.request_bodies.clear()
+    server.recipe_created = False
+    server.nodes = [NODE, NODE_2]
+    pair, _ = _run_model(pair_root, server, "--stop-after", "recipe-resolved")
+    assert pair.returncode == 0, pair.stderr
+    pair_document = next(
+        json.loads(body)["document"]
+        for method, path, body in server.request_bodies
+        if method == "POST" and path == "/api/v1/catalog/recipes"
+    )
+    assert pair_document["topology"]["node_count"] == 2
 
 
 def test_runner_completes_exact_public_lifecycle_without_secret_leaks(
@@ -823,6 +1342,237 @@ def test_runner_completes_exact_public_lifecycle_without_secret_leaks(
         path == "/api/v1/recipes/image-distributions"
         for _method, path, _authorization in server.requests
     )
+
+
+def test_runner_consumes_current_fleet_snapshot_and_binds_its_canonical_digest(
+    tmp_path: Path, server: SliceServer
+) -> None:
+    result, evidence_path = _run(tmp_path, server, "--stop-after", "inventory-ready")
+
+    assert result.returncode == 0, result.stderr
+    assert server.last_fleet_document is not None
+    evidence = json.loads(evidence_path.read_text())
+    assert evidence["completed_states"] == ["inventory-ready"]
+    assert (
+        evidence["outputs"]["fleet_evidence_digest"]
+        == hashlib.sha256(_canonical(server.last_fleet_document)).hexdigest()
+    )
+
+
+@pytest.mark.parametrize(
+    ("phase", "preview_path", "apply_path", "identifier", "digest"),
+    (
+        (
+            "stopped",
+            "/api/v1/recipes/stop-plans/preview",
+            "/api/v1/recipes/runs/{identifier}/stop",
+            "run_id",
+            "a" * 64,
+        ),
+        (
+            "uninstalled",
+            "/api/v1/recipes/uninstall-plans/preview",
+            "/api/v1/recipes/installations/{identifier}/uninstall",
+            "installation_id",
+            "b" * 64,
+        ),
+    ),
+)
+def test_runner_previews_lifecycle_action_before_applying_exact_digest(
+    tmp_path: Path,
+    server: SliceServer,
+    phase: str,
+    preview_path: str,
+    apply_path: str,
+    identifier: str,
+    digest: str,
+) -> None:
+    result, evidence_path = _run(tmp_path, server, "--stop-after", phase)
+
+    assert result.returncode == 0, result.stderr
+    evidence = json.loads(evidence_path.read_text())
+    selected_id = evidence["outputs"][identifier]
+    requests = [
+        (path, json.loads(body))
+        for method, path, body in server.request_bodies
+        if method == "POST" and path in {preview_path, apply_path.format(identifier=selected_id)}
+    ]
+    assert requests == [
+        (preview_path, {identifier: selected_id}),
+        (
+            apply_path.format(identifier=selected_id),
+            {
+                "plan_digest": digest,
+                "request_key": str(
+                    uuid.uuid5(
+                        uuid.UUID(evidence["acceptance_id"]),
+                        f"{phase}:{'stop' if phase == 'stopped' else 'uninstall'}",
+                    )
+                ),
+            },
+        ),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("phase", "blockers", "preview_path", "apply_suffix", "message"),
+    (
+        (
+            "stopped",
+            "stop_preview_blockers",
+            "/api/v1/recipes/stop-plans/preview",
+            "/stop",
+            "recipe stop is not admitted",
+        ),
+        (
+            "uninstalled",
+            "uninstall_preview_blockers",
+            "/api/v1/recipes/uninstall-plans/preview",
+            "/uninstall",
+            "recipe uninstall is not admitted",
+        ),
+    ),
+)
+def test_runner_rejects_blocked_lifecycle_action_preview_before_apply(
+    tmp_path: Path,
+    server: SliceServer,
+    phase: str,
+    blockers: str,
+    preview_path: str,
+    apply_suffix: str,
+    message: str,
+) -> None:
+    setattr(server, blockers, ["recipe.action_blocked"])
+
+    result, _evidence_path = _run(tmp_path, server, "--stop-after", phase)
+
+    assert result.returncode == 1
+    assert message in result.stderr
+    assert any(
+        method == "POST" and path == preview_path
+        for method, path, _body in server.request_bodies
+    )
+    assert not any(
+        method == "POST" and path.endswith(apply_suffix)
+        for method, path, _body in server.request_bodies
+    )
+
+
+@pytest.mark.parametrize(
+    ("preview_path", "preview_body", "apply_path", "expected_digest"),
+    (
+        (
+            "/api/v1/recipes/stop-plans/preview",
+            {"run_id": "20000000-0000-4000-8001-000000000001"},
+            "/api/v1/recipes/runs/20000000-0000-4000-8001-000000000001/stop",
+            "a" * 64,
+        ),
+        (
+            "/api/v1/recipes/uninstall-plans/preview",
+            {"installation_id": "20000000-0000-4000-8000-000000000003"},
+            "/api/v1/recipes/installations/20000000-0000-4000-8000-000000000003/uninstall",
+            "b" * 64,
+        ),
+    ),
+)
+def test_fake_authority_rejects_wrong_lifecycle_action_digest(
+    server: SliceServer,
+    preview_path: str,
+    preview_body: dict[str, str],
+    apply_path: str,
+    expected_digest: str,
+) -> None:
+    base = f"http://127.0.0.1:{server.server_port}"
+    preview = Request(
+        f"{base}{preview_path}",
+        data=json.dumps(preview_body).encode(),
+        method="POST",
+    )
+    with urlopen(preview) as response:
+        assert response.status == 200
+        assert json.loads(response.read())["plan_digest"] == expected_digest
+
+    apply = Request(
+        f"{base}{apply_path}",
+        data=json.dumps(
+            {
+                "plan_digest": "c" * 64,
+                "request_key": "30000000-0000-4000-8000-000000000001",
+            }
+        ).encode(),
+        method="POST",
+    )
+    with pytest.raises(HTTPError) as error:
+        urlopen(apply)
+
+    assert error.value.code == 409
+    assert expected_digest != "c" * 64
+    assert "does not match preview" in json.loads(error.value.read())["detail"]
+
+
+def test_fake_run_authority_replays_only_exact_previewed_alias_and_digest(
+    server: SliceServer,
+) -> None:
+    base = f"http://127.0.0.1:{server.server_port}"
+    installation_id = "20000000-0000-4000-8000-000000000003"
+    request_key = "30000000-0000-4000-8000-000000000009"
+
+    def post(path: str, body: dict[str, object]) -> tuple[int, dict[str, object]]:
+        request = Request(
+            f"{base}{path}",
+            data=json.dumps(body).encode(),
+            method="POST",
+        )
+        try:
+            with urlopen(request) as response:
+                return response.status, json.loads(response.read())
+        except HTTPError as error:
+            return error.code, json.loads(error.read())
+
+    status, preview_a = post(
+        "/api/v1/recipes/run-plans/preview",
+        {"installation_id": installation_id, "alias": server.slug},
+    )
+    assert status == 200
+    body_a = {
+        "installation_id": installation_id,
+        "alias": server.slug,
+        "plan_digest": preview_a["plan_digest"],
+        "request_key": request_key,
+    }
+    first_status, first = post("/api/v1/recipes/runs", body_a)
+    replay_status, replayed = post("/api/v1/recipes/runs", body_a)
+
+    assert first_status == replay_status == 202
+    assert replayed == first
+    assert server.run_creation_attempts == 1
+
+    mismatched_status, mismatched = post(
+        "/api/v1/recipes/runs",
+        {**body_a, "alias": "different-alias"},
+    )
+    assert mismatched_status == 409
+    assert mismatched["detail"] == "submitted plan digest does not match preview"
+    assert server.run_creation_attempts == 1
+
+    server.run_plan_digest = "e" * 64
+    status, preview_b = post(
+        "/api/v1/recipes/run-plans/preview",
+        {"installation_id": installation_id, "alias": "different-alias"},
+    )
+    assert status == 200
+    conflict_status, conflict = post(
+        "/api/v1/recipes/runs",
+        {
+            "installation_id": installation_id,
+            "alias": "different-alias",
+            "plan_digest": preview_b["plan_digest"],
+            "request_key": request_key,
+        },
+    )
+    assert conflict_status == 409
+    assert conflict["detail"] == "request key was already used differently"
+    assert server.run_creation_attempts == 1
 
 
 def test_runner_accepts_litellm_empty_provider_metadata(
@@ -911,7 +1661,20 @@ def test_runner_recovers_once_after_cleaned_failed_start(
         for method, path, body in server.request_bodies
         if method == "POST" and path == "/api/v1/recipes/runs"
     ]
+    run_previews = [
+        json.loads(body)
+        for method, path, body in server.request_bodies
+        if method == "POST" and path == "/api/v1/recipes/run-plans/preview"
+    ]
     assert len(run_creations) == 2
+    assert [
+        (request["installation_id"], request["alias"])
+        for request in run_previews
+    ] == [
+        (request["installation_id"], request["alias"])
+        for request in run_creations
+    ]
+    assert {request["alias"] for request in run_creations} == {server.slug}
     expected_retry_key = str(
         uuid.uuid5(uuid.UUID(evidence["acceptance_id"]), "running:start-retry")
     )
@@ -1002,7 +1765,7 @@ def test_runner_resumes_checkpointed_starts_without_repreviewing(
     evidence = json.loads(evidence_path.read_text())
     assert evidence["completed_states"] == STATES[:9]
     run_previews = [
-        body
+        json.loads(body)
         for method, path, body in server.request_bodies
         if method == "POST" and path == "/api/v1/recipes/run-plans/preview"
     ]
@@ -1012,6 +1775,8 @@ def test_runner_resumes_checkpointed_starts_without_repreviewing(
         if method == "POST" and path == "/api/v1/recipes/runs"
     ]
     assert len(run_previews) == 2
+    assert [request["alias"] for request in run_previews] == [server.slug] * 2
+    assert [request["alias"] for request in run_creations] == [server.slug] * 2
     assert [creation["plan_digest"] for creation in run_creations] == [
         "f" * 64,
         "e" * 64,
@@ -1052,12 +1817,13 @@ def test_runner_recovers_interrupted_start_creation(
     expected_digest = "f" * 64 if committed else "e" * 64
     assert evidence["outputs"][f"{prefix}_plan_digest"] == expected_digest
     run_previews = [
-        body
+        json.loads(body)
         for method, path, body in server.request_bodies
         if method == "POST" and path == "/api/v1/recipes/run-plans/preview"
     ]
     baseline_previews = 1 if purpose == "start" else 2
     assert len(run_previews) == baseline_previews + (0 if committed else 1)
+    assert {request["alias"] for request in run_previews} == {server.slug}
     request_key = str(
         uuid.uuid5(uuid.UUID(evidence["acceptance_id"]), f"running:{purpose}")
     )
@@ -1068,6 +1834,7 @@ def test_runner_recovers_interrupted_start_creation(
         and path == "/api/v1/recipes/runs"
         and json.loads(body)["request_key"] == request_key
     ]
+    assert {creation["alias"] for creation in matching_creations} == {server.slug}
     assert [creation["plan_digest"] for creation in matching_creations] == (
         ["f" * 64, "f" * 64] if committed else ["f" * 64, "f" * 64, "e" * 64]
     )
@@ -1107,7 +1874,7 @@ def test_model_multinode_runner_proves_failure_recovery_restart_and_cleanup(
         NODE: "2026-08-11T10:01:00+00:00",
         NODE_2: "2026-08-11T10:01:00+00:00",
     }
-    server.fleet_digest = "c" * 64
+    server.fleet_event_cursor = 2
     server.route_published = True
     recovered, _ = _run_model(tmp_path, server, "--stop-after", "inference-recovered")
     assert recovered.returncode == 0, recovered.stderr
@@ -1116,23 +1883,85 @@ def test_model_multinode_runner_proves_failure_recovery_restart_and_cleanup(
         NODE: "2026-08-11T10:02:00+00:00",
         NODE_2: "2026-08-11T10:02:00+00:00",
     }
-    server.fleet_digest = "d" * 64
+    server.supervisor_generations = {NODE: 2, NODE_2: 2}
+    server.boot_ids = {
+        NODE: "33333333-3333-4333-8333-333333333333",
+        NODE_2: "44444444-4444-4444-8444-444444444444",
+    }
+    server.fleet_event_cursor = 3
     completed, _ = _run_model(tmp_path, server)
 
     assert completed.returncode == 0, completed.stderr
     evidence = json.loads(evidence_path.read_text())
     assert evidence["completed_states"] == list(MODEL_MULTINODE_STATES)
     assert evidence["failure_node"] == NODE_2
-    assert evidence["outputs"]["restart_fleet_evidence_digest"] == "d" * 64
+    restart_digest = evidence["outputs"]["restart_fleet_evidence_digest"]
+    assert re.fullmatch(r"[0-9a-f]{64}", restart_digest)
+    assert restart_digest != evidence["outputs"]["fleet_evidence_digest"]
     assert (
         evidence["qualification_sha256"]
         == hashlib.sha256((tmp_path / "qualification.json").read_bytes()).hexdigest()
     )
     assert server.route_published is False
     assert any(
-        path == "/api/v1/endpoints/development-deepseek-smoke"
+        path == "/api/v1/endpoints/deepseek-v4-flash-0731-mia-dual"
         for _method, path, _authorization in server.requests
     )
+
+
+def test_model_restart_gate_rejects_heartbeat_then_retries_without_cleanup(
+    tmp_path: Path, server: SliceServer
+) -> None:
+    initial, evidence_path = _run_model_single(
+        tmp_path, server, "--stop-after", "inference-ok"
+    )
+    assert initial.returncode == 0, initial.stderr
+    checkpoint = json.loads(evidence_path.read_text())
+    assert checkpoint["completed_states"] == MODEL_SINGLE_STATES[:9]
+    assert checkpoint["outputs"]["restart_checkpoint"] == {
+        NODE: {
+            "boot_id": "11111111-1111-4111-8111-111111111111",
+            "supervisor_generation": 1,
+        }
+    }
+
+    server.last_seen[NODE] = "2026-08-11T10:01:00+00:00"
+    server.fleet_event_cursor = 2
+    server.fleet_generated_at = "2026-08-11T10:01:01+00:00"
+    no_restart, _ = _run_model_single(tmp_path, server)
+
+    assert no_restart.returncode == 1
+    assert "restart checkpoint identity did not advance" in no_restart.stderr
+    retained = json.loads(evidence_path.read_text())
+    assert retained["completed_states"] == MODEL_SINGLE_STATES[:9]
+    assert retained["outputs"]["restart_checkpoint"] == checkpoint["outputs"][
+        "restart_checkpoint"
+    ]
+    assert not any(
+        method == "POST" and path.endswith("/stop")
+        for method, path, _body in server.request_bodies
+    )
+    assert not any(
+        method == "POST" and path.endswith("/uninstall")
+        for method, path, _body in server.request_bodies
+    )
+
+    server.supervisor_generations[NODE] = 2
+    server.boot_ids[NODE] = "33333333-3333-4333-8333-333333333333"
+    server.last_seen[NODE] = "2026-08-11T10:02:00+00:00"
+    server.fleet_event_cursor = 3
+    server.fleet_generated_at = "2026-08-11T10:02:01+00:00"
+    restarted, _ = _run_model_single(tmp_path, server)
+
+    assert restarted.returncode == 0, restarted.stderr
+    accepted = json.loads(evidence_path.read_text())
+    assert accepted["completed_states"] == MODEL_SINGLE_STATES
+    assert accepted["outputs"]["restart_identity"] == {
+        NODE: {
+            "boot_id": "33333333-3333-4333-8333-333333333333",
+            "supervisor_generation": 2,
+        }
+    }
 
 
 def test_model_inference_allows_a_bounded_reasoning_budget(
@@ -1158,9 +1987,12 @@ def test_model_runner_requires_exact_private_qualification(
     tmp_path: Path, server: SliceServer
 ) -> None:
     server.nodes = [NODE, NODE_2]
-    qualification = _qualification(tmp_path / "qualification.json")
+    qualification = _qualification(
+        tmp_path / "qualification.json",
+        "deepseek-v4-flash-0731-mia-dual.json",
+    )
     document = json.loads(qualification.read_text())
-    document["multinode_nodes"] = [NODE_2, NODE]
+    document["recipe"] = "wrong-recipe.json"
     qualification.write_bytes(_canonical(document))
 
     result, evidence = _run_model(tmp_path, server, qualification=qualification)

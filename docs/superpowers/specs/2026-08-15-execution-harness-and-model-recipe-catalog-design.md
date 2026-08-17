@@ -188,6 +188,17 @@ config/model-targets/
 The implementation may refine filenames, but these identities must not be
 collapsed back into one monolithic recipe document.
 
+### Standard recipe-library boundary
+
+The public standard-library source for these directories is the separate
+`CarstVaartjes/vonk-forge-recipes` repository. The platform repository owns the
+schema, harness implementations, control-plane authority, and acceptance
+tools; the recipe repository owns reviewed model/recipe material and public
+build contexts. A development checkout may be supplied through
+`--library-root`, but a production import records the exact signed
+approved immutable recipe-library commit. Local PostgreSQL remains authoritative for installed
+state and runs after import. No runtime path reads a mutable branch or tag.
+
 ## Universal execution contract
 
 Every execution harness implements the same state machine:
@@ -338,6 +349,15 @@ Validators are composable and modality-specific:
 - mesh/container parsing, vertex/face/material counts, finite coordinates, and
   expected output format;
 - generic artifact digest, size, and media type.
+
+Input-dependent jobs use a recipe-declared input contract rather than an
+arbitrary host bind or runtime URL. A non-OpenAI job interface may declare the
+`/inputs` path, accepted media types, and maximum input bytes. The agent stages
+each request as a content-addressed per-job artifact, mounts that directory
+read-only and isolated from `/models` and `/outputs`, and removes it according
+to the job retention policy. The recipe must declare the matching `inputs`
+security mount. A recipe cannot declare filesystem inputs on an OpenAI serving
+interface, and the runtime remains offline after installation.
 
 The validation layer must not require a separate execution harness merely
 because a result is a file instead of a chat response.
@@ -542,6 +562,19 @@ independently verified by their content digests may be reused.
    historical evidence.
 4. Remove old model-specific runtime identities and every prototype contract
    path in the same cutover; there is no dual-contract period.
+
+The merged Fleet and Library experience remains the presentation layer, but
+its prototype profile vocabulary does not. It presents the one exact topology
+from each recipe revision and the exact model-version, harness,
+runtime-distribution, and optional patch identities. Mapping and installation
+flows never ask the operator to select a deployment profile.
+
+The v1 schema is added after the merged Alembic head. This is schema
+construction for a fresh pre-production database, not an upgrade contract:
+there is no row-preservation or data-translation test. Operators remove all
+pre-production Vonk Forge control state, start the fresh schema, create the
+administrator again, and re-enroll agents. Only independently
+content-addressed caches may survive after digest verification.
 
 ### Model recipe acceptance
 

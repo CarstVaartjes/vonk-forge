@@ -9,6 +9,8 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker
+from test_catalog_service import _seed_recipe_dependencies
+from vonk_control.auth import TokenCodec
 from vonk_control.catalog_service import CatalogService, RecipeDraftInput
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.models import AgentNode, Base, ClusterMapping
@@ -22,9 +24,8 @@ def migration_config(database_url: str) -> Config:
     return value
 
 
-def test_recipe_deployment_authority_is_linear_head() -> None:
+def test_recipe_deployment_authority_follows_recipe_catalog() -> None:
     script = ScriptDirectory.from_config(migration_config("sqlite://"))
-    assert script.get_heads() == ["0021_browser_authentication"]
     assert script.get_revision("0016_recipe_deployment_authority").down_revision == (
         "0015_recipe_catalog"
     )
@@ -55,7 +56,7 @@ def test_migration_backfills_legacy_authority_and_allows_recipe_authority(
                 "now": now,
             },
         )
-    command.upgrade(config, "head")
+    command.upgrade(config, "0016_recipe_deployment_authority")
     columns = {
         column["name"]: column
         for column in inspect(engine).get_columns("package_rollouts")
@@ -76,7 +77,9 @@ def test_resolved_recipe_maps_without_git_remote(tmp_path: Path) -> None:
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     clock = lambda: datetime(2026, 8, 7, 12, 0, tzinfo=UTC)
-    catalog = CatalogService(sessions, clock=clock)
+    catalog = CatalogService(
+        sessions, clock=clock, cursors=TokenCodec(b"c" * 32).cursor_codec()
+    )
     node_id = "spk_" + "1" * 32
     with sessions.begin() as session:
         session.add(
@@ -90,17 +93,19 @@ def test_resolved_recipe_maps_without_git_remote(tmp_path: Path) -> None:
     document = json.loads(
         (Path(__file__).parent / "fixtures/global/recipe-v1-minimal.json").read_text()
     )
+    document["identity"]["slug"] = "qwen3-vllm"
+    _seed_recipe_dependencies(catalog, document)
     draft = catalog.create_recipe(
         "admin", RecipeDraftInput(slug="qwen3-vllm", document=document)
     )
     resolved = catalog.resolve(draft.recipe_id, draft.revision_number, "admin")
     service = ClusterMappingService(sessions)
 
-    plan = service.plan(
+    plan = service.preview(
         resolved.id,
-        "solo",
         (node_id,),
-        parameters={},
+        {},
+        "admin",
     )
     mapping_id = service.materialize(plan, actor="admin", now=clock())
 

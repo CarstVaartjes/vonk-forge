@@ -1,10 +1,15 @@
+import copy
 from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
-from vonk_control.catalog_seeds import seed_standard_families
-from vonk_control.models import Base, PackageFamily
+from vonk_control.auth import TokenCodec
+from vonk_control.catalog_contract import catalog_content_sha256
+from vonk_control.catalog_entities import CatalogEntityService
+from vonk_control.catalog_seeds import seed_builtin_harnesses
+from vonk_control.harnesses import BUILTIN_HARNESS_SLUGS
+from vonk_control.models import Base, CatalogEntity, CatalogEntityRevision
 
 
 @pytest.fixture
@@ -15,41 +20,94 @@ def session():
         yield value
 
 
-def test_standard_seed_is_idempotent_and_preserves_user_edits(session) -> None:
-    now = datetime(2026, 8, 7, 12, 0, tzinfo=UTC)
-    first = seed_standard_families(session, now)
-    session.commit()
-    session.get(PackageFamily, "vllm").display_name = "My vLLM"
+def test_builtin_harness_seed_creates_one_resolved_entity_per_builtin(session) -> None:
+    first = seed_builtin_harnesses(session, datetime(2026, 8, 15, tzinfo=UTC))
     session.commit()
 
-    second = seed_standard_families(session, now)
+    assert first.created == len(BUILTIN_HARNESS_SLUGS)
+    assert set(first.identifiers) == set(BUILTIN_HARNESS_SLUGS)
+    assert set(
+        session.scalars(
+            select(CatalogEntity.slug).where(CatalogEntity.kind == "execution-harness")
+        )
+    ) == set(BUILTIN_HARNESS_SLUGS)
+    assert (
+        session.scalar(
+            select(CatalogEntityRevision).where(
+                CatalogEntityRevision.lifecycle == "resolved"
+            )
+        )
+        is not None
+    )
+
+
+def test_builtin_harness_seed_is_idempotent(session) -> None:
+    now = datetime(2026, 8, 15, tzinfo=UTC)
+    seed_builtin_harnesses(session, now)
     session.commit()
 
-    assert first.created == 5
+    second = seed_builtin_harnesses(session, now)
+    session.commit()
+
     assert second.created == 0
-    assert session.get(PackageFamily, "vllm").display_name == "My vLLM"
+    assert second.identifiers == ()
 
 
-def test_standard_seeds_are_typed_arm64_definitions(session) -> None:
-    seed_standard_families(session, datetime.now(UTC))
+def test_builtin_harness_seed_revises_an_existing_identity_to_the_canonical_digest(
+    session,
+) -> None:
+    now = datetime(2026, 8, 15, tzinfo=UTC)
+    seed_builtin_harnesses(session, now)
+    session.commit()
+    canonical = session.scalar(
+        select(CatalogEntityRevision)
+        .join(CatalogEntity)
+        .where(
+            CatalogEntity.kind == "execution-harness",
+            CatalogEntity.publisher == "vonk-forge",
+            CatalogEntity.slug == "vllm",
+            CatalogEntityRevision.lifecycle == "resolved",
+        )
+    )
+    assert canonical is not None
+    canonical_document = copy.deepcopy(canonical.document)
+    older_document = copy.deepcopy(canonical.document)
+    older_document["metadata"]["title"] = "Older vLLM execution harness"
+    service = CatalogEntityService(
+        session,
+        clock=lambda: now,
+        cursors=TokenCodec(b"s" * 32).cursor_codec(),
+    )
+    older_draft = service.revise(canonical.entity_id, older_document, actor="test")
+    older_resolved = service.resolve(older_draft.id, actor="test")
     session.commit()
 
-    assert set(session.scalars(select(PackageFamily.id))) == {
-        "oci",
-        "huggingface-snapshot",
-        "vllm",
-        "sglang",
-        "llama-cpp",
-    }
-    for family in session.scalars(select(PackageFamily)):
-        assert family.builtin is True
-        assert family.schema_version == 1
-        assert family.definition["architecture"] == "linux/arm64"
-        assert family.definition["capability"].endswith(".v1")
+    updated = seed_builtin_harnesses(session, now)
+    session.commit()
 
-
-def test_seed_participates_in_the_callers_transaction(session) -> None:
-    seed_standard_families(session, datetime.now(UTC))
-    session.rollback()
-
-    assert session.get(PackageFamily, "vllm") is None
+    canonical_revision = session.scalar(
+        select(CatalogEntityRevision)
+        .join(CatalogEntity)
+        .where(
+            CatalogEntity.kind == "execution-harness",
+            CatalogEntity.publisher == "vonk-forge",
+            CatalogEntity.slug == "vllm",
+            CatalogEntityRevision.lifecycle == "resolved",
+            CatalogEntityRevision.content_sha256
+            == catalog_content_sha256(canonical_document),
+        )
+        .order_by(CatalogEntityRevision.revision_number.desc())
+        .limit(1)
+    )
+    assert updated.created == 1
+    assert updated.identifiers == ("vllm",)
+    assert canonical_revision is not None
+    assert canonical_revision.entity_id == canonical.entity_id
+    assert canonical_revision.revision_number > older_resolved.revision_number
+    assert session.scalar(
+        select(CatalogEntity).where(
+            CatalogEntity.kind == "execution-harness",
+            CatalogEntity.publisher == "vonk-forge",
+            CatalogEntity.slug == "vllm",
+        )
+    ).id == canonical.entity_id

@@ -252,11 +252,15 @@ it("requires the exact destructive confirmation before rollback authorization, t
 
 it("keeps the NAS-newer fleet prompt persistent per exact skew digest without auto-apply", async () => {
   const fleet = {
-    commit: "f".repeat(40), evidence_digest: "9".repeat(64), nodes: [],
+    schema_version: 1 as const,
+    event_cursor: 0,
+    generated_at: "2026-08-15T12:00:00Z",
+    repository_commit: "f".repeat(40),
+    nodes: [],
   };
   let applies = 0;
   const control = api({
-    fleet: async () => fleet,
+    visualFleet: async () => fleet,
     applyUpdate: async () => { applies += 1; return rollout; },
   });
   const first = render(<FleetPage api={control}/>);
@@ -276,7 +280,7 @@ it("keeps the NAS-newer fleet prompt persistent per exact skew digest without au
   expect(screen.queryByRole("region", {name: "GPU node update available"})).not.toBeInTheDocument();
   second.unmount();
 
-  render(<FleetPage api={api({fleet: async () => fleet, updateSkew: async () => ({...skew, digest: `sha256:${"e".repeat(64)}`})})}/>);
+  render(<FleetPage api={api({visualFleet: async () => fleet, updateSkew: async () => ({...skew, digest: `sha256:${"e".repeat(64)}`})})}/>);
   expect(await screen.findByRole("region", {name: "GPU node update available"})).toBeVisible();
   expect(applies).toBe(0);
 });

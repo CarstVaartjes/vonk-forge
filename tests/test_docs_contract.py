@@ -1,5 +1,6 @@
 import re
 import tomllib
+from html.parser import HTMLParser
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,12 +25,31 @@ MODEL_SWITCHING = ROOT / "docs/runbooks/model-switching.md"
 MODEL_CAPACITY = ROOT / "docs/model-capacity-overview.md"
 DEVELOPMENT_MODEL_SMOKE = ROOT / "docs/audits/development-model-smoke.md"
 FRESH_DEVELOPMENT_INSTALL = ROOT / "docs/runbooks/fresh-development-install.md"
+HERMES_AGENT = ROOT / "docs/runbooks/hermes-agent.md"
 PLATFORM_UPDATE = ROOT / "docs/runbooks/platform-update.md"
 RUNTIME_RELEASE = ROOT / "docs/runbooks/runtime-release.md"
 VONKCTL = ROOT / "docs/runbooks/vonkctl.md"
 DOCS_INDEX = ROOT / "docs/README.md"
 CONTROL_RECOVERY = ROOT / "docs/runbooks/control-plane-recovery.md"
 THREAT_MODEL = ROOT / "docs/security/threat-model.md"
+EXECUTION_HARNESS_PLAN = (
+    ROOT / "docs/superpowers/plans/2026-08-15-execution-harness-foundation.md"
+)
+ROUTE_LEASE_PLAN = (
+    ROOT / "docs/superpowers/plans/2026-08-16-route-serving-lease-authority.md"
+)
+EXECUTION_HARNESSES = ROOT / "docs/operators/execution-harnesses.md"
+MODEL_CATALOG = ROOT / "docs/operators/model-catalog.md"
+RECIPE_LIBRARY = ROOT / "docs/operators/recipe-library.md"
+
+CURRENT_OPERATIONAL_DOCS = (
+    README,
+    DOCS_INDEX,
+    *(ROOT / "docs/runbooks").glob("*.md"),
+    *(ROOT / "docs/operations").glob("*.md"),
+    *(ROOT / "docs/operators").glob("*.md"),
+    ROOT / "deploy/compose/README.md",
+)
 
 GENERIC_ONBOARDING_DOCS = (
     README,
@@ -59,7 +79,9 @@ def _fenced_blocks(path: Path, *languages: str) -> list[str]:
 def _section(path: Path, heading: str) -> str:
     text = path.read_text()
     start = text.index(f"## {heading}")
-    following_heading = re.search(r"^## ", text[start + len(heading) + 3 :], re.MULTILINE)
+    following_heading = re.search(
+        r"^## ", text[start + len(heading) + 3 :], re.MULTILINE
+    )
     if following_heading is None:
         return text[start:]
     end = start + len(heading) + 3 + following_heading.start()
@@ -75,6 +97,29 @@ def _ordered_steps(section: str) -> list[str]:
         elif steps and line.startswith("   "):
             steps[-1] += f" {line.strip()}"
     return steps
+
+
+def _headings(path: Path) -> list[str]:
+    return [
+        match.group(2).strip()
+        for match in re.finditer(
+            r"^(#{1,6})\s+(.+?)\s*$", path.read_text(), re.MULTILINE
+        )
+    ]
+
+
+class _ArchitectureDocument(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.ids: set[str] = set()
+        self.links: set[str] = set()
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = dict(attrs)
+        if attributes.get("id"):
+            self.ids.add(str(attributes["id"]))
+        if tag == "a" and attributes.get("href"):
+            self.links.add(str(attributes["href"]))
 
 
 def test_readme_describes_the_spark_native_runtime_boundary() -> None:
@@ -112,22 +157,71 @@ def test_architecture_explains_one_two_and_many_node_shapes() -> None:
     assert "agents.vonk.lan" not in html
 
 
-def test_mia_runbook_distinguishes_image_receipts_from_model_loading() -> None:
-    text = _normalized_text(MIA_TWO_SPARK)
-
+def test_standard_recipe_library_documents_the_authority_split() -> None:
+    text = _normalized_text(RECIPE_LIBRARY)
     for required in (
-        "18,908,041,728-byte runtime image",
-        "155.43 GiB model checkpoint",
-        "does not redownload",
-        "new signed import receipt",
-        "full digest verification",
-        "not a release SLA",
-        "146 seconds",
+        "vonk-forge-recipes",
+        "exact library commit",
+        "GitHub Actions-only",
+        "never turns a branch",
+        "--library-root",
+        "--platform-root",
+        "Custom libraries",
     ):
         assert required in text
 
 
-def test_active_agent_install_examples_keep_pairing_and_controller_inputs_together() -> None:
+def test_current_ds4_audit_uses_v1_external_library_commands() -> None:
+    text = _normalized_text(ROOT / "docs/audits/development-model-smoke.md")
+
+    assert "scripts/qualify-recipe" in text
+    assert "../vonk-forge-recipes/recipes/deepseek-v4-flash-0731-ds4-single.json" in text
+    assert "--library-root ../vonk-forge-recipes" in text
+    assert "scripts/qualify-development-model" not in text
+    assert "--artifact-root /var/lib/vonk/models" not in text
+
+
+def test_current_docs_do_not_advertise_prototype_model_operations() -> None:
+    forbidden = (
+        "vonkctl-legacy",
+        "config/cluster-profiles/",
+        "config/workloads/",
+        "deepseek-agent-single",
+        "deepseek-agent-dual",
+        "adapters/<family>/<runtime>",
+    )
+    offenders = {
+        path.relative_to(ROOT).as_posix(): token
+        for path in CURRENT_OPERATIONAL_DOCS
+        for token in forbidden
+        if token in path.read_text()
+    }
+    assert offenders == {}
+
+
+def test_workload_packages_are_not_the_model_or_runtime_release_path() -> None:
+    text = _normalized_text(ROOT / "docs/runbooks/workload-packages.md")
+
+    assert "operator contract for model and runtime releases" not in text
+    assert "Catalog and Library are the operator path for model recipes" in text
+
+
+def test_mia_runbook_distinguishes_image_receipts_from_model_loading() -> None:
+    text = _normalized_text(MIA_TWO_SPARK)
+
+    for required in (
+        "ghcr.io/anemll/dspark-vllm-gx10@sha256:a83948492cf13df455170fb42885f5ef4db54fefe0feff0f841ecbff464ac9d8",
+        "166,898,666,055-byte model checkpoint",
+        "does not redownload",
+        "full digest verification",
+        "Spark acceptance remains a required gate",
+    ):
+        assert required in text
+
+
+def test_active_agent_install_examples_keep_pairing_and_controller_inputs_together() -> (
+    None
+):
     agent_configs = []
     for block in _fenced_blocks(INSTALL_AGENT, "toml"):
         config = tomllib.loads(block)
@@ -143,7 +237,9 @@ def test_active_agent_install_examples_keep_pairing_and_controller_inputs_togeth
         assert config["node_id"] == "<NODE_ID>"
 
 
-def test_agent_ca_fingerprint_is_derived_from_der_and_used_without_command_output_noise() -> None:
+def test_agent_ca_fingerprint_is_derived_from_der_and_used_without_command_output_noise() -> (
+    None
+):
     install_blocks = _fenced_blocks(INSTALL_AGENT, "bash", "sh", "shell")
     fingerprint_block = next(
         block for block in install_blocks if "openssl x509" in block
@@ -163,9 +259,7 @@ def test_agent_urls_have_distinct_pairing_and_post_identity_roles() -> None:
     sentences = re.split(r"(?<=[.!])\s+", _normalized_text(INSTALL_AGENT))
 
     assert any(
-        "`enrollment_url`" in sentence
-        and "only" in sentence
-        and "`pair`" in sentence
+        "`enrollment_url`" in sentence and "only" in sentence and "`pair`" in sentence
         for sentence in sentences
     )
     assert any(
@@ -230,8 +324,8 @@ def test_fresh_spark_install_does_not_claim_nvidia_platform_ownership() -> None:
 
     assert "NVIDIA Sync owns supported cluster networking and node-to-node SSH" in fresh
     assert "must not stop, disable, mask, or install `earlyoom`" in platform
-    assert "archived SSH-controller compatibility tool" in runtime_release
-    assert "host networking and host IPC are legacy runtime exceptions" in legacy
+    assert "published by the repository’s GitHub Actions workflows" in runtime_release
+    assert "The browser is the normal recipe workflow" in legacy
 
 
 def test_onboarding_preserves_the_one_use_grant_pair_approve_pair_sequence() -> None:
@@ -243,7 +337,9 @@ def test_onboarding_preserves_the_one_use_grant_pair_approve_pair_sequence() -> 
     assert "Repeat the same `pair` command" in steps[3]
 
 
-def test_generic_path_covers_secret_safe_backup_identity_recovery_and_package_removal() -> None:
+def test_generic_path_covers_secret_safe_backup_identity_recovery_and_package_removal() -> (
+    None
+):
     onboarding = _section(NODE_ONBOARDING, "Clean-machine prerequisites")
     agent_lifecycle = _section(INSTALL_AGENT, "Rotation, recovery, and removal")
     pki_recovery = _section(AGENT_PKI, "Backup and restore consistency")
@@ -297,7 +393,9 @@ def test_generic_onboarding_uses_hosts_placeholders_for_nas_and_agent_nodes() ->
     assert "192.168.1.231" not in combined
 
 
-def test_generic_docs_exclude_task_11_site_constants_and_physical_acceptance_results() -> None:
+def test_generic_docs_exclude_task_11_site_constants_and_physical_acceptance_results() -> (
+    None
+):
     combined = "\n".join(path.read_text() for path in GENERIC_ONBOARDING_DOCS)
     forbidden = (
         "192.168.1.231",
@@ -316,13 +414,18 @@ def test_generic_docs_exclude_task_11_site_constants_and_physical_acceptance_res
             assert not re.search(r"/volume\d+(?:/|$)", block)
 
 
-def test_development_nas_contract_keeps_only_compose_file_and_secrets_directory() -> None:
+def test_development_nas_contract_keeps_only_compose_file_and_secrets_directory() -> (
+    None
+):
     text = _normalized_text(DEV_NAS)
 
     assert "Its contents must be exactly:" in text
     assert "├── docker-compose.yaml" in text
     assert "└── secrets/" in text
-    assert "No `current/`, source tree, Dockerfiles, or `.env` file belongs in this project." in text
+    assert (
+        "No `current/`, source tree, Dockerfiles, or `.env` file belongs in this project."
+        in text
+    )
 
     for name in (
         "agent-ca-certificate",
@@ -347,7 +450,9 @@ def test_development_nas_contract_keeps_only_compose_file_and_secrets_directory(
     )
 
 
-def test_development_and_production_docs_separate_mutable_dev_from_authoritative_production() -> None:
+def test_development_and_production_docs_separate_mutable_dev_from_authoritative_production() -> (
+    None
+):
     readme = _normalized_text(README)
     compose = _normalized_text(COMPOSE_README)
     supply_chain = _normalized_text(SUPPLY_CHAIN)
@@ -393,16 +498,16 @@ def test_complete_development_workload_runbook_has_every_operator_phase() -> Non
     assert "scripts/dev-admin-token" in text
     assert "docs/operations/agent-package-release.md#install-the-dev-channel" in text
     assert "vonk-agent pair" in text
-    assert "scripts/qualify-development-model" in text
-    for phase in ("synthetic", "model-single", "model-multinode"):
+    assert "scripts/qualify-recipe" in text
+    for phase in ("model-single", "model-multinode"):
         assert f"--phase {phase}" in text
-    for checkpoint in (
-        "inference-ok",
-        "rank-failure-observed",
-        "route-withdrawn-after-failure",
-        "inference-recovered",
-    ):
-        assert f"--stop-after {checkpoint}" in text
+    assert "--api-base" in text
+    assert "--inference-base" in text
+    assert "--qualification-file" in text
+    assert "../vonk-forge-recipes/recipes/deepseek-v4-flash-0731-ds4-single.json" in text
+    assert "../vonk-forge-recipes/recipes/deepseek-v4-flash-0731-mia-dual.json" in text
+    assert "config/recipes/development" not in text
+    assert "--stop-after inference-ok" in text
 
 
 def test_multinode_rendezvous_firewall_is_direct_fabric_only() -> None:
@@ -423,16 +528,11 @@ def test_multinode_rendezvous_firewall_is_direct_fabric_only() -> None:
 def test_model_smoke_records_public_arm64_fabric_transport_identity() -> None:
     text = _normalized_text(DEVELOPMENT_MODEL_SMOKE)
 
-    assert "Public multi-architecture OCI index" in text
-    assert (
-        "sha256:fc6dddc4c44b1bfe37f41cae8e67d1693828e8f42a91862816d7953e2c9d3f23"
-        in text
-    )
-    assert "linux/arm64/v8" in text
-    assert (
-        "sha256:97d3fa0415c6749d4b27849c2bf251ac11fe2ec7d3178a2dae4bbf3bd30056fc"
-        in text
-    )
+    assert "linux/arm64" in text
+    assert "84cc882352757baf628a1776badf7cc54d584e28" in text
+    assert "e7f04037032990db0346398d249baf9fb9df1ccc" in text
+    assert "ca22ae2f838e14077c22bc1c1417b71b45b5e5a3687bd96c2ac6e17fdb6261c0" in text
+    assert "7e319924541db3f7a163ed7e11d7532a70d48228ab59d36cb81e1d4511885360" in text
 
 
 def test_model_commands_bind_private_qualification_and_runtime_evidence() -> None:
@@ -440,16 +540,21 @@ def test_model_commands_bind_private_qualification_and_runtime_evidence() -> Non
 
     for phase in ("model-single", "model-multinode"):
         command = next(block for block in blocks if f"--phase {phase}" in block)
-        assert (
-            "--qualification-file "
-            "'<EVIDENCE_DIRECTORY>/model-qualification.json'"
-        ) in command
+        assert "--api-base" in command
+        assert "--admin-token-file" in command
+        assert "--inference-token-file" in command
+        assert "--qualification-file" in command
+        assert "--builder-node" in command
+        assert "--target-node" in command
+        assert "--stop-after inference-ok" in command
+        assert "--evidence-file '<EVIDENCE_DIRECTORY>/" in command
 
     normalized = _normalized_text(DEV_WORKLOADS)
-    assert "private qualification SHA-256" in normalized
-    assert "build and distribution evidence" in normalized
-    assert "per-node runtime artifact evidence" in normalized
-    assert "retained by the acceptance runner" in normalized
+    assert "canonical qualification evidence" in normalized
+    assert "source verification, image build/distribution" in normalized
+    assert "route publication" in normalized
+    assert "rank-loss route withdrawal" in normalized
+    assert "worker-first recovery" in normalized
 
 
 def test_latest_mia_runbook_is_exact_reproducible_and_secret_free() -> None:
@@ -458,14 +563,13 @@ def test_latest_mia_runbook_is_exact_reproducible_and_secret_free() -> None:
 
     for value in (
         "f752cd04ab30f2cf42077dd8811a5e1e682d63e7",
-        "9e165c30e2704aec5d9d593cce3eebd58bbef1cb",
-        "166898660330",
-        "mia-mit",
-        "VONK_HOST_ENDPOINT_PORTS=8888",
-        "check-host-port 8888",
-        "--recipe config/recipes/development/mia-deepseek-v4-flash.json",
+        "47503f8e38dadd4dededca798150db2619594fce",
+        "62af8fffb2f7030cac4de2f0169f5b8d1101b646",
+        "166898666055",
+        "a83948492cf13df455170fb42885f5ef4db54fefe0feff0f841ecbff464ac9d8",
+        "--recipe ../vonk-forge-recipes/recipes/deepseek-v4-flash-0731-mia-dual.json",
         "--phase model-multinode",
-        "--stop-after inference-ok",
+        "--level container",
     ):
         assert value in text
     assert "No Hugging Face token" in normalized
@@ -474,8 +578,9 @@ def test_latest_mia_runbook_is_exact_reproducible_and_secret_free() -> None:
     assert "one exact retry" in normalized.lower()
     assert "same installation identity" in normalized.lower()
     assert "immutable model and image caches" in normalized.lower()
-    assert "derives the fabric interface directly from `/sys/class/infiniband`" in normalized
-    assert "does not depend on `iproute2` inside the runtime image" in normalized
+    assert "VONK_MASTER_ADDR" in text
+    assert "NCCL_IB_HCA" in text
+    assert "no startup patching" in normalized.lower()
 
 
 def test_secret_docs_separate_local_backup_from_exact_nas_projection() -> None:
@@ -505,14 +610,17 @@ def test_design_records_intentionally_database_free_litellm_runtime() -> None:
     assert "LiteLLM database URL is derived" not in design
 
 
-def test_complete_runbook_keeps_access_loopback_tokens_private_and_evidence_local() -> None:
+def test_complete_runbook_keeps_access_loopback_tokens_private_and_evidence_local() -> (
+    None
+):
     text = DEV_WORKLOADS.read_text()
     normalized = _normalized_text(DEV_WORKLOADS)
 
     assert "-L <LOCAL_API_PORT>:127.0.0.1:8080" in text
     assert "-L <LOCAL_INFERENCE_PORT>:127.0.0.1:4000" in text
-    assert "--admin-token-file" in text
-    assert "--inference-token-file" in text
+    assert "scripts/dev-admin-token" in text
+    assert "<EVIDENCE_DIRECTORY>/admin-token" in text
+    assert "<LOCAL_SECRETS_DIR>/litellm-master-key" in text
     assert "mode `0600`" in normalized
     assert ".state/development-acceptance/" in text
     assert "must not be committed" in normalized
@@ -520,6 +628,86 @@ def test_complete_runbook_keeps_access_loopback_tokens_private_and_evidence_loca
     for block in _fenced_blocks(DEV_WORKLOADS, "bash", "sh", "shell"):
         assert "cat " not in block
         assert "Get-Content" not in block
+
+
+def test_active_inference_guides_define_the_request_time_caddy_boundary() -> None:
+    inference_guides = (
+        DEV_NAS,
+        DEV_WORKLOADS,
+        FRESH_DEVELOPMENT_INSTALL,
+        HERMES_AGENT,
+    )
+    required_claims = (
+        (
+            "A request whose Caddy authorization begins at or after lease expiry "
+            "is never forwarded to LiteLLM"
+        ),
+        (
+            "If the supervisor authority is unavailable, Caddy fails closed "
+            "without contacting LiteLLM"
+        ),
+        (
+            "A same-config lease renewal replaces the deadline without restarting "
+            "the healthy LiteLLM child"
+        ),
+    )
+
+    for path in inference_guides:
+        normalized = _normalized_text(path)
+        for claim in required_claims:
+            assert claim in normalized, path
+
+    loopback_claim = (
+        "`127.0.0.1:4000` terminates at Caddy's lease-gated internal `:8081` "
+        "listener; no LiteLLM port is published to the host"
+    )
+    for path in (DEV_NAS, DEV_WORKLOADS, FRESH_DEVELOPMENT_INSTALL):
+        assert loopback_claim in _normalized_text(path), path
+
+    assert (
+        "OpenAI-compatible base URL: http://caddy:8081/v1" in HERMES_AGENT.read_text()
+    )
+    for path in sorted((ROOT / "docs/runbooks").glob("*.md")):
+        text = path.read_text().lower()
+        assert "http://litellm:4000" not in text, path
+        assert "https://litellm:4000" not in text, path
+
+
+def test_fresh_preproduction_reset_recreates_users_sessions_and_enrollments() -> None:
+    reset_contracts = (
+        DEV_NAS,
+        DEV_WORKLOADS,
+        FRESH_DEVELOPMENT_INSTALL,
+        EXECUTION_HARNESS_PLAN,
+    )
+    required = (
+        (
+            "A fresh pre-production reset removes every user, browser session, "
+            "and agent enrollment"
+        ),
+        (
+            "Recreate the development administrator, sign in to establish a fresh "
+            "browser session, and re-enroll every Spark before acceptance"
+        ),
+    )
+
+    for path in reset_contracts:
+        normalized = _normalized_text(path)
+        for claim in required:
+            assert claim in normalized, path
+
+
+def test_route_lease_plan_caddy_validation_supplies_required_inputs() -> None:
+    text = ROUTE_LEASE_PLAN.read_text()
+
+    for required in (
+        "validation_root=$(mktemp -d)",
+        "openssl req -x509 -newkey rsa:2048 -nodes -days 1",
+        "-e VONK_CONTROL_HOSTNAME=control.test.example",
+        "$validation_root/ca.pem:/run/secrets/agent-client-ca:ro",
+        "caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile",
+    ):
+        assert required in text
 
 
 def test_complete_runbook_documents_exact_cleanup_and_recovery_boundaries() -> None:
@@ -582,6 +770,10 @@ def test_fresh_install_finishes_with_direct_login_and_both_nodes_visible() -> No
     assert "both Sparks" in normalized
     assert "Logout" in normalized
     assert "normal browser access does not require an SSH tunnel" in normalized
+    assert "git clone https://github.com/CarstVaartjes/vonk-forge-recipes" in normalized
+    assert "scripts/validate-recipe-library" in normalized
+    assert "scripts/import-recipe-library" in normalized
+    assert "Candidate recipes require an explicit opt-in" in normalized
 
     proof_parts = re.split(
         r"^## (?:\d+\. )?Prove the installation$",
@@ -674,3 +866,48 @@ def test_quick_start_does_not_present_a_tunnel_as_normal_browser_access() -> Non
         assert "-L 18080:127.0.0.1:8080" not in text
         for claim in forbidden:
             assert claim not in text
+
+
+def test_operator_catalog_guides_expose_complete_navigable_concept_and_lifecycle_sections() -> (
+    None
+):
+    assert _headings(MODEL_CATALOG) == [
+        "Model catalog",
+        "Four catalog layers",
+        "Exact immutable identity",
+        "One Spark, many Sparks, and replicas",
+        "Custom recipes and license responsibility",
+        "Catalog operations",
+        "Install and invoke",
+        "Stop and uninstall",
+        "Update and exact-revision rollback",
+    ]
+    assert _headings(EXECUTION_HARNESSES) == [
+        "Execution harness operations",
+        "Harness, distribution, and patch",
+        "The eight built-in harnesses",
+        "Interface publication",
+        "Clean development reset",
+        "Acceptance evidence",
+        "Controller execution sequence",
+    ]
+
+    index_links = {
+        destination
+        for _label, destination in re.findall(
+            r"\[([^\]]+)\]\(([^)]+)\)", DOCS_INDEX.read_text()
+        )
+    }
+    assert "operators/model-catalog.md" in index_links
+    assert "operators/execution-harnesses.md" in index_links
+
+
+def test_architecture_html_has_semantic_catalog_resolution_and_interface_publication_paths() -> (
+    None
+):
+    document = _ArchitectureDocument()
+    document.feed(ARCHITECTURE_HTML.read_text())
+
+    assert {"catalog-resolution", "interface-publication"} <= document.ids
+    assert "operators/model-catalog.md" in document.links
+    assert "operators/execution-harnesses.md" in document.links

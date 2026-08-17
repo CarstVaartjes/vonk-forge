@@ -13,6 +13,9 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
+from test_catalog_service import _seed_recipe_dependencies
+from vonk_control.auth import TokenCodec
+from vonk_control.catalog_service import CatalogService
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.inventory_repository import (
     InventoryRepository,
@@ -26,6 +29,7 @@ from vonk_control.models import (
     LocalRecipeRevision,
     RecipeBuild,
     RecipeInstallation,
+    RecipeRun,
     ResourceReservation,
 )
 from vonk_control.run_admission import RunAdmissionService, RunPlanConflict
@@ -47,7 +51,7 @@ def setup(
     document = json.loads(
         (Path(__file__).parent / "fixtures/global/recipe-v1-minimal.json").read_text()
     )
-    memory = document["deployment_profiles"][0]["roles"][0]["resources"]["memory"]
+    memory = document["topology"]["roles"][0]["resources"]["memory"]
     memory.update(
         {
             "startup_peak_bytes": 225,
@@ -56,13 +60,17 @@ def setup(
             "system_reserve_bytes": 0,
         }
     )
+    catalog = CatalogService(
+        sessions, clock=lambda: now, cursors=TokenCodec(b"c" * 32).cursor_codec()
+    )
+    _seed_recipe_dependencies(catalog, document)
     with sessions.begin() as session:
         session.add(
             AgentNode(
                 node_id=node,
                 state="active",
                 architecture="linux-arm64",
-                capabilities=list(capabilities),
+                capabilities=["runtime.vonk.v1"],
             )
         )
         recipe = LocalRecipe(
@@ -90,7 +98,7 @@ def setup(
         session.flush()
         revision_id = revision.id
     mappings = ClusterMappingService(sessions)
-    mapping_plan = mappings.plan(revision_id, "solo", (node,), parameters={})
+    mapping_plan = mappings.preview(revision_id, (node,), {}, "admin")
     mapping_id = mappings.materialize(mapping_plan, actor="admin", now=now)
     with sessions.begin() as session:
         build = RecipeBuild(
@@ -214,19 +222,28 @@ def postgres_engine():
         subprocess.run(["docker", "stop", name], check=False, capture_output=True)
 
 
-def test_run_plan_accounts_for_memory_floor_and_persists_reservations(tmp_path) -> None:
+def test_run_alias_is_digest_bound_and_persisted_with_plan_authority(tmp_path) -> None:
     sessions, now, _node, installation = setup(tmp_path, free_memory=300)
     service = RunAdmissionService(
         sessions, inventory_max_age=300, memory_floor_bytes=50
     )
-    plan = service.plan_run(installation, now=now)
+    plan = service.plan_run(installation, alias="qwen", now=now)
+    alternate = service.plan_run(installation, alias="qwen-alt", now=now)
     assert (
         plan.allowed is True
         and plan.nodes[0].required_memory_bytes == 225
         and plan.nodes[0].free_after_bytes == 75
     )
-    run_id = service.accept_run(plan, alias="qwen", actor="admin", now=now)
-    assert run_id
+    assert plan.alias == "qwen"
+    assert alternate.alias == "qwen-alt"
+    assert alternate.plan_digest != plan.plan_digest
+
+    run_id = service.accept_run(plan, actor="admin", now=now)
+
+    with sessions() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        assert run.alias == plan.alias == run.plan["alias"]
 
 
 def test_memory_capability_and_port_conflicts_are_explained(tmp_path) -> None:
@@ -238,7 +255,7 @@ def test_memory_capability_and_port_conflicts_are_explained(tmp_path) -> None:
     )
     plan = RunAdmissionService(
         sessions, inventory_max_age=300, memory_floor_bytes=50
-    ).plan_run(installation, now=now)
+    ).plan_run(installation, "qwen", now=now)
     codes = {reason.code for reason in plan.nodes[0].blockers}
     assert {
         "run.insufficient_memory",
@@ -252,7 +269,7 @@ def test_accept_rechecks_memory_reservations_while_holding_node_lock(tmp_path) -
     service = RunAdmissionService(
         sessions, inventory_max_age=300, memory_floor_bytes=50
     )
-    plan = service.plan_run(installation, now=now)
+    plan = service.plan_run(installation, "qwen", now=now)
     with sessions.begin() as session:
         session.add_all(
             [
@@ -273,7 +290,31 @@ def test_accept_rechecks_memory_reservations_while_holding_node_lock(tmp_path) -
     service.plan_run = lambda *args, **kwargs: plan
 
     with pytest.raises(RunPlanConflict, match="memory capacity changed"):
-        service.accept_run(plan, alias="qwen", actor="admin", now=now)
+        service.accept_run(plan, actor="admin", now=now)
+
+
+def test_queue_rejects_reservation_mutation_after_preview(tmp_path) -> None:
+    sessions, now, node, installation = setup(tmp_path, free_memory=300)
+    service = RunAdmissionService(
+        sessions, inventory_max_age=300, memory_floor_bytes=50
+    )
+    plan = service.plan_run(installation, "qwen", now=now)
+    with sessions.begin() as session:
+        session.add(
+            ResourceReservation(
+                node_id=node,
+                kind="unified-memory",
+                resource_key="between-preview-and-queue",
+                amount_bytes=50,
+                owner_kind="run",
+                owner_id="2" * 36,
+                state="active",
+                plan_digest="d" * 64,
+                created_at=now,
+            )
+        )
+    with pytest.raises(RunPlanConflict, match="run.plan_stale_or_blocked"):
+        service.accept_run(plan, actor="admin", now=now)
 
 
 def test_postgres_competing_admissions_have_one_capacity_winner(
@@ -286,13 +327,16 @@ def test_postgres_competing_admissions_have_one_capacity_winner(
     service = RunAdmissionService(
         sessions, inventory_max_age=300, memory_floor_bytes=50
     )
-    plan = service.plan_run(installation, now=now)
+    plans = {
+        alias: service.plan_run(installation, alias, now=now)
+        for alias in ("qwen-a", "qwen-b")
+    }
     barrier = threading.Barrier(2)
 
     def accept(alias: str) -> bool:
         barrier.wait()
         try:
-            service.accept_run(plan, alias=alias, actor="admin", now=now)
+            service.accept_run(plans[alias], actor="admin", now=now)
         except RunPlanConflict:
             return False
         return True

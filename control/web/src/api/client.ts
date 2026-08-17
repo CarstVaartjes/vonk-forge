@@ -6,11 +6,10 @@ import type {
   AgentsResponse,
   AuditSummary,
   ControlApi,
-  DocumentList,
   EnrollmentDecisionResponse,
   EnrollmentGrantResponse,
   EnrollmentListResponse,
-  FleetResponse,
+  FleetEvidenceResponse,
   JobDetail,
   JobResumeResponse,
   JobsResponse,
@@ -21,8 +20,6 @@ import type {
   PackageProgress,
   PackageRemovalProgress,
   PackageRemovalPreview,
-  ReconciliationAccepted,
-  ReconciliationPlan,
   UpdatePlan,
   UpdateRollout,
   UpdateSkew,
@@ -32,11 +29,22 @@ import type {
   GlobalRecipeRevision,
   WorkloadRunApplied,
   WorkloadRunPreview,
+  TelemetryHistory,
+  TelemetryResolution,
+  VisualFleetSnapshot,
   SourceBundleReceipt,
   SourcePolicyReport,
   RecipeBuildPlan,
   RecipeMappingPlan,
   RecipeOperation,
+  LibraryInstallApplyInput,
+  LibraryInstallPreviewInput,
+  LibraryLoadApplyInput,
+  LibraryLoadPreviewInput,
+  LibraryMappingApplyInput,
+  LibraryMappingPreviewInput,
+  LibraryStopApplyInput,
+  LibraryUninstallApplyInput,
 } from "./types";
 import type {
   PackageCandidate,
@@ -296,12 +304,12 @@ export class ApiClient implements ControlApi {
     return this.request("/api/v1/recipes/builds", {method: "POST", body: JSON.stringify({recipe_revision_id: plan.recipe_revision_id, builder_node_id: plan.builder_node_id, build_input_sha256: plan.build_input_sha256, request_key: crypto.randomUUID()})});
   }
 
-  previewRecipeMapping(recipeRevisionId: string, profileName: string, nodeIds: string[]): Promise<RecipeMappingPlan> {
-    return this.request("/api/v1/recipes/mapping-plans/preview", {method: "POST", body: JSON.stringify({recipe_revision_id: recipeRevisionId, profile_name: profileName, node_ids: nodeIds, parameters: {}})});
+  previewRecipeMapping(recipeRevisionId: string, nodeIds: string[]): Promise<RecipeMappingPlan> {
+    return this.request("/api/v1/recipes/mapping-plans/preview", {method: "POST", body: JSON.stringify({recipe_revision_id: recipeRevisionId, node_ids: nodeIds, parameters: {}})});
   }
 
   createRecipeMapping(plan: RecipeMappingPlan): Promise<{mapping_id: string; generation: number; placement_digest: string}> {
-    return this.request("/api/v1/recipes/mappings", {method: "POST", body: JSON.stringify({recipe_revision_id: plan.recipe_revision_id, profile_name: plan.profile_name, node_ids: plan.nodes.map(node => node.node_id), parameters: plan.parameters, placement_digest: plan.placement_digest, request_key: crypto.randomUUID()})});
+    return this.request("/api/v1/recipes/mappings", {method: "POST", body: JSON.stringify({recipe_revision_id: plan.recipe_revision_id, node_ids: plan.nodes.map(node => node.node_id), parameters: plan.parameters, placement_digest: plan.placement_digest, request_key: crypto.randomUUID()})});
   }
 
   previewWorkloadRun(sourceYaml: string): Promise<WorkloadRunPreview> {
@@ -312,8 +320,136 @@ export class ApiClient implements ControlApi {
     return this.request("/api/v1/catalog/imports/workload_run", {method: "POST", body: JSON.stringify({source_yaml: sourceYaml, source_sha256: sourceSha256, report_digest: reportDigest})});
   }
 
-  async fleet(): Promise<FleetResponse> {
-    return resultData(await this.generated.GET("/api/v1/fleet"));
+  async visualFleet(signal?: AbortSignal): Promise<VisualFleetSnapshot> {
+    return resultData(await this.generated.GET("/api/v1/fleet", {signal}));
+  }
+
+  async librarySnapshot(cursor?: string, signal?: AbortSignal) {
+    return resultData(await this.generated.GET("/api/v1/library", {
+      params: {query: {cursor, limit: 100}},
+      signal,
+    }));
+  }
+
+  async libraryRecipe(recipeId: string, signal?: AbortSignal) {
+    return resultData(await this.generated.GET("/api/v1/library/recipes/{recipe_id}", {
+      params: {path: {recipe_id: recipeId}},
+      signal,
+    }));
+  }
+
+  async previewLibraryMapping(input: LibraryMappingPreviewInput, signal?: AbortSignal) {
+    return resultData(await this.generated.POST("/api/v1/recipes/mapping-plans/preview", {body: input, signal}));
+  }
+
+  async applyLibraryMapping(input: LibraryMappingApplyInput, signal?: AbortSignal) {
+    return resultData(await this.generated.POST("/api/v1/recipes/mappings", {
+      body: input,
+      signal,
+    }));
+  }
+
+  async previewLibraryInstall(input: LibraryInstallPreviewInput, signal?: AbortSignal) {
+    return resultData(await this.generated.POST("/api/v1/recipes/install-plans/preview", {body: input, signal}));
+  }
+
+  async applyLibraryInstall(input: LibraryInstallApplyInput, signal?: AbortSignal) {
+    return resultData(await this.generated.POST("/api/v1/recipes/installations", {
+      body: input,
+      signal,
+    }));
+  }
+
+  async previewLibraryLoad(input: LibraryLoadPreviewInput, signal?: AbortSignal) {
+    return resultData(await this.generated.POST("/api/v1/recipes/run-plans/preview", {body: input, signal}));
+  }
+
+  async applyLibraryLoad(input: LibraryLoadApplyInput, signal?: AbortSignal) {
+    return resultData(await this.generated.POST("/api/v1/recipes/runs", {
+      body: input,
+      signal,
+    }));
+  }
+
+  async previewLibraryStop(runId: string, signal?: AbortSignal) {
+    return resultData(await this.generated.POST("/api/v1/recipes/stop-plans/preview", {body: {run_id: runId}, signal}));
+  }
+
+  async applyLibraryStop(runId: string, input: LibraryStopApplyInput, signal?: AbortSignal) {
+    return resultData(await this.generated.POST("/api/v1/recipes/runs/{run_id}/stop", {
+      params: {path: {run_id: runId}},
+      body: input,
+      signal,
+    }));
+  }
+
+  async previewLibraryUninstall(installationId: string, signal?: AbortSignal) {
+    return resultData(await this.generated.POST("/api/v1/recipes/uninstall-plans/preview", {
+      body: {installation_id: installationId},
+      signal,
+    }));
+  }
+
+  async applyLibraryUninstall(installationId: string, input: LibraryUninstallApplyInput, signal?: AbortSignal) {
+    return resultData(await this.generated.POST("/api/v1/recipes/installations/{installation_id}/uninstall", {
+      params: {path: {installation_id: installationId}},
+      body: input,
+      signal,
+    }));
+  }
+
+  async libraryOperation(operationId: string, signal?: AbortSignal) {
+    return resultData(await this.generated.GET("/api/v1/recipes/operations/{operation_id}", {
+      params: {path: {operation_id: operationId}},
+      signal,
+    }));
+  }
+
+  async retryLibraryOperation(operationId: string, signal?: AbortSignal) {
+    return resultData(await this.generated.POST("/api/v1/recipes/operations/{operation_id}/retry", {
+      params: {path: {operation_id: operationId}},
+      body: {request_key: crypto.randomUUID()},
+      signal,
+    }));
+  }
+
+  async libraryRunStatus(runId: string, signal?: AbortSignal) {
+    return resultData(await this.generated.GET("/api/v1/recipes/runs/{run_id}", {
+      params: {path: {run_id: runId}},
+      signal,
+    }));
+  }
+
+  async libraryJobProgress(jobId: string, signal?: AbortSignal) {
+    return resultData(await this.generated.GET("/api/v1/jobs/{job_id}", {
+      params: {path: {job_id: jobId}, query: {}},
+      signal,
+    }));
+  }
+
+  async nodeStatuses(signal?: AbortSignal): Promise<FleetEvidenceResponse> {
+    return resultData(await this.generated.GET("/api/v1/nodes/status", {signal}));
+  }
+
+  fleetEvidence(signal?: AbortSignal): Promise<FleetEvidenceResponse> {
+    return this.nodeStatuses(signal);
+  }
+
+  async nodeTelemetryHistory(
+    nodeId: string,
+    start: string,
+    end: string,
+    resolution: TelemetryResolution,
+    maximumPoints: number,
+    signal?: AbortSignal,
+  ): Promise<TelemetryHistory> {
+    return resultData(await this.generated.GET("/api/v1/nodes/{node_id}/telemetry", {
+      params: {
+        path: {node_id: nodeId},
+        query: {start, end, resolution, maximum_points: maximumPoints},
+      },
+      signal,
+    }));
   }
 
   async agents(): Promise<AgentsResponse> {
@@ -359,18 +495,6 @@ export class ApiClient implements ControlApi {
     if (!response.ok) throw new Error(`Control API returned ${response.status}`);
   }
 
-  async planProfile(profileId: string): Promise<ReconciliationPlan> {
-    return resultData(await this.generated.POST("/api/v1/profiles/{profile_id}/plan", {
-      params: {path: {profile_id: profileId}},
-    }));
-  }
-
-  async applyReconciliation(digest: string, fleetEvidenceDigest: string): Promise<ReconciliationAccepted> {
-    return resultData(await this.generated.POST("/api/v1/reconciliations", {
-      body: {plan_digest: digest, fleet_evidence_digest: fleetEvidenceDigest},
-    }));
-  }
-
   async jobs(cursor?: string): Promise<JobsResponse> {
     return resultData(await this.generated.GET("/api/v1/jobs", {
       params: {query: {cursor, limit: 20}},
@@ -392,7 +516,6 @@ export class ApiClient implements ControlApi {
     }));
   }
 
-  documents(kind: "models" | "profiles") { return this.request<DocumentList>(`/api/v1/documents?kind=${kind}`); }
   audit() { return this.request<{events: AuditSummary[]}>("/api/v1/audit"); }
   preview(input: ProposalInput) { return this.request<ProposalPreview>("/api/v1/proposals", {method: "POST", body: JSON.stringify(input)}); }
   submit(digest: string) { return this.request<Record<string, unknown>>("/api/v1/changes", {method: "POST", body: JSON.stringify({proposal_digest: digest})}); }

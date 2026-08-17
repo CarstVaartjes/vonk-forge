@@ -264,7 +264,7 @@ def _successful_lifecycle_tools(tmp_path: Path) -> tuple[Path, Path]:
         "  exit 0\n"
         "fi\n"
         'if [[ "$1" == run && " $* " == *\' --network=none \'* ]]; then\n'
-        "  if [[ \" $* \" == *database_revision* ]]; then printf '%s\\n' 0021_browser_authentication; exit 0; fi\n"
+        "  if [[ \" $* \" == *database_revision* ]]; then printf '%s\\n' 0027_execution_harness_catalog; exit 0; fi\n"
         '  printf \'{"image_role":"%s","source_commit":"%s","source_repository":"%s"}\\n\' "${@: -3:1}" "${@: -2:1}" "${@: -1}"\n'
         "  exit 0\n"
         "fi\n"
@@ -340,6 +340,31 @@ def _successful_lifecycle_tools(tmp_path: Path) -> tuple[Path, Path]:
     docker.chmod(0o755)
     _install_successful_curl(fake_bin, log)
     return fake_bin, log
+
+
+def test_database_revision_fixture_matches_the_fresh_development_head(
+    tmp_path: Path,
+) -> None:
+    fake_bin, log = _successful_lifecycle_tools(tmp_path)
+
+    result = subprocess.run(
+        (
+            str(fake_bin / "docker"),
+            "run",
+            "--rm",
+            "--network=none",
+            "fixture-api",
+            "python",
+            "-c",
+            "print(database_revision)",
+        ),
+        check=True,
+        capture_output=True,
+        text=True,
+        env=os.environ | {"VONK_TEST_DOCKER_LOG": str(log)},
+    )
+
+    assert result.stdout == "0027_execution_harness_catalog\n"
 
 
 def _run(
@@ -952,7 +977,9 @@ def test_acceptance_diagnostics_are_bounded_and_avoid_raw_secret_output() -> Non
     assert "[redacted]" in text
 
 
-def test_acceptance_generates_synthetic_oauth_inputs_and_checks_only_projection_metadata() -> None:
+def test_acceptance_generates_synthetic_oauth_inputs_and_checks_only_projection_metadata() -> (
+    None
+):
     text = SCRIPT.read_text(encoding="utf-8")
 
     assert 'oauth_inputs="$acceptance_root/oauth-inputs"' in text

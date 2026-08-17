@@ -36,6 +36,7 @@ NCCL_TESTS_COMMIT = "a0b82b2260cf5152b9f8c061bbf7eaf0ba096432"
 CUDA_NVCC = "/usr/local/cuda/bin/nvcc"
 MPI_HOME = "/usr/lib/aarch64-linux-gnu/openmpi"
 FABRIC_WORKER_ALIAS = "vonk-node-2-fabric"
+NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
 SSH_OPTIONS = ("-o", "BatchMode=yes", "-o", "ForwardAgent=no", "-o", "ConnectTimeout=10")
 PHYSICAL_LINK_MIN_GBPS = 184.0
 WRITE_FUNCTION_MIN_GBPS = 98.01
@@ -360,6 +361,7 @@ command -v rdma >/dev/null
             f"test -r /sys/class/infiniband/{shlex.quote(rail.hca)}/ports/1/gid_attrs/ndevs/{rail.gid_index}\n"
             f"test \"$(cat /sys/class/infiniband/{shlex.quote(rail.hca)}/ports/1/gid_attrs/ndevs/{rail.gid_index})\" = {shlex.quote(rail.interface)}\n"
             f"test -z \"$(ip route show default dev {shlex.quote(rail.interface)})\"\n"
+            f"timeout 5 ping -n -I {shlex.quote(rail.interface)} -c 1 -W 2 {shlex.quote(rail.peer_ip)}\n"
         )
     if via_fabric:
         runner.worker_via_fabric(command)
@@ -778,11 +780,39 @@ def run_preflights(runner: Runner, head: Host, worker: Host) -> None:
     remote_preflight(runner, head, via_fabric=False)
 
 
+def validate_expected_nodes(
+    values: list[str], head: Host, worker: Host
+) -> dict[str, str]:
+    """Bind two selected Fleet IDs to the inventory's ordered SSH aliases."""
+
+    selected: dict[str, str] = {}
+    for value in values:
+        node_id, separator, ssh_alias = value.partition("=")
+        if (
+            separator != "="
+            or NODE_ID.fullmatch(node_id) is None
+            or not ssh_alias
+            or node_id in selected
+            or ssh_alias in selected.values()
+        ):
+            raise GateError("selected Fleet node mapping is invalid")
+        selected[node_id] = ssh_alias
+    if list(selected.values()) != [head.ssh_alias, worker.ssh_alias]:
+        raise GateError("selected Fleet nodes do not match inventory SSH aliases")
+    return selected
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--inventory", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--preflight-only", action="store_true", help="run only non-mutating inventory and host checks")
+    parser.add_argument(
+        "--expected-node",
+        action="append",
+        required=True,
+        help="selected Fleet node-id=inventory SSH alias; repeat head then worker",
+    )
     parser.add_argument(
         "--nccl-preflight-only",
         action="store_true",
@@ -806,12 +836,17 @@ def main(argv: list[str] | None = None) -> int:
     }
     try:
         head, worker = load_hosts(args.inventory)
+        selected_nodes = validate_expected_nodes(args.expected_node, head, worker)
         validate_consumers(head, worker)
         document["inventory"] = str(args.inventory)
         document["resolved_consumers"] = {
             key: head.fabric[key]
             for key in ("NCCL_SOCKET_IFNAME", "NCCL_IB_HCA", "NCCL_IB_GID_INDEX", "TP_SOCKET_IFNAME", "GLOO_SOCKET_IFNAME")
         }
+        document["selected_nodes"] = [
+            f"{node_id}={ssh_alias}"
+            for node_id, ssh_alias in selected_nodes.items()
+        ]
         runner = Runner(head, worker, evidence)
         run_preflights(runner, head, worker)
         if args.preflight_only:

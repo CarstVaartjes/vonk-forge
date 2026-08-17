@@ -8,6 +8,8 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from vonk_control import dev_cohort
 from vonk_control.dev_cohort import (
     DEVELOPMENT_IMAGE_IDENTITY_PATH,
@@ -27,16 +29,26 @@ OTHER_COMMIT = "89abcdef0123456789abcdef0123456789abcdef"
 SCHEMA_VERSION = 1
 
 
+def test_development_database_revision_is_the_exact_single_alembic_head() -> None:
+    control_root = Path(__file__).resolve().parents[1]
+    config = Config(control_root / "alembic.ini")
+    config.set_main_option("script_location", str(control_root / "migrations"))
+    script = ScriptDirectory.from_config(config)
+
+    assert script.get_heads() == ["0027_execution_harness_catalog"]
+    assert dev_cohort.DEVELOPMENT_DATABASE_REVISION == script.get_heads()[0]
+
+
 def _canonical_for_expected(value: object) -> bytes:
-    return (
-        json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n"
-    ).encode("ascii")
+    return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode(
+        "ascii"
+    )
 
 
 def _expected_build_digest(source_commit: str = COMMIT) -> str:
     common = {
         "channel": "development",
-        "database_revision": "0021_browser_authentication",
+        "database_revision": "0027_execution_harness_catalog",
         "platform_version": "0.1.0",
         "protocol_maximum": 3,
         "protocol_minimum": 1,
@@ -55,7 +67,7 @@ def _identity_document(**overrides: object) -> dict[str, object]:
         "channel": "development",
         "platform_version": "0.1.0",
         "build_digest": _expected_build_digest(),
-        "database_revision": "0021_browser_authentication",
+        "database_revision": "0027_execution_harness_catalog",
         "protocol_minimum": 1,
         "protocol_maximum": 3,
         "image_role": "api",
@@ -86,7 +98,7 @@ def test_identity_parser_accepts_only_the_canonical_development_identity() -> No
         channel="development",
         platform_version="0.1.0",
         build_digest=_expected_build_digest(),
-        database_revision="0021_browser_authentication",
+        database_revision="0027_execution_harness_catalog",
         protocol_minimum=1,
         protocol_maximum=3,
         image_role="api",
@@ -99,26 +111,35 @@ def test_identity_parser_accepts_only_the_canonical_development_identity() -> No
     (
         ("malformed", b"{"),
         ("not an object", b"[]\n"),
-        ("duplicate field", b'{"build_digest":"sha256:'
-        + b"a" * 64
-        + b'","build_digest":"sha256:'
-        + b"b" * 64
-        + b'","channel":"development","database_revision":"0021_browser_authentication",'
-        + b'"image_role":"api","platform_version":"0.1.0","protocol_maximum":3,'
-        + b'"protocol_minimum":1,"schema_version":1,"source_commit":"'
-        + COMMIT.encode("ascii")
-        + b'","source_repository":"'
-        + DEVELOPMENT_SOURCE_REPOSITORY.encode("ascii")
-        + b'"}\n'),
-        ("non canonical whitespace", json.dumps(_identity_document(), sort_keys=True).encode("ascii")),
-        ("non canonical key order", b'{"schema_version":1,"source_repository":"'
-        + DEVELOPMENT_SOURCE_REPOSITORY.encode("ascii")
-        + b'","source_commit":"'
-        + COMMIT.encode("ascii")
-        + b'","channel":"development","platform_version":"0.1.0","build_digest":"sha256:'
-        + b"a" * 64
-        + b'","database_revision":"0021_browser_authentication","protocol_minimum":1,'
-        + b'"protocol_maximum":3,"image_role":"api"}\n'),
+        (
+            "duplicate field",
+            b'{"build_digest":"sha256:'
+            + b"a" * 64
+            + b'","build_digest":"sha256:'
+            + b"b" * 64
+            + b'","channel":"development","database_revision":"0027_execution_harness_catalog",'
+            + b'"image_role":"api","platform_version":"0.1.0","protocol_maximum":3,'
+            + b'"protocol_minimum":1,"schema_version":1,"source_commit":"'
+            + COMMIT.encode("ascii")
+            + b'","source_repository":"'
+            + DEVELOPMENT_SOURCE_REPOSITORY.encode("ascii")
+            + b'"}\n',
+        ),
+        (
+            "non canonical whitespace",
+            json.dumps(_identity_document(), sort_keys=True).encode("ascii"),
+        ),
+        (
+            "non canonical key order",
+            b'{"schema_version":1,"source_repository":"'
+            + DEVELOPMENT_SOURCE_REPOSITORY.encode("ascii")
+            + b'","source_commit":"'
+            + COMMIT.encode("ascii")
+            + b'","channel":"development","platform_version":"0.1.0","build_digest":"sha256:'
+            + b"a" * 64
+            + b'","database_revision":"0027_execution_harness_catalog","protocol_minimum":1,'
+            + b'"protocol_maximum":3,"image_role":"api"}\n',
+        ),
         ("oversized", b" " * 17000),
         ("hostile integer", b'{"schema_version":' + b"1" * 5000 + b"}\n"),
     ),
@@ -157,7 +178,9 @@ def test_identity_parser_rejects_values_that_break_the_development_trust_boundar
     overrides: dict[str, object],
 ) -> None:
     with pytest.raises(DevelopmentCohortError):
-        DevelopmentImageIdentity.from_bytes(_identity_bytes(**overrides), expected_role="api")
+        DevelopmentImageIdentity.from_bytes(
+            _identity_bytes(**overrides), expected_role="api"
+        )
 
 
 def test_identity_parser_rejects_missing_required_fields() -> None:
@@ -165,12 +188,16 @@ def test_identity_parser_rejects_missing_required_fields() -> None:
     del document["source_commit"]
 
     with pytest.raises(DevelopmentCohortError, match="missing"):
-        DevelopmentImageIdentity.from_bytes(canonical_json(document), expected_role="api")
+        DevelopmentImageIdentity.from_bytes(
+            canonical_json(document), expected_role="api"
+        )
 
 
 def test_identity_parser_binds_the_expected_role_to_the_reader() -> None:
     with pytest.raises(DevelopmentCohortError, match="role"):
-        DevelopmentImageIdentity.from_bytes(_identity_bytes(image_role="worker"), expected_role="api")
+        DevelopmentImageIdentity.from_bytes(
+            _identity_bytes(image_role="worker"), expected_role="api"
+        )
 
 
 def test_build_identity_uses_fixed_development_values_and_one_cohort_digest() -> None:
@@ -181,7 +208,7 @@ def test_build_identity_uses_fixed_development_values_and_one_cohort_digest() ->
     assert api.source_commit == COMMIT
     assert api.channel == "development"
     assert api.platform_version == "0.1.0"
-    assert api.database_revision == "0021_browser_authentication"
+    assert api.database_revision == "0027_execution_harness_catalog"
     assert api.protocol_minimum == 1
     assert api.protocol_maximum == 3
     assert api.image_role == "api"
@@ -208,13 +235,17 @@ def test_read_identity_uses_the_fixed_embedded_path_and_rejects_symlinked_input(
 
 
 def test_identity_model_cannot_be_mutated_into_an_invalid_public_identity() -> None:
-    identity = DevelopmentImageIdentity.from_bytes(_identity_bytes(), expected_role="api")
+    identity = DevelopmentImageIdentity.from_bytes(
+        _identity_bytes(), expected_role="api"
+    )
 
     with pytest.raises(DevelopmentCohortError):
         replace(identity, source_commit=OTHER_COMMIT.upper())
 
 
-def _unsafe_identity(identity: DevelopmentImageIdentity, **overrides: object) -> DevelopmentImageIdentity:
+def _unsafe_identity(
+    identity: DevelopmentImageIdentity, **overrides: object
+) -> DevelopmentImageIdentity:
     clone = object.__new__(DevelopmentImageIdentity)
     values = identity.to_document()
     values.update(overrides)
@@ -252,7 +283,9 @@ def test_verify_cohort_rejects_any_mismatch_in_common_identity_metadata(
     overrides: dict[str, object],
 ) -> None:
     api = build_identity(role="api", source_commit=COMMIT)
-    worker = _unsafe_identity(build_identity(role="worker", source_commit=COMMIT), **overrides)
+    worker = _unsafe_identity(
+        build_identity(role="worker", source_commit=COMMIT), **overrides
+    )
 
     with pytest.raises(DevelopmentCohortError, match="cohort"):
         verify_cohort([api, worker])
@@ -261,12 +294,16 @@ def test_verify_cohort_rejects_any_mismatch_in_common_identity_metadata(
 def test_matching_identities_produce_one_canonical_selected_cohort_document() -> None:
     api = build_identity(role="api", source_commit=COMMIT)
     worker = build_identity(role="worker", source_commit=COMMIT)
-    expected_api_identity_digest = "sha256:" + hashlib.sha256(api.to_bytes()).hexdigest()
-    expected_worker_identity_digest = "sha256:" + hashlib.sha256(worker.to_bytes()).hexdigest()
+    expected_api_identity_digest = (
+        "sha256:" + hashlib.sha256(api.to_bytes()).hexdigest()
+    )
+    expected_worker_identity_digest = (
+        "sha256:" + hashlib.sha256(worker.to_bytes()).hexdigest()
+    )
     expected_common = {
         "build_digest": api.build_digest,
         "channel": "development",
-        "database_revision": "0021_browser_authentication",
+        "database_revision": "0027_execution_harness_catalog",
         "platform_version": "0.1.0",
         "protocol_maximum": 3,
         "protocol_minimum": 1,
@@ -274,12 +311,15 @@ def test_matching_identities_produce_one_canonical_selected_cohort_document() ->
         "source_commit": COMMIT,
         "source_repository": DEVELOPMENT_SOURCE_REPOSITORY,
     }
-    expected_release_digest = "sha256:" + hashlib.sha256(
-        (
-            json.dumps(expected_common, sort_keys=True, separators=(",", ":"))
-            + "\n"
-        ).encode("ascii")
-    ).hexdigest()
+    expected_release_digest = (
+        "sha256:"
+        + hashlib.sha256(
+            (
+                json.dumps(expected_common, sort_keys=True, separators=(",", ":"))
+                + "\n"
+            ).encode("ascii")
+        ).hexdigest()
+    )
     expected_generation_seed = {
         "api_identity_digest": expected_api_identity_digest,
         "common": expected_common,
@@ -300,7 +340,7 @@ def test_matching_identities_produce_one_canonical_selected_cohort_document() ->
         source_commit=COMMIT,
         channel="development",
         platform_version="0.1.0",
-        database_revision="0021_browser_authentication",
+        database_revision="0027_execution_harness_catalog",
         protocol_minimum=1,
         protocol_maximum=3,
         build_digest=api.build_digest,
@@ -321,14 +361,15 @@ def test_matching_identities_produce_one_canonical_selected_cohort_document() ->
         "worker_identity_digest": expected_worker_identity_digest,
         "api_image": f"development.invalid/vonk-forge-api@{expected_api_identity_digest}",
         "worker_image": f"development.invalid/vonk-forge-worker@{expected_worker_identity_digest}",
-        "generation_id": "gen-"
-        + expected_release_digest.removeprefix("sha256:")[:24],
+        "generation_id": "gen-" + expected_release_digest.removeprefix("sha256:")[:24],
         "start_nonce": hashlib.sha256(
             f"vonk-forge:development-start:{expected_generation_hash}".encode("ascii")
         ).hexdigest(),
     }
     assert selected.to_bytes() == canonical_json(selected.to_document())
-    assert DevelopmentCohort(api=api, worker=worker).common_document() == expected_common
+    assert (
+        DevelopmentCohort(api=api, worker=worker).common_document() == expected_common
+    )
 
 
 def test_selected_cohort_round_trips_and_rejects_tampered_canonical_documents() -> None:
@@ -662,14 +703,13 @@ def test_cli_exposes_build_reset_report_and_verify_lifecycle(
     capsysbinary: pytest.CaptureFixture[bytes],
 ) -> None:
     assert (
-        dev_cohort.main(
-            ["build-identity", "--role", "api", "--source-commit", COMMIT]
-        )
+        dev_cohort.main(["build-identity", "--role", "api", "--source-commit", COMMIT])
         == 0
     )
-    assert capsysbinary.readouterr().out == build_identity(
-        role="api", source_commit=COMMIT
-    ).to_bytes()
+    assert (
+        capsysbinary.readouterr().out
+        == build_identity(role="api", source_commit=COMMIT).to_bytes()
+    )
 
     root = tmp_path / "cohort"
     root.mkdir()

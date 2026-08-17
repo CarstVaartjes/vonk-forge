@@ -323,6 +323,12 @@
     </section>
     <p class="scale-contract">There is no fixed fleet size, and an IP address is not identity. Client inference always follows <strong>Tailscale → Caddy → LiteLLM → one accepted entrypoint</strong>. GPU nodes never receive Tailscale OAuth, database, signing, or client API keys. LiteLLM never discovers containers; it uses only routes published from authenticated agent evidence.</p>
 
+    <h2 class="section-title" id="catalog-resolution">Catalog resolution before execution</h2>
+    <section class="answer" aria-labelledby="catalog-resolution">
+      <article><h3>Identity layers</h3><p>A model group contains models; a model version fixes upstream revision, format, artifacts, checksums, lineage and license; a recipe binds that exact version to a harness, runtime distribution, optional patch, topology, resources and interfaces. Read the <a href="operators/model-catalog.md">model catalog operator guide</a>.</p></article>
+      <article><h3>Immutable resolution</h3><p>Every reference resolves by kind, publisher, slug and content SHA-256. The controller admits a build only after the checked-in documents, source bundle, Fleet capacity and topology agree. Updates create new resolved revisions; rollback selects a prior exact revision rather than moving a tag or downgrading the database.</p></article>
+    </section>
+
     <section class="map" aria-label="Vonk Forge network and control architecture">
       <svg viewBox="0 0 1120 660" role="img" aria-labelledby="map-heading map-description">
         <title id="map-heading">Vonk Forge architecture</title>
@@ -482,9 +488,15 @@
 
       <article class="flow">
         <span class="num">8</span>
-        <div><h3>Bad health withdraws the route</h3><p>If evidence becomes stale, a rank fails, or a deployment stops, the controller removes the LiteLLM route before cleanup. Caddy does not invent a fallback and LiteLLM does not rediscover the container.</p></div>
+        <div><h3>Bad health withdraws the route</h3><p>If evidence becomes stale, a rank fails, or a recipe run stops, the controller removes the LiteLLM route before cleanup. Caddy does not invent a fallback, LiteLLM does not rediscover the container, and Hermes is available only while an accepted v1 run owns the exact <code>hermes-agent</code> alias.</p></div>
         <div class="route">health lost → alias withdrawn → stop/repair/rollback</div>
       </article>
+    </section>
+
+    <h2 class="section-title" id="interface-publication">Interface-specific publication</h2>
+    <section class="answer" aria-labelledby="interface-publication">
+      <article><h3>OpenAI serving</h3><p>An accepted <code>openai</code> recipe publishes an alias through Caddy and LiteLLM to exactly one healthy endpoint-owner rank. LiteLLM receives only controller-authored, lease-bound routes; it never resolves catalog documents or discovers a container.</p></article>
+      <article><h3>Artifact jobs</h3><p>Image, video, audio, 3D and other artifact-producing jobs use their declared controller job and result APIs directly. Their progress and output artifacts do not become LiteLLM model aliases, while install, health, stop and cleanup still follow the same harness lifecycle. See <a href="operators/execution-harnesses.md">execution harness operations</a>.</p></article>
     </section>
 
     <h2 class="section-title">Who knows what?</h2>

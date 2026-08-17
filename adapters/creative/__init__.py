@@ -1,1 +1,0 @@
-"""Creative model adapter implementations."""

@@ -35,9 +35,14 @@ class Models:
         )
 
 
-def test_complete_overlays_resolve_import_to_valid_recipe() -> None:
-    raw = (Path(__file__).parent / "fixtures/workload_run/minimal-vllm.yaml").read_bytes()
+def test_exact_overlays_do_not_authorize_a_raw_runtime_command() -> None:
+    raw = (
+        Path(__file__).parent / "fixtures/workload_run/minimal-vllm.yaml"
+    ).read_bytes()
     imported = import_workload_run(parse_workload_run_yaml(raw))
+    exact = json.loads(
+        (Path(__file__).parent / "fixtures/global/recipe-v1-minimal.json").read_text()
+    )
     result = resolve_import(
         imported,
         {
@@ -50,25 +55,29 @@ def test_complete_overlays_resolve_import_to_valid_recipe() -> None:
             "artifact_sizes": {
                 "weights": {"download_bytes": 100, "installed_bytes": 150}
             },
-            "profile_resources": {
-                "solo": {
-                    "entrypoint": {
-                        "disk": {
-                            "image_bytes": 50,
-                            "artifact_bytes": 150,
-                            "staging_bytes": 50,
-                            "cache_bytes": 10,
-                            "rollback_bytes": 50,
-                            "safety_margin_bytes": 20,
-                        },
-                        "memory": {
-                            "kind": "unified",
-                            "startup_peak_bytes": 225,
-                            "steady_state_bytes": 200,
-                            "runtime_growth_bytes": 25,
-                            "system_reserve_bytes": 25,
-                        },
-                    }
+            "catalog_references": {
+                "model": exact["model"],
+                "execution_harness": exact["execution"]["harness"],
+                "runtime_distribution": exact["runtime"]["distribution"],
+                "patch_bundle": exact["execution"]["patch_bundle"],
+            },
+            "topology_resources": {
+                "entrypoint": {
+                    "disk": {
+                        "image_bytes": 50,
+                        "artifact_bytes": 150,
+                        "staging_bytes": 50,
+                        "cache_bytes": 10,
+                        "rollback_bytes": 50,
+                        "safety_margin_bytes": 20,
+                    },
+                    "memory": {
+                        "kind": "unified",
+                        "startup_peak_bytes": 225,
+                        "steady_state_bytes": 200,
+                        "runtime_growth_bytes": 25,
+                        "system_reserve_bytes": 25,
+                    },
                 }
             },
             "security_acknowledged": True,
@@ -77,7 +86,7 @@ def test_complete_overlays_resolve_import_to_valid_recipe() -> None:
         models=Models(),
     )
 
-    assert result.runnable is True
+    assert result.runnable is False
     assert (
         result.bundle.files["Dockerfile"]
         .decode()
@@ -85,4 +94,9 @@ def test_complete_overlays_resolve_import_to_valid_recipe() -> None:
     )
     assert result.document["build"]["context"]["sha256"] == result.bundle.sha256
     assert result.document["artifacts"][0]["download_bytes"] == 100
-    assert not result.blockers
+    assert result.document["topology"]["name"] == "solo"
+    assert [item.reason_code for item in result.blockers] == [
+        "runtime.command_unsupported"
+    ]
+    assert result.document["runtime"]["entrypoint"] == ["unresolved-runtime"]
+    assert result.document["runtime"]["arguments"] == []

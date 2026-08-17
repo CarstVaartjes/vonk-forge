@@ -23,10 +23,13 @@ from .models import (
     RecipeSourceBundle,
     ResourceReservation,
 )
+from .recipe_contract import RecipeContractError, recipe_topology
+from .recipe_runtime_specs import RecipeRuntimeSpecError, resolve_recipe_entities
 from .source_bundles import SourceBundleError, SourceBundleStore
 from .source_policy import (
     SourcePolicyError,
     SourcePolicyReport,
+    dockerfile_base_images,
     enforce_build_source_policy,
     inspect_build_source_policy,
 )
@@ -93,6 +96,13 @@ class RecipeBuildService:
                     "build.recipe_unresolved", "only a resolved recipe can be checked"
                 )
             document = copy.deepcopy(revision.document)
+            try:
+                resolve_recipe_entities(session, document)
+            except RecipeRuntimeSpecError as error:
+                raise RecipeBuildError(
+                    "build.dependencies_stale",
+                    "exact recipe dependencies are unavailable",
+                ) from error
             build = document.get("build")
             context = build.get("context") if isinstance(build, dict) else None
             source_sha256 = context.get("sha256") if isinstance(context, dict) else None
@@ -123,11 +133,20 @@ class RecipeBuildService:
                 )
             node = session.get(AgentNode, builder_node_id)
             if node is None:
-                raise RecipeBuildError("build.node_unknown", "builder GPU node is unknown")
+                raise RecipeBuildError(
+                    "build.node_unknown", "builder GPU node is unknown"
+                )
             _validate_builder(node)
             assert node.agent_sha256 is not None
             builder_agent_sha256 = node.agent_sha256
             document = copy.deepcopy(revision.document)
+            try:
+                resolve_recipe_entities(session, document)
+            except RecipeRuntimeSpecError as error:
+                raise RecipeBuildError(
+                    "build.dependencies_stale",
+                    "exact recipe dependencies are unavailable",
+                ) from error
             build = document.get("build")
             context = build.get("context") if isinstance(build, dict) else None
             source_sha256 = context.get("sha256") if isinstance(context, dict) else None
@@ -149,6 +168,15 @@ class RecipeBuildService:
         except SourcePolicyError as error:
             finding = error.report.findings[0]
             raise RecipeBuildError(finding.code, finding.detail) from error
+        dockerfile_path = build.get("dockerfile") if isinstance(build, dict) else None
+        dockerfile_payload = (
+            bundle.files.get(dockerfile_path) if isinstance(dockerfile_path, str) else None
+        )
+        if dockerfile_payload is None:
+            raise RecipeBuildError(
+                "build.source_invalid", "recipe Dockerfile authority is unavailable"
+            )
+        base_images = list(dockerfile_base_images(dockerfile_payload))
         try:
             snapshot = self._inventory.latest(
                 builder_node_id, now=now, maximum_age=self._inventory_max_age
@@ -180,10 +208,13 @@ class RecipeBuildService:
         # The rootless builder retains its source/staging data while exporting
         # the OCI layout.  Reserve the concurrent peak, not just the inputs.
         # The OCI export is the build output. Bind it to the largest declared
-        # per-node image envelope across the selected recipe's profiles;
+        # per-node image envelope across the selected recipe topology;
         # CUDA/vLLM images routinely exceed 64 MiB.
         output_bytes = _declared_image_bytes(document)
-        required_disk = temporary_bytes + len(bundle.archive) + output_bytes
+        base_image_storage_bytes = int(resources["download_bytes"]) if base_images else 0
+        required_disk = (
+            base_image_storage_bytes + temporary_bytes + len(bundle.archive) + output_bytes
+        )
         if snapshot.disk_free_bytes - disk_reserved < required_disk:
             raise RecipeBuildError(
                 "build.insufficient_disk", "builder lacks temporary disk capacity"
@@ -199,6 +230,8 @@ class RecipeBuildService:
             "source_bundle_sha256": source_sha256,
             "builder_agent_sha256": builder_agent_sha256,
             "artifact_format": BUILD_ARTIFACT_FORMAT,
+            "base_images": base_images,
+            "base_image_storage_bytes": base_image_storage_bytes,
             "build": build,
         }
         build_input_sha256 = _digest(build_identity)
@@ -224,6 +257,8 @@ class RecipeBuildService:
             "source_bundle_sha256": source_sha256,
             "source_bundle_bytes": len(bundle.archive),
             "build_input_sha256": build_input_sha256,
+            "base_images": copy.deepcopy(base_images),
+            "base_image_storage_bytes": base_image_storage_bytes,
             "dockerfile": build["dockerfile"],
             "platform": build["platform"],
             "arguments": copy.deepcopy(build["arguments"]),
@@ -331,6 +366,27 @@ class RecipeBuildService:
         self, session: Session, plan: RecipeBuildPlan, *, now: datetime
     ) -> None:
         build = session.get(RecipeBuild, plan.build_id, with_for_update=True)
+        revision = (
+            session.get(
+                LocalRecipeRevision, plan.recipe_revision_id, with_for_update=True
+            )
+            if build is not None
+            else None
+        )
+        if (
+            revision is None
+            or revision.lifecycle != "resolved"
+            or revision.content_sha256 != plan.recipe_content_sha256
+        ):
+            raise RecipeBuildError(
+                "build.dependencies_stale", "exact recipe dependencies changed"
+            )
+        try:
+            resolve_recipe_entities(session, revision.document)
+        except RecipeRuntimeSpecError as error:
+            raise RecipeBuildError(
+                "build.dependencies_stale", "exact recipe dependencies are unavailable"
+            ) from error
         expected_agent = (
             build.policy_report.get("builder_agent_sha256")
             if build is not None and isinstance(build.policy_report, dict)
@@ -377,14 +433,18 @@ class RecipeBuildService:
         temporary_bytes = limits.get("temporary_bytes")
         memory_bytes = limits.get("memory_bytes")
         output_bytes = limits.get("output_bytes")
+        base_image_storage_bytes = plan.agent_payload.get("base_image_storage_bytes")
         if (
             not isinstance(temporary_bytes, int)
             or not isinstance(memory_bytes, int)
             or not isinstance(output_bytes, int)
+            or not isinstance(base_image_storage_bytes, int)
         ):
             raise RecipeBuildError("build.plan_invalid", "build plan is invalid")
         # Staging and the OCI export coexist until the build is committed.
-        disk_bytes = temporary_bytes + source_bytes + output_bytes
+        disk_bytes = (
+            base_image_storage_bytes + temporary_bytes + source_bytes + output_bytes
+        )
         if (
             snapshot.disk_free_bytes - _reserved(session, plan.builder_node_id, "disk")
             < disk_bytes
@@ -530,27 +590,25 @@ def _ensure_supported_build_network(build: object) -> None:
 
 
 def _declared_image_bytes(document: dict[str, object]) -> int:
-    profiles = document.get("deployment_profiles")
     values: list[int] = []
-    if isinstance(profiles, list):
-        for profile in profiles:
-            if not isinstance(profile, dict):
+    try:
+        topology = recipe_topology(document)
+    except RecipeContractError:
+        topology = {}
+    roles = topology.get("roles")
+    if isinstance(roles, list):
+        for role in roles:
+            if not isinstance(role, dict):
                 continue
-            roles = profile.get("roles")
-            if not isinstance(roles, list):
-                continue
-            for role in roles:
-                if not isinstance(role, dict):
-                    continue
-                resources = role.get("resources")
-                disk = resources.get("disk") if isinstance(resources, dict) else None
-                image_bytes = disk.get("image_bytes") if isinstance(disk, dict) else None
-                if isinstance(image_bytes, int) and not isinstance(image_bytes, bool):
-                    values.append(image_bytes)
+            resources = role.get("resources")
+            disk = resources.get("disk") if isinstance(resources, dict) else None
+            image_bytes = disk.get("image_bytes") if isinstance(disk, dict) else None
+            if isinstance(image_bytes, int) and not isinstance(image_bytes, bool):
+                values.append(image_bytes)
     if not values or min(values) < 1 or max(values) > 16 * 1024**4:
         raise RecipeBuildError(
             "build.image_size_invalid",
-            "recipe profiles must declare a positive per-node image size",
+            "recipe topology must declare a positive per-node image size",
         )
     return max(values)
 

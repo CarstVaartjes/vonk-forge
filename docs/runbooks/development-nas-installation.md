@@ -121,7 +121,7 @@ The operator-owned bundle has narrow service projections:
 
 | File | Consumer | Purpose |
 |---|---|---|
-| `admin-password-verifier` | `dev-init`, then the authentication-initializer projection | Argon2id verifier for exact subject `admin`; the plaintext password is local-only and the API reads the resulting database row. |
+| `admin-password-verifier` | `dev-bootstrap`, then the authentication-initializer projection | Argon2id verifier for exact subject `admin`; the plaintext password is local-only and the API reads the resulting database row. |
 | `postgres-password` | PostgreSQL only | Password for the development `control` database role. |
 | `database-url` | initializer, migration, then separate API/worker projections | Matching SQLAlchemy URL for that role. |
 | `git-signing-key` | initializer, then API projection only | Unencrypted Ed25519 SSH private key for development Git signing. |
@@ -135,9 +135,9 @@ The operator-owned bundle has narrow service projections:
 | `tailscale-oauth-client-id`, `tailscale-oauth-client-secret` | initializer, then Tailscale-only projection | Scoped unattended gateway enrollment; no API, worker, Caddy, or GPU-node consumer. |
 
 On first start, the networked `dev-repository-init` service fetches and verifies
-the public repository without receiving any runtime secret. The separate
-`network_mode: none` `dev-init` service generates an admin-grant private key and
-a worker API token without mounting the repository. It projects authority into distinct API, migration, worker,
+the public repository without receiving any runtime secret. The persistent
+`network_mode: none` `dev-bootstrap` service generates the runtime projections
+and remains healthy for NAS Docker UIs. It projects authority into distinct API, migration, worker,
 Caddy, LiteLLM-database-initializer, and LiteLLM named volumes: API gets its signing and enrollment
 authority; migration gets only the database URL; worker gets the database URL,
 management CIDRs, and worker token; Caddy gets only TLS/proxy material; the
@@ -285,8 +285,7 @@ The publisher copies exactly 18 files into the NAS `secrets/` directory. The
 four local-only files are `admin-password`, `controller-ca-key`,
 `git-signing-key.pub`, and `host-runtime-grant-public-key`. In particular, the
 plaintext administrator password is never published to the NAS. The publisher
-and `dev-init` then enforce the disjoint service ownership boundaries described
-above; a read-only mount is not used as a substitute for separating secrets.
+and `dev-bootstrap` then enforce the disjoint service ownership boundaries described
 
 For an existing valid 21-file browser-access generation, repeat the same
 command with `--upgrade-litellm-key-management`. This add-only operation
@@ -388,9 +387,8 @@ expected names appear.
 Back up that exact host bundle before first start and after every rotation, but
 confirm the backup by filename, size, and timestamp only; never reveal the
 secret values during the check.
-
-Do not change host files to container UIDs. The Docker daemon reads the
-Compose file-backed secrets, and `dev-init` creates service-owned mode `0400`
+Do not change host files to container UIDs. The Docker daemon reads the Compose
+file-backed secrets, and `dev-bootstrap` creates service-owned mode `0400`
 projections inside separate named volumes. File sizes are safe to display.
 Never use `cat`, `Get-Content`, or a screenshot that reveals values. Confirm
 names, presence, and sizes through the NAS file manager; do not copy
@@ -418,10 +416,9 @@ Obtain the unencrypted private key through the approved secret-management
 process, then copy it as a regular file from protected local storage. SMB is a
 copy path, not a secret-generation environment; its ordinary cleanup does not
 guarantee secure erasure from snapshots or managed Windows storage.
-
 Windows ACLs on an SMB drive do not establish Linux numeric container
 ownership. Do not compensate with permissive public ACLs; the Docker daemon
-needs read access and `dev-init` establishes the container-side identities.
+needs read access and `dev-bootstrap` establishes the container-side identities.
 
 ## Restrict acceptance and break-glass loopback forwarding
 
@@ -431,6 +428,14 @@ and inference listeners.
 Keep them bound to `127.0.0.1` in Compose and permit one NAS operator to open
 local forwards only to those two destinations. On an OpenSSH NAS, create
 `/etc/ssh/sshd_config.d/00-vonk-operator-forwarding.conf` with:
+
+`127.0.0.1:4000` terminates at Caddy's lease-gated internal `:8081` listener;
+no LiteLLM port is published to the host. Caddy evaluates the current
+route-serving lease at request admission. A request whose Caddy authorization
+begins at or after lease expiry is never forwarded to LiteLLM. If the
+supervisor authority is unavailable, Caddy fails closed without contacting
+LiteLLM. A same-config lease renewal replaces the deadline without restarting
+the healthy LiteLLM child.
 
 ```sshconfig
 Match User <NAS_OPERATOR>
@@ -476,16 +481,16 @@ In a generic NAS Docker project UI:
 
 After the UI reports the deployment, follow the two prerequisite lanes in the
 job and container status: the cohort reset, API and worker cohort reporters,
-and cohort verifier complete in one lane while PostgreSQL becomes healthy in
-the other. Only then may `dev-repository-init`, the offline `dev-init`, and
-`migrate` complete. The isolated `dev-litellm-database-init` creates or
-reconciles the dedicated `litellm` role and database without exposing its
-password to the control API or worker. The isolated `dev-auth-init` then installs the exact
-administrator verifier before the long-running API and worker can become
-healthy. A one-shot service that exits
-successfully is complete, not failed. The API remains bound to NAS loopback for
-acceptance and recovery; normal operator access uses the private Tailscale
-Service below.
+acceptance sidecar, or control-state row. The development bootstrap and
+cohort verifier complete in one lane while PostgreSQL becomes healthy in the
+other. Only then may `dev-repository-init`, `dev-bootstrap`, and `migrate` complete.
+The isolated `dev-litellm-database-init` creates or reconciles the dedicated
+`litellm` role and database without exposing its password to the control API or
+worker. The isolated `dev-auth-init` then installs the exact administrator
+verifier before the long-running API and worker can become healthy. A one-shot
+service that exits successfully is complete, not failed. The API remains bound
+to NAS loopback for acceptance and recovery; normal operator access uses the
+private Tailscale Service below.
 
 ## Open the stable browser URL
 
@@ -509,6 +514,33 @@ Log in as exact subject `admin` using the password from the 1Password item
 user into the application. After login, verify the Development marker, the
 `admin` / `administrator` identity, and the expected fleet. Use **Logout** and
 confirm the login page returns; logout revokes the server-side browser session.
+
+## Fresh recipe-domain reset
+
+Normal updates retain every named volume. The destructive pre-production reset
+is a different operation and must use the reviewed bounded helper in
+[Execution harness operations](../operators/execution-harnesses.md#clean-development-reset).
+It validates the exact development Compose graph before mutation, drains runs
+and installations through public APIs, removes every project volume, verifies
+fresh schema head `0027_execution_harness_catalog`, and verifies only the eight
+supported v1 harness seeds. It is forbidden for production or an unknown
+Compose graph.
+
+A fresh pre-production reset removes every user, browser session, and agent
+enrollment. Recreate the development administrator, sign in to establish a
+fresh browser session, and re-enroll every Spark before acceptance. The
+retained NAS `secrets/` generation supplies the administrator verifier and
+control authorities to fresh initializers; it does not preserve database
+rows. The gateway also receives a fresh volume identity. Never retain or
+translate a pre-reset browser cookie, pairing token, enrollment, route,
+acceptance sidecar, or control-state row.
+
+Spark-local content-addressed caches are outside the NAS reset. Reuse is
+permitted only after the fresh acceptance independently verifies each exact
+image and artifact digest. See
+[Acceptance evidence](../operators/execution-harnesses.md#acceptance-evidence)
+for separate preflight and post-reset evidence paths and the one-Spark and
+distributed ladders.
 
 ## Update after an accepted development publication
 
@@ -721,8 +753,9 @@ as a substitute for restoring PostgreSQL or generated-secret state.
   with the secret generator, retain the former public key wherever historical
   development signatures are verified, and publish the complete validated
   generation with the same supported project publisher. Never edit the active NAS
-  `secrets/` directory file by file. The offline `dev-init` refreshes the
-  API-only projection during redeploy.
+generation with the same supported project publisher. Never edit the active NAS
+`secrets/` directory file by file. The persistent `dev-bootstrap` refreshes the
+API-only projection during redeploy.
 - The PostgreSQL password and `database-url` are one credential pair. Never
   replace only one file. Back up the database, stage a new hexadecimal password
   and matching URL, change the existing PostgreSQL `control` role through a
@@ -732,6 +765,10 @@ as a substitute for restoring PostgreSQL or generated-secret state.
 - The generated admin private key and worker token are intentionally not
   operator files. A disposable full development reset can rotate them by
   removing their named volumes, but that invalidates related development state.
+  A fresh pre-production reset removes every user, browser session, and agent
+  enrollment. Recreate the development administrator, sign in to establish a
+  fresh browser session, and re-enroll every Spark before acceptance. Never
+  retain or translate pre-reset authentication or enrollment state.
   Do not delete individual secret-projection volumes in a stateful installation
   without a tested recovery plan.
 - Rotate agent/controller PKI and LiteLLM/proxy tokens as one planned bundle

@@ -765,7 +765,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
     fn prepare_runtime_access(&self, run: &ValidatedDockerRun) -> Result<(), OperationError> {
         for (path, access) in [
             (&run.models, "rX"),
-            (&run.state, "rwx"),
+            (&run.outputs, "rwx"),
             (&run.runtime_contract, "r"),
         ] {
             let output = self
@@ -1071,7 +1071,7 @@ struct ValidatedDockerRun {
     run_id: String,
     uid: u32,
     models: PathBuf,
-    state: PathBuf,
+    outputs: PathBuf,
     runtime_contract: PathBuf,
     host_endpoint_port: Option<u16>,
 }
@@ -1112,7 +1112,7 @@ fn validate_docker_run(
     let mut listen_port = None;
     let mut gpu = false;
     let mut models = None;
-    let mut state = None;
+    let mut outputs = None;
     let mut runtime_contract = None;
 
     while index < arguments.len() {
@@ -1294,12 +1294,14 @@ fn validate_docker_run(
                     && models.is_none()
                 {
                     models = Some(source);
-                } else if target == "/state"
+                } else if target == "/outputs"
                     && !readonly
-                    && source.starts_with(roots.agent_data.join("runs"))
-                    && state.is_none()
+                    && source.file_name().and_then(|value| value.to_str()) == Some("outputs")
+                    && source.parent().and_then(Path::parent)
+                        == Some(roots.agent_data.join("runs").as_path())
+                    && outputs.is_none()
                 {
-                    state = Some(source);
+                    outputs = Some(source);
                 } else if target == "/run/vonk/runtime.json"
                     && readonly
                     && source.starts_with(roots.agent_data.join("run-metadata"))
@@ -1328,10 +1330,11 @@ fn validate_docker_run(
         .ok_or(OperationError::InvalidOperation)?;
     let (image, embedded_digest) = parse_local_image_reference(&image_reference)?;
     let (uid, _gid) = user.ok_or(OperationError::InvalidOperation)?;
-    let state = state.ok_or(OperationError::InvalidOperation)?;
+    let outputs = outputs.ok_or(OperationError::InvalidOperation)?;
     let runtime_contract = runtime_contract.ok_or(OperationError::InvalidOperation)?;
-    let state_run_id = state
-        .file_name()
+    let state_run_id = outputs
+        .parent()
+        .and_then(Path::file_name)
         .and_then(|value| value.to_str())
         .ok_or(OperationError::InvalidOperation)?;
     let named_run_id = name.as_deref();
@@ -1358,7 +1361,7 @@ fn validate_docker_run(
         || (network == Some("host") && (!ipc_host || !infiniband || !memlock || !stack || !gpu))
         || (network == Some("bridge") && (ipc_host || infiniband || memlock || stack))
         || environments == 0
-        || state.parent() != Some(roots.agent_data.join("runs").as_path())
+        || outputs.parent().and_then(Path::parent) != Some(roots.agent_data.join("runs").as_path())
         || runtime_contract.parent().and_then(Path::parent)
             != Some(roots.agent_data.join("run-metadata").as_path())
         || runtime_contract
@@ -1370,7 +1373,7 @@ fn validate_docker_run(
         return Err(OperationError::InvalidOperation);
     }
     let models = models.ok_or(OperationError::InvalidOperation)?;
-    for path in [&models, &state, &runtime_contract] {
+    for path in [&models, &outputs, &runtime_contract] {
         let metadata = fs::symlink_metadata(path).map_err(|_| OperationError::UnsafePath)?;
         if metadata.file_type().is_symlink()
             || !(metadata.is_dir() || metadata.is_file())
@@ -1394,7 +1397,7 @@ fn validate_docker_run(
         run_id: state_run_id.to_owned(),
         uid,
         models,
-        state,
+        outputs,
         runtime_contract,
         host_endpoint_port: (network == Some("host")).then_some(listen_port).flatten(),
     })

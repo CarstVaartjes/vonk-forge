@@ -6,10 +6,10 @@ starting point for a rebuild or a third-party review. The linked runbooks remain
 the source for exact commands, safety checks, rollback procedures, and expected
 output.
 
-The controller/profile framework and live node-health path are implemented.
+The v1 recipe catalog, execution-harness path, and live node-health path are implemented.
 The opening sections record the pre-runtime baseline; later sections record the
-installed Mia and DS4 runtimes. No Model Definition or Cluster Profile is
-accepted yet.
+installed Mia and DS4 runtimes. Recipe acceptance remains revision- and
+mapping-specific.
 
 ## Final baseline
 

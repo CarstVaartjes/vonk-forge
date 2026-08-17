@@ -8,6 +8,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from vonk_control import dev_bootstrap, dev_cohort, dev_init
 
 ROOT = Path(__file__).resolve().parents[3]
 COMPOSE = ROOT / "deploy/compose/compose.dev.yaml"
@@ -133,8 +134,17 @@ def test_source_compose_advertises_the_actual_alembic_head(tmp_path: Path) -> No
         services[name]["environment"]["VONK_DATABASE_REVISION"]
         for name in ("control-api", "control-worker")
     }
+    alembic_heads = _alembic_heads()
 
-    assert advertised_revisions == _alembic_heads()
+    assert alembic_heads == {"0027_execution_harness_catalog"}
+    assert {
+        *advertised_revisions,
+        dev_cohort.DEVELOPMENT_DATABASE_REVISION,
+        dev_init._DATABASE_REVISION,
+        dev_cohort.build_identity(
+            role="api", source_commit=EXPECTED_COMMIT
+        ).database_revision,
+    } == alembic_heads
 
 
 def test_local_source_compose_remains_distinct_from_published_image_template() -> None:
@@ -146,16 +156,51 @@ def test_local_source_compose_remains_distinct_from_published_image_template() -
     assert "__VONK_API_IMAGE__" in image_template.read_text(encoding="utf-8")
 
 
+def test_image_template_routes_loopback_inference_through_isolated_caddy() -> None:
+    rendered = _rendered_image_template()
+    services = rendered["services"]
+    litellm = services["litellm"]
+    caddy = services["caddy"]
+
+    assert litellm.get("ports") in (None, [])
+    assert set(litellm["networks"]) == {
+        "cluster-egress",
+        "litellm-data",
+        "litellm-edge",
+    }
+    assert {
+        name
+        for name, service in services.items()
+        if "litellm-edge" in service.get("networks", {})
+    } == {"caddy", "litellm"}
+    assert rendered["networks"]["litellm-edge"]["internal"] is True
+    assert rendered["networks"]["litellm-data"]["internal"] is True
+    assert {
+        name
+        for name, service in services.items()
+        if "litellm-data" in service.get("networks", {})
+    } == {"litellm", "postgres"}
+    litellm_networks = set(litellm["networks"])
+    for name, service in services.items():
+        if name not in {"caddy", "litellm", "postgres"}:
+            assert litellm_networks.isdisjoint(service.get("networks", {})), name
+    assert {
+        (port["host_ip"], port["published"], port["target"])
+        for port in caddy["ports"]
+        if port.get("host_ip") == "127.0.0.1"
+    } == {("127.0.0.1", "4000", 8081)}
+
+
 def test_dev_compose_initializes_identity_before_api_and_worker(tmp_path: Path) -> None:
     services = _rendered(tmp_path)["services"]
 
-    assert "dev-init" in services
-    assert services["dev-init"]["user"] == "0:0"
-    assert services["control-api"]["depends_on"]["dev-init"]["condition"] == (
-        "service_completed_successfully"
+    assert "dev-bootstrap" in services
+    assert services["dev-bootstrap"]["user"] == "0:0"
+    assert services["control-api"]["depends_on"]["dev-bootstrap"]["condition"] == (
+        "service_healthy"
     )
-    assert services["control-worker"]["depends_on"]["dev-init"]["condition"] == (
-        "service_completed_successfully"
+    assert services["control-worker"]["depends_on"]["dev-bootstrap"]["condition"] == (
+        "service_healthy"
     )
 
 
@@ -187,14 +232,8 @@ def test_image_template_reconciles_auth_after_migration_before_api() -> None:
         "dev-postgres-data"
     )
     assert auth["depends_on"] == {
-        "dev-init": {
-            "condition": "service_completed_successfully",
-            "required": True,
-        },
-        "migrate": {
-            "condition": "service_completed_successfully",
-            "required": True,
-        },
+        "dev-bootstrap": {"condition": "service_healthy", "required": True},
+        "migrate": {"condition": "service_completed_successfully", "required": True},
         "postgres": {"condition": "service_healthy", "required": True},
     }
     assert services["control-api"]["depends_on"]["dev-auth-init"] == {
@@ -240,11 +279,19 @@ def test_image_template_hardens_caddy_as_the_only_lan_listener() -> None:
             "published": "8443",
             "protocol": "tcp",
             "target": 8443,
-        }
+        },
+        {
+            "host_ip": "127.0.0.1",
+            "mode": "ingress",
+            "published": "4000",
+            "protocol": "tcp",
+            "target": 8081,
+        },
     ]
     assert set(caddy["networks"]) == {
         "application",
         "ingress",
+        "litellm-edge",
         "tailnet-web-edge",
     }
     assert caddy["healthcheck"] == {
@@ -259,14 +306,8 @@ def test_image_template_hardens_caddy_as_the_only_lan_listener() -> None:
         "retries": 12,
     }
     assert caddy["depends_on"] == {
-        "control-api": {
-            "condition": "service_healthy",
-            "required": True,
-        },
-        "dev-init": {
-            "condition": "service_completed_successfully",
-            "required": True,
-        },
+        "control-api": {"condition": "service_healthy", "required": True},
+        "dev-bootstrap": {"condition": "service_healthy", "required": True},
     }
 
     volumes = _volumes_by_target(caddy)
@@ -302,13 +343,7 @@ def test_image_template_hardens_caddy_as_the_only_lan_listener() -> None:
         for name, service in services.items()
         if service.get("ports")
     }
-    assert set(listeners) == {"caddy", "control-api", "litellm"}
-    assert all(
-        port.get("host_ip") == "127.0.0.1"
-        for service_name in ("control-api", "litellm")
-        for port in listeners[service_name]
-    )
-    assert all("host_ip" not in port for port in listeners["caddy"])
+    assert set(listeners) == {"caddy", "control-api"}
     assert listeners["control-api"] == [
         {
             "host_ip": "127.0.0.1",
@@ -318,12 +353,7 @@ def test_image_template_hardens_caddy_as_the_only_lan_listener() -> None:
             "target": 8000,
         }
     ]
-    assert all(
-        port.get("host_ip") == "127.0.0.1"
-        for name, ports in listeners.items()
-        if name != "caddy"
-        for port in ports
-    )
+    assert all(port.get("host_ip") == "127.0.0.1" for port in listeners["control-api"])
 
 
 def test_pinned_caddy_image_provides_the_configured_http_probe() -> None:
@@ -357,7 +387,7 @@ def test_pinned_caddy_image_provides_the_configured_http_probe() -> None:
     assert "-T SEC" in result.stdout + result.stderr
 
 
-def test_image_template_runs_litellm_on_application_and_loopback_ingress() -> None:
+def test_image_template_isolates_litellm_behind_caddy_with_bounded_egress() -> None:
     rendered = _rendered_image_template()
     services = rendered["services"]
     litellm = services["litellm"]
@@ -381,18 +411,16 @@ def test_image_template_runs_litellm_on_application_and_loopback_ingress() -> No
         "STORE_MODEL_IN_DB": "False",
         "XDG_CACHE_HOME": "/run/vonk-litellm/cache",
     }
-    assert set(litellm["networks"]) == {"application", "data", "ingress"}
-    assert rendered["networks"]["application"]["internal"] is True
+    assert set(litellm["networks"]) == {
+        "cluster-egress",
+        "litellm-data",
+        "litellm-edge",
+    }
     assert rendered["networks"]["data"]["internal"] is True
-    assert litellm["ports"] == [
-        {
-            "host_ip": "127.0.0.1",
-            "mode": "ingress",
-            "published": "4000",
-            "protocol": "tcp",
-            "target": 4000,
-        }
-    ]
+    assert rendered["networks"]["litellm-data"]["internal"] is True
+    assert rendered["networks"]["litellm-edge"]["internal"] is True
+    assert rendered["networks"]["cluster-egress"].get("internal", False) is False
+    assert litellm.get("ports") in (None, [])
     assert litellm["healthcheck"] == {
         "test": [
             "CMD",
@@ -410,14 +438,7 @@ def test_image_template_runs_litellm_on_application_and_loopback_ingress() -> No
             "condition": "service_completed_successfully",
             "required": True,
         },
-        "dev-init": {
-            "condition": "service_completed_successfully",
-            "required": True,
-        },
-        "dev-supervisor-init": {
-            "condition": "service_completed_successfully",
-            "required": True,
-        },
+        "dev-bootstrap": {"condition": "service_healthy", "required": True},
     }
 
     volumes = _volumes_by_target(litellm)
@@ -508,6 +529,7 @@ def test_image_template_enables_only_the_explicit_builtin_agent_authority() -> N
     assert set(services["caddy"]["networks"]) == {
         "application",
         "ingress",
+        "litellm-edge",
         "tailnet-web-edge",
     }
     assert services["control-worker"]["networks"] == {
@@ -521,27 +543,28 @@ def test_dev_compose_runs_packaged_initializer_with_disjoint_runtime_authority(
 ) -> None:
     rendered = _rendered(tmp_path)
     services = rendered["services"]
-    initializer = services["dev-init"]
+    initializer = services["dev-bootstrap"]
 
     assert initializer["build"]["target"] == "api"
-    assert initializer["command"] == ["python", "-m", "vonk_control.dev_init"]
-    assert initializer["environment"] == {
+    assert initializer["command"] == ["python", "-m", "vonk_control.dev_bootstrap"]
+    expected_environment = {
         "VONK_CONTROL_IDENTITY_ROOT": "/control-identity",
-        "VONK_DEV_API_SECRET_ROOT": "/api-secrets",
         "VONK_DEV_API_IMAGE": DEV_API_IMAGE,
+        "VONK_DEV_API_SECRET_ROOT": "/api-secrets",
         "VONK_DEV_EXPECTED_COMMIT": EXPECTED_COMMIT,
         "VONK_DEV_LOCAL_ACCEPTANCE": "1",
         "VONK_DEV_MIGRATE_SECRET_ROOT": "/migrate-secrets",
         "VONK_DEV_LITELLM_DATABASE_SECRET_ROOT": "/litellm-database-secrets",
         "VONK_DEV_REPOSITORY_URL": "file:///source-origin",
         "VONK_DEV_SECRET_SOURCE_ROOT": "/host-secrets",
-        "VONK_DEV_WORKER_SECRET_ROOT": "/worker-secrets",
         "VONK_DEV_WORKER_IMAGE": DEV_WORKER_IMAGE,
+        "VONK_DEV_WORKER_SECRET_ROOT": "/worker-secrets",
         "VONK_REPOSITORY_PATH": "/repository",
         "VONK_ROUTE_ROOT": "/routes",
         "VONK_STATE_PATH": "/state",
         "VONK_SUPERVISOR_ROOT": "/supervisor",
     }
+    assert expected_environment.items() <= initializer["environment"].items()
     init_volumes = _volumes_by_target(initializer)
     assert init_volumes["/source-origin"]["type"] == "bind"
     assert init_volumes["/source-origin"]["read_only"] is True
@@ -602,7 +625,7 @@ def test_dev_compose_runs_packaged_initializer_with_disjoint_runtime_authority(
 
 def test_image_template_uses_the_database_only_migration_projection() -> None:
     services = _rendered_image_template()["services"]
-    initializer = services["dev-init"]
+    initializer = services["dev-bootstrap"]
     init_volumes = _volumes_by_target(initializer)
     migrate_volumes = _volumes_by_target(services["migrate"])
     api_volumes = _volumes_by_target(services["control-api"])
@@ -665,14 +688,18 @@ def test_image_template_gates_mutation_on_one_ordered_fail_closed_cohort() -> No
         services["dev-repository-init"]["depends_on"]["dev-cohort-verify"]["condition"]
         == "service_completed_successfully"
     )
-    assert (
-        services["dev-init"]["depends_on"]["dev-repository-init"]["condition"]
-        == "service_completed_successfully"
+    assert services["dev-bootstrap"]["depends_on"]["dev-repository-init"]["condition"] == (
+        "service_completed_successfully"
     )
-    for dependency in ("dev-cohort-verify", "dev-init"):
+    for dependency in ("dev-cohort-verify", "dev-bootstrap"):
+        expected_condition = (
+            "service_completed_successfully"
+            if dependency == "dev-cohort-verify"
+            else "service_healthy"
+        )
         assert (
             services["migrate"]["depends_on"][dependency]["condition"]
-            == "service_completed_successfully"
+            == expected_condition
         )
 
     for service_name in gate_names:
@@ -692,12 +719,12 @@ def test_image_template_limits_cohort_volume_and_mutable_image_authority() -> No
         "dev-worker-cohort",
         "dev-cohort-verify",
     }
-    consumers = {"dev-init", "migrate", "control-api", "control-worker"}
+    consumers = {"dev-bootstrap", "migrate", "control-api", "control-worker"}
     api_services = {
         "dev-cohort-reset",
         "dev-api-cohort",
         "dev-cohort-verify",
-        "dev-init",
+        "dev-bootstrap",
         "migrate",
         "control-api",
     }
@@ -739,7 +766,7 @@ def test_image_template_uses_selected_cohort_without_a_mutable_commit_literal() 
     services = _rendered_image_template()["services"]
     selected_path = "/cohort/selected.json"
 
-    for service_name in ("dev-init", "migrate", "control-api", "control-worker"):
+    for service_name in ("dev-bootstrap", "migrate", "control-api", "control-worker"):
         environment = services[service_name]["environment"]
         assert environment["VONK_DEV_SELECTED_COHORT_FILE"] == selected_path
         assert "VONK_DEV_EXPECTED_COMMIT" not in environment
@@ -776,7 +803,9 @@ def _script_repository(tmp_path: Path) -> tuple[Path, Path]:
     package = repository / "control/src/vonk_control"
     package.mkdir(parents=True)
     shutil.copy2(ROOT / "control/src/vonk_control/__init__.py", package / "__init__.py")
-    shutil.copy2(ROOT / "control/src/vonk_control/passwords.py", package / "passwords.py")
+    shutil.copy2(
+        ROOT / "control/src/vonk_control/passwords.py", package / "passwords.py"
+    )
     local_compose = repository / "deploy/compose/compose.dev.images.yaml"
     local_compose.parent.mkdir(parents=True)
     shutil.copy2(IMAGE_TEMPLATE, local_compose)

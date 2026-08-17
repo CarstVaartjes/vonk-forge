@@ -87,7 +87,7 @@ _PROJECTION_FILES = {
 _TARGET_SHA256 = "0" * 64
 _BUILD_DIGEST = "sha256:" + "1" * 64
 _VERSION = "0.1.0"
-_DATABASE_REVISION = "0021_browser_authentication"
+_DATABASE_REVISION = "0027_execution_harness_catalog"
 _GIT_HOME = "/nonexistent/vonk-control"
 
 
@@ -1022,9 +1022,7 @@ def stage_runtime_secrets(
     controller_server_key = _read_source_secret(source, "controller-server-key")
     litellm_master_key = _read_source_secret(source, "litellm-master-key")
     litellm_upstream_key = _read_source_secret(source, "litellm-upstream-key")
-    litellm_database_password = _read_source_secret(
-        source, "litellm-database-password"
-    )
+    litellm_database_password = _read_source_secret(source, "litellm-database-password")
     if _LITELLM_DATABASE_PASSWORD.fullmatch(litellm_database_password) is None:
         raise DevInitError("development LiteLLM database password is invalid")
     litellm_database_url = (

@@ -4,7 +4,7 @@ x-dev-generation: &dev-generation
   VONK_DEPLOYMENT_MODE: development
   VONK_CONTROL_STARTUP_MODE: selected
   VONK_CONTROL_GENERATION_ID: gen-000000000000000000000000
-  VONK_DATABASE_REVISION: 0021_browser_authentication
+  VONK_DATABASE_REVISION: 0027_execution_harness_catalog
   VONK_PLATFORM_VERSION: 0.1.0
   VONK_PLATFORM_RELEASE_DIGEST: sha256:0000000000000000000000000000000000000000000000000000000000000000
   VONK_PLATFORM_BUILD_DIGEST: sha256:1111111111111111111111111111111111111111111111111111111111111111
@@ -55,17 +55,17 @@ services:
       - dev-migrate-secrets:/run/secrets:ro
     depends_on:
       postgres: {condition: service_healthy}
-      dev-init: {condition: service_completed_successfully}
+      dev-bootstrap: {condition: service_healthy}
     networks: [data]
     restart: "no"
 
-  dev-init:
+  dev-bootstrap:
     build:
       context: ../..
       dockerfile: control/Dockerfile
       target: api
     user: "0:0"
-    command: [python, -m, vonk_control.dev_init]
+    command: [python, -m, vonk_control.dev_bootstrap]
     environment:
       VONK_CONTROL_IDENTITY_ROOT: /control-identity
       VONK_DEV_API_IMAGE: vonk-forge-dev/control-api@sha256:0000000000000000000000000000000000000000000000000000000000000000
@@ -82,6 +82,11 @@ services:
       VONK_ROUTE_ROOT: /routes
       VONK_STATE_PATH: /state
       VONK_SUPERVISOR_ROOT: /supervisor
+      VONK_DEV_AUTH_SECRET_ROOT: /auth-secrets
+      VONK_DEV_CADDY_SECRET_ROOT: /caddy-secrets
+      VONK_DEV_LITELLM_SECRET_ROOT: /litellm-secrets
+      VONK_DEV_RUNTIME_CONFIG_ROOT: /runtime-config
+      VONK_DEV_TAILSCALE_SECRET_ROOT: /tailscale-secrets
     volumes:
       - ${VONK_DEV_ORIGIN_DIR:?internal wrapper}:/source-origin:ro
       - dev-repository:/repository
@@ -89,6 +94,11 @@ services:
       - dev-migrate-secrets:/migrate-secrets
       - dev-litellm-database-secrets:/litellm-database-secrets
       - dev-worker-secrets:/worker-secrets
+      - dev-auth-secrets:/auth-secrets
+      - dev-caddy-secrets:/caddy-secrets
+      - dev-litellm-secrets:/litellm-secrets
+      - dev-runtime-config:/runtime-config
+      - dev-tailscale-secrets:/tailscale-secrets
       - dev-control-identity:/control-identity
       - dev-control-state:/state
       - dev-route-publications:/routes
@@ -100,7 +110,12 @@ services:
         target: /host-secrets/git-signing-key
       - source: litellm-database-password
         target: /host-secrets/litellm-database-password
-    restart: "no"
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD, test, -f, /tmp/bootstrap-ready]
+      interval: 5s
+      timeout: 3s
+      retries: 12
 
   control-worker:
     build:
@@ -127,7 +142,7 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
       migrate: {condition: service_completed_successfully}
-      dev-init: {condition: service_completed_successfully}
+      dev-bootstrap: {condition: service_healthy}
 
   control-api:
     build:
@@ -155,7 +170,7 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
       migrate: {condition: service_completed_successfully}
-      dev-init: {condition: service_completed_successfully}
+      dev-bootstrap: {condition: service_healthy}
       control-worker: {condition: service_started}
     healthcheck:
       test: [CMD, python, -m, vonk_control.healthcheck]
@@ -188,3 +203,8 @@ volumes:
   dev-migrate-secrets: {}
   dev-litellm-database-secrets: {}
   dev-worker-secrets: {}
+  dev-auth-secrets: {}
+  dev-caddy-secrets: {}
+  dev-litellm-secrets: {}
+  dev-runtime-config: {}
+  dev-tailscale-secrets: {}

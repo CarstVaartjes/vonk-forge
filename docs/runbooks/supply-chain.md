@@ -54,7 +54,7 @@ content-addressed evidence manifest. Normal verification performs no network
 access. Regeneration is an explicit reviewed operation:
 
 ```bash
-scripts/verify-supply-chain --generate --json
+scripts/verify-supply-chain --write-manifest --json
 ```
 
 ## Local diagnostic builds
@@ -84,12 +84,14 @@ mutable tag. Store scan/signature attestations with the release evidence.
 
 ## Workload artifact build and promotion boundary
 
-Workload artifacts have an independent release cadence from `vonk-forge`. A new
-model, adapter, runtime, wheel, environment, checkpoint, or auxiliary component
-does not require a platform release when it fits the installed workload ABI.
-The authorities are deliberately separate:
+Generic package artifacts have an independent release cadence from
+`vonk-forge`. A generic component that fits the installed node-package ABI does
+not require a platform release. Model recipes instead use the exact
+Catalog/Library revision and execution-harness gates documented in the
+[recipe operations runbook](model-switching.md). The authorities are
+deliberately separate:
 
-1. A reviewed Git change supplies a bounded workload build request. The request
+1. A reviewed Git change supplies a bounded generic-package build request. The request
    names an exact 40-character source commit, a content digest, reviewed source
    paths, a digest-pinned base image, target architecture, and output repository.
 2. `.github/workflows/workload-artifacts.yml` is a build-only publisher. After
@@ -105,8 +107,8 @@ The authorities are deliberately separate:
 3. The NAS promotion service independently verifies the request digest, source
    identity, OCI manifest digest, SBOM, provenance, family policy, and validation
    evidence. A successful build is only a promotion candidate; it is not an
-   authorized workload release.
-4. Workload TUF authorizes the exact immutable workload release lock after
+   authorized generic-package release.
+4. Workload TUF authorizes the exact immutable generic-package release lock after
    promotion. Its roots, roles, target prefixes, and signing credentials are
    separate from platform TUF, so a workload key cannot update `vonk-forge`, its
    agents, supervisors, protocol, or node policy.
@@ -126,7 +128,7 @@ Store each reviewed request as `release/workloads/<request-id>.json`. Its
 
 ```bash
 workload_source_commit=$(git rev-parse HEAD)
-workload_context=adapters/<family>/<runtime>
+workload_context=packages/<family>/<component>
 git archive --format=tar "$workload_source_commit" -- "$workload_context" \
   | sha256sum
 scripts/workload-artifact-metadata request \

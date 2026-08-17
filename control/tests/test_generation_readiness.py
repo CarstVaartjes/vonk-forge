@@ -843,7 +843,7 @@ def test_mutable_compose_supplies_only_cohort_path_and_role_for_dynamic_identity
         assert environment["VONK_CONTROL_PROCESS_ROLE"] == role
         assert dynamic_names.isdisjoint(environment)
 
-    initializer = services["dev-init"]["environment"]
+    initializer = services["dev-bootstrap"]["environment"]
     assert initializer["VONK_DEV_SELECTED_COHORT_FILE"] == "/cohort/selected.json"
     assert {
         "VONK_DEV_EXPECTED_COMMIT",

@@ -71,12 +71,9 @@ def test_tracked_admin_contract_has_secret_free_decisions_and_typed_errors() -> 
     assert set(decision["properties"]) == {"id", "node_id", "state"}
 
     expected_errors = {
-        "applyReconciliation": {"401", "403", "409", "503"},
         "approveAgentEnrollment": {"401", "403", "409", "503"},
         "getJobLog": {"401", "403", "404", "503"},
         "getPublishedEndpoint": {"401", "404", "503"},
-        "planProfileReconciliation": {"401", "403", "409", "503"},
-        "planReconciliation": {"401", "403", "409", "503"},
         "resumeJob": {"401", "403", "404", "409", "503"},
     }
     for operation_id, statuses in expected_errors.items():
@@ -90,9 +87,6 @@ def test_tracked_admin_contract_has_secret_free_decisions_and_typed_errors() -> 
     assert bounded_error["additionalProperties"] is False
     assert bounded_error["properties"]["detail"]["maxLength"] == 256
 
-    plan = schema["components"]["schemas"]["ReconciliationPlanResponse"]
-    for field in ("placements", "routes", "releases", "operation_graph"):
-        assert "$ref" in plan["properties"][field]
     progress = schema["components"]["schemas"]["JobOperationResponse"][
         "properties"
     ]["progress"]
@@ -104,6 +98,33 @@ def test_tracked_admin_contract_has_secret_free_decisions_and_typed_errors() -> 
     serialized = json.dumps(schema, sort_keys=True).lower()
     assert "certificate_pem" not in serialized
     assert "chain_pem" not in serialized
+
+
+def test_library_contract_uses_exact_model_versions_and_v1_revisions() -> None:
+    schema = json.loads(OPENAPI.read_text())
+    components = schema["components"]["schemas"]
+    library_model = components["LibraryModel"]
+    assert set(library_model["properties"]) == {"model", "page_local", "recipes"}
+    assert library_model["properties"]["model"] == {
+        "$ref": "#/components/schemas/ModelVersionIdentity"
+    }
+    model_identity = components["ModelVersionIdentity"]
+    assert model_identity["properties"]["kind"]["const"] == "model-version"
+    assert set(model_identity["required"]) == {
+        "kind",
+        "publisher",
+        "slug",
+        "content_sha256",
+    }
+    assert components["RecipeRevisionSummary"]["properties"]["schema_version"][
+        "const"
+    ] == 1
+
+    typescript = TYPESCRIPT_CLIENT.read_text()
+    assert 'model: components["schemas"]["ModelVersionIdentity"];' in typescript
+    assert "schema_version: 1;" in typescript
+    python_client = (PYTHON_CLIENT / "models/recipe_revision_summary.py").read_text()
+    assert "schema_version: Union[Literal[1], Unset] = 1" in python_client
 
 
 def test_generator_is_idempotent_and_admin_schema_is_secret_free() -> None:
@@ -121,13 +142,12 @@ def test_generator_is_idempotent_and_admin_schema_is_secret_free() -> None:
         "/api/v1/agents",
         "/api/v1/endpoints/{alias}",
         "/api/v1/fleet",
+        "/api/v1/fleet/stream",
         "/api/v1/jobs/{job_id}",
         "/api/v1/jobs/{job_id}/logs",
         "/api/v1/jobs/{job_id}/resume",
         "/api/v1/nodes/status",
-        "/api/v1/profiles/{profile_id}/plan",
-        "/api/v1/reconciliations",
-        "/api/v1/reconciliations/plan",
+        "/api/v1/nodes/{node_id}/telemetry",
     }
     assert all(path.startswith("/api/v1/") for path in schema["paths"])
     operation_list = [
@@ -147,11 +167,20 @@ def test_generator_is_idempotent_and_admin_schema_is_secret_free() -> None:
             "type": "apiKey",
         },
     }
+    operations = _operations(schema)
+    assert operations["streamFleetEvents"]["security"] == [
+        {"BrowserSession": []}
+    ]
     assert all(
         operation["security"] == [{"BearerAuth": []}]
-        for operation_id, operation in _operations(schema).items()
+        for operation_id, operation in operations.items()
         if operation_id
-        not in {"getBrowserSession", "loginBrowser", "logoutBrowser"}
+        not in {
+            "getBrowserSession",
+            "loginBrowser",
+            "logoutBrowser",
+            "streamFleetEvents",
+        }
     )
 
     assert {
@@ -165,16 +194,14 @@ def test_generator_is_idempotent_and_admin_schema_is_secret_free() -> None:
 
     by_id = {operation["operationId"]: operation for operation in operation_list}
     for operation_id in (
-        "applyReconciliation",
         "getFleetStatus",
         "getJob",
         "getNodeStatuses",
+        "getNodeTelemetryHistory",
         "getPublishedEndpoint",
         "listAgents",
         "listJobLogs",
         "listJobs",
-        "planProfileReconciliation",
-        "planReconciliation",
         "resumeJob",
     ):
         response_schema = next(
@@ -185,6 +212,13 @@ def test_generator_is_idempotent_and_admin_schema_is_secret_free() -> None:
         reference = response_schema["$ref"]
         component = schema["components"]["schemas"][reference.rsplit("/", 1)[-1]]
         assert component["additionalProperties"] is False
+
+    assert by_id["getFleetStatus"]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/FleetSnapshot"}
+    assert by_id["getNodeStatuses"]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/FleetStatusResponse"}
 
     serialized = json.dumps(schema, sort_keys=True).lower()
     for forbidden in (
@@ -257,6 +291,48 @@ def test_generated_python_models_compile() -> None:
     assert set(PYTHON_CLIENT.rglob("*.pyc")) == bytecode_before
 
 
+def test_generated_run_preview_contracts_require_digest_bound_alias() -> None:
+    schema = json.loads(OPENAPI.read_text())["components"]["schemas"]
+    assert "alias" in schema["RunPreviewRequest"]["required"]
+    assert "alias" in schema["RunPlanResponse"]["required"]
+
+    from cluster_profiles.generated_control.models.run_preview_request import (
+        RunPreviewRequest,
+    )
+
+    request = RunPreviewRequest(
+        installation_id="00000000-0000-4000-8000-000000000001",
+        alias="qwen",
+    )
+    assert request.to_dict()["alias"] == "qwen"
+
+    typescript = TYPESCRIPT_CLIENT.read_text()
+    request_contract = typescript.split("RunPreviewRequest: {", 1)[1].split("};", 1)[0]
+    response_contract = typescript.split("RunPlanResponse: {", 1)[1].split("};", 1)[0]
+    assert "alias: string;" in request_contract
+    assert "alias: string;" in response_contract
+
+
+def test_generated_library_contract_has_one_recipe_topology_and_strict_identities() -> None:
+    schema = json.loads(OPENAPI.read_text())["components"]["schemas"]
+    detail = schema["LibraryRecipeDetail"]
+    visual = schema["VisualRecipeDocument"]
+
+    assert set(detail["properties"]) >= {"topology", "placement", "visual_recipe"}
+    assert "profiles" not in detail["properties"]
+    assert set(visual["properties"]) >= {"model", "execution", "runtime", "interfaces"}
+    assert "workload" not in visual["properties"]
+    assert "adapter" not in schema["VisualRuntime"]["properties"]
+
+    typescript = TYPESCRIPT_CLIENT.read_text()
+    mapping_contract = typescript.split("MappingPreviewInput: {", 1)[1].split("};", 1)[0]
+    detail_contract = typescript.split("LibraryRecipeDetail: {", 1)[1].split("};", 1)[0]
+    runtime_contract = typescript.split("VisualRuntime: {", 1)[1].split("};", 1)[0]
+    assert "topology_name" not in mapping_contract
+    assert "topology:" in detail_contract and "profiles:" not in detail_contract
+    assert "distribution:" in runtime_contract and "adapter:" not in runtime_contract
+
+
 def test_generated_python_client_imports_in_the_root_locked_environment() -> None:
     result = subprocess.run(
         [
@@ -276,6 +352,71 @@ def test_generated_python_client_imports_in_the_root_locked_environment() -> Non
     assert result.returncode == 0, result.stderr
 
 
+def test_stream_resume_header_is_in_openapi_python_and_typescript_clients() -> None:
+    schema = json.loads(OPENAPI.read_text())
+    operation = schema["paths"]["/api/v1/fleet/stream"]["get"]
+    assert operation["parameters"] == [
+        {
+            "description": (
+                "Optional durable Fleet cursor; duplicate and numeric validity "
+                "are checked from the raw header list."
+            ),
+            "in": "header",
+            "name": "Last-Event-ID",
+            "required": False,
+            "schema": {
+                "anyOf": [{"type": "string"}, {"type": "null"}],
+                "description": (
+                    "Optional durable Fleet cursor; duplicate and numeric validity "
+                    "are checked from the raw header list."
+                ),
+                "title": "Last-Event-Id",
+            },
+        }
+    ]
+
+    from cluster_profiles.generated_control.api.default import stream_fleet_events
+
+    assert stream_fleet_events._get_kwargs(last_event_id="17")["headers"] == {
+        "Last-Event-ID": "17"
+    }
+    typescript = TYPESCRIPT_CLIENT.read_text()
+    assert '"Last-Event-ID"?: string | null;' in typescript
+
+
+def test_generated_fleet_projection_vocabulary_is_finite() -> None:
+    schema = json.loads(OPENAPI.read_text())["components"]["schemas"]
+    assert schema["NodeConnection"]["properties"]["certificate_state"]["enum"] == [
+        "valid",
+        "missing",
+        "not-yet-valid",
+        "expired",
+        "revoked",
+        "inactive",
+    ]
+    offline = schema["NodeConnection"]["properties"]["offline_reason"]
+    assert offline["anyOf"][0]["enum"] == [
+        "unregistered",
+        "agent-inactive",
+        "agent-revoked",
+        "never-seen",
+        "last-seen-in-future",
+        "stale",
+        "certificate-missing",
+        "certificate-not-yet-valid",
+        "certificate-expired",
+        "certificate-revoked",
+        "certificate-inactive",
+    ]
+    assert schema["TelemetryPoint"]["properties"]["boot_id"]["pattern"] == (
+        "^(?!00000000-0000-0000-0000-000000000000$)"
+        "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    )
+    typescript = TYPESCRIPT_CLIENT.read_text()
+    assert 'certificate_state: "valid" | "missing" | "not-yet-valid"' in typescript
+    assert 'degraded_reason?: ("external-member" | "mapping-incomplete"' in typescript
+
+
 def test_generated_python_client_parses_documented_operation_errors() -> None:
     import httpx
 
@@ -286,11 +427,8 @@ def test_generated_python_client_parses_documented_operation_errors() -> None:
 
     client = Client(base_url="https://control.invalid")
     expected = {
-        "apply_reconciliation": (401, 403, 409, 503),
         "get_job_log": (401, 403, 404, 503),
         "get_published_endpoint": (401, 404, 503),
-        "plan_profile_reconciliation": (401, 403, 409, 503),
-        "plan_reconciliation": (401, 403, 409, 503),
         "resume_job": (401, 403, 404, 409, 503),
     }
     for module_name, status_codes in expected.items():

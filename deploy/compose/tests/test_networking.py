@@ -120,12 +120,15 @@ def test_caddy_publishes_only_reserved_nas_backend_listener() -> None:
     assert caddy["environment"]["VONK_BACKEND_PORT"] == "8443"
 
 
-def test_database_has_only_data_network_and_ingress_is_segmented() -> None:
-    services = _rendered()["services"]
-    assert set(services["postgres"]["networks"]) == {"data"}
+def test_litellm_has_no_network_path_from_control_services() -> None:
+    rendered = _rendered()
+    services = rendered["services"]
+    assert set(services["postgres"]["networks"]) == {"data", "litellm-data"}
     assert set(services["caddy"]["networks"]) == {
         "agent-proxy",
+        "hermes-inference",
         "ingress",
+        "litellm-edge",
         "registry-edge",
         "tailnet-web-edge",
     }
@@ -141,13 +144,29 @@ def test_database_has_only_data_network_and_ingress_is_segmented() -> None:
         "data",
         "worker-authority",
     }
-    assert _rendered()["networks"]["worker-authority"]["internal"] is True
+    assert rendered["networks"]["worker-authority"]["internal"] is True
     assert set(services["litellm"]["networks"]) == {
         "cluster-egress",
-        "data",
-        "hermes-inference",
-        "ingress",
+        "litellm-data",
+        "litellm-edge",
     }
+    assert services["litellm"].get("ports") in (None, [])
+    assert rendered["networks"]["litellm-edge"]["internal"] is True
+    assert rendered["networks"]["litellm-data"]["internal"] is True
+    assert {
+        name
+        for name, service in services.items()
+        if "litellm-edge" in service.get("networks", {})
+    } == {"caddy", "litellm"}
+    assert {
+        name
+        for name, service in services.items()
+        if "litellm-data" in service.get("networks", {})
+    } == {"litellm", "postgres"}
+    litellm_networks = set(services["litellm"]["networks"])
+    for name, service in services.items():
+        if name not in {"caddy", "litellm", "postgres"}:
+            assert litellm_networks.isdisjoint(service.get("networks", {})), name
     assert set(services["prometheus"]["networks"]) == {"application"}
     for service in ("control-api", "control-worker"):
         assert services[service]["environment"]["VONK_MANAGEMENT_CIDRS"] == (
@@ -200,8 +219,13 @@ def test_worker_has_a_distinct_minimal_image_and_runtime_boundary() -> None:
         "/run/vonk-signer",
         "/verifier",
     }
-    socket_initializer = services["signer-runtime-init"]
-    assert "os.chmod('/socket',0o710)" in " ".join(socket_initializer["command"])
+    bootstrap = services["control-bootstrap"]
+    assert bootstrap["network_mode"] == "none"
+    assert any(
+        item.get("source") == "update-signer-socket"
+        and item.get("target") == "/update-socket"
+        for item in bootstrap["volumes"]
+    )
 
 
 def test_workload_signer_isolated_from_api_and_platform_signer() -> None:
@@ -221,7 +245,7 @@ def test_workload_signer_isolated_from_api_and_platform_signer() -> None:
         "workload-snapshot-key",
         "workload-timestamp-key",
     } & {item["source"] for item in api["secrets"]}
-    assert services["workload-signer-runtime-init"]["network_mode"] == "none"
+    assert services["control-bootstrap"]["network_mode"] == "none"
     assert services["control-signer"]["secrets"] != signer["secrets"]
 
 
@@ -288,62 +312,24 @@ def test_selected_api_and_worker_receive_one_dynamic_exact_generation_identity()
     assert worker["environment"]["VONK_CONTROL_PROCESS_IMAGE"] == worker["image"]
 
 
-def test_signer_runtime_initializer_executes_its_fixed_directory_setup(
-    tmp_path: Path,
-) -> None:
-    initializer = _rendered()["services"]["signer-runtime-init"]
-    command = " ".join(initializer["command"][2:])
-    socket_root = tmp_path / "socket"
-    verifier_root = tmp_path / "verifier"
-    publication_root = tmp_path / "publication"
-    for path in (socket_root, verifier_root, publication_root):
-        path.mkdir()
-    command = (
-        command.replace("'/socket'", repr(str(socket_root)))
-        .replace("'/verifier'", repr(str(verifier_root)))
-        .replace("'/publication'", repr(str(publication_root)))
-        .replace("10003", str(os.getuid()))
-        .replace("10001", str(os.getgid()))
-    )
-
-    subprocess.run([sys.executable, "-c", command], check=True)
-
-    assert (publication_root / "metadata").is_dir()
-    assert (publication_root / "targets").is_dir()
-    assert socket_root.stat().st_mode & 0o777 == 0o710
-    assert verifier_root.stat().st_mode & 0o777 == 0o700
+def test_bootstrap_prepares_signer_directories() -> None:
+    bootstrap = _rendered()["services"]["control-bootstrap"]
+    assert bootstrap["command"] == ["python", "-m", "vonk_control.compose_bootstrap"]
+    assert bootstrap["healthcheck"]["test"] == ["CMD", "test", "-f", "/tmp/bootstrap-ready"]
 
 
-def test_admin_grant_signing_key_is_available_only_to_the_api() -> None:
+def test_admin_grant_signing_key_is_available_only_to_bootstrap() -> None:
     services = _rendered()["services"]
     secret_sources = {
-        service_name: {secret["source"] for secret in services[service_name]["secrets"]}
-        for service_name in ("control-api", "control-worker", "control-signer")
+        name: {secret["source"] for secret in services[name]["secrets"]}
+        for name in ("control-api", "control-worker", "control-signer")
     }
-
     assert "admin-grant-private-key" not in secret_sources["control-api"]
-    assert "admin-grant-public-key" not in secret_sources["control-api"]
     assert "admin-grant-private-key" not in secret_sources["control-worker"]
-    assert "admin-grant-public-key" not in secret_sources["control-worker"]
     assert "admin-grant-private-key" not in secret_sources["control-signer"]
-    assert "admin-grant-public-key" in secret_sources["control-signer"]
+    assert "admin-grant-private-key" in {secret["source"] for secret in services["control-bootstrap"]["secrets"]}
 
-    initializer = services["api-admin-grant-init"]
-    assert initializer["network_mode"] == "none"
-    assert initializer["user"] == "0:0"
-    assert {secret["source"] for secret in initializer["secrets"]} == {
-        "admin-grant-private-key"
-    }
-    runtime_mount = next(
-        volume
-        for volume in services["control-api"]["volumes"]
-        if volume["target"] == "/run/vonk-api-secrets"
-    )
-    assert runtime_mount["read_only"] is True
-    assert (
-        services["control-api"]["environment"]["VONK_ADMIN_GRANT_PRIVATE_KEY_FILE"]
-        == "/run/vonk-api-secrets/admin-grant-private-key.pem"
-    )
+
 
 
 def test_tailnet_backends_have_readiness_checks() -> None:
@@ -398,11 +384,6 @@ def test_litellm_routes_use_a_dedicated_atomic_config_volume() -> None:
     assert "litellm-upstream-key" not in {
         secret["source"] for secret in services["control-worker"]["secrets"]
     }
-    initializer = services["route-publication-init"]
-    assert initializer["network_mode"] == "none"
-    assert initializer["cap_drop"] == ["ALL"]
-    assert set(initializer["cap_add"]) == {"CHOWN", "FOWNER"}
-    assert initializer["security_opt"] == ["no-new-privileges:true"]
     assert services["litellm"]["user"] == "10002:10001"
     assert services["litellm"]["cap_drop"] == ["ALL"]
     assert services["litellm"]["security_opt"] == ["no-new-privileges:true"]

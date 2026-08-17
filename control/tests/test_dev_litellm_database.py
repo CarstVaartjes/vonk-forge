@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Self
 
 import pytest
-
 from vonk_control import dev_litellm_database
 from vonk_control.dev_litellm_database import (
     DevLiteLLMDatabaseError,
@@ -17,7 +17,7 @@ class FakeCursor:
         self._rows = iter(rows)
         self.executed: list[str] = []
 
-    def __enter__(self) -> FakeCursor:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *_args: object) -> None:

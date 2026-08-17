@@ -18,7 +18,8 @@ use vonk_agent::{
     process::{ProcessError, ProcessOutput, ProcessRunner, Program, SystemProcessRunner},
     workloads::{
         ArgumentValue, ArtifactMountSpec, ArtifactSpec, EndpointSpec, LifecycleSpec, MountSpec,
-        Placement, RuntimeArgument, RuntimeSpec, SecuritySpec, WorkloadSpec,
+        Placement, PlacementEnvironmentSpec, RuntimeArgument, RuntimeSpec, SecuritySpec,
+        WorkloadSpec,
     },
 };
 
@@ -127,6 +128,7 @@ fn spec() -> WorkloadSpec {
                 },
             ],
             environment: vec![],
+            placement_environment: None,
         },
         artifacts: vec![ArtifactSpec {
             id: "model".to_owned(),
@@ -160,8 +162,8 @@ fn spec() -> WorkloadSpec {
                     read_only: true,
                 },
                 MountSpec {
-                    source: "state".to_owned(),
-                    target: "/state".to_owned(),
+                    source: "outputs".to_owned(),
+                    target: "/outputs".to_owned(),
                     read_only: false,
                 },
             ],
@@ -172,6 +174,14 @@ fn spec() -> WorkloadSpec {
             stop_timeout_seconds: 30,
         },
     }
+}
+
+fn bind_distributed_placement(workload: &mut WorkloadSpec) {
+    workload.runtime.placement_environment = Some(PlacementEnvironmentSpec {
+        local_address: "VONK_LOCAL_ADDR".to_owned(),
+        master_address: "VONK_MASTER_ADDR".to_owned(),
+        master_port: "VONK_MASTER_PORT".to_owned(),
+    });
 }
 
 fn write_managed_run(root: &Path, run_id: &str, installation_id: &str, port: u16) {
@@ -318,13 +328,15 @@ fn container_arguments_are_typed_and_hardened() {
         outputs: RefCell::new(VecDeque::new()),
     };
     let directory = tempdir().unwrap();
+    let mut workload = spec();
+    bind_distributed_placement(&mut workload);
     let arguments = OciRuntime {
         runner: &runner,
         data_root: directory.path(),
         huggingface_curl_config: None,
     }
     .start_arguments(
-        &spec(),
+        &workload,
         "cb555393-764b-4eb6-8f15-b416d289428f",
         "45ea6921-50c9-4971-be2a-4cd04ce05069",
         &Placement {
@@ -364,7 +376,6 @@ fn container_arguments_are_typed_and_hardened() {
         "VONK_MASTER_PORT=29500",
         "VONK_RUNTIME_SPEC=/run/vonk/runtime.json",
         "VONK_MODEL_ROOT=/models",
-        "VONK_STATE_ROOT=/state",
         "VONK_LISTEN_HOST=0.0.0.0",
         "VONK_LISTEN_PORT=8000",
     ] {
@@ -393,6 +404,14 @@ fn container_arguments_are_typed_and_hardened() {
             .iter()
             .any(|value| value.ends_with("dst=/models,readonly"))
     );
+    assert!(arguments.iter().any(|value| {
+        value.ends_with("/outputs,dst=/outputs") && !value.ends_with(",readonly")
+    }));
+    assert!(
+        !arguments
+            .iter()
+            .any(|value| { value == "VONK_STATE_ROOT=/state" || value.contains("dst=/state") })
+    );
     assert!(
         arguments
             .iter()
@@ -413,6 +432,7 @@ fn direct_fabric_host_mode_has_one_compiled_privilege_shape() {
     };
     let directory = tempdir().unwrap();
     let mut workload = spec();
+    bind_distributed_placement(&mut workload);
     workload.security.host_network = true;
     let placement = Placement {
         endpoint_address: Some("192.168.1.211".parse::<IpAddr>().unwrap()),
@@ -477,19 +497,57 @@ fn direct_fabric_host_mode_has_one_compiled_privilege_shape() {
 }
 
 #[test]
+fn distributed_launch_refuses_an_unbound_rendezvous_projection() {
+    let runner = FakeRunner {
+        calls: RefCell::new(vec![]),
+        outputs: RefCell::new(VecDeque::new()),
+    };
+    let directory = tempdir().unwrap();
+    let workload = spec();
+    let placement = Placement {
+        endpoint_address: Some("192.168.1.212".parse::<IpAddr>().unwrap()),
+        rank: 1,
+        role: "worker".to_owned(),
+        world_size: 2,
+        local_address: Some("192.168.100.11".parse::<IpAddr>().unwrap()),
+        master_address: Some("192.168.100.10".parse::<IpAddr>().unwrap()),
+        master_port: Some(29500),
+        port: 8101,
+        reserved_memory_bytes: 64 * 1024 * 1024 * 1024,
+    };
+
+    assert!(
+        OciRuntime {
+            runner: &runner,
+            data_root: directory.path(),
+            huggingface_curl_config: None,
+        }
+        .start_arguments(
+            &workload,
+            "cb555393-764b-4eb6-8f15-b416d289428f",
+            "45ea6921-50c9-4971-be2a-4cd04ce05069",
+            &placement,
+        )
+        .is_err()
+    );
+}
+
+#[test]
 fn coordinator_publishes_rendezvous_only_on_declared_master_fabric_address() {
     let runner = FakeRunner {
         calls: RefCell::new(vec![]),
         outputs: RefCell::new(VecDeque::new()),
     };
     let directory = tempdir().unwrap();
+    let mut workload = spec();
+    bind_distributed_placement(&mut workload);
     let arguments = OciRuntime {
         runner: &runner,
         data_root: directory.path(),
         huggingface_curl_config: None,
     }
     .start_arguments(
-        &spec(),
+        &workload,
         "cb555393-764b-4eb6-8f15-b416d289428f",
         "45ea6921-50c9-4971-be2a-4cd04ce05069",
         &Placement {
@@ -1132,8 +1190,16 @@ fn start_keeps_agent_metadata_outside_workload_writable_state() {
             .join("lifecycle.json")
             .is_file()
     );
+    let writable_run_root = directory.path().join("runs").join(run_id);
+    assert_eq!(
+        fs::read_dir(&writable_run_root)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect::<Vec<_>>(),
+        vec!["outputs"]
+    );
     assert!(
-        fs::read_dir(directory.path().join("runs").join(run_id))
+        fs::read_dir(writable_run_root.join("outputs"))
             .unwrap()
             .next()
             .is_none()

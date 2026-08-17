@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "kind": "model-version",
+  "identity": {"publisher": "antirez", "slug": "deepseek-v4-flash-0731-ds4"},
+  "metadata": {
+    "title": "DeepSeek V4 Flash 0731 DS4 IQ2/Q2 mixed",
+    "description": "Exact DS4 96/128-GB imatrix target GGUF and matching DSpark support GGUF.",
+    "tags": ["deepseek", "ds4", "gguf", "iq2", "spark"]
+  },
+  "model": {
+    "kind": "model",
+    "publisher": "deepseek-ai",
+    "slug": "deepseek-v4-flash-0731",
+    "content_sha256": "379c5650925fcf84631a262f3112d1c1f1aa603c3885056192cebb25c614f145"
+  },
+  "version": "0731-ds4-e7f0403",
+  "source": {
+    "repository": "https://huggingface.co/antirez/deepseek-v4-gguf",
+    "revision": "e7f04037032990db0346398d249baf9fb9df1ccc"
+  },
+  "lineage": {
+    "publisher": "antirez",
+    "relation": "quantized",
+    "source_model": {
+      "kind": "model",
+      "publisher": "deepseek-ai",
+      "slug": "deepseek-v4-flash-0731",
+      "content_sha256": "379c5650925fcf84631a262f3112d1c1f1aa603c3885056192cebb25c614f145"
+    },
+    "derivation": "imatrix mixed quantization with routed-expert gate/up tensors at IQ2_XXS, routed-expert down tensors at Q2_K, attention projections at Q8_0, shared experts at Q8_0, and output at Q8_0"
+  },
+  "format": {
+    "container": "gguf",
+    "precision": "mixed",
+    "quantization": "iq2_xxs-q2_k-mixed"
+  },
+  "parameters": {"total": 284000000000, "active": 13000000000},
+  "limits": {"context_tokens": 1048576},
+  "sizes": {"download_bytes": 92709225760, "installed_bytes": 92709225760},
+  "license": {
+    "spdx": "MIT",
+    "url": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-DSpark/blob/62af8fffb2f7030cac4de2f0169f5b8d1101b646/LICENSE",
+    "attribution": ["DeepSeek AI", "Salvatore Sanfilippo (antirez)"],
+    "operator_acceptance_required": false
+  },
+  "access": {"visibility": "public", "gated": false, "authentication": "none"},
+  "artifacts": [
+    {
+      "id": "target",
+      "path": "DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf",
+      "kind": "http.file",
+      "repository": "https://huggingface.co/antirez/deepseek-v4-gguf",
+      "revision": "e7f04037032990db0346398d249baf9fb9df1ccc",
+      "sha256": "ca22ae2f838e14077c22bc1c1417b71b45b5e5a3687bd96c2ac6e17fdb6261c0",
+      "download_bytes": 86720111488,
+      "installed_bytes": 86720111488,
+      "roles": ["target"]
+    },
+    {
+      "id": "drafter",
+      "path": "DeepSeek-V4-Flash-DSpark-support-0731.gguf",
+      "kind": "http.file",
+      "repository": "https://huggingface.co/antirez/deepseek-v4-gguf",
+      "revision": "e7f04037032990db0346398d249baf9fb9df1ccc",
+      "sha256": "7e319924541db3f7a163ed7e11d7532a70d48228ab59d36cb81e1d4511885360",
+      "download_bytes": 5989114272,
+      "installed_bytes": 5989114272,
+      "roles": ["drafter"]
+    }
+  ],
+  "dependencies": [],
+  "availability": "active",
+  "supersedes": null
+}
