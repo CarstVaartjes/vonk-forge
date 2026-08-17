@@ -291,7 +291,7 @@ def _successful_lifecycle_tools(tmp_path: Path) -> tuple[Path, Path]:
         "  cohort=$(sed -n '1p' \"$state_file\" 2>/dev/null || true)\n"
         '  case "${*: -1}" in\n'
         "    dev-repository-init-id) if [[ \"$cohort\" == rollback-failed ]]; then printf '%s\\n' 'exited 1'; else printf '%s\\n' 'exited 0'; fi ;;\n"
-        "    dev-init-id) if [[ \"$cohort\" == rollback-failed ]]; then printf '%s\\n' 'created 0'; else printf '%s\\n' 'exited 0'; fi ;;\n"
+        "    dev-bootstrap-id) if [[ \"$cohort\" == rollback-failed ]]; then printf '%s\\n' 'created 0'; else printf '%s\\n' 'running 0'; fi ;;\n"
         "    migrate-id) if [[ \"$cohort\" == rollback-failed ]]; then printf '%s\\n' 'created 0'; else printf '%s\\n' 'exited 0'; fi ;;\n"
         "    dev-auth-init-id) if [[ \"$cohort\" == rollback-failed ]]; then printf '%s\\n' 'created 0'; else printf '%s\\n' 'exited 0'; fi ;;\n"
         "    dev-*-id) printf '%s\\n' 'exited 0' ;;\n"
@@ -770,7 +770,7 @@ def test_mixed_cohort_gate_stops_before_initializer_or_migration(
     assert result.returncode == 0, result.stderr
     assert mixed_up < first_full_up
     assert any(
-        " ps --all --services dev-repository-init dev-init migrate " in f" {command} "
+        " ps --all --services dev-repository-init dev-bootstrap migrate " in f" {command} "
         for command in commands[mixed_up:first_full_up]
     )
     assert any(

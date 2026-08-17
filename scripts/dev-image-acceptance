@@ -337,7 +337,7 @@ image_id() {
   --expected-commit "$expected_commit" \
   --expected-repository "$expected_repository" \
   "$api_image" "$worker_image"
-# Git runs inside dev-init as its isolated UID.  Give that UID ownership of
+# Git runs inside dev-repository-init as its isolated UID.  Give that UID ownership of
 # this disposable, acceptance-only bare origin without touching the checkout.
 docker run --rm --user 0:0 --volume "$origin_dir:/source-origin" \
   "$api_image" chown -R 65534:65534 /source-origin
@@ -630,7 +630,7 @@ assert_project_volume_exists() {
 pull_first_party_aliases() {
   compose pull --policy always \
     dev-cohort-reset dev-api-cohort dev-worker-cohort dev-cohort-verify \
-    dev-repository-init dev-init migrate dev-auth-init control-api control-worker
+    dev-repository-init dev-bootstrap migrate dev-auth-init control-api control-worker
 }
 
 # A deliberately mixed API-current/worker-previous pair uses two distinct
@@ -642,7 +642,7 @@ compose_started=1
 if compose up --wait --pull never dev-cohort-verify; then
   die "mixed development image cohort was accepted"
 fi
-if [[ -n $(compose ps --all --services dev-repository-init dev-init migrate) ]]; then
+if [[ -n $(compose ps --all --services dev-repository-init dev-bootstrap migrate) ]]; then
   die "mixed development image cohort reached initializer or migration"
 fi
 compose down --volumes --remove-orphans >/dev/null
@@ -656,7 +656,7 @@ compose_started=1
 compose up --wait --pull never caddy control-worker litellm
 assert_cohort_gate_succeeded
 assert_exited_successfully dev-repository-init
-assert_exited_successfully dev-init
+assert_running dev-bootstrap
 assert_exited_successfully migrate
 assert_exited_successfully dev-auth-init
 assert_running postgres
@@ -681,7 +681,7 @@ pull_first_party_aliases
 compose up --wait --pull never --force-recreate caddy control-worker litellm
 assert_cohort_gate_succeeded
 assert_exited_successfully dev-repository-init
-assert_exited_successfully dev-init
+assert_running dev-bootstrap
 assert_exited_successfully migrate
 assert_exited_successfully dev-auth-init
 assert_running postgres
@@ -702,17 +702,17 @@ postgres_volume=$(verify_project_volume postgres /var/lib/postgresql dev-postgre
 state_volume=$(verify_project_volume control-api /state dev-control-state)
 
 # Pinned A uses the immutable local-registry refs, not mutable aliases. With
-# B's repository baseline preserved, dev-init must reject A before migration.
+# B's repository baseline preserved, dev-bootstrap must reject A before migration.
 active_compose_file=$pinned_file
 compose stop control-api control-worker >/dev/null
 compose rm --force --stop \
   dev-cohort-reset dev-api-cohort dev-worker-cohort dev-cohort-verify \
-  dev-repository-init dev-init migrate dev-auth-init control-api control-worker >/dev/null
+  dev-repository-init dev-bootstrap migrate dev-auth-init control-api control-worker >/dev/null
 if compose up --wait --pull never --force-recreate caddy control-worker litellm; then
   die "pinned cohort A unexpectedly accepted cohort B's repository baseline"
 fi
 assert_exited_with_failure dev-repository-init
-assert_service_never_started dev-init
+assert_service_never_started dev-bootstrap
 assert_service_never_started migrate
 assert_service_never_started dev-auth-init
 rollback_logs=$(compose logs --no-color dev-repository-init 2>&1 || true)
@@ -742,7 +742,7 @@ compose_started=1
 compose up --wait --pull never --force-recreate caddy control-worker litellm
 assert_cohort_gate_succeeded
 assert_exited_successfully dev-repository-init
-assert_exited_successfully dev-init
+assert_running dev-bootstrap
 assert_exited_successfully migrate
 assert_exited_successfully dev-auth-init
 assert_running postgres

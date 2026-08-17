@@ -96,7 +96,7 @@ def test_pinned_render_uses_one_verified_cohort_identity_for_every_service(
     assert "__VONK_EXPECTED_COMMIT__" not in text
     assert "VONK_DEV_EXPECTED_COMMIT" not in text
     for service in (
-        "dev-init",
+        "dev-bootstrap",
         "migrate",
         "control-api",
         "control-worker",
@@ -493,13 +493,13 @@ def test_rendered_compose_is_image_only_and_has_exact_runtime_boundaries(
     services = rendered["services"]
 
     assert all("build" not in service for service in services.values())
-    assert services["dev-init"]["image"] == API_IMAGE
+    assert services["dev-bootstrap"]["image"] == API_IMAGE
     assert services["migrate"]["image"] == API_IMAGE
     assert services["dev-auth-init"]["image"] == API_IMAGE
     assert services["control-api"]["image"] == API_IMAGE
     assert services["control-worker"]["image"] == WORKER_IMAGE
     for service in (
-        "dev-init",
+        "dev-bootstrap",
         "migrate",
         "control-api",
         "control-worker",
@@ -530,7 +530,7 @@ def test_rendered_compose_is_image_only_and_has_exact_runtime_boundaries(
     assert {secret["source"] for secret in services["postgres"]["secrets"]} == {
         "postgres-password"
     }
-    assert {secret["source"] for secret in services["dev-init"]["secrets"]} == (
+    assert {secret["source"] for secret in services["dev-bootstrap"]["secrets"]} == (
         EXPECTED_SECRET_NAMES - {"postgres-password"}
     )
     assert services["migrate"].get("secrets", []) == []
@@ -544,7 +544,7 @@ def test_rendered_compose_is_image_only_and_has_exact_runtime_boundaries(
     }
     assert "secrets" not in services["control-worker"]
     assert volumes["control-api"]["/run/secrets"]["source"].endswith("dev-api-secrets")
-    init_migrate_secrets = volumes["dev-init"]["/migrate-secrets"]
+    init_migrate_secrets = volumes["dev-bootstrap"]["/migrate-secrets"]
     migrate_secrets = volumes["migrate"]["/run/secrets"]
     assert init_migrate_secrets["type"] == "volume"
     assert migrate_secrets["type"] == "volume"
@@ -599,7 +599,7 @@ def test_mutable_and_pinned_outputs_share_secret_projection_topology_without_val
         )
         services = rendered["services"]
         return {
-            "dev-init-volumes": services["dev-init"]["volumes"],
+            "dev-bootstrap-volumes": services["dev-bootstrap"]["volumes"],
             "dev-auth-init": {
                 key: value
                 for key, value in services["dev-auth-init"].items()
@@ -638,7 +638,7 @@ def test_mutable_compose_uses_exact_refs_and_always_pulls_every_first_party_serv
         "dev-cohort-reset",
         "dev-api-cohort",
         "dev-cohort-verify",
-        "dev-init",
+        "dev-bootstrap",
         "migrate",
         "dev-auth-init",
         "control-api",
@@ -651,7 +651,7 @@ def test_mutable_compose_uses_exact_refs_and_always_pulls_every_first_party_serv
         services[name]["pull_policy"] == "always"
         for name in api_services | worker_services
     )
-    dev_init_environment = services["dev-init"]["environment"]
+    dev_init_environment = services["dev-bootstrap"]["environment"]
     assert (
         dev_init_environment["VONK_DEV_SELECTED_COHORT_FILE"] == "/cohort/selected.json"
     )
