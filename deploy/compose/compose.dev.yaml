@@ -82,6 +82,7 @@ services:
       VONK_REPOSITORY_PATH: /repository
       VONK_ROUTE_ROOT: /routes
       VONK_STATE_PATH: /state
+      VONK_DEV_SUPERVISOR_ROOT: /supervisor
       VONK_SUPERVISOR_ROOT: /supervisor
       VONK_DEV_AUTH_SECRET_ROOT: /auth-secrets
       VONK_DEV_CADDY_SECRET_ROOT: /caddy-secrets

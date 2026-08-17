@@ -132,6 +132,7 @@ services:
       VONK_DEV_SELECTED_COHORT_FILE: /cohort/selected.json
       VONK_ROUTE_ROOT: /routes
       VONK_STATE_PATH: /state
+      VONK_DEV_SUPERVISOR_ROOT: /supervisor
       VONK_SUPERVISOR_ROOT: /supervisor
     volumes:
       - dev-auth-secrets:/auth-secrets

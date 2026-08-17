@@ -558,6 +558,7 @@ def test_dev_compose_runs_packaged_initializer_with_disjoint_runtime_authority(
         "VONK_DEV_LITELLM_DATABASE_SECRET_ROOT": "/litellm-database-secrets",
         "VONK_DEV_REPOSITORY_URL": "file:///source-origin",
         "VONK_DEV_SECRET_SOURCE_ROOT": "/host-secrets",
+        "VONK_DEV_SUPERVISOR_ROOT": "/supervisor",
         "VONK_DEV_WORKER_IMAGE": DEV_WORKER_IMAGE,
         "VONK_DEV_WORKER_SECRET_ROOT": "/worker-secrets",
         "VONK_REPOSITORY_PATH": "/repository",
@@ -633,6 +634,7 @@ def test_image_template_uses_the_database_only_migration_projection() -> None:
     worker_volumes = _volumes_by_target(services["control-worker"])
 
     assert initializer["tmpfs"] == ["/tmp"]
+    assert initializer["environment"]["VONK_DEV_SUPERVISOR_ROOT"] == "/supervisor"
     assert (
         initializer["environment"]["VONK_DEV_MIGRATE_SECRET_ROOT"] == "/migrate-secrets"
     )
