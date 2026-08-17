@@ -265,19 +265,13 @@ On every Ubuntu 24.04 ARM64 node:
    `sudo apt update && sudo apt install vonk-forge-agent`.
    Require `Linger=yes`, the `vonk-agent` user bus, and rootless Podman with the
    systemd cgroup manager exactly as shown in that guide before pairing.
-3. Copy only `controller-ca` and `host-runtime-grant-public-key` from the
-   private local source bundle to the node. Never copy either corresponding
-   private key.
-4. Install the CA at `/etc/vonk-forge-agent/controller-ca.pem`, owned by
-   `root:vonk-agent` with mode `0640`.
-5. Install the helper authority public key at
-   `/etc/vonk-forge-agent/host-helper-authority.pub`, owned by `root:root` with
-   mode `0644`.
-6. Set the two explicit `:8443` HTTPS origins, CA path, independently computed
-   DER SHA-256 fingerprint, unique node ID, and (for multi-node use) the
-   node's direct-fabric address and measured 200000 Mb/s bandwidth in
-   `/etc/vonk-forge-agent/agent.toml`.
-7. Create the root-owned `docker-firewall.conf`, including every accepted
+3. In Fleet, create the node-bound bootstrap grant and registration intent for
+   that Spark.
+4. Use the generated bootstrap command from Fleet. Registration generates the
+   node-specific runtime inputs, copies only the public CA and
+   `host-runtime-grant-public-key`, and writes the node-local runtime file.
+   Manual `agent.toml` editing is unsupported.
+5. Create the root-owned `docker-firewall.conf`, including every accepted
    bridge-published and host-network endpoint port, then enable the signed
    `vonk-forge-docker-firewall.service` before the package-helper socket. It
    installs persistent Docker-aware `DOCKER-USER` policy for every accepted
@@ -287,7 +281,7 @@ On every Ubuntu 24.04 ARM64 node:
    contract from the workload runbook and run the packaged check after Docker
    restart and host reboot.
 
-Use the exact commands and minimal configuration in
+Use the exact commands and generated bootstrap contract in
 [Install the Vonk Forge agent](../operations/install-vonk-agent.md). Do not add
 the agent account to Docker, sudo, or an NVIDIA administration group.
 
@@ -299,15 +293,14 @@ source-first two-Spark tensor-parallel workload.
 
 For each node, complete this order without reusing its one-use token:
 
-1. Create a pairing grant for that exact node ID in the administrator UI.
-2. Save the token in a private root-readable file on that node.
-3. Run the installation guide's exact
-   `/var/lib/vonk-forge/supervisor/current/vonk-agent pair ... --token-stdin`
-   command; the controller records a pending enrollment.
+1. Create the node-bound bootstrap grant in Fleet.
+2. Deliver the generated bootstrap command to that node.
+3. Run the generated bootstrap command; the controller records a pending
+   enrollment from the generated runtime inputs.
 4. Compare the displayed node, CSR, host, hardware, agent, and boot evidence,
    then approve it.
-5. Repeat the same pair command to collect the issued certificate and remove
-   the token file.
+5. Re-run the same generated bootstrap command if it is waiting to collect the
+   issued certificate, then remove the consumed token material.
 6. Enable the package-helper socket and agent supervisor as documented in the
    agent installation guide.
 

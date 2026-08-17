@@ -365,34 +365,30 @@ scp '<LOCAL_SECRETS_DIR>/host-runtime-grant-public-key' \
   '<SPARK_2_SSH_TARGET>:/tmp/host-helper-authority.pub'
 ```
 
-On each node, install that certificate as root and set the complete
-`/etc/vonk-forge-agent/agent.toml` inputs from
-[Install the Vonk Forge agent](../operations/install-vonk-agent.md):
-`enrollment_url`, `controller_url`, `ca_path`, the DER `ca_sha256`, that
-node's unique `node_id`, `fabric_address`, and `fabric_bandwidth_mbps = 200000`.
-Install the helper key at `/etc/vonk-forge-agent/host-helper-authority.pub` as
-`root:root` mode `0644`. Use `https://<ENROLLMENT_HOSTNAME>:8443/` for
-enrollment and `https://<CONTROLLER_HOSTNAME>:8443/` for authenticated
-controller traffic. Generate a non-secret candidate identity with
-`printf 'spk_%s\n' "$(openssl rand -hex 16)"`, record it, and never reuse it on
-another node.
+On each node, install the CA and helper public key as documented in
+[Install the Vonk Forge agent](../operations/install-vonk-agent.md), then use
+the generated bootstrap command from Fleet. Registration generates the
+node-specific runtime inputs, including the two explicit `:8443` origins, the
+DER `ca_sha256`, that node's unique `node_id`, and any required
+`fabric_address` plus `fabric_bandwidth_mbps = 200000`. Manual `agent.toml`
+editing is unsupported.
 
 Pair one node at a time in this strict order:
 
-1. Create one one-use node pairing grant in the administrator interface.
-2. Save its token directly to a private root-readable node file; do not display
-   or paste it into a command.
-3. Run `vonk-agent pair` with the configured `enrollment_url`, CA fingerprint,
-   and `--token-stdin`.
+1. Create the node-bound bootstrap grant in the administrator interface.
+2. Deliver the generated bootstrap command to that node without exposing the
+   one-use token in shell history.
+3. Run the generated bootstrap command; it uses the generated runtime inputs
+   and records the pending enrollment.
 4. Approve the pending enrollment after comparing the node, CSR, host-key,
    hardware, agent, and boot evidence.
-5. Repeat the same `vonk-agent pair` command to collect the issued certificate,
-   then remove the one-use token file.
+5. Re-run the same generated bootstrap command if it pauses waiting for the
+   issued certificate, then remove the consumed token material.
 6. Enable the package-helper socket and supervisor, and confirm the controller
    reports the certificate-bound `spk_` identity.
 
-The exact pair command is documented in the installation guide. Hostnames and
-IP addresses are observations; the certificate-bound `spk_` value is identity.
+Hostnames and IP addresses are observations; the certificate-bound `spk_`
+value is identity.
 
 ## Inventory preflight
 

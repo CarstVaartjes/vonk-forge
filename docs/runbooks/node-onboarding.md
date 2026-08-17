@@ -82,13 +82,16 @@ match again.
 
 After the host record is accepted, install the package and pair the agent by
 following [Install the Vonk Forge agent](../operations/install-vonk-agent.md).
-The controller-side ordering is always:
+Use the generated bootstrap command from Fleet after **Add Spark** creates the
+node-bound bootstrap grant. Registration generates the node-specific runtime
+inputs, and manual `agent.toml` editing is unsupported. The controller-side
+ordering is always:
 
-1. Create one one-use node pairing grant.
-2. Run `vonk-agent pair` with `enrollment_url`, `controller_url`, `ca_path`,
-   and the exact DER SHA-256 CA fingerprint already configured.
+1. Create one node-bound bootstrap grant.
+2. Run the generated bootstrap command with the generated runtime inputs.
 3. Approve the pending enrollment.
-4. Repeat the same `pair` command once to collect the issued certificate.
+4. Repeat the same generated bootstrap command once to collect the issued
+   certificate when required.
 5. Start or restart the supervisor and verify the node reports inventory under
    its certificate-bound `spk_` identity.
 

@@ -13,5 +13,7 @@ def test_node_onboarding_runbook_covers_safe_resumable_workflow() -> None:
         "topology",
         "recovery",
         "does not modify Git",
+        "generated bootstrap command",
+        "manual `agent.toml` editing is unsupported",
     ):
         assert phrase.lower() in text.lower()

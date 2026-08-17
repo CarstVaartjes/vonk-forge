@@ -255,6 +255,7 @@ def test_operator_entry_points_link_to_development_nas_runbook() -> None:
 
 def test_fresh_install_is_the_concise_operator_entry_point() -> None:
     text = _normalized_text(FRESH_INSTALL)
+    normalized = text.lower()
     setup = text.split("## 3. Generate and publish the NAS project", 1)[1].split(
         "## 4. Configure names and start the NAS stack", 1
     )[0]
@@ -265,7 +266,9 @@ def test_fresh_install_is_the_concise_operator_entry_point() -> None:
         "scripts/dev-runtime-secrets.py",
         "scripts/dev-runtime-project",
         "APT `dev` channel setup",
-        "/var/lib/vonk-forge/supervisor/current/vonk-agent pair ... --token-stdin",
+        "generated bootstrap command",
+        "registration generates the node-specific runtime inputs",
+        "manual `agent.toml` editing is unsupported",
         "scripts/run-development-slices",
         "--phase synthetic",
         "MagicDNS",
@@ -275,7 +278,7 @@ def test_fresh_install_is_the_concise_operator_entry_point() -> None:
         "`svc:vonk-forge`",
         "`tcp:443`",
     ):
-        assert required in text
+        assert required.lower() in normalized
     assert "No GitHub, GHCR, R2, database, signing, or model credential" in text
     assert "Do not install a registry token on the NAS" in text
     assert setup.index("MagicDNS") < setup.index("`svc:vonk-forge`") < setup.index(
