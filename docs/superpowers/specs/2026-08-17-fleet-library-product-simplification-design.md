@@ -128,28 +128,54 @@ A user can complete the following without leaving Library:
 1. Browse accepted models and service definitions.
 2. Create a recipe or import one from the public catalog.
 3. Review the exact version, source, resource needs, and topology.
-4. See whether the required package/build is ready, pending, rejected, or
-   needs review.
+4. See whether the selected model/service version is ready to install, still
+   building, blocked, or needs review.
 5. Select one or more eligible Sparks.
 6. Review placement, capacity, ranks, and safety evidence.
 7. Install, load/run, stop, uninstall, or remove the selected model/service.
 8. See operation progress and any operator decision inline.
 
 User-facing copy uses “model,” “service,” “version,” “Install,” and “Run.”
-Backend entities such as recipes, package candidates, deployments, jobs, and
-operations may appear as concise status details only when they help the user
-understand an action.
+The new Library implementation owns its own PostgreSQL-backed version,
+artifact, placement, installation, and run records. It does not expose or
+depend on the old package-candidate, package-deployment, or job pipeline.
+Internal operation state may appear as concise progress details only when it
+helps the user understand an action.
 
 ### Advanced detail without advanced pages
 
-Recipe editing, public import, source review, placement mapping, package
-validation, rollout preview, rollback, and operation progress become nested
-Library views or dialogs. They retain exact-digest confirmation and server
-authority previews where safety requires them.
+Recipe editing, public import, source review, placement mapping, artifact
+readiness, install preview, stop/remove confirmation, and operation progress
+become nested Library views or dialogs. They retain exact-digest confirmation
+and server-authority previews where safety requires them.
 
-Long-running jobs are represented by inline progress and actionable recovery
-states. A user does not need to open a separate Jobs page to discover whether
-an install or run is still progressing.
+Long-running operations are represented by inline progress and actionable
+recovery states. A user does not need to open a separate Jobs page to discover
+whether an install or run is still progressing.
+
+## Spark bootstrap and registration
+
+The Spark package installation and registration flow is also clean-slate and
+generated. The operator does not manually edit an agent TOML file.
+
+1. The operator clicks **Add Spark** in Fleet.
+2. Fleet creates a short-lived, node-bound bootstrap grant and registration
+   intent in PostgreSQL.
+3. Fleet provides a one-time bootstrap command or protected bootstrap file for
+   the Spark. It contains the non-secret enrollment/controller endpoints,
+   public CA trust material or fingerprint, the assigned node identity, and
+   safe runtime defaults. The one-time token is the only secret.
+4. The operator runs the bootstrap once on the Spark after installing the
+   signed Spark-agent installer.
+5. The agent writes its local runtime configuration, generates its key and CSR,
+   submits hardware/host/agent/boot evidence, and waits for approval.
+6. After approval, the agent collects the certificate, removes the consumed
+   token, and starts its authenticated runtime loop.
+
+The browser never SSHes to a Spark or writes its filesystem. The installation
+command is the only host-side action; it is generated from the Fleet
+registration state and must not require hand-editing `/etc/vonk-forge-agent/
+agent.toml`.
 
 ## Audit and settings
 
@@ -161,35 +187,37 @@ links consume them.
 Settings is a small user/admin surface. It must contain real supported settings
 only; an empty placeholder page is not created merely to satisfy navigation.
 
-## Removal and dependency policy
+## Clean-slate removal policy
 
-This is a functional simplification, not a cosmetic menu change.
+This is a direct replacement, not a migration. The old implementation is not
+kept behind the new UX.
 
 1. Inventory every current page, route, API method, backend operation,
    component, test, and documentation reference.
 2. Identify the Fleet or Library user journey that consumes each item.
-3. Keep and refactor items required by those journeys, including security
-   gates, exact previews, validation, rollback, certificate handling, and
-   durable progress.
-4. Delete items with no remaining consumer: standalone page components,
-   routes, page-only API wrappers, dead schemas, tests, fixtures, and docs.
-5. Do not retain a page or API solely because it existed previously.
-6. Do not delete backend safety mechanics merely because their old page is
-   gone; they must be callable from Fleet/Library or removed when genuinely
-   unused.
-7. Remove `inventory/fleet.toml` as a Spark-roster dependency. Update or delete
-   node-onboarding instructions, repository fixtures, proposal contracts, and
-   tests that exist only to maintain that roster. Retain the file only if the
-   dependency audit proves it still serves a separate, non-roster policy.
-8. Rewrite the existing Catalog maintenance design and operator runbooks so
-   they describe the Library workflow. No documentation may direct an
-   operator to a removed Catalog, Packages, Deployments, Updates, Jobs, or
-   `inventory/fleet.toml` workflow.
-
-The old endpoints may be retained temporarily during the migration only when
-they are actively used by Fleet/Library. Once replacement consumers are in
-place, unused endpoint groups and their tests are removed as part of the same
-change.
+3. Implement only the new Fleet/Library data models, routes, and workflows,
+   including security gates, exact previews, validation, certificate handling,
+   and durable progress where the new UX needs them.
+4. Delete the old Agents, Catalog, Packages, Deployments, Updates, and Jobs
+   pages, routes, API groups, schemas, services, modules, fixtures, tests, and
+   documentation. Do not wrap or alias them into the new implementation.
+5. Delete the old package/deployment pipeline directly, including package
+   candidate promotion, deployment rollout/rollback artifacts, legacy package
+   and deployment TOML documents, and their dedicated orchestration code.
+6. Delete `inventory/fleet.toml` and all Spark-roster proposal, loader,
+   projection, onboarding, and documentation dependencies. PostgreSQL is the
+   only live Spark-management authority.
+7. Do not add migration code, compatibility shims, redirect routes, legacy
+   schema readers, data translators, dual-write paths, or old API aliases.
+   Existing development state is disposable and must be recreated under the
+   new schema and workflows.
+8. Rewrite or delete every design document, runbook, fixture, and test that
+   describes the removed Catalog, package/deployment pipeline, Jobs page, or
+   Git-managed Spark roster. Documentation must describe only the new Fleet,
+   Library, and generated bootstrap flow.
+9. Keep a TOML file only when it is a toolchain/project manifest or a generated
+   local runtime file that the new system genuinely requires. File format
+   alone is not a reason to retain legacy behavior.
 
 ## Acceptance criteria
 
@@ -205,6 +233,8 @@ change.
   PostgreSQL profile or the documented safe metadata defaults.
 - Fleet can start the secure Add Spark/enrollment flow and manage platform
   update status without leaving Fleet.
+- Add Spark generates the host bootstrap inputs and never requires manual
+  editing of the agent runtime TOML.
 - Library can create/import a recipe, review readiness, select Sparks, install,
   run, stop, remove, and follow progress without leaving Library.
 - Exact previews, digest confirmations, certificate controls, and operator
@@ -215,5 +245,7 @@ change.
   API/module has no remaining consumer proven by tests and repository search.
 - Repository node-roster documentation and contracts are removed or rewritten
   consistently with PostgreSQL-backed Spark management.
+- No old package/deployment API, TOML artifact, migration adapter, compatibility
+  route, or legacy page remains in the supported source tree.
 - Automated tests cover the new unified journeys and fail if the removed pages
   or placeholder concepts return.
