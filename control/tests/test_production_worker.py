@@ -8,8 +8,6 @@ from sqlalchemy.orm import sessionmaker
 from vonk_control import telemetry_maintenance
 from vonk_control.jobs import JobService
 from vonk_control.models import Base
-from vonk_control.package_rollout_worker import PackageRolloutWorker
-from vonk_control.package_validation_runner import PackageValidationRunner
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.route_runtime import AtomicRouteBundlePublisher
 from vonk_control.settings import Settings, SettingsError, WorkerSettings
@@ -97,10 +95,8 @@ def test_production_builder_wires_signer_queue_route_boundary_and_update_worker(
     )
 
     assert isinstance(worker._updates, UpdateRolloutWorker)
-    assert isinstance(worker._packages, PackageRolloutWorker)
-    assert isinstance(worker._validation, PackageValidationRunner)
-    assert worker._validation._agent_jobs is agent_jobs
-    assert worker._packages._orchestrator._agent_jobs is agent_jobs
+    assert not hasattr(worker, "_packages")
+    assert not hasattr(worker, "_validation")
     assert worker._updates._orchestrator._agent_jobs is agent_jobs
     assert isinstance(worker._updates._routes, ProductionUpdateRouteBoundary)
     assert worker._updates._routes is worker._updates._orchestrator._routes

@@ -24,15 +24,3 @@ test("the redesigned shell makes Library and Catalog the recipe workflow", async
   await page.getByRole("link", {name: "Catalog"}).click();
   await expect(page.getByRole("heading", {name: "Recipe catalog"})).toBeVisible();
 });
-
-test("packages remain usable at a mobile viewport", async ({page}) => {
-  await page.setViewportSize({width: 390, height: 844});
-  await page.route("**/api/v1/packages/families**", route => route.fulfill({json: {families: [], total: 0}}));
-  await page.route("**/api/v1/packages/candidates**", route => route.fulfill({json: {candidates: [], total: 0}}));
-  await page.route("**/api/v1/packages/inventory**", route => route.fulfill({json: {nodes: [], total: 0}}));
-  await page.goto("/packages");
-  await expect(page.getByRole("heading", {name: "Workload packages"})).toBeVisible();
-  await page.getByRole("button", {name: "Open system navigation"}).click();
-  await expect(page.getByRole("navigation", {name: "Primary"})).toBeVisible();
-  await expect(page.locator(".shell")).toHaveCSS("grid-template-columns", "390px");
-});

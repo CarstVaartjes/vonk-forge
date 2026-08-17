@@ -184,8 +184,6 @@ class Worker:
         housekeeping: Callable[[], object] | None = None,
         reconciliations=None,
         updates=None,
-        packages=None,
-        validation=None,
         recipes=None,
         quarantine_unlinked: bool = False,
         loop_heartbeat: Callable[[], object] | None = None,
@@ -197,8 +195,6 @@ class Worker:
         self._housekeeping = housekeeping
         self._reconciliations = reconciliations
         self._updates = updates
-        self._packages = packages
-        self._validation = validation
         self._recipes = recipes
         self._quarantine_unlinked = quarantine_unlinked
         self._loop_heartbeat = loop_heartbeat
@@ -212,10 +208,6 @@ class Worker:
             sources.append(self._reconciliations.tick)
         if self._updates is not None:
             sources.append(self._updates.tick)
-        if self._packages is not None:
-            sources.append(self._packages.tick)
-        if self._validation is not None:
-            sources.append(self._validation.tick)
         if self._recipes is not None:
             sources.append(self._recipes.tick)
         sources.append(self._run_generic)
@@ -282,9 +274,6 @@ def assemble_production_worker(
 
     from .agent_reconciliation import AgentReconciliationService
     from .distributed_recovery import DistributedRecoveryCoordinator
-    from .package_rollout_worker import PackageRolloutWorker
-    from .package_rollouts import PackageRolloutOrchestrator
-    from .package_validation_runner import PackageValidationRunner
     from .recipe_operation_worker import RecipeOperationWorker
     from .recipe_routes import AtomicRecipeRoutePublisher, RecipeRouteService
     from .telemetry_maintenance import (
@@ -323,15 +312,6 @@ def assemble_production_worker(
         update_orchestrator,
         routes,
         authority,
-    )
-    package_rollouts = PackageRolloutWorker(
-        sessions,
-        PackageRolloutOrchestrator(sessions, agent_jobs, clock=clock),
-    )
-    package_validation = PackageValidationRunner(
-        sessions,
-        agent_jobs,
-        clock=clock,
     )
     reconciliations = AgentReconciliationService(
         sessions,
@@ -372,8 +352,6 @@ def assemble_production_worker(
         ),
         reconciliations=reconciliations,
         updates=updates,
-        packages=package_rollouts,
-        validation=package_validation,
         recipes=recipe_operations,
         quarantine_unlinked=True,
         loop_heartbeat=loop_heartbeat,

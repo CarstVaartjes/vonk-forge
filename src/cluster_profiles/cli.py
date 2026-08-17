@@ -28,8 +28,6 @@ _SENSITIVE_OPTION = re.compile(
     r"(?i)^--(?:[a-z0-9]+-)*(?:authorization|api-key|password|secret|token|private-key)(?:=|$)"
 )
 _PLATFORM_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
-_PACKAGE_CANDIDATE = re.compile(r"[0-9a-f]{64}\Z")
-_PACKAGE_IDENTIFIER = re.compile(r"[a-z0-9][a-z0-9._-]{0,126}\Z")
 _UPDATE_RELEASE = re.compile(
     r"platform/releases/"
     r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)/"
@@ -97,87 +95,6 @@ def _parser() -> argparse.ArgumentParser:
     update_status = update_commands.add_parser("status")
     update_status.add_argument("job_id")
     _add_json(update_status)
-    packages = admin_commands.add_parser("packages")
-    package_commands = packages.add_subparsers(
-        dest="packages_command", required=True, parser_class=_CliParser
-    )
-    package_candidates = package_commands.add_parser("candidates")
-    package_candidate_commands = package_candidates.add_subparsers(
-        dest="package_candidates_command", required=True, parser_class=_CliParser
-    )
-    package_list = package_candidate_commands.add_parser("list")
-    package_list.add_argument("--family")
-    package_list.add_argument("--cursor")
-    package_list.add_argument("--limit", type=int, default=20)
-    _add_json(package_list)
-    for name in ("get", "resolution", "compatibility"):
-        package_read = package_candidate_commands.add_parser(name)
-        package_read.add_argument("--candidate", required=True)
-        _add_json(package_read)
-    package_families = package_commands.add_parser("families")
-    package_families.add_argument("--cursor")
-    package_families.add_argument("--limit", type=int, default=20)
-    _add_json(package_families)
-    package_preview = package_commands.add_parser("promote-preview")
-    package_preview.add_argument("--candidate", required=True)
-    _add_json(package_preview)
-    package_validation_preview = package_commands.add_parser("validation-preview")
-    package_validation_preview.add_argument("--candidate", required=True)
-    _add_json(package_validation_preview)
-    package_validate = package_commands.add_parser("validate")
-    package_validate.add_argument("--candidate", required=True)
-    package_validate.add_argument("--plan-digest", required=True)
-    _add_json(package_validate)
-    package_validation_status = package_commands.add_parser("validation-status")
-    package_validation_status.add_argument("--validation", required=True)
-    _add_json(package_validation_status)
-    package_promote = package_commands.add_parser("promote")
-    package_promote.add_argument("--candidate", required=True)
-    package_promote.add_argument("--preview-digest", required=True)
-    _add_json(package_promote)
-    package_gc_preview = package_commands.add_parser("gc-preview")
-    _add_json(package_gc_preview)
-    package_gc = package_commands.add_parser("gc")
-    package_gc.add_argument("--plan-digest", required=True)
-    _add_json(package_gc)
-    deployments = admin_commands.add_parser("deployments")
-    deployment_commands = deployments.add_subparsers(
-        dest="deployments_command", required=True, parser_class=_CliParser
-    )
-    deployment_list = deployment_commands.add_parser("list")
-    deployment_list.add_argument("--cursor")
-    deployment_list.add_argument("--limit", type=int, default=20)
-    _add_json(deployment_list)
-    deployment_get = deployment_commands.add_parser("get")
-    deployment_get.add_argument("--deployment", required=True)
-    _add_json(deployment_get)
-    deployment_rollout_preview = deployment_commands.add_parser("rollout-preview")
-    deployment_rollout_preview.add_argument("--deployment", required=True)
-    _add_json(deployment_rollout_preview)
-    deployment_rollout = deployment_commands.add_parser("rollout")
-    deployment_rollout.add_argument("--deployment", required=True)
-    deployment_rollout.add_argument("--plan-digest", required=True)
-    _add_json(deployment_rollout)
-    deployment_status = deployment_commands.add_parser("status")
-    deployment_status.add_argument("--deployment", required=True)
-    deployment_status.add_argument("--rollout", required=True)
-    _add_json(deployment_status)
-    deployment_rollback_preview = deployment_commands.add_parser("rollback-preview")
-    deployment_rollback_preview.add_argument("--deployment", required=True)
-    deployment_rollback_preview.add_argument("--rollout", required=True)
-    _add_json(deployment_rollback_preview)
-    deployment_rollback = deployment_commands.add_parser("rollback")
-    deployment_rollback.add_argument("--deployment", required=True)
-    deployment_rollback.add_argument("--rollout", required=True)
-    deployment_rollback.add_argument("--plan-digest", required=True)
-    _add_json(deployment_rollback)
-    deployment_repair_preview = deployment_commands.add_parser("repair-preview")
-    deployment_repair_preview.add_argument("--deployment", required=True)
-    _add_json(deployment_repair_preview)
-    deployment_repair = deployment_commands.add_parser("repair")
-    deployment_repair.add_argument("--deployment", required=True)
-    deployment_repair.add_argument("--plan-digest", required=True)
-    _add_json(deployment_repair)
     proposal = admin_commands.add_parser("proposal")
     proposal.add_argument("--file", type=Path, required=True)
     _add_json(proposal)
@@ -301,79 +218,6 @@ def _admin(
         if rollout_id != args.job_id:
             raise ControlClientError("platform update rollout ID is invalid")
         return _model_payload(client.update_status(rollout_id))  # type: ignore[attr-defined]
-    if args.admin_command == "packages":
-        if args.packages_command == "candidates":
-            if args.package_candidates_command == "list":
-                if args.family is not None and _PACKAGE_IDENTIFIER.fullmatch(args.family) is None:
-                    raise ControlClientError("package family ID is invalid")
-                return _admin_payload(client.package_candidates(args.family, cursor=args.cursor, limit=args.limit))  # type: ignore[attr-defined]
-            if _PACKAGE_CANDIDATE.fullmatch(args.candidate) is None:
-                raise ControlClientError("package candidate ID is invalid")
-            method = {
-                "get": client.package_candidate,
-                "resolution": client.package_resolution,
-                "compatibility": client.package_compatibility,
-            }[args.package_candidates_command]
-            return _admin_payload(method(args.candidate))
-        if args.packages_command == "families":
-            return _admin_payload(client.package_families(cursor=args.cursor, limit=args.limit))  # type: ignore[attr-defined]
-        if args.packages_command == "validation-status":
-            try:
-                validation_id = str(uuid.UUID(args.validation))
-            except ValueError:
-                raise ControlClientError("package validation ID is invalid") from None
-            if validation_id != args.validation:
-                raise ControlClientError("package validation ID is invalid")
-            return _model_payload(client.package_validation(validation_id))  # type: ignore[attr-defined]
-        if args.packages_command in {"gc-preview", "gc"}:
-            if args.packages_command == "gc-preview":
-                return _model_payload(client.preview_package_gc())  # type: ignore[attr-defined]
-            if _PLATFORM_DIGEST.fullmatch(args.plan_digest) is None:
-                raise ControlClientError("package garbage collection plan digest is invalid")
-            return _model_payload(client.apply_package_gc(args.plan_digest, request_id=request_id_factory()))  # type: ignore[attr-defined]
-        if _PACKAGE_CANDIDATE.fullmatch(args.candidate) is None:
-            raise ControlClientError("package candidate ID is invalid")
-        if args.packages_command == "promote-preview":
-            return _model_payload(client.preview_package_promotion(args.candidate))  # type: ignore[attr-defined]
-        if args.packages_command == "validation-preview":
-            return _model_payload(client.preview_package_validation(args.candidate))  # type: ignore[attr-defined]
-        if args.packages_command == "validate":
-            if _PLATFORM_DIGEST.fullmatch(args.plan_digest) is None:
-                raise ControlClientError("package validation plan digest is invalid")
-            return _model_payload(client.validate_package(args.candidate, args.plan_digest, request_id=request_id_factory()))  # type: ignore[attr-defined]
-        if _PLATFORM_DIGEST.fullmatch(args.preview_digest) is None:
-            raise ControlClientError("package preview digest is invalid")
-        return _model_payload(client.promote_package(args.candidate, args.preview_digest, request_id=request_id_factory()))  # type: ignore[attr-defined]
-    if args.admin_command == "deployments":
-        if args.deployments_command == "list":
-            return _admin_payload(client.package_deployments(cursor=args.cursor, limit=args.limit))  # type: ignore[attr-defined]
-        if _PACKAGE_IDENTIFIER.fullmatch(args.deployment) is None:
-            raise ControlClientError("package deployment ID is invalid")
-        if args.deployments_command == "get":
-            return _admin_payload(client.package_deployment(args.deployment))  # type: ignore[attr-defined]
-        if args.deployments_command in {"status", "rollback-preview", "rollback"}:
-            try:
-                rollout_id = str(uuid.UUID(args.rollout))
-            except ValueError:
-                raise ControlClientError("package rollout ID is invalid") from None
-            if rollout_id != args.rollout:
-                raise ControlClientError("package rollout ID is invalid")
-            if args.deployments_command == "status":
-                return _model_payload(client.package_rollout(args.deployment, rollout_id))  # type: ignore[attr-defined]
-            if args.deployments_command == "rollback-preview":
-                return _model_payload(client.preview_deployment_rollback(args.deployment, rollout_id))  # type: ignore[attr-defined]
-            if _PLATFORM_DIGEST.fullmatch(args.plan_digest) is None:
-                raise ControlClientError("package rollback plan digest is invalid")
-            return _model_payload(client.rollback_deployment(args.deployment, rollout_id, args.plan_digest, request_id=request_id_factory()))  # type: ignore[attr-defined]
-        if args.deployments_command == "rollout-preview":
-            return _model_payload(client.preview_deployment_rollout(args.deployment))  # type: ignore[attr-defined]
-        if args.deployments_command == "repair-preview":
-            return _model_payload(client.preview_deployment_repair(args.deployment))  # type: ignore[attr-defined]
-        if _PLATFORM_DIGEST.fullmatch(args.plan_digest) is None:
-            raise ControlClientError("package deployment plan digest is invalid")
-        if args.deployments_command == "repair":
-            return _model_payload(client.repair_deployment(args.deployment, args.plan_digest, request_id=request_id_factory()))  # type: ignore[attr-defined]
-        return _admin_payload(client.rollout_deployment(args.deployment, args.plan_digest, request_id=request_id_factory()))  # type: ignore[attr-defined]
     if args.admin_command == "proposal":
         path = args.file
         if path.is_symlink() or not path.is_file() or path.stat().st_size > 1_048_576:

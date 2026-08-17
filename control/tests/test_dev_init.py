@@ -28,7 +28,7 @@ def test_pinned_database_revision_matches_the_fresh_development_cohort() -> None
         WORKER_IMAGE,
     )
 
-    assert generation.database_revision == "0027_execution_harness_catalog"
+    assert generation.database_revision == "0001_fleet_library_baseline"
     assert generation.database_revision == dev_cohort.DEVELOPMENT_DATABASE_REVISION
 
 

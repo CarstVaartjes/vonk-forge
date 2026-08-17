@@ -6,7 +6,7 @@ import math
 import re
 import threading
 from collections import defaultdict
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from datetime import UTC, datetime
 
 from sqlalchemy import func, select
@@ -18,10 +18,6 @@ from .models import (
     AgentOperation,
     AgentOperationAttempt,
     Job,
-    PackageCandidate,
-    PackageRollout,
-    PackageRolloutNode,
-    PackageValidationRun,
 )
 
 _NODE = re.compile(r"spk_[0-9a-f]{32}")
@@ -40,51 +36,11 @@ _AGENT_OPERATIONS = frozenset({
     "workload.verify",
 })
 _VERSION_BUCKETS = frozenset({"supported", "old", "new", "incompatible"})
-_PACKAGE_CANDIDATE_STATES = frozenset({
-    "discovered", "resolving", "resolved", "unsupported", "quarantined", "rejected",
-})
-_PACKAGE_VALIDATION_STATES = frozenset({
-    "planned", "running", "passed", "failed", "retryable", "rejected", "cancelled",
-})
-_PACKAGE_ROLLOUT_STATES = frozenset({
-    "planned", "preparing", "activating", "health-checking", "soaking", "paused",
-    "rolling-back", "completed", "failed", "rolled-back", "cancelled", "waiting-for-operator",
-})
-_PACKAGE_NODE_STATES = frozenset({
-    "offline-pending", "pending", "preparing", "prepared", "activating", "health-checking",
-    "accepted", "failed", "rolling-back", "rolled-back", "cancelled",
-})
-_PACKAGE_PROVIDERS = frozenset({"git", "oci", "huggingface", "python-index", "http-index"})
-_PACKAGE_BACKENDS = frozenset({"artifact", "health", "inference", "compatibility"})
-_PACKAGE_PHASES = frozenset({
-    "acquisition", "resolution", "validation", "canary", "stable", "rollback", "offline-pending",
-})
-_PACKAGE_REASONS = {
-    "canary-failed": "canary-failure",
-    "canary-failure": "canary-failure",
-    "capacity-rejected": "capacity-rejected",
-    "no-compatible-nodes": "capacity-rejected",
-    "trust-failure": "trust-failure",
-    "trust_or_provenance_failure": "trust-failure",
-    "rollback-failed": "rollback-failure",
-    "rollback-failure": "rollback-failure",
-    "stuck-acquisition": "stuck-acquisition",
-}
 _BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0)
 
 
 def _aware(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
-
-
-def _package_reason(value: object) -> str:
-    if not isinstance(value, str):
-        return "none"
-    return _PACKAGE_REASONS.get(value, "other")
-
-
-def _package_phase(value: object, *, fallback: str = "other") -> str:
-    return value if isinstance(value, str) and value in _PACKAGE_PHASES else fallback
 
 
 def protocol_version_bucket(
@@ -119,10 +75,6 @@ class MetricsRegistry:
         self._agent_operations: dict[tuple[str, str], int] = {}
         self._agent_leases: dict[tuple[str, str], float] = {}
         self._agent_rollouts: dict[str, int] = {}
-        self._package_candidates: dict[tuple[str, str], int] = {}
-        self._package_validations: dict[tuple[str, str, str], int] = {}
-        self._package_rollouts: dict[tuple[str, str, str], int] = {}
-        self._package_rollout_nodes: dict[tuple[str, str], int] = {}
 
     @staticmethod
     def _number(value: float, field: str) -> float:
@@ -221,47 +173,6 @@ class MetricsRegistry:
             self._agent_leases = safe_leases
             self._agent_rollouts = dict(safe_rollouts)
 
-    def _replace_package_snapshot(
-        self,
-        *,
-        candidates: dict[tuple[str, str], int],
-        validations: dict[tuple[str, str, str], int],
-        rollouts: dict[tuple[str, str, str], int],
-        rollout_nodes: dict[tuple[str, str], int],
-    ) -> None:
-        """Replace package aggregates after collapsing every dynamic value."""
-        safe_candidates: dict[tuple[str, str], int] = defaultdict(int)
-        for (provider, state), count in candidates.items():
-            safe_candidates[(
-                provider if provider in _PACKAGE_PROVIDERS else "other",
-                state if state in _PACKAGE_CANDIDATE_STATES else "other",
-            )] += int(self._number(count, "package candidate count"))
-        safe_validations: dict[tuple[str, str, str], int] = defaultdict(int)
-        for (backend, state, reason), count in validations.items():
-            safe_validations[(
-                backend if backend in _PACKAGE_BACKENDS else "other",
-                state if state in _PACKAGE_VALIDATION_STATES else "other",
-                _package_reason(reason),
-            )] += int(self._number(count, "package validation count"))
-        safe_rollouts: dict[tuple[str, str, str], int] = defaultdict(int)
-        for (state, phase, reason), count in rollouts.items():
-            safe_rollouts[(
-                state if state in _PACKAGE_ROLLOUT_STATES else "other",
-                _package_phase(phase),
-                _package_reason(reason),
-            )] += int(self._number(count, "package rollout count"))
-        safe_nodes: dict[tuple[str, str], int] = defaultdict(int)
-        for (phase, state), count in rollout_nodes.items():
-            safe_nodes[(
-                _package_phase(phase),
-                state if state in _PACKAGE_NODE_STATES else "other",
-            )] += int(self._number(count, "package rollout node count"))
-        with self._lock:
-            self._package_candidates = dict(safe_candidates)
-            self._package_validations = dict(safe_validations)
-            self._package_rollouts = dict(safe_rollouts)
-            self._package_rollout_nodes = dict(safe_nodes)
-
     def render(self) -> str:
         with self._lock:
             nodes, jobs = dict(self._nodes), dict(self._jobs)
@@ -273,10 +184,6 @@ class MetricsRegistry:
             agent_operations = dict(self._agent_operations)
             agent_leases = dict(self._agent_leases)
             agent_rollouts = dict(self._agent_rollouts)
-            package_candidates = dict(self._package_candidates)
-            package_validations = dict(self._package_validations)
-            package_rollouts = dict(self._package_rollouts)
-            package_rollout_nodes = dict(self._package_rollout_nodes)
         lines = [
             "# HELP vonk_route_state Current inference route state.",
             "# TYPE vonk_route_state gauge",
@@ -346,30 +253,6 @@ class MetricsRegistry:
         ))
         for state, count in sorted(agent_rollouts.items()):
             lines.append(f'vonk_agent_rollouts{{state="{state}"}} {count}')
-        lines.extend((
-            "# HELP vonk_package_candidates Workload package candidates by bounded provider and state.",
-            "# TYPE vonk_package_candidates gauge",
-        ))
-        for (provider, state), count in sorted(package_candidates.items()):
-            lines.append(f'vonk_package_candidates{{provider="{provider}",state="{state}"}} {count}')
-        lines.extend((
-            "# HELP vonk_package_validations Workload package validation runs by bounded backend, state, and reason.",
-            "# TYPE vonk_package_validations gauge",
-        ))
-        for (backend, state, reason), count in sorted(package_validations.items()):
-            lines.append(f'vonk_package_validations{{backend="{backend}",reason="{reason}",state="{state}"}} {count}')
-        lines.extend((
-            "# HELP vonk_package_rollouts Workload package rollouts by bounded state, phase, and reason.",
-            "# TYPE vonk_package_rollouts gauge",
-        ))
-        for (state, phase, reason), count in sorted(package_rollouts.items()):
-            lines.append(f'vonk_package_rollouts{{phase="{phase}",reason="{reason}",state="{state}"}} {count}')
-        lines.extend((
-            "# HELP vonk_package_rollout_nodes Workload rollout node progress by bounded phase and state.",
-            "# TYPE vonk_package_rollout_nodes gauge",
-        ))
-        for (phase, state), count in sorted(package_rollout_nodes.items()):
-            lines.append(f'vonk_package_rollout_nodes{{phase="{phase}",state="{state}"}} {count}')
         lines.extend(("# HELP vonk_api_requests_total API responses by method and status class.", "# TYPE vonk_api_requests_total counter"))
         for (method, status_class), count in sorted(api_counts.items()):
             labels = f'method="{method}",status_class="{status_class}"'
@@ -454,38 +337,6 @@ class OperationalMetricsCollector:
                     .order_by(Job.state)
                 )
             )
-            package_candidates = list(
-                session.execute(
-                    select(PackageCandidate.source_provider, PackageCandidate.state)
-                    .order_by(PackageCandidate.source_provider, PackageCandidate.state)
-                )
-            )
-            package_validations = list(
-                session.execute(
-                    select(
-                        PackageValidationRun.validation_kind,
-                        PackageValidationRun.state,
-                        PackageValidationRun.reason_code,
-                    ).order_by(
-                        PackageValidationRun.validation_kind,
-                        PackageValidationRun.state,
-                        PackageValidationRun.reason_code,
-                    )
-                )
-            )
-            package_rollouts = list(
-                session.execute(
-                    select(PackageRollout.state, PackageRollout.progress)
-                    .order_by(PackageRollout.state, PackageRollout.id)
-                )
-            )
-            package_rollout_nodes = list(
-                session.execute(
-                    select(PackageRolloutNode.state)
-                    .order_by(PackageRolloutNode.state, PackageRolloutNode.id)
-                )
-            )
-
         active_certificates: dict[str, AgentCertificate] = {}
         for certificate in certificates:
             active_certificates.setdefault(certificate.node_id, certificate)
@@ -513,30 +364,9 @@ class OperationalMetricsCollector:
             age = max(0.0, (now - _aware(updated_at)).total_seconds())
             leases[key] = max(leases.get(key, 0.0), age)
         rollouts = {state: int(count) for state, count in rollout_rows}
-        candidate_counts: dict[tuple[str, str], int] = defaultdict(int)
-        for provider, state in package_candidates:
-            candidate_counts[(provider, state)] += 1
-        validation_counts: dict[tuple[str, str, str], int] = defaultdict(int)
-        for backend, state, reason in package_validations:
-            validation_counts[(backend, state, _package_reason(reason))] += 1
-        package_rollout_counts: dict[tuple[str, str, str], int] = defaultdict(int)
-        for state, progress in package_rollouts:
-            detail = progress if isinstance(progress, Mapping) else {}
-            phase = _package_phase(detail.get("phase"), fallback="other")
-            reason = _package_reason(detail.get("reason_code"))
-            package_rollout_counts[(state, phase, reason)] += 1
-        package_node_counts: dict[tuple[str, str], int] = defaultdict(int)
-        for (state,) in package_rollout_nodes:
-            package_node_counts[(_package_phase(state), state)] += 1
         self._registry._replace_agent_snapshot(
             nodes=nodes,
             operations=operations,
             leases=leases,
             rollouts=rollouts,
-        )
-        self._registry._replace_package_snapshot(
-            candidates=dict(candidate_counts),
-            validations=dict(validation_counts),
-            rollouts=dict(package_rollout_counts),
-            rollout_nodes=dict(package_node_counts),
         )

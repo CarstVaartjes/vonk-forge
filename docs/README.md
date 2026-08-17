@@ -68,7 +68,6 @@ Normal administration uses the stable private Tailscale HTTPS
   freshness, resolutions, retention, and troubleshooting
 - [Node onboarding and health](runbooks/node-onboarding.md)
 - [Recipe operations](runbooks/model-switching.md)
-- [Generic workload package operations](runbooks/workload-packages.md)
 - [Global catalog import and publication](runbooks/global-catalog.md)
 - [Vonk Forge agent installation](operations/install-vonk-agent.md)
 - [Accepted development system evidence](audits/2026-08-15-development-system-acceptance.md)

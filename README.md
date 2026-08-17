@@ -57,9 +57,6 @@ not treated as production-ready until its evidence gates are accepted.
   requiring a community container registry.
 - Build approved recipe source bundles for immutable execution-harness
   revisions, including the checked-in DeepSeek Mia and DS4 recipes.
-- Publish and operate generic, signed workload packages independently from
-  Vonk Forge platform releases. Recipe selection is owned by Catalog and
-  Library, not the package plane.
 - Review and apply NAS-to-GPU node platform skew updates through the Admin web UX
   or `vonkctl`, with explicit signed fan-out over the outbound agent channel.
 
@@ -166,7 +163,7 @@ Recipe maintenance is performed in the authenticated browser at `/library` and
 `/catalog`: Library shows current model-version families and accepted recipe
 revisions, while Catalog handles creating/importing drafts, resolving immutable
 revisions, attaching build evidence, and mapping a recipe to a cluster. Routine
-CLI commands only read server projections or invoke current package/update
+CLI commands only read server projections or invoke current platform-update
 operations; they never fall back to SSH. Production work is persisted in
 PostgreSQL, claimed outbound by each GPU node agent over mTLS, and reconciled by
 the repository-less worker.
@@ -176,11 +173,11 @@ the repository-less worker.
 - `bin/` — repository-local command launchers
 - `src/cluster_profiles/` — current control client, typed contracts, node tooling, and CLI
 - `adapters/` — model-specific runtime definitions and lifecycle tooling
-- `config/` — platform contracts, execution harnesses, runtime fixtures, and
-  package authority; reviewed model recipes and target research live in the
-  separate standard recipe library
+- `config/` — platform contracts, execution harnesses, and runtime fixtures;
+  reviewed model recipes and target research live in the separate standard
+  recipe library
 - `nodes/` — node bootstrap, health, fabric, and recovery utilities
-- `schemas/` — JSON contracts for profiles, workloads, and health evidence
+- `schemas/` — JSON contracts for Fleet, Library, runtime, and health evidence
 - `tests/` — Python and shell test suites
 - `docs/` — architecture, security, testing, and operator runbooks
 
@@ -189,7 +186,6 @@ the repository-less worker.
 - [Documentation index](docs/README.md)
 - [Fresh development installation](docs/runbooks/fresh-development-install.md)
 - [Architecture overview](docs/architecture-overview.md)
-- [Recipe catalog and WorkloadRun operations](docs/runbooks/workload-packages.md)
 - [NAS pull-only Compose deployment](deploy/compose/README.md)
 - [Development NAS installation and runtime secrets](docs/runbooks/development-nas-installation.md)
 - [Source-first recipe containers and local builds](deploy/compose/README.md#recipe-containers-are-source-first)
@@ -206,9 +202,6 @@ the repository-less worker.
 - [GPU node agent PKI and recovery runbook](docs/runbooks/agent-pki.md)
 - [Tailnet-only NAS ingress runbook](docs/runbooks/tailscale.md)
 - [Hermes Agent runbook](docs/runbooks/hermes-agent.md)
-- [Workload package operations](docs/runbooks/workload-packages.md) — generic
-  family/release publication, rollout, rollback, repair, GC, and first-release
-  evidence
 - [Platform update runbook](docs/runbooks/platform-update.md) — NAS/GPU node
   platform skew and recovery boundaries
 

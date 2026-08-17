@@ -21,7 +21,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-EXPECTED_REVISION = "0027_execution_harness_catalog"
+EXPECTED_REVISION = "0001_fleet_library_baseline"
 EXPECTED_PROJECT_NAME = "vonk-forge"
 EXPECTED_SERVICES = {
     "postgres",
@@ -1098,7 +1098,7 @@ def main() -> int:
         print(f"development recipe-domain reset failed: {error}", file=sys.stderr)
         return 1
     print(
-        "Fresh reset complete at 0027_execution_harness_catalog. Recreate the "
+        "Fresh reset complete at 0001_fleet_library_baseline. Recreate the "
         "development administrator, establish a fresh browser session, and "
         "re-enroll every Spark before acceptance."
     )

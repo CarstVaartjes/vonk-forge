@@ -522,7 +522,7 @@ is a different operation and must use the reviewed bounded helper in
 [Execution harness operations](../operators/execution-harnesses.md#clean-development-reset).
 It validates the exact development Compose graph before mutation, drains runs
 and installations through public APIs, removes every project volume, verifies
-fresh schema head `0027_execution_harness_catalog`, and verifies only the eight
+fresh schema head `0001_fleet_library_baseline`, and verifies only the eight
 supported v1 harness seeds. It is forbidden for production or an unknown
 Compose graph.
 

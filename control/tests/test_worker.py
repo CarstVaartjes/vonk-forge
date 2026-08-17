@@ -202,38 +202,6 @@ def test_worker_round_robins_reconciliation_update_and_generic_without_starvatio
     ]
 
 
-def test_worker_round_robins_package_rollouts_with_other_durable_sources(tmp_path) -> None:
-    jobs = _service(tmp_path)
-    events: list[str] = []
-
-    class Source:
-        def __init__(self, name: str) -> None:
-            self.name = name
-
-        def tick(self) -> bool:
-            events.append(self.name)
-            return True
-
-    worker = Worker(
-        jobs,
-        "worker-1",
-        {},
-        reconciliations=Source("reconciliation"),
-        updates=Source("update"),
-        packages=Source("package"),
-    )
-
-    assert [worker.run_once() for _ in range(6)] == [True] * 6
-    assert events == [
-        "reconciliation",
-        "update",
-        "package",
-        "reconciliation",
-        "update",
-        "package",
-    ]
-
-
 def test_telemetry_maintenance_cadence_is_fixed_aware_and_does_not_burst() -> None:
     current = datetime(2026, 8, 15, 12, tzinfo=UTC)
     calls: list[datetime] = []

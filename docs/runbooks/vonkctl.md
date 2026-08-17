@@ -1,9 +1,9 @@
 # `vonkctl` control API client
 
 `vonkctl` is the routine command-line client for the authenticated control API.
-It reads server projections and invokes current package, deployment, and update
-operations. It does not read a local profile controller, construct SSH
-workflows, or fall back to direct node access.
+It reads server projections and invokes current Fleet, Catalog, Library, and
+platform-update operations. It does not read a local profile controller,
+construct SSH workflows, or fall back to direct node access.
 
 Configure an HTTPS origin and a restrictive bearer-token file:
 
@@ -29,12 +29,12 @@ immutable revision, attach build evidence, and map it to a cluster. The
 canonical JSON editor is an advanced section of that same workflow, not a
 second authority.
 
-Package and deployment operations are available under `vonkctl admin packages`
-and `vonkctl admin deployments`; platform updates are under
-`vonkctl admin updates`. Every mutating command consumes a server-issued digest
-or plan and returns a durable job or operation identity. Errors are bounded and
-redacted. Credentials belong in the token file or runtime secret store, never
-in recipe documents or command arguments.
+Platform updates are available under `vonkctl admin updates`; recipe placement
+and revision changes are driven through the retained Catalog and Library
+workflows. Every mutating command consumes a server-issued digest or plan and
+returns a durable job or operation identity. Errors are bounded and redacted.
+Credentials belong in the token file or runtime secret store, never in recipe
+documents or command arguments.
 
 The generated client boundary is checked in. After changing control routes,
 run `scripts/generate-control-clients` and verify that the OpenAPI and generated

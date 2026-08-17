@@ -183,14 +183,12 @@ def test_generator_is_idempotent_and_admin_schema_is_secret_free() -> None:
         }
     )
 
-    assert {
-        "/api/v1/packages/families",
-        "/api/v1/packages/candidates",
-        "/api/v1/packages/candidates/{candidate_id}/promotion-preview",
-        "/api/v1/packages/candidates/{candidate_id}/promote",
-        "/api/v1/deployments/{deployment_id}/rollout-preview",
-        "/api/v1/deployments/{deployment_id}/rollouts",
-    } <= set(schema["paths"])
+    legacy_prefixes = ("/api/v1/" + "packages", "/api/v1/" + "deployments")
+    assert not any(
+        path.startswith(prefix)
+        for path in schema["paths"]
+        for prefix in legacy_prefixes
+    )
 
     by_id = {operation["operationId"]: operation for operation in operation_list}
     for operation_id in (

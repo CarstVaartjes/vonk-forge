@@ -131,6 +131,19 @@ def test_preselection_is_a_distinct_app_factory() -> None:
     assert create_preselection_app is not create_app
 
 
+def test_legacy_package_and_deployment_routes_are_not_registered() -> None:
+    client, _, _, _ = _client("administrator")
+    package_prefix = "/api/v1/" + "packages/"
+    deployment_prefix = "/api/v1/" + "deployments"
+    legacy_paths = {
+        route.path
+        for route in client.app.routes
+        if route.path.startswith(package_prefix)
+        or route.path.startswith(deployment_prefix)
+    }
+    assert legacy_paths == set()
+
+
 def test_viewer_cannot_enqueue_mutation() -> None:
     client, headers, _, _ = _client("viewer")
     response = client.post(

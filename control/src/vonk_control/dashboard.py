@@ -15,31 +15,7 @@ from .models import (
     AgentNodeProfile,
     NodeInventorySnapshot,
     Observation,
-    PackageCandidate,
-    PackageRollout,
-    PackageValidationRun,
 )
-
-_PACKAGE_CANDIDATE_STATES = frozenset({
-    "discovered", "resolving", "resolved", "unsupported", "quarantined", "rejected",
-})
-_PACKAGE_VALIDATION_STATES = frozenset({
-    "planned", "running", "passed", "failed", "retryable", "rejected", "cancelled",
-})
-_PACKAGE_ROLLOUT_STATES = frozenset({
-    "planned", "preparing", "activating", "health-checking", "soaking", "paused",
-    "rolling-back", "completed", "failed", "rolled-back", "cancelled", "waiting-for-operator",
-})
-_PACKAGE_ALERTS = {
-    "canary-failed": "canary-failure",
-    "canary-failure": "canary-failure",
-    "trust_or_provenance_failure": "trust-failure",
-    "trust-failure": "trust-failure",
-    "no-compatible-nodes": "capacity-rejected",
-    "capacity-rejected": "capacity-rejected",
-    "rollback-failed": "rollback-failure",
-    "rollback-failure": "rollback-failure",
-}
 
 
 class DashboardService:
@@ -284,56 +260,3 @@ class DashboardService:
                 ),
             })
         return {"commit": commit, "nodes": nodes}
-
-    def package_summary(self) -> dict[str, dict[str, int]]:
-        """Return content-free package counts and operator alert buckets.
-
-        Package family, release, source, node, and evidence identifiers are
-        intentionally absent: this is a fleet-wide dashboard projection, not
-        a substitute for the authenticated package detail API.
-        """
-        with self._sessions() as session:
-            candidates = list(session.execute(select(PackageCandidate.state)))
-            validations = list(
-                session.execute(
-                    select(PackageValidationRun.state, PackageValidationRun.reason_code)
-                )
-            )
-            rollouts = list(
-                session.execute(select(PackageRollout.state, PackageRollout.progress))
-            )
-        candidate_counts: dict[str, int] = {}
-        validation_counts: dict[str, int] = {}
-        rollout_counts: dict[str, int] = {}
-        alerts: dict[str, int] = {}
-
-        def increment(counts: dict[str, int], value: str) -> None:
-            counts[value] = counts.get(value, 0) + 1
-
-        def alert(value: object) -> None:
-            if isinstance(value, str) and value in _PACKAGE_ALERTS:
-                increment(alerts, _PACKAGE_ALERTS[value])
-
-        for (state,) in candidates:
-            safe_state = state if state in _PACKAGE_CANDIDATE_STATES else "other"
-            increment(candidate_counts, safe_state)
-            if safe_state in {"discovered", "resolving"}:
-                increment(alerts, "stuck-acquisition")
-        for state, reason in validations:
-            increment(
-                validation_counts,
-                state if state in _PACKAGE_VALIDATION_STATES else "other",
-            )
-            alert(reason)
-        for state, progress in rollouts:
-            increment(rollout_counts, state if state in _PACKAGE_ROLLOUT_STATES else "other")
-            detail = progress if isinstance(progress, Mapping) else {}
-            alert(detail.get("reason_code"))
-            if detail.get("phase") == "acquisition" and state in {"planned", "preparing"}:
-                increment(alerts, "stuck-acquisition")
-        return {
-            "candidates": candidate_counts,
-            "validations": validation_counts,
-            "rollouts": rollout_counts,
-            "alerts": alerts,
-        }

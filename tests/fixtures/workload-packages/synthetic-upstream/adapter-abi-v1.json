@@ -1,8 +1,0 @@
-{
-  "content": "#!/bin/sh\n# synthetic adapter ABI v1\n",
-  "name": "opaque-adapter-v1",
-  "source": {
-    "provider": "https",
-    "url": "https://synthetic.invalid/adapters/opaque-v1"
-  }
-}

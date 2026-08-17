@@ -306,11 +306,8 @@ git commit -m "feat: expose local recipe catalog API"
 **Files:**
 - Create: `control/migrations/versions/0016_recipe_deployment_authority.py`
 - Modify: `control/src/vonk_control/models.py`
-- Modify: `control/src/vonk_control/package_rollouts.py`
-- Modify: `control/src/vonk_control/package_services.py`
 - Modify: `control/src/vonk_control/agent_reconciliation.py`
-- Create: `control/tests/test_recipe_deployment_authority.py`
-- Modify: `control/tests/test_workload_package_migration.py`
+- Create: deployment authority tests for the retained recipe placement path
 
 **Interfaces:**
 - Produces rollout identity: `recipe_revision_id + placement_digest + plan_digest`

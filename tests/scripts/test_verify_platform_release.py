@@ -606,26 +606,6 @@ def test_workload_failure_helper_emits_report_accepted_by_release_verifier(
     assert namespace["_failure_matrix_valid"](report)
 
 
-def test_unknown_workload_acceptance_helper_runs_real_e2e_and_emits_canonical_report(
-    tmp_path: Path,
-) -> None:
-    helper = ROOT / "scripts/accept-workload-packages"
-    output = tmp_path / "workload-package-acceptance.json"
-    completed = subprocess.run(
-        [helper, "--mode", "simulated", "--output", str(output), "--json"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert completed.returncode == 0, completed.stderr
-    report = json.loads(output.read_text())
-    namespace = runpy.run_path(str(SCRIPT))
-    assert namespace["_workload_acceptance_valid"](report)
-    assert report["test_command"]
-    assert "test_unknown_workload_package_e2e.py" in report["test_command"]
-    assert report["physical_nodes_exercised"] is False
-
-
 def test_physical_update_evidence_must_be_complete_and_content_addressed(
     tmp_path: Path,
 ) -> None:

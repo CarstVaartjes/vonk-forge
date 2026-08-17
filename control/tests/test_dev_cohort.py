@@ -35,7 +35,7 @@ def test_development_database_revision_is_the_exact_single_alembic_head() -> Non
     config.set_main_option("script_location", str(control_root / "migrations"))
     script = ScriptDirectory.from_config(config)
 
-    assert script.get_heads() == ["0027_execution_harness_catalog"]
+    assert script.get_heads() == ["0001_fleet_library_baseline"]
     assert dev_cohort.DEVELOPMENT_DATABASE_REVISION == script.get_heads()[0]
 
 
@@ -48,7 +48,7 @@ def _canonical_for_expected(value: object) -> bytes:
 def _expected_build_digest(source_commit: str = COMMIT) -> str:
     common = {
         "channel": "development",
-        "database_revision": "0027_execution_harness_catalog",
+        "database_revision": "0001_fleet_library_baseline",
         "platform_version": "0.1.0",
         "protocol_maximum": 3,
         "protocol_minimum": 1,
@@ -67,7 +67,7 @@ def _identity_document(**overrides: object) -> dict[str, object]:
         "channel": "development",
         "platform_version": "0.1.0",
         "build_digest": _expected_build_digest(),
-        "database_revision": "0027_execution_harness_catalog",
+        "database_revision": "0001_fleet_library_baseline",
         "protocol_minimum": 1,
         "protocol_maximum": 3,
         "image_role": "api",
@@ -98,7 +98,7 @@ def test_identity_parser_accepts_only_the_canonical_development_identity() -> No
         channel="development",
         platform_version="0.1.0",
         build_digest=_expected_build_digest(),
-        database_revision="0027_execution_harness_catalog",
+        database_revision="0001_fleet_library_baseline",
         protocol_minimum=1,
         protocol_maximum=3,
         image_role="api",
@@ -117,7 +117,7 @@ def test_identity_parser_accepts_only_the_canonical_development_identity() -> No
             + b"a" * 64
             + b'","build_digest":"sha256:'
             + b"b" * 64
-            + b'","channel":"development","database_revision":"0027_execution_harness_catalog",'
+            + b'","channel":"development","database_revision":"0001_fleet_library_baseline",'
             + b'"image_role":"api","platform_version":"0.1.0","protocol_maximum":3,'
             + b'"protocol_minimum":1,"schema_version":1,"source_commit":"'
             + COMMIT.encode("ascii")
@@ -137,7 +137,7 @@ def test_identity_parser_accepts_only_the_canonical_development_identity() -> No
             + COMMIT.encode("ascii")
             + b'","channel":"development","platform_version":"0.1.0","build_digest":"sha256:'
             + b"a" * 64
-            + b'","database_revision":"0027_execution_harness_catalog","protocol_minimum":1,'
+            + b'","database_revision":"0001_fleet_library_baseline","protocol_minimum":1,'
             + b'"protocol_maximum":3,"image_role":"api"}\n',
         ),
         ("oversized", b" " * 17000),
@@ -208,7 +208,7 @@ def test_build_identity_uses_fixed_development_values_and_one_cohort_digest() ->
     assert api.source_commit == COMMIT
     assert api.channel == "development"
     assert api.platform_version == "0.1.0"
-    assert api.database_revision == "0027_execution_harness_catalog"
+    assert api.database_revision == "0001_fleet_library_baseline"
     assert api.protocol_minimum == 1
     assert api.protocol_maximum == 3
     assert api.image_role == "api"
@@ -303,7 +303,7 @@ def test_matching_identities_produce_one_canonical_selected_cohort_document() ->
     expected_common = {
         "build_digest": api.build_digest,
         "channel": "development",
-        "database_revision": "0027_execution_harness_catalog",
+        "database_revision": "0001_fleet_library_baseline",
         "platform_version": "0.1.0",
         "protocol_maximum": 3,
         "protocol_minimum": 1,
@@ -340,7 +340,7 @@ def test_matching_identities_produce_one_canonical_selected_cohort_document() ->
         source_commit=COMMIT,
         channel="development",
         platform_version="0.1.0",
-        database_revision="0027_execution_harness_catalog",
+        database_revision="0001_fleet_library_baseline",
         protocol_minimum=1,
         protocol_maximum=3,
         build_digest=api.build_digest,

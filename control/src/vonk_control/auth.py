@@ -43,50 +43,6 @@ MUTATION_ROLES = {
     ("POST", "/api/v1/updates/{rollout_id}/approve-resume"): frozenset(
         {"administrator"}
     ),
-    # Workload-package mutations use the same explicit role matrix as the
-    # legacy control-plane mutations.  Preview operations are still mutations
-    # of the authorization/audit surface and therefore must be represented.
-    (
-        "POST",
-        "/api/v1/packages/candidates/{candidate_id}/validation-preview",
-    ): frozenset({"operator", "administrator"}),
-    ("POST", "/api/v1/packages/candidates/{candidate_id}/validate"): frozenset(
-        {"operator", "administrator"}
-    ),
-    ("POST", "/api/v1/packages/candidates/{candidate_id}/promotion-preview"): frozenset(
-        {"administrator"}
-    ),
-    ("POST", "/api/v1/packages/candidates/{candidate_id}/promote"): frozenset(
-        {"administrator"}
-    ),
-    ("POST", "/api/v1/deployments/{deployment_id}/rollout-preview"): frozenset(
-        {"operator", "administrator"}
-    ),
-    ("POST", "/api/v1/deployments/{deployment_id}/rollouts"): frozenset(
-        {"operator", "administrator"}
-    ),
-    (
-        "POST",
-        "/api/v1/deployments/{deployment_id}/rollouts/{rollout_id}/rollback-preview",
-    ): frozenset({"administrator"}),
-    (
-        "POST",
-        "/api/v1/deployments/{deployment_id}/rollouts/{rollout_id}/rollback",
-    ): frozenset({"administrator"}),
-    ("POST", "/api/v1/deployments/{deployment_id}/repair-preview"): frozenset(
-        {"operator", "administrator"}
-    ),
-    ("POST", "/api/v1/deployments/{deployment_id}/repair"): frozenset(
-        {"operator", "administrator"}
-    ),
-    ("POST", "/api/v1/packages/gc-preview"): frozenset({"administrator"}),
-    ("POST", "/api/v1/packages/gc"): frozenset({"administrator"}),
-    ("POST", "/api/v1/packages/inventory/remove-preview"): frozenset(
-        {"operator", "administrator"}
-    ),
-    ("POST", "/api/v1/packages/inventory/remove"): frozenset(
-        {"operator", "administrator"}
-    ),
     # Local catalog authoring and WorkloadRun imports change the controller's
     # authoritative PostgreSQL state. Keep them administrator-only and list
     # preview calls too: previews accept untrusted source documents and are

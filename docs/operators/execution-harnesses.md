@@ -87,7 +87,7 @@ PostgreSQL Fleet registrations are empty, so no nodes are projected and no
 inventory, telemetry, workload, or reservation state remains. Terminally
 paginated catalog reads must contain exactly the eight built-in harness
 identities and their checked-in content digests, no recipes, and no prototype
-state. Migration head must be exactly `0027_execution_harness_catalog`.
+state. Migration head must be exactly `0001_fleet_library_baseline`.
 
 This is a truly fresh control domain: all control database rows, users, browser
 sessions, agent enrollments, route publications, repository projection,

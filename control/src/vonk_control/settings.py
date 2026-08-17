@@ -298,7 +298,6 @@ class Settings:
     package_helper_grant_private_key_path: Path | None = None
     package_helper_receipt_private_key_path: Path | None = None
     host_runtime_grant_private_key_path: Path | None = None
-    workload_signer_socket_path: Path = Path("/run/vonk-workload-signer/signer.sock")
     global_catalog_url: str = "https://vonkforge.ai"
 
     @property
@@ -584,10 +583,6 @@ class Settings:
             package_helper_grant_private_key_path=package_helper_grant_private_key_path,
             package_helper_receipt_private_key_path=package_helper_receipt_private_key_path,
             host_runtime_grant_private_key_path=host_runtime_grant_private_key_path,
-            workload_signer_socket_path=_absolute_root(
-                "VONK_WORKLOAD_SIGNER_SOCKET",
-                "/run/vonk-workload-signer/signer.sock",
-            ),
             global_catalog_url=global_catalog_url,
         )
 

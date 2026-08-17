@@ -29,7 +29,7 @@ def _embedded_identity_document(**overrides: object) -> dict[str, object]:
     document: dict[str, object] = {
         "build_digest": BUILD_DIGEST,
         "channel": "development",
-        "database_revision": "0027_execution_harness_catalog",
+        "database_revision": "0001_fleet_library_baseline",
         "image_role": "api",
         "platform_version": "0.1.0",
         "protocol_maximum": 3,
@@ -58,7 +58,7 @@ def test_image_identity_fixture_uses_the_fresh_database_revision() -> None:
 
     identity = DevelopmentImageIdentity.from_bytes(raw, expected_role="api")
 
-    assert identity.database_revision == "0027_execution_harness_catalog"
+    assert identity.database_revision == "0001_fleet_library_baseline"
 
 
 def _accepted_image_inspection() -> dict[str, object]:

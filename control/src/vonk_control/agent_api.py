@@ -70,9 +70,9 @@ from .models import (
     RecipeSourceBundle,
 )
 from .operation_api import bounded_error_responses
-from .package_helper_authority import (
-    PackageHelperAuthorityError,
-    PackageHelperAuthorityService,
+from .workload_helper_authority import (
+    WorkloadHelperAuthorityError,
+    WorkloadHelperAuthorityService,
 )
 from .pki import IssuedCertificate
 from .presence import AgentPresenceService, ManagementAddressPolicy, PresenceError
@@ -148,7 +148,7 @@ class AgentApiServices:
     max_tuf_target_bytes: int = _MAX_TUF_TARGET_BYTES
     max_workload_tuf_metadata_bytes: int = 2 * 1024 * 1024
     max_workload_tuf_target_bytes: int = 1024 * 1024
-    package_helper_authority: PackageHelperAuthorityService | None = None
+    workload_helper_authority: WorkloadHelperAuthorityService | None = None
     host_runtime_authority: HostRuntimeAuthorityService | None = None
     fabric_policy: ManagementAddressPolicy | None = None
 
@@ -1734,15 +1734,15 @@ def install_agent_routes(
             raise HTTPException(status_code=409, detail=str(error)) from None
         return _json_response(spec)
 
-    def package_helper_service() -> PackageHelperAuthorityService:
-        required = services.package_helper_authority if services is not None else None
+    def workload_helper_service() -> WorkloadHelperAuthorityService:
+        required = services.workload_helper_authority if services is not None else None
         if required is None:
             raise HTTPException(
-                status_code=503, detail="package helper authority unavailable"
+                status_code=503, detail="workload helper authority unavailable"
             )
         return required
 
-    def package_helper_identity(request: Request) -> AgentIdentity:
+    def workload_helper_identity(request: Request) -> AgentIdentity:
         _scope_identity(request)
         required = _require_services(services)
         return _authenticated_identity(request, required)
@@ -1757,7 +1757,7 @@ def install_agent_routes(
 
     @agent.post("/host-runtime/grant")
     def host_runtime_grant(body: dict[str, object], request: Request) -> Response:
-        identity = package_helper_identity(request)
+        identity = workload_helper_identity(request)
         required = host_runtime_service()
         try:
             grant = required.issue_grant(
@@ -1779,8 +1779,8 @@ def install_agent_routes(
 
     @agent.post("/package-helper/receipts")
     def package_helper_receipts(body: dict[str, object], request: Request) -> Response:
-        identity = package_helper_identity(request)
-        required = package_helper_service()
+        identity = workload_helper_identity(request)
+        required = workload_helper_service()
         try:
             receipts = required.issue_receipts(
                 node_id=body["node_id"],
@@ -1795,15 +1795,15 @@ def install_agent_routes(
             return _json_response(
                 {"receipts": [item.to_mapping() for item in receipts]}
             )
-        except (KeyError, TypeError, ValueError, PackageHelperAuthorityError):
+        except (KeyError, TypeError, ValueError, WorkloadHelperAuthorityError):
             raise HTTPException(
-                status_code=409, detail="package helper authority rejected request"
+                status_code=409, detail="workload helper authority rejected request"
             ) from None
 
     @agent.post("/package-helper/grant")
     def package_helper_grant(body: dict[str, object], request: Request) -> Response:
-        identity = package_helper_identity(request)
-        required = package_helper_service()
+        identity = workload_helper_identity(request)
+        required = workload_helper_service()
         try:
             operation = PackageHelperOperation(body["operation"])
             grant = required.issue_grant(
@@ -1821,9 +1821,9 @@ def install_agent_routes(
                 expires_in_seconds=body.get("expires_in_seconds", 30),
             )
             return _json_response({"grant": grant.to_mapping()})
-        except (KeyError, TypeError, ValueError, PackageHelperAuthorityError):
+        except (KeyError, TypeError, ValueError, WorkloadHelperAuthorityError):
             raise HTTPException(
-                status_code=409, detail="package helper authority rejected request"
+                status_code=409, detail="workload helper authority rejected request"
             ) from None
 
     @agent.post("/heartbeat")

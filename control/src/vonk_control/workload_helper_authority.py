@@ -1,4 +1,4 @@
-"""Distinct workload-package helper grant and object-receipt issuer."""
+"""Distinct workload helper grant and object-receipt issuer."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ from .models import AgentOperation as StoredAgentOperation
 from .models import AgentOperationAttempt
 
 
-class PackageHelperAuthorityError(RuntimeError):
+class WorkloadHelperAuthorityError(RuntimeError):
     """A helper authority input or signing boundary is invalid."""
 
 
@@ -50,8 +50,8 @@ def _load_private_key(path: Path) -> ed25519.Ed25519PrivateKey:
             or stat.S_IMODE(before.st_mode) & 0o077
             or not 1 <= before.st_size <= 16 * 1024
         ):
-            raise PackageHelperAuthorityError(
-                "package helper private key is unsafe"
+            raise WorkloadHelperAuthorityError(
+                "workload helper private key is unsafe"
             )
         raw = os.read(descriptor, 16 * 1024 + 1)
         after = os.fstat(descriptor)
@@ -63,14 +63,14 @@ def _load_private_key(path: Path) -> ed25519.Ed25519PrivateKey:
             value.st_ctime_ns,
         )
         if len(raw) > 16 * 1024 or identity(before) != identity(after):
-            raise PackageHelperAuthorityError(
-                "package helper private key changed while read"
+            raise WorkloadHelperAuthorityError(
+                "workload helper private key changed while read"
             )
-    except PackageHelperAuthorityError:
+    except WorkloadHelperAuthorityError:
         raise
     except OSError as error:
-        raise PackageHelperAuthorityError(
-            "package helper private key is unavailable"
+        raise WorkloadHelperAuthorityError(
+            "workload helper private key is unavailable"
         ) from error
     finally:
         if descriptor >= 0:
@@ -78,17 +78,17 @@ def _load_private_key(path: Path) -> ed25519.Ed25519PrivateKey:
     try:
         key = serialization.load_pem_private_key(raw, password=None)
     except (TypeError, ValueError) as error:
-        raise PackageHelperAuthorityError(
-            "package helper private key is invalid"
+        raise WorkloadHelperAuthorityError(
+            "workload helper private key is invalid"
         ) from error
     if not isinstance(key, ed25519.Ed25519PrivateKey):
-        raise PackageHelperAuthorityError(
-            "package helper private key must be Ed25519"
+        raise WorkloadHelperAuthorityError(
+            "workload helper private key must be Ed25519"
         )
     return key
 
 
-class PackageHelperGrantIssuer:
+class WorkloadHelperGrantIssuer:
     """Issue only workload helper grants from the dedicated fence key."""
 
     def __init__(
@@ -99,11 +99,11 @@ class PackageHelperGrantIssuer:
         request_id_factory: Callable[[], object] | None = None,
     ) -> None:
         if not isinstance(private_key, ed25519.Ed25519PrivateKey):
-            raise TypeError("package helper authority key must be Ed25519")
+            raise TypeError("workload helper authority key must be Ed25519")
         if clock is not None and not callable(clock):
-            raise TypeError("package helper authority clock is invalid")
+            raise TypeError("workload helper authority clock is invalid")
         if request_id_factory is not None and not callable(request_id_factory):
-            raise TypeError("package helper request ID factory is invalid")
+            raise TypeError("workload helper request ID factory is invalid")
         self._private_key = private_key
         self._clock = clock or (lambda: datetime.now(UTC))
         self._request_id_factory = request_id_factory or uuid4
@@ -121,7 +121,7 @@ class PackageHelperGrantIssuer:
         *,
         clock: Callable[[], datetime] | None = None,
         request_id_factory: Callable[[], object] | None = None,
-    ) -> PackageHelperGrantIssuer:
+    ) -> WorkloadHelperGrantIssuer:
         return cls(
             _load_private_key(Path(path)),
             clock=clock,
@@ -154,7 +154,7 @@ class PackageHelperGrantIssuer:
         expires_in_seconds: object,
     ) -> SignedPackageHelperGrant:
         if type(operation) is not PackageHelperOperation:
-            raise PackageHelperAuthorityError("package helper operation is invalid")
+            raise WorkloadHelperAuthorityError("workload helper operation is invalid")
         if (
             not isinstance(expires_in_seconds, int)
             or isinstance(expires_in_seconds, bool)
@@ -162,7 +162,7 @@ class PackageHelperGrantIssuer:
             <= expires_in_seconds
             <= MAX_PACKAGE_HELPER_GRANT_SECONDS
         ):
-            raise PackageHelperAuthorityError("package helper grant expiry is invalid")
+            raise WorkloadHelperAuthorityError("workload helper grant expiry is invalid")
         now = self._now()
         try:
             if request_id is None:
@@ -184,8 +184,8 @@ class PackageHelperGrantIssuer:
                 expires_at=now + expires_in_seconds,
             )
         except (AgentProtocolError, TypeError, ValueError) as error:
-            raise PackageHelperAuthorityError(
-                "package helper grant binding is invalid"
+            raise WorkloadHelperAuthorityError(
+                "workload helper grant binding is invalid"
             ) from error
         return SignedPackageHelperGrant(
             claims=claims,
@@ -202,26 +202,26 @@ class PackageHelperGrantIssuer:
         try:
             now = self._clock()
         except Exception as error:
-            raise PackageHelperAuthorityError(
-                "package helper authority clock is unavailable"
+            raise WorkloadHelperAuthorityError(
+                "workload helper authority clock is unavailable"
             ) from error
         if (
             not isinstance(now, datetime)
             or now.tzinfo is None
             or now.utcoffset() is None
         ):
-            raise PackageHelperAuthorityError(
-                "package helper authority clock must be timezone-aware"
+            raise WorkloadHelperAuthorityError(
+                "workload helper authority clock must be timezone-aware"
             )
         return int(now.astimezone(UTC).timestamp())
 
 
-class PackageObjectReceiptIssuer:
+class WorkloadObjectReceiptIssuer:
     """Issue only workload object receipts from an independent receipt key."""
 
     def __init__(self, private_key: ed25519.Ed25519PrivateKey) -> None:
         if not isinstance(private_key, ed25519.Ed25519PrivateKey):
-            raise TypeError("package object receipt key must be Ed25519")
+            raise TypeError("workload object receipt key must be Ed25519")
         self._private_key = private_key
         self.public_key = private_key.public_key()
         self.public_key_bytes = self.public_key.public_bytes(
@@ -231,7 +231,7 @@ class PackageObjectReceiptIssuer:
         self.key_id = hashlib.sha256(self.public_key_bytes).hexdigest()
 
     @classmethod
-    def from_private_key_file(cls, path: Path) -> PackageObjectReceiptIssuer:
+    def from_private_key_file(cls, path: Path) -> WorkloadObjectReceiptIssuer:
         return cls(_load_private_key(Path(path)))
 
     def public_key_document(self) -> dict[str, object]:
@@ -256,8 +256,8 @@ class PackageObjectReceiptIssuer:
                 relative_name=f"objects/sha256/{object_digest}",
             )
         except (AgentProtocolError, TypeError, ValueError) as error:
-            raise PackageHelperAuthorityError(
-                "package object receipt binding is invalid"
+            raise WorkloadHelperAuthorityError(
+                "workload object receipt binding is invalid"
             ) from error
         return SignedPackageObjectReceipt(
             claims=claims,
@@ -271,7 +271,7 @@ class PackageObjectReceiptIssuer:
         )
 
 
-class PackageHelperAuthorityService:
+class WorkloadHelperAuthorityService:
     """Database-bound issuer used by the authenticated GPU node grant routes.
 
     The private keys remain control-plane secrets.  A GPU node can ask for a
@@ -284,23 +284,23 @@ class PackageHelperAuthorityService:
     def __init__(
         self,
         sessions: sessionmaker[Session],
-        grant_issuer: PackageHelperGrantIssuer,
-        receipt_issuer: PackageObjectReceiptIssuer,
+        grant_issuer: WorkloadHelperGrantIssuer,
+        receipt_issuer: WorkloadObjectReceiptIssuer,
         *,
         workload_target_root: Path,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         if not callable(sessions):
-            raise TypeError("package helper sessions are invalid")
-        if not isinstance(grant_issuer, PackageHelperGrantIssuer):
-            raise TypeError("package helper grant issuer is invalid")
-        if not isinstance(receipt_issuer, PackageObjectReceiptIssuer):
-            raise TypeError("package helper receipt issuer is invalid")
+            raise TypeError("workload helper sessions are invalid")
+        if not isinstance(grant_issuer, WorkloadHelperGrantIssuer):
+            raise TypeError("workload helper grant issuer is invalid")
+        if not isinstance(receipt_issuer, WorkloadObjectReceiptIssuer):
+            raise TypeError("workload helper receipt issuer is invalid")
         root = Path(workload_target_root)
         if not root.is_absolute():
             raise ValueError("workload target root must be absolute")
         if clock is not None and not callable(clock):
-            raise TypeError("package helper authority clock is invalid")
+            raise TypeError("workload helper authority clock is invalid")
         self._sessions = sessions
         self._grant_issuer = grant_issuer
         self._receipt_issuer = receipt_issuer
@@ -338,16 +338,16 @@ class PackageHelperAuthorityService:
         )
         allowed = self._release_objects(release_digest)
         if not isinstance(objects, (list, tuple)) or not 1 <= len(objects) <= 256:
-            raise PackageHelperAuthorityError("package helper objects are invalid")
+            raise WorkloadHelperAuthorityError("workload helper objects are invalid")
         result: list[SignedPackageObjectReceipt] = []
         seen: set[str] = set()
         for item in objects:
             if not isinstance(item, dict):
-                raise PackageHelperAuthorityError("package helper object is invalid")
+                raise WorkloadHelperAuthorityError("workload helper object is invalid")
             digest = item.get("object_digest")
             size = item.get("size")
             if digest in seen or digest not in allowed or allowed[digest] != size:
-                raise PackageHelperAuthorityError("package helper object is not authorized")
+                raise WorkloadHelperAuthorityError("workload helper object is not authorized")
             seen.add(digest)
             result.append(
                 self._receipt_issuer.issue_object_receipt(
@@ -438,7 +438,7 @@ class PackageHelperAuthorityService:
                 or not isinstance(payload, dict)
                 or payload.get("release_digest") != release_digest
             ):
-                raise PackageHelperAuthorityError("package helper operation authority is stale")
+                raise WorkloadHelperAuthorityError("workload helper operation authority is stale")
 
     def _release_objects(self, release_digest: str) -> dict[str, int]:
         if (
@@ -446,7 +446,7 @@ class PackageHelperAuthorityService:
             or len(release_digest) != 64
             or any(value not in "0123456789abcdef" for value in release_digest)
         ):
-            raise PackageHelperAuthorityError("package release digest is invalid")
+            raise WorkloadHelperAuthorityError("workload release digest is invalid")
         # Workload TUF exposes ``releases/<digest>.json`` but stores the
         # content-addressed target as the bare digest on disk.
         path = self._workload_target_root / release_digest
@@ -468,9 +468,9 @@ class PackageHelperAuthorityService:
             if lock.canonical_bytes != raw:
                 raise ValueError("workload release target is not canonical")
         except Exception as error:
-            raise PackageHelperAuthorityError("package release target is unavailable") from error
+            raise WorkloadHelperAuthorityError("workload release target is unavailable") from error
         if lock.digest != release_digest:
-            raise PackageHelperAuthorityError("package release target identity is invalid")
+            raise WorkloadHelperAuthorityError("workload release target identity is invalid")
         allowed: dict[str, int] = {}
         for descriptor in (*lock.components, lock.adapter):
             digest = descriptor.digest.removeprefix("sha256:")
@@ -478,8 +478,8 @@ class PackageHelperAuthorityService:
         return allowed
 
 __all__ = [
-    "PackageHelperAuthorityError",
-    "PackageHelperAuthorityService",
-    "PackageHelperGrantIssuer",
-    "PackageObjectReceiptIssuer",
+    "WorkloadHelperAuthorityError",
+    "WorkloadHelperAuthorityService",
+    "WorkloadHelperGrantIssuer",
+    "WorkloadObjectReceiptIssuer",
 ]

@@ -264,7 +264,7 @@ def _successful_lifecycle_tools(tmp_path: Path) -> tuple[Path, Path]:
         "  exit 0\n"
         "fi\n"
         'if [[ "$1" == run && " $* " == *\' --network=none \'* ]]; then\n'
-        "  if [[ \" $* \" == *database_revision* ]]; then printf '%s\\n' 0027_execution_harness_catalog; exit 0; fi\n"
+        "  if [[ \" $* \" == *database_revision* ]]; then printf '%s\\n' 0001_fleet_library_baseline; exit 0; fi\n"
         '  printf \'{"image_role":"%s","source_commit":"%s","source_repository":"%s"}\\n\' "${@: -3:1}" "${@: -2:1}" "${@: -1}"\n'
         "  exit 0\n"
         "fi\n"
@@ -364,7 +364,7 @@ def test_database_revision_fixture_matches_the_fresh_development_head(
         env=os.environ | {"VONK_TEST_DOCKER_LOG": str(log)},
     )
 
-    assert result.stdout == "0027_execution_harness_catalog\n"
+    assert result.stdout == "0001_fleet_library_baseline\n"
 
 
 def _run(

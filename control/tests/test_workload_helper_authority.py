@@ -13,26 +13,26 @@ from vonk_agent_protocol.workload_packages import (
     package_helper_grant_signing_bytes,
     package_object_receipt_signing_bytes,
 )
-from vonk_control.package_helper_authority import (
-    PackageHelperAuthorityError,
-    PackageHelperGrantIssuer,
-    PackageObjectReceiptIssuer,
+from vonk_control.workload_helper_authority import (
+    WorkloadHelperAuthorityError,
+    WorkloadHelperGrantIssuer,
+    WorkloadObjectReceiptIssuer,
 )
 
 NOW = datetime(2033, 5, 18, 12, 0, tzinfo=UTC)
 REQUEST_ID = "10000000-0000-4000-8000-000000000001"
 
 
-def grant_issuer() -> PackageHelperGrantIssuer:
-    return PackageHelperGrantIssuer(
+def grant_issuer() -> WorkloadHelperGrantIssuer:
+    return WorkloadHelperGrantIssuer(
         ed25519.Ed25519PrivateKey.from_private_bytes(b"h" * 32),
         clock=lambda: NOW,
         request_id_factory=lambda: REQUEST_ID,
     )
 
 
-def receipt_issuer() -> PackageObjectReceiptIssuer:
-    return PackageObjectReceiptIssuer(
+def receipt_issuer() -> WorkloadObjectReceiptIssuer:
+    return WorkloadObjectReceiptIssuer(
         ed25519.Ed25519PrivateKey.from_private_bytes(b"r" * 32)
     )
 
@@ -117,7 +117,7 @@ def test_grant_signature_cannot_be_reused_as_an_undomained_or_update_signature()
 
 @pytest.mark.parametrize("seconds", (0, 901, True))
 def test_issuer_rejects_unbounded_grant_expiry(seconds: object) -> None:
-    with pytest.raises(PackageHelperAuthorityError, match="expiry"):
+    with pytest.raises(WorkloadHelperAuthorityError, match="expiry"):
         grant_issuer().issue_grant(
             node_id="spk_" + "1" * 32,
             job_id="20000000-0000-4000-8000-000000000002",
@@ -133,7 +133,7 @@ def test_issuer_rejects_unbounded_grant_expiry(seconds: object) -> None:
 
 
 def test_issuer_refuses_non_workload_operation_even_when_string_shaped() -> None:
-    with pytest.raises(PackageHelperAuthorityError, match="operation"):
+    with pytest.raises(WorkloadHelperAuthorityError, match="operation"):
         grant_issuer().issue_grant(
             node_id="spk_" + "1" * 32,
             job_id="20000000-0000-4000-8000-000000000002",
@@ -194,12 +194,12 @@ def test_distinct_issuers_load_only_owner_private_ed25519_key_files(
         )
         path.chmod(0o600)
 
-    grant = PackageHelperGrantIssuer.from_private_key_file(
+    grant = WorkloadHelperGrantIssuer.from_private_key_file(
         grant_path, clock=lambda: NOW, request_id_factory=lambda: REQUEST_ID
     )
-    receipt = PackageObjectReceiptIssuer.from_private_key_file(receipt_path)
+    receipt = WorkloadObjectReceiptIssuer.from_private_key_file(receipt_path)
 
     assert grant.key_id != receipt.key_id
     grant_path.chmod(0o640)
-    with pytest.raises(PackageHelperAuthorityError, match="private key"):
-        PackageHelperGrantIssuer.from_private_key_file(grant_path)
+    with pytest.raises(WorkloadHelperAuthorityError, match="private key"):
+        WorkloadHelperGrantIssuer.from_private_key_file(grant_path)

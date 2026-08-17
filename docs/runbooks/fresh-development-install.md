@@ -323,7 +323,7 @@ state, do not continue with a retained database or selected volumes. Run the
 development-only procedure in
 [Clean development reset](../operators/execution-harnesses.md#clean-development-reset).
 That procedure removes every control volume and verifies exact fresh head
-`0027_execution_harness_catalog`; it has no compatibility or prototype import
+`0001_fleet_library_baseline`; it has no compatibility or prototype import
 path. Afterward, the initializer recreates administrator subject `admin` from
 the retained verifier, but the operator must establish a fresh browser session
 and repeat the one-use grant/pair/approve/pair sequence for every Spark. Use new

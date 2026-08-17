@@ -94,7 +94,6 @@ def test_retired_profile_controller_modules_are_absent() -> None:
         "src/cluster_profiles/state.py",
         "src/cluster_profiles/switcher.py",
         "src/cluster_profiles/fleet/legacy.py",
-        "src/cluster_profiles/workload_packages/legacy.py",
         "src/cluster_profiles/schemas/accepted-cluster-profiles.schema.json",
         "src/cluster_profiles/schemas/model-definitions.schema.json",
         "bin/vonkctl-legacy",

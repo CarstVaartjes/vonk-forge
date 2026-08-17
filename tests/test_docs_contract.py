@@ -199,13 +199,6 @@ def test_current_docs_do_not_advertise_prototype_model_operations() -> None:
     assert offenders == {}
 
 
-def test_workload_packages_are_not_the_model_or_runtime_release_path() -> None:
-    text = _normalized_text(ROOT / "docs/runbooks/workload-packages.md")
-
-    assert "operator contract for model and runtime releases" not in text
-    assert "Catalog and Library are the operator path for model recipes" in text
-
-
 def test_mia_runbook_distinguishes_image_receipts_from_model_loading() -> None:
     text = _normalized_text(MIA_TWO_SPARK)
 
