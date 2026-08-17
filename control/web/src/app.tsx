@@ -47,6 +47,7 @@ export function App({api}: {api: ControlApi}) {
     onNavigate={navigate}
     operator={auth ? {
       environment: "Development",
+      loadAudit: () => api.audit(),
       logoutError: auth.logoutError,
       loggingOut: auth.loggingOut,
       onLogout: () => void auth.logout(),

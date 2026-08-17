@@ -1,11 +1,14 @@
 import {useEffect, useRef, useState} from "react";
 import type {MouseEvent, ReactNode} from "react";
+import type {AuditResponse} from "../api/types";
+import {AdminMenu} from "./admin-menu";
 import {CloseIcon, FleetIcon, LibraryIcon, MenuIcon} from "./icons";
 
 export type AppRoute = "fleet" | "library";
 
 type Operator = {
   environment: string;
+  loadAudit(): Promise<AuditResponse>;
   logoutError: string;
   loggingOut: boolean;
   onLogout(): void;
@@ -50,12 +53,7 @@ export function AppShell({activeRoute, children, onNavigate, operator}: AppShell
           <a href="/library" className="nav-link nav-link-primary" aria-current={activeRoute === "library" ? "page" : undefined} onClick={event => navigate(event, "library")}><LibraryIcon/><span>Library</span></a>
         </nav>
         <div className="sidebar-footer">
-          {operator && <section className="operator-identity" aria-label="Authenticated operator">
-            <div className="operator-summary"><span className="operator-avatar" aria-hidden="true">{operator.subject.slice(0, 1).toUpperCase()}</span><div><strong>{operator.subject}</strong><span>{operator.role}</span></div></div>
-            <span className="environment-badge">{operator.environment}</span>
-            <button type="button" className="logout" disabled={operator.loggingOut} onClick={operator.onLogout}>{operator.loggingOut ? "Signing out…" : "Logout"}</button>
-            {operator.logoutError && <p role="alert">{operator.logoutError}</p>}
-          </section>}
+          {operator && <AdminMenu {...operator}/>}
           <small className="authority-note">Local database authority</small>
         </div>
       </div>

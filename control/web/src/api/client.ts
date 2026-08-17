@@ -4,6 +4,7 @@ import type {paths} from "./generated";
 import type {
   AuthSession,
   AgentsResponse,
+  AuditResponse,
   AuditSummary,
   ControlApi,
   EnrollmentDecisionResponse,
@@ -446,7 +447,7 @@ export class ApiClient implements ControlApi {
     }));
   }
 
-  audit() { return this.request<{events: AuditSummary[]}>("/api/v1/audit"); }
+  audit() { return this.request<AuditResponse>("/api/v1/audit"); }
   preview(input: ProposalInput) { return this.request<ProposalPreview>("/api/v1/proposals", {method: "POST", body: JSON.stringify(input)}); }
   submit(digest: string) { return this.request<Record<string, unknown>>("/api/v1/changes", {method: "POST", body: JSON.stringify({proposal_digest: digest})}); }
   async updateSkew() {

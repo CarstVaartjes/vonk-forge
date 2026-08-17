@@ -22,6 +22,7 @@ export type JobsResponse = components["schemas"]["JobsResponse"];
 export type ProposalInput = {base_commit: string; changes: {path: string; document: Record<string, unknown>}[]};
 export type ProposalPreview = {base_commit: string; digest: string; patch: string; affected_documents: string[]; validation_results: string[]};
 export type AuditSummary = {request_id: string; actor: string; action: string; base_commit?: string; targets: string[]};
+export type AuditResponse = {events: AuditSummary[]};
 export type UpdateTarget = {
   build_digest: string;
   platform_version: string;
@@ -171,7 +172,7 @@ export interface ControlApi extends LibraryApi {
   jobs(cursor?: string): Promise<JobsResponse>;
   job(jobId: string, operationCursor?: string, targetCursor?: string): Promise<JobDetail>;
   resumeJob(jobId: string): Promise<JobResumeResponse>;
-  audit(): Promise<{events: AuditSummary[]}>;
+  audit(): Promise<AuditResponse>;
   preview(input: ProposalInput): Promise<ProposalPreview>; submit(digest: string): Promise<Record<string, unknown>>;
   agents(): Promise<AgentsResponse>;
   enrollments(): Promise<EnrollmentListResponse>;
