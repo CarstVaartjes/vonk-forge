@@ -85,11 +85,6 @@ export type UpdateRollout = {
   resume_required: boolean;
   state: string;
 };
-export type PackageInventory = components["schemas"]["PackageInventoryResponse"];
-export type PackageRemovalPreview = components["schemas"]["PackageRemovalPreviewResponse"];
-export type PackageRemovalProgress = components["schemas"]["PackageProgressResponse"];
-export type PackagePlan = components["schemas"]["PackagePlanResponse"];
-export type PackageProgress = components["schemas"]["PackageProgressResponse"];
 export type CatalogRecipeSummary = components["schemas"]["RecipeSummaryResponse"];
 export type CatalogRecipeRevision = components["schemas"]["RecipeRevisionResponse"];
 export type CatalogRecipeList = components["schemas"]["RecipeListResponse"];
@@ -190,9 +185,4 @@ export interface ControlApi extends LibraryApi {
   applyUpdate(planDigest: string): Promise<UpdateRollout>;
   updateStatus(rolloutId: string): Promise<UpdateRollout>;
   approveUpdateResume(rolloutId: string): Promise<UpdateRollout>;
-  packageInventory(nodeId?: string, deploymentId?: string, cursor?: string): Promise<PackageInventory>;
-  previewPackageRemoval(input: {deployment_id: string; release_digest: string; node_ids: string[]}): Promise<PackageRemovalPreview>;
-  removePackageInventory(planDigest: string): Promise<PackageRemovalProgress>;
-  previewPackageGc(): Promise<PackagePlan>;
-  applyPackageGc(planDigest: string): Promise<PackageProgress>;
 }

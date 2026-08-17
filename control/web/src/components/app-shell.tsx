@@ -14,7 +14,7 @@ type Operator = {
 };
 
 type AppShellProps = {
-  activeRoute: AppRoute;
+  activeRoute?: AppRoute;
   children: ReactNode;
   onNavigate(event: MouseEvent<HTMLAnchorElement>, route: AppRoute): void;
   operator?: Operator;

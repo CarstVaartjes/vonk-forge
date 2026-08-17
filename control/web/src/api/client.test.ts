@@ -314,51 +314,34 @@ it("uses one exact API contract for update plan, apply, status, and administrato
   expect(requests[4].headers.get("X-CSRF-Token")).toBe("csrf-value");
 });
 
-it("routes package pages through the generated package API, including GC", async () => {
-  const candidateId = "a".repeat(64);
-  const digest = `sha256:${"b".repeat(64)}`;
-  const rolloutId = "11111111-1111-4111-8111-111111111111";
-  const requests: Request[] = [];
-  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
-    const request = input instanceof Request ? input : new Request(new URL(String(input), location.origin), init);
-    requests.push(request);
-    const path = new URL(request.url).pathname;
-    if (path === "/api/v1/packages/families") return new Response(JSON.stringify({families: [{id: "llm-runtime", channels: ["stable"], promotion_mode: "admin"}], total: 1}), {status: 200});
-    if (path === "/api/v1/packages/candidates" ) return new Response(JSON.stringify({candidates: [{id: candidateId, family_id: "llm-runtime", release_key: "stable/v1", upstream_version: "1.0.0", state: "eligible", reason_code: null}], total: 1}), {status: 200});
-    if (path === `/api/v1/packages/candidates/${candidateId}`) return new Response(JSON.stringify({id: candidateId, family_id: "llm-runtime", release_key: "stable/v1", upstream_version: "1.0.0", state: "eligible", reason_code: null, release: {lock_digest: digest, components: [], dependencies: [], provenance: []}}), {status: 200});
-    if (path === `/api/v1/packages/candidates/${candidateId}/promotion-preview`) return new Response(JSON.stringify({digest, state: "ready"}), {status: 200});
-    if (path === `/api/v1/packages/candidates/${candidateId}/promote`) return new Response(JSON.stringify({release_digest: digest}), {status: 202});
-    if (path === "/api/v1/deployments") return new Response(JSON.stringify({deployments: [{id: "chat", family_id: "llm-runtime", release_digest: digest, previous_release_digest: null, state: "active"}], total: 1}), {status: 200});
-    if (path === "/api/v1/deployments/chat/rollout-preview") return new Response(JSON.stringify({digest, state: "ready", batches: [], offline_pending: [], download_bytes: 3, storage_bytes: 4}), {status: 200});
-    if (path === "/api/v1/deployments/chat/rollouts") return new Response(JSON.stringify({id: rolloutId, plan_digest: digest}), {status: 202});
-    if (path === `/api/v1/deployments/chat/rollouts/${rolloutId}`) return new Response(JSON.stringify({id: rolloutId, state: "running", nodes: []}), {status: 200});
-    if (path === "/api/v1/packages/inventory") return new Response(JSON.stringify({nodes: [], total: 0}), {status: 200});
-    if (path === "/api/v1/packages/gc-preview") return new Response(JSON.stringify({digest, state: "ready", reclaim_bytes: 3}), {status: 200});
-    if (path === "/api/v1/packages/gc") return new Response(JSON.stringify({id: rolloutId, plan_digest: digest, state: "accepted", progress: {completed: 0, failed: 0, running: 0, total: 0}}), {status: 202});
-    return new Response(JSON.stringify({detail: "unexpected route"}), {status: 404});
-  });
+it("does not expose orphaned package and deployment helpers after the Fleet/Library cleanup", () => {
+  // Break caught: superseded package/deployment client helpers remain on the
+  // live web API surface after their last retained consumers were removed.
+  const api = new ApiClient() as Record<string, unknown>;
 
-  const api = new ApiClient();
-  expect((await api.packageFamilies())[0].channels).toEqual(["stable"]);
-  expect((await api.packageCandidates())[0].id).toBe(candidateId);
-  expect((await api.packageCandidate(candidateId)).lock?.digest).toBe(digest);
-  expect((await api.previewPackagePromotion(candidateId)).digest).toBe(digest);
-  expect((await api.promotePackage(candidateId, digest)).release_digest).toBe(digest);
-  expect((await api.deployments())[0].id).toBe("chat");
-  expect((await api.previewPackageRollout("chat")).download_remaining_bytes).toBe(3);
-  expect((await api.startPackageRollout("chat", digest)).id).toBe(rolloutId);
-  expect((await api.packageRollout("chat", rolloutId)).state).toBe("running");
-  expect((await api.packageInventory()).total).toBe(0);
-  expect((await api.previewPackageGc()).reclaim_bytes).toBe(3);
-  expect((await api.applyPackageGc(digest)).state).toBe("accepted");
-  expect(requests.map(request => [request.method, new URL(request.url).pathname])).toEqual([
-    ["GET", "/api/v1/packages/families"], ["GET", "/api/v1/packages/candidates"],
-    ["GET", `/api/v1/packages/candidates/${candidateId}`], ["POST", `/api/v1/packages/candidates/${candidateId}/promotion-preview`],
-    ["POST", `/api/v1/packages/candidates/${candidateId}/promote`], ["GET", "/api/v1/deployments"],
-    ["POST", "/api/v1/deployments/chat/rollout-preview"], ["POST", "/api/v1/deployments/chat/rollouts"],
-    ["GET", `/api/v1/deployments/chat/rollouts/${rolloutId}`], ["GET", "/api/v1/packages/inventory"],
-    ["POST", "/api/v1/packages/gc-preview"], ["POST", "/api/v1/packages/gc"],
-  ]);
+  for (const name of [
+    "packageFamilies",
+    "packageCandidates",
+    "packageCandidate",
+    "previewPackageValidation",
+    "validatePackage",
+    "packageValidation",
+    "previewPackagePromotion",
+    "promotePackage",
+    "deployments",
+    "previewPackageRollout",
+    "startPackageRollout",
+    "packageRollout",
+    "previewPackageRollback",
+    "rollbackPackage",
+    "packageInventory",
+    "previewPackageRemoval",
+    "removePackageInventory",
+    "previewPackageGc",
+    "applyPackageGc",
+  ]) {
+    expect(name in api).toBe(false);
+  }
 });
 
 it.each(["skew", "plan"])(

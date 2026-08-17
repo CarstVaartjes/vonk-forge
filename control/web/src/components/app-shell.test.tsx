@@ -1,4 +1,4 @@
-import {render, screen, waitFor, within} from "@testing-library/react";
+import {act, render, screen, waitFor, within} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {App} from "../app";
 import type {ControlApi} from "../api/types";
@@ -105,9 +105,9 @@ test("keeps only Fleet and Library in primary navigation while preserving the mo
   }
 });
 
-test("opens the visual Library and falls legacy catalog URLs back to Fleet", async () => {
-  // Break caught: Library disappears as a primary workspace or legacy catalog
-  // URLs still render deleted page content.
+test("does not render a replacement page for unsupported legacy catalog URLs", async () => {
+  // Break caught: an unsupported legacy route silently falls back to Fleet or
+  // Library, preserving compatibility behavior instead of disappearing.
   render(<App api={apiFixture}/>);
   const user = userEvent.setup();
 
@@ -117,9 +117,16 @@ test("opens the visual Library and falls legacy catalog URLs back to Fleet", asy
   expect(location.pathname).toBe("/library");
   expect(screen.getByRole("link", {name: "Library"})).toHaveAttribute("aria-current", "page");
 
-  history.pushState(null, "", "/catalog");
-  dispatchEvent(new PopStateEvent("popstate"));
-  expect(await screen.findByRole("heading", {name: "Fleet"})).toBeVisible();
+  act(() => {
+    history.pushState(null, "", "/catalog");
+    dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await waitFor(() => {
+    expect(screen.queryByRole("heading", {name: "Fleet"})).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", {name: "Library"})).not.toBeInTheDocument();
+  });
+  expect(screen.getByRole("link", {name: "Fleet"})).not.toHaveAttribute("aria-current");
+  expect(screen.getByRole("link", {name: "Library"})).not.toHaveAttribute("aria-current");
   expect(location.pathname).toBe("/catalog");
 });
 

@@ -8,10 +8,11 @@ import {LibraryPage} from "./pages/library";
 
 const pages: AppRoute[] = ["fleet", "library"];
 
-function currentPage(pathname = location.pathname): AppRoute {
+function currentPage(pathname = location.pathname): AppRoute | undefined {
   const value = pathname.replace(/^\//, "");
+  if (value === "" || value === "fleet") return "fleet";
   if (/^library(?:\/|$)/.test(value)) return "library";
-  return pages.includes(value as AppRoute) ? value as AppRoute : "fleet";
+  return pages.includes(value as AppRoute) ? value as AppRoute : undefined;
 }
 
 export function App({api}: {api: ControlApi}) {
@@ -36,10 +37,10 @@ export function App({api}: {api: ControlApi}) {
     history.pushState(null, "", nextPath);
     setPath(nextPath);
   }
-  const content = {
+  const content = page ? {
     fleet: <FleetPage api={api}/>,
     library: <LibraryPage api={api} path={path} onNavigate={navigatePath}/>,
-  }[page];
+  }[page] : null;
 
   return <AppShell
     activeRoute={page}
