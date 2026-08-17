@@ -195,6 +195,7 @@ def test_hostname_handoff_orders_caddy_without_a_startup_cycle() -> None:
         "application",
         "ingress",
         "tailnet-web-edge",
+        "litellm-edge",
     }
     caddy_volumes = _volumes_by_target(caddy)
     assert caddy_volumes["/run/vonk-tailnet"] == {
