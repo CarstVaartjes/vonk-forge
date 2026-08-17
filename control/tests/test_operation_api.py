@@ -382,7 +382,7 @@ def test_plan_response_whitelists_nested_route_release_and_dag_fields() -> None:
                 "private_evidence": "release-secret",
             }
         },
-        input_digests={"inventory/fleet.toml": "8" * 64},
+        input_digests={"inventory/topology.json": "8" * 64},
         operation_graph=SimpleNamespace(
             reconciliation_id="22222222-2222-4222-8222-222222222222",
             document={

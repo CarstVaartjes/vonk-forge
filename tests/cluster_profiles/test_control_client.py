@@ -121,7 +121,7 @@ def test_client_reads_token_file_and_sends_canonical_proposal(tmp_path: Path) ->
         {
             "base_commit": "base",
             "changes": [
-                {"path": "inventory/fleet.toml", "document": {"schema_version": 2}}
+                {"path": "inventory/topology.json", "document": {"schema_version": 1}}
             ],
         }
     )
@@ -131,7 +131,7 @@ def test_client_reads_token_file_and_sends_canonical_proposal(tmp_path: Path) ->
     assert json.loads(request.data) == {
         "base_commit": "base",
         "changes": [
-            {"document": {"schema_version": 2}, "path": "inventory/fleet.toml"}
+            {"document": {"schema_version": 1}, "path": "inventory/topology.json"}
         ],
     }
     assert result == {"digest": "abc", "patch": "diff"}
@@ -972,7 +972,7 @@ def test_vonkctl_admin_proposal_is_thin_api_adapter(tmp_path: Path, capsys) -> N
             {
                 "base_commit": "a" * 40,
                 "changes": [
-                    {"path": "inventory/fleet.toml", "document": {"schema_version": 2}}
+                    {"path": "inventory/topology.json", "document": {"schema_version": 1}}
                 ],
             }
         )

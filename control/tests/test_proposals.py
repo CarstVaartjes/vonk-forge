@@ -41,7 +41,7 @@ def test_stale_base_is_rejected_after_head_moves(proposals) -> None:
     root, service = proposals
     preview = service.preview("admin", service.head(), [DocumentChange("config/package-families/model.toml", {"schema_version": 2, "name": "new"})])
     (root / "inventory").mkdir()
-    (root / "inventory/fleet.toml").write_text("schema_version = 2\n")
+    (root / "inventory/topology.json").write_text('{"schema_version": 1}\n')
     _git(root, "add", ".")
     _git(root, "commit", "-qm", "advance")
     with pytest.raises(StaleBaseCommit):

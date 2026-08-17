@@ -1,8 +1,7 @@
-"""Deterministic, non-mutating repository proposals for accepted nodes."""
+"""Deterministic, non-mutating enrollment records for accepted nodes."""
 
 from __future__ import annotations
 
-import hashlib
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -65,18 +64,17 @@ def build_node_proposal(
     accepted_journal: InstallationJournal,
     observations: Mapping[str, object],
 ) -> RepositoryProposal:
-    """Build canonical fleet content; never read, write, or invoke Git."""
+    """Reject retired Git Fleet proposals after validating caller inputs."""
 
+    if accepted_journal.state != "accepted":
+        raise ProposalError("only an accepted installation can emit a node record")
     if not base_commit.strip() or re.search(r"\s", base_commit):
         raise ProposalError("base commit must be a nonblank revision")
     hostname = observations.get("hostname")
     if not isinstance(hostname, str) or not hostname.strip():
         raise ProposalError("accepted observation must contain a hostname")
-    record = emit_node_record(accepted_journal, hostname=hostname)
-    content = b"schema_version = 2\n\n" + record
-    return RepositoryProposal(
-        base_commit=base_commit,
-        target_path="inventory/fleet.toml",
-        content=content,
-        sha256=hashlib.sha256(content).hexdigest(),
+    if re.search(r"[\x00-\x20]", hostname):
+        raise ProposalError("observed hostname is missing or unsafe")
+    raise ProposalError(
+        "Git Fleet proposals are retired; persist enrolled nodes in PostgreSQL"
     )

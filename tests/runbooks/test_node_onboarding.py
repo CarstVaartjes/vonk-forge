@@ -9,7 +9,7 @@ def test_node_onboarding_runbook_covers_safe_resumable_workflow() -> None:
         "--apply",
         "resume",
         "emit-record",
-        "inventory/fleet.toml",
+        "PostgreSQL",
         "topology",
         "recovery",
         "does not modify Git",

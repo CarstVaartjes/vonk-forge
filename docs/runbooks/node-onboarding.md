@@ -62,16 +62,16 @@ bin/node-install node resume NODE_ID --apply \
 Use `retry NODE_ID --apply` only after correcting a recorded failure. Use
 `verify NODE_ID` to require the accepted terminal state.
 
-## Propose the fleet record
+## Record the enrollment metadata
 
 ```bash
 bin/node-install node emit-record NODE_ID >node-record.toml
 ```
 
-This command does not modify Git. Review the sanitized record and add it to
-`inventory/fleet.toml` in a normal commit. Keep physical links and fabric
-relationships in the separate topology document; adding a node must not invent
-topology.
+This command does not modify Git. Review the sanitized record, then let the
+enrollment workflow persist the node in PostgreSQL. Keep physical links and
+fabric relationships in the separate topology document; adding a node must not
+invent topology.
 
 If verification or recovery access fails, stop. Restore access through the
 physical console, inspect the journal, and resume only after the trusted facts

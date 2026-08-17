@@ -14,7 +14,7 @@ class Jobs:
 
 class Repository:
     def inspect(self, commit):
-        return type("Snapshot", (), {"commit": commit, "documents": {"inventory/fleet.toml": "blob"}, "dependencies": {}})()
+        return type("Snapshot", (), {"commit": commit, "documents": {"inventory/topology.json": "blob"}, "dependencies": {}})()
     def read_document(self, commit, path):
         return type("Document", (), {"commit": commit, "path": path, "sha256": "hash", "parsed": {"schema_version": 2}})()
 
@@ -35,11 +35,11 @@ def test_admin_proposal_returns_canonical_patch_and_digest() -> None:
     token = codec.issue(Actor("admin", "administrator"), ttl_seconds=100, now=0)
     response = client.post("/api/v1/proposals", headers={"Authorization": f"Bearer {token}"}, json={
         "base_commit": "a" * 40,
-        "changes": [{"path": "inventory/fleet.toml", "document": {"schema_version": 2}}],
+        "changes": [{"path": "inventory/topology.json", "document": {"schema_version": 1}}],
     })
     assert response.status_code == 200
     assert response.json() == {
-        "affected_documents": ["inventory/fleet.toml"],
+        "affected_documents": ["inventory/topology.json"],
         "base_commit": "a" * 40,
         "digest": "d" * 64,
         "patch": base64.b64encode(b"canonical diff").decode(),

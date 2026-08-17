@@ -515,6 +515,35 @@ class AgentNode(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class AgentNodeProfile(Base):
+    """Mutable display metadata for an enrolled agent node."""
+
+    __tablename__ = "agent_node_profiles"
+    __table_args__ = (
+        CheckConstraint(
+            "length(display_name) BETWEEN 1 AND 200",
+            name="ck_agent_node_profiles_display_name_length",
+        ),
+        CheckConstraint(
+            "length(hostname) <= 255",
+            name="ck_agent_node_profiles_hostname_length",
+        ),
+        CheckConstraint(
+            "length(lifecycle) BETWEEN 1 AND 64",
+            name="ck_agent_node_profiles_lifecycle_length",
+        ),
+    )
+    node_id: Mapped[str] = mapped_column(
+        ForeignKey("agent_nodes.node_id", ondelete="CASCADE"), primary_key=True
+    )
+    display_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    hostname: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    lifecycle: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="managed", server_default="managed"
+    )
+    labels: Mapped[dict[str, str]] = mapped_column(JSON, nullable=False, default=dict)
+
+
 class NodeMutationLease(Base):
     """Exclusive durable ownership of one node's mutations and route state."""
 

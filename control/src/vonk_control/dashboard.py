@@ -1,4 +1,4 @@
-"""Read-only projection joining Git authority with operational observations."""
+"""Read-only projection joining PostgreSQL Fleet authority with observations."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from .metrics import protocol_version_bucket
 from .models import (
     AgentCertificate,
     AgentNode,
+    AgentNodeProfile,
     NodeInventorySnapshot,
     Observation,
     PackageCandidate,
@@ -73,14 +74,27 @@ class DashboardService:
 
     def fleet(self) -> dict[str, object]:
         commit = self._repository.head()
-        document = self._repository.read_document(commit, "inventory/fleet.toml")
-        parsed = document.parsed
-        if not isinstance(parsed, Mapping) or not isinstance(parsed.get("nodes"), Mapping):
-            raise TypeError("fleet document does not contain a node table")
-        fleet_node_ids = tuple(
-            node_id for node_id in parsed["nodes"] if isinstance(node_id, str)
-        )
         with self._sessions() as session:
+            agent_nodes = {
+                node.node_id: node
+                for node in session.scalars(
+                    select(AgentNode)
+                    .where(
+                        AgentNode.state != "revoked",
+                        AgentNode.revoked_at.is_(None),
+                    )
+                    .order_by(AgentNode.node_id)
+                )
+            }
+            fleet_node_ids = tuple(agent_nodes)
+            profiles = {
+                profile.node_id: profile
+                for profile in session.scalars(
+                    select(AgentNodeProfile)
+                    .where(AgentNodeProfile.node_id.in_(fleet_node_ids))
+                    .order_by(AgentNodeProfile.node_id)
+                )
+            }
             ranked_observations = select(
                 Observation.id.label("id"),
                 func.row_number()
@@ -107,10 +121,6 @@ class DashboardService:
                     .order_by(Observation.node_id)
                 )
             )
-            agent_nodes = {
-                node.node_id: node
-                for node in session.scalars(select(AgentNode).order_by(AgentNode.node_id))
-            }
             ranked_inventory = select(
                 NodeInventorySnapshot.id.label("id"),
                 func.row_number()
@@ -138,6 +148,7 @@ class DashboardService:
                 session.scalars(
                     select(AgentCertificate)
                     .where(
+                        AgentCertificate.node_id.in_(fleet_node_ids),
                         AgentCertificate.state == "active",
                         AgentCertificate.revoked_at.is_(None),
                     )
@@ -162,9 +173,8 @@ class DashboardService:
         if current.tzinfo is None or current.utcoffset() is None:
             raise ValueError("dashboard clock must be timezone-aware")
         current = current.astimezone(UTC)
-        for node_id, raw in sorted(parsed["nodes"].items()):
-            if not isinstance(node_id, str) or not isinstance(raw, Mapping):
-                continue
+        for node_id in fleet_node_ids:
+            profile = profiles.get(node_id)
             health, observed_at = latest.get(node_id, ({}, None))
             if observed_at is not None and observed_at.tzinfo is None:
                 observed_at = observed_at.replace(tzinfo=UTC)
@@ -214,9 +224,9 @@ class DashboardService:
             )
             nodes.append({
                 "id": node_id,
-                "display_name": str(raw.get("display_name", node_id)),
-                "hostname": str(raw.get("hostname", "")),
-                "lifecycle": str(raw.get("lifecycle", "unknown")),
+                "display_name": node_id if profile is None else profile.display_name,
+                "hostname": "" if profile is None else profile.hostname,
+                "lifecycle": "managed" if profile is None else profile.lifecycle,
                 "healthy": (
                     health.get("status") in {"healthy", "warning"}
                     if observed_at is not None and isinstance(health, Mapping)
@@ -226,7 +236,11 @@ class DashboardService:
                     probe_age is None
                     or probe_age > self._health_stale_after_seconds
                 ),
-                "labels": dict(raw.get("labels", {})) if isinstance(raw.get("labels"), Mapping) else {},
+                "labels": (
+                    {}
+                    if profile is None or not isinstance(profile.labels, Mapping)
+                    else dict(profile.labels)
+                ),
                 "memory_available_bytes": health.get(
                     "memory_available_bytes",
                     0 if inventory is None else inventory.host_memory_free_bytes,

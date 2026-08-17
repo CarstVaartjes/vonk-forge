@@ -12,7 +12,6 @@ from cluster_profiles.fleet.install_contracts import (
 from cluster_profiles.install.proposal import (
     ProposalError,
     build_node_proposal,
-    emit_node_record,
 )
 
 
@@ -38,28 +37,18 @@ def _journal(*, accepted: bool) -> InstallationJournal:
     return journal
 
 
-def test_proposal_is_deterministic_and_sanitized() -> None:
-    journal = _journal(accepted=True)
-    observations = {"hostname": "runtime-name", "serial": "PRIVATE KEY"}
-
-    first = build_node_proposal("abc123", journal, observations)
-    second = build_node_proposal("abc123", journal, observations)
-
-    assert first == second
-    assert first.base_commit == "abc123"
-    assert first.target_path == "inventory/fleet.toml"
-    assert first.sha256 == __import__("hashlib").sha256(first.content).hexdigest()
-    assert b"PRIVATE KEY" not in first.content
-    assert b"credential_ref" not in first.content
-    assert b'schema_version = 2' in first.content
-    assert b'purpose = "inference"' in first.content
-    assert b'zone = "west"' in first.content
-    assert emit_node_record(journal, hostname="runtime-name") in first.content
-
-
 def test_unaccepted_install_cannot_emit_proposal() -> None:
     with pytest.raises(ProposalError, match="accepted"):
         build_node_proposal("abc123", _journal(accepted=False), {})
+
+
+def test_git_fleet_proposals_are_retired_after_acceptance() -> None:
+    with pytest.raises(ProposalError, match="PostgreSQL"):
+        build_node_proposal(
+            "abc123",
+            _journal(accepted=True),
+            {"hostname": "runtime-name"},
+        )
 
 
 def test_observed_hostname_is_required_and_validated() -> None:

@@ -19,7 +19,7 @@ def repository(tmp_path: Path):
     root.mkdir()
     _git(root, "init", "-q")
     (root / "inventory").mkdir()
-    (root / "inventory/fleet.toml").write_text("schema_version = 2\n")
+    (root / "inventory/topology.json").write_text('{"schema_version": 1}\n')
     (root / "config/package-families").mkdir(parents=True, exist_ok=True)
     (root / "config/package-families/basic.toml").write_text('schema_version = 1\nname = "basic"\n')
     _git(root, "add", ".")
@@ -38,11 +38,11 @@ def test_repository_rejects_unallowlisted_and_traversal_paths(repository) -> Non
 def test_read_is_pinned_to_immutable_commit(repository) -> None:
     root, commit = repository
     service = RepositoryService(root)
-    before = service.read_document(commit, "inventory/fleet.toml")
-    (root / "inventory/fleet.toml").write_text("schema_version = 999\n")
-    after = service.read_document(commit, "inventory/fleet.toml")
+    before = service.read_document(commit, "inventory/topology.json")
+    (root / "inventory/topology.json").write_text('{"schema_version": 999}\n')
+    after = service.read_document(commit, "inventory/topology.json")
     assert before == after
-    assert before.parsed == {"schema_version": 2}
+    assert before.parsed == {"schema_version": 1}
     assert before.sha256 == __import__("hashlib").sha256(before.content).hexdigest()
 
 
@@ -85,14 +85,14 @@ def test_inspect_does_not_execute_repository_hooks(repository, tmp_path: Path) -
     hook.chmod(0o700)
     snapshot = RepositoryService(root).inspect(commit)
     assert snapshot.commit == commit
-    assert "inventory/fleet.toml" in snapshot.documents
+    assert "inventory/topology.json" in snapshot.documents
     assert not marker.exists()
 
 
 def test_managed_symlink_is_rejected(repository) -> None:
     root, _ = repository
-    (root / "inventory/link.toml").symlink_to("fleet.toml")
-    _git(root, "add", "inventory/link.toml")
+    (root / "inventory/link.json").symlink_to("topology.json")
+    _git(root, "add", "inventory/link.json")
     _git(root, "commit", "-qm", "link")
     commit = _git(root, "rev-parse", "HEAD")
     with pytest.raises(RepositoryPolicyError, match="symlink"):
@@ -117,6 +117,6 @@ def test_repository_accepts_a_valid_linked_worktree(repository, tmp_path: Path) 
 
     assert service.head() == commit
     assert service.object_store == (root / ".git" / "objects").resolve()
-    assert service.read_document(commit, "inventory/fleet.toml").parsed == {
-        "schema_version": 2
+    assert service.read_document(commit, "inventory/topology.json").parsed == {
+        "schema_version": 1
     }
