@@ -87,6 +87,7 @@ from .operation_api import (
 from .proposals import DocumentChange
 from .recipe_api import install_recipe_operation_routes
 from .recipe_builds import RecipeBuildService
+from .recipe_library import RecipeLibraryClient
 from .recipe_operations import RecipeOperationService
 from .settings import StartupMode
 from .source_bundles import SourceBundleStore
@@ -642,20 +643,20 @@ def build_agent_services(
 ) -> AgentApiServices:
     """Construct the fail-closed production agent runtime from one provider."""
     from .agent_jobs import AgentJobService
-    from .enrollment_bootstrap import EnrollmentBootstrapConfig
     from .enrollment import EnrollmentService
+    from .enrollment_bootstrap import EnrollmentBootstrapConfig
     from .host_helper_authority import (
         HostHelperGrantIssuer,
         HostRuntimeAuthorityService,
     )
+    from .pki import BuiltinCertificateAuthority
+    from .presence import AgentPresenceService, ManagementAddressPolicy
+    from .step_ca import StepCertificateAuthority
     from .workload_helper_authority import (
         WorkloadHelperAuthorityService,
         WorkloadHelperGrantIssuer,
         WorkloadObjectReceiptIssuer,
     )
-    from .pki import BuiltinCertificateAuthority
-    from .presence import AgentPresenceService, ManagementAddressPolicy
-    from .step_ca import StepCertificateAuthority
 
     if settings.agent_runtime != "enabled":
         # Local development still needs the durable operation queue and fleet
@@ -973,6 +974,7 @@ def create_app(
     updates: Any | None = None,
     catalog: CatalogService | None = None,
     global_catalog: Any | None = None,
+    recipe_library: Any | None = None,
     workload_run: WorkloadRunWorkflow | None = None,
     recipe_operations: RecipeOperationService | None = None,
     browser_auth: BrowserAuthService | None = None,
@@ -1196,6 +1198,7 @@ def create_app(
         audits=audits,
         service=catalog,
         global_catalog=global_catalog,
+        recipe_library=recipe_library,
     )
     install_library_routes(
         app,
@@ -2137,6 +2140,7 @@ def production_app() -> FastAPI:
                 pass
 
     global_catalog = GlobalCatalogClient(settings.global_catalog_url)
+    recipe_library = RecipeLibraryClient()
     catalog_service = CatalogService(
         sessions,
         clock=clock,
@@ -2177,6 +2181,7 @@ def production_app() -> FastAPI:
         updates=update_admin,
         catalog=catalog_service,
         global_catalog=global_catalog,
+        recipe_library=recipe_library,
         workload_run=WorkloadRunWorkflow(
             sessions,
             clock=clock,
@@ -2200,6 +2205,7 @@ def production_app() -> FastAPI:
     @app.on_event("shutdown")
     def close_global_catalog() -> None:
         global_catalog.close()
+        recipe_library.close()
 
     return app
 

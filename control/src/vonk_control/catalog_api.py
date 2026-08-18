@@ -26,6 +26,11 @@ from .catalog_service import (
 )
 from .global_catalog import GlobalCatalogError, GlobalRecipeRevision
 from .models import CatalogEntityRevision
+from .recipe_library import (
+    RecipeLibraryError,
+    RecipeLibraryItem,
+    RecipeLibrarySnapshot,
+)
 
 _UUID = r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 _SLUG = r"^[a-z0-9][a-z0-9-]{1,62}$"
@@ -60,6 +65,9 @@ CATALOG_OPERATION_IDS = {
     ("post", "/api/v1/catalog/imports/global/preview"): "previewGlobalRecipeImport",
     ("post", "/api/v1/catalog/imports/global"): "importGlobalRecipe",
     ("post", "/api/v1/catalog/imports/recipe-library"): "importRecipeLibrary",
+    ("get", "/api/v1/catalog/public-recipes"): "listPublicRecipes",
+    ("post", "/api/v1/catalog/imports/public/preview"): "previewPublicRecipeImport",
+    ("post", "/api/v1/catalog/imports/public"): "importPublicRecipe",
     (
         "put",
         "/api/v1/catalog/recipes/{recipe_id}/publication-report",
@@ -78,6 +86,11 @@ class AuditSink(Protocol):
 class GlobalCatalogReader(Protocol):
     def fetch(self, uri: str) -> GlobalRecipeRevision: ...
     def fetch_source_bundle(self, sha256: str) -> bytes: ...
+
+
+class RecipeLibraryReader(Protocol):
+    def list(self) -> RecipeLibrarySnapshot: ...
+    def fetch(self, uri: str) -> RecipeLibraryItem: ...
 
 
 class StrictModel(BaseModel):
@@ -129,6 +142,10 @@ class GlobalImportRequest(GlobalImportPreviewRequest):
     expected_content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+class PublicImportRequest(GlobalImportPreviewRequest):
+    expected_content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class RecipeLibraryImportRequest(StrictModel):
     library_commit: str = Field(pattern=r"^[0-9a-f]{40}$")
     source_path: str = Field(pattern=r"^recipes/[a-z0-9][a-z0-9-]{1,62}\.json$")
@@ -153,6 +170,33 @@ class GlobalRevisionResponse(StrictModel):
     content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     published_at: str
     document: dict[str, object]
+
+
+class PublicRecipeListItem(StrictModel):
+    publisher: str = Field(pattern=_SLUG)
+    slug: str = Field(pattern=_SLUG)
+    title: str = Field(min_length=1, max_length=120)
+    description: str = Field(min_length=1, max_length=4000)
+    tags: list[str] = Field(max_length=32)
+    uri: str = Field(min_length=100, max_length=256)
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class PublicRecipeListResponse(StrictModel):
+    repository: str = Field(min_length=1, max_length=200)
+    commit: str = Field(pattern=r"^[0-9a-f]{40}$")
+    recipes: list[PublicRecipeListItem] = Field(max_length=100)
+
+
+class PublicRecipePreviewResponse(StrictModel):
+    publisher: str = Field(pattern=_SLUG)
+    slug: str = Field(pattern=_SLUG)
+    title: str = Field(min_length=1, max_length=120)
+    description: str = Field(min_length=1, max_length=4000)
+    tags: list[str] = Field(max_length=32)
+    uri: str = Field(min_length=100, max_length=256)
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source: Literal["global", "recipe_library"]
 
 
 class RecipeSummaryResponse(StrictModel):
@@ -325,6 +369,7 @@ def install_catalog_routes(
     audits: AuditSink,
     service: CatalogService | None,
     global_catalog: GlobalCatalogReader | None = None,
+    recipe_library: RecipeLibraryReader | None = None,
 ) -> None:
     from .operation_api import _ADMIN_OPERATION_IDS
 
@@ -364,6 +409,44 @@ def install_catalog_routes(
                 "global.unavailable", "global catalog is not configured"
             )
         return global_catalog.fetch(uri)
+
+    def public_remote(uri: str) -> tuple[Literal["global", "recipe_library"], object]:
+        if recipe_library is not None:
+            try:
+                return "recipe_library", recipe_library.fetch(uri)
+            except RecipeLibraryError:
+                pass
+        return "global", remote(uri)
+
+    def public_preview(
+        source: Literal["global", "recipe_library"], value: object
+    ) -> dict[str, object]:
+        if source == "recipe_library":
+            assert isinstance(value, RecipeLibraryItem)
+            return {
+                "publisher": value.publisher,
+                "slug": value.slug,
+                "title": value.title,
+                "description": value.description,
+                "tags": list(value.tags),
+                "uri": value.uri,
+                "content_sha256": value.content_sha256,
+                "source": source,
+            }
+        assert isinstance(value, GlobalRecipeRevision)
+        metadata = value.document.get("metadata")
+        metadata = metadata if isinstance(metadata, dict) else {}
+        tags = metadata.get("tags", [])
+        return {
+            "publisher": value.publisher,
+            "slug": value.slug,
+            "title": metadata.get("title", value.slug),
+            "description": metadata.get("description", ""),
+            "tags": tags if isinstance(tags, list) else [],
+            "uri": value.uri,
+            "content_sha256": value.content_sha256,
+            "source": source,
+        }
 
     @app.get(
         "/api/v1/catalog/entities",
@@ -652,6 +735,27 @@ def install_catalog_routes(
             },
         )
 
+    def recipe_library_problem(
+        request: Request, error: RecipeLibraryError
+    ) -> JSONResponse:
+        status_code = (
+            404
+            if error.code == "recipe_library.not_found"
+            else 409
+            if error.code == "recipe_library.digest_mismatch"
+            else 422
+            if error.code in {"recipe_library.uri_invalid", "recipe_library.schema_incompatible"}
+            else 503
+        )
+        return JSONResponse(
+            status_code=status_code,
+            content={
+                "code": error.code[:128],
+                "detail": error.detail[:256],
+                "request_id": request.state.request_id,
+            },
+        )
+
     def global_revision(value: GlobalRecipeRevision) -> dict[str, object]:
         return {
             "publisher": value.publisher,
@@ -868,6 +972,132 @@ def install_catalog_routes(
             return global_revision(remote(body.uri))
         except GlobalCatalogError as error:
             return global_problem(request, error)
+
+    @app.get(
+        "/api/v1/catalog/public-recipes",
+        response_model=PublicRecipeListResponse,
+        operation_id="listPublicRecipes",
+    )
+    def list_public_recipes(
+        request: Request, _actor: Actor = authenticated
+    ):
+        administrator(_actor)
+        if recipe_library is None:
+            return recipe_library_problem(
+                request,
+                RecipeLibraryError(
+                    "recipe_library.unavailable",
+                    "recipe library is not configured",
+                ),
+            )
+        try:
+            snapshot = recipe_library.list()
+        except RecipeLibraryError as error:
+            return recipe_library_problem(request, error)
+        return {
+            "repository": snapshot.repository,
+            "commit": snapshot.commit,
+            "recipes": [
+                {
+                    "publisher": item.publisher,
+                    "slug": item.slug,
+                    "title": item.title,
+                    "description": item.description,
+                    "tags": list(item.tags),
+                    "uri": item.uri,
+                    "content_sha256": item.content_sha256,
+                }
+                for item in snapshot.items
+            ],
+        }
+
+    @app.post(
+        "/api/v1/catalog/imports/public/preview",
+        response_model=PublicRecipePreviewResponse,
+        operation_id="previewPublicRecipeImport",
+    )
+    def preview_public_import(
+        body: GlobalImportPreviewRequest,
+        request: Request,
+        actor: Actor = authenticated,
+    ):
+        administrator(actor)
+        try:
+            source, value = public_remote(body.uri)
+            return public_preview(source, value)
+        except RecipeLibraryError as error:
+            return recipe_library_problem(request, error)
+        except GlobalCatalogError as error:
+            return global_problem(request, error)
+
+    @app.post(
+        "/api/v1/catalog/imports/public",
+        response_model=RecipeRevisionResponse,
+        status_code=status.HTTP_201_CREATED,
+        operation_id="importPublicRecipe",
+    )
+    def import_public_recipe(
+        body: PublicImportRequest,
+        request: Request,
+        actor: Actor = authenticated,
+    ):
+        administrator(actor)
+        try:
+            source, value = public_remote(body.uri)
+            preview = public_preview(source, value)
+            if preview["content_sha256"] != body.expected_content_sha256:
+                return _problem(
+                    request,
+                    CatalogConflict(
+                        "public.preview_changed",
+                        "public recipe changed since preview; review it again",
+                    ),
+                )
+            if source == "recipe_library":
+                assert isinstance(value, RecipeLibraryItem)
+                result = catalog().import_recipe_library(
+                    actor.subject,
+                    library_commit=value.library_commit,
+                    source_path=value.source_path,
+                    document=value.document,
+                    expected_content_sha256=value.content_sha256,
+                )
+                action = "catalog.public.import"
+            else:
+                assert isinstance(value, GlobalRecipeRevision)
+                build = value.document.get("build")
+                context = build.get("context") if isinstance(build, dict) else None
+                source_sha256 = context.get("sha256") if isinstance(context, dict) else None
+                if not isinstance(source_sha256, str):
+                    raise CatalogValidationError(
+                        "global.source_invalid", "global recipe source identity is invalid"
+                    )
+                source_bundle = (
+                    global_catalog.fetch_source_bundle(source_sha256)
+                    if global_catalog is not None
+                    else b""
+                )
+                catalog().store_source_bundle(
+                    source_sha256, io.BytesIO(source_bundle), actor.subject
+                )
+                result = catalog().import_global(actor.subject, value)
+                action = "catalog.public.import"
+        except CatalogError as error:
+            return _problem(request, error)
+        except RecipeLibraryError as error:
+            return recipe_library_problem(request, error)
+        except GlobalCatalogError as error:
+            return global_problem(request, error)
+        audits.append(
+            AuditRecord(
+                request.state.request_id,
+                actor.subject,
+                action,
+                None,
+                (result.recipe_id, result.content_sha256 or ""),
+            )
+        )
+        return _revision(result)
 
     @app.post(
         "/api/v1/catalog/imports/global",

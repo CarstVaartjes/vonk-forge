@@ -277,6 +277,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/catalog/imports/public": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Import Public Recipe */
+        post: operations["importPublicRecipe"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/catalog/imports/public/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Public Import */
+        post: operations["previewPublicRecipeImport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/catalog/imports/recipe-library": {
         parameters: {
             query?: never;
@@ -322,6 +356,23 @@ export interface paths {
         put?: never;
         /** Preview */
         post: operations["previewWorkloadRunImport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/catalog/public-recipes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Public Recipes */
+        get: operations["listPublicRecipes"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2468,6 +2519,61 @@ export interface components {
             /** Changes */
             changes: components["schemas"]["ProposalChangeRequest"][];
         };
+        /** PublicImportRequest */
+        PublicImportRequest: {
+            /** Expected Content Sha256 */
+            expected_content_sha256: string;
+            /** Uri */
+            uri: string;
+        };
+        /** PublicRecipeListItem */
+        PublicRecipeListItem: {
+            /** Content Sha256 */
+            content_sha256: string;
+            /** Description */
+            description: string;
+            /** Publisher */
+            publisher: string;
+            /** Slug */
+            slug: string;
+            /** Tags */
+            tags: string[];
+            /** Title */
+            title: string;
+            /** Uri */
+            uri: string;
+        };
+        /** PublicRecipeListResponse */
+        PublicRecipeListResponse: {
+            /** Commit */
+            commit: string;
+            /** Recipes */
+            recipes: components["schemas"]["PublicRecipeListItem"][];
+            /** Repository */
+            repository: string;
+        };
+        /** PublicRecipePreviewResponse */
+        PublicRecipePreviewResponse: {
+            /** Content Sha256 */
+            content_sha256: string;
+            /** Description */
+            description: string;
+            /** Publisher */
+            publisher: string;
+            /** Slug */
+            slug: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "global" | "recipe_library";
+            /** Tags */
+            tags: string[];
+            /** Title */
+            title: string;
+            /** Uri */
+            uri: string;
+        };
         /** PublicationExportRequest */
         PublicationExportRequest: {
             /** Publisher */
@@ -4350,6 +4456,72 @@ export interface operations {
             };
         };
     };
+    importPublicRecipe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PublicImportRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecipeRevisionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    previewPublicRecipeImport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GlobalImportPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicRecipePreviewResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     importRecipeLibrary: {
         parameters: {
             query?: never;
@@ -4445,6 +4617,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    listPublicRecipes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicRecipeListResponse"];
                 };
             };
         };

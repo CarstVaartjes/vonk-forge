@@ -428,9 +428,9 @@ test("offers custom recipe authoring with validation and save", async () => {
 
 test("previews a public recipe import with exact identity and persists only after confirmation", async () => {
   history.replaceState(null, "", "/library");
-  const previewGlobalRecipe = vi.fn(async () => ({publisher: "vonk", slug: "service", recipe_id: "remote-1", revision_number: 4, revision_id: "remote-rev", content_sha256: "a".repeat(64), published_at: "2026-08-18T10:00:00Z", document: {}}));
-  const importGlobalRecipe = vi.fn(async () => ({recipe_id: "remote-1", revision_number: 4, lifecycle: "draft", slug: "service"}));
-  const api = {librarySnapshot: async () => ({...librarySnapshot, models: [], unlinked_recipes: []}), previewGlobalRecipe, importGlobalRecipe} as unknown as ControlApi;
+  const previewPublicRecipe = vi.fn(async () => ({publisher: "vonk", slug: "service", title: "Service", description: "", tags: [], uri: "vonk://catalog/vonk/service@sha256:" + "a".repeat(64), content_sha256: "a".repeat(64), source: "global"}));
+  const importPublicRecipe = vi.fn(async () => ({recipe_id: "remote-1", revision_number: 4, lifecycle: "draft", slug: "service"}));
+  const api = {librarySnapshot: async () => ({...librarySnapshot, models: [], unlinked_recipes: []}), listPublicRecipes: async () => ({repository: "CarstVaartjes/vonk-forge-recipes", commit: "a".repeat(40), recipes: []}), previewPublicRecipe, importPublicRecipe} as unknown as ControlApi;
   const user = userEvent.setup();
   render(<App api={api}/>);
   await user.click(await screen.findByRole("button", {name: "Import public recipe"}));
@@ -440,5 +440,25 @@ test("previews a public recipe import with exact identity and persists only afte
   expect(within(preview).getByText("vonk/service")).toBeVisible();
   expect(within(preview).getByText("sha256:" + "a".repeat(64))).toBeVisible();
   await user.click(within(preview).getByRole("button", {name: "Import reviewed recipe"}));
-  expect(importGlobalRecipe).toHaveBeenCalledWith(expect.stringContaining("vonk://catalog/vonk/service"), "a".repeat(64));
+  expect(importPublicRecipe).toHaveBeenCalledWith(expect.stringContaining("vonk://catalog/vonk/service"), "a".repeat(64));
+});
+
+test("loads the current default catalog recipes when public import opens", async () => {
+  history.replaceState(null, "", "/library");
+  const uri = "vonk://catalog/vonk-forge/qwen@sha256:" + "b".repeat(64);
+  const listPublicRecipes = vi.fn(async () => ({
+    repository: "CarstVaartjes/vonk-forge-recipes",
+    commit: "c".repeat(40),
+    recipes: [{publisher: "vonk-forge", slug: "qwen", title: "Qwen 3.5 · vLLM · single Spark", description: "A fast language recipe.", tags: ["qwen", "vllm"], uri, content_sha256: "b".repeat(64)}],
+  }));
+  const api = {librarySnapshot: async () => ({...librarySnapshot, models: [], unlinked_recipes: []}), listPublicRecipes} as unknown as ControlApi;
+  const user = userEvent.setup();
+  render(<App api={api}/>);
+  await user.click(await screen.findByRole("button", {name: "Import public recipe"}));
+
+  expect(listPublicRecipes).toHaveBeenCalledTimes(1);
+  const select = await screen.findByRole("combobox", {name: "Default catalog recipe"});
+  expect(within(select).getByRole("option", {name: /Qwen 3\.5/})).toBeVisible();
+  await user.selectOptions(select, uri);
+  expect(screen.getByRole("textbox", {name: "Public recipe URI"})).toHaveValue(uri);
 });

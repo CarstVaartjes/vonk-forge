@@ -1,6 +1,6 @@
 import {useCallback, useEffect, useRef, useState} from "react";
 import type {MouseEvent} from "react";
-import type {CatalogApi, GlobalRecipeRevision, LibraryApi, LibraryModel, LibraryRecipeDetail, LibraryRecipeSummary, LibrarySnapshot} from "../api/types";
+import type {CatalogApi, LibraryApi, LibraryModel, LibraryRecipeDetail, LibraryRecipeSummary, LibrarySnapshot, PublicRecipe, PublicRecipePreview} from "../api/types";
 import {LibraryBrowser} from "../components/library-browser";
 import {libraryRoute, modelVersionKey} from "../lib/library-route";
 import type {LibraryRoute} from "../lib/library-route";
@@ -132,8 +132,11 @@ export function LibraryPage({api, path, onNavigate}: {
   const [documentText, setDocumentText] = useState(() => JSON.stringify(defaultDocument(), null, 2));
   const [authoringStatus, setAuthoringStatus] = useState("");
   const [importUri, setImportUri] = useState("");
-  const [importPreview, setImportPreview] = useState<GlobalRecipeRevision>();
+  const [importPreview, setImportPreview] = useState<PublicRecipePreview>();
   const [importError, setImportError] = useState("");
+  const [publicRecipes, setPublicRecipes] = useState<PublicRecipe[]>([]);
+  const [publicRecipesLoading, setPublicRecipesLoading] = useState(false);
+  const [publicRecipesError, setPublicRecipesError] = useState("");
   const [snapshotAttempt, setSnapshotAttempt] = useState(0);
   const [detailAttempt, setDetailAttempt] = useState(0);
   const [query, setQuery] = useState("");
@@ -247,7 +250,7 @@ export function LibraryPage({api, path, onNavigate}: {
         <h2 ref={heading} tabIndex={-1}>Library</h2>
       <div className="library-toolbar-actions">
         <button type="button" className="button secondary" onClick={() => { setAuthoring("create"); setAuthoringStatus(""); }}>Create custom recipe</button>
-        <button type="button" className="button secondary" onClick={() => { setAuthoring("import"); setImportError(""); setImportPreview(undefined); }}>Import public recipe</button>
+        <button type="button" className="button secondary" onClick={() => { setAuthoring("import"); setImportError(""); setImportPreview(undefined); setPublicRecipesError(""); const listPublicRecipes = catalog.listPublicRecipes; if (!listPublicRecipes) { setPublicRecipesLoading(false); return; } setPublicRecipesLoading(true); void listPublicRecipes().then(result => { setPublicRecipes(result.recipes); setPublicRecipesLoading(false); }).catch((error: unknown) => { setPublicRecipesError(error instanceof Error ? error.message : "Unable to load the current recipe catalog"); setPublicRecipesLoading(false); }); }}>Import public recipe</button>
       </div>
       {authoring === "create" && <section className="library-section" aria-label="Recipe authoring">
         <h3>Create custom recipe</h3>
@@ -259,10 +262,16 @@ export function LibraryPage({api, path, onNavigate}: {
       </section>}
       {authoring === "import" && <section className="library-section" aria-label="Public recipe import">
         <h3>Import public recipe</h3>
+        <label>Default catalog recipe<select aria-label="Default catalog recipe" value={importUri} onChange={event => { setImportUri(event.target.value); setImportPreview(undefined); setImportError(""); }}>
+          <option value="">Choose a recipe from vonk-forge-recipes…</option>
+          {publicRecipes.map(recipe => <option key={recipe.uri} value={recipe.uri}>{recipe.title} · {recipe.slug}</option>)}
+        </select></label>
+        {publicRecipesLoading && <p role="status">Loading the current recipe catalog…</p>}
+        {publicRecipesError && <p role="alert">{publicRecipesError}</p>}
         <label>Public recipe URI<input aria-label="Public recipe URI" value={importUri} onChange={event => setImportUri(event.target.value)} placeholder="vonk://catalog/publisher/slug@sha256:…" /></label>
-        <button type="button" className="button" disabled={!catalog.previewGlobalRecipe || !importUri} onClick={() => { setImportError(""); void catalog.previewGlobalRecipe?.(importUri).then(setImportPreview).catch((error: unknown) => setImportError(error instanceof Error ? error.message : "Unable to preview import")); }}>Preview public import</button>
+        <button type="button" className="button" disabled={!catalog.previewPublicRecipe || !importUri} onClick={() => { setImportError(""); void catalog.previewPublicRecipe?.(importUri).then(setImportPreview).catch((error: unknown) => setImportError(error instanceof Error ? error.message : "Unable to preview import")); }}>Preview public import</button>
         {importError && <p role="alert">{importError}</p>}
-        {importPreview && <section aria-label="Public recipe import preview"><h4>{importPreview.publisher}/{importPreview.slug}</h4><p className="digest">sha256:{importPreview.content_sha256}</p><p>Revision {importPreview.revision_number} · immutable identity</p><button type="button" className="button" disabled={!catalog.importGlobalRecipe} onClick={() => { const match = /@sha256:([0-9a-f]{64})$/.exec(importUri); if (match) void catalog.importGlobalRecipe?.(importUri, match[1]).then(() => setAuthoringStatus("Recipe imported")); }}>Import reviewed recipe</button></section>}
+        {importPreview && <section aria-label="Public recipe import preview"><h4>{importPreview.publisher}/{importPreview.slug}</h4><p>{importPreview.title}</p><p>{importPreview.description}</p><p className="digest">sha256:{importPreview.content_sha256}</p><p>{importPreview.source === "recipe_library" ? "Current default catalog recipe · immutable content" : "Public catalog recipe · immutable content"}</p><button type="button" className="button" disabled={!catalog.importPublicRecipe} onClick={() => { void catalog.importPublicRecipe?.(importPreview.uri, importPreview.content_sha256).then(() => setAuthoringStatus("Recipe imported")); }}>Import reviewed recipe</button></section>}
         {authoringStatus && <p role="status" aria-label={authoringStatus === "Recipe saved" || authoringStatus === "Recipe imported" ? "Recipe authoring" : "Recipe validation"}>{authoringStatus}</p>}
         <button type="button" className="button secondary" onClick={() => setAuthoring(undefined)}>Close import</button>
       </section>}
