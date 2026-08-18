@@ -705,7 +705,7 @@ def test_complete_development_stack_enforces_tls_identity_and_acks_routes(
             port=api_port,
             path="/api/v1/agents/enrollments/grants",
             token=admin_token,
-            payload={"node_id": NODE_ID, "ttl_seconds": 300},
+            payload={"ttl_seconds": 300},
             expected=201,
         )
         assert isinstance(grant.get("token"), str)
