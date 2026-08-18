@@ -155,11 +155,6 @@ def workload_package_inputs(root: Path) -> tuple[str, ...]:
     protocol = root / "agent_protocol/src/vonk_agent_protocol/workload_packages.py"
     if protocol.is_file():
         paths.append(protocol.relative_to(root).as_posix())
-    for acceptance in (
-        root / "scripts/accept-workload-package-failures",
-    ):
-        if acceptance.is_file():
-            paths.append(acceptance.relative_to(root).as_posix())
     return tuple(dict.fromkeys(paths))
 
 

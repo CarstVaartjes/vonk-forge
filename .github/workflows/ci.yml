@@ -151,7 +151,6 @@ jobs:
           tests/runbooks/test_development_nas_installation.py
           tests/test_ci_platform_boundaries.py
           tests/test_container_release_workflow.py
-          tests/e2e/test_workload_package_failure_matrix.py
       - name: Run focused control cleanup contracts
         run: >-
           uv run --project control --frozen --with-editable . pytest -q

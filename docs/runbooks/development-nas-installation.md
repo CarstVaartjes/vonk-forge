@@ -781,7 +781,7 @@ Back up all 18 host secret files and every named volume needed for continuity
 to encrypted, access-controlled storage. The repository volume can be cloned
 again from public GitHub, but local `deploy` history, `main`,
 `refs/vonk/deploy-base`, other local refs, and signed changes exist only in its
-backup until pushed. PostgreSQL is authoritative for development catalog data.
+backup until pushed. PostgreSQL is authoritative for development Library data.
 The API, migration, and worker secret projections contain generated private
 authority and must be protected like the host secret files.
 

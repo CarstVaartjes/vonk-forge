@@ -17,10 +17,6 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric import ed25519
 
 REPORTS = ("control-plane-recovery", "control-plane-scale", "platform-lifecycle")
-WORKLOAD_REPORTS = {
-    "workload-package-acceptance": "workload-package-acceptance.json",
-    "workload-package-failure-matrix": "workload-package-failure-matrix.json",
-}
 UPDATE_REPORT = "platform-update"
 UPDATE_PHYSICAL_GATES = {
     "control_host_update_recovery": "physical-control-host-update-recovery",
@@ -52,8 +48,6 @@ _OBSERVED_AT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2
 _GENERATION = re.compile(r"gen-[0-9a-f]{24}\Z")
 _NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
 _ARCHITECTURE = re.compile(r"linux-(?:amd64|arm64)\Z")
-_WORKLOAD_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
-_WORKLOAD_BARE_DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 
 
 def canonical(value: object) -> bytes:
@@ -334,35 +328,6 @@ def _node_claim_matches_manifest(manifest: object, node: object) -> bool:
     )
 
 
-def _read_workload_report(root: Path, name: str) -> tuple[dict[str, object] | None, str | None]:
-    """Read one canonical, bounded workload acceptance report.
-
-    Workload evidence is intentionally supplied by the acceptance harness and
-    not synthesized by this aggregate verifier.  Requiring a canonical file
-    also makes the digest recorded in release evidence reproducible in hosted
-    CI and on the NAS.
-    """
-
-    path = root / "inventory/reports" / WORKLOAD_REPORTS[name]
-    raw = _read_bounded_regular(path, maximum=_MAX_REPORT_BYTES)
-    if raw is None:
-        return None, None
-    digest = hashlib.sha256(raw).hexdigest()
-    try:
-        report = json.loads(raw)
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        return None, digest
-    if not isinstance(report, dict) or raw != canonical(report):
-        return None, digest
-    declared = report.get("digest")
-    without_digest = dict(report)
-    without_digest.pop("digest", None)
-    expected = "sha256:" + hashlib.sha256(canonical(without_digest)).hexdigest()
-    if not isinstance(declared, str) or declared != expected:
-        return None, digest
-    return report, digest
-
-
 def _secret_free(value: object) -> bool:
     """Reject obvious secret-bearing evidence fields without inspecting payloads."""
 
@@ -376,150 +341,6 @@ def _secret_free(value: object) -> bool:
     elif isinstance(value, list):
         return all(_secret_free(item) for item in value)
     return True
-
-
-def _workload_acceptance_valid(report: object) -> bool:
-    if not isinstance(report, dict):
-        return False
-    required = {
-        "schema_version",
-        "report_type",
-        "status",
-        "evidence_kind",
-        "physical_nodes_exercised",
-        "unknown_family_without_agent_update",
-        "agent_digest_unchanged",
-        "release_two_activated",
-        "offline_release_one_rollback",
-        "unsigned_release_rejected",
-        "unapproved_release_rejected",
-        "ssh_calls",
-        "agent_update_calls",
-    }
-    return not (
-        not required <= set(report)
-        or report.get("schema_version") != 1
-        or report.get("report_type") not in {
-            "vonk-forge-workload-package-acceptance",
-            "workload-package-acceptance",
-        }
-        or report.get("status") != "passed"
-        or report.get("evidence_kind") not in {"assertion", "simulated", "physical"}
-        or report.get("physical_nodes_exercised") not in {True, False}
-        or not all(report.get(field) is True for field in (
-            "unknown_family_without_agent_update",
-            "agent_digest_unchanged",
-            "release_two_activated",
-            "offline_release_one_rollback",
-            "unsigned_release_rejected",
-            "unapproved_release_rejected",
-        ))
-        or report.get("ssh_calls") != 0
-        or report.get("agent_update_calls") != 0
-        or not _secret_free(report)
-    )
-
-
-def _failure_matrix_valid(report: object) -> bool:
-    if not isinstance(report, dict):
-        return False
-    if (
-        report.get("schema_version") != 1
-        or report.get("report_type") not in {
-            "vonk-forge-workload-package-failure-matrix",
-            "workload-package-failure-matrix",
-        }
-        or report.get("status") != "passed"
-        or report.get("evidence_kind") not in {"assertion", "simulated", "physical"}
-        or report.get("failure_matrix") is not True
-        or report.get("physical_nodes_exercised") not in {True, False}
-        or report.get("ssh_calls") != 0
-        or report.get("agent_update_calls") != 0
-        or report.get("restart_recovery") != "passed"
-        or report.get("gc_restart_recovery") != "passed"
-        or report.get("concurrent_identical_downloads") != "one-fetch-many-consumers"
-        or not _secret_free(report)
-    ):
-        return False
-    cases = report.get("cases")
-    if not isinstance(cases, list) or not cases:
-        return False
-    required_case = {"family_id", "release_digest", "node_id", "fence", "reason_code", "disposition"}
-    dispositions = {"safe-to-retry", "compensate", "operator-intervention"}
-    for case in cases:
-        if not isinstance(case, dict) or not required_case <= set(case):
-            return False
-        if (
-            not isinstance(case["family_id"], str)
-            or not isinstance(case["release_digest"], str)
-            or not (
-                _WORKLOAD_DIGEST.fullmatch(case["release_digest"])
-                or _WORKLOAD_BARE_DIGEST.fullmatch(case["release_digest"])
-            )
-            or not isinstance(case["node_id"], str)
-            or not isinstance(case["fence"], str)
-            or not isinstance(case["reason_code"], str)
-            or case["disposition"] not in dispositions
-        ):
-            return False
-    return True
-
-
-def _workload_evidence(root: Path) -> tuple[dict[str, object], dict[str, str], list[str]]:
-    """Validate the independent workload acceptance artifacts."""
-
-    digests: dict[str, str] = {}
-    kinds: dict[str, str] = {}
-    missing: list[str] = []
-    acceptance, acceptance_digest = _read_workload_report(root, "workload-package-acceptance")
-    failure, failure_digest = _read_workload_report(root, "workload-package-failure-matrix")
-    if acceptance_digest is not None:
-        digests["workload-package-acceptance"] = acceptance_digest
-    if failure_digest is not None:
-        digests["workload-package-failure-matrix"] = failure_digest
-    if acceptance is None:
-        kinds["workload-package-acceptance"] = "missing"
-        missing.append("workload-package-acceptance")
-    elif not _workload_acceptance_valid(acceptance):
-        kinds["workload-package-acceptance"] = "invalid"
-        missing.append("workload-package-acceptance:valid")
-    else:
-        kinds["workload-package-acceptance"] = str(acceptance["evidence_kind"])
-    if failure is None:
-        kinds["workload-package-failure-matrix"] = "missing"
-        missing.append("workload-package-failure-matrix")
-    elif not _failure_matrix_valid(failure):
-        kinds["workload-package-failure-matrix"] = "invalid"
-        missing.append("workload-package-failure-matrix:valid")
-    else:
-        kinds["workload-package-failure-matrix"] = str(failure["evidence_kind"])
-    acceptance_ok = acceptance is not None and _workload_acceptance_valid(acceptance)
-    failure_ok = failure is not None and _failure_matrix_valid(failure)
-    return (
-        {
-            "unknown_family_without_agent_update": bool(
-                acceptance_ok and acceptance["unknown_family_without_agent_update"]
-            ),
-            "agent_digest_unchanged": bool(acceptance_ok and acceptance["agent_digest_unchanged"]),
-            "release_two_activated": bool(acceptance_ok and acceptance["release_two_activated"]),
-            "offline_release_one_rollback": bool(
-                acceptance_ok and acceptance["offline_release_one_rollback"]
-            ),
-            "unsigned_release_rejected": bool(
-                acceptance_ok and acceptance["unsigned_release_rejected"]
-            ),
-            "unapproved_release_rejected": bool(
-                acceptance_ok and acceptance["unapproved_release_rejected"]
-            ),
-            "ssh_calls": acceptance.get("ssh_calls") if acceptance_ok else None,
-            "agent_update_calls": acceptance.get("agent_update_calls") if acceptance_ok else None,
-            "failure_matrix": failure_ok,
-            "evidence_sha256": dict(sorted(digests.items())),
-            "missing_gates": sorted(set(missing)),
-        },
-        kinds,
-        missing,
-    )
 
 
 def _code_host_pr_lifecycle_valid(
@@ -849,9 +670,6 @@ def verify(
     if update_digest is not None:
         digests[UPDATE_REPORT] = update_digest
     missing.extend(update_missing)
-    workload, workload_kinds, workload_missing = _workload_evidence(root)
-    evidence_kinds.update(workload_kinds)
-    missing.extend(workload_missing)
     if code_host_pr_lifecycle:
         missing = [
             gate
@@ -874,7 +692,6 @@ def verify(
         "evidence_kinds": dict(sorted(evidence_kinds.items())),
         "physical_evidence_key_id": physical_key_id,
         "physical_update_gates": physical_update_gates,
-        "workload_packages": workload,
         "missing_gates": sorted(set(missing)),
     }
     report["digest"] = hashlib.sha256(canonical(report)).hexdigest()

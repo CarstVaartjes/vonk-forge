@@ -23,7 +23,7 @@ the fleet repository proposal; it must not create a new node identity.
 
 ## Reconciliation failures
 
-Filter Jobs and Audit by action, inspect sanitized evidence, and verify the
+Filter operations and Audit by action, inspect sanitized evidence, and verify the
 protected commit is still eligible. Re-plan after correcting repository state;
 never retry a revoked or stale plan.
 

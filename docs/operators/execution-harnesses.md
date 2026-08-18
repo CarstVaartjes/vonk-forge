@@ -4,7 +4,7 @@ An execution harness is the stable lifecycle contract between a recipe and the
 Spark agent. It compiles declarative recipe inputs into the universal source,
 build, distribute, install, run, health, route, stop, and uninstall operations.
 Operators act through those operations and their preview digests; they do not
-start a parallel container and then write catalog state by hand.
+start a parallel container and then write Library state by hand.
 
 See [Model and recipe identities](model-catalog.md) for model identity and revision concepts.
 
@@ -28,7 +28,7 @@ existing built-in.
 The supported v1 seed is exactly `comfyui`, `diffusers`, `ds4`, `llama-cpp`,
 `pytorch-pipeline`, `sglang`, `tensorrt-llm`, and `vllm`. A fresh development
 database must resolve those eight `vonk-forge` execution-harness entities and
-no prototype catalog state. Their names describe execution contracts, not a
+no placeholder harness state. Their names describe execution contracts, not a
 promise that every model works with every distribution or topology; the recipe,
 distribution capability, structural qualification, and Fleet admission still
 have to agree.
@@ -85,7 +85,7 @@ run resumes from that hash-bound phase without assuming the API is available
 during teardown. Final verification requires `/api/v1/agents` to be empty;
 PostgreSQL Fleet registrations are empty, so no nodes are projected and no
 inventory, telemetry, workload, or reservation state remains. Terminally
-paginated catalog reads must contain exactly the eight built-in harness
+paginated Library reads must contain exactly the eight built-in harness
 identities and their checked-in content digests, no recipes, and no prototype
 state. Migration head must be exactly `0001_fleet_library_baseline`.
 
@@ -133,7 +133,7 @@ prefix of `authored`, `structurally-verified`, `container-verified`,
 validating all exact runner outputs required at that point. State names without
 an image digest, artifact-set digest, inference digest, cleanup operation, or
 advanced post-restart supervisor generation cannot overstate acceptance. A
-changed recipe, catalog digest, node/certificate binding, qualification file,
+changed recipe, Library digest, node/certificate binding, qualification file,
 API origin, topology, or noncanonical sidecar cannot resume older evidence.
 
 At each restart checkpoint the runner records both the supervisor generation

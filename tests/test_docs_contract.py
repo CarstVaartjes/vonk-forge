@@ -42,6 +42,13 @@ EXECUTION_HARNESSES = ROOT / "docs/operators/execution-harnesses.md"
 MODEL_CATALOG = ROOT / "docs/operators/model-catalog.md"
 RECIPE_LIBRARY = ROOT / "docs/operators/recipe-library.md"
 
+FLEET_LIBRARY_ONLY_DOCS = (
+    README,
+    *(ROOT / "docs/runbooks").glob("*.md"),
+    *(ROOT / "docs/operators").glob("*.md"),
+    THREAT_MODEL,
+)
+
 CURRENT_OPERATIONAL_DOCS = (
     README,
     DOCS_INDEX,
@@ -318,12 +325,10 @@ def test_fresh_spark_install_does_not_claim_nvidia_platform_ownership() -> None:
     fresh = _normalized_text(FRESH_DEVELOPMENT_INSTALL)
     platform = _normalized_text(PLATFORM_UPDATE)
     runtime_release = _normalized_text(RUNTIME_RELEASE)
-    legacy = _normalized_text(VONKCTL)
 
     assert "NVIDIA Sync owns supported cluster networking and node-to-node SSH" in fresh
     assert "must not stop, disable, mask, or install `earlyoom`" in platform
     assert "published by the repository’s GitHub Actions workflows" in runtime_release
-    assert "The browser is the normal recipe workflow" in legacy
 
 
 def test_onboarding_preserves_the_one_use_grant_pair_approve_pair_sequence() -> None:
@@ -906,7 +911,6 @@ def test_operator_library_identity_guides_expose_complete_navigable_concept_and_
 def test_supported_docs_do_not_present_catalog_as_an_operator_surface() -> None:
     supported = (
         README,
-        VONKCTL,
         ROOT / "docs/runbooks/repository-administration.md",
         ROOT / "docs/runbooks/platform-release-update.md",
         RUNTIME_RELEASE,
@@ -933,6 +937,49 @@ def test_supported_docs_do_not_present_catalog_as_an_operator_surface() -> None:
         for token in forbidden
         if token in path.read_text()
     }
+    assert offenders == {}
+
+
+def test_fleet_library_only_docs_do_not_advertise_removed_operator_surfaces() -> None:
+    forbidden_patterns = {
+        r"\bvonkctl\b": "vonkctl",
+        r"/catalog": "/catalog",
+        r"\bCatalog\b": "Catalog",
+        r"\bCatalog drafts\b": "Catalog drafts",
+        r"\bCatalog imports\b": "Catalog imports",
+        r"\bPackages page\b": "Packages page",
+        r"\bDeployments page\b": "Deployments page",
+        r"\bUpdates page\b": "Updates page",
+        r"\bJobs page\b": "Jobs page",
+        r"\bAdmin\s*(?:→|->)\s*Updates\b": "Admin Updates page",
+        r"\badmin updates\b": "admin updates CLI",
+        r"\badmin jobs\b": "admin jobs CLI",
+        r"\blocal recipe catalog\b": "local recipe catalog",
+        r"\bglobal catalog\b": "global catalog",
+        r"\bremote catalog\b": "remote catalog",
+        r"\bcatalog state\b": "catalog state",
+        r"\bprototype catalog\b": "prototype catalog",
+        r"\bcatalog reads\b": "catalog reads",
+        r"\bcatalog reference": "catalog reference",
+        r"agent/tests/packages/test_engine\.py": "deleted agent package engine test",
+        r"agent/tests/test_package_operations\.py": "deleted package operations test",
+        r"agent/tests/test_workload_preflight\.py": "deleted workload preflight test",
+        r"agent_protocol/tests/test_package_operations\.py": (
+            "deleted protocol package operations test"
+        ),
+        r"agent_protocol/fixtures/workload-package\.json": (
+            "deleted workload package fixture"
+        ),
+    }
+    offenders = {
+        path.relative_to(ROOT).as_posix(): label
+        for path in FLEET_LIBRARY_ONLY_DOCS
+        if path.exists()
+        for pattern, label in forbidden_patterns.items()
+        if re.search(pattern, path.read_text())
+    }
+
+    assert not VONKCTL.exists()
     assert offenders == {}
 
 

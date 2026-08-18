@@ -201,6 +201,13 @@ def test_release_verifier_lists_external_gates() -> None:
     }
     assert report["physical_evidence_key_id"] is None
     assert report["evidence_kinds"]["platform-update"] in {"missing", "simulated"}
+    assert "workload_packages" not in report
+    assert not any(
+        gate.startswith("workload-package") for gate in report["missing_gates"]
+    )
+    assert not any(
+        key.startswith("workload-package") for key in report["evidence_kinds"]
+    )
     schema = json.loads(
         (ROOT / "schemas/platform-release-evidence.schema.json").read_text()
     )
@@ -354,56 +361,6 @@ def _write_update_report(repository: Path, report: dict[str, object]) -> None:
     (repository / "inventory/reports/platform-update.json").write_bytes(
         _canonical(content)
     )
-
-
-def _write_workload_evidence(repository: Path) -> None:
-    reports = repository / "inventory/reports"
-    acceptance: dict[str, object] = {
-        "schema_version": 1,
-        "report_type": "vonk-forge-workload-package-acceptance",
-        "status": "passed",
-        "evidence_kind": "simulated",
-        "physical_nodes_exercised": False,
-        "unknown_family_without_agent_update": True,
-        "agent_digest_unchanged": True,
-        "release_two_activated": True,
-        "offline_release_one_rollback": True,
-        "unsigned_release_rejected": True,
-        "unapproved_release_rejected": True,
-        "ssh_calls": 0,
-        "agent_update_calls": 0,
-    }
-    failure: dict[str, object] = {
-        "schema_version": 1,
-        "report_type": "vonk-forge-workload-package-failure-matrix",
-        "status": "passed",
-        "evidence_kind": "simulated",
-        "failure_matrix": True,
-        "physical_nodes_exercised": False,
-        "ssh_calls": 0,
-        "agent_update_calls": 0,
-        "restart_recovery": "passed",
-        "gc_restart_recovery": "passed",
-        "concurrent_identical_downloads": "one-fetch-many-consumers",
-        "cases": [
-            {
-                "family_id": "synthetic-stack",
-                "release_digest": "sha256:" + "a" * 64,
-                "node_id": "spk_" + "1" * 32,
-                "fence": "fence-1",
-                "reason_code": "transport-unavailable",
-                "disposition": "safe-to-retry",
-            }
-        ],
-    }
-    for filename, report in (
-        ("workload-package-acceptance.json", acceptance),
-        ("workload-package-failure-matrix.json", failure),
-    ):
-        report["digest"] = "sha256:" + hashlib.sha256(
-            _canonical(report)
-        ).hexdigest()
-        (reports / filename).write_bytes(_canonical(report))
 
 
 def _write_physical_evidence(repository: Path, report: dict[str, object]) -> Path:
@@ -577,42 +534,12 @@ def test_simulated_update_report_never_satisfies_physical_release_gates(
     assert not any(aggregate["physical_update_gates"].values())
 
 
-def test_workload_failure_helper_emits_report_accepted_by_release_verifier(
-    tmp_path: Path,
-) -> None:
-    helper = ROOT / "scripts/accept-workload-package-failures"
-    if not helper.exists():
-        pytest.skip("W19 failure evidence helper is not present yet")
-    output = tmp_path / "workload-package-failure-matrix.json"
-    completed = subprocess.run(
-        [helper, "--output", str(output), "--json"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert completed.returncode == 0, completed.stderr
-    namespace = runpy.run_path(str(SCRIPT))
-    # The helper writes to its requested path; copy it into the verifier's
-    # canonical inventory location before validating the real artifact.
-    inventory = tmp_path.parent / "inventory/reports"
-    inventory.mkdir(parents=True)
-    target = inventory / output.name
-    target.write_bytes(output.read_bytes())
-    report, digest = namespace["_read_workload_report"](
-        tmp_path.parent, "workload-package-failure-matrix"
-    )
-    assert report is not None
-    assert digest == hashlib.sha256(target.read_bytes()).hexdigest()
-    assert namespace["_failure_matrix_valid"](report)
-
-
 def test_physical_update_evidence_must_be_complete_and_content_addressed(
     tmp_path: Path,
 ) -> None:
     repository = tmp_path / "repo"
     _copy_verifier(repository)
     _passing_baseline_reports(repository)
-    _write_workload_evidence(repository)
     report = _acceptance_report()
     report["evidence_kind"] = "physical"
     report["remaining_release_gates"] = []

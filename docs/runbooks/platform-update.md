@@ -353,14 +353,12 @@ as a historical record, not a procedure to replay.
 ## NAS-to-GPU node platform skew
 
 The NAS Docker services and GPU node worker code are updated as a platform
-operation. In the authenticated web update workflow, or with the CLI below,
-compare the NAS's signed platform target with each authenticated GPU node agent:
+operation. In the authenticated Fleet update workflow, compare the NAS's
+signed platform target with each authenticated GPU node agent:
 
 ```bash
-vonkctl admin updates skew --json
-vonkctl admin updates plan --target-version 2.0.0 --json
-vonkctl admin updates apply --plan-digest PLAN_DIGEST --json
-vonkctl admin updates status --json
+Fleet shows skew, the exact signed target, the canary plan, and rollout status
+inline with the affected Sparks.
 ```
 
 When the NAS is newer, the UI shows the exact target digest, affected node

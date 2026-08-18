@@ -8,13 +8,9 @@ recipe edit or activation into a Git change.
 ## Inspect the platform boundary
 
 Use the browser Fleet and Library views for normal operation. The generated
-CLI exposes the same read-only platform views:
-
-```bash
-vonkctl nodes status --json
-vonkctl admin fleet --json
-vonkctl admin proposal --file change.json --json
-```
+API clients expose the same read-only platform projections for maintainers and
+automation, but the supported operator surface remains the authenticated web
+workflow.
 
 Platform proposals pin a full commit, typed document changes, affected targets,
 and all input digests. A proposal is reviewable before submission and cannot
@@ -43,7 +39,7 @@ an accepted v1 run owns the exact `hermes-agent` alias.
 
 ## Recovery boundary
 
-Do not use `vonk-control-offline` for ordinary catalog or platform changes. Its
+Do not use `vonk-control-offline` for ordinary recipe or platform changes. Its
 exclusive lock and stopped-service proof are reserved for documented bootstrap
 and recovery operations. Never use SSH to bypass a queued preview, route lease,
 or evidence gate.
