@@ -418,7 +418,15 @@ test("offers custom recipe authoring with validation and save", async () => {
   const user = userEvent.setup();
   render(<App api={api}/>);
   await user.click(await screen.findByRole("button", {name: "Create custom recipe"}));
-  await user.type(screen.getByRole("textbox", {name: "Recipe slug"}), "custom-service");
+  expect(screen.getByRole("group", {name: "Identity and description"})).toBeVisible();
+  expect(screen.getByRole("group", {name: "Model and execution"})).toBeVisible();
+  expect(screen.getByRole("group", {name: "Build and runtime"})).toBeVisible();
+  expect(screen.getByRole("group", {name: "Artifacts and interfaces"})).toBeVisible();
+  expect(screen.getByRole("group", {name: "Validation and provenance"})).toBeVisible();
+  expect(screen.getByText("Advanced JSON fallback")).toBeVisible();
+  const slug = screen.getByRole("textbox", {name: "Recipe slug"});
+  await user.clear(slug);
+  await user.type(slug, "custom-service");
   await user.click(screen.getByRole("button", {name: "Validate recipe"}));
   expect(screen.getByRole("status", {name: "Recipe validation"})).toHaveTextContent("Recipe document valid");
   await user.click(screen.getByRole("button", {name: "Save custom recipe"}));
@@ -437,7 +445,7 @@ test("previews a public recipe import with exact identity and persists only afte
   await user.type(screen.getByRole("textbox", {name: "Public recipe URI"}), "vonk://catalog/vonk/service@sha256:" + "a".repeat(64));
   await user.click(screen.getByRole("button", {name: "Preview public import"}));
   const preview = await screen.findByRole("region", {name: "Public recipe import preview"});
-  expect(within(preview).getByText("vonk/service")).toBeVisible();
+  expect(within(preview).getAllByText("vonk/service")).toHaveLength(2);
   expect(within(preview).getByText("sha256:" + "a".repeat(64))).toBeVisible();
   await user.click(within(preview).getByRole("button", {name: "Import reviewed recipe"}));
   expect(importPublicRecipe).toHaveBeenCalledWith(expect.stringContaining("vonk://catalog/vonk/service"), "a".repeat(64));
