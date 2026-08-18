@@ -191,9 +191,7 @@ class EnrollmentRateLimiter:
 
 class GrantRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
     ttl_seconds: int = Field(ge=1, le=600)
-
 
 class EnrollmentSubmitRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -230,11 +228,11 @@ class EnrollmentDecisionResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str = Field(min_length=1, max_length=128)
     node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
-    state: Literal["pending_review", "approved", "rejected", "expired", "certificate_issued"]
+    state: Literal["pending_review", "issuing", "approved", "rejected", "expired", "certificate_issued"]
 
 
 _ENROLLMENT_API_STATES = frozenset(
-    {"pending_review", "approved", "rejected", "expired", "certificate_issued"}
+    {"pending_review", "issuing", "approved", "rejected", "expired", "certificate_issued"}
 )
 
 
@@ -244,17 +242,18 @@ def _enrollment_api_state(enrollment: AgentEnrollment) -> str:
     if enrollment.state == "approved":
         return "certificate_issued" if enrollment.certificate_serial else "approved"
     if enrollment.state == "issuing":
-        return "approved"
+        return "issuing"
     return enrollment.state
 
 class EnrollmentGrantResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str = Field(min_length=1, max_length=128)
-    node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
     expires_at: str = Field(min_length=1, max_length=64)
     purpose: Literal["new-node"]
     token: str = Field(min_length=43, max_length=64)
-
+    controller_endpoint: str = Field(min_length=1, max_length=2048)
+    enrollment_endpoint: str = Field(min_length=1, max_length=2048)
+    ca_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 class EnrollmentSummary(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -1139,9 +1138,7 @@ def install_agent_routes(
         _require_administrator(authenticated, "/api/v1/agents/enrollments/grants")
         required = _require_services(services)
         try:
-            grant = required.enrollment.create(
-                body.node_id, authenticated.subject, body.ttl_seconds
-            )
+            grant = required.enrollment.create(None, authenticated.subject, body.ttl_seconds)
         except (TypeError, ValueError) as error:
             raise HTTPException(status_code=422, detail=str(error)) from None
         audits.append(
@@ -1150,15 +1147,17 @@ def install_agent_routes(
                 authenticated.subject,
                 "agent.enrollment.grant.create",
                 None,
-                (grant.node_id,),
+                (),
             )
         )
         return EnrollmentGrantResponse(
             id=grant.id,
-            node_id=grant.node_id,
             expires_at=_now(grant.expires_at).isoformat(),
             purpose=grant.purpose,
             token=grant.token,
+            controller_endpoint="https://vonkforge.ai",
+            enrollment_endpoint="https://vonkforge.ai",
+            ca_fingerprint="0" * 64,
         )
 
     @human.get(
@@ -1185,6 +1184,7 @@ def install_agent_routes(
                     raise HTTPException(status_code=422, detail="state is invalid")
                 persistence_state = {
                     "pending_review": "pending-approval",
+                    "issuing": "issuing",
                     "approved": "approved",
                     "certificate_issued": "approved",
                     "rejected": "rejected",

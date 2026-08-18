@@ -127,13 +127,14 @@ class EnrollmentService:
         # production database transaction boundary.
         self._rotation_lock = threading.RLock()
 
-    def create(self, node_id: str, actor: str, ttl_seconds: int) -> EnrollmentGrant:
+    def create(self, node_id: str | None, actor: str, ttl_seconds: int) -> EnrollmentGrant:
         return self._create(node_id, actor, ttl_seconds, purpose="new-node")
 
     def _create(
-        self, node_id: str, actor: str, ttl_seconds: int, *, purpose: str
+        self, node_id: str | None, actor: str, ttl_seconds: int, *, purpose: str
     ) -> EnrollmentGrant:
-        _validate_node_id(node_id)
+        if node_id is not None:
+            _validate_node_id(node_id)
         _validate_actor(actor)
         if not 0 < ttl_seconds <= _MAX_GRANT_TTL_SECONDS:
             raise ValueError("enrollment grant TTL must be between one and 600 seconds")
@@ -199,16 +200,24 @@ class EnrollmentService:
                 try:
                     if not isinstance(csr, bytes) or len(csr) > _MAX_CSR_BYTES:
                         raise EnrollmentDenied("CSR is too large")
-                    csr_pem, public_key_pem, public_key_fingerprint = _load_csr(grant.node_id, csr)
+                    csr_pem, public_key_pem, public_key_fingerprint, csr_node_id = _load_csr(
+                        grant.node_id, csr
+                    )
                 except EnrollmentDenied as error:
                     failure = str(error)
                 else:
-                    values, failure = _validate_evidence(evidence, grant.node_id, public_key_fingerprint)
+                    values, failure = _validate_evidence(
+                        evidence,
+                        grant.node_id,
+                        csr_node_id,
+                        public_key_fingerprint,
+                    )
                 if failure is None:
+                    node_id = values["node_id"]
                     enrollment = AgentEnrollment(
                         id=str(uuid.uuid4()),
                         grant_id=grant.id,
-                        node_id=grant.node_id,
+                        node_id=node_id,
                         state="pending-approval",
                         csr_pem=csr_pem.decode("ascii"),
                         csr_public_key_pem=public_key_pem.decode("ascii"),
@@ -219,12 +228,11 @@ class EnrollmentService:
                         boot_id=values["boot_id"],
                         created_at=now,
                     )
+                    grant.node_id = node_id
                     grant.consumed_at = now
                     session.add(enrollment)
                     outcome = _pending(enrollment)
                 else:
-                    # A valid bearer token is one-use even when its holder
-                    # supplies evidence that cannot be accepted.
                     grant.consumed_at = now
         if failure is not None:
             raise EnrollmentDenied(failure)
@@ -302,7 +310,7 @@ class EnrollmentService:
         _validate_node_id(node_id)
         if not serial.strip():
             raise ValueError("certificate serial is required")
-        normalized_csr, _, csr_fingerprint = _load_csr(node_id, csr)
+        normalized_csr, _, csr_fingerprint, _ = _load_csr(node_id, csr)
         now = _utc(self._clock())
         try:
             claim = self._claim_rotation(
@@ -929,10 +937,15 @@ def _replay_matches(
     evidence: Mapping[str, object],
 ) -> bool:
     try:
-        normalized, _, fingerprint = _load_csr(enrollment.node_id, csr)
+        normalized, _, fingerprint, _ = _load_csr(enrollment.node_id, csr)
     except EnrollmentDenied:
         return False
-    values, failure = _validate_evidence(evidence, enrollment.node_id, fingerprint)
+    values, failure = _validate_evidence(
+        evidence,
+        enrollment.node_id,
+        enrollment.node_id,
+        fingerprint,
+    )
     return failure is None and (
         normalized.decode("ascii") == enrollment.csr_pem
         and fingerprint == enrollment.csr_public_key_fingerprint
@@ -975,15 +988,20 @@ def _rotation_claim(
     )
 
 
-def _load_csr(node_id: str, csr: bytes) -> tuple[bytes, bytes, str]:
+def _load_csr(
+    node_id: str | None, csr: bytes
+) -> tuple[bytes, bytes, str, str]:
     try:
         request = x509.load_pem_x509_csr(csr)
     except (TypeError, ValueError) as error:
         raise EnrollmentDenied("CSR must be valid PEM") from error
     if not request.is_signature_valid:
         raise EnrollmentDenied("CSR signature is invalid")
-    expected_subject = x509.Name([x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, node_id)])
-    if request.subject != expected_subject:
+    common_names = request.subject.get_attributes_for_oid(x509.oid.NameOID.COMMON_NAME)
+    if len(common_names) != 1 or _NODE_ID.fullmatch(common_names[0].value) is None:
+        raise EnrollmentDenied("CSR subject must contain a canonical node ID")
+    csr_node_id = common_names[0].value
+    if node_id is not None and csr_node_id != node_id:
         raise EnrollmentDenied("CSR subject does not match enrollment node")
     if len(request.extensions) != 1:
         raise EnrollmentDenied("CSR must contain only the node URI SAN extension")
@@ -992,7 +1010,7 @@ def _load_csr(node_id: str, csr: bytes) -> tuple[bytes, bytes, str]:
     except x509.ExtensionNotFound as error:
         raise EnrollmentDenied("CSR node URI SAN is required") from error
     expected_sans = x509.SubjectAlternativeName([
-        x509.UniformResourceIdentifier(f"spiffe://vonk-forge.local/node/{node_id}")
+        x509.UniformResourceIdentifier(f"spiffe://vonk-forge.local/node/{csr_node_id}")
     ])
     if sans != expected_sans:
         raise EnrollmentDenied("CSR node URI SAN does not match enrollment node")
@@ -1001,11 +1019,14 @@ def _load_csr(node_id: str, csr: bytes) -> tuple[bytes, bytes, str]:
         raise EnrollmentDenied("CSR public key must be Ed25519")
     public_key_pem = public_key.public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
     public_key_der = public_key.public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
-    return request.public_bytes(serialization.Encoding.PEM), public_key_pem, _digest(public_key_der)
+    return request.public_bytes(serialization.Encoding.PEM), public_key_pem, _digest(public_key_der), csr_node_id
 
 
 def _validate_evidence(
-    evidence: Mapping[str, object], node_id: str, public_key_fingerprint: str
+    evidence: Mapping[str, object],
+    grant_node_id: str | None,
+    csr_node_id: str,
+    public_key_fingerprint: str,
 ) -> tuple[dict[str, str], str | None]:
     values: dict[str, str] = {}
     if set(evidence) != set(_EVIDENCE_FIELDS):
@@ -1015,7 +1036,9 @@ def _validate_evidence(
         if not isinstance(value, str) or not value.strip() or len(value) > _EVIDENCE_LIMITS[name]:
             return values, f"evidence {name} is required"
         values[name] = value
-    if values["node_id"] != node_id:
+    if values["node_id"] != csr_node_id:
+        return values, "evidence node ID does not match CSR"
+    if grant_node_id is not None and values["node_id"] != grant_node_id:
         return values, "evidence node ID does not match enrollment grant"
     if values["csr_public_key_fingerprint"] != public_key_fingerprint:
         return values, "evidence CSR public-key fingerprint does not match CSR"

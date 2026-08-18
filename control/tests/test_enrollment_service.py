@@ -30,7 +30,7 @@ def service():
         connection.exec_driver_sql(
             """
             CREATE TABLE enrollment_intents (
-                intent_id TEXT PRIMARY KEY, node_id TEXT NOT NULL,
+                intent_id TEXT PRIMARY KEY, node_id TEXT,
                 state TEXT NOT NULL, created_by TEXT NOT NULL,
                 created_at DATETIME NOT NULL, expires_at DATETIME NOT NULL,
                 token_verifier TEXT NOT NULL, consumed_at DATETIME,
@@ -74,6 +74,8 @@ def test_creation_returns_deterministic_response_and_exposes_token_once(service)
     assert row.token_verifier != result.token
     assert row.consumed_at is None
     assert json.loads(row.metadata)["source"] == "test"
+
+
 
 
 def test_valid_verification_consumes_and_replay_fails(service):

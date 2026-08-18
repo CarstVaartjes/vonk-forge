@@ -20,11 +20,9 @@ T = TypeVar("T", bound="GrantRequest")
 class GrantRequest:
     """
         Attributes:
-            node_id (str):
             ttl_seconds (int):
      """
 
-    node_id: str
     ttl_seconds: int
 
 
@@ -32,15 +30,12 @@ class GrantRequest:
 
 
     def to_dict(self) -> dict[str, Any]:
-        node_id = self.node_id
-
         ttl_seconds = self.ttl_seconds
 
 
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
-            "node_id": node_id,
             "ttl_seconds": ttl_seconds,
         })
 
@@ -51,12 +46,9 @@ class GrantRequest:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        node_id = d.pop("node_id")
-
         ttl_seconds = d.pop("ttl_seconds")
 
         grant_request = cls(
-            node_id=node_id,
             ttl_seconds=ttl_seconds,
         )
 

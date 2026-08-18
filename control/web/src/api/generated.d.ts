@@ -1348,16 +1348,20 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "pending_review" | "approved" | "rejected" | "expired" | "certificate_issued";
+            state: "pending_review" | "issuing" | "approved" | "rejected" | "expired" | "certificate_issued";
         };
         /** EnrollmentGrantResponse */
         EnrollmentGrantResponse: {
+            /** Ca Fingerprint */
+            ca_fingerprint: string;
+            /** Controller Endpoint */
+            controller_endpoint: string;
+            /** Enrollment Endpoint */
+            enrollment_endpoint: string;
             /** Expires At */
             expires_at: string;
             /** Id */
             id: string;
-            /** Node Id */
-            node_id: string;
             /**
              * Purpose
              * @constant
@@ -1518,8 +1522,6 @@ export interface components {
         };
         /** GrantRequest */
         GrantRequest: {
-            /** Node Id */
-            node_id: string;
             /** Ttl Seconds */
             ttl_seconds: number;
         };

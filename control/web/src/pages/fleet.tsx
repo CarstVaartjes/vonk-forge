@@ -35,7 +35,6 @@ function connectionPresentation(connection: ReturnType<typeof useFleetStream>["c
 }
 
 function SparkOnboarding({api, onClose}: {api: ControlApi; onClose(): void}) {
-  const [nodeId, setNodeId] = useState("");
   const [grant, setGrant] = useState<EnrollmentGrantResponse>();
   const [error, setError] = useState("");
   const [creating, setCreating] = useState(false);
@@ -44,7 +43,7 @@ function SparkOnboarding({api, onClose}: {api: ControlApi; onClose(): void}) {
     setCreating(true);
     setError("");
     try {
-      setGrant(await api.createEnrollmentGrant(nodeId.trim(), 900));
+      setGrant(await api.createEnrollmentGrant(900));
     } catch (value) {
       setError(value instanceof Error ? value.message : "The enrollment grant could not be created.");
     } finally {
@@ -52,21 +51,23 @@ function SparkOnboarding({api, onClose}: {api: ControlApi; onClose(): void}) {
     }
   }
 
-  return <div className="library-dialog-backdrop">
-    <div className="library-action-dialog" role="dialog" aria-modal="true" aria-labelledby="spark-onboarding-title">
-      <header><div><p className="fleet-kicker">Secure node enrollment</p><h3 id="spark-onboarding-title">Add Spark</h3></div><button type="button" className="icon-button" onClick={onClose} aria-label="Close Add Spark">×</button></header>
+  return <div className="library-dialog-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
+    <div className="library-action-dialog onboarding-dialog" role="dialog" aria-modal="true" aria-labelledby="spark-onboarding-title">
+      <header><div><p className="fleet-kicker">Secure node enrollment</p><h3 id="spark-onboarding-title">Add Spark</h3><p className="dialog-subtitle">Issue a short-lived, pinned bootstrap command.</p></div><button type="button" className="icon-button" onClick={onClose} aria-label="Close Add Spark">×</button></header>
       <div className="library-action-dialog-body">
         {!grant && <>
-          <label htmlFor="spark-node-id">Spark node ID</label>
-          <input id="spark-node-id" value={nodeId} onChange={event => setNodeId(event.target.value)} placeholder="spk_…" autoFocus/>
-          {error && <p role="alert">{error}</p>}
+          <ol className="onboarding-steps" aria-label="Spark onboarding steps"><li><strong>Create</strong><span>Generate a one-time grant here.</span></li><li><strong>Run</strong><span>Copy the command to the Spark.</span></li><li><strong>Review</strong><span>Approve the pending enrollment.</span></li></ol>
+          <p className="onboarding-guidance">The Spark generates its immutable <code>spk_…</code> identity locally. The command carries the controller endpoints and CA fingerprint required for a pinned bootstrap.</p>
+          {error && <p role="alert" className="dialog-error">{error}</p>}
         </>}
         {grant && <>
-          <p>Run this one-time command on the Spark. The token expires at {grant.expires_at} and is not shown again after closing this dialog.</p>
-          <code>{`vonk-agent bootstrap --node-id ${grant.node_id} --token ${grant.token}`}</code>
+          <div className="grant-success"><span className="success-mark" aria-hidden="true">✓</span><div><strong>One-time command ready</strong><span>Expires {grant.expires_at}. It will not be shown again after closing.</span></div></div>
+          <p>Run this command on the Spark, then approve the enrollment from the Fleet queue.</p>
+          <code className="onboarding-command">vonk-agent bootstrap --token {grant.token}</code>
+          <dl className="grant-facts"><div><dt>Controller</dt><dd>{grant.controller_endpoint}</dd></div><div><dt>Enrollment</dt><dd>{grant.enrollment_endpoint}</dd></div><div><dt>CA fingerprint</dt><dd><code>{grant.ca_fingerprint}</code></dd></div></dl>
         </>}
       </div>
-      <footer>{grant ? <button type="button" className="button" onClick={onClose}>Done</button> : <><button type="button" className="button secondary" onClick={onClose}>Cancel</button><button type="button" className="button" disabled={!nodeId.trim() || creating} onClick={() => void createGrant()}>{creating ? "Creating…" : "Create one-time enrollment command"}</button></>}</footer>
+      <footer>{grant ? <button type="button" className="button" onClick={onClose}>Done</button> : <><button type="button" className="button secondary" onClick={onClose}>Cancel</button><button type="button" className="button" disabled={creating} onClick={() => void createGrant()}>{creating ? "Creating…" : "Create one-time enrollment command"}</button></>}</footer>
     </div>
   </div>;
 }

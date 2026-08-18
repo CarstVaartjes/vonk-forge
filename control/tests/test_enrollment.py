@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import base64
 import hashlib
 import shutil
@@ -245,6 +243,12 @@ def test_grant_is_single_use_and_requires_administrator_approval(service) -> Non
         assert stored.csr_public_key_fingerprint == public_key_fingerprint(request)
         assert certificate is not None and certificate.node_id == NODE_ID
         assert node is not None and node.state == "active"
+def test_identity_free_grant_binds_node_from_submitted_csr(service) -> None:
+    enrollment, _, _, _ = service
+    grant = enrollment.create(None, "admin", 600)
+    request = csr(NODE_ID)
+    result = enrollment.submit(grant.token, request, evidence(request))
+    assert result.node_id == NODE_ID
 
 
 def test_submit_rejects_expired_malformed_and_evidence_mismatched_grants_without_leaking_token(service) -> None:

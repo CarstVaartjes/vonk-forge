@@ -656,6 +656,7 @@
           "state": {
             "enum": [
               "pending_review",
+              "issuing",
               "approved",
               "rejected",
               "expired",
@@ -676,6 +677,23 @@
       "EnrollmentGrantResponse": {
         "additionalProperties": false,
         "properties": {
+          "ca_fingerprint": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Ca Fingerprint",
+            "type": "string"
+          },
+          "controller_endpoint": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Controller Endpoint",
+            "type": "string"
+          },
+          "enrollment_endpoint": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Enrollment Endpoint",
+            "type": "string"
+          },
           "expires_at": {
             "maxLength": 64,
             "minLength": 1,
@@ -686,11 +704,6 @@
             "maxLength": 128,
             "minLength": 1,
             "title": "Id",
-            "type": "string"
-          },
-          "node_id": {
-            "pattern": "^spk_[0-9a-f]{32}$",
-            "title": "Node Id",
             "type": "string"
           },
           "purpose": {
@@ -707,10 +720,12 @@
         },
         "required": [
           "id",
-          "node_id",
           "expires_at",
           "purpose",
-          "token"
+          "token",
+          "controller_endpoint",
+          "enrollment_endpoint",
+          "ca_fingerprint"
         ],
         "title": "EnrollmentGrantResponse",
         "type": "object"
@@ -1202,11 +1217,6 @@
       "GrantRequest": {
         "additionalProperties": false,
         "properties": {
-          "node_id": {
-            "pattern": "^spk_[0-9a-f]{32}$",
-            "title": "Node Id",
-            "type": "string"
-          },
           "ttl_seconds": {
             "maximum": 600.0,
             "minimum": 1.0,
@@ -1215,7 +1225,6 @@
           }
         },
         "required": [
-          "node_id",
           "ttl_seconds"
         ],
         "title": "GrantRequest",

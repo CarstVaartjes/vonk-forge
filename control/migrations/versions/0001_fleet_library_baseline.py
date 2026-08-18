@@ -14,7 +14,7 @@ depends_on = None
 def upgrade() -> None:
     op.create_table('agent_enrollment_grants',
     sa.Column('id', sa.String(length=36), nullable=False),
-    sa.Column('node_id', sa.String(length=36), nullable=False),
+    sa.Column('node_id', sa.String(length=36), nullable=True),
     sa.Column('purpose', sa.String(length=24), server_default='new-node', nullable=False),
     sa.Column('token_digest', sa.String(length=64), nullable=False),
     sa.Column('created_by', sa.String(length=200), nullable=False),

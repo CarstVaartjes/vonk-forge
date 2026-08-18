@@ -19,7 +19,6 @@ FINGERPRINT = "a" * 64
 def args(tmp_path: Path) -> list[str]:
     return [
         "--token", "A" * 43,
-        "--node-id", NODE,
         "--controller-endpoint", "https://controller.example",
         "--enrollment-endpoint", "https://enroll.example",
         "--ca-fingerprint", FINGERPRINT,
@@ -61,8 +60,8 @@ def test_bootstrap_generates_material_config_and_consumes_token(
     assert result.response == response
     assert not token_path.exists()
     document = json.loads((tmp_path / "config.json").read_text(encoding="utf-8"))
-    assert document["node_id"] == NODE
-    assert (tmp_path / "state" / "credentials" / "pending-key.pem").exists()
+    assert document["node_id"].startswith("spk_")
+    assert len(document["node_id"]) == 36
     assert (tmp_path / "state" / "credentials" / "pending-csr.pem").exists()
 
 

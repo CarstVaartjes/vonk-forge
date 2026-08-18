@@ -1764,7 +1764,7 @@ def test_enrollment_routes_are_admin_only_and_pending_exact_replay_is_idempotent
         client.post(
             "/api/v1/agents/enrollments/grants",
             headers=admin_headers(codec, "operator"),
-            json={"node_id": NODE_A, "ttl_seconds": 60},
+            json={"ttl_seconds": 60},
         ).status_code
         == 403
     )
@@ -1773,7 +1773,7 @@ def test_enrollment_routes_are_admin_only_and_pending_exact_replay_is_idempotent
     grant = client.post(
         "/api/v1/agents/enrollments/grants",
         headers=admin_headers(codec),
-        json={"node_id": NODE_A, "ttl_seconds": 60},
+        json={"ttl_seconds": 60},
     ).json()
     key = ed25519.Ed25519PrivateKey.generate()
     csr = (
@@ -2264,7 +2264,7 @@ def test_human_enrollment_mutations_audit_only_success_with_request_actor_and_ta
     grant_response = client.post(
         "/api/v1/agents/enrollments/grants",
         headers=headers,
-        json={"node_id": NODE_C, "ttl_seconds": 60},
+        json={"ttl_seconds": 60},
     )
     grant = grant_response.json()
     csr = _csr_for(NODE_C)
@@ -2325,7 +2325,7 @@ def test_human_enrollment_mutations_audit_only_success_with_request_actor_and_ta
     expected = {
         grant_response.headers["x-request-id"]: (
             "agent.enrollment.grant.create",
-            (NODE_C,),
+            (),
         ),
         approval.headers["x-request-id"]: (
             "agent.enrollment.approve",
@@ -3196,7 +3196,8 @@ def test_invalid_ranges_do_not_leak_artifact_descriptors(agent_system) -> None:
         "a" * 40,
         {"artifact_digest": digest},
     )
-    before = len(os.listdir("/proc/self/fd"))
+    fd_directory = "/proc/self/fd" if os.path.isdir("/proc/self/fd") else "/dev/fd"
+    before = len(os.listdir(fd_directory))
     for _ in range(25):
         assert (
             client.get(
@@ -3208,7 +3209,7 @@ def test_invalid_ranges_do_not_leak_artifact_descriptors(agent_system) -> None:
             ).status_code
             == 416
         )
-    assert len(os.listdir("/proc/self/fd")) <= before + 1
+    assert len(os.listdir(fd_directory)) <= before + 1
 
 
 def test_artifact_stream_close_releases_its_descriptor(tmp_path) -> None:
@@ -3320,7 +3321,7 @@ def test_enrollment_overflow_burns_valid_grant_before_rejection(agent_system) ->
     grant = client.post(
         "/api/v1/agents/enrollments/grants",
         headers=admin_headers(codec),
-        json={"node_id": NODE_A, "ttl_seconds": 60},
+        json={"ttl_seconds": 60},
     ).json()
     key = ed25519.Ed25519PrivateKey.generate()
     csr = (
@@ -3369,7 +3370,7 @@ def test_enrollment_unknown_top_level_field_burns_valid_grant(agent_system) -> N
     grant = client.post(
         "/api/v1/agents/enrollments/grants",
         headers=admin_headers(codec),
-        json={"node_id": NODE_A, "ttl_seconds": 60},
+        json={"ttl_seconds": 60},
     ).json()
     key = ed25519.Ed25519PrivateKey.generate()
     csr = (

@@ -391,9 +391,9 @@ export class ApiClient implements ControlApi {
     return resultData(await this.generated.GET("/api/v1/agents/enrollments"));
   }
 
-  async createEnrollmentGrant(nodeId: string, ttlSeconds: number, signal?: AbortSignal): Promise<EnrollmentGrantResponse> {
+  async createEnrollmentGrant(ttlSeconds: number, signal?: AbortSignal): Promise<EnrollmentGrantResponse> {
     return resultData(await this.generated.POST("/api/v1/agents/enrollments/grants", {
-      body: {node_id: nodeId, ttl_seconds: ttlSeconds},
+      body: {ttl_seconds: ttlSeconds},
       signal,
     }));
   }

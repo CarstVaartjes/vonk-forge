@@ -214,17 +214,9 @@ it("adds the session CSRF token to generated enrollment mutations", async () => 
   let captured: Request | undefined;
   vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
     captured = input as Request;
-    return new Response(JSON.stringify({
-      expires_at: "2026-08-05T10:15:00Z",
-      id: "grant-001",
-      node_id: "spk_0123456789abcdef0123456789abcdef",
-      purpose: "new-node",
-      token: "g".repeat(48),
-    }), {headers: {"Content-Type": "application/json"}, status: 201});
+    return new Response(JSON.stringify({expires_at: "2026-08-05T10:15:00Z", id: "grant-001", purpose: "new-node", token: "g".repeat(48), controller_endpoint: "https://controller.example", enrollment_endpoint: "https://enroll.example", ca_fingerprint: "a".repeat(64)}), {headers: {"Content-Type": "application/json"}, status: 201});
   });
-
-  await new ApiClient().createEnrollmentGrant("spk_0123456789abcdef0123456789abcdef", 300);
-
+  await new ApiClient().createEnrollmentGrant(300);
   expect(captured!.method).toBe("POST");
   expect(captured!.headers.get("X-CSRF-Token")).toBe("csrf-value");
   expect(captured!.credentials).toBe("same-origin");
@@ -255,16 +247,15 @@ it.each(["nonce=", "nonce==", "nonce=middle=="]) (
       return new Response(JSON.stringify({
         expires_at: "2026-08-05T10:15:00Z",
         id: "grant-001",
-        node_id: "spk_0123456789abcdef0123456789abcdef",
         purpose: "new-node",
         token: "g".repeat(48),
+        controller_endpoint: "https://controller.example",
+        enrollment_endpoint: "https://enroll.example",
+        ca_fingerprint: "a".repeat(64),
       }), {headers: {"Content-Type": "application/json"}, status: 201});
     });
 
-    await new ApiClient().createEnrollmentGrant(
-      "spk_0123456789abcdef0123456789abcdef",
-      300,
-    );
+    await new ApiClient().createEnrollmentGrant(300);
 
     expect(captured!.headers.get("X-CSRF-Token")).toBe(csrfValue);
   },

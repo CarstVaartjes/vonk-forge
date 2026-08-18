@@ -21,7 +21,7 @@ from cryptography.x509.oid import NameOID
 _NODE = re.compile(r"spk_[0-9a-f]{32}\Z")
 _TOKEN = re.compile(r"[A-Za-z0-9_-]{43}\Z")
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
-_FLAGS = {"--token", "--node-id", "--controller-endpoint", "--enrollment-endpoint", "--ca-fingerprint", "--config", "--state-root", "--ca-path", "--installer"}
+_FLAGS = {"--token", "--controller-endpoint", "--enrollment-endpoint", "--ca-fingerprint", "--config", "--state-root", "--ca-path", "--installer"}
 
 
 class BootstrapError(RuntimeError):
@@ -31,7 +31,6 @@ class BootstrapError(RuntimeError):
 @dataclass(frozen=True)
 class BootstrapArguments:
     token: str
-    node_id: str
     controller_endpoint: str
     enrollment_endpoint: str
     ca_fingerprint: str
@@ -87,12 +86,10 @@ def parse_bootstrap_args(argv: list[str]) -> BootstrapArguments:
         raise BootstrapError("bootstrap arguments are invalid") from error
     if _TOKEN.fullmatch(ns.token) is None:
         raise BootstrapError("token is invalid")
-    if _NODE.fullmatch(ns.node_id) is None:
-        raise BootstrapError("node ID is invalid")
     if _DIGEST.fullmatch(ns.ca_fingerprint) is None:
         raise BootstrapError("CA fingerprint is invalid")
     return BootstrapArguments(
-        ns.token, ns.node_id,
+        ns.token,
         _origin(ns.controller_endpoint, "controller"),
         _origin(ns.enrollment_endpoint, "enrollment"),
         ns.ca_fingerprint,
@@ -157,9 +154,13 @@ def _atomic(path: Path, content: bytes, mode: int) -> None:
         except FileNotFoundError:
             pass
         raise BootstrapError("bootstrap write failed") from error
-def _make_material(node_id: str, directory: Path) -> bytes:
+def _make_material(directory: Path) -> tuple[str, bytes]:
     _secure_directory(directory)
     key = ed25519.Ed25519PrivateKey.generate()
+    public_key = key.public_key().public_bytes(
+        serialization.Encoding.Raw, serialization.PublicFormat.Raw
+    )
+    node_id = "spk_" + hashlib.sha256(public_key).hexdigest()[:32]
     csr = (
         x509.CertificateSigningRequestBuilder()
         .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, node_id)]))
@@ -174,15 +175,11 @@ def _make_material(node_id: str, directory: Path) -> bytes:
     )
     _atomic(
         directory / "pending-key.pem",
-        key.private_bytes(
-            serialization.Encoding.PEM,
-            serialization.PrivateFormat.PKCS8,
-            serialization.NoEncryption(),
-        ),
+        key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()),
         0o600,
     )
     _atomic(directory / "pending-csr.pem", csr, 0o600)
-    return csr
+    return node_id, csr
 
 def bootstrap(arguments: BootstrapArguments, *, token_path: Path, submit: Submitter, verify_installer: Callable[[Path], None]) -> BootstrapResult:
     if arguments.installer_path is not None:
@@ -203,11 +200,11 @@ def bootstrap(arguments: BootstrapArguments, *, token_path: Path, submit: Submit
         token = os.read(token_fd, 65537).decode("ascii").strip()
         if token != arguments.token or _TOKEN.fullmatch(token) is None:
             raise BootstrapError("token does not match bootstrap command")
-        csr = _make_material(arguments.node_id, arguments.state_root / "credentials")
+        node_id, csr = _make_material(arguments.state_root / "credentials")
         try:
-            response = submit(token, arguments.node_id, csr, arguments.ca_fingerprint)
+            response = submit(token, node_id, csr, arguments.ca_fingerprint)
         except TypeError:
-            response = submit(token, arguments.node_id, csr)
+            response = submit(token, node_id, csr)
         except Exception as error:
             raise BootstrapError("registration submission failed") from error
         if not isinstance(response, BootstrapResponse) or response.status not in {"pending", "approved"}:
@@ -218,7 +215,7 @@ def bootstrap(arguments: BootstrapArguments, *, token_path: Path, submit: Submit
                     raise BootstrapError("registration response expired")
             except ValueError as error:
                 raise BootstrapError("registration response expiry is invalid") from error
-        config = {"control_origin": arguments.controller_endpoint, "enrollment_origin": arguments.enrollment_endpoint, "node_id": arguments.node_id, "certificate_path": "/etc/vonk-forge-agent/certificate.pem", "private_key_path": str(arguments.state_root / "credentials" / "pending-key.pem"), "ca_path": str(arguments.ca_path), "ca_fingerprint": arguments.ca_fingerprint, "poll_min_seconds": 5, "poll_max_seconds": 60, "state_root": str(arguments.state_root), "installed_policy_path": "/etc/vonk-forge-agent/runtime-policy.json", "runtime_policy_path": "/etc/vonk-forge-agent/runtime-policy.json", "enrollment_token_path": str(token_path)}
+        config = {"control_origin": arguments.controller_endpoint, "enrollment_origin": arguments.enrollment_endpoint, "node_id": node_id, "certificate_path": "/etc/vonk-forge-agent/certificate.pem", "private_key_path": str(arguments.state_root / "credentials" / "pending-key.pem"), "ca_path": str(arguments.ca_path), "ca_fingerprint": arguments.ca_fingerprint, "poll_min_seconds": 5, "poll_max_seconds": 60, "state_root": str(arguments.state_root), "installed_policy_path": "/etc/vonk-forge-agent/runtime-policy.json", "runtime_policy_path": "/etc/vonk-forge-agent/runtime-policy.json", "enrollment_token_path": str(token_path)}
         _atomic(arguments.config_path, json.dumps(config, sort_keys=True, separators=(",", ":")).encode(), 0o600)
         current = os.stat(token_path.name, dir_fd=directory_fd, follow_symlinks=False)
         if (current.st_dev, current.st_ino) != (metadata.st_dev, metadata.st_ino):
