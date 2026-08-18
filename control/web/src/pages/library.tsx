@@ -1,10 +1,13 @@
 import {useCallback, useEffect, useRef, useState} from "react";
 import type {MouseEvent} from "react";
-import type {LibraryApi, LibraryModel, LibraryRecipeDetail, LibraryRecipeSummary, LibrarySnapshot} from "../api/types";
+import type {CatalogApi, GlobalRecipeRevision, LibraryApi, LibraryModel, LibraryRecipeDetail, LibraryRecipeSummary, LibrarySnapshot} from "../api/types";
 import {LibraryBrowser} from "../components/library-browser";
 import {libraryRoute, modelVersionKey} from "../lib/library-route";
 import type {LibraryRoute} from "../lib/library-route";
+import {parseVisualRecipeDocument} from "../lib/library-recipe-document";
 import "./library.css";
+
+const defaultDocument = () => ({schema_version: 1 as const, identity: {publisher: "local", slug: "custom"}, metadata: {title: "Custom recipe", description: "Custom service recipe", tags: [] as string[]}, model: {kind: "model-version" as const, publisher: "local", slug: "model", content_sha256: "0".repeat(64)}, execution: {harness: {kind: "execution-harness" as const, publisher: "local", slug: "harness", content_sha256: "1".repeat(64)}, patch_bundle: null}, build: {context: {sha256: "2".repeat(64), expected_bytes: 0, media_type: "application/octet-stream"}, dockerfile: "Dockerfile", platform: "linux/arm64", network_mode: "none", network_hosts: [] as string[], download_bytes: 0, temporary_bytes: 0, memory_bytes: 1, timeout_seconds: 1}, artifacts: [], runtime: {distribution: {kind: "runtime-distribution" as const, publisher: "local", slug: "runtime", content_sha256: "3".repeat(64)}, entrypoint: ["run"], lifecycle_pre_start_count: 0, lifecycle_post_stop_count: 0, stop_timeout_seconds: 1}, interfaces: [], validation: {checks: [] as string[], benchmark_count: 0}, provenance: {source_kind: "local", source_reference: null, attribution: [] as string[]} });
 
 const LIBRARY_MODEL_WINDOW = 40;
 const LIBRARY_RECIPE_WINDOW = 50;
@@ -123,6 +126,14 @@ export function LibraryPage({api, path, onNavigate}: {
   const [loadingMore, setLoadingMore] = useState(false);
   const [paginationError, setPaginationError] = useState("");
   const [paginationWindowed, setPaginationWindowed] = useState(false);
+  const catalog = api as LibraryApi & Partial<CatalogApi>;
+  const [authoring, setAuthoring] = useState<"create" | "import">();
+  const [slug, setSlug] = useState("");
+  const [documentText, setDocumentText] = useState(() => JSON.stringify(defaultDocument(), null, 2));
+  const [authoringStatus, setAuthoringStatus] = useState("");
+  const [importUri, setImportUri] = useState("");
+  const [importPreview, setImportPreview] = useState<GlobalRecipeRevision>();
+  const [importError, setImportError] = useState("");
   const [snapshotAttempt, setSnapshotAttempt] = useState(0);
   const [detailAttempt, setDetailAttempt] = useState(0);
   const [query, setQuery] = useState("");
@@ -234,6 +245,27 @@ export function LibraryPage({api, path, onNavigate}: {
       <div>
         <p className="fleet-kicker">Model control</p>
         <h2 ref={heading} tabIndex={-1}>Library</h2>
+      <div className="library-toolbar-actions">
+        <button type="button" className="button secondary" onClick={() => { setAuthoring("create"); setAuthoringStatus(""); }}>Create custom recipe</button>
+        <button type="button" className="button secondary" onClick={() => { setAuthoring("import"); setImportError(""); setImportPreview(undefined); }}>Import public recipe</button>
+      </div>
+      {authoring === "create" && <section className="library-section" aria-label="Recipe authoring">
+        <h3>Create custom recipe</h3>
+        <label>Recipe slug<input aria-label="Recipe slug" value={slug} onChange={event => setSlug(event.target.value)} /></label>
+        <label>Recipe document<textarea aria-label="Recipe document" rows={8} value={documentText} onChange={event => setDocumentText(event.target.value)} /></label>
+        <div className="button-row"><button type="button" className="button secondary" onClick={() => { const result = parseVisualRecipeDocument(documentText); setAuthoringStatus(result.ok ? "Recipe document valid" : result.error); }}>Validate recipe</button><button type="button" className="button" disabled={!catalog.createCatalogRecipe} onClick={() => { try { const result = parseVisualRecipeDocument(documentText); if (!result.ok) { setAuthoringStatus(result.error); return; } void catalog.createCatalogRecipe?.({slug, document: result.document}).then(() => setAuthoringStatus("Recipe saved")); } catch { setAuthoringStatus("Unable to save recipe"); } }}>Save custom recipe</button></div>
+        {authoringStatus && <p role="status" aria-label={authoringStatus === "Recipe saved" || authoringStatus === "Recipe imported" ? "Recipe authoring" : "Recipe validation"}>{authoringStatus}</p>}
+        <button type="button" className="button secondary" onClick={() => setAuthoring(undefined)}>Close authoring</button>
+      </section>}
+      {authoring === "import" && <section className="library-section" aria-label="Public recipe import">
+        <h3>Import public recipe</h3>
+        <label>Public recipe URI<input aria-label="Public recipe URI" value={importUri} onChange={event => setImportUri(event.target.value)} placeholder="vonk://catalog/publisher/slug@sha256:…" /></label>
+        <button type="button" className="button" disabled={!catalog.previewGlobalRecipe || !importUri} onClick={() => { setImportError(""); void catalog.previewGlobalRecipe?.(importUri).then(setImportPreview).catch((error: unknown) => setImportError(error instanceof Error ? error.message : "Unable to preview import")); }}>Preview public import</button>
+        {importError && <p role="alert">{importError}</p>}
+        {importPreview && <section aria-label="Public recipe import preview"><h4>{importPreview.publisher}/{importPreview.slug}</h4><p className="digest">sha256:{importPreview.content_sha256}</p><p>Revision {importPreview.revision_number} · immutable identity</p><button type="button" className="button" disabled={!catalog.importGlobalRecipe} onClick={() => { const match = /@sha256:([0-9a-f]{64})$/.exec(importUri); if (match) void catalog.importGlobalRecipe?.(importUri, match[1]).then(() => setAuthoringStatus("Recipe imported")); }}>Import reviewed recipe</button></section>}
+        {authoringStatus && <p role="status" aria-label={authoringStatus === "Recipe saved" || authoringStatus === "Recipe imported" ? "Recipe authoring" : "Recipe validation"}>{authoringStatus}</p>}
+        <button type="button" className="button secondary" onClick={() => setAuthoring(undefined)}>Close import</button>
+      </section>}
         <p className="fleet-introduction">Choose a model, its exact recipe, and one complete placement group before reviewing any change.</p>
       </div>
     </header>

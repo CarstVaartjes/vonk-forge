@@ -411,3 +411,34 @@ test("keeps the empty Library state inside the reduced workspace", async () => {
   expect(screen.getByText("Recipes will appear here after they are added to the local library authority.")).toBeVisible();
   expect(screen.queryByRole("link", {name: "Open advanced catalog"})).not.toBeInTheDocument();
 });
+test("offers custom recipe authoring with validation and save", async () => {
+  history.replaceState(null, "", "/library");
+  const createCatalogRecipe = vi.fn(async (input: {slug: string; document: Record<string, unknown>}) => ({recipe_id: "custom-1", revision_number: 1, lifecycle: "draft", slug: input.slug, document: input.document}));
+  const api = {librarySnapshot: async () => ({...librarySnapshot, models: [], unlinked_recipes: []}), createCatalogRecipe} as unknown as ControlApi;
+  const user = userEvent.setup();
+  render(<App api={api}/>);
+  await user.click(await screen.findByRole("button", {name: "Create custom recipe"}));
+  await user.type(screen.getByRole("textbox", {name: "Recipe slug"}), "custom-service");
+  await user.click(screen.getByRole("button", {name: "Validate recipe"}));
+  expect(screen.getByRole("status", {name: "Recipe validation"})).toHaveTextContent("Recipe document valid");
+  await user.click(screen.getByRole("button", {name: "Save custom recipe"}));
+  expect(createCatalogRecipe).toHaveBeenCalledWith(expect.objectContaining({slug: "custom-service", document: expect.any(Object)}));
+  expect(await screen.findByRole("status", {name: "Recipe authoring"})).toHaveTextContent("Recipe saved");
+});
+
+test("previews a public recipe import with exact identity and persists only after confirmation", async () => {
+  history.replaceState(null, "", "/library");
+  const previewGlobalRecipe = vi.fn(async () => ({publisher: "vonk", slug: "service", recipe_id: "remote-1", revision_number: 4, revision_id: "remote-rev", content_sha256: "a".repeat(64), published_at: "2026-08-18T10:00:00Z", document: {}}));
+  const importGlobalRecipe = vi.fn(async () => ({recipe_id: "remote-1", revision_number: 4, lifecycle: "draft", slug: "service"}));
+  const api = {librarySnapshot: async () => ({...librarySnapshot, models: [], unlinked_recipes: []}), previewGlobalRecipe, importGlobalRecipe} as unknown as ControlApi;
+  const user = userEvent.setup();
+  render(<App api={api}/>);
+  await user.click(await screen.findByRole("button", {name: "Import public recipe"}));
+  await user.type(screen.getByRole("textbox", {name: "Public recipe URI"}), "vonk://catalog/vonk/service@sha256:" + "a".repeat(64));
+  await user.click(screen.getByRole("button", {name: "Preview public import"}));
+  const preview = await screen.findByRole("region", {name: "Public recipe import preview"});
+  expect(within(preview).getByText("vonk/service")).toBeVisible();
+  expect(within(preview).getByText("sha256:" + "a".repeat(64))).toBeVisible();
+  await user.click(within(preview).getByRole("button", {name: "Import reviewed recipe"}));
+  expect(importGlobalRecipe).toHaveBeenCalledWith(expect.stringContaining("vonk://catalog/vonk/service"), "a".repeat(64));
+});
