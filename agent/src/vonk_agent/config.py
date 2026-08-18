@@ -49,13 +49,13 @@ class AgentConfig:
     certificate_path: Path
     private_key_path: Path
     ca_path: Path
-    ca_fingerprint: str
     poll_min_seconds: int
     poll_max_seconds: int
     state_root: Path
     installed_policy_path: Path
     runtime_policy_path: Path
     enrollment_token_path: Path
+    ca_fingerprint: str = ""
 
     @classmethod
     def load(cls, path: Path = DEFAULT_CONFIG_PATH) -> AgentConfig:
@@ -130,13 +130,13 @@ class AgentConfig:
             paths["certificate_path"],
             paths["private_key_path"],
             paths["ca_path"],
-            ca_fingerprint,
             minimum,
             maximum,
             paths["state_root"],
             paths["installed_policy_path"],
             paths["runtime_policy_path"],
             paths["enrollment_token_path"],
+            ca_fingerprint,
         )
 
 

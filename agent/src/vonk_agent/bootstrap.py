@@ -7,6 +7,7 @@ import json
 import os
 import re
 import stat
+from pathlib import Path, PurePosixPath
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Protocol
@@ -14,6 +15,7 @@ from urllib.parse import urlsplit
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.x509.oid import NameOID
 
 _NODE = re.compile(r"spk_[0-9a-f]{32}\Z")
@@ -155,6 +157,32 @@ def _atomic(path: Path, content: bytes, mode: int) -> None:
         except FileNotFoundError:
             pass
         raise BootstrapError("bootstrap write failed") from error
+def _make_material(node_id: str, directory: Path) -> bytes:
+    _secure_directory(directory)
+    key = ed25519.Ed25519PrivateKey.generate()
+    csr = (
+        x509.CertificateSigningRequestBuilder()
+        .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, node_id)]))
+        .add_extension(
+            x509.SubjectAlternativeName(
+                [x509.UniformResourceIdentifier(f"spiffe://vonk-forge.local/node/{node_id}")]
+            ),
+            critical=False,
+        )
+        .sign(key, algorithm=None)
+        .public_bytes(serialization.Encoding.PEM)
+    )
+    _atomic(
+        directory / "pending-key.pem",
+        key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        ),
+        0o600,
+    )
+    _atomic(directory / "pending-csr.pem", csr, 0o600)
+    return csr
 
 def bootstrap(arguments: BootstrapArguments, *, token_path: Path, submit: Submitter, verify_installer: Callable[[Path], None]) -> BootstrapResult:
     if arguments.installer_path is not None:

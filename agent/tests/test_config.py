@@ -29,6 +29,7 @@ def _valid_document(tmp_path: Path) -> dict[str, object]:
         "node_id": NODE_ID,
         "certificate_path": _regular_file(tmp_path / "node.crt"),
         "private_key_path": _regular_file(tmp_path / "node.key", mode=0o600),
+        "ca_path": _regular_file(tmp_path / "ca.crt"),
         "ca_fingerprint": "a" * 64,
         "poll_min_seconds": 2,
         "poll_max_seconds": 30,

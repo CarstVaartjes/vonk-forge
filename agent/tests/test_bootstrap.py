@@ -41,11 +41,15 @@ def test_parse_rejects_invalid_fingerprint_and_unsafe_paths(tmp_path: Path) -> N
         parse_bootstrap_args([*args(tmp_path)[:-6], "--config", "relative.json", *args(tmp_path)[-4:]])
 
 
-def test_bootstrap_generates_material_config_and_consumes_token(tmp_path: Path) -> None:
+def test_bootstrap_generates_material_config_and_consumes_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     parsed = parse_bootstrap_args(args(tmp_path))
     token_path = tmp_path / "token"
     token_path.write_text("A" * 43 + "\n", encoding="ascii")
+    token_path.chmod(0o600)
     response = BootstrapResponse(status="pending", expires_at="2099-01-01T00:00:00+00:00")
+    monkeypatch.setattr("vonk_agent.bootstrap._read_ca", lambda *_: None)
 
     result = bootstrap(
         parsed,
