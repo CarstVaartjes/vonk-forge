@@ -149,9 +149,7 @@ class FleetHandler(BaseHTTPRequestHandler):
                         {
                             "node_id": node_id,
                             "state": "active",
-                            "agent_implementation": "rust",
-                            "migration_state": "complete",
-                            "protocol_version": 1,
+                            "protocol_version": 3,
                             "platform_version": "0.1.0",
                             "build_digest": "sha256:" + "b" * 64,
                             "active_slot": "A",

@@ -177,7 +177,6 @@ export interface ControlApi extends LibraryApi {
   agents(): Promise<AgentsResponse>;
   enrollments(): Promise<EnrollmentListResponse>;
   createEnrollmentGrant(nodeId: string, ttlSeconds: number, signal?: AbortSignal): Promise<EnrollmentGrantResponse>;
-  createAgentMigrationGrant(nodeId: string, ttlSeconds: number, signal?: AbortSignal): Promise<EnrollmentGrantResponse>;
   approveEnrollment(enrollmentId: string): Promise<EnrollmentDecisionResponse>;
   rejectEnrollment(enrollmentId: string, reason: string): Promise<EnrollmentDecisionResponse>;
   revokeAgentNode(nodeId: string): Promise<void>;

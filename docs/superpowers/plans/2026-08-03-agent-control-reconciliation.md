@@ -173,7 +173,6 @@ git commit -m "feat: reconcile cluster through outbound agents"
 
 **Interfaces:**
 - Production worker registry contains orchestration/maintenance tasks only and emits agent operations.
-- Legacy runtime requires `VONK_LEGACY_DIRECT_TRANSPORT=explicit-test-only` and is rejected in production mode.
 
 - [x] **Step 1: Write failing production-boundary tests**
 

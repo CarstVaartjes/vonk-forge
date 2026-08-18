@@ -105,8 +105,8 @@ test("keeps only Fleet and Library in primary navigation while preserving the mo
   }
 });
 
-test("does not render a replacement page for unsupported legacy URLs", async () => {
-  // Break caught: an unsupported legacy route silently falls back to Fleet or
+test("does not render a replacement page for unsupported URLs", async () => {
+  // Break caught: an unsupported route silently falls back to Fleet or
   // Library, preserving compatibility behavior instead of disappearing.
   render(<App api={apiFixture}/>);
   const user = userEvent.setup();
@@ -118,7 +118,7 @@ test("does not render a replacement page for unsupported legacy URLs", async () 
   expect(screen.getByRole("link", {name: "Library"})).toHaveAttribute("aria-current", "page");
 
   act(() => {
-    history.pushState(null, "", "/unsupported-legacy-route");
+    history.pushState(null, "", "/unsupported-route");
     dispatchEvent(new PopStateEvent("popstate"));
   });
   await waitFor(() => {
@@ -127,7 +127,7 @@ test("does not render a replacement page for unsupported legacy URLs", async () 
   });
   expect(screen.getByRole("link", {name: "Fleet"})).not.toHaveAttribute("aria-current");
   expect(screen.getByRole("link", {name: "Library"})).not.toHaveAttribute("aria-current");
-  expect(location.pathname).toBe("/unsupported-legacy-route");
+  expect(location.pathname).toBe("/unsupported-route");
 });
 
 test("moves focus to main content after mobile route activation", async () => {

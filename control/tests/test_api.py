@@ -131,7 +131,7 @@ def test_preselection_is_a_distinct_app_factory() -> None:
     assert create_preselection_app is not create_app
 
 
-def test_legacy_package_and_deployment_routes_are_not_registered() -> None:
+def test_removed_package_and_deployment_routes_are_not_registered() -> None:
     client, _, _, _ = _client("administrator")
     package_prefix = "/api/v1/" + "packages/"
     deployment_prefix = "/api/v1/" + "deployments"

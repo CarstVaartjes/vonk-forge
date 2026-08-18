@@ -52,7 +52,7 @@ it("keeps visual Fleet snapshots separate from reconciliation evidence", async (
 });
 
 it("uses distinct digest-bound Library action operations", async () => {
-  // Break caught: the visual Library falls back to legacy evidence routes,
+  // Break caught: the visual Library falls back to retired evidence routes,
   // action apply bypasses its server preview digest, or one selected owner is
   // replaced by a browser-invented group.
   const requests: Request[] = [];

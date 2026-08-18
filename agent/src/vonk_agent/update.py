@@ -35,7 +35,6 @@ _UUID = re.compile(
     r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\Z"
 )
 _SIGNATURE = re.compile(r"[0-9a-f]{128}\Z")
-_PARTIAL = re.compile(r"\.[0-9a-f]{64}\.[0-9a-f]{16}\.partial\Z")
 _TUF_METADATA_NAME = re.compile(
     r"(?:[1-9][0-9]*\.root|timestamp|snapshot|targets|"
     r"[a-z0-9][a-z0-9._-]{0,126})\.json\Z"
@@ -848,7 +847,6 @@ class AgentUpdater:
         ):
             raise AgentUpdateError("agent update plan is stale")
         _secure_directory(self._staging_root)
-        _cleanup_staging_partials(self._staging_root)
         final = self._staging_root / f"{plan.artifact.payload_sha256}.agent"
         temporary = self._staging_root / f".{plan.artifact.payload_sha256}.{secrets.token_hex(8)}.partial"
         try:
@@ -1054,30 +1052,6 @@ def _verify_artifact(path: Path, artifact: AgentArtifact, architecture: str) -> 
     elf_type, machine = struct.unpack_from("<HH", content, 16)
     if elf_type not in {2, 3} or machine != _MACHINE[architecture]:
         raise AgentUpdateError("agent artifact ELF architecture is incompatible")
-
-
-def _cleanup_staging_partials(root: Path) -> None:
-    changed = False
-    try:
-        for entry in os.scandir(root):
-            if _PARTIAL.fullmatch(entry.name) is None:
-                continue
-            metadata = entry.stat(follow_symlinks=False)
-            if (
-                metadata.st_uid != os.geteuid()
-                or not stat.S_ISREG(metadata.st_mode)
-                or metadata.st_nlink < 1
-                or metadata.st_size > _MAX_ARTIFACT_BYTES
-            ):
-                raise AgentUpdateError("agent staging partial is unsafe")
-            Path(entry.path).unlink()
-            changed = True
-        if changed:
-            _fsync_directory(root)
-    except AgentUpdateError:
-        raise
-    except OSError as error:
-        raise AgentUpdateError("agent staging cleanup failed") from error
 
 
 def _update_deadline(

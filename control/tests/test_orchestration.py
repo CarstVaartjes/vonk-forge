@@ -324,9 +324,9 @@ def test_package_operations_are_not_control_plane_graph_operations(planner) -> N
     document["targets"] = [NODE_A]
     document["operations"] = [
         {
-            "operation_id": "legacy-package:prepare",
+            "operation_id": "removed-package:prepare",
             "node_id": NODE_A,
-            "workload_id": "legacy-package",
+            "workload_id": "removed-package",
             "kind": "package.prepare",
             "dependencies": [],
             "compensation_kind": None,
@@ -388,14 +388,14 @@ def test_persisted_plan_consumers_reject_deleted_package_operations(planner) -> 
     orchestrator, sessions = planner
     package_payload = {
         "schema_version": 1,
-        "deployment_id": "legacy-package",
+        "deployment_id": "removed-package",
         "release_digest": "a" * 64,
         "deployment_digest": "b" * 64,
     }
     package_node = {
-        "operation_id": "legacy-package:prepare",
+        "operation_id": "removed-package:prepare",
         "node_id": NODE_A,
-        "workload_id": "legacy-package",
+        "workload_id": "removed-package",
         "kind": "package.prepare",
         "dependencies": [],
         "compensation_kind": None,
@@ -417,7 +417,7 @@ def test_persisted_plan_consumers_reject_deleted_package_operations(planner) -> 
         "input_digests": {"fleet": "f" * 64},
         "fleet_evidence_digest": "e" * 64,
         "operation_graph": graph,
-        "operation_payloads": {"legacy-package:prepare": package_payload},
+        "operation_payloads": {"removed-package:prepare": package_payload},
         "agent_protocol_range": [1, 1],
     }
     with sessions.begin() as session:
@@ -505,7 +505,7 @@ def test_plan_persists_immutable_canonical_graph_and_progress_fields(planner) ->
         }
 
 
-def test_advance_changes_mutable_state_but_legacy_cancel_is_disabled(planner) -> None:
+def test_advance_changes_mutable_state_but_cancel_is_disabled(planner) -> None:
     orchestrator, sessions = planner
     graph = orchestrator.plan(distributed_plan())
     original_document = deepcopy(graph.document)

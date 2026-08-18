@@ -787,7 +787,6 @@ def _resource_preflight(
             or not isinstance(reservations, dict)
             or agent.get("state") != "active"
             or agent.get("stale") is not False
-            or agent.get("migration_state") != "complete"
         ):
             raise AcceptanceError(f"node {node_id} is not acceptance-ready")
         capabilities = set(inventory.get("capabilities", [])) & set(

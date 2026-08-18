@@ -139,13 +139,11 @@ def test_development_nas_runbook_documents_exact_browser_secret_boundary() -> No
     assert "plaintext administrator password is never published to the NAS" in text
 
 
-def test_existing_install_browser_upgrade_and_normal_journey_are_complete() -> None:
+def test_fresh_install_and_normal_journey_are_complete() -> None:
     text = _normalized_text(RUNBOOK)
 
     for required in (
-        "`--upgrade-browser-access`",
-        "`--upgrade-litellm-key-management`",
-        "preserves every existing secret byte",
+        "fresh-install bundle",
         "**Pull** then **Redeploy**",
         "Keep every named volume",
         "stable Tailscale Service URL",

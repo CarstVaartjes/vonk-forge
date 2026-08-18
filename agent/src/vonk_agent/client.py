@@ -1303,7 +1303,6 @@ class AgentClient:
 
     def claim(self) -> AgentClaim | None:
         body: dict[str, object] = {
-            "agent_implementation": "python",
             "capabilities": list(_CAPABILITIES),
             "lease_seconds": self._lease_seconds,
             "node_id": self._node_id,

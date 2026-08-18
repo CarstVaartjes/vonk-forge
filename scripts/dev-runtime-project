@@ -26,7 +26,6 @@ _MAX_FILE_BYTES = 2 * 1024 * 1024
 _PUBLICATION_JOURNAL = ".vonk-forge-publish"
 _PUBLICATION_TOMBSTONE = ".vonk-forge-publish.cleanup"
 _COMPOSE_FILE = "docker-compose.yaml"
-_LEGACY_COMPOSE_FILE = "docker-compose.yml"
 _LOCAL_STAGING_FILESYSTEMS = frozenset(
     {
         "btrfs",
@@ -363,7 +362,6 @@ def _validate_destination(destination: Path) -> tuple[Path, bool]:
         raise ProjectPublicationError("project destination is unsafe")
     allowed = {
         _COMPOSE_FILE,
-        _LEGACY_COMPOSE_FILE,
         "secrets",
         _PUBLICATION_JOURNAL,
         _PUBLICATION_TOMBSTONE,
@@ -371,7 +369,7 @@ def _validate_destination(destination: Path) -> tuple[Path, bool]:
     entries = {entry.name for entry in destination.iterdir()}
     if not entries <= allowed:
         raise ProjectPublicationError("project destination contains unexpected entries")
-    for compose_name in (_COMPOSE_FILE, _LEGACY_COMPOSE_FILE):
+    for compose_name in (_COMPOSE_FILE,):
         compose = destination / compose_name
         if compose.exists() or compose.is_symlink():
             metadata = compose.lstat()
@@ -454,7 +452,7 @@ def _generation_paths() -> tuple[str, ...]:
 
 
 def _all_generation_paths() -> tuple[str, ...]:
-    return (_COMPOSE_FILE, _LEGACY_COMPOSE_FILE) + tuple(
+    return (_COMPOSE_FILE,) + tuple(
         f"secrets/{name}" for name in sorted(_PUBLISHED_SECRET_NAMES)
     )
 
@@ -977,7 +975,6 @@ def publish_project(
                     new_generation[relative],
                     journal / "scratch",
                 )
-            (destination / _LEGACY_COMPOSE_FILE).unlink(missing_ok=True)
             if {entry.name for entry in destination.iterdir()} != {
                 _COMPOSE_FILE,
                 "secrets",

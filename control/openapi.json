@@ -16,11 +16,6 @@
             ],
             "title": "Active Slot"
           },
-          "agent_implementation": {
-            "pattern": "^(pending|python|rust)$",
-            "title": "Agent Implementation",
-            "type": "string"
-          },
           "agent_sha256": {
             "anyOf": [
               {
@@ -86,11 +81,6 @@
             ],
             "title": "Last Seen At"
           },
-          "migration_state": {
-            "pattern": "^(required|complete)$",
-            "title": "Migration State",
-            "type": "string"
-          },
           "node_id": {
             "pattern": "^spk_[0-9a-f]{32}$",
             "title": "Node Id",
@@ -145,8 +135,6 @@
         "required": [
           "node_id",
           "state",
-          "agent_implementation",
-          "migration_state",
           "capabilities",
           "last_seen_at",
           "stale",
@@ -703,10 +691,7 @@
             "type": "string"
           },
           "purpose": {
-            "enum": [
-              "new-node",
-              "rust-migration"
-            ],
+            "const": "new-node",
             "title": "Purpose",
             "type": "string"
           },
@@ -2795,20 +2780,6 @@
         "title": "MappingResponse",
         "type": "object"
       },
-      "MigrationGrantRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "ttl_seconds": {
-            "default": 600,
-            "maximum": 600.0,
-            "minimum": 1.0,
-            "title": "Ttl Seconds",
-            "type": "integer"
-          }
-        },
-        "title": "MigrationGrantRequest",
-        "type": "object"
-      },
       "ModelVersionIdentity": {
         "additionalProperties": false,
         "properties": {
@@ -2965,17 +2936,6 @@
             ],
             "title": "Agent Build Digest"
           },
-          "agent_implementation": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Agent Implementation"
-          },
           "agent_last_seen_at": {
             "anyOf": [
               {
@@ -2986,17 +2946,6 @@
               }
             ],
             "title": "Agent Last Seen At"
-          },
-          "agent_migration_state": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Agent Migration State"
           },
           "agent_online": {
             "default": false,
@@ -8016,100 +7965,6 @@
           }
         ],
         "summary": "Reject"
-      }
-    },
-    "/api/v1/agents/nodes/{node_id}/migration-grant": {
-      "post": {
-        "operationId": "createAgentMigrationGrant",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "node_id",
-            "required": true,
-            "schema": {
-              "title": "Node Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MigrationGrantRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnrollmentGrantResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Service Unavailable"
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "summary": "Create Migration Grant"
       }
     },
     "/api/v1/agents/nodes/{node_id}/revoke": {

@@ -378,7 +378,6 @@ def test_claim_uses_fixed_mtls_post_and_parses_canonical_protocol_claim(
     assert request.headers["content-type"] == "application/json"
     assert request.body == canonical_message(
         {
-            "agent_implementation": "python",
             "capabilities": [
                 "agent.rollback",
                 "agent.update",

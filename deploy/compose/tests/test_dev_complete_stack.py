@@ -744,7 +744,6 @@ def test_complete_development_stack_enforces_tls_identity_and_acks_routes(
         claim_body.write_text(
             json.dumps(
                 {
-                    "agent_implementation": "rust",
                     "capabilities": [
                         "agent.runtime.rust.v1",
                         "recipe.build.v1",

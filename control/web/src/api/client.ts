@@ -398,14 +398,6 @@ export class ApiClient implements ControlApi {
     }));
   }
 
-  async createAgentMigrationGrant(nodeId: string, ttlSeconds: number, signal?: AbortSignal): Promise<EnrollmentGrantResponse> {
-    return resultData(await this.generated.POST("/api/v1/agents/nodes/{node_id}/migration-grant", {
-      body: {ttl_seconds: ttlSeconds},
-      params: {path: {node_id: nodeId}},
-      signal,
-    }));
-  }
-
   async approveEnrollment(enrollmentId: string): Promise<EnrollmentDecisionResponse> {
     return resultData(await this.generated.POST("/api/v1/agents/enrollments/{enrollment_id}/approve", {
       params: {path: {enrollment_id: enrollmentId}},

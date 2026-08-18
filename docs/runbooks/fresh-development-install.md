@@ -188,16 +188,9 @@ publishers across workstations and is safe to retain. A successful run removes
 both hidden transaction states from the project and leaves exactly
 `docker-compose.yaml` plus `secrets/`.
 
-An existing installation with a valid 21-file browser-access generation can be
-upgraded without rotating its CA, control database password, or other
-authority: repeat the generator command once with
-`--upgrade-litellm-key-management`, back up the resulting 22-file generation,
-and republish it. This add-only migration creates only
-`litellm-database-password`, preserves every existing secret byte, and safely
-accepts a retry after interruption. A valid pre-browser 17-file generation
-first needs `--upgrade-browser-access`; an older valid 15-file generation first
-needs `--upgrade-host-runtime-authority`. Each transition refuses partial,
-unknown, symlinked, or inconsistent state.
+This is a fresh-install bundle. If an older or incomplete secret directory is
+present, preserve any required evidence separately and generate a new bundle
+in a new directory; the clean-slate generator does not upgrade old layouts.
 
 ## 4. Configure names and start the NAS stack
 
@@ -302,7 +295,7 @@ For each node, complete this order without reusing its one-use grant:
    hand-author `agent.toml` or substitute an SSH/bootstrap script.
 
 The controller must show the same certificate-bound node ID, Rust protocol 3,
-migration `complete`, and fresh inventory. Repeat for each additional node.
+and fresh inventory. Repeat for each additional node.
 If a resolved controller outage left the node at `start-limit-hit`, use the
 installation guide's bounded
 [start-limit recovery](../operations/install-vonk-agent.md#rotation-recovery-and-removal);

@@ -287,17 +287,9 @@ four local-only files are `admin-password`, `controller-ca-key`,
 plaintext administrator password is never published to the NAS. The publisher
 and `dev-bootstrap` then enforce the disjoint service ownership boundaries described
 
-For an existing valid 21-file browser-access generation, repeat the same
-command with `--upgrade-litellm-key-management`. This add-only operation
-creates only `litellm-database-password`, preserves every existing secret byte,
-and validates an already-completed retry. Back up the resulting 22-file
-generation before publication. A valid pre-browser 17-file generation first
-needs `--upgrade-browser-access`; an older valid 15-file generation first needs
-`--upgrade-host-runtime-authority`. Neither switch repairs partial, unknown,
-symlinked, or inconsistent state created outside its own transaction. If power
-or the workstation process is lost during the browser upgrade, leave the hidden
-`.browser-access-upgrade-*` transaction untouched and rerun the identical
-command with the same OAuth inputs.
+This is a fresh-install bundle. If an older or incomplete secret directory is
+present, generate a new bundle in a new directory; the clean-slate generator
+does not upgrade old layouts.
 
 Publish the accepted Compose and that exact bundle on the NAS's real Linux
 filesystem. For Windows, WSL, and ordinary SMB clients, use the generic remote

@@ -1821,7 +1821,6 @@ def production_app() -> FastAPI:
     from .logging import JobLogStore
     from .metrics import MetricsRegistry, OperationalMetricsCollector
     from .models import Job
-    from .offline import OnlineLock
     from .operation_api import durable_operation_services
     from .presence import ManagementAddressPolicy
     from .proposals import ProposalService
@@ -1888,8 +1887,6 @@ def production_app() -> FastAPI:
     with sessions.begin() as session:
         seed_builtin_harnesses(session, clock())
 
-    online_lock = OnlineLock(settings.state_path / "offline.lock")
-    online_lock.__enter__()
     token_codec = TokenCodec(settings.token_signing_key)
     cursor_codec = token_codec.cursor_codec()
     job_service = JobService(sessions, clock=clock, cursors=cursor_codec)
@@ -2175,9 +2172,8 @@ def production_app() -> FastAPI:
         app.mount("/", SpaFiles(directory=web_root, html=True), name="admin-web")
 
     @app.on_event("shutdown")
-    def release_online_lock() -> None:
+    def close_global_catalog() -> None:
         global_catalog.close()
-        online_lock.__exit__()
 
     return app
 

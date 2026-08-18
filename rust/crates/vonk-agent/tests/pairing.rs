@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use std::{fs, os::unix::fs::PermissionsExt, path::Path};
+use std::{fs, os::unix::fs::PermissionsExt};
 
 use chrono::{TimeZone, Utc};
 use rcgen::string::Ia5String;
@@ -29,15 +29,6 @@ poll_min_seconds = 2
 poll_max_seconds = 60
 "#;
 
-fn legacy_config(data_dir: &Path) -> AgentConfig {
-    AgentConfig::parse(&format!(
-        "controller_url = \"https://agents.vonk.test/\"\nca_path = \"/etc/vonk-forge-agent/controller-ca.pem\"\nca_sha256 = \"{}\"\ndata_dir = \"{}\"\nnode_id = \"{NODE_ID}\"\npoll_min_seconds = 2\npoll_max_seconds = 60\n",
-        "a".repeat(64),
-        data_dir.display(),
-    ))
-    .unwrap()
-}
-
 #[test]
 fn config_is_strict_and_rejects_secret_fields() {
     let document = format!(
@@ -53,10 +44,7 @@ fn config_parses_distinct_enrollment_and_controller_origins() {
     ))
     .unwrap();
 
-    assert_eq!(
-        config.enrollment_url.unwrap().as_str(),
-        "https://enroll.vonk.test/"
-    );
+    assert_eq!(config.enrollment_url.as_str(), "https://enroll.vonk.test/");
     assert_eq!(config.controller_url.as_str(), "https://agents.vonk.test/");
 }
 
@@ -176,7 +164,7 @@ async fn pairing_rejects_controller_url_before_any_identity_material_is_written(
     fs::write(&ca_path, ca.pem()).unwrap();
     let data_dir = directory.path().join("state");
     let config = AgentConfig {
-        enrollment_url: Some(Url::parse("https://enroll.vonkforge.test/").unwrap()),
+        enrollment_url: Url::parse("https://enroll.vonkforge.test/").unwrap(),
         controller_url: Url::parse("https://127.0.0.1:1/").unwrap(),
         ca_path,
         ca_sha256: hex::encode(Sha256::digest(ca.der())),
@@ -207,36 +195,6 @@ async fn pairing_rejects_controller_url_before_any_identity_material_is_written(
     .await;
 
     assert!(matches!(result, Err(PairingError::CaPin)));
-    assert!(!data_dir.exists());
-}
-
-#[tokio::test]
-async fn pairing_refuses_legacy_config_before_identity_or_network_mutation() {
-    let directory = tempdir().unwrap();
-    let data_dir = directory.path().join("state");
-    let config = legacy_config(&data_dir);
-    let evidence = EnrollmentEvidence {
-        agent_digest: "a".repeat(64),
-        boot_id: "boot".to_owned(),
-        csr_public_key_fingerprint: String::new(),
-        hardware_fingerprint: "hardware".to_owned(),
-        host_key_fingerprint: "host".to_owned(),
-        node_id: String::new(),
-    };
-
-    let result = pair(
-        &config,
-        &Url::parse("https://enroll.vonk.test/").unwrap(),
-        &"t".repeat(43),
-        &config.ca_sha256,
-        evidence,
-    )
-    .await;
-
-    assert_eq!(
-        result.unwrap_err().to_string(),
-        "agent configuration has no enrollment URL"
-    );
     assert!(!data_dir.exists());
 }
 

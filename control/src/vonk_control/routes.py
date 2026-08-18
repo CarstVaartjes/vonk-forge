@@ -9,7 +9,6 @@ import os
 import re
 import tempfile
 from collections.abc import Callable, Mapping
-from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -142,15 +141,10 @@ class RoutePublisher:
         self,
         root: Path,
         *,
-        endpoint_policy: RouteEndpointPolicy | None = None,
-        allowed_upstreams: AbstractSet[str] | None = None,
+        endpoint_policy: RouteEndpointPolicy,
         validate: Callable[[bytes], bool],
         apply: Callable[[bytes], None],
     ) -> None:
-        if (endpoint_policy is None) == (allowed_upstreams is None):
-            raise RouteValidationError(
-                "configure exactly one route endpoint policy or legacy upstream allowlist"
-            )
         if root.is_symlink():
             raise RouteValidationError("route state root must not be a symlink")
         root.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -161,9 +155,6 @@ class RoutePublisher:
             raise RouteValidationError("route generations must not be a symlink")
         self._generations.mkdir(mode=0o700, exist_ok=True)
         self._endpoint_policy = endpoint_policy
-        self._allowed_upstreams = (
-            frozenset(allowed_upstreams) if allowed_upstreams is not None else None
-        )
         self._validate = validate
         self._apply = apply
         self._state: RouteState | None = None
@@ -252,41 +243,21 @@ class RoutePublisher:
         candidate_aliases = dict(candidate.aliases)
         if not candidate_aliases or any(_NAME.fullmatch(alias) is None for alias in candidate_aliases):
             raise RouteValidationError("route aliases are invalid")
-        if all(isinstance(endpoint, RouteEndpoint) for endpoint in candidate_aliases.values()):
-            if self._endpoint_policy is None:
-                raise RouteValidationError("structured route endpoints require an endpoint policy")
-            endpoints = {
-                alias: endpoint
-                for alias, endpoint in candidate_aliases.items()
-                if isinstance(endpoint, RouteEndpoint)
-            }
-            aliases = {
-                alias: self._endpoint_policy.render(endpoint, node_ids=candidate.node_ids)
-                for alias, endpoint in endpoints.items()
-            }
-            health_timestamp = self._endpoint_policy.validate_health(
-                candidate.health_timestamp,
-                endpoints=tuple(endpoints.values()),
-            )
-        elif all(isinstance(upstream, str) for upstream in candidate_aliases.values()):
-            if self._allowed_upstreams is None:
-                raise RouteValidationError("legacy route URLs require an upstream allowlist")
-            aliases = {
-                alias: upstream
-                for alias, upstream in candidate_aliases.items()
-                if isinstance(upstream, str)
-            }
-            unknown = set(aliases.values()) - self._allowed_upstreams
-            if unknown:
-                raise RouteValidationError("route candidate contains an unconfigured upstream")
-            if (
-                candidate.health_timestamp.tzinfo is None
-                or candidate.health_timestamp.utcoffset() is None
-            ):
-                raise RouteValidationError("route health timestamp must be timezone-aware")
-            health_timestamp = candidate.health_timestamp
-        else:
+        if not all(isinstance(endpoint, RouteEndpoint) for endpoint in candidate_aliases.values()):
             raise RouteValidationError("route aliases must use one endpoint representation")
+        endpoints = {
+            alias: endpoint
+            for alias, endpoint in candidate_aliases.items()
+            if isinstance(endpoint, RouteEndpoint)
+        }
+        aliases = {
+            alias: self._endpoint_policy.render(endpoint, node_ids=candidate.node_ids)
+            for alias, endpoint in endpoints.items()
+        }
+        health_timestamp = self._endpoint_policy.validate_health(
+            candidate.health_timestamp,
+            endpoints=tuple(endpoints.values()),
+        )
         return self._publish_payload({
             "state": "published", "commit": candidate.commit, "profile": candidate.profile,
             "workload": candidate.workload, "node_ids": sorted(set(candidate.node_ids)),

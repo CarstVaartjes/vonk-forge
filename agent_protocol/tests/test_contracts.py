@@ -500,7 +500,7 @@ def test_operation_enum_contains_only_supported_operations() -> None:
 def test_removed_package_operation_strings_are_not_protocol_claims() -> None:
     payload = {
         "schema_version": 1,
-        "deployment_id": "legacy-package",
+        "deployment_id": "sample-package",
         "release_digest": "a" * 64,
         "deployment_digest": "b" * 64,
     }

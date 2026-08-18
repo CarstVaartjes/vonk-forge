@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import struct
 import time
 from dataclasses import replace
@@ -613,30 +612,6 @@ def test_interrupted_agent_download_never_publishes_activation(tmp_path: Path) -
     assert not (
         tmp_path / "staging" / f"{artifact.payload_sha256}.agent"
     ).exists()
-
-
-def test_restart_cleans_legacy_hardlink_before_reusing_published_candidate(
-    tmp_path: Path,
-) -> None:
-    content = _elf()
-    updater, _trust, transport, _supervisor = _updater(tmp_path, content)
-    artifact, release = _inputs(content)
-    staging = tmp_path / "staging"
-    staging.mkdir(mode=0o700)
-    final = staging / f"{artifact.payload_sha256}.agent"
-    final.write_bytes(content)
-    final.chmod(0o500)
-    partial = staging / f".{artifact.payload_sha256}.0123456789abcdef.partial"
-    os.link(final, partial)
-    authorization = _authorization(artifact, release)
-
-    updater.apply(
-        updater.plan(artifact, release, authorization, _signature())
-    )
-
-    assert not partial.exists()
-    assert final.stat().st_nlink == 1
-    assert transport.destinations == []
 
 
 def test_agent_rejects_receipt_that_disagrees_with_tuf_or_claim_fence(

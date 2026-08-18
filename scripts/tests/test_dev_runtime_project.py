@@ -234,7 +234,6 @@ def test_publishes_exact_two_item_project_without_secret_output(tmp_path: Path) 
     ("entry_name", "directory"),
     (
         ("unexpected-secret", False),
-        (".browser-access-upgrade-" + "a" * 32, True),
         (".admin-password-rotation-" + "b" * 32, True),
         (".tailscale-oauth-rotation-" + "c" * 32, True),
         (".admin-password-rotation", False),
@@ -474,25 +473,6 @@ def test_replaces_only_validated_project_children_and_rejects_extras(
     ).hexdigest()
     assert accepted_again.returncode == 0, accepted_again.stderr
     assert second_digest == first_digest
-    assert sorted(path.name for path in destination.iterdir()) == [
-        "docker-compose.yaml",
-        "secrets",
-    ]
-
-
-def test_migrates_the_legacy_yml_project_filename(tmp_path: Path) -> None:
-    secrets_dir = _prepare_source_secrets(tmp_path)
-    destination = tmp_path / "nas-project"
-    initial = _run_project(destination, secrets_dir)
-    assert initial.returncode == 0, initial.stderr
-    (destination / "docker-compose.yaml").rename(
-        destination / "docker-compose.yml"
-    )
-
-    migrated = _run_project(destination, secrets_dir)
-
-    assert migrated.returncode == 0, migrated.stderr
-    assert not (destination / "docker-compose.yml").exists()
     assert sorted(path.name for path in destination.iterdir()) == [
         "docker-compose.yaml",
         "secrets",

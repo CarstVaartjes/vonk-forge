@@ -57,7 +57,6 @@ def active_agents(payload: object) -> dict[str, dict[str, Any]]:
             or NODE_ID.fullmatch(node_id) is None
             or node_id in indexed
             or agent.get("state") != "active"
-            or agent.get("migration_state") != "complete"
             or agent.get("stale") is not False
             or not isinstance(generation, int)
             or isinstance(generation, bool)
@@ -84,7 +83,6 @@ def restart_identity(
     if (
         agent.get("node_id") != node.get("id")
         or agent.get("state") != "active"
-        or agent.get("migration_state") != "complete"
         or agent.get("stale") is not False
         or not isinstance(generation, int)
         or isinstance(generation, bool)

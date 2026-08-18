@@ -1,6 +1,6 @@
 # Recipe activation and model changes
 
-Vonk Forge does not switch named legacy profiles. A model family can have many
+Vonk Forge does not switch named profiles. A model family can have many
 immutable model versions, and each version can have multiple recipes for a
 specific execution harness, runtime distribution, patch bundle, and topology.
 The recipe revision is the unit the controller resolves and activates.

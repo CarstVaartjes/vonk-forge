@@ -595,10 +595,9 @@ def test_secret_docs_separate_local_backup_from_exact_nas_projection() -> None:
 
     assert "exactly 22 local source files" in runbook
     assert "exactly 18 deployment files" in runbook
-    assert "`--upgrade-litellm-key-management`" in runbook
+    assert "fresh-install bundle" in runbook
     assert "four local-only files" in runbook
-    assert "15-file" in runbook
-    assert "add-only" in runbook
+    assert "new complete source directory" in runbook
 
     # This dated design records the accepted boundary at that historical slice.
     assert "17 local source files" in design
@@ -738,7 +737,6 @@ def test_complete_runbook_uses_current_browser_secret_generation_contract() -> N
     assert "--tailscale-oauth-client-secret-file" in text
     assert "exactly 22 local source files" in normalized
     assert "exactly 18 deployment files" in normalized
-    assert "litellm-database-password" in normalized
     for local_only in (
         "`admin-password`",
         "`controller-ca-key`",
@@ -746,8 +744,7 @@ def test_complete_runbook_uses_current_browser_secret_generation_contract() -> N
         "`host-runtime-grant-public-key`",
     ):
         assert local_only in text
-    assert "--upgrade-browser-access" in text
-    assert "--upgrade-litellm-key-management" in text
+    assert "fresh-install bundle" in normalized
     assert "Pull** then **Redeploy" in text
 
 

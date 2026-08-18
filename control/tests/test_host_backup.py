@@ -431,7 +431,7 @@ def test_backup_retry_discards_prepublication_staging_and_rebuilds(
     assert len(runner.calls) == 2
 
 
-def test_backup_retry_replaces_artifact_only_legacy_orphan(
+def test_backup_retry_replaces_artifact_only_orphan(
     tmp_path: Path,
 ) -> None:
     boundary, runner, generation = _boundary(tmp_path)

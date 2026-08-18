@@ -4,29 +4,10 @@ use chrono::{DateTime, FixedOffset, Utc};
 use serde_json::json;
 use tempfile::tempdir;
 use uuid::Uuid;
-use vonk_agent::config::AgentConfig;
 use vonk_agent::state::{BeginDecision, StateError, StateStore};
 use vonk_agent_protocol::{AgentClaim, AgentDirective, AgentProgress, canonical_json, hex_sha256};
 
 const NODE_ID: &str = "spk_0123456789abcdef0123456789abcdef";
-
-#[test]
-fn polling_configuration_allows_a_legacy_missing_enrollment_origin() {
-    let document = r#"
-controller_url = "https://agents.vonk.test/"
-ca_path = "/etc/vonk-forge-agent/controller-ca.pem"
-ca_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-data_dir = "/var/lib/vonk-forge"
-node_id = "spk_0123456789abcdef0123456789abcdef"
-poll_min_seconds = 2
-poll_max_seconds = 60
-"#;
-
-    let config = AgentConfig::parse(document).unwrap();
-
-    assert!(config.enrollment_url.is_none());
-    assert_eq!(config.controller_url.as_str(), "https://agents.vonk.test/");
-}
 
 fn claim(attempt: u32, deadline: &str) -> AgentClaim {
     let payload = json!({"plan_digest": "a".repeat(64)});

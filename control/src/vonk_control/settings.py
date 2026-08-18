@@ -265,7 +265,6 @@ class Settings:
     repository_path: Path
     state_path: Path
     deployment_mode: str
-    legacy_direct_transport: str
     token_signing_key: bytes
     metrics_token: str
     git_signing_key_path: Path | None
@@ -309,14 +308,6 @@ class Settings:
         mode = os.environ.get("VONK_DEPLOYMENT_MODE", "development")
         if mode not in {"development", "test", "production"}:
             raise SettingsError("VONK_DEPLOYMENT_MODE is invalid")
-        legacy_direct_transport = os.environ.get(
-            "VONK_LEGACY_DIRECT_TRANSPORT",
-            "",
-        )
-        if legacy_direct_transport not in {"", "explicit-test-only"}:
-            raise SettingsError("legacy direct transport selector is invalid")
-        if mode == "production" and legacy_direct_transport:
-            raise SettingsError("legacy direct transport is forbidden in production")
         agent_ca_provider = os.environ.get("VONK_AGENT_CA_PROVIDER", "")
         agent_runtime = os.environ.get(
             "VONK_AGENT_RUNTIME",
@@ -550,7 +541,6 @@ class Settings:
             repository_path=Path(os.environ.get("VONK_REPOSITORY_PATH", "/srv/vonk-forge/repository")),
             state_path=Path(os.environ.get("VONK_STATE_PATH", "/srv/vonk-forge/state")),
             deployment_mode=mode,
-            legacy_direct_transport=legacy_direct_transport,
             token_signing_key=signing_key,
             metrics_token=metrics_token,
             git_signing_key_path=git_signing_key_path,
@@ -605,11 +595,6 @@ class WorkerSettings:
         mode = os.environ.get("VONK_DEPLOYMENT_MODE", "development")
         if mode not in {"development", "test", "production"}:
             raise SettingsError("VONK_DEPLOYMENT_MODE is invalid")
-        legacy = os.environ.get("VONK_LEGACY_DIRECT_TRANSPORT", "")
-        if legacy not in {"", "explicit-test-only"}:
-            raise SettingsError("legacy direct transport selector is invalid")
-        if mode == "production" and legacy:
-            raise SettingsError("legacy direct transport is forbidden in production")
         database_url = _secret(
             "VONK_DATABASE_URL_FILE",
             production=mode == "production",

@@ -27,8 +27,6 @@ from .auth import AgentSource
 from .logging import redact_text
 from .models import (
     AgentCertificate,
-    AgentEnrollment,
-    AgentEnrollmentGrant,
     AgentNode,
     AgentOperationAttempt,
     Job,
@@ -289,13 +287,9 @@ class AgentJobService:
             raise KeyError(node_id)
         if node.state != "active" or node.revoked_at is not None:
             raise ValueError("agent operation node must be active")
-        if (
-            node.agent_implementation == "rust"
-            and node.migration_state == "complete"
-            and operation not in set(node.capabilities)
-        ):
+        if node.capabilities and operation not in set(node.capabilities):
             raise ValueError(
-                f"Rust agent does not advertise operation capability {operation}"
+                f"agent does not advertise operation capability {operation}"
             )
         parent = session.scalar(
             select(Job).where(Job.id == parent_job_id).with_for_update(of=Job)
@@ -903,10 +897,9 @@ class AgentJobService:
         certificate_serial: str,
         lease_seconds: int,
         wait_seconds: float = 0,
-        protocol_version: int | None = None,
-        capabilities: Sequence[str] | None = None,
+        protocol_version: int | None = 3,
+        capabilities: Sequence[str] | None = tuple(_NEXT_CAPABILITIES),
         runtime_identity: Mapping[str, object] | None = None,
-        agent_implementation: str | None = None,
         *,
         source: AgentSource | None = None,
     ) -> AgentClaim | None:
@@ -929,7 +922,6 @@ class AgentJobService:
             raise ValueError("node, certificate, and positive lease are required")
         advertised = self._capabilities(capabilities)
         running = self._runtime_identity(runtime_identity)
-        implementation = self._implementation(agent_implementation)
         deadline = time.monotonic() + wait_seconds
         with self._available:
             while True:
@@ -940,7 +932,6 @@ class AgentJobService:
                     protocol_version,
                     advertised,
                     running,
-                    implementation,
                     source,
                 )
                 if claim is not None:
@@ -958,7 +949,6 @@ class AgentJobService:
         protocol_version: int | None,
         capabilities: tuple[str, ...] | None,
         runtime_identity: dict[str, object] | None,
-        agent_implementation: str | None,
         source: AgentSource | None,
     ) -> AgentClaim | None:
         with self._claim_lock, self._sessions.begin() as session:
@@ -1002,14 +992,7 @@ class AgentJobService:
             if identity is None or not self._identity_is_active(*identity, now):
                 return None
             node, certificate = identity
-            self._negotiate_implementation(
-                session,
-                node,
-                certificate,
-                agent_implementation,
-                protocol_version,
-                capabilities,
-            )
+            self._validate_agent_contract(protocol_version, capabilities)
             self._consume_contact(session, source, node, certificate)
             self._record_contact(
                 node,
@@ -1345,8 +1328,8 @@ class AgentJobService:
         if job is None:
             raise ValueError("agent operation lacks its parent job")
         if job.reconciliation_id is None:
-            # Legacy non-platform jobs are retained for migration compatibility;
-            # production platform updates are authorized only by the rollout below.
+            # Non-reconciliation recipe jobs may request agent updates; platform
+            # updates are authorized only by the rollout below.
             if (
                 operation.kind == AgentOperation.AGENT_UPDATE.value
                 and job.kind != "platform.update"
@@ -1867,80 +1850,17 @@ class AgentJobService:
         return tuple(sorted(values))
 
     @staticmethod
-    def _implementation(value: str | None) -> str | None:
-        if value is not None and value not in {"python", "rust"}:
-            raise ValueError("agent implementation is invalid")
-        return value
-
-    def _negotiate_implementation(
-        self,
-        session: Session,
-        node: AgentNode,
-        certificate: AgentCertificate,
-        advertised: str | None,
+    def _validate_agent_contract(
         protocol_version: int | None,
         capabilities: tuple[str, ...] | None,
     ) -> None:
-        implementation = "python" if advertised is None else advertised
-        rust_ready = (
-            implementation == "rust"
-            and protocol_version is not None
-            and protocol_version >= 3
-            and capabilities is not None
-            and "agent.runtime.rust.v1" in capabilities
-        )
-        if node.agent_implementation == "pending":
-            if not rust_ready:
-                raise ValueError("new enrollment requires the Rust agent")
-            node.agent_implementation = "rust"
-            node.migration_state = "complete"
-            return
-        if node.agent_implementation == "python":
-            if implementation == "python":
-                node.migration_state = "required"
-                return
-            if not rust_ready:
-                raise ValueError("Rust agent capability negotiation is incomplete")
-            migration_enrollment = session.scalar(
-                select(AgentEnrollment.id)
-                .join(
-                    AgentEnrollmentGrant,
-                    AgentEnrollmentGrant.id == AgentEnrollment.grant_id,
-                )
-                .where(
-                    AgentEnrollment.node_id == node.node_id,
-                    AgentEnrollment.state == "approved",
-                    AgentEnrollment.certificate_serial == certificate.serial,
-                    AgentEnrollmentGrant.purpose == "rust-migration",
-                )
-                .limit(1)
-            )
-            if migration_enrollment is None:
-                raise ValueError(
-                    "Rust migration requires a dedicated migration certificate"
-                )
-            older_certificates = list(
-                session.scalars(
-                    select(AgentCertificate)
-                    .where(
-                        AgentCertificate.node_id == node.node_id,
-                        AgentCertificate.serial != certificate.serial,
-                        AgentCertificate.state.in_({"active", "staged"}),
-                    )
-                    .with_for_update(of=AgentCertificate)
-                )
-            )
-            now = self._clock()
-            for previous in older_certificates:
-                previous.state = "revoked"
-                previous.revoked_at = previous.revoked_at or now
-            node.agent_implementation = "rust"
-            node.migration_state = "complete"
-            return
-        if node.agent_implementation == "rust" and not rust_ready:
-            raise ValueError("a migrated node cannot downgrade to the Python agent")
-        if node.agent_implementation != "rust" or node.migration_state != "complete":
-            raise ValueError("agent migration state is invalid")
+        if (
+            protocol_version is None
+            or protocol_version != 3
+            or capabilities is None
+            or "agent.runtime.rust.v1" not in capabilities
+        ):
+            raise ValueError("Rust agent capability negotiation is incomplete")
 
     @staticmethod
     def _record_contact(

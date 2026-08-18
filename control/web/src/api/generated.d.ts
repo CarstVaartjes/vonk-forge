@@ -89,23 +89,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/agents/nodes/{node_id}/migration-grant": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Create Migration Grant */
-        post: operations["createAgentMigrationGrant"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/agents/nodes/{node_id}/revoke": {
         parameters: {
             query?: never;
@@ -1137,8 +1120,6 @@ export interface components {
         AgentSummary: {
             /** Active Slot */
             active_slot?: string | null;
-            /** Agent Implementation */
-            agent_implementation: string;
             /** Agent Sha256 */
             agent_sha256?: string | null;
             /** Build Digest */
@@ -1151,8 +1132,6 @@ export interface components {
             last_seen_age_seconds?: number | null;
             /** Last Seen At */
             last_seen_at: string | null;
-            /** Migration State */
-            migration_state: string;
             /** Node Id */
             node_id: string;
             /** Platform Version */
@@ -1364,9 +1343,9 @@ export interface components {
             node_id: string;
             /**
              * Purpose
-             * @enum {string}
+             * @constant
              */
-            purpose: "new-node" | "rust-migration";
+            purpose: "new-node";
             /** Token */
             token: string;
         };
@@ -2028,14 +2007,6 @@ export interface components {
             /** Placement Digest */
             placement_digest: string;
         };
-        /** MigrationGrantRequest */
-        MigrationGrantRequest: {
-            /**
-             * Ttl Seconds
-             * @default 600
-             */
-            ttl_seconds: number;
-        };
         /** ModelVersionIdentity */
         ModelVersionIdentity: {
             /** Content Sha256 */
@@ -2080,12 +2051,8 @@ export interface components {
             agent_active_slot?: string | null;
             /** Agent Build Digest */
             agent_build_digest?: string | null;
-            /** Agent Implementation */
-            agent_implementation?: string | null;
             /** Agent Last Seen At */
             agent_last_seen_at?: string | null;
-            /** Agent Migration State */
-            agent_migration_state?: string | null;
             /**
              * Agent Online
              * @default false
@@ -3797,77 +3764,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EnrollmentDecisionResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Forbidden */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Conflict */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-            /** @description Service Unavailable */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-        };
-    };
-    createAgentMigrationGrant: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                node_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["MigrationGrantRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EnrollmentGrantResponse"];
                 };
             };
             /** @description Unauthorized */

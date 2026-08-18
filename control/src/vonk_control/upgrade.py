@@ -256,12 +256,6 @@ class ControlGenerationPlan:
     required_bytes: int
     plan_digest: str
 
-    @property
-    def migration_revision(self) -> str:
-        """Compatibility name retained while the offline boundary converges."""
-
-        return self.database_revision
-
     def _payload_document(self) -> dict[str, object]:
         bundle = self.deployment_bundle
         return {
@@ -699,7 +693,7 @@ class ControlUpgrade:
             targets_version = 1
             operation_id = "operation-" + target_sha256[:32]
             start_nonce = hashlib.sha256(
-                ("legacy-selection:" + release.digest).encode("ascii")
+                ("release-selection:" + release.digest).encode("ascii")
             ).hexdigest()
         else:
             exact_plan = True
@@ -1493,7 +1487,7 @@ class ControlUpgrade:
         plan: ControlGenerationPlan,
         release: PlatformRelease,
     ) -> ControlGenerationResult:
-        self._require_legacy_plan_snapshot(plan, release)
+        self._require_plan_snapshot(plan, release)
         available = self._boundary.available_bytes()
         if (
             isinstance(available, bool)
@@ -1542,7 +1536,7 @@ class ControlUpgrade:
             _json_mapping(backup, "backup manifest")
             self._boundary.stop_worker()
             try:
-                self._boundary.migrate(plan.migration_revision)
+                self._boundary.migrate(plan.database_revision)
             except AmbiguousMigrationError as error:
                 recovery = {
                     "schema_version": 1,
@@ -1579,7 +1573,7 @@ class ControlUpgrade:
                 "platform_version": plan.platform_version,
                 "api_image": plan.api_image,
                 "worker_image": plan.worker_image,
-                "migration_revision": plan.migration_revision,
+                "migration_revision": plan.database_revision,
                 "previous_generation": plan.previous_generation,
                 "compose_sha256": hashlib.sha256(rendered).hexdigest(),
                 "backup": backup,
@@ -1658,7 +1652,7 @@ class ControlUpgrade:
         ):
             raise UpgradeConflict("upgrade plan does not match the exact release")
 
-    def _require_legacy_plan_snapshot(
+    def _require_plan_snapshot(
         self,
         plan: ControlGenerationPlan,
         release: PlatformRelease,

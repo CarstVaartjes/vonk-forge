@@ -175,8 +175,8 @@ sudo systemctl restart vonk-forge-agent-supervisor.service
 sudo systemctl status vonk-forge-agent-supervisor.service
 ```
 
-The controller must show `Rust agent`, migration `complete`, protocol 3, the
-signed runtime identity, fresh inventory, `build.rootless-podman.v1`, and
+The controller must show a registered Spark with protocol 3, the signed
+runtime identity, fresh inventory, `build.rootless-podman.v1`, and
 `runtime.spark-docker-nvidia.v1`. The latter is reported only when the Docker
 client and NVIDIA CDI `nvidia.com/gpu=all` checks pass.
 Install/start admission remains controller-side: disk is checked before image

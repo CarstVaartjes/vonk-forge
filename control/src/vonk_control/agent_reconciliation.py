@@ -79,7 +79,7 @@ _REQUIRED_AGENT_CAPABILITIES = frozenset(
     }
 )
 _NEXT_AGENT_CAPABILITIES = _REQUIRED_AGENT_CAPABILITIES | frozenset(
-    {"agent.rollback", "agent.update"}
+    {"agent.rollback", "agent.update", "agent.runtime.rust.v1"}
 )
 _ACTIVE_CANCELLATION_STATES = frozenset(
     {

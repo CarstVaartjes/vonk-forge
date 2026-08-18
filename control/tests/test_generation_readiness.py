@@ -548,9 +548,6 @@ def test_worker_heartbeat_is_persisted_only_after_scheduler_loop_returns(
     )
 
     class Jobs:
-        def quarantine_unlinked(self, _reason: str) -> bool:
-            return False
-
         def claim(self, _worker_id: str, _lease_seconds: int):
             return None
 

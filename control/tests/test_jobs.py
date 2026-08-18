@@ -59,18 +59,6 @@ def test_generic_claim_never_claims_platform_update_parent(service) -> None:
     assert jobs.get(platform.id).state == "queued"
 
 
-def test_legacy_quarantine_never_quarantines_platform_update_parent(service) -> None:
-    jobs, clock = service
-    platform = jobs.enqueue("platform.update", "admin", "a" * 40, [], {})
-    clock.now += timedelta(seconds=1)
-    generic = jobs.enqueue("probe", "admin", "a" * 40, [], {})
-
-    assert jobs.quarantine_unlinked("legacy") is True
-
-    assert jobs.get(platform.id).state == "queued"
-    assert jobs.get(generic.id).state == "waiting-for-operator"
-
-
 def test_job_list_keyset_pages_reach_every_job_in_stable_order(service) -> None:
     jobs, clock = service
     expected: set[str] = set()

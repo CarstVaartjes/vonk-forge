@@ -25,7 +25,6 @@ from .endpoint_response import EndpointResponse
 from .enrollment_decision_response import EnrollmentDecisionResponse
 from .enrollment_decision_response_state import EnrollmentDecisionResponseState
 from .enrollment_grant_response import EnrollmentGrantResponse
-from .enrollment_grant_response_purpose import EnrollmentGrantResponsePurpose
 from .enrollment_list_response import EnrollmentListResponse
 from .enrollment_summary import EnrollmentSummary
 from .fleet_node import FleetNode
@@ -87,7 +86,6 @@ from .mapping_preview_target import MappingPreviewTarget
 from .mapping_request import MappingRequest
 from .mapping_request_parameters import MappingRequestParameters
 from .mapping_response import MappingResponse
-from .migration_grant_request import MigrationGrantRequest
 from .model_version_identity import ModelVersionIdentity
 from .node_connection import NodeConnection
 from .node_connection_agent_state import NodeConnectionAgentState
@@ -252,7 +250,6 @@ __all__ = (
     "EnrollmentDecisionResponse",
     "EnrollmentDecisionResponseState",
     "EnrollmentGrantResponse",
-    "EnrollmentGrantResponsePurpose",
     "EnrollmentListResponse",
     "EnrollmentSummary",
     "FleetNode",
@@ -314,7 +311,6 @@ __all__ = (
     "MappingRequest",
     "MappingRequestParameters",
     "MappingResponse",
-    "MigrationGrantRequest",
     "ModelVersionIdentity",
     "NodeConnection",
     "NodeConnectionAgentState",

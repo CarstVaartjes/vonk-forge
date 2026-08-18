@@ -278,8 +278,8 @@ class OperationalMetricsCollector:
         sessions: sessionmaker[Session],
         *,
         clock: Callable[[], datetime],
-        protocol_minimum: int = 1,
-        protocol_maximum: int = 1,
+        protocol_minimum: int = 3,
+        protocol_maximum: int = 3,
     ) -> None:
         if protocol_minimum < 1 or protocol_maximum < protocol_minimum:
             raise ValueError("supported protocol range is invalid")

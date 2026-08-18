@@ -264,7 +264,7 @@ def test_unknown_duck_typed_or_known_unimplemented_operation_never_dispatches(tm
 def test_removed_package_operation_claims_never_dispatch(tmp_path) -> None:
     payload = {
         "schema_version": 1,
-        "deployment_id": "legacy-package",
+        "deployment_id": "removed-package",
         "release_digest": "a" * 64,
         "deployment_digest": "b" * 64,
     }

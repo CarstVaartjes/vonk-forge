@@ -6,8 +6,6 @@ import pytest
 from vonk_control import offline
 from vonk_control.offline import (
     OfflineConflict,
-    OfflineLock,
-    OnlineLock,
     main,
     require_offline,
 )
@@ -16,26 +14,6 @@ from vonk_control.offline import (
 def test_offline_mutation_refuses_healthy_api(tmp_path: Path) -> None:
     with pytest.raises(OfflineConflict, match="control plane is running"):
         require_offline(tmp_path, probe=lambda: True, owner_uid=os.geteuid())
-
-
-def test_offline_lock_is_exclusive(tmp_path: Path) -> None:
-    first = OfflineLock(tmp_path, owner_uid=os.geteuid())
-    second = OfflineLock(tmp_path, owner_uid=os.geteuid())
-    with (
-        first,
-        pytest.raises(OfflineConflict, match="maintenance operation"),
-        second,
-    ):
-        pass
-
-
-def test_online_lock_does_not_create_host_authority_in_application_state(
-    tmp_path: Path,
-) -> None:
-    path = tmp_path / "application-state/offline.lock"
-    with OnlineLock(path):
-        assert not path.exists()
-        assert not path.parent.exists()
 
 
 def test_installed_updater_exposes_only_allowlisted_maintenance_actions(

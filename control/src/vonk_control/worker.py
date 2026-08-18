@@ -185,7 +185,6 @@ class Worker:
         reconciliations=None,
         updates=None,
         recipes=None,
-        quarantine_unlinked: bool = False,
         loop_heartbeat: Callable[[], object] | None = None,
     ) -> None:
         self._jobs = jobs
@@ -196,7 +195,6 @@ class Worker:
         self._reconciliations = reconciliations
         self._updates = updates
         self._recipes = recipes
-        self._quarantine_unlinked = quarantine_unlinked
         self._loop_heartbeat = loop_heartbeat
         self._source_cursor = 0
 
@@ -225,10 +223,6 @@ class Worker:
         return advanced
 
     def _run_generic(self) -> bool:
-        if self._quarantine_unlinked:
-            return self._jobs.quarantine_unlinked(
-                "legacy unlinked job requires operator review"
-            )
         attempt = self._jobs.claim(self._worker_id, 30)
         if attempt is None:
             return False
@@ -353,7 +347,6 @@ def assemble_production_worker(
         reconciliations=reconciliations,
         updates=updates,
         recipes=recipe_operations,
-        quarantine_unlinked=True,
         loop_heartbeat=loop_heartbeat,
     )
 

@@ -19,8 +19,6 @@ import urllib.request
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict
 from pathlib import Path, PurePosixPath
-from typing import Self
-
 from tuf.ngclient import Urllib3Fetcher
 
 from cluster_profiles.deployment_bundle import (
@@ -2119,52 +2117,17 @@ class _PlanOnlyUpgradeBoundary:
         raise UpgradeConflict(f"dry-run boundary cannot execute {name}")
 
 
-class OfflineLock:
-    """Compatibility wrapper over the one root host-operation lock."""
-
-    def __init__(self, state_root: Path, *, owner_uid: int = 0) -> None:
-        self._lock = HostOperationLock(state_root, owner_uid=owner_uid)
-        self._entered = False
-
-    def __enter__(self) -> Self:
-        if self._entered:
-            return self
-        try:
-            self._lock.__enter__()
-        except HostStateConflict as error:
-            raise OfflineConflict(
-                "another offline maintenance operation is active"
-            ) from error
-        self._entered = True
-        return self
-
-    def __exit__(self, *_args: object) -> None:
-        if self._entered:
-            self._lock.__exit__(*_args)
-            self._entered = False
-
-
-class OnlineLock:
-    """Deprecated no-op: online application state is not host authority."""
-
-    def __init__(self, _path: Path) -> None:
-        pass
-
-    def __enter__(self) -> Self:
-        return self
-
-    def __exit__(self, *_args: object) -> None:
-        return None
-
-
 def require_offline(
     state_path: Path,
     *,
     probe: Callable[[], bool],
     owner_uid: int = 0,
-) -> OfflineLock:
-    lock = OfflineLock(state_path, owner_uid=owner_uid)
-    lock.__enter__()
+) -> HostOperationLock:
+    lock = HostOperationLock(state_path, owner_uid=owner_uid)
+    try:
+        lock.__enter__()
+    except HostStateConflict as error:
+        raise OfflineConflict("another offline maintenance operation is active") from error
     if probe():
         lock.__exit__()
         raise OfflineConflict("control plane is running; stop API and worker first")

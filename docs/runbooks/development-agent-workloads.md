@@ -142,22 +142,8 @@ in the local generation, its encrypted backup, and the named 1Password item.
 For two-node acceptance, pass the canonical NVIDIA Sync direct networks and
 configure each agent with one address from those networks plus its measured
 bandwidth. The publisher rejects any direct network that overlaps management.
-For the one supported host-authority upgrade from the original 15-file source
-generation, rerun the same command once with
-`--upgrade-host-runtime-authority`. The helper
-accepts only an otherwise complete and valid legacy generation, performs an
-add-only migration by adding the two
-host-runtime authority files, leaves every existing file byte-for-byte
-unchanged, and can recover if power is lost after publishing the private half.
-That produces the valid pre-browser 17-file source generation. Rerun the full
-command with both OAuth input files and `--upgrade-browser-access`; this
-add-only browser migration preserves all 17 existing bytes and adds the four
-browser files. Then run `--upgrade-litellm-key-management` to add only
-`litellm-database-password`. Back up the resulting 22-file generation
-before deployment. It
-rejects a public-only key, unknown file, inconsistent generation, or ordinary
-incomplete directory; do not work around that refusal by replacing the CA or
-server certificate.
+This is a fresh-install bundle. Generate a new complete source directory for
+each clean deployment; the generator does not upgrade older secret layouts.
 
 `dev-runtime-project` validates the complete local generation and projects
 exactly 18 deployment files into the NAS `secrets/` directory; it excludes

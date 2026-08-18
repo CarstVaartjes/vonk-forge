@@ -247,60 +247,6 @@ def test_grant_is_single_use_and_requires_administrator_approval(service) -> Non
         assert node is not None and node.state == "active"
 
 
-def test_rust_migration_grant_issues_fresh_generation_for_existing_python_node(
-    service,
-) -> None:
-    enrollment, sessions, _clock, authority = service
-    original = enrollment.approve(enroll(enrollment).id, "admin")
-    with sessions.begin() as session:
-        node = session.get(AgentNode, NODE_ID)
-        assert node is not None
-        node.agent_implementation = "python"
-    request = csr()
-
-    grant = enrollment.create_migration(NODE_ID, "admin", 600)
-    pending = enrollment.submit(grant.token, request, evidence(request))
-    migrated = enrollment.approve(pending.id, "admin")
-
-    assert grant.purpose == "rust-migration"
-    assert migrated.generation == 2
-    assert migrated.serial != original.serial
-    assert len(authority.calls) == 2
-    with sessions() as session:
-        node = session.get(AgentNode, NODE_ID)
-        certificates = list(
-            session.scalars(
-                select(AgentCertificate)
-                .where(AgentCertificate.node_id == NODE_ID)
-                .order_by(AgentCertificate.generation)
-            )
-        )
-        assert node is not None and node.agent_implementation == "python"
-        assert [item.generation for item in certificates] == [1, 2]
-        assert [item.state for item in certificates] == ["active", "active"]
-
-
-def test_rust_migration_grant_requires_active_legacy_node(service) -> None:
-    enrollment, sessions, _clock, _authority = service
-    with pytest.raises(EnrollmentDenied, match="legacy Python"):
-        enrollment.create_migration(NODE_ID, "admin", 600)
-
-    enrollment.approve(enroll(enrollment).id, "admin")
-    with sessions.begin() as session:
-        node = session.get(AgentNode, NODE_ID)
-        assert node is not None
-        node.agent_implementation = "python"
-    grant = enrollment.create_migration(NODE_ID, "admin", 600)
-    assert grant.purpose == "rust-migration"
-    with sessions.begin() as session:
-        node = session.get(AgentNode, NODE_ID)
-        assert node is not None
-        node.agent_implementation = "rust"
-        node.migration_state = "complete"
-    with pytest.raises(EnrollmentDenied, match="legacy Python"):
-        enrollment.create_migration(NODE_ID, "admin", 600)
-
-
 def test_submit_rejects_expired_malformed_and_evidence_mismatched_grants_without_leaking_token(service) -> None:
     enrollment, _, clock, _ = service
     request = csr()

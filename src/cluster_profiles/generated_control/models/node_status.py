@@ -38,9 +38,7 @@ class NodeStatus:
             stale (bool):
             agent_active_slot (Union[None, Unset, str]):
             agent_build_digest (Union[None, Unset, str]):
-            agent_implementation (Union[None, Unset, str]):
             agent_last_seen_at (Union[None, Unset, str]):
-            agent_migration_state (Union[None, Unset, str]):
             agent_online (Union[Unset, bool]):  Default: False.
             agent_platform_version (Union[None, Unset, str]):
             agent_sha256 (Union[None, Unset, str]):
@@ -70,9 +68,7 @@ class NodeStatus:
     stale: bool
     agent_active_slot: Union[None, Unset, str] = UNSET
     agent_build_digest: Union[None, Unset, str] = UNSET
-    agent_implementation: Union[None, Unset, str] = UNSET
     agent_last_seen_at: Union[None, Unset, str] = UNSET
-    agent_migration_state: Union[None, Unset, str] = UNSET
     agent_online: Union[Unset, bool] = False
     agent_platform_version: Union[None, Unset, str] = UNSET
     agent_sha256: Union[None, Unset, str] = UNSET
@@ -129,23 +125,11 @@ class NodeStatus:
         else:
             agent_build_digest = self.agent_build_digest
 
-        agent_implementation: Union[None, Unset, str]
-        if isinstance(self.agent_implementation, Unset):
-            agent_implementation = UNSET
-        else:
-            agent_implementation = self.agent_implementation
-
         agent_last_seen_at: Union[None, Unset, str]
         if isinstance(self.agent_last_seen_at, Unset):
             agent_last_seen_at = UNSET
         else:
             agent_last_seen_at = self.agent_last_seen_at
-
-        agent_migration_state: Union[None, Unset, str]
-        if isinstance(self.agent_migration_state, Unset):
-            agent_migration_state = UNSET
-        else:
-            agent_migration_state = self.agent_migration_state
 
         agent_online = self.agent_online
 
@@ -240,12 +224,8 @@ class NodeStatus:
             field_dict["agent_active_slot"] = agent_active_slot
         if agent_build_digest is not UNSET:
             field_dict["agent_build_digest"] = agent_build_digest
-        if agent_implementation is not UNSET:
-            field_dict["agent_implementation"] = agent_implementation
         if agent_last_seen_at is not UNSET:
             field_dict["agent_last_seen_at"] = agent_last_seen_at
-        if agent_migration_state is not UNSET:
-            field_dict["agent_migration_state"] = agent_migration_state
         if agent_online is not UNSET:
             field_dict["agent_online"] = agent_online
         if agent_platform_version is not UNSET:
@@ -340,16 +320,6 @@ class NodeStatus:
         agent_build_digest = _parse_agent_build_digest(d.pop("agent_build_digest", UNSET))
 
 
-        def _parse_agent_implementation(data: object) -> Union[None, Unset, str]:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            return cast(Union[None, Unset, str], data)
-
-        agent_implementation = _parse_agent_implementation(d.pop("agent_implementation", UNSET))
-
-
         def _parse_agent_last_seen_at(data: object) -> Union[None, Unset, str]:
             if data is None:
                 return data
@@ -358,16 +328,6 @@ class NodeStatus:
             return cast(Union[None, Unset, str], data)
 
         agent_last_seen_at = _parse_agent_last_seen_at(d.pop("agent_last_seen_at", UNSET))
-
-
-        def _parse_agent_migration_state(data: object) -> Union[None, Unset, str]:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            return cast(Union[None, Unset, str], data)
-
-        agent_migration_state = _parse_agent_migration_state(d.pop("agent_migration_state", UNSET))
 
 
         agent_online = d.pop("agent_online", UNSET)
@@ -494,9 +454,7 @@ class NodeStatus:
             stale=stale,
             agent_active_slot=agent_active_slot,
             agent_build_digest=agent_build_digest,
-            agent_implementation=agent_implementation,
             agent_last_seen_at=agent_last_seen_at,
-            agent_migration_state=agent_migration_state,
             agent_online=agent_online,
             agent_platform_version=agent_platform_version,
             agent_sha256=agent_sha256,

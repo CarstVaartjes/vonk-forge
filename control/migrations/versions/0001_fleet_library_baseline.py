@@ -21,7 +21,7 @@ def upgrade() -> None:
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.Column('expires_at', sa.DateTime(timezone=True), nullable=False),
     sa.Column('consumed_at', sa.DateTime(timezone=True), nullable=True),
-    sa.CheckConstraint("purpose IN ('new-node', 'rust-migration')", name='ck_agent_enrollment_grants_purpose'),
+    sa.CheckConstraint("purpose = 'new-node'", name='ck_agent_enrollment_grants_purpose'),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('token_digest')
     )
@@ -46,8 +46,6 @@ def upgrade() -> None:
     op.create_table('agent_nodes',
     sa.Column('node_id', sa.String(length=36), nullable=False),
     sa.Column('state', sa.String(length=24), nullable=False),
-    sa.Column('agent_implementation', sa.String(length=16), server_default='pending', nullable=False),
-    sa.Column('migration_state', sa.String(length=16), server_default='required', nullable=False),
     sa.Column('protocol_version', sa.Integer(), nullable=True),
     sa.Column('architecture', sa.String(length=16), nullable=True),
     sa.Column('platform_version', sa.String(length=32), nullable=True),
@@ -62,10 +60,7 @@ def upgrade() -> None:
     sa.Column('capabilities', sa.JSON(), nullable=False),
     sa.Column('last_seen_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('revoked_at', sa.DateTime(timezone=True), nullable=True),
-    sa.CheckConstraint("(agent_implementation = 'rust' AND migration_state = 'complete') OR (agent_implementation IN ('pending', 'python') AND migration_state = 'required')", name='ck_agent_nodes_migration_consistency'),
-    sa.CheckConstraint("agent_implementation IN ('pending', 'python', 'rust')", name='ck_agent_nodes_implementation'),
     sa.CheckConstraint("architecture IS NULL OR architecture IN ('linux-arm64', 'linux-x86_64')", name='ck_agent_nodes_architecture'),
-    sa.CheckConstraint("migration_state IN ('required', 'complete')", name='ck_agent_nodes_migration_state'),
     sa.PrimaryKeyConstraint('node_id')
     )
     op.create_table('audit_events',
@@ -197,7 +192,7 @@ def upgrade() -> None:
     sa.Column('graph_digest', sa.String(length=64), server_default='5c061eb8dfce0a3f2bcbfbf06cb71d695c33e8f4269e17bfe5cd1cda0054cdc5', nullable=False),
     sa.Column('plan_digest', sa.String(length=64), nullable=True),
     sa.Column('resolved_plan', sa.JSON(), nullable=True),
-    sa.Column('current_phase', sa.String(length=32), server_default='legacy', nullable=False),
+    sa.Column('current_phase', sa.String(length=32), server_default='planned', nullable=False),
     sa.Column('route_withdrawal_generation', sa.Integer(), server_default='0', nullable=False),
     sa.Column('terminal_reason', sa.Text(), nullable=True),
     sa.Column('completion_generation', sa.BigInteger(), nullable=True),

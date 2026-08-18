@@ -243,7 +243,7 @@ class Reconciliation(Base):
     plan_digest: Mapped[str | None] = mapped_column(String(64), unique=True, index=True)
     resolved_plan: Mapped[dict[str, object] | None] = mapped_column(JSON)
     current_phase: Mapped[str] = mapped_column(
-        String(32), nullable=False, default="legacy", server_default="legacy"
+        String(32), nullable=False, default="planned", server_default="planned"
     )
     route_withdrawal_generation: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
@@ -474,28 +474,9 @@ class AgentNode(Base):
             "architecture IS NULL OR architecture IN ('linux-arm64', 'linux-x86_64')",
             name="ck_agent_nodes_architecture",
         ),
-        CheckConstraint(
-            "agent_implementation IN ('pending', 'python', 'rust')",
-            name="ck_agent_nodes_implementation",
-        ),
-        CheckConstraint(
-            "migration_state IN ('required', 'complete')",
-            name="ck_agent_nodes_migration_state",
-        ),
-        CheckConstraint(
-            "(agent_implementation = 'rust' AND migration_state = 'complete') OR "
-            "(agent_implementation IN ('pending', 'python') AND migration_state = 'required')",
-            name="ck_agent_nodes_migration_consistency",
-        ),
     )
     node_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     state: Mapped[str] = mapped_column(String(24), nullable=False)
-    agent_implementation: Mapped[str] = mapped_column(
-        String(16), nullable=False, default="python", server_default="pending"
-    )
-    migration_state: Mapped[str] = mapped_column(
-        String(16), nullable=False, default="required", server_default="required"
-    )
     protocol_version: Mapped[int | None] = mapped_column(Integer)
     architecture: Mapped[str | None] = mapped_column(String(16))
     platform_version: Mapped[str | None] = mapped_column(String(32))
@@ -679,7 +660,7 @@ class AgentEnrollmentGrant(Base):
     __tablename__ = "agent_enrollment_grants"
     __table_args__ = (
         CheckConstraint(
-            "purpose IN ('new-node', 'rust-migration')",
+            "purpose = 'new-node'",
             name="ck_agent_enrollment_grants_purpose",
         ),
     )

@@ -103,6 +103,14 @@ def test_fresh_baseline_is_fixed_and_does_not_import_live_metadata() -> None:
     assert ".create_all(" not in migration
 
 
+def test_fresh_install_has_one_baseline_migration() -> None:
+    versions = Path(__file__).resolve().parents[1] / "migrations/versions"
+
+    assert sorted(path.name for path in versions.glob("*.py")) == [
+        "0001_fleet_library_baseline.py"
+    ]
+
+
 def test_fresh_baseline_is_reversible(tmp_path: Path) -> None:
     url = f"sqlite:///{tmp_path / 'control.sqlite'}"
     config = _config(url)

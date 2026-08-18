@@ -183,11 +183,11 @@ def test_generator_is_idempotent_and_admin_schema_is_secret_free() -> None:
         }
     )
 
-    legacy_prefixes = ("/api/v1/" + "packages", "/api/v1/" + "deployments")
+    retired_prefixes = ("/api/v1/" + "packages", "/api/v1/" + "deployments")
     assert not any(
         path.startswith(prefix)
         for path in schema["paths"]
-        for prefix in legacy_prefixes
+        for prefix in retired_prefixes
     )
 
     by_id = {operation["operationId"]: operation for operation in operation_list}

@@ -43,6 +43,7 @@ NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
 BASE_COMMIT = "a" * 40
 AGENT_CAPABILITIES = (
+    "agent.runtime.rust.v1",
     "node.probe",
     "release.install",
     "workload.health",
@@ -246,7 +247,7 @@ def test_workload_evidence_binds_action_identity_release_and_verify_digest(
 def test_package_evidence_is_not_a_retained_reconciliation_result() -> None:
     payload = {
         "schema_version": 1,
-        "deployment_id": "legacy-package",
+        "deployment_id": "removed-package",
         "release_digest": "a" * 64,
         "deployment_digest": "b" * 64,
     }
@@ -254,7 +255,7 @@ def test_package_evidence_is_not_a_retained_reconciliation_result() -> None:
         "status": "ok",
         "evidence": {
             "operation": "package.prepare",
-            "deployment_id": "legacy-package",
+            "deployment_id": "removed-package",
             "release_digest": "a" * 64,
             "generation": None,
             "status": "validated",
@@ -437,7 +438,7 @@ def _execution_fixture(
         "operation_payloads": {
             operation["operation_id"]: payload for operation in operations
         },
-        "agent_protocol_range": [1, 1],
+        "agent_protocol_range": [3, 3],
     }
     reconciliation_id = str(uuid.uuid4())
     job_id = str(uuid.uuid4())
@@ -816,7 +817,7 @@ def test_authority_change_after_enqueue_stops_before_first_route_side_effect(
     with sessions.begin() as session:
         node = session.get(AgentNode, NODE_A)
         assert node is not None
-        node.protocol_version = 1
+        node.protocol_version = 3
         node.capabilities = [
             "node.probe",
             "release.install",
@@ -1346,7 +1347,7 @@ def _compensation_fixture(
         "fleet_evidence_digest": "e" * 64,
         "operation_graph": graph,
         "operation_payloads": {worker_id: payload, entry_id: payload},
-        "agent_protocol_range": [1, 1],
+        "agent_protocol_range": [3, 3],
     }
     reconciliation_id = str(uuid.uuid4())
     job_id = str(uuid.uuid4())
@@ -1356,7 +1357,7 @@ def _compensation_fixture(
                 AgentNode(
                     node_id=node_id,
                     state="active",
-                    protocol_version=1 if authority is not None else None,
+                    protocol_version=3 if authority is not None else None,
                     capabilities=(
                         list(AGENT_CAPABILITIES) if authority is not None else []
                     ),
@@ -1463,9 +1464,9 @@ def _continuous_authority() -> dict[str, object]:
 
 @pytest.mark.parametrize(
     ("field", "value"),
-    (("protocol_version", 2), ("capabilities", ["workload.start"])),
+    (("protocol_version", 4), ("capabilities", ["workload.start"])),
 )
-def test_claim_fails_closed_when_agent_no_longer_matches_persisted_plan(
+def test_claim_rejects_non_current_agent_contract(
     tmp_path,
     field: str,
     value: object,
@@ -1480,14 +1481,17 @@ def test_claim_fails_closed_when_agent_no_longer_matches_persisted_plan(
         node = session.get(AgentNode, NODE_A)
         assert node is not None
         setattr(node, field, value)
+        claim_protocol = node.protocol_version
+        claim_capabilities = node.capabilities
 
-    assert queue.claim(NODE_A, "serial-a", 30) is None
-    with sessions() as session:
-        reconciliation = session.get(Reconciliation, reconciliation_id)
-        job = session.get(Job, job_id)
-        assert reconciliation is not None
-        assert reconciliation.current_phase == "waiting-for-operator"
-        assert job is not None and job.state == "waiting-for-operator"
+    with pytest.raises(ValueError, match="capability negotiation"):
+        queue.claim(
+            NODE_A,
+            "serial-a",
+            30,
+            protocol_version=claim_protocol,
+            capabilities=claim_capabilities,
+        )
 
 
 @pytest.mark.parametrize("authority_field", ("eligible", "commit", "address_fresh"))
@@ -1555,7 +1559,7 @@ def test_completed_owner_is_withdrawn_immediately_when_authority_is_lost(
         if lost_authority == "protocol_version":
             node = session.get(AgentNode, NODE_A)
             assert node is not None
-            node.protocol_version = 2
+            node.protocol_version = 4
         elif lost_authority == "capabilities":
             node = session.get(AgentNode, NODE_A)
             assert node is not None

@@ -195,11 +195,6 @@ class GrantRequest(BaseModel):
     ttl_seconds: int = Field(ge=1, le=600)
 
 
-class MigrationGrantRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    ttl_seconds: int = Field(default=600, ge=1, le=600)
-
-
 class EnrollmentSubmitRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     grant_token: str = Field(min_length=43, max_length=64)
@@ -243,7 +238,7 @@ class EnrollmentGrantResponse(BaseModel):
     id: str = Field(min_length=1, max_length=128)
     node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
     expires_at: str = Field(min_length=1, max_length=64)
-    purpose: Literal["new-node", "rust-migration"]
+    purpose: Literal["new-node"]
     token: str = Field(min_length=43, max_length=64)
 
 
@@ -289,10 +284,9 @@ class AgentRuntimeIdentityRequest(BaseModel):
 
 class ClaimRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    agent_implementation: Literal["python", "rust"] | None = None
     lease_seconds: int = Field(default=30, ge=1, le=300)
     node_id: str | None = Field(default=None, pattern=r"^spk_[0-9a-f]{32}$")
-    protocol_version: int = Field(default=1, ge=1, le=2_147_483_647, strict=True)
+    protocol_version: int = Field(default=3, ge=1, le=2_147_483_647, strict=True)
     capabilities: list[str] | None = Field(default=None, max_length=32)
     runtime_identity: AgentRuntimeIdentityRequest | None = None
     wait_seconds: int = Field(default=0, ge=0, le=60)
@@ -1155,47 +1149,6 @@ def install_agent_routes(
             token=grant.token,
         )
 
-    @human.post(
-        "/nodes/{node_id}/migration-grant",
-        status_code=status.HTTP_201_CREATED,
-        response_model=EnrollmentGrantResponse,
-        responses=bounded_error_responses(401, 403, 409, 503),
-    )
-    def create_migration_grant(
-        node_id: str,
-        body: MigrationGrantRequest,
-        request: Request,
-        authenticated: Actor = authenticated_actor,
-    ) -> EnrollmentGrantResponse:
-        _require_administrator(
-            authenticated, "/api/v1/agents/nodes/{node_id}/migration-grant"
-        )
-        required = _require_services(services)
-        try:
-            grant = required.enrollment.create_migration(
-                node_id, authenticated.subject, body.ttl_seconds
-            )
-        except ValueError as error:
-            raise HTTPException(status_code=422, detail=str(error)) from None
-        except EnrollmentDenied as error:
-            raise HTTPException(status_code=409, detail=str(error)) from None
-        audits.append(
-            AuditRecord(
-                request.state.request_id,
-                authenticated.subject,
-                "agent.rust-migration.grant.create",
-                None,
-                (grant.node_id, grant.id),
-            )
-        )
-        return EnrollmentGrantResponse(
-            id=grant.id,
-            node_id=grant.node_id,
-            expires_at=_now(grant.expires_at).isoformat(),
-            purpose=grant.purpose,
-            token=grant.token,
-        )
-
     @human.get(
         "/enrollments",
         response_model=EnrollmentListResponse,
@@ -1479,7 +1432,6 @@ def install_agent_routes(
                 None
                 if body.runtime_identity is None
                 else body.runtime_identity.model_dump(),
-                body.agent_implementation,
                 source=source,
             )
         except ValueError as error:
