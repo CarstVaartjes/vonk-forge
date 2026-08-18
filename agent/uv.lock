@@ -625,16 +625,16 @@ wheels = [
 [[package]]
 name = "vonk-agent-protocol"
 version = "2.1.0"
-source = { directory = "../agent_protocol" }
+source = { path = "../inventory/wheels/vonk_agent_protocol-2.1.0-py3-none-any.whl" }
 dependencies = [
     { name = "jsonschema" },
+]
+wheels = [
+    { filename = "vonk_agent_protocol-2.1.0-py3-none-any.whl", hash = "sha256:a9a47436c9776de5cefa573cefbfc4f7da81ba61acbf7ddc6bf1431c47093934" },
 ]
 
 [package.metadata]
 requires-dist = [{ name = "jsonschema", specifier = "==4.25.1" }]
-
-[package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = "==9.1.1" }]
 
 [[package]]
 name = "vonk-cluster-profiles"
@@ -691,7 +691,7 @@ requires-dist = [
     { name = "cryptography", specifier = "==50.0.0" },
     { name = "securesystemslib", extras = ["crypto"], specifier = "==1.4.0" },
     { name = "tuf", specifier = "==7.0.0" },
-    { name = "vonk-agent-protocol", directory = "../agent_protocol" },
+    { name = "vonk-agent-protocol", path = "../inventory/wheels/vonk_agent_protocol-2.1.0-py3-none-any.whl" },
     { name = "vonk-cluster-profiles", directory = "../" },
 ]
 

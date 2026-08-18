@@ -23,7 +23,7 @@ dependencies = [
 vonk-control-offline = "vonk_control.offline:main"
 
 [tool.uv.sources]
-vonk-agent-protocol = { path = "../agent_protocol" }
+vonk-agent-protocol = { path = "../inventory/wheels/vonk_agent_protocol-2.1.0-py3-none-any.whl" }
 vonk-cluster-profiles = { path = ".." }
 
 [dependency-groups]
