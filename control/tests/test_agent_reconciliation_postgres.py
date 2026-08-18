@@ -48,6 +48,7 @@ NODE_C = "spk_" + "c" * 32
 BASE_COMMIT = "a" * 40
 NOW = datetime(2026, 8, 5, tzinfo=UTC)
 AGENT_CAPABILITIES = (
+    "agent.runtime.rust.v1",
     "node.probe",
     "release.install",
     "workload.health",
