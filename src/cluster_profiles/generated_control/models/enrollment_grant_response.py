@@ -21,16 +21,20 @@ T = TypeVar("T", bound="EnrollmentGrantResponse")
 class EnrollmentGrantResponse:
     """
         Attributes:
+            ca_fingerprint (str):
+            controller_endpoint (str):
+            enrollment_endpoint (str):
             expires_at (str):
             id (str):
-            node_id (str):
             purpose (Literal['new-node']):
             token (str):
      """
 
+    ca_fingerprint: str
+    controller_endpoint: str
+    enrollment_endpoint: str
     expires_at: str
     id: str
-    node_id: str
     purpose: Literal['new-node']
     token: str
 
@@ -39,11 +43,15 @@ class EnrollmentGrantResponse:
 
 
     def to_dict(self) -> dict[str, Any]:
+        ca_fingerprint = self.ca_fingerprint
+
+        controller_endpoint = self.controller_endpoint
+
+        enrollment_endpoint = self.enrollment_endpoint
+
         expires_at = self.expires_at
 
         id = self.id
-
-        node_id = self.node_id
 
         purpose = self.purpose
 
@@ -53,9 +61,11 @@ class EnrollmentGrantResponse:
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
+            "ca_fingerprint": ca_fingerprint,
+            "controller_endpoint": controller_endpoint,
+            "enrollment_endpoint": enrollment_endpoint,
             "expires_at": expires_at,
             "id": id,
-            "node_id": node_id,
             "purpose": purpose,
             "token": token,
         })
@@ -67,11 +77,15 @@ class EnrollmentGrantResponse:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
+        ca_fingerprint = d.pop("ca_fingerprint")
+
+        controller_endpoint = d.pop("controller_endpoint")
+
+        enrollment_endpoint = d.pop("enrollment_endpoint")
+
         expires_at = d.pop("expires_at")
 
         id = d.pop("id")
-
-        node_id = d.pop("node_id")
 
         purpose = cast(Literal['new-node'] , d.pop("purpose"))
         if purpose != 'new-node':
@@ -80,9 +94,11 @@ class EnrollmentGrantResponse:
         token = d.pop("token")
 
         enrollment_grant_response = cls(
+            ca_fingerprint=ca_fingerprint,
+            controller_endpoint=controller_endpoint,
+            enrollment_endpoint=enrollment_endpoint,
             expires_at=expires_at,
             id=id,
-            node_id=node_id,
             purpose=purpose,
             token=token,
         )

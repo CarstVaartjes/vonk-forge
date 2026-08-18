@@ -1,8 +1,8 @@
 from typing import Literal, cast
 
-EnrollmentDecisionResponseState = Literal['approved', 'certificate_issued', 'expired', 'pending_review', 'rejected']
+EnrollmentDecisionResponseState = Literal['approved', 'certificate_issued', 'expired', 'issuing', 'pending_review', 'rejected']
 
-ENROLLMENT_DECISION_RESPONSE_STATE_VALUES: set[EnrollmentDecisionResponseState] = { 'approved', 'certificate_issued', 'expired', 'pending_review', 'rejected',  }
+ENROLLMENT_DECISION_RESPONSE_STATE_VALUES: set[EnrollmentDecisionResponseState] = { 'approved', 'certificate_issued', 'expired', 'issuing', 'pending_review', 'rejected',  }
 
 def check_enrollment_decision_response_state(value: str) -> EnrollmentDecisionResponseState:
     if value in ENROLLMENT_DECISION_RESPONSE_STATE_VALUES:

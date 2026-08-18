@@ -134,7 +134,10 @@ export function LibraryActionDialog({alias, api, evidence, onApplied, onClose, o
   }, [alias, api, previewAttempt, target]);
 
   useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     close.current?.focus();
+    return () => { document.body.style.overflow = previousOverflow; };
   }, []);
 
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
@@ -148,9 +151,10 @@ export function LibraryActionDialog({alias, api, evidence, onApplied, onClose, o
     if (controls.length === 0) return;
     const first = controls[0];
     const last = controls[controls.length - 1];
-    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
-    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    if (event.shiftKey && (document.activeElement === first || !dialog.current?.contains(document.activeElement))) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && (document.activeElement === last || !dialog.current?.contains(document.activeElement))) { event.preventDefault(); first.focus(); }
   }
+
 
   async function applyPlan() {
     if (!plan || !allowed(plan) || applying || !requestKey.current) return;
@@ -179,7 +183,7 @@ export function LibraryActionDialog({alias, api, evidence, onApplied, onClose, o
   }
 
   const digest = plan && "plan_digest" in plan ? plan.plan_digest : plan && "placement_digest" in plan ? plan.placement_digest : undefined;
-  return <div className="library-dialog-backdrop">
+  return <div className="library-dialog-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
     <div className="library-action-dialog" ref={dialog} role="dialog" aria-modal="true" aria-labelledby={titleId} onKeyDown={onKeyDown}>
       <header><div><p className="fleet-kicker">Server authority preview</p><h3 id={titleId}>Review {name}</h3></div><button ref={close} type="button" className="icon-button" onClick={onClose} aria-label="Close review">×</button></header>
       <div className="library-action-dialog-body">
