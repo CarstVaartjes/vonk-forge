@@ -152,6 +152,7 @@ def test_image_template_keeps_private_authority_with_its_exact_service() -> None
         "tailscale-gateway",
     }
     assert secret_consumers["agent-ca-key"] == {"dev-bootstrap"}
+    assert secret_consumers["controller-ca"] == {"control-api", "dev-bootstrap"}
     assert secret_consumers["controller-server-key"] == {"dev-bootstrap"}
     assert secret_consumers["litellm-master-key"] == {"dev-bootstrap"}
     assert secret_consumers["litellm-database-password"] == {"dev-bootstrap"}
@@ -164,6 +165,14 @@ def test_image_template_keeps_private_authority_with_its_exact_service() -> None
     assert services["control-api"]["environment"]["VONK_TOKEN_SIGNING_KEY_FILE"] == (
         "/run/secrets/token-signing-key"
     )
+    api_environment = services["control-api"]["environment"]
+    assert api_environment["VONK_AGENT_CONTROLLER_ORIGIN"] == (
+        "https://agents.vonk-forge.lan:8443"
+    )
+    assert api_environment["VONK_AGENT_ENROLLMENT_ORIGIN"] == (
+        "https://enroll.vonk-forge.lan:8443"
+    )
+    assert api_environment["VONK_CONTROLLER_CA_FILE"] == "/run/secrets/controller-ca"
 
     for service_name, service in services.items():
         environment = service.get("environment", {})

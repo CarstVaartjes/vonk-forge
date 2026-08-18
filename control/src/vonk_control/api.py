@@ -642,6 +642,7 @@ def build_agent_services(
 ) -> AgentApiServices:
     """Construct the fail-closed production agent runtime from one provider."""
     from .agent_jobs import AgentJobService
+    from .enrollment_bootstrap import EnrollmentBootstrapConfig
     from .enrollment import EnrollmentService
     from .host_helper_authority import (
         HostHelperGrantIssuer,
@@ -690,6 +691,13 @@ def build_agent_services(
 
     if settings.agent_intermediate_certificate_path is None:
         raise RuntimeError("agent intermediate certificate path is unavailable")
+    if settings.controller_ca_path is None:
+        raise RuntimeError("controller CA path is unavailable")
+    bootstrap = EnrollmentBootstrapConfig.from_paths(
+        controller_endpoint=settings.agent_controller_origin,
+        enrollment_endpoint=settings.agent_enrollment_origin,
+        controller_ca_path=settings.controller_ca_path,
+    )
     if settings.agent_ca_provider == "step-ca":
         if (
             settings.agent_ca_root_path is None
@@ -819,6 +827,7 @@ def build_agent_services(
             if settings.direct_fabric_cidrs
             else None
         ),
+        bootstrap=bootstrap,
     )
 
 

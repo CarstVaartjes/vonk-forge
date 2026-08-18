@@ -39,6 +39,7 @@ from vonk_control.auth import Actor, TokenCodec
 from vonk_control.catalog_contract import catalog_content_sha256
 from vonk_control.catalog_service import CatalogService
 from vonk_control.enrollment import EnrollmentDenied, EnrollmentService
+from vonk_control.enrollment_bootstrap import EnrollmentBootstrapConfig
 from vonk_control.metrics import MetricsRegistry, OperationalMetricsCollector
 from vonk_control.models import (
     AgentCertificate,
@@ -244,6 +245,11 @@ def agent_system(tmp_path):
         max_tuf_metadata_bytes=128,
         max_tuf_target_bytes=128,
         fabric_policy=ManagementAddressPolicy.parse("192.168.100.0/24"),
+        bootstrap=EnrollmentBootstrapConfig(
+            controller_endpoint="https://agents.example.test:8443",
+            enrollment_endpoint="https://enroll.example.test:8443",
+            ca_fingerprint="a" * 64,
+        ),
     )
     services.artifact_root.mkdir()
     services.tuf_metadata_root.mkdir()
@@ -1837,6 +1843,29 @@ def test_enrollment_grant_ttl_accepts_nine_hundred_and_rejects_above_contract(
 
     assert accepted.status_code == 201
     assert rejected.status_code == 422
+
+
+def test_enrollment_grant_returns_configured_origins_and_controller_ca_fingerprint(
+    agent_system,
+) -> None:
+    client, _, codec, _ = agent_system
+
+    grant = client.post(
+        "/api/v1/agents/enrollments/grants",
+        headers=admin_headers(codec),
+        json={"ttl_seconds": 60},
+    )
+
+    assert grant.status_code == 201
+    body = grant.json()
+    assert {
+        key: body[key]
+        for key in ("controller_endpoint", "enrollment_endpoint", "ca_fingerprint")
+    } == {
+        "controller_endpoint": "https://agents.example.test:8443",
+        "enrollment_endpoint": "https://enroll.example.test:8443",
+        "ca_fingerprint": "a" * 64,
+    }
 
 
 def test_rust_agent_enrollment_shape_remains_controller_compatible(

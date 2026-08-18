@@ -111,6 +111,28 @@ def _absolute_root(name: str, default: str) -> Path:
     return path
 
 
+def _fixed_https_origin(name: str, value: str) -> str:
+    if value != value.strip():
+        raise SettingsError(f"{name} must be a fixed HTTPS origin")
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError as error:
+        raise SettingsError(f"{name} must be a fixed HTTPS origin") from error
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.path not in {"", "/"}
+        or parsed.query
+        or parsed.fragment
+        or parsed.username is not None
+        or parsed.password is not None
+        or port is not None and not 1 <= port <= 65535
+    ):
+        raise SettingsError(f"{name} must be a fixed HTTPS origin")
+    return value.rstrip("/")
+
+
 @dataclass(frozen=True)
 class GenerationStartupSettings:
     """Minimal immutable identity shared by one generation's API and worker."""
@@ -273,6 +295,9 @@ class Settings:
     required_checks: tuple[str, ...]
     agent_ca_provider: str
     agent_runtime: str
+    agent_controller_origin: str
+    agent_enrollment_origin: str
+    controller_ca_path: Path | None
     agent_client_ca: bytes
     agent_intermediate_certificate: bytes
     agent_intermediate_certificate_path: Path | None
@@ -418,6 +443,25 @@ class Settings:
         )
         if len(required_checks) != len(set(required_checks)):
             raise SettingsError("required checks must be unique")
+        agent_controller_origin = (
+            _fixed_https_origin(
+                "VONK_AGENT_CONTROLLER_ORIGIN",
+                os.environ.get("VONK_AGENT_CONTROLLER_ORIGIN", ""),
+            )
+            if agent_enabled
+            else ""
+        )
+        agent_enrollment_origin = (
+            _fixed_https_origin(
+                "VONK_AGENT_ENROLLMENT_ORIGIN",
+                os.environ.get("VONK_AGENT_ENROLLMENT_ORIGIN", ""),
+            )
+            if agent_enabled
+            else ""
+        )
+        controller_ca_path = (
+            _secret_path("VONK_CONTROLLER_CA_FILE") if agent_enabled else None
+        )
         agent_client_ca = _secret("VONK_AGENT_CLIENT_CA_FILE", production=True).encode() if agent_enabled else b""
         agent_intermediate_certificate_path = (
             _secret_path("VONK_AGENT_INTERMEDIATE_CERTIFICATE_FILE") if agent_enabled else None
@@ -549,6 +593,9 @@ class Settings:
             required_checks=required_checks,
             agent_ca_provider=agent_ca_provider,
             agent_runtime=agent_runtime,
+            agent_controller_origin=agent_controller_origin,
+            agent_enrollment_origin=agent_enrollment_origin,
+            controller_ca_path=controller_ca_path,
             agent_client_ca=agent_client_ca,
             agent_intermediate_certificate=agent_intermediate_certificate,
             agent_intermediate_certificate_path=agent_intermediate_certificate_path,
