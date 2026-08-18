@@ -126,12 +126,16 @@ Keep `data_dir` at `/var/lib/vonk-forge-agent` unless a reviewed packaging
 change says otherwise.
 
 Fleet **Add Spark** is the next implementation step. It will remain the source
-of the node-bound registration intent, the one-use bootstrap grant, and the
-exact non-secret runtime inputs: `enrollment_url`, `controller_url`,
-`ca_path = "/etc/vonk-forge-agent/controller-ca.pem"`, `ca_sha256`, the
-assigned `node_id`, and—when multi-node admission is in scope—the node's
-direct-fabric address plus `fabric_bandwidth_mbps = 200000`. That bootstrap
-action is not an operator command currently available.
+of the node-bound registration intent, the one-use bootstrap token, and the
+exact runtime inputs supplied to bootstrap: `enrollment_url`,
+`controller_url`, and `ca_sha256`, along with the assigned `node_id` and—when
+multi-node admission is in scope—the node's direct-fabric address plus
+`fabric_bandwidth_mbps = 200000`. The installed agent supplies the canonical
+local paths: `/etc/vonk-forge-agent/config.json`,
+`/var/lib/vonk-forge-agent`, and
+`/etc/vonk-forge-agent/controller-ca.pem`; explicit absolute path overrides
+remain available for recovery and testing. That bootstrap action is not an
+operator command currently available.
 
 Until the emitter lands, this section is the implementation contract only. The
 packaged placeholder `agent.toml` is a materialization target for registration

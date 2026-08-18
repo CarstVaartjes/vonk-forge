@@ -18,6 +18,8 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.x509.oid import NameOID
 
+from .config import DEFAULT_CA_PATH, DEFAULT_CONFIG_PATH, DEFAULT_STATE_ROOT
+
 _NODE = re.compile(r"spk_[0-9a-f]{32}\Z")
 _TOKEN = re.compile(r"[A-Za-z0-9_-]{43}\Z")
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
@@ -78,8 +80,17 @@ def parse_bootstrap_args(argv: list[str]) -> BootstrapArguments:
                 raise BootstrapError(f"duplicate argument: {item}")
             seen.add(item)
     parser = argparse.ArgumentParser(add_help=False)
+    defaults = {
+        "--config": str(DEFAULT_CONFIG_PATH),
+        "--state-root": str(DEFAULT_STATE_ROOT),
+        "--ca-path": str(DEFAULT_CA_PATH),
+    }
     for flag in _FLAGS:
-        parser.add_argument(flag, required=flag not in {"--installer"})
+        parser.add_argument(
+            flag,
+            default=defaults.get(flag),
+            required=flag not in {"--installer", *defaults},
+        )
     try:
         ns = parser.parse_args(argv)
     except SystemExit as error:

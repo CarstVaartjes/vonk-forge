@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 
 DEFAULT_CONFIG_PATH = Path("/etc/vonk-forge-agent/config.json")
 DEFAULT_STATE_ROOT = Path("/var/lib/vonk-forge-agent")
+DEFAULT_CA_PATH = Path("/etc/vonk-forge-agent/controller-ca.pem")
 MAX_CONFIG_BYTES = MAX_IDENTITY_BYTES = 64 * 1024
 _NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
 _FINGERPRINT = re.compile(r"[0-9a-f]{64}\Z")

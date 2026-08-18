@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 from vonk_agent.config import (
+    DEFAULT_CA_PATH,
     DEFAULT_CONFIG_PATH,
     DEFAULT_STATE_ROOT,
     AgentConfig,
@@ -53,6 +54,7 @@ def _write_config(
 def test_defaults_are_fixed_system_locations() -> None:
     assert DEFAULT_CONFIG_PATH == Path("/etc/vonk-forge-agent/config.json")
     assert DEFAULT_STATE_ROOT == Path("/var/lib/vonk-forge-agent")
+    assert DEFAULT_CA_PATH == Path("/etc/vonk-forge-agent/controller-ca.pem")
 
 
 def test_valid_configuration_is_immutable_and_typed(tmp_path: Path) -> None:
