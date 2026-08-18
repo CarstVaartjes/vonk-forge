@@ -56,6 +56,10 @@ configured by `VONK_AGENT_CONTROLLER_ORIGIN` and
 `VONK_AGENT_ENROLLMENT_ORIGIN`. Invalid origins, a missing CA path, a symlink,
 or a non-single-certificate PEM fail closed.
 
+The controller and enrollment origins are separate HTTPS hostnames, but both
+share the existing GPU-node-restricted Caddy listener on TCP 8443; this change
+does not introduce or expose a new port.
+
 ## Deployment handoff and verification status
 
 Rebuild and redeploy the control API, Caddy configuration, and web bundle. Also
