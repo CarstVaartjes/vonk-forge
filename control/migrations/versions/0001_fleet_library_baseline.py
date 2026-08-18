@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = "0001_fleet_library_baseline"
 down_revision = None
@@ -122,6 +122,11 @@ def upgrade() -> None:
     sa.CheckConstraint('singleton_id = 1', name='ck_fleet_event_cursor_singleton'),
     sa.PrimaryKeyConstraint('singleton_id')
     )
+    op.execute(
+        sa.text(
+            "INSERT INTO fleet_event_cursor (singleton_id, last_id) VALUES (1, 0)"
+        )
+    )
     op.create_table('fleet_stream_events',
     sa.Column('id', sa.BigInteger(), nullable=False),
     sa.Column('event_type', sa.String(length=32), nullable=False),
@@ -208,6 +213,12 @@ def upgrade() -> None:
     sa.CheckConstraint('next_resolution_seconds IN (60, 900)', name='ck_telemetry_maintenance_state_resolution'),
     sa.CheckConstraint('singleton_id = 1', name='ck_telemetry_maintenance_state_singleton'),
     sa.PrimaryKeyConstraint('singleton_id')
+    )
+    op.execute(
+        sa.text(
+            "INSERT INTO telemetry_maintenance_state "
+            "(singleton_id, next_resolution_seconds) VALUES (1, 60)"
+        )
     )
     op.create_table('users',
     sa.Column('id', sa.String(length=36), nullable=False),

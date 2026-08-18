@@ -4,7 +4,7 @@ from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, inspect, text
 
 EXPECTED_BASELINE_TABLES = {
     "agent_certificate_rotations",
@@ -89,7 +89,18 @@ def test_fresh_baseline_creates_retained_metadata_without_legacy_tables(
     assert "agent_node_profiles" in tables
     assert not any(table.startswith("package_") for table in tables)
     with engine.connect() as connection:
-        assert compare_metadata(MigrationContext.configure(connection), Base.metadata) == []
+        assert (
+            compare_metadata(MigrationContext.configure(connection), Base.metadata)
+            == []
+        )
+        assert connection.execute(
+            text(
+                "SELECT singleton_id, next_resolution_seconds FROM telemetry_maintenance_state"
+            )
+        ).all() == [(1, 60)]
+        assert connection.execute(
+            text("SELECT singleton_id, last_id FROM fleet_event_cursor")
+        ).all() == [(1, 0)]
 
 
 def test_fresh_baseline_is_fixed_and_does_not_import_live_metadata() -> None:
