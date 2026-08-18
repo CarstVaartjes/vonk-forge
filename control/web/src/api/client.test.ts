@@ -317,7 +317,7 @@ it("uses one exact API contract for update plan, apply, status, and administrato
 it("does not expose orphaned package and deployment helpers after the Fleet/Library cleanup", () => {
   // Break caught: superseded package/deployment client helpers remain on the
   // live web API surface after their last retained consumers were removed.
-  const api = new ApiClient() as Record<string, unknown>;
+  const api: object = new ApiClient();
 
   for (const name of [
     "packageFamilies",
