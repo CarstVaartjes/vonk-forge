@@ -199,7 +199,7 @@ docs: scrub superseded control-plane workflows
 Commit hash:
 
 ```text
-6db436e48ea16d41fa835137c9c00ae49607f7d8
+3fa9a45d2148653a671f37e392cffb2ece632fc6
 ```
 
 ## Concerns
