@@ -18,11 +18,15 @@ export function EnrollmentReview({actionsDisabled = false, enrollment, onApprove
   const [rejectionConfirmation, setRejectionConfirmation] = useState("");
   const [rejectionReason, setRejectionReason] = useState("");
   const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState("");
 
   async function run(action: () => Promise<void>) {
     setBusy(true);
+    setActionError("");
     try {
       await action();
+    } catch (value) {
+      setActionError(value instanceof Error ? value.message : "The enrollment decision could not be completed.");
     } finally {
       setBusy(false);
     }
@@ -49,6 +53,7 @@ export function EnrollmentReview({actionsDisabled = false, enrollment, onApprove
       <EvidenceItem label="Decided at" value={enrollment.decided_at}/>
       <EvidenceItem label="Rejection reason" value={enrollment.rejection_reason}/>
     </dl>
+    {actionError && <p role="alert">{actionError}</p>}
     {enrollment.state === "pending" && <div className="decision-grid">
       <div>
         <h4>Approve</h4>
