@@ -7,11 +7,11 @@ Catalog, Packages, Deployments, Updates, and Jobs. The result is a fragmented
 operator experience with duplicated lifecycle concepts and jargon such as
 “workload,” “package,” and “deployment.”
 
-Spark membership is also split between two authorities. The current Fleet
-projection reads the Git-controlled `inventory/fleet.toml` node roster first and
-then joins PostgreSQL registration, certificate, telemetry, and inventory
-state. That makes repository-only definitions appear as Sparks and can hide a
-real enrollment whose ID is not in the Git roster.
+Spark membership is managed from PostgreSQL alone. Fleet now treats enrolled
+`AgentNode` registrations, with their certificate, telemetry, and inventory
+joins, as the only live Spark-management authority. The old Git-controlled
+`inventory/fleet.toml` roster was removed, so repository entries neither create
+Spark membership nor suppress a real enrolled Spark.
 
 The product has two natural user tasks:
 
