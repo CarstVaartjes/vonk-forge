@@ -75,6 +75,7 @@ from .library_run_summary_route_state import LibraryRunSummaryRouteState
 from .library_run_summary_state import LibraryRunSummaryState
 from .library_snapshot import LibrarySnapshot
 from .list_audit_events_response_audit_view_api_v1_audit_get import ListAuditEventsResponseAuditViewApiV1AuditGet
+from .list_identity_history_response_listidentityhistory import ListIdentityHistoryResponseListidentityhistory
 from .mapping_node_plan_response import MappingNodePlanResponse
 from .mapping_plan_response import MappingPlanResponse
 from .mapping_plan_response_parameters import MappingPlanResponseParameters
@@ -300,6 +301,7 @@ __all__ = (
     "LibraryRunSummaryState",
     "LibrarySnapshot",
     "ListAuditEventsResponseAuditViewApiV1AuditGet",
+    "ListIdentityHistoryResponseListidentityhistory",
     "MappingNodePlanResponse",
     "MappingPlanResponse",
     "MappingPlanResponseParameters",

@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from typing import Any, BinaryIO
 
+from .import_report import ImportDisposition, ImportReportItem
 from jsonschema import Draft202012Validator, FormatChecker
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -53,6 +54,7 @@ from .recipe_contract import (
 from .schema_resources import read_runtime_schema
 from .source_bundles import SourceBundleError, SourceBundleStore
 
+
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}$")
 _MUTABLE_REVISIONS = frozenset(
     {"main", "master", "latest", "head", "main-latest", "master-latest"}
@@ -85,6 +87,15 @@ class RecipeRevisionView:
     created_by: str
     created_at: datetime
 
+
+@dataclass(frozen=True, slots=True)
+class RemoteRecipeImportPreview:
+    """Immutable, exact preview identity for one remote recipe revision."""
+
+    remote: GlobalRecipeRevision
+    report: tuple[ImportReportItem, ...]
+    report_digest: str
+    source_sha256: str
 
 @dataclass(frozen=True, slots=True)
 class RecipeSummary:
@@ -886,6 +897,34 @@ class CatalogService:
                 )
             return copy.deepcopy(clean)
 
+    def preview_recipe_library(
+        self, remote: GlobalRecipeRevision
+    ) -> RemoteRecipeImportPreview:
+        """Validate an exact remote revision and return its persistence report."""
+        raw_identity = _mapping(remote.document.get("identity"))
+        clean = self._validated_document(remote.document, slug=str(raw_identity.get("slug", "")))
+        actual = recipe_content_sha256(clean)
+        if actual != remote.content_sha256:
+            raise CatalogValidationError("recipe_library.hash_mismatch", "recipe content does not match remote digest")
+        identity = _mapping(clean["identity"])
+        if identity != {"publisher": remote.publisher, "slug": remote.slug}:
+            raise CatalogValidationError("recipe_library.identity_mismatch", "remote recipe identity is inconsistent")
+        item = ImportReportItem(
+            source_path=f"recipes/{remote.slug}.json",
+            disposition=ImportDisposition.IMPORTED,
+            destination_path=f"recipes/{remote.slug}.json",
+            reason_code="recipe_library.materialized",
+            detail="remote recipe revision will be copied into PostgreSQL",
+            blocking=False,
+        )
+        encoded = json.dumps({"source_sha256": actual, "items": [asdict(item)]}, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+        return RemoteRecipeImportPreview(remote, (item,), hashlib.sha256(encoded).hexdigest(), actual)
+
+    def import_recipe_library_preview(self, actor: str, preview: RemoteRecipeImportPreview) -> RecipeRevisionView:
+        checked = self.preview_recipe_library(preview.remote)
+        if (checked.source_sha256, checked.report_digest) != (preview.source_sha256, preview.report_digest):
+            raise CatalogConflict("recipe_library.preview_changed", "remote recipe changed since preview")
+        return self.import_recipe_library(actor, library_commit=preview.remote.revision_id.replace("-", "")[:40], source_path=f"recipes/{preview.remote.slug}.json", document=preview.remote.document, expected_content_sha256=preview.source_sha256)
     def publication_export(
         self, recipe_id: str, target_publisher: str
     ) -> dict[str, object]:

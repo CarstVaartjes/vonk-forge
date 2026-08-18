@@ -230,8 +230,22 @@ class EnrollmentDecisionResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str = Field(min_length=1, max_length=128)
     node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
-    state: Literal["approved", "rejected"]
+    state: Literal["pending_review", "approved", "rejected", "expired", "certificate_issued"]
 
+
+_ENROLLMENT_API_STATES = frozenset(
+    {"pending_review", "approved", "rejected", "expired", "certificate_issued"}
+)
+
+
+def _enrollment_api_state(enrollment: AgentEnrollment) -> str:
+    if enrollment.state == "pending-approval":
+        return "pending_review"
+    if enrollment.state == "approved":
+        return "certificate_issued" if enrollment.certificate_serial else "approved"
+    if enrollment.state == "issuing":
+        return "approved"
+    return enrollment.state
 
 class EnrollmentGrantResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -739,9 +753,7 @@ async def _bounded_enrollment_body(
         if len(chunk) > remaining:
             scan = _scan_enrollment_grants(token_prefix)
             _consume_enrollment_denial(services, scan.tokens)
-            raise HTTPException(
-                status_code=413, detail="enrollment request is too large"
-            )
+            raise HTTPException(status_code=413, detail="enrollment request is too large")
         buffered.extend(chunk)
     return buffered
 
@@ -750,7 +762,7 @@ def _enrollment_view(enrollment: AgentEnrollment) -> dict[str, object]:
     return {
         "id": enrollment.id,
         "node_id": enrollment.node_id,
-        "state": enrollment.state,
+        "state": _enrollment_api_state(enrollment),
         "csr_public_key_fingerprint": enrollment.csr_public_key_fingerprint,
         "host_key_fingerprint": enrollment.host_key_fingerprint,
         "hardware_fingerprint": enrollment.hardware_fingerprint,
@@ -758,13 +770,13 @@ def _enrollment_view(enrollment: AgentEnrollment) -> dict[str, object]:
         "boot_id": enrollment.boot_id,
         "created_at": _now(enrollment.created_at).isoformat(),
         "decision_actor": enrollment.decision_actor,
-        "decided_at": _now(enrollment.decided_at).isoformat()
-        if enrollment.decided_at
-        else None,
+        "decided_at": _now(enrollment.decided_at).isoformat() if enrollment.decided_at else None,
         "rejection_reason": enrollment.rejection_reason,
         "certificate_serial": enrollment.certificate_serial,
         "certificate_fingerprint": enrollment.certificate_fingerprint,
     }
+
+
 
 
 def _references_digest(value: object, digest: str) -> bool:
@@ -1169,7 +1181,16 @@ def install_agent_routes(
         with required.sessions() as session:
             statement = select(AgentEnrollment)
             if state is not None:
-                statement = statement.where(AgentEnrollment.state == state)
+                if state not in _ENROLLMENT_API_STATES:
+                    raise HTTPException(status_code=422, detail="state is invalid")
+                persistence_state = {
+                    "pending_review": "pending-approval",
+                    "approved": "approved",
+                    "certificate_issued": "approved",
+                    "rejected": "rejected",
+                    "expired": "expired",
+                }[state]
+                statement = statement.where(AgentEnrollment.state == persistence_state)
             if cursor is not None:
                 cursor_record = session.get(AgentEnrollment, cursor)
                 if cursor_record is None:

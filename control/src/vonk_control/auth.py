@@ -114,6 +114,25 @@ class Actor:
         if not self.subject.strip() or self.role not in _ROLES:
             raise AuthError("invalid authenticated actor")
 
+_CAPABILITY_ROLES: dict[str, frozenset[str]] = {
+    "fleet:enroll": frozenset({"administrator"}),
+    "fleet:review": frozenset({"administrator"}),
+    "fleet:update": frozenset({"administrator"}),
+    "fleet:revoke": frozenset({"administrator"}),
+}
+
+
+def has_capability(actor: Actor | str, capability: str) -> bool:
+    """Return whether an authenticated actor may perform a capability."""
+    role = actor.role if isinstance(actor, Actor) else actor
+    return role in _CAPABILITY_ROLES.get(capability, frozenset())
+
+
+def require_capability(actor: Actor | str, capability: str) -> None:
+    """Fail closed when an actor lacks the requested capability."""
+    if not has_capability(actor, capability):
+        raise AuthError(f"missing capability: {capability}")
+
 
 @dataclass(frozen=True)
 class AgentIdentity:

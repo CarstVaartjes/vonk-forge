@@ -3414,7 +3414,7 @@ def test_enrollment_unknown_top_level_field_burns_valid_grant(agent_system) -> N
     assert client.post("/agent/v1/enroll", json=body).status_code == 403
 
 
-def test_enrollment_listing_paginates_stably_and_can_filter_issuing(
+def test_enrollment_listing_paginates_stably_and_can_filter_pending_review(
     agent_system,
 ) -> None:
     client, services, codec, clock = agent_system
@@ -3436,7 +3436,7 @@ def test_enrollment_listing_paginates_stably_and_can_filter_issuing(
                     id=str(uuid.uuid4()),
                     grant_id=grant_id,
                     node_id=NODE_A,
-                    state="issuing" if index == 0 else "rejected",
+                    state="pending-approval" if index == 0 else "rejected",
                     csr_pem="csr",
                     csr_public_key_pem="pem",
                     csr_public_key_fingerprint="a" * 64,
@@ -3457,7 +3457,7 @@ def test_enrollment_listing_paginates_stably_and_can_filter_issuing(
         headers=admin_headers(codec),
     ).json()
     assert len(second["enrollments"]) == 1
-    issuing = client.get(
-        "/api/v1/agents/enrollments?state=issuing", headers=admin_headers(codec)
+    pending = client.get(
+        "/api/v1/agents/enrollments?state=pending_review", headers=admin_headers(codec)
     ).json()
-    assert [item["state"] for item in issuing["enrollments"]] == ["issuing"]
+    assert [item["state"] for item in pending["enrollments"]] == ["pending_review"]

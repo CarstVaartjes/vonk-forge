@@ -106,8 +106,7 @@ class RecipeRunObservation:
     run_id: str
     ready: bool
 
-
-_TERMINAL_JOB_STATES = frozenset({"succeeded", "failed", "expired"})
+_TERMINAL_JOB_STATES = frozenset({"succeeded", "failed", "expired", "cancelled"})
 _RETRYABLE_IMAGE_DISTRIBUTION_STATES = frozenset({"failed", "waiting-for-operator"})
 _RETRYABLE_IMAGE_OPERATION_STATES = _TERMINAL_JOB_STATES | frozenset(
     {"waiting-for-operator"}
@@ -115,6 +114,13 @@ _RETRYABLE_IMAGE_OPERATION_STATES = _TERMINAL_JOB_STATES | frozenset(
 _MEMORY_RESERVATION_KINDS = frozenset({"unified-memory", "host-memory", "gpu-memory"})
 _MAX_ACTION_NODES = 1024
 _MAX_ACTIVE_RUNS = 128
+
+
+def _cancel_reason(value: object) -> str:
+    reason = " ".join(str(value).split())
+    if not reason:
+        raise RecipeOperationConflict("cancellation reason is required")
+    return reason[:512]
 
 
 class RecipeOperationService:
@@ -1505,6 +1511,31 @@ class RecipeOperationService:
             if job is None or not job.kind.startswith("recipe."):
                 raise KeyError(operation_id)
             return self._view(job)
+
+    def cancel(
+        self, operation_id: str, *, actor: str, request_id: str, reason: str
+    ) -> RecipeOperationView:
+        """Durably cancel a queued/running recipe operation."""
+        now = self._clock()
+        cancellation_reason = _cancel_reason(reason)
+        with self._sessions.begin() as session:
+            job = session.get(Job, operation_id, with_for_update=True)
+            if job is None or not job.kind.startswith("recipe."):
+                raise RecipeOperationConflict("recipe operation is not cancellable")
+            if job.state == "cancelled":
+                return self._view(job)
+            if job.state not in {"queued", "running"}:
+                raise RecipeOperationConflict("recipe operation is not cancellable")
+            children = tuple(session.scalars(select(AgentOperation).where(AgentOperation.parent_job_id == job.id)))
+            for child in children:
+                if child.state not in _TERMINAL_JOB_STATES:
+                    child.state = "cancelled"
+                    child.updated_at = now
+            job.state = "cancelled"
+            job.status_reason = cancellation_reason
+            job.result = {**(dict(job.result) if isinstance(job.result, Mapping) else {}), "cancelled": True, "reason": cancellation_reason, "recovery": "retry creates a new operation"}
+            job.updated_at = now
+        return self.get(operation_id)
 
     def _stop_plan_in_session(
         self, session: Session, run_id: str, *, lock: bool
