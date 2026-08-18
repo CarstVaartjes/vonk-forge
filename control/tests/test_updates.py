@@ -22,8 +22,8 @@ def target() -> TargetPlatform:
         build_digest="sha256:" + "a" * 64,
         release_digest="sha256:" + "b" * 64,
         base_commit="f" * 40,
-        protocol_minimum=1,
-        protocol_maximum=2,
+        protocol_minimum=3,
+        protocol_maximum=3,
         tuf_targets_version=7,
         artifacts=(
             PlatformAgentArtifact(
@@ -42,7 +42,7 @@ def agent(
     *,
     version: str = "1.0.0",
     build: str = "c" * 64,
-    protocol: int = 1,
+    protocol: int = 3,
     online: bool = True,
     state: str = "active",
     capabilities: tuple[str, ...] = ("agent.rollback", "agent.update"),
@@ -69,7 +69,7 @@ def test_skew_reports_current_old_build_mismatch_offline_and_incompatible() -> N
         agent(2),
         agent(3, version="2.0.0", build="e" * 64),
         agent(4, online=False),
-        agent(5, protocol=3),
+        agent(5, protocol=2),
         agent(6, state="retired"),
     )
 
@@ -312,8 +312,8 @@ def test_plan_emits_only_the_signed_architecture_update_payload() -> None:
         "release": {
             "build_digest": "sha256:" + "a" * 64,
             "platform_version": "2.0.0",
-            "protocol_maximum": 2,
-            "protocol_minimum": 1,
+            "protocol_maximum": 3,
+            "protocol_minimum": 3,
         },
     }
 

@@ -1059,7 +1059,7 @@ class AgentJobService:
             if capabilities is not None and operation.kind not in capabilities:
                 return None
             if operation.kind in _RECIPE_CAPABILITIES and (
-                protocol_version is None or protocol_version < 2 or capabilities is None
+                protocol_version != 3 or capabilities is None
             ):
                 return None
             if (

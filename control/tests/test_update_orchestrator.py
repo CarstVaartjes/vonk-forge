@@ -378,8 +378,8 @@ def _target() -> updates.TargetPlatform:
         build_digest=TARGET_BUILD,
         release_digest="sha256:" + "b" * 64,
         base_commit=BASE_COMMIT,
-        protocol_minimum=1,
-        protocol_maximum=2,
+        protocol_minimum=3,
+        protocol_maximum=3,
         tuf_targets_version=7,
         artifacts=(
             updates.PlatformAgentArtifact(
@@ -401,7 +401,7 @@ def _observation(node_id: str) -> updates.AgentObservation:
         architecture="linux-arm64",
         platform_version="1.0.0",
         build_digest=OLD_BUILD,
-        protocol_version=1,
+        protocol_version=3,
         active_slot="A",
         agent_sha256="3" * 64,
         supervisor_generation=1,
@@ -456,7 +456,7 @@ def _harness(
                 AgentNode(
                     node_id=node_id,
                     state="active",
-                    protocol_version=1,
+                    protocol_version=3,
                     platform_version="1.0.0",
                     build_digest=OLD_BUILD,
                     active_slot="A",
@@ -537,7 +537,7 @@ def _finish_update_operation(
             assert node is not None
             node.platform_version = "2.0.0"
             node.build_digest = TARGET_BUILD
-            node.protocol_version = 1
+            node.protocol_version = 3
             node.active_slot = "B"
             node.agent_sha256 = "2" * 64
             node.supervisor_generation = 2

@@ -51,7 +51,7 @@ def _expected_build_digest(source_commit: str = COMMIT) -> str:
         "database_revision": "0001_fleet_library_baseline",
         "platform_version": "0.1.0",
         "protocol_maximum": 3,
-        "protocol_minimum": 1,
+        "protocol_minimum": 3,
         "schema_version": SCHEMA_VERSION,
         "source_commit": source_commit,
         "source_repository": DEVELOPMENT_SOURCE_REPOSITORY,
@@ -68,7 +68,7 @@ def _identity_document(**overrides: object) -> dict[str, object]:
         "platform_version": "0.1.0",
         "build_digest": _expected_build_digest(),
         "database_revision": "0001_fleet_library_baseline",
-        "protocol_minimum": 1,
+        "protocol_minimum": 3,
         "protocol_maximum": 3,
         "image_role": "api",
     }
@@ -99,7 +99,7 @@ def test_identity_parser_accepts_only_the_canonical_development_identity() -> No
         platform_version="0.1.0",
         build_digest=_expected_build_digest(),
         database_revision="0001_fleet_library_baseline",
-        protocol_minimum=1,
+        protocol_minimum=3,
         protocol_maximum=3,
         image_role="api",
     )
@@ -119,7 +119,7 @@ def test_identity_parser_accepts_only_the_canonical_development_identity() -> No
             + b"b" * 64
             + b'","channel":"development","database_revision":"0001_fleet_library_baseline",'
             + b'"image_role":"api","platform_version":"0.1.0","protocol_maximum":3,'
-            + b'"protocol_minimum":1,"schema_version":1,"source_commit":"'
+            + b'"protocol_minimum":3,"schema_version":1,"source_commit":"'
             + COMMIT.encode("ascii")
             + b'","source_repository":"'
             + DEVELOPMENT_SOURCE_REPOSITORY.encode("ascii")
@@ -137,7 +137,7 @@ def test_identity_parser_accepts_only_the_canonical_development_identity() -> No
             + COMMIT.encode("ascii")
             + b'","channel":"development","platform_version":"0.1.0","build_digest":"sha256:'
             + b"a" * 64
-            + b'","database_revision":"0001_fleet_library_baseline","protocol_minimum":1,'
+            + b'","database_revision":"0001_fleet_library_baseline","protocol_minimum":3,'
             + b'"protocol_maximum":3,"image_role":"api"}\n',
         ),
         ("oversized", b" " * 17000),
@@ -209,7 +209,7 @@ def test_build_identity_uses_fixed_development_values_and_one_cohort_digest() ->
     assert api.channel == "development"
     assert api.platform_version == "0.1.0"
     assert api.database_revision == "0001_fleet_library_baseline"
-    assert api.protocol_minimum == 1
+    assert api.protocol_minimum == 3
     assert api.protocol_maximum == 3
     assert api.image_role == "api"
     assert worker.image_role == "worker"
@@ -306,7 +306,7 @@ def test_matching_identities_produce_one_canonical_selected_cohort_document() ->
         "database_revision": "0001_fleet_library_baseline",
         "platform_version": "0.1.0",
         "protocol_maximum": 3,
-        "protocol_minimum": 1,
+        "protocol_minimum": 3,
         "schema_version": SCHEMA_VERSION,
         "source_commit": COMMIT,
         "source_repository": DEVELOPMENT_SOURCE_REPOSITORY,
@@ -341,7 +341,7 @@ def test_matching_identities_produce_one_canonical_selected_cohort_document() ->
         channel="development",
         platform_version="0.1.0",
         database_revision="0001_fleet_library_baseline",
-        protocol_minimum=1,
+        protocol_minimum=3,
         protocol_maximum=3,
         build_digest=api.build_digest,
         release_digest=expected_release_digest,

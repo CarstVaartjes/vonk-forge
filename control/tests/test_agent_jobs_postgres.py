@@ -263,7 +263,7 @@ def test_postgres_platform_update_failure_serializes_before_claim_without_deadlo
     with sessions.begin() as session:
         node = session.get(AgentNode, NODE_A)
         assert node is not None
-        node.protocol_version = 1
+        node.protocol_version = 3
         node.platform_version = "1.0.0"
         node.build_digest = "sha256:" + "1" * 64
         node.active_slot = "A"
@@ -456,7 +456,7 @@ def test_postgres_revocation_serializes_agent_work_and_contact(
     claim = None
     original_deadline = None
     if agent_action != "claim":
-        claim = jobs.claim(NODE_A, "serial-a", 30, protocol_version=2)
+        claim = jobs.claim(NODE_A, "serial-a", 30, protocol_version=3)
         assert claim is not None
         original_deadline = claim.deadline
     with sessions.begin() as session:

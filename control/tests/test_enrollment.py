@@ -743,6 +743,7 @@ def test_postgres_approved_node_cannot_be_deleted_while_certificate_exists(
         assert session.get(AgentNode, NODE_ID) is not None
 
 
+@pytest.mark.parametrize("failure_mode", ("success", "runtime", "system-exit"))
 def test_postgres_missing_node_after_completed_rotation_retains_recovery_evidence(
     postgres_engine: Engine,
     failure_mode: str,

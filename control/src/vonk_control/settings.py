@@ -209,10 +209,10 @@ class GenerationStartupSettings:
             nonce = os.environ.get("VONK_CONTROL_START_NONCE", "")
             try:
                 protocol_minimum = int(
-                    os.environ.get("VONK_AGENT_PROTOCOL_MINIMUM", "1")
+                    os.environ.get("VONK_AGENT_PROTOCOL_MINIMUM", "3")
                 )
                 protocol_maximum = int(
-                    os.environ.get("VONK_AGENT_PROTOCOL_MAXIMUM", "1")
+                    os.environ.get("VONK_AGENT_PROTOCOL_MAXIMUM", "3")
                 )
             except ValueError as error:
                 raise SettingsError("agent protocol range is invalid") from error

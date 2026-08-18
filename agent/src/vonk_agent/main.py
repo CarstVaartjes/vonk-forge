@@ -763,7 +763,7 @@ def build_agent(
     )
     updates = AgentUpdater(
         architecture=protocol_architecture,
-        protocol_version=1,
+        protocol_version=3,
         staging_root=_AGENT_UPDATE_STAGING_ROOT,
         trust=platform_trust,
         transport=ORASAgentTransport(

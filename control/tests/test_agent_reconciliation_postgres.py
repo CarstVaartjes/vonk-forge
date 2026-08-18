@@ -945,7 +945,7 @@ def test_postgres_successor_authority_loss_withdraws_predecessor_before_wait(
     with sessions.begin() as session:
         node = session.get(AgentNode, NODE_A)
         assert node is not None
-        node.protocol_version = 1
+        node.protocol_version = 3
         node.capabilities = list(AGENT_CAPABILITIES)
     assert _complete(system) == old_id
     new_id, _new_job_id = _insert_successor(sessions, old_id)
@@ -995,7 +995,7 @@ def test_postgres_pending_successor_does_not_block_fail_closed_owner_withdrawal(
     with sessions.begin() as session:
         node = session.get(AgentNode, NODE_A)
         assert node is not None
-        node.protocol_version = 1
+        node.protocol_version = 3
         node.capabilities = list(AGENT_CAPABILITIES)
     assert _complete(system) == old_id
     new_id, _new_job_id = _insert_successor(sessions, old_id)
@@ -1043,7 +1043,7 @@ def test_postgres_publication_ack_crash_then_authority_loss_withdraws_routes(
     with sessions.begin() as session:
         node = session.get(AgentNode, NODE_A)
         assert node is not None
-        node.protocol_version = 1
+        node.protocol_version = 3
         node.capabilities = list(AGENT_CAPABILITIES)
 
     _sessions, operations, service, _reconciliation_id, _job_id, claim = _claimed(

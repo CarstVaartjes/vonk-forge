@@ -425,7 +425,7 @@ def test_durable_projection_reads_only_current_activation_and_hides_agent_secret
             AgentNode(
                 node_id=NODE_ID,
                 state="active",
-                protocol_version=1,
+                protocol_version=3,
                 capabilities=["node.probe"],
                 last_seen_at=now,
             )
@@ -479,7 +479,7 @@ def test_durable_projection_reads_only_current_activation_and_hides_agent_secret
             "last_seen_age_seconds": 0.0,
             "last_seen_at": now.isoformat(),
             "node_id": NODE_ID,
-            "protocol_version": 1,
+            "protocol_version": 3,
             "platform_version": None,
             "build_digest": None,
             "active_slot": None,

@@ -699,8 +699,8 @@ class ORASAgentTransport:
             architecture=self._architecture,
             agent_min_version="0.1.0",
             agent_max_version="0.1.0",
-            protocol_min_version=1,
-            protocol_max_version=1,
+            protocol_min_version=3,
+            protocol_max_version=3,
             members=(),
         )
         try:
