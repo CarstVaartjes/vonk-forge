@@ -905,8 +905,10 @@ def test_operator_library_identity_guides_expose_complete_navigable_concept_and_
 
 def test_supported_docs_do_not_present_catalog_as_an_operator_surface() -> None:
     supported = (
+        README,
         VONKCTL,
         ROOT / "docs/runbooks/repository-administration.md",
+        ROOT / "docs/runbooks/platform-release-update.md",
         RUNTIME_RELEASE,
         MODEL_SWITCHING,
         HERMES_AGENT,
@@ -918,6 +920,11 @@ def test_supported_docs_do_not_present_catalog_as_an_operator_surface() -> None:
         " Catalog ",
         "`Catalog`",
         "/catalog",
+        "Catalog drafts",
+        "Catalog imports",
+        "Admin → Updates page",
+        "Admin -> Updates page",
+        "Updates page",
     )
 
     offenders = {

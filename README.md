@@ -159,14 +159,12 @@ uv run --project /path/to/vonk-forge vonkctl admin fleet --json
 uv run --project /path/to/vonk-forge vonkctl admin jobs --json
 ```
 
-Recipe maintenance is performed in the authenticated browser at `/library` and
-`/catalog`: Library shows current model-version families and accepted recipe
-revisions, while Catalog handles creating/importing drafts, resolving immutable
-revisions, attaching build evidence, and mapping a recipe to a cluster. Routine
-CLI commands only read server projections or invoke current platform-update
-operations; they never fall back to SSH. Production work is persisted in
-PostgreSQL, claimed outbound by each GPU node agent over mTLS, and reconciled by
-the repository-less worker.
+Recipe maintenance is performed in the authenticated browser at `/library`.
+Library shows current model-version families, accepted recipe revisions, build
+evidence, and Fleet mapping/apply state. Routine CLI commands only read server
+projections or invoke current platform-update operations; they never fall back
+to SSH. Production work is persisted in PostgreSQL, claimed outbound by each GPU
+node agent over mTLS, and reconciled by the repository-less worker.
 
 ## Repository layout
 

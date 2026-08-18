@@ -353,8 +353,8 @@ as a historical record, not a procedure to replay.
 ## NAS-to-GPU node platform skew
 
 The NAS Docker services and GPU node worker code are updated as a platform
-operation. In the Admin → Updates page, or with the CLI below, compare the
-NAS's signed platform target with each authenticated GPU node agent:
+operation. In the authenticated web update workflow, or with the CLI below,
+compare the NAS's signed platform target with each authenticated GPU node agent:
 
 ```bash
 vonkctl admin updates skew --json

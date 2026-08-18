@@ -76,14 +76,6 @@ class AgentOperation(StrEnum):
     WORKLOAD_VERIFY = "workload.verify"
     AGENT_UPDATE = "agent.update"
     AGENT_ROLLBACK = "agent.rollback"
-    PACKAGE_PREPARE = "package.prepare"
-    PACKAGE_ACTIVATE = "package.activate"
-    PACKAGE_HEALTH = "package.health"
-    PACKAGE_STOP = "package.stop"
-    PACKAGE_ROLLBACK = "package.rollback"
-    PACKAGE_REMOVE = "package.remove"
-    PACKAGE_REPAIR = "package.repair"
-    PACKAGE_GC = "package.gc"
     RECIPE_BUILD = "recipe.build.v1"
     RECIPE_IMAGE_IMPORT = "recipe.image.import.v1"
     RECIPE_INSTALL = "recipe.install"
@@ -767,6 +759,54 @@ class AgentProgress:
 
 
 @dataclass(frozen=True)
+class AgentDirective:
+    """Authenticated heartbeat response for deadline renewal and cancellation."""
+
+    schema_version: int
+    job_id: str
+    operation_id: str
+    attempt: int
+    fence: str
+    node_id: str
+    deadline: datetime
+    cancel_requested: bool
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "schema_version", _version(self.schema_version))
+        object.__setattr__(self, "job_id", _uuid(self.job_id, name="job_id"))
+        object.__setattr__(
+            self, "operation_id", _uuid(self.operation_id, name="operation_id")
+        )
+        object.__setattr__(self, "attempt", _attempt(self.attempt))
+        object.__setattr__(self, "fence", _uuid(self.fence, name="fence"))
+        object.__setattr__(self, "node_id", _node_id(self.node_id))
+        object.__setattr__(self, "deadline", _deadline(self.deadline))
+        if not isinstance(self.cancel_requested, bool):
+            raise AgentProtocolError("cancel_requested must be a boolean")
+
+    @classmethod
+    def parse(cls, raw: Any) -> AgentDirective:
+        value = _mapping(raw)
+        _fields(
+            value,
+            required={
+                "schema_version",
+                "job_id",
+                "operation_id",
+                "attempt",
+                "fence",
+                "node_id",
+                "deadline",
+                "cancel_requested",
+            },
+        )
+        return cls(
+            **_attempt_fields(value),
+            cancel_requested=value["cancel_requested"],
+        )
+
+
+@dataclass(frozen=True)
 class AgentResult:
     schema_version: int
     job_id: str
@@ -845,8 +885,6 @@ def schema_validator(schema_name: str) -> Draft202012Validator:
 
 def validate_schema_message(schema_name: str, raw: Any) -> Any:
     """Apply the format-aware wire schema and its mandatory runtime limits."""
-    from .package_operations import AgentDirective
-
     parsers = {
         "agent-job.schema.json": AgentClaim.parse,
         "agent-result.schema.json": AgentResult.parse,

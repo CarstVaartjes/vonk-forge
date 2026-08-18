@@ -8,22 +8,15 @@ from enum import StrEnum
 from typing import Any, Protocol
 
 from vonk_agent_protocol import (
-    PACKAGE_OPERATIONS,
     AgentClaim,
     AgentOperation,
     AgentProtocolError,
     AgentResult,
-    PackageOperationRequest,
     canonical_message,
 )
 
 from .deadlines import MonotonicDeadline
 from .nvidia_tools import InstalledToolSecurityError
-from .package_operations import (
-    OperationBinding,
-    PackageDisposition,
-    PackageOperationsBoundary,
-)
 from .probe import ProbeError
 from .releases import (
     ReleaseDisposition,
@@ -120,7 +113,6 @@ class OperationContext:
     releases: ReleaseInstallerBoundary | None = None
     workloads: WorkloadOperationsBoundary | None = None
     updates: AgentUpdateOperationsBoundary | None = None
-    packages: PackageOperationsBoundary | None = None
 
 
 class InspectionDisposition(StrEnum):
@@ -324,7 +316,6 @@ class OperationRegistry:
         | WorkloadRequest
         | AgentUpdateCommand
         | AgentRollbackCommand
-        | PackageOperationRequest
     ):
         if type(claim) is not AgentClaim:
             raise UnsupportedOperation("operation is not compiled into this agent")
@@ -357,10 +348,6 @@ class OperationRegistry:
                 return AgentRollbackCommand.parse(claim.payload)
             except AgentUpdateError as error:
                 raise AgentProtocolError("agent rollback payload is invalid") from error
-        if claim.operation in PACKAGE_OPERATIONS:
-            if context.packages is None:
-                raise UnsupportedOperation("package operations are unavailable")
-            return PackageOperationRequest.parse(claim.operation, claim.payload)
         action = _WORKLOAD_ACTIONS.get(claim.operation)
         if action is not None:
             if context.workloads is None:
@@ -389,7 +376,6 @@ def _execute_request(
         | WorkloadRequest
         | AgentUpdateCommand
         | AgentRollbackCommand
-        | PackageOperationRequest
     ),
     context: OperationContext,
     deadline: MonotonicDeadline,
@@ -442,13 +428,6 @@ def _execute_request(
         return context.updates.rollback(
             request, deadline, claim.operation_id, claim.fence
         )
-    if isinstance(request, PackageOperationRequest):
-        assert context.packages is not None
-        return context.packages.execute(
-            request,
-            OperationBinding.from_claim(claim),
-            deadline,
-        )
     assert context.workloads is not None
     return context.workloads.execute(
         request,
@@ -468,28 +447,9 @@ def _inspect_request(
         | WorkloadRequest
         | AgentUpdateCommand
         | AgentRollbackCommand
-        | PackageOperationRequest
     ),
     context: OperationContext,
 ) -> OperationInspection:
-    if isinstance(request, PackageOperationRequest):
-        assert context.packages is not None
-        inspection = context.packages.inspect(
-            request,
-            OperationBinding.from_claim(claim),
-            _recovery_deadline(),
-        )
-        mapping = {
-            PackageDisposition.READY: InspectionDisposition.OPERATOR_INTERVENTION,
-            PackageDisposition.SAFE_TO_RETRY: InspectionDisposition.SAFE_TO_RETRY,
-            PackageDisposition.COMPLETED: InspectionDisposition.COMPLETED,
-            PackageDisposition.COMPENSATE: InspectionDisposition.COMPENSATE,
-            PackageDisposition.OPERATOR_INTERVENTION: InspectionDisposition.OPERATOR_INTERVENTION,
-        }
-        return OperationInspection(
-            mapping[inspection.disposition],
-            evidence=inspection.evidence,
-        )
     if isinstance(request, NodeProbeRequest) or claim.operation in {
         AgentOperation.WORKLOAD_HEALTH,
         AgentOperation.WORKLOAD_VERIFY,
@@ -565,8 +525,6 @@ _PROBE_ERROR_CODES = frozenset(
 
 
 def _stable_error_code(error: Exception, operation: AgentOperation) -> str:
-    if operation in PACKAGE_OPERATIONS:
-        return "package_operation_failed"
     if operation is AgentOperation.AGENT_UPDATE:
         return "agent_update_failed"
     if operation is AgentOperation.AGENT_ROLLBACK:

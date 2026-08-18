@@ -50,7 +50,7 @@ export function FleetPage({api}: {api: ControlApi}) {
       setDismissed(previouslyDismissed(result.digest) ? result.digest : "");
     }).catch(() => {
       // Fleet visibility remains useful when the update authority is
-      // temporarily unavailable; the dedicated Updates page reports it.
+      // temporarily unavailable; the update workflow reports it.
     });
     return () => { current = false; };
   }, [api]);

@@ -16,7 +16,7 @@ test("opens audit log from the operator menu and closes it without leaving Fleet
     events: [{
       request_id: "audit-1",
       actor: "admin",
-      action: "package.rollout.approved",
+      action: "library.recipe.run.applied",
       base_commit: "a".repeat(40),
       targets: ["node-1"],
     }],
@@ -36,13 +36,13 @@ test("opens audit log from the operator menu and closes it without leaving Fleet
   await user.click(screen.getByRole("button", {name: "Audit log"}));
 
   const dialog = await screen.findByRole("dialog", {name: "Audit log"});
-  expect(within(dialog).getByText("package.rollout.approved")).toBeVisible();
+  expect(within(dialog).getByText("library.recipe.run.applied")).toBeVisible();
   expect(within(dialog).getByText("Actor admin")).toBeVisible();
 
   await user.click(within(dialog).getByRole("button", {name: "Close audit log"}));
 
   await waitFor(() => {
-    expect(screen.queryByText("package.rollout.approved")).not.toBeInTheDocument();
+    expect(screen.queryByText("library.recipe.run.applied")).not.toBeInTheDocument();
   });
   expect(location.pathname).toBe("/fleet");
 });

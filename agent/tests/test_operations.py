@@ -261,6 +261,31 @@ def test_unknown_duck_typed_or_known_unimplemented_operation_never_dispatches(tm
         )
 
 
+def test_removed_package_operation_claims_never_dispatch(tmp_path) -> None:
+    payload = {
+        "schema_version": 1,
+        "deployment_id": "legacy-package",
+        "release_digest": "a" * 64,
+        "deployment_digest": "b" * 64,
+    }
+    raw = {
+        "schema_version": 1,
+        "job_id": "11111111-1111-4111-8111-111111111111",
+        "operation_id": OPERATION_ID,
+        "attempt": 1,
+        "fence": FENCE,
+        "node_id": NODE_ID,
+        "operation": "package.prepare",
+        "base_commit": "a" * 40,
+        "payload_digest": hashlib.sha256(canonical_message(payload)).hexdigest(),
+        "payload": payload,
+        "deadline": (datetime.now(UTC) + timedelta(minutes=1)).isoformat(),
+    }
+
+    with pytest.raises(AgentProtocolError, match="operation"):
+        AgentClaim.parse(raw)
+
+
 def test_release_and_workload_operations_dispatch_only_to_typed_interfaces(tmp_path) -> None:
     release = RecordingReleaseInstaller()
     workloads = RecordingWorkloads()

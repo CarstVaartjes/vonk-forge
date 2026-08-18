@@ -211,8 +211,8 @@ state may require restore/roll-forward instead of image rollback; use
 
 ## Review the NAS-newer fleet prompt
 
-After the control API and worker are healthy, view skew from the web Admin →
-Updates page or the CLI:
+After the control API and worker are healthy, view skew from the authenticated
+web update workflow or the CLI:
 
 ```bash
 vonkctl admin updates skew --json
@@ -287,8 +287,8 @@ The paused rollout's recovery worker creates the signed `agent.rollback`
 operations for nodes already changed; there is no manual rollback button or
 public rollback endpoint. Keep refreshing status while the state is paused. Do
 not try to manufacture a rollback job. Only after every required rollback is
-observed does the rollout enter `waiting-for-approval` and the web Admin →
-Updates page exposes **Approve rollout resume**. An administrator—not an
+observed does the rollout enter `waiting-for-approval` and the authenticated web
+update workflow exposes **Approve rollout resume**. An administrator—not an
 operator—may then approve resume with a bounded audit reason. Approval creates
 a fresh plan/authorization boundary; it does not reuse stale signatures. The
 CLI remains suitable for skew, plan, apply, and status; use the web workflow for

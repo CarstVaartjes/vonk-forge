@@ -482,5 +482,5 @@ test("Library local fixture recovers from errors and exposes an empty-state esca
   state.empty = true;
   await page.goto("/library");
   await expect(page.getByRole("heading", {name: "No recipes in the Library"})).toBeVisible();
-  await expect(page.getByRole("link", {name: "Open advanced catalog"})).toHaveAttribute("href", "/catalog");
+  await expect(page.getByRole("link", {name: /advanced/i})).toHaveCount(0);
 });

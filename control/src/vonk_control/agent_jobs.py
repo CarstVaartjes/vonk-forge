@@ -272,7 +272,12 @@ class AgentJobService:
         """Attach a caller-identified operation to the caller's transaction."""
         self._mark_started()
         now = self._clock()
-        protocol_operation = AgentOperation(operation)
+        try:
+            protocol_operation = AgentOperation(operation)
+        except ValueError as error:
+            raise ValueError(
+                "agent operation is not supported by the control plane"
+            ) from error
         if protocol_operation.value not in _CONTROL_OPERATIONS:
             raise ValueError("agent operation is not supported by the control plane")
         node = session.scalar(

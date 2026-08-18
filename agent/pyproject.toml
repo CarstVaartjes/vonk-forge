@@ -19,5 +19,5 @@ packages = ["src/vonk_agent"]
 dev = ["pyinstaller==6.15.0", "pytest==8.4.2"]
 
 [tool.uv.sources]
-vonk-agent-protocol = { path = "../inventory/wheels/vonk_agent_protocol-2.1.0-py3-none-any.whl" }
+vonk-agent-protocol = { path = "../agent_protocol" }
 vonk-cluster-profiles = { path = ".." }
