@@ -130,24 +130,6 @@ class EnrollmentService:
     def create(self, node_id: str, actor: str, ttl_seconds: int) -> EnrollmentGrant:
         return self._create(node_id, actor, ttl_seconds, purpose="new-node")
 
-    def create_migration(
-        self, node_id: str, actor: str, ttl_seconds: int
-    ) -> EnrollmentGrant:
-        _validate_node_id(node_id)
-        with self._sessions() as session:
-            node = session.get(AgentNode, node_id)
-            if (
-                node is None
-                or node.state != "active"
-                or node.revoked_at is not None
-                or node.agent_implementation != "python"
-                or node.migration_state != "required"
-            ):
-                raise EnrollmentDenied(
-                    "Rust migration requires an active legacy Python node"
-                )
-        return self._create(node_id, actor, ttl_seconds, purpose="rust-migration")
-
     def _create(
         self, node_id: str, actor: str, ttl_seconds: int, *, purpose: str
     ) -> EnrollmentGrant:
@@ -822,19 +804,10 @@ class EnrollmentService:
                 raise EnrollmentDenied("enrollment state cannot be approved")
             _lock_node_issuance(session, enrollment.node_id)
             grant = session.get(AgentEnrollmentGrant, enrollment.grant_id)
-            if grant is None or grant.purpose not in {"new-node", "rust-migration"}:
+            if grant is None or grant.purpose != "new-node":
                 raise EnrollmentDenied("enrollment purpose is invalid")
-            node = session.get(AgentNode, enrollment.node_id)
-            if grant.purpose == "new-node" and node is not None:
+            if session.get(AgentNode, enrollment.node_id) is not None:
                 raise EnrollmentDenied("node identity already exists")
-            if grant.purpose == "rust-migration" and (
-                node is None
-                or node.state != "active"
-                or node.revoked_at is not None
-                or node.agent_implementation != "python"
-                or node.migration_state != "required"
-            ):
-                raise EnrollmentDenied("node is not eligible for Rust migration")
             competing = session.scalar(
                 select(AgentEnrollment.id)
                 .where(
@@ -872,41 +845,18 @@ def _persist_issued_enrollment(
     except UnicodeDecodeError as error:
         raise EnrollmentDenied("certificate authority returned non-PEM certificate material") from error
     node = session.get(AgentNode, enrollment.node_id)
-    if purpose == "new-node":
-        if node is not None:
-            raise EnrollmentDenied("node identity already exists")
-        node = AgentNode(
-            node_id=enrollment.node_id,
-            state="active",
-            capabilities=[],
-            agent_implementation="pending",
-            migration_state="required",
-        )
-        session.add(node)
-        # There is no ORM relationship between these operational rows. Flush
-        # the FK parent explicitly for PostgreSQL.
-        session.flush([node])
-        generation = 1
-    elif purpose == "rust-migration":
-        if (
-            node is None
-            or node.state != "active"
-            or node.revoked_at is not None
-            or node.agent_implementation != "python"
-            or node.migration_state != "required"
-        ):
-            raise EnrollmentDenied("node is not eligible for Rust migration")
-        generation = (
-            session.scalar(
-                select(AgentCertificate.generation)
-                .where(AgentCertificate.node_id == enrollment.node_id)
-                .order_by(AgentCertificate.generation.desc())
-                .limit(1)
-            )
-            or 0
-        ) + 1
-    else:
+    if purpose != "new-node" or node is not None:
         raise EnrollmentDenied("enrollment purpose is invalid")
+    node = AgentNode(
+        node_id=enrollment.node_id,
+        state="active",
+        capabilities=[],
+    )
+    session.add(node)
+    # There is no ORM relationship between these operational rows. Flush
+    # the FK parent explicitly for PostgreSQL.
+    session.flush([node])
+    generation = 1
     session.add(AgentCertificate(
         serial=issued.serial,
         node_id=enrollment.node_id,

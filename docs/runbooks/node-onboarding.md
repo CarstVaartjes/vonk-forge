@@ -62,16 +62,17 @@ bin/node-install node resume NODE_ID --apply \
 Use `retry NODE_ID --apply` only after correcting a recorded failure. Use
 `verify NODE_ID` to require the accepted terminal state.
 
-## Propose the fleet record
+## Record the enrollment metadata
 
 ```bash
 bin/node-install node emit-record NODE_ID >node-record.toml
 ```
 
-This command does not modify Git. Review the sanitized record and add it to
-`inventory/fleet.toml` in a normal commit. Keep physical links and fabric
-relationships in the separate topology document; adding a node must not invent
-topology.
+This command does not modify Git. PostgreSQL enrollment is authoritative for
+Fleet membership and display metadata. Review the sanitized record, then let
+the enrollment workflow persist the node in PostgreSQL. Keep physical links
+and fabric relationships in the separate topology document; adding a node must
+not invent topology.
 
 If verification or recovery access fails, stop. Restore access through the
 physical console, inspect the journal, and resume only after the trusted facts
@@ -81,15 +82,12 @@ match again.
 
 After the host record is accepted, install the package and pair the agent by
 following [Install the Vonk Forge agent](../operations/install-vonk-agent.md).
-The controller-side ordering is always:
 
-1. Create one one-use node pairing grant.
-2. Run `vonk-agent pair` with `enrollment_url`, `controller_url`, `ca_path`,
-   and the exact DER SHA-256 CA fingerprint already configured.
-3. Approve the pending enrollment.
-4. Repeat the same `pair` command once to collect the issued certificate.
-5. Start or restart the supervisor and verify the node reports inventory under
-   its certificate-bound `spk_` identity.
+1. Registration is the authority: manual `agent.toml` editing is unsupported,
+   and Fleet **Add Spark** is the next implementation step. It records the
+   node-bound bootstrap grant and runtime inputs, but the bootstrap action is
+   not an operator command currently available, so the supported runbook stops
+   at that reviewed registration boundary until the emitter lands.
 
 ## How an accepted GPU node appears online
 

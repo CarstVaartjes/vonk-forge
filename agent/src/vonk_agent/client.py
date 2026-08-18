@@ -38,17 +38,6 @@ _CAPABILITIES = (
     "agent.rollback",
     "agent.update",
     "node.probe",
-    "package-abi-v1",
-    "package-backend-native-v1",
-    "package-backend-python-venv-v1",
-    "package.activate",
-    "package.gc",
-    "package.health",
-    "package.prepare",
-    "package.remove",
-    "package.repair",
-    "package.rollback",
-    "package.stop",
     "release.install",
     "workload.health",
     "workload.prepare",
@@ -1314,7 +1303,6 @@ class AgentClient:
 
     def claim(self) -> AgentClaim | None:
         body: dict[str, object] = {
-            "agent_implementation": "python",
             "capabilities": list(_CAPABILITIES),
             "lease_seconds": self._lease_seconds,
             "node_id": self._node_id,

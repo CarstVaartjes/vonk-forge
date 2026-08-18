@@ -236,10 +236,6 @@ export function LibraryPage({api, path, onNavigate}: {
         <h2 ref={heading} tabIndex={-1}>Library</h2>
         <p className="fleet-introduction">Choose a model, its exact recipe, and one complete placement group before reviewing any change.</p>
       </div>
-      <div className="library-hero-action">
-        <span>Ready to shape the fleet?</span>
-        <a className="button" href="/catalog" onClick={event => onNavigate(event, "/catalog")}>Manage recipes</a>
-      </div>
     </header>
     {snapshot && <>
       <section className="library-overview" aria-label="Library summary">
@@ -260,7 +256,7 @@ export function LibraryPage({api, path, onNavigate}: {
     </>}
     {error && <section className="fleet-error" role="alert"><h3>Library unavailable</h3><p>{error}</p><button type="button" onClick={() => setSnapshotAttempt(value => value + 1)}>Retry Library</button></section>}
     {!error && !snapshot && <section className="fleet-loading" role="status" aria-label="Loading Library"><span className="loading-orb" aria-hidden="true"/><div><h3>Opening Library</h3><p>Loading model, recipe, and placement authority…</p></div></section>}
-    {snapshot && snapshot.models.length === 0 && snapshot.unlinked_recipes.length === 0 && <section className="fleet-empty"><h3>No recipes in the Library</h3><p>Create or import a recipe through the advanced catalog workflow.</p><a className="button" href="/catalog" onClick={event => onNavigate(event, "/catalog")}>Open advanced catalog</a></section>}
+    {snapshot && snapshot.models.length === 0 && snapshot.unlinked_recipes.length === 0 && <section className="fleet-empty"><h3>No recipes in the Library</h3><p>Recipes will appear here after they are added to the local library authority.</p></section>}
     {browserSnapshot && (browserSnapshot.models.length > 0 || browserSnapshot.unlinked_recipes.length > 0) && <LibraryBrowser
       api={api}
       detail={detail}

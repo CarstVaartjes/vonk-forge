@@ -287,17 +287,9 @@ four local-only files are `admin-password`, `controller-ca-key`,
 plaintext administrator password is never published to the NAS. The publisher
 and `dev-bootstrap` then enforce the disjoint service ownership boundaries described
 
-For an existing valid 21-file browser-access generation, repeat the same
-command with `--upgrade-litellm-key-management`. This add-only operation
-creates only `litellm-database-password`, preserves every existing secret byte,
-and validates an already-completed retry. Back up the resulting 22-file
-generation before publication. A valid pre-browser 17-file generation first
-needs `--upgrade-browser-access`; an older valid 15-file generation first needs
-`--upgrade-host-runtime-authority`. Neither switch repairs partial, unknown,
-symlinked, or inconsistent state created outside its own transaction. If power
-or the workstation process is lost during the browser upgrade, leave the hidden
-`.browser-access-upgrade-*` transaction untouched and rerun the identical
-command with the same OAuth inputs.
+This is a fresh-install bundle. If an older or incomplete secret directory is
+present, generate a new bundle in a new directory; the clean-slate generator
+does not upgrade old layouts.
 
 Publish the accepted Compose and that exact bundle on the NAS's real Linux
 filesystem. For Windows, WSL, and ordinary SMB clients, use the generic remote
@@ -522,7 +514,7 @@ is a different operation and must use the reviewed bounded helper in
 [Execution harness operations](../operators/execution-harnesses.md#clean-development-reset).
 It validates the exact development Compose graph before mutation, drains runs
 and installations through public APIs, removes every project volume, verifies
-fresh schema head `0027_execution_harness_catalog`, and verifies only the eight
+fresh schema head `0001_fleet_library_baseline`, and verifies only the eight
 supported v1 harness seeds. It is forbidden for production or an unknown
 Compose graph.
 
@@ -781,7 +773,7 @@ Back up all 18 host secret files and every named volume needed for continuity
 to encrypted, access-controlled storage. The repository volume can be cloned
 again from public GitHub, but local `deploy` history, `main`,
 `refs/vonk/deploy-base`, other local refs, and signed changes exist only in its
-backup until pushed. PostgreSQL is authoritative for development catalog data.
+backup until pushed. PostgreSQL is authoritative for development Library data.
 The API, migration, and worker secret projections contain generated private
 authority and must be protected like the host secret files.
 

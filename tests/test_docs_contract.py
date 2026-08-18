@@ -42,6 +42,13 @@ EXECUTION_HARNESSES = ROOT / "docs/operators/execution-harnesses.md"
 MODEL_CATALOG = ROOT / "docs/operators/model-catalog.md"
 RECIPE_LIBRARY = ROOT / "docs/operators/recipe-library.md"
 
+FLEET_LIBRARY_ONLY_DOCS = (
+    README,
+    *(ROOT / "docs/runbooks").glob("*.md"),
+    *(ROOT / "docs/operators").glob("*.md"),
+    THREAT_MODEL,
+)
+
 CURRENT_OPERATIONAL_DOCS = (
     README,
     DOCS_INDEX,
@@ -199,13 +206,6 @@ def test_current_docs_do_not_advertise_prototype_model_operations() -> None:
     assert offenders == {}
 
 
-def test_workload_packages_are_not_the_model_or_runtime_release_path() -> None:
-    text = _normalized_text(ROOT / "docs/runbooks/workload-packages.md")
-
-    assert "operator contract for model and runtime releases" not in text
-    assert "Catalog and Library are the operator path for model recipes" in text
-
-
 def test_mia_runbook_distinguishes_image_receipts_from_model_loading() -> None:
     text = _normalized_text(MIA_TWO_SPARK)
 
@@ -219,22 +219,25 @@ def test_mia_runbook_distinguishes_image_receipts_from_model_loading() -> None:
         assert required in text
 
 
-def test_active_agent_install_examples_keep_pairing_and_controller_inputs_together() -> (
+def test_active_agent_install_stops_at_registration_boundary_without_operator_authored_toml() -> (
     None
 ):
+    text = _normalized_text(INSTALL_AGENT)
     agent_configs = []
     for block in _fenced_blocks(INSTALL_AGENT, "toml"):
         config = tomllib.loads(block)
         if {"enrollment_url", "controller_url"} & config.keys():
             agent_configs.append(config)
 
-    assert agent_configs
-    for config in agent_configs:
-        assert config["enrollment_url"] == "https://<ENROLLMENT_HOSTNAME>:8443/"
-        assert config["controller_url"] == "https://<CONTROLLER_HOSTNAME>:8443/"
-        assert config["ca_path"] == "/etc/vonk-forge-agent/controller-ca.pem"
-        assert config["ca_sha256"] == "<64_LOWERCASE_HEX_FROM_SHA256SUM>"
-        assert config["node_id"] == "<NODE_ID>"
+    assert agent_configs == []
+    for required in (
+        "registration is the authority",
+        "Add Spark",
+        "next implementation step",
+        "not an operator command currently available",
+    ):
+        assert required.lower() in text.lower()
+    assert "generated bootstrap command" not in text.lower()
 
 
 def test_agent_ca_fingerprint_is_derived_from_der_and_used_without_command_output_noise() -> (
@@ -259,7 +262,9 @@ def test_agent_urls_have_distinct_pairing_and_post_identity_roles() -> None:
     sentences = re.split(r"(?<=[.!])\s+", _normalized_text(INSTALL_AGENT))
 
     assert any(
-        "`enrollment_url`" in sentence and "only" in sentence and "`pair`" in sentence
+        "`enrollment_url`" in sentence
+        and "only" in sentence
+        and "first-contact registration" in sentence
         for sentence in sentences
     )
     assert any(
@@ -320,21 +325,20 @@ def test_fresh_spark_install_does_not_claim_nvidia_platform_ownership() -> None:
     fresh = _normalized_text(FRESH_DEVELOPMENT_INSTALL)
     platform = _normalized_text(PLATFORM_UPDATE)
     runtime_release = _normalized_text(RUNTIME_RELEASE)
-    legacy = _normalized_text(VONKCTL)
 
     assert "NVIDIA Sync owns supported cluster networking and node-to-node SSH" in fresh
     assert "must not stop, disable, mask, or install `earlyoom`" in platform
     assert "published by the repository’s GitHub Actions workflows" in runtime_release
-    assert "The browser is the normal recipe workflow" in legacy
 
 
 def test_onboarding_preserves_the_one_use_grant_pair_approve_pair_sequence() -> None:
     steps = _ordered_steps(_section(NODE_ONBOARDING, "Install and pair the agent"))
 
-    assert "one-use" in steps[0] and "grant" in steps[0]
-    assert "`vonk-agent pair`" in steps[1]
-    assert steps[2].startswith("Approve the pending enrollment")
-    assert "Repeat the same `pair` command" in steps[3]
+    assert len(steps) == 1
+    assert "add spark" in steps[0].lower()
+    assert "next implementation step" in steps[0].lower()
+    assert "not an operator command currently available" in steps[0].lower()
+    assert "`vonk-agent pair`" not in _section(NODE_ONBOARDING, "Install and pair the agent")
 
 
 def test_generic_path_covers_secret_safe_backup_identity_recovery_and_package_removal() -> (
@@ -497,7 +501,9 @@ def test_complete_development_workload_runbook_has_every_operator_phase() -> Non
     assert "scripts/dev-runtime-project" in text
     assert "scripts/dev-admin-token" in text
     assert "docs/operations/agent-package-release.md#install-the-dev-channel" in text
-    assert "vonk-agent pair" in text
+    assert "Add Spark" in text
+    assert "next implementation step" in text
+    assert "vonk-agent pair" not in text
     assert "scripts/qualify-recipe" in text
     for phase in ("model-single", "model-multinode"):
         assert f"--phase {phase}" in text
@@ -589,10 +595,9 @@ def test_secret_docs_separate_local_backup_from_exact_nas_projection() -> None:
 
     assert "exactly 22 local source files" in runbook
     assert "exactly 18 deployment files" in runbook
-    assert "`--upgrade-litellm-key-management`" in runbook
+    assert "fresh-install bundle" in runbook
     assert "four local-only files" in runbook
-    assert "15-file" in runbook
-    assert "add-only" in runbook
+    assert "new complete source directory" in runbook
 
     # This dated design records the accepted boundary at that historical slice.
     assert "17 local source files" in design
@@ -732,7 +737,6 @@ def test_complete_runbook_uses_current_browser_secret_generation_contract() -> N
     assert "--tailscale-oauth-client-secret-file" in text
     assert "exactly 22 local source files" in normalized
     assert "exactly 18 deployment files" in normalized
-    assert "litellm-database-password" in normalized
     for local_only in (
         "`admin-password`",
         "`controller-ca-key`",
@@ -740,8 +744,7 @@ def test_complete_runbook_uses_current_browser_secret_generation_contract() -> N
         "`host-runtime-grant-public-key`",
     ):
         assert local_only in text
-    assert "--upgrade-browser-access" in text
-    assert "--upgrade-litellm-key-management" in text
+    assert "fresh-install bundle" in normalized
     assert "Pull** then **Redeploy" in text
 
 
@@ -868,16 +871,16 @@ def test_quick_start_does_not_present_a_tunnel_as_normal_browser_access() -> Non
             assert claim not in text
 
 
-def test_operator_catalog_guides_expose_complete_navigable_concept_and_lifecycle_sections() -> (
+def test_operator_library_identity_guides_expose_complete_navigable_concept_and_lifecycle_sections() -> (
     None
 ):
     assert _headings(MODEL_CATALOG) == [
-        "Model catalog",
-        "Four catalog layers",
+        "Model and recipe identities",
+        "Four identity layers",
         "Exact immutable identity",
         "One Spark, many Sparks, and replicas",
         "Custom recipes and license responsibility",
-        "Catalog operations",
+        "Library operations",
         "Install and invoke",
         "Stop and uninstall",
         "Update and exact-revision rollback",
@@ -902,6 +905,81 @@ def test_operator_catalog_guides_expose_complete_navigable_concept_and_lifecycle
     assert "operators/execution-harnesses.md" in index_links
 
 
+def test_supported_docs_do_not_present_catalog_as_an_operator_surface() -> None:
+    supported = (
+        README,
+        ROOT / "docs/runbooks/repository-administration.md",
+        ROOT / "docs/runbooks/platform-release-update.md",
+        RUNTIME_RELEASE,
+        MODEL_SWITCHING,
+        HERMES_AGENT,
+        PLATFORM_UPDATE,
+        MODEL_CATALOG,
+    )
+
+    forbidden = (
+        " Catalog ",
+        "`Catalog`",
+        "/catalog",
+        "Catalog drafts",
+        "Catalog imports",
+        "Admin → Updates page",
+        "Admin -> Updates page",
+        "Updates page",
+    )
+
+    offenders = {
+        path.relative_to(ROOT).as_posix(): token
+        for path in supported
+        for token in forbidden
+        if token in path.read_text()
+    }
+    assert offenders == {}
+
+
+def test_fleet_library_only_docs_do_not_advertise_removed_operator_surfaces() -> None:
+    forbidden_patterns = {
+        r"\bvonkctl\b": "vonkctl",
+        r"/catalog": "/catalog",
+        r"\bCatalog\b": "Catalog",
+        r"\bCatalog drafts\b": "Catalog drafts",
+        r"\bCatalog imports\b": "Catalog imports",
+        r"\bPackages page\b": "Packages page",
+        r"\bDeployments page\b": "Deployments page",
+        r"\bUpdates page\b": "Updates page",
+        r"\bJobs page\b": "Jobs page",
+        r"\bAdmin\s*(?:→|->)\s*Updates\b": "Admin Updates page",
+        r"\badmin updates\b": "admin updates CLI",
+        r"\badmin jobs\b": "admin jobs CLI",
+        r"\blocal recipe catalog\b": "local recipe catalog",
+        r"\bglobal catalog\b": "global catalog",
+        r"\bremote catalog\b": "remote catalog",
+        r"\bcatalog state\b": "catalog state",
+        r"\bprototype catalog\b": "prototype catalog",
+        r"\bcatalog reads\b": "catalog reads",
+        r"\bcatalog reference": "catalog reference",
+        r"agent/tests/packages/test_engine\.py": "deleted agent package engine test",
+        r"agent/tests/test_package_operations\.py": "deleted package operations test",
+        r"agent/tests/test_workload_preflight\.py": "deleted workload preflight test",
+        r"agent_protocol/tests/test_package_operations\.py": (
+            "deleted protocol package operations test"
+        ),
+        r"agent_protocol/fixtures/workload-package\.json": (
+            "deleted workload package fixture"
+        ),
+    }
+    offenders = {
+        path.relative_to(ROOT).as_posix(): label
+        for path in FLEET_LIBRARY_ONLY_DOCS
+        if path.exists()
+        for pattern, label in forbidden_patterns.items()
+        if re.search(pattern, path.read_text())
+    }
+
+    assert not VONKCTL.exists()
+    assert offenders == {}
+
+
 def test_architecture_html_has_semantic_catalog_resolution_and_interface_publication_paths() -> (
     None
 ):
@@ -911,3 +989,10 @@ def test_architecture_html_has_semantic_catalog_resolution_and_interface_publica
     assert {"catalog-resolution", "interface-publication"} <= document.ids
     assert "operators/model-catalog.md" in document.links
     assert "operators/execution-harnesses.md" in document.links
+
+
+def test_clean_development_reset_describes_postgresql_fleet_authority() -> None:
+    section = _section(EXECUTION_HARNESSES, "Clean development reset")
+
+    assert "PostgreSQL Fleet registrations are empty" in section
+    assert "repository" + " Fleet" not in section

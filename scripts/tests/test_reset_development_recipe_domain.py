@@ -596,7 +596,7 @@ def _run(
     *arguments: str,
     extra_volume: bool = False,
     redirected_volume: bool = False,
-    revision: str = "0027_execution_harness_catalog",
+    revision: str = "0001_fleet_library_baseline",
     symlink_project: bool = False,
     project_name: str = "vonk-forge",
     docker_mode: str = "direct",
@@ -1033,6 +1033,6 @@ def test_reset_never_starts_services_when_migration_head_is_not_exact(
 
     assert result.returncode != 0
     assert (
-        "fresh database revision is not 0027_execution_harness_catalog" in result.stderr
+        "fresh database revision is not 0001_fleet_library_baseline" in result.stderr
     )
     assert not (tmp_path / "started").exists()

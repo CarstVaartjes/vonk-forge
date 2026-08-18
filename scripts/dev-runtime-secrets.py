@@ -69,48 +69,14 @@ LOCAL_SOURCE_SECRET_NAMES = DEPLOYMENT_SECRET_NAMES | frozenset(
         "host-runtime-grant-public-key",
     }
 )
-# Compatibility for the project publisher, which validates the complete local
-# source before publishing its fixed deployment subset.
+# Shared source set validated before publishing the fixed deployment subset.
 RUNTIME_SECRET_NAMES = LOCAL_SOURCE_SECRET_NAMES
-_LITELLM_DATABASE_PASSWORD = "litellm-database-password"
-_PRE_LITELLM_KEY_MANAGEMENT_SECRET_NAMES = RUNTIME_SECRET_NAMES - {
-    _LITELLM_DATABASE_PASSWORD
-}
-_BROWSER_ACCESS_SECRET_NAMES = frozenset(
-    {
-        "admin-password",
-        "admin-password-verifier",
-        "tailscale-oauth-client-id",
-        "tailscale-oauth-client-secret",
-    }
-)
-_PRE_BROWSER_ACCESS_SECRET_NAMES = RUNTIME_SECRET_NAMES - _BROWSER_ACCESS_SECRET_NAMES
-_BROWSER_UPGRADE_PREFIX = ".browser-access-upgrade-"
-_BROWSER_UPGRADE_NAME = re.compile(r"\.browser-access-upgrade-[0-9a-f]{32}\Z")
-_BROWSER_UPGRADE_JOURNAL = "journal"
-_BROWSER_UPGRADE_JOURNAL_TEMPORARY = ".journal.tmp"
-_HOST_RUNTIME_PRIVATE = "host-runtime-grant-private-key"
-_HOST_RUNTIME_PUBLIC = "host-runtime-grant-public-key"
-_LEGACY_RUNTIME_SECRET_NAMES = RUNTIME_SECRET_NAMES - {
-    _HOST_RUNTIME_PRIVATE,
-    _HOST_RUNTIME_PUBLIC,
-}
 _ROTATION_PREFIX = ".admin-password-rotation-"
 _ROTATION_NAME = re.compile(r"\.admin-password-rotation-[0-9a-f]{32}\Z")
 _ROTATION_PASSWORD = "admin-password"
 _ROTATION_VERIFIER = "admin-password-verifier"
 _ROTATION_JOURNAL = "journal"
 _ROTATION_MANIFEST_TEMPORARY = ".journal.tmp"
-_LEGACY_ROTATION_JOURNAL = ".admin-password-rotation"
-_LEGACY_ROTATION_PASSWORD = ".admin-password.rotate"
-_LEGACY_ROTATION_VERIFIER = ".admin-password-verifier.rotate"
-_LEGACY_ROTATION_ENTRIES = frozenset(
-    {
-        _LEGACY_ROTATION_JOURNAL,
-        _LEGACY_ROTATION_PASSWORD,
-        _LEGACY_ROTATION_VERIFIER,
-    }
-)
 _ROTATION_DIGEST_KEYS = frozenset(
     {
         "old_password_sha256",
@@ -1116,387 +1082,6 @@ def _host_runtime_authority_pair(
     return private, public
 
 
-def _upgrade_host_runtime_authority(
-    directory: int,
-    bundle: dict[str, bytes],
-    *,
-    management_cidrs: tuple[str, ...],
-    enroll_hostname: str,
-    agent_hostname: str,
-    registry_hostname: str,
-) -> None:
-    retained = bundle.get(_HOST_RUNTIME_PRIVATE)
-    private, public = _host_runtime_authority_pair(retained)
-    candidate = dict(bundle)
-    candidate[_HOST_RUNTIME_PRIVATE] = private
-    candidate[_HOST_RUNTIME_PUBLIC] = public
-    _validate_bundle(
-        candidate,
-        management_cidrs=management_cidrs,
-        enroll_hostname=enroll_hostname,
-        agent_hostname=agent_hostname,
-        registry_hostname=registry_hostname,
-    )
-    if retained is None:
-        _write_file(directory, _HOST_RUNTIME_PRIVATE, private)
-        os.fsync(directory)
-    _write_file(directory, _HOST_RUNTIME_PUBLIC, public)
-    os.fsync(directory)
-    installed = {name: _read_file(directory, name) for name in RUNTIME_SECRET_NAMES}
-    _validate_bundle(
-        installed,
-        management_cidrs=management_cidrs,
-        enroll_hostname=enroll_hostname,
-        agent_hostname=agent_hostname,
-        registry_hostname=registry_hostname,
-    )
-
-
-def _upgrade_litellm_key_management(
-    directory: int,
-    bundle: dict[str, bytes],
-    *,
-    management_cidrs: tuple[str, ...],
-    enroll_hostname: str,
-    agent_hostname: str,
-    registry_hostname: str,
-) -> None:
-    password = (secrets.token_hex(32) + "\n").encode("ascii")
-    candidate = dict(bundle)
-    candidate[_LITELLM_DATABASE_PASSWORD] = password
-    _validate_bundle(
-        candidate,
-        management_cidrs=management_cidrs,
-        enroll_hostname=enroll_hostname,
-        agent_hostname=agent_hostname,
-        registry_hostname=registry_hostname,
-    )
-    _write_file(directory, _LITELLM_DATABASE_PASSWORD, password)
-    os.fsync(directory)
-    installed = {name: _read_file(directory, name) for name in RUNTIME_SECRET_NAMES}
-    _validate_bundle(
-        installed,
-        management_cidrs=management_cidrs,
-        enroll_hostname=enroll_hostname,
-        agent_hostname=agent_hostname,
-        registry_hostname=registry_hostname,
-    )
-
-
-def _browser_upgrade_journal(additions: dict[str, bytes]) -> bytes:
-    return (
-        json.dumps(
-            {name: _sha256(content) for name, content in additions.items()},
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-        + "\n"
-    ).encode("ascii")
-
-
-def _parse_browser_upgrade_journal(content: bytes) -> dict[str, str]:
-    message = "development browser access upgrade state is invalid"
-    try:
-        document = json.loads(content.decode("ascii"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise RuntimeSecretError(message) from error
-    if (
-        not isinstance(document, dict)
-        or set(document) != _BROWSER_ACCESS_SECRET_NAMES
-        or any(
-            not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None
-            for value in document.values()
-        )
-    ):
-        raise RuntimeSecretError(message)
-    return document
-
-
-def _open_browser_upgrade_transaction(
-    directory: int, name: str
-) -> tuple[int, _OwnedEntry, dict[str, tuple[bytes, _OwnedEntry]]]:
-    message = "development browser access upgrade state is invalid"
-    opened = _open_existing_directory(directory, name)
-    if opened is None:
-        raise RuntimeSecretError(message)
-    transaction, metadata = opened
-    entries: dict[str, tuple[bytes, _OwnedEntry]] = {}
-    allowed = _BROWSER_ACCESS_SECRET_NAMES | {
-        _BROWSER_UPGRADE_JOURNAL,
-        _BROWSER_UPGRADE_JOURNAL_TEMPORARY,
-    }
-    try:
-        if metadata.st_nlink != 2:
-            raise RuntimeSecretError(message)
-        names = set(os.listdir(transaction))
-        if _BROWSER_UPGRADE_JOURNAL not in names:
-            if not names <= (
-                _BROWSER_ACCESS_SECRET_NAMES
-                | {_BROWSER_UPGRADE_JOURNAL_TEMPORARY}
-            ):
-                raise RuntimeSecretError(message)
-        elif (
-            _BROWSER_UPGRADE_JOURNAL_TEMPORARY in names
-            or not names <= allowed - {_BROWSER_UPGRADE_JOURNAL_TEMPORARY}
-        ):
-            raise RuntimeSecretError(message)
-        for child in sorted(names):
-            entries[child] = _read_rotation_file(
-                transaction,
-                child,
-                error_message=message,
-                allowed_link_counts=frozenset({1, 2}),
-            )
-        return transaction, _owned_entry(name, metadata, transaction), entries
-    except BaseException:
-        for _content, entry in entries.values():
-            _close_owned_entry(entry)
-        os.close(transaction)
-        raise
-
-
-def _browser_destination_is_owned(
-    directory: int, name: str, entry: _OwnedEntry
-) -> bool:
-    try:
-        current = os.stat(name, dir_fd=directory, follow_symlinks=False)
-    except FileNotFoundError:
-        return False
-    opened = os.fstat(entry.descriptor)
-    return (
-        _same_inode(current, opened)
-        and stat.S_ISREG(current.st_mode)
-        and stat.S_ISREG(opened.st_mode)
-        and current.st_uid == os.geteuid()
-        and opened.st_uid == os.geteuid()
-        and current.st_nlink in {1, 2}
-        and opened.st_nlink in {1, 2}
-        and stat.S_IMODE(current.st_mode) == _PRIVATE_MODE
-        and stat.S_IMODE(opened.st_mode) == _PRIVATE_MODE
-    )
-
-
-def _rollback_browser_upgrade(
-    directory: int,
-    transaction: int,
-    transaction_entry: _OwnedEntry,
-    entries: dict[str, tuple[bytes, _OwnedEntry]],
-) -> None:
-    changed = False
-    for name in sorted(_BROWSER_ACCESS_SECRET_NAMES):
-        staged = entries.get(name)
-        if staged is not None and _browser_destination_is_owned(
-            directory, name, staged[1]
-        ):
-            os.unlink(name, dir_fd=directory)
-            changed = True
-    if changed:
-        os.fsync(directory)
-    _remove_rotation_transaction(
-        directory, transaction, transaction_entry, entries
-    )
-
-
-def _resume_browser_upgrade(directory: int, name: str) -> bool:
-    message = "development browser access upgrade state is invalid"
-    transaction = -1
-    transaction_entry: _OwnedEntry | None = None
-    entries: dict[str, tuple[bytes, _OwnedEntry]] = {}
-    try:
-        transaction, transaction_entry, entries = (
-            _open_browser_upgrade_transaction(directory, name)
-        )
-        live_names = set(os.listdir(directory)) & _BROWSER_ACCESS_SECRET_NAMES
-        journal_content = entries.get(_BROWSER_UPGRADE_JOURNAL, (None, None))[0]
-        if journal_content is None:
-            staged_names = set(entries) & _BROWSER_ACCESS_SECRET_NAMES
-            if not live_names:
-                completed = False
-            elif (
-                live_names == _BROWSER_ACCESS_SECRET_NAMES
-                and not staged_names
-                and _BROWSER_UPGRADE_JOURNAL_TEMPORARY not in entries
-            ):
-                completed = True
-            else:
-                raise RuntimeSecretError(message)
-            _remove_rotation_transaction(
-                directory, transaction, transaction_entry, entries
-            )
-            return completed
-
-        journal = _parse_browser_upgrade_journal(journal_content)
-        staged_names = set(entries) & _BROWSER_ACCESS_SECRET_NAMES
-        if any(
-            _sha256(entries[child][0]) != journal[child]
-            for child in staged_names
-        ):
-            raise RuntimeSecretError(message)
-        if not live_names and staged_names != _BROWSER_ACCESS_SECRET_NAMES:
-            _remove_rotation_transaction(
-                directory, transaction, transaction_entry, entries
-            )
-            return False
-        if live_names | staged_names != _BROWSER_ACCESS_SECRET_NAMES:
-            raise RuntimeSecretError(message)
-
-        for child in sorted(_BROWSER_ACCESS_SECRET_NAMES):
-            staged = entries.get(child)
-            if staged is None:
-                if _sha256(_read_file(directory, child)) != journal[child]:
-                    raise RuntimeSecretError(message)
-                continue
-            try:
-                os.stat(child, dir_fd=directory, follow_symlinks=False)
-            except FileNotFoundError:
-                os.link(
-                    child,
-                    child,
-                    src_dir_fd=transaction,
-                    dst_dir_fd=directory,
-                    follow_symlinks=False,
-                )
-            else:
-                if not _browser_destination_is_owned(directory, child, staged[1]):
-                    raise RuntimeSecretError(message)
-            os.fsync(directory)
-            if not _unlink_owned_entry(
-                transaction,
-                staged[1],
-                allowed_link_counts=frozenset({1, 2}),
-            ):
-                raise RuntimeSecretError(message)
-            os.fsync(transaction)
-
-        installed = {
-            child: _read_file(directory, child)
-            for child in _BROWSER_ACCESS_SECRET_NAMES
-        }
-        if any(_sha256(installed[child]) != journal[child] for child in installed):
-            raise RuntimeSecretError(message)
-        _validate_admin_credential(
-            installed["admin-password"],
-            installed["admin-password-verifier"],
-        )
-        _remove_rotation_transaction(
-            directory, transaction, transaction_entry, entries
-        )
-        return True
-    finally:
-        for _content, entry in entries.values():
-            _close_owned_entry(entry)
-        if transaction_entry is not None:
-            _close_owned_entry(transaction_entry)
-            transaction = -1
-        elif transaction >= 0:
-            os.close(transaction)
-
-
-def _recover_browser_upgrade(directory: int) -> bool:
-    extras = set(os.listdir(directory)) - RUNTIME_SECRET_NAMES
-    transactions = [
-        name for name in extras if _BROWSER_UPGRADE_NAME.fullmatch(name) is not None
-    ]
-    if not transactions:
-        return False
-    if len(extras) != 1 or len(transactions) != 1:
-        raise RuntimeSecretError(
-            "development browser access upgrade state is invalid"
-        )
-    try:
-        return _resume_browser_upgrade(directory, transactions[0])
-    except RuntimeSecretError:
-        raise
-    except OSError as error:
-        raise RuntimeSecretError(
-            "development browser access upgrade recovery was interrupted"
-        ) from error
-
-
-def _upgrade_browser_access(
-    directory: int,
-    prior_bundle: dict[str, bytes],
-    *,
-    tailscale_oauth_client_id: bytes,
-    tailscale_oauth_client_secret: bytes,
-    management_cidrs: tuple[str, ...],
-    enroll_hostname: str,
-    agent_hostname: str,
-    registry_hostname: str,
-) -> None:
-    password, verifier = _admin_credential_pair()
-    additions = {
-        "admin-password": password,
-        "admin-password-verifier": verifier,
-        "tailscale-oauth-client-id": tailscale_oauth_client_id,
-        "tailscale-oauth-client-secret": tailscale_oauth_client_secret,
-    }
-    candidate = dict(prior_bundle)
-    candidate.update(additions)
-    _validate_bundle(
-        candidate,
-        management_cidrs=management_cidrs,
-        enroll_hostname=enroll_hostname,
-        agent_hostname=agent_hostname,
-        registry_hostname=registry_hostname,
-    )
-    transaction = -1
-    transaction_entry: _OwnedEntry | None = None
-    entries: dict[str, tuple[bytes, _OwnedEntry]] = {}
-    transaction_name = _BROWSER_UPGRADE_PREFIX + secrets.token_hex(16)
-    try:
-        transaction, transaction_entry = _create_owned_directory(
-            directory,
-            transaction_name,
-            error_message="development browser access upgrade cannot be created",
-        )
-        os.fsync(directory)
-        journal_content = _browser_upgrade_journal(additions)
-        journal_entry = _create_owned_file(
-            transaction,
-            _BROWSER_UPGRADE_JOURNAL_TEMPORARY,
-            journal_content,
-        )
-        entries[_BROWSER_UPGRADE_JOURNAL_TEMPORARY] = (
-            journal_content,
-            journal_entry,
-        )
-        os.replace(
-            _BROWSER_UPGRADE_JOURNAL_TEMPORARY,
-            _BROWSER_UPGRADE_JOURNAL,
-            src_dir_fd=transaction,
-            dst_dir_fd=transaction,
-        )
-        entries.pop(_BROWSER_UPGRADE_JOURNAL_TEMPORARY)
-        journal_entry.name = _BROWSER_UPGRADE_JOURNAL
-        entries[_BROWSER_UPGRADE_JOURNAL] = (journal_content, journal_entry)
-        os.fsync(transaction)
-        for child, content in sorted(additions.items()):
-            entries[child] = (content, _create_owned_file(transaction, child, content))
-        os.fsync(transaction)
-        _resume_browser_upgrade(directory, transaction_name)
-    except BaseException as error:
-        if transaction >= 0 and transaction_entry is not None:
-            try:
-                _rollback_browser_upgrade(
-                    directory, transaction, transaction_entry, entries
-                )
-            except (OSError, RuntimeSecretError):
-                pass
-        if isinstance(error, OSError):
-            raise RuntimeSecretError(
-                "development browser access upgrade cannot be installed"
-            ) from error
-        raise
-    finally:
-        for _content, entry in entries.values():
-            _close_owned_entry(entry)
-        if transaction_entry is not None:
-            _close_owned_entry(transaction_entry)
-            transaction = -1
-        elif transaction >= 0:
-            os.close(transaction)
-
 
 def _rotation_journal(
     old_password: bytes,
@@ -1539,86 +1124,6 @@ def _parse_rotation_journal(content: bytes) -> dict[str, str]:
         )
     return document
 
-
-def _legacy_rotation_value(directory: int, name: str) -> bytes | None:
-    try:
-        os.stat(name, dir_fd=directory, follow_symlinks=False)
-    except FileNotFoundError:
-        return None
-    return _read_file(directory, name)
-
-
-def _finish_legacy_admin_rotation(directory: int, journal: dict[str, str]) -> None:
-    password = _read_file(directory, "admin-password")
-    verifier = _read_file(directory, "admin-password-verifier")
-    password_temporary = _legacy_rotation_value(directory, _LEGACY_ROTATION_PASSWORD)
-    verifier_temporary = _legacy_rotation_value(directory, _LEGACY_ROTATION_VERIFIER)
-    password_digest = _sha256(password)
-    verifier_digest = _sha256(verifier)
-    temporary_password_digest = (
-        None if password_temporary is None else _sha256(password_temporary)
-    )
-    temporary_verifier_digest = (
-        None if verifier_temporary is None else _sha256(verifier_temporary)
-    )
-    old_pair = (
-        password_digest == journal["old_password_sha256"]
-        and verifier_digest == journal["old_verifier_sha256"]
-    )
-    new_pair = (
-        password_digest == journal["new_password_sha256"]
-        and verifier_digest == journal["new_verifier_sha256"]
-    )
-    if old_pair:
-        valid_password_temporary = temporary_password_digest in {
-            None,
-            journal["new_password_sha256"],
-        }
-        valid_verifier_temporary = temporary_verifier_digest in {
-            None,
-            journal["new_verifier_sha256"],
-        }
-        if not valid_password_temporary or not valid_verifier_temporary:
-            raise RuntimeSecretError(
-                "development administrator rotation state is invalid"
-            )
-        if password_temporary is not None and verifier_temporary is not None:
-            os.replace(
-                _LEGACY_ROTATION_PASSWORD,
-                "admin-password",
-                src_dir_fd=directory,
-                dst_dir_fd=directory,
-            )
-            os.fsync(directory)
-            os.replace(
-                _LEGACY_ROTATION_VERIFIER,
-                "admin-password-verifier",
-                src_dir_fd=directory,
-                dst_dir_fd=directory,
-            )
-        else:
-            _unlink_if_present(directory, _LEGACY_ROTATION_PASSWORD)
-            _unlink_if_present(directory, _LEGACY_ROTATION_VERIFIER)
-    elif (
-        password_digest == journal["new_password_sha256"]
-        and verifier_digest == journal["old_verifier_sha256"]
-        and password_temporary is None
-        and temporary_verifier_digest == journal["new_verifier_sha256"]
-    ):
-        os.fsync(directory)
-        os.replace(
-            _LEGACY_ROTATION_VERIFIER,
-            "admin-password-verifier",
-            src_dir_fd=directory,
-            dst_dir_fd=directory,
-        )
-    elif new_pair and password_temporary is None and verifier_temporary is None:
-        pass
-    else:
-        raise RuntimeSecretError("development administrator rotation state is invalid")
-    os.fsync(directory)
-    _unlink_if_present(directory, _LEGACY_ROTATION_JOURNAL)
-    os.fsync(directory)
 
 
 def _replace_owned_rotation_file(
@@ -1867,16 +1372,6 @@ def _recover_admin_rotation(directory: int) -> None:
     names = set(os.listdir(directory))
     extras = names - RUNTIME_SECRET_NAMES
     if not extras:
-        return
-    if extras <= _LEGACY_ROTATION_ENTRIES:
-        if _LEGACY_ROTATION_JOURNAL not in extras:
-            raise RuntimeSecretError(
-                "development administrator rotation state is invalid"
-            )
-        journal = _parse_rotation_journal(
-            _read_file(directory, _LEGACY_ROTATION_JOURNAL)
-        )
-        _finish_legacy_admin_rotation(directory, journal)
         return
     if len(extras) != 1:
         raise RuntimeSecretError("development administrator rotation state is invalid")
@@ -2666,9 +2161,6 @@ def prepare_runtime_secrets(
     registry_hostname: str,
     tailscale_oauth_client_id_file: Path,
     tailscale_oauth_client_secret_file: Path,
-    upgrade_host_runtime_authority: bool = False,
-    upgrade_litellm_key_management: bool = False,
-    upgrade_browser_access: bool = False,
     rotate_admin_password: bool = False,
     rotate_tailscale_oauth: bool = False,
     tailscale_oauth_rotation_id: str | None = None,
@@ -2676,9 +2168,6 @@ def prepare_runtime_secrets(
     if (
         sum(
             (
-                upgrade_host_runtime_authority,
-                upgrade_litellm_key_management,
-                upgrade_browser_access,
                 rotate_admin_password,
                 rotate_tailscale_oauth,
             )
@@ -2719,112 +2208,11 @@ def prepare_runtime_secrets(
             if os.listdir(existing_descriptor):
                 _acquire_mutation_lock(existing_descriptor)
             _remove_oauth_receipt_temporary(parent, oauth_receipt_name)
-            _recover_browser_upgrade(existing_descriptor)
             oauth_recovery = _recover_rotations(
                 existing_descriptor, parent, oauth_receipt_name
             )
             names = set(os.listdir(existing_descriptor))
             if names:
-                if upgrade_litellm_key_management:
-                    if names == RUNTIME_SECRET_NAMES:
-                        completed = {
-                            name: _read_file(existing_descriptor, name)
-                            for name in names
-                        }
-                        _validate_bundle(
-                            completed,
-                            management_cidrs=cidrs,
-                            enroll_hostname=enroll,
-                            agent_hostname=agent,
-                            registry_hostname=registry,
-                        )
-                        return secrets_dir
-                    if names != _PRE_LITELLM_KEY_MANAGEMENT_SECRET_NAMES:
-                        for name in sorted(names):
-                            if name not in RUNTIME_SECRET_NAMES:
-                                raise RuntimeSecretError(
-                                    "development secrets directory contains unknown entries"
-                                )
-                            _read_file(existing_descriptor, name)
-                        raise RuntimeSecretError(
-                            "LiteLLM key-management upgrade requires the exact prior generation"
-                        )
-                    prior_bundle = {
-                        name: _read_file(existing_descriptor, name) for name in names
-                    }
-                    _upgrade_litellm_key_management(
-                        existing_descriptor,
-                        prior_bundle,
-                        management_cidrs=cidrs,
-                        enroll_hostname=enroll,
-                        agent_hostname=agent,
-                        registry_hostname=registry,
-                    )
-                    return secrets_dir
-                if upgrade_browser_access:
-                    if names == RUNTIME_SECRET_NAMES:
-                        completed = {
-                            name: _read_file(existing_descriptor, name)
-                            for name in names
-                        }
-                        _validate_bundle(
-                            completed,
-                            management_cidrs=cidrs,
-                            enroll_hostname=enroll,
-                            agent_hostname=agent,
-                            registry_hostname=registry,
-                        )
-                        if (
-                            completed[_OAUTH_CLIENT_ID]
-                            == tailscale_oauth_client_id
-                            and completed[_OAUTH_CLIENT_SECRET]
-                            == tailscale_oauth_client_secret
-                        ):
-                            return secrets_dir
-                        raise RuntimeSecretError(
-                            "browser access upgrade requires the exact prior generation"
-                        )
-                    if names != _PRE_BROWSER_ACCESS_SECRET_NAMES:
-                        for name in sorted(names):
-                            if name not in RUNTIME_SECRET_NAMES:
-                                raise RuntimeSecretError(
-                                    "development secrets directory contains unknown entries"
-                                )
-                            _read_file(existing_descriptor, name)
-                        raise RuntimeSecretError(
-                            "browser access upgrade requires the exact prior generation"
-                        )
-                    prior_bundle = {
-                        name: _read_file(existing_descriptor, name) for name in names
-                    }
-                    _upgrade_browser_access(
-                        existing_descriptor,
-                        prior_bundle,
-                        tailscale_oauth_client_id=tailscale_oauth_client_id,
-                        tailscale_oauth_client_secret=tailscale_oauth_client_secret,
-                        management_cidrs=cidrs,
-                        enroll_hostname=enroll,
-                        agent_hostname=agent,
-                        registry_hostname=registry,
-                    )
-                    return secrets_dir
-                recoverable_upgrade = frozenset(names) in {
-                    frozenset(_LEGACY_RUNTIME_SECRET_NAMES),
-                    frozenset(_LEGACY_RUNTIME_SECRET_NAMES | {_HOST_RUNTIME_PRIVATE}),
-                }
-                if upgrade_host_runtime_authority and recoverable_upgrade:
-                    bundle = {
-                        name: _read_file(existing_descriptor, name) for name in names
-                    }
-                    _upgrade_host_runtime_authority(
-                        existing_descriptor,
-                        bundle,
-                        management_cidrs=cidrs,
-                        enroll_hostname=enroll,
-                        agent_hostname=agent,
-                        registry_hostname=registry,
-                    )
-                    return secrets_dir
                 if names != RUNTIME_SECRET_NAMES:
                     # Validate every present entry before reporting an incomplete bundle.
                     for name in sorted(names):
@@ -2874,12 +2262,7 @@ def prepare_runtime_secrets(
                 return secrets_dir
         else:
             existing_metadata = None
-        if (
-            upgrade_litellm_key_management
-            or upgrade_browser_access
-            or rotate_admin_password
-            or rotate_tailscale_oauth
-        ):
+        if rotate_admin_password or rotate_tailscale_oauth:
             raise RuntimeSecretError(
                 "development secret operation requires an existing generation"
             )
@@ -2992,24 +2375,6 @@ def _arguments() -> argparse.Namespace:
     )
     operations = parser.add_mutually_exclusive_group()
     operations.add_argument(
-        "--upgrade-host-runtime-authority",
-        action="store_true",
-        help=(
-            "add only the host runtime signing key pair to a validated "
-            "legacy development secret generation"
-        ),
-    )
-    operations.add_argument(
-        "--upgrade-litellm-key-management",
-        action="store_true",
-        help="add the dedicated LiteLLM database credential to an exact prior generation",
-    )
-    operations.add_argument(
-        "--upgrade-browser-access",
-        action="store_true",
-        help="add browser access secrets to the exact prior generation",
-    )
-    operations.add_argument(
         "--rotate-admin-password",
         action="store_true",
         help="rotate only the administrator password and verifier",
@@ -3045,11 +2410,6 @@ def main() -> int:
             tailscale_oauth_client_secret_file=(
                 arguments.tailscale_oauth_client_secret_file
             ),
-            upgrade_host_runtime_authority=(arguments.upgrade_host_runtime_authority),
-            upgrade_litellm_key_management=(
-                arguments.upgrade_litellm_key_management
-            ),
-            upgrade_browser_access=arguments.upgrade_browser_access,
             rotate_admin_password=arguments.rotate_admin_password,
             rotate_tailscale_oauth=arguments.rotate_tailscale_oauth,
             tailscale_oauth_rotation_id=arguments.tailscale_oauth_rotation_id,

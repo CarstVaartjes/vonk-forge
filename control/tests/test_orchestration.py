@@ -318,6 +318,29 @@ def test_zero_compute_gate_is_the_only_cross_workload_barrier(planner) -> None:
     assert graph.dependencies("new:install") == ("node:gate",)
 
 
+def test_package_operations_are_not_control_plane_graph_operations(planner) -> None:
+    orchestrator, sessions = planner
+    document = distributed_plan()
+    document["targets"] = [NODE_A]
+    document["operations"] = [
+        {
+            "operation_id": "removed-package:prepare",
+            "node_id": NODE_A,
+            "workload_id": "removed-package",
+            "kind": "package.prepare",
+            "dependencies": [],
+            "compensation_kind": None,
+            "payload_digest": "1" * 64,
+        }
+    ]
+
+    with pytest.raises(ValueError, match="agent registry"):
+        orchestrator.plan(document)
+
+    with sessions() as session:
+        assert session.scalars(select(Reconciliation)).all() == []
+
+
 @pytest.mark.parametrize(
     "corruption",
     (
@@ -359,6 +382,64 @@ def test_persisted_plan_consumers_reject_semantic_gate_and_nonmutating_corruptio
 
     with pytest.raises((TypeError, ValueError), match="persisted resolved plan"):
         orchestrator.resolved_plan(plan_digest)
+
+
+def test_persisted_plan_consumers_reject_deleted_package_operations(planner) -> None:
+    orchestrator, sessions = planner
+    package_payload = {
+        "schema_version": 1,
+        "deployment_id": "removed-package",
+        "release_digest": "a" * 64,
+        "deployment_digest": "b" * 64,
+    }
+    package_node = {
+        "operation_id": "removed-package:prepare",
+        "node_id": NODE_A,
+        "workload_id": "removed-package",
+        "kind": "package.prepare",
+        "dependencies": [],
+        "compensation_kind": None,
+        "payload_digest": _digest(package_payload),
+    }
+    graph: dict[str, object] = {
+        "schema_version": 1,
+        "base_commit": BASE_COMMIT,
+        "targets": [NODE_A],
+        "nodes": [package_node],
+    }
+    resolved: dict[str, object] = {
+        "commit": BASE_COMMIT,
+        "targets": [NODE_A],
+        "placements": {},
+        "routes": {},
+        "releases": {},
+        "workload_groups": {},
+        "input_digests": {"fleet": "f" * 64},
+        "fleet_evidence_digest": "e" * 64,
+        "operation_graph": graph,
+        "operation_payloads": {"removed-package:prepare": package_payload},
+        "agent_protocol_range": [1, 1],
+    }
+    with sessions.begin() as session:
+        session.add(
+            Reconciliation(
+                id="persisted-package-operation",
+                base_commit=BASE_COMMIT,
+                status="succeeded",
+                summary={},
+                graph=graph,
+                graph_digest=_digest(graph),
+                plan_digest=_digest(resolved),
+                resolved_plan=resolved,
+                current_phase="completed",
+                route_withdrawal_generation=0,
+                completion_generation=1,
+                created_at=datetime(2026, 8, 3, tzinfo=UTC),
+            )
+        )
+
+    with pytest.raises(ValueError, match="persisted resolved plan graph"):
+        orchestrator.resolved_plan(_digest(resolved))
 
 
 @pytest.mark.parametrize(
@@ -424,7 +505,7 @@ def test_plan_persists_immutable_canonical_graph_and_progress_fields(planner) ->
         }
 
 
-def test_advance_changes_mutable_state_but_legacy_cancel_is_disabled(planner) -> None:
+def test_advance_changes_mutable_state_but_cancel_is_disabled(planner) -> None:
     orchestrator, sessions = planner
     graph = orchestrator.plan(distributed_plan())
     original_document = deepcopy(graph.document)

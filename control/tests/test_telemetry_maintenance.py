@@ -1404,22 +1404,7 @@ def test_latest_raw_pruning_appends_authoritative_missing_sample_reset(
             return "a" * 40
 
         def read_document(self, commit: str, path: str) -> SimpleNamespace:
-            assert (commit, path) == (
-                "a" * 40,
-                "inventory/fleet.toml",
-            )
-            return SimpleNamespace(
-                parsed={
-                    "nodes": {
-                        NODE_A: {
-                            "display_name": "Alpha",
-                            "hostname": "alpha.internal",
-                            "lifecycle": "managed",
-                            "labels": {},
-                        }
-                    }
-                }
-            )
+            raise AssertionError(f"unexpected document read: {commit} {path}")
 
     events = FleetEventRepository(sessions, clock=lambda: NOW)
     telemetry = TelemetryRepository(sessions, clock=lambda: NOW)

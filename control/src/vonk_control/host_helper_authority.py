@@ -27,7 +27,7 @@ from vonk_agent_protocol.host_helper import (
 
 from .models import AgentOperation as StoredAgentOperation
 from .models import AgentOperationAttempt
-from .package_helper_authority import _load_private_key
+from .workload_helper_authority import _load_private_key
 
 
 class HostHelperAuthorityError(RuntimeError):

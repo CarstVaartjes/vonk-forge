@@ -9,9 +9,14 @@ def test_node_onboarding_runbook_covers_safe_resumable_workflow() -> None:
         "--apply",
         "resume",
         "emit-record",
-        "inventory/fleet.toml",
+        "PostgreSQL enrollment is authoritative",
         "topology",
         "recovery",
         "does not modify Git",
+        "add spark",
+        "next implementation step",
+        "not an operator command currently available",
+        "manual `agent.toml` editing is unsupported",
     ):
         assert phrase.lower() in text.lower()
+    assert "generated bootstrap command" not in text.lower()

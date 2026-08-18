@@ -53,7 +53,6 @@ impl ClientError {
 #[derive(Serialize)]
 #[serde(deny_unknown_fields)]
 struct ClaimRequest<'a> {
-    agent_implementation: &'static str,
     capabilities: &'a [&'a str],
     lease_seconds: u64,
     node_id: &'a str,
@@ -169,7 +168,6 @@ impl AgentHttpClient {
             .client
             .post(self.endpoint("/agent/v1/claim")?)
             .json(&ClaimRequest {
-                agent_implementation: "rust",
                 capabilities,
                 lease_seconds: 60,
                 node_id: &self.node_id,

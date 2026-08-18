@@ -32,18 +32,6 @@ _IMPLEMENTED_OPERATIONS = frozenset(
         AgentOperation.WORKLOAD_STOP.value,
         AgentOperation.WORKLOAD_HEALTH.value,
         AgentOperation.WORKLOAD_VERIFY.value,
-        # Workload-package operations use the same persisted graph and agent
-        # queue as the legacy workload actions.  Keeping them in this registry
-        # makes the graph validator family-agnostic without adding a second
-        # transport.
-        AgentOperation.PACKAGE_PREPARE.value,
-        AgentOperation.PACKAGE_ACTIVATE.value,
-        AgentOperation.PACKAGE_HEALTH.value,
-        AgentOperation.PACKAGE_STOP.value,
-        AgentOperation.PACKAGE_ROLLBACK.value,
-        AgentOperation.PACKAGE_REMOVE.value,
-        AgentOperation.PACKAGE_REPAIR.value,
-        AgentOperation.PACKAGE_GC.value,
     }
 )
 _PHASE_TRANSITIONS = {
@@ -450,20 +438,6 @@ def validate_persisted_resolved_plan(
             raise ValueError(
                 "persisted resolved plan operation payload digest is invalid"
             )
-    package_nodes = tuple(node for node in nodes if node.kind.startswith("package."))
-    if package_nodes:
-        _validate_package_plan(nodes, payloads)
-        return (
-            OperationGraph(
-                reconciliation_id,
-                base_commit,
-                targets,
-                nodes,
-                graph_digest,
-            ),
-            document,
-        )
-
     stop_nodes = tuple(
         node for node in nodes if node.kind == AgentOperation.WORKLOAD_STOP.value
     )
@@ -509,88 +483,6 @@ def validate_persisted_resolved_plan(
         ),
         document,
     )
-
-
-def _validate_package_plan(
-    nodes: tuple[OperationNode, ...],
-    payloads: Mapping[str, object],
-) -> None:
-    """Validate the generic package graph without a model catalog.
-
-    Package identities are carried only as exact digests in the request.  The
-    graph validator deliberately does not enumerate adapters, models, or
-    releases; those are authorized by the workload trust plane and checked by
-    the GPU node package engine.
-    """
-
-    from vonk_agent_protocol import PackageOperationRequest
-
-    allowed = {
-        AgentOperation.PACKAGE_PREPARE.value,
-        AgentOperation.PACKAGE_ACTIVATE.value,
-        AgentOperation.PACKAGE_HEALTH.value,
-        AgentOperation.PACKAGE_STOP.value,
-        AgentOperation.PACKAGE_ROLLBACK.value,
-        AgentOperation.PACKAGE_REMOVE.value,
-        AgentOperation.PACKAGE_REPAIR.value,
-    }
-    by_target: dict[tuple[str, str], dict[str, OperationNode]] = {}
-    for node in nodes:
-        if node.kind not in allowed:
-            continue
-        payload = payloads.get(node.operation_id)
-        if not isinstance(payload, Mapping):
-            raise TypeError("persisted package operation payload is invalid")
-        try:
-            request = PackageOperationRequest.parse(AgentOperation(node.kind), payload)
-        except Exception as error:
-            raise ValueError(
-                "persisted package operation payload is invalid"
-            ) from error
-        if request.deployment_id != node.workload_id:
-            raise ValueError("package operation deployment identity is inconsistent")
-        deployment = request.deployment_id
-        assert deployment is not None
-        family = by_target.setdefault((deployment, node.node_id), {})
-        if node.kind in family:
-            raise ValueError("duplicate package operation for deployment and node")
-        family[node.kind] = node
-
-    if not by_target:
-        raise ValueError("package graph has no package operations")
-    for (deployment, _node_id), operations in by_target.items():
-        prepares = operations.get(AgentOperation.PACKAGE_PREPARE.value)
-        activates = operations.get(AgentOperation.PACKAGE_ACTIVATE.value)
-        health = operations.get(AgentOperation.PACKAGE_HEALTH.value)
-        if prepares is None and activates is None and health is not None:
-            if health.dependencies:
-                raise ValueError("retained package health must not have dependencies")
-            continue
-        if prepares is None or activates is None or health is None:
-            raise ValueError("package graph lifecycle is incomplete")
-        if prepares.node_id != activates.node_id or activates.node_id != health.node_id:
-            raise ValueError("package graph lifecycle target is inconsistent")
-        expected_activation_dependencies = [prepares.operation_id]
-        stop = operations.get(AgentOperation.PACKAGE_STOP.value)
-        if stop is not None:
-            expected_activation_dependencies.append(stop.operation_id)
-        if activates.dependencies != tuple(sorted(expected_activation_dependencies)):
-            raise ValueError("package activation must depend on preparation and stop")
-        if health.dependencies != (activates.operation_id,):
-            raise ValueError("package health must depend on activation")
-        if activates.compensation_kind not in {
-            AgentOperation.PACKAGE_ROLLBACK.value,
-            None,
-        }:
-            raise ValueError("package activation compensation is invalid")
-        if activates.compensation_kind == AgentOperation.PACKAGE_ROLLBACK.value and any(
-            node.kind == AgentOperation.PACKAGE_ROLLBACK.value
-            and node.workload_id == deployment
-            for node in nodes
-        ):
-            # The rollback node is represented by the compensation kind on
-            # activation; it must never be dispatched as a primary operation.
-            raise ValueError("package rollback must be compensation-only")
 
 
 def _parse_plan(

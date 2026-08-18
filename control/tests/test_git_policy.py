@@ -12,7 +12,7 @@ from vonk_control.proposals import ProposalPreview
 
 
 def _preview(digest: str = "a" * 64) -> ProposalPreview:
-    return ProposalPreview("admin", "b" * 40, b"patch", ("inventory/fleet.toml",), ("passed",), digest)
+    return ProposalPreview("admin", "b" * 40, b"patch", ("inventory/topology.json",), ("passed",), digest)
 
 
 def test_release_mode_cannot_return_to_direct_and_survives_restart(tmp_path: Path) -> None:

@@ -15,8 +15,6 @@ from vonk_agent_protocol import canonical_message
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
 from vonk_control.models import (
     AgentCertificate,
-    AgentEnrollment,
-    AgentEnrollmentGrant,
     AgentNode,
     AgentOperation,
     AgentOperationAttempt,
@@ -279,8 +277,6 @@ def test_rust_node_cannot_be_assigned_an_unadvertised_operation(service) -> None
     with sessions.begin() as session:
         node = session.get(AgentNode, NODE_A)
         assert node is not None
-        node.agent_implementation = "rust"
-        node.migration_state = "complete"
         node.capabilities = ["recipe.install"]
 
     with pytest.raises(ValueError, match="does not advertise"):
@@ -296,270 +292,60 @@ def test_rust_node_cannot_be_assigned_an_unadvertised_operation(service) -> None
     assert stored.kind == "recipe.install"
 
 
-def test_new_enrollment_requires_rust_and_cannot_downgrade_after_migration(service) -> None:
+def test_rust_claim_updates_current_contact(service) -> None:
     jobs, sessions, _clock = service
-    with sessions.begin() as session:
-        node = session.get(AgentNode, NODE_A)
-        assert node is not None
-        node.agent_implementation = "pending"
-        node.migration_state = "required"
-
-    with pytest.raises(ValueError, match="requires the Rust agent"):
-        jobs.claim(
-            NODE_A,
-            "serial-a",
-            30,
-            protocol_version=2,
-            capabilities=["recipe.install"],
-            agent_implementation="python",
-        )
-
     assert jobs.claim(
         NODE_A,
         "serial-a",
         30,
         protocol_version=3,
         capabilities=["agent.runtime.rust.v1", "recipe.install"],
-        agent_implementation="rust",
     ) is None
-    with sessions() as session:
-        node = session.get(AgentNode, NODE_A)
-        assert node is not None
-        assert node.agent_implementation == "rust"
-        assert node.migration_state == "complete"
-
-    with pytest.raises(ValueError, match="cannot downgrade"):
-        jobs.claim(
-            NODE_A,
-            "serial-a",
-            30,
-            protocol_version=2,
-            capabilities=["recipe.install"],
-            agent_implementation="python",
-        )
 
 
-def test_python_cutover_requires_migration_certificate_and_retires_old_identity(
-    service,
-) -> None:
+def test_package_operation_is_not_a_control_plane_queue_operation(service) -> None:
     jobs, sessions, clock = service
-    rust_serial = "serial-rust"
 
-    with pytest.raises(ValueError, match="dedicated migration certificate"):
-        jobs.claim(
+    with pytest.raises(ValueError, match="not supported"):
+        jobs.enqueue(
+            parent(sessions, clock).id,
             NODE_A,
-            "serial-a",
-            30,
-            protocol_version=3,
-            capabilities=["agent.runtime.rust.v1", "recipe.install"],
-            agent_implementation="rust",
-        )
-
-    grant_id = str(uuid.uuid4())
-    with sessions.begin() as session:
-        session.add(
-            AgentEnrollmentGrant(
-                id=grant_id,
-                node_id=NODE_A,
-                purpose="rust-migration",
-                token_digest="d" * 64,
-                created_by="admin",
-                created_at=clock.now,
-                expires_at=clock.now + timedelta(minutes=10),
-                consumed_at=clock.now,
-            )
-        )
-        session.add(
-            AgentCertificate(
-                serial=rust_serial,
-                node_id=NODE_A,
-                not_before=clock.now - timedelta(seconds=1),
-                not_after=clock.now + timedelta(hours=1),
-                fingerprint="fingerprint-rust",
-                generation=2,
-            )
-        )
-        session.add(
-            AgentEnrollment(
-                id=str(uuid.uuid4()),
-                grant_id=grant_id,
-                node_id=NODE_A,
-                state="approved",
-                csr_pem="csr",
-                csr_public_key_pem="public",
-                csr_public_key_fingerprint="e" * 64,
-                host_key_fingerprint="host",
-                hardware_fingerprint="hardware",
-                agent_digest="f" * 64,
-                boot_id="boot",
-                created_at=clock.now,
-                decision_actor="admin",
-                decided_at=clock.now,
-                certificate_pem="certificate",
-                chain_pem="chain",
-                certificate_serial=rust_serial,
-                certificate_fingerprint="fingerprint-rust",
-                certificate_generation=2,
-                certificate_not_before=clock.now - timedelta(seconds=1),
-                certificate_not_after=clock.now + timedelta(hours=1),
-            )
-        )
-
-    assert (
-        jobs.claim(
-            NODE_A,
-            rust_serial,
-            30,
-            protocol_version=3,
-            capabilities=["agent.runtime.rust.v1", "recipe.install"],
-            agent_implementation="rust",
-        )
-        is None
-    )
-    with sessions() as session:
-        node = session.get(AgentNode, NODE_A)
-        old = session.get(AgentCertificate, "serial-a")
-        new = session.get(AgentCertificate, rust_serial)
-        assert node is not None and node.agent_implementation == "rust"
-        assert node.migration_state == "complete"
-        assert old is not None and old.state == "revoked"
-        assert old.revoked_at is not None
-        assert old.revoked_at.replace(tzinfo=UTC) == clock.now
-        assert new is not None and new.state == "active" and new.revoked_at is None
-
-    with pytest.raises(ValueError, match="cannot downgrade"):
-        jobs.claim(
-            NODE_A,
-            rust_serial,
-            30,
-            protocol_version=2,
-            capabilities=["recipe.install"],
-            agent_implementation="python",
-        )
-
-
-def test_package_operation_requires_protocol_v2_and_its_exact_capability(
-    service,
-) -> None:
-    jobs, sessions, clock = service
-    operation = jobs.enqueue(
-        parent(sessions, clock).id,
-        NODE_A,
-        "package.prepare",
-        COMMIT,
-        {
-            "schema_version": 1,
-            "deployment_id": "future-family",
-            "release_digest": "a" * 64,
-            "deployment_digest": "b" * 64,
-        },
-    )
-    legacy = [
-        "agent.rollback",
-        "agent.update",
-        "node.probe",
-        "release.install",
-        "workload.health",
-        "workload.prepare",
-        "workload.start",
-        "workload.stop",
-        "workload.verify",
-    ]
-
-    assert jobs.claim(
-        NODE_A,
-        "serial-a",
-        30,
-        protocol_version=1,
-        capabilities=legacy,
-    ) is None
-    with sessions() as session:
-        stored = session.get(AgentOperation, operation.id)
-        assert stored is not None and stored.state == "queued"
-
-    package_capabilities = legacy + [
-        "package.activate",
-        "package.gc",
-        "package.health",
-        "package.prepare",
-        "package.remove",
-        "package.repair",
-        "package.rollback",
-        "package.stop",
-    ]
-    claim = jobs.claim(
-        NODE_A,
-        "serial-a",
-        30,
-        protocol_version=2,
-        capabilities=package_capabilities,
-    )
-
-    assert claim is not None
-    assert claim.operation.value == "package.prepare"
-
-
-def test_package_validation_result_is_not_sent_to_reconciliation_consumer(service) -> None:
-    _, sessions, clock = service
-    consumed: list[str] = []
-    jobs = AgentJobService(
-        sessions,
-        clock=clock,
-        result_consumer=lambda _session, operation, _attempt, _message: consumed.append(
-            operation.id
-        ),
-    )
-    validation_parent = parent(sessions, clock)
-    with sessions.begin() as session:
-        stored = session.get(Job, validation_parent.id)
-        assert stored is not None
-        stored.kind = "package.validation"
-    operation = jobs.enqueue(
-        validation_parent.id,
-        NODE_A,
-        "package.prepare",
-        COMMIT,
-        {
-            "schema_version": 1,
-            "deployment_id": "future-family",
-            "release_digest": "a" * 64,
-            "deployment_digest": "b" * 64,
-        },
-    )
-    claim = jobs.claim(
-        NODE_A,
-        "serial-a",
-        30,
-        protocol_version=2,
-        capabilities=[
-            "node.probe",
-            "release.install",
-            "workload.health",
-            "workload.prepare",
-            "workload.start",
-            "workload.stop",
-            "workload.verify",
             "package.prepare",
-            "package.health",
-            "package.activate",
-            "package.stop",
-            "package.rollback",
-            "package.remove",
-            "package.gc",
-            "package.repair",
-        ],
-    )
-    assert claim is not None
-
-    jobs.succeed(claim, {"status": "ok"})
-
-    assert consumed == []
-    with sessions() as session:
-        stored_operation = session.get(AgentOperation, operation.id)
-        assert stored_operation is not None and stored_operation.state == "succeeded"
+            COMMIT,
+            {
+                "schema_version": 1,
+                "deployment_id": "removed-package",
+                "release_digest": "a" * 64,
+                "deployment_digest": "b" * 64,
+            },
+        )
 
 
-def test_recipe_only_agent_is_not_forced_to_advertise_legacy_executors(service) -> None:
+def test_package_capabilities_are_not_control_plane_agent_capabilities(
+    service,
+) -> None:
+    jobs, _sessions, _clock = service
+
+    with pytest.raises(ValueError, match="agent capabilities"):
+        jobs.claim(
+            NODE_A,
+            "serial-a",
+            30,
+            protocol_version=3,
+            capabilities=[
+                "node.probe",
+                "release.install",
+                "workload.health",
+                "workload.prepare",
+                "workload.start",
+                "workload.stop",
+                "workload.verify",
+                "package.prepare",
+            ],
+        )
+
+
+def test_recipe_only_agent_is_not_forced_to_advertise_old_executors(service) -> None:
     jobs, sessions, clock = service
     queued = jobs.enqueue(
         parent(sessions, clock).id,
@@ -580,8 +366,8 @@ def test_recipe_only_agent_is_not_forced_to_advertise_legacy_executors(service) 
         NODE_A,
         "serial-a",
         30,
-        protocol_version=2,
-        capabilities=["recipe.install"],
+        protocol_version=3,
+        capabilities=["agent.runtime.rust.v1", "recipe.install"],
     )
 
     assert claim is not None
@@ -683,8 +469,8 @@ def test_recipe_build_is_rejected_when_builder_runtime_changed_before_claim(
         NODE_A,
         "serial-a",
         30,
-        protocol_version=2,
-        capabilities=["recipe.build.v1"],
+        protocol_version=3,
+        capabilities=["agent.runtime.rust.v1", "recipe.build.v1"],
         runtime_identity={
             "active_slot": "B",
             "architecture": "linux-arm64",
@@ -779,8 +565,8 @@ def test_recipe_build_requires_runtime_identity_on_the_current_claim(service) ->
         NODE_A,
         "serial-a",
         30,
-        protocol_version=2,
-        capabilities=["recipe.build.v1"],
+        protocol_version=3,
+        capabilities=["agent.runtime.rust.v1", "recipe.build.v1"],
     )
 
     assert claim is None
@@ -1371,7 +1157,7 @@ def test_claim_persists_authenticated_running_release_identity(service) -> None:
         NODE_A,
         "serial-a",
         30,
-        protocol_version=1,
+        protocol_version=3,
         runtime_identity=runtime_identity,
     ) is not None
 
@@ -1412,7 +1198,7 @@ def test_claim_rejects_malformed_runtime_architecture_without_persisting_it(
             NODE_A,
             "serial-a",
             30,
-            protocol_version=1,
+            protocol_version=3,
             runtime_identity=runtime_identity,
         )
 
@@ -1430,7 +1216,7 @@ def test_retired_identity_cannot_mutate_active_attempt_or_record_contact(
     operation = jobs.enqueue(
         parent(sessions, clock).id, NODE_A, "node.probe", COMMIT, {}
     )
-    claim = jobs.claim(NODE_A, "serial-a", 30, protocol_version=2)
+    claim = jobs.claim(NODE_A, "serial-a", 30, protocol_version=3)
     assert claim is not None
     with sessions.begin() as session:
         node = session.get(AgentNode, NODE_A)
@@ -1456,7 +1242,7 @@ def test_retired_identity_cannot_mutate_active_attempt_or_record_contact(
             AgentOperationAttempt.attempt == claim.attempt,
         ))
         assert node is not None and node.last_seen_at is None
-        assert node.protocol_version == 2
+        assert node.protocol_version == 3
         assert stored_operation is not None and stored_operation.state == "running"
         assert attempt is not None and attempt.state == "running"
         assert attempt.progress is None and attempt.result is None

@@ -19,9 +19,11 @@ def repository(tmp_path: Path):
     root.mkdir()
     _git(root, "init", "-q")
     (root / "inventory").mkdir()
-    (root / "inventory/fleet.toml").write_text("schema_version = 2\n")
-    (root / "config/package-families").mkdir(parents=True, exist_ok=True)
-    (root / "config/package-families/basic.toml").write_text('schema_version = 1\nname = "basic"\n')
+    (root / "inventory/topology.json").write_text('{"schema_version": 1}\n')
+    (root / "docs/audits").mkdir(parents=True, exist_ok=True)
+    (root / "docs/audits/baseline.toml").write_text(
+        'schema_version = 1\nname = "baseline"\n'
+    )
     _git(root, "add", ".")
     _git(root, "commit", "-qm", "initial")
     return root, _git(root, "rev-parse", "HEAD")
@@ -38,43 +40,34 @@ def test_repository_rejects_unallowlisted_and_traversal_paths(repository) -> Non
 def test_read_is_pinned_to_immutable_commit(repository) -> None:
     root, commit = repository
     service = RepositoryService(root)
-    before = service.read_document(commit, "inventory/fleet.toml")
-    (root / "inventory/fleet.toml").write_text("schema_version = 999\n")
-    after = service.read_document(commit, "inventory/fleet.toml")
+    before = service.read_document(commit, "inventory/topology.json")
+    (root / "inventory/topology.json").write_text('{"schema_version": 999}\n')
+    after = service.read_document(commit, "inventory/topology.json")
     assert before == after
-    assert before.parsed == {"schema_version": 2}
+    assert before.parsed == {"schema_version": 1}
     assert before.sha256 == __import__("hashlib").sha256(before.content).hexdigest()
 
 
-def test_workload_authority_documents_are_read_from_pinned_commits(repository) -> None:
+def test_manifest_and_audit_documents_are_read_from_pinned_commits(repository) -> None:
     root, _commit = repository
-    (root / "config/package-families").mkdir(parents=True, exist_ok=True)
-    (root / "config/package-families/future.toml").write_text(
-        'schema_version = 1\nfamily_id = "future"\n'
+    (root / "docs/audits/future.toml").write_text(
+        'schema_version = 1\naudit_id = "future"\n'
     )
-    (root / "config/workload-deployments").mkdir(parents=True)
-    (root / "config/workload-deployments/future.toml").write_text(
-        'schema_version = 1\ndeployment_id = "future"\n'
-    )
-    (root / "manifests/workload-releases/future").mkdir(parents=True)
-    release_path = root / (
-        "manifests/workload-releases/future/" + "a" * 64 + ".json"
-    )
-    release_path.write_text("{}")
+    (root / "manifests/library").mkdir(parents=True)
+    manifest_path = root / "manifests/library/future.json"
+    manifest_path.write_text('{"schema_version": 1, "manifest_id": "future"}\n')
     _git(root, "add", ".")
     _git(root, "commit", "-qm", "workload documents")
     commit = _git(root, "rev-parse", "HEAD")
     service = RepositoryService(root)
 
-    assert service.read_document(commit, "config/package-families/future.toml").parsed[
-        "family_id"
+    assert service.read_document(commit, "docs/audits/future.toml").parsed[
+        "audit_id"
     ] == "future"
-    assert service.read_document(commit, "config/workload-deployments/future.toml").parsed[
-        "deployment_id"
-    ] == "future"
-    assert service.read_document(
-        commit, "manifests/workload-releases/future/" + "a" * 64 + ".json"
-    ).parsed == {}
+    assert service.read_document(commit, "manifests/library/future.json").parsed == {
+        "schema_version": 1,
+        "manifest_id": "future",
+    }
 
 
 def test_inspect_does_not_execute_repository_hooks(repository, tmp_path: Path) -> None:
@@ -85,14 +78,14 @@ def test_inspect_does_not_execute_repository_hooks(repository, tmp_path: Path) -
     hook.chmod(0o700)
     snapshot = RepositoryService(root).inspect(commit)
     assert snapshot.commit == commit
-    assert "inventory/fleet.toml" in snapshot.documents
+    assert "inventory/topology.json" in snapshot.documents
     assert not marker.exists()
 
 
 def test_managed_symlink_is_rejected(repository) -> None:
     root, _ = repository
-    (root / "inventory/link.toml").symlink_to("fleet.toml")
-    _git(root, "add", "inventory/link.toml")
+    (root / "inventory/link.json").symlink_to("topology.json")
+    _git(root, "add", "inventory/link.json")
     _git(root, "commit", "-qm", "link")
     commit = _git(root, "rev-parse", "HEAD")
     with pytest.raises(RepositoryPolicyError, match="symlink"):
@@ -117,6 +110,6 @@ def test_repository_accepts_a_valid_linked_worktree(repository, tmp_path: Path) 
 
     assert service.head() == commit
     assert service.object_store == (root / ".git" / "objects").resolve()
-    assert service.read_document(commit, "inventory/fleet.toml").parsed == {
-        "schema_version": 2
+    assert service.read_document(commit, "inventory/topology.json").parsed == {
+        "schema_version": 1
     }

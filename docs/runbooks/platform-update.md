@@ -6,13 +6,10 @@ completely before changing GPU node 1. Never run a distributed model during this
 procedure, and never use ad-hoc `apt` or `fwupdmgr` updates while the Dashboard
 path is available.
 
-This document covers the platform plane only. Generic workload packages are
-published from the NAS Git/TUF authority and rolled out independently through
-the package API. Model recipes, adapters, runtimes, images, and checkpoints
-are selected through Catalog and Library. Follow [Generic workload package
-operations](workload-packages.md) only for a generic package; do not use this
-runbook, SSH, or `agent.update` for a recipe revision or routine package
-change.
+This document covers the platform plane only. Model recipes, adapters,
+runtimes, images, and checkpoints are selected through Library; do not use
+this runbook, SSH, or `agent.update` for a recipe revision or routine
+recipe change.
 
 The authoritative NVIDIA references checked on 2026-08-01 are:
 
@@ -356,14 +353,12 @@ as a historical record, not a procedure to replay.
 ## NAS-to-GPU node platform skew
 
 The NAS Docker services and GPU node worker code are updated as a platform
-operation. In the Admin → Updates page, or with the CLI below, compare the
-NAS's signed platform target with each authenticated GPU node agent:
+operation. In the authenticated Fleet update workflow, compare the NAS's
+signed platform target with each authenticated GPU node agent:
 
 ```bash
-vonkctl admin updates skew --json
-vonkctl admin updates plan --target-version 2.0.0 --json
-vonkctl admin updates apply --plan-digest PLAN_DIGEST --json
-vonkctl admin updates status --json
+Fleet shows skew, the exact signed target, the canary plan, and rollout status
+inline with the affected Sparks.
 ```
 
 When the NAS is newer, the UI shows the exact target digest, affected node
@@ -371,8 +366,7 @@ IDs, compatibility result, canary order, and predecessor. Nothing is sent
 until an administrator explicitly confirms the signed plan. The control plane
 then fans out `agent.update` over each GPU node's outbound mTLS channel using the
 supervisor's A/B slots; SSH is not used for this standard path. A compatible
-older agent may continue serving workload packages while the operator reviews
-the skew. The workload package path remains independent and must be used for
-new models, adapters, runtimes, images, checkpoints, and environments. A
-workload only requires a platform update when it declares a genuinely new
-privileged ABI or protocol capability.
+older agent may continue serving active workloads while the operator reviews
+the skew. New models, adapters, runtimes, images, checkpoints, and environments
+are selected through Library. A workload only requires a platform
+update when it declares a genuinely new privileged ABI or protocol capability.

@@ -142,22 +142,8 @@ in the local generation, its encrypted backup, and the named 1Password item.
 For two-node acceptance, pass the canonical NVIDIA Sync direct networks and
 configure each agent with one address from those networks plus its measured
 bandwidth. The publisher rejects any direct network that overlaps management.
-For the one supported host-authority upgrade from the original 15-file source
-generation, rerun the same command once with
-`--upgrade-host-runtime-authority`. The helper
-accepts only an otherwise complete and valid legacy generation, performs an
-add-only migration by adding the two
-host-runtime authority files, leaves every existing file byte-for-byte
-unchanged, and can recover if power is lost after publishing the private half.
-That produces the valid pre-browser 17-file source generation. Rerun the full
-command with both OAuth input files and `--upgrade-browser-access`; this
-add-only browser migration preserves all 17 existing bytes and adds the four
-browser files. Then run `--upgrade-litellm-key-management` to add only
-`litellm-database-password`. Back up the resulting 22-file generation
-before deployment. It
-rejects a public-only key, unknown file, inconsistent generation, or ordinary
-incomplete directory; do not work around that refusal by replacing the CA or
-server certificate.
+This is a fresh-install bundle. Generate a new complete source directory for
+each clean deployment; the generator does not upgrade older secret layouts.
 
 `dev-runtime-project` validates the complete local generation and projects
 exactly 18 deployment files into the NAS `secrets/` directory; it excludes
@@ -365,34 +351,31 @@ scp '<LOCAL_SECRETS_DIR>/host-runtime-grant-public-key' \
   '<SPARK_2_SSH_TARGET>:/tmp/host-helper-authority.pub'
 ```
 
-On each node, install that certificate as root and set the complete
-`/etc/vonk-forge-agent/agent.toml` inputs from
-[Install the Vonk Forge agent](../operations/install-vonk-agent.md):
-`enrollment_url`, `controller_url`, `ca_path`, the DER `ca_sha256`, that
-node's unique `node_id`, `fabric_address`, and `fabric_bandwidth_mbps = 200000`.
-Install the helper key at `/etc/vonk-forge-agent/host-helper-authority.pub` as
-`root:root` mode `0644`. Use `https://<ENROLLMENT_HOSTNAME>:8443/` for
-enrollment and `https://<CONTROLLER_HOSTNAME>:8443/` for authenticated
-controller traffic. Generate a non-secret candidate identity with
-`printf 'spk_%s\n' "$(openssl rand -hex 16)"`, record it, and never reuse it on
-another node.
+On each node, install the CA and helper public key as documented in
+[Install the Vonk Forge agent](../operations/install-vonk-agent.md).
+Registration is the authority. Fleet **Add Spark** is the next implementation
+step: it records the node-bound bootstrap grant and the node-specific runtime
+inputs, including the two explicit `:8443` origins, the DER `ca_sha256`, that
+node's unique `node_id`, and any required `fabric_address` plus
+`fabric_bandwidth_mbps = 200000`. That next implementation step is not an
+operator command currently available. Manual `agent.toml` editing is
+unsupported.
 
 Pair one node at a time in this strict order:
 
-1. Create one one-use node pairing grant in the administrator interface.
-2. Save its token directly to a private root-readable node file; do not display
-   or paste it into a command.
-3. Run `vonk-agent pair` with the configured `enrollment_url`, CA fingerprint,
-   and `--token-stdin`.
-4. Approve the pending enrollment after comparing the node, CSR, host-key,
+1. Create the node-bound registration intent in the administrator interface.
+2. Review the Fleet-issued runtime inputs and pending enrollment evidence.
+3. Approve the pending enrollment after comparing the node, CSR, host-key,
    hardware, agent, and boot evidence.
-5. Repeat the same `vonk-agent pair` command to collect the issued certificate,
-   then remove the one-use token file.
-6. Enable the package-helper socket and supervisor, and confirm the controller
-   reports the certificate-bound `spk_` identity.
+4. Leave the node at that reviewed registration boundary until the Fleet
+   bootstrap emitter exists; do not script a substitute or hand-author
+   `agent.toml`.
+5. After the emitter lands, resume this step with the Fleet-issued bootstrap
+   action, then enable the package-helper socket and supervisor and confirm
+   the controller reports the certificate-bound `spk_` identity.
 
-The exact pair command is documented in the installation guide. Hostnames and
-IP addresses are observations; the certificate-bound `spk_` value is identity.
+Hostnames and IP addresses are observations; the certificate-bound `spk_`
+value is identity.
 
 ## Inventory preflight
 

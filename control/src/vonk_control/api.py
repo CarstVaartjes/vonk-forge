@@ -84,7 +84,6 @@ from .operation_api import (
     fleet_response,
     job_response,
 )
-from .package_api import PackageApiServices, install_package_routes
 from .proposals import DocumentChange
 from .recipe_api import install_recipe_operation_routes
 from .recipe_builds import RecipeBuildService
@@ -648,10 +647,10 @@ def build_agent_services(
         HostHelperGrantIssuer,
         HostRuntimeAuthorityService,
     )
-    from .package_helper_authority import (
-        PackageHelperAuthorityService,
-        PackageHelperGrantIssuer,
-        PackageObjectReceiptIssuer,
+    from .workload_helper_authority import (
+        WorkloadHelperAuthorityService,
+        WorkloadHelperGrantIssuer,
+        WorkloadObjectReceiptIssuer,
     )
     from .pki import BuiltinCertificateAuthority
     from .presence import AgentPresenceService, ManagementAddressPolicy
@@ -771,12 +770,12 @@ def build_agent_services(
     if getattr(settings, "deployment_mode", "") == "production" and (
         grant_key_path is None or receipt_key_path is None
     ):
-        raise RuntimeError("package helper authority keys are unavailable")
+        raise RuntimeError("workload helper authority keys are unavailable")
     if grant_key_path is not None and receipt_key_path is not None:
-        helper_authority = PackageHelperAuthorityService(
+        helper_authority = WorkloadHelperAuthorityService(
             sessions,
-            PackageHelperGrantIssuer.from_private_key_file(grant_key_path, clock=clock),
-            PackageObjectReceiptIssuer.from_private_key_file(receipt_key_path),
+            WorkloadHelperGrantIssuer.from_private_key_file(grant_key_path, clock=clock),
+            WorkloadObjectReceiptIssuer.from_private_key_file(receipt_key_path),
             workload_target_root=workload_tuf_target_root,
             clock=clock,
         )
@@ -810,7 +809,7 @@ def build_agent_services(
         tuf_target_root=tuf_target_root,
         workload_tuf_metadata_root=workload_tuf_metadata_root,
         workload_tuf_target_root=workload_tuf_target_root,
-        package_helper_authority=helper_authority,
+        workload_helper_authority=helper_authority,
         host_runtime_authority=host_runtime_authority,
         fabric_policy=(
             ManagementAddressPolicy.parse(
@@ -962,7 +961,6 @@ def create_app(
     generic_jobs_enabled: bool = False,
     operations: OperationApiServices | None = None,
     updates: Any | None = None,
-    packages: PackageApiServices | None = None,
     catalog: CatalogService | None = None,
     global_catalog: Any | None = None,
     workload_run: WorkloadRunWorkflow | None = None,
@@ -1006,14 +1004,6 @@ def create_app(
                         "request_id": request.state.request_id,
                     }
                 ),
-                status_code=422,
-                media_type="application/json",
-            )
-        if request.url.path.startswith(
-            "/api/v1/packages/"
-        ) or request.url.path.startswith("/api/v1/deployments"):
-            return Response(
-                content=canonical_message({"detail": "package request is invalid"}),
                 status_code=422,
                 media_type="application/json",
             )
@@ -1190,12 +1180,6 @@ def create_app(
 
         install_auth_routes(app, browser_auth, audits, authenticated_actor)
 
-    install_package_routes(
-        app,
-        actor_dependency=authenticated_actor,
-        audits=audits,
-        services=packages,
-    )
     install_catalog_routes(
         app,
         actor_dependency=authenticated_actor,
@@ -1837,11 +1821,7 @@ def production_app() -> FastAPI:
     from .logging import JobLogStore
     from .metrics import MetricsRegistry, OperationalMetricsCollector
     from .models import Job
-    from .offline import OnlineLock
     from .operation_api import durable_operation_services
-    from .package_publication import PackagePublicationService
-    from .package_services import ProductionPackageProjectionService
-    from .package_validation_runner import PackageValidationRunner
     from .presence import ManagementAddressPolicy
     from .proposals import ProposalService
     from .recipe_routes import AtomicRecipeRoutePublisher, RecipeRouteService
@@ -1864,8 +1844,6 @@ def production_app() -> FastAPI:
     from .update_grants import AdminActionGrantIssuer
     from .updates import UpdateOrchestrator
     from .worker_authority import RepositoryAuthorityService
-    from .workload_signer import UnixWorkloadSignerClient
-    from .workload_trust import WorkloadTrustDelivery
 
     generation = GenerationStartupSettings.from_env_and_secrets()
     sessions = session_factory(build_engine(generation.database_url))
@@ -1909,8 +1887,6 @@ def production_app() -> FastAPI:
     with sessions.begin() as session:
         seed_builtin_harnesses(session, clock())
 
-    online_lock = OnlineLock(settings.state_path / "offline.lock")
-    online_lock.__enter__()
     token_codec = TokenCodec(settings.token_signing_key)
     cursor_codec = token_codec.cursor_codec()
     job_service = JobService(sessions, clock=clock, cursors=cursor_codec)
@@ -1978,33 +1954,6 @@ def production_app() -> FastAPI:
         clock,
         commit_eligible=commit_eligible,
         current_commit=current_commit,
-    )
-    validation_runner = PackageValidationRunner(
-        sessions,
-        agent_services.operations,
-        clock=clock,
-    )
-    package_services = ProductionPackageProjectionService(
-        repository,
-        sessions,
-        fleet=dashboard.fleet,
-        clock=clock,
-        agent_jobs=agent_services.operations,
-        package_trust=WorkloadTrustDelivery(
-            metadata_root=settings.workload_tuf_metadata_root,
-            target_root=settings.workload_tuf_target_root,
-            clock=clock,
-        ),
-        validation_runner=validation_runner,
-    )
-    package_services.install_publication(
-        PackagePublicationService(
-            candidate_loader=package_services.publication_candidate,
-            head=current_commit,
-            commit_eligible=commit_eligible,
-            publisher=UnixWorkloadSignerClient(settings.workload_signer_socket_path),
-            clock=clock,
-        )
     )
     if settings.admin_grant_private_key_path is None:
         raise RuntimeError("production admin grant private key is unavailable")
@@ -2200,7 +2149,6 @@ def production_app() -> FastAPI:
             cursors=cursor_codec,
         ),
         updates=update_admin,
-        packages=PackageApiServices.from_object(package_services),
         catalog=catalog_service,
         global_catalog=global_catalog,
         workload_run=WorkloadRunWorkflow(
@@ -2224,9 +2172,8 @@ def production_app() -> FastAPI:
         app.mount("/", SpaFiles(directory=web_root, html=True), name="admin-web")
 
     @app.on_event("shutdown")
-    def release_online_lock() -> None:
+    def close_global_catalog() -> None:
         global_catalog.close()
-        online_lock.__exit__()
 
     return app
 

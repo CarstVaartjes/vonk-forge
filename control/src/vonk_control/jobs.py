@@ -379,48 +379,6 @@ class JobService:
                 dict(job.payload), job.base_commit, tuple(job.targets),
             )
 
-    def quarantine_unlinked(self, reason: str) -> bool:
-        """Move one legacy unlinked job to operator review without executing it."""
-
-        if not reason.strip():
-            raise ValueError("quarantine reason is required")
-        now = self._clock()
-        with self._claim_lock, self._sessions.begin() as session:
-            job = session.scalars(
-                select(Job)
-                .where(
-                    Job.reconciliation_id.is_(None),
-                    Job.kind != "platform.update",
-                    or_(
-                        Job.state == "queued",
-                        Job.id.in_(
-                            select(JobAttempt.job_id).where(
-                                JobAttempt.state == "running",
-                                JobAttempt.lease_deadline < now,
-                            )
-                        ),
-                    ),
-                )
-                .order_by(Job.created_at, Job.id)
-                .with_for_update(skip_locked=True)
-                .limit(1)
-            ).first()
-            if job is None:
-                return False
-            if job.current_attempt:
-                attempt = session.scalar(
-                    select(JobAttempt).where(
-                        JobAttempt.job_id == job.id,
-                        JobAttempt.attempt == job.current_attempt,
-                    )
-                )
-                if attempt is not None and attempt.state == "running":
-                    attempt.state = "expired"
-            job.state = "waiting-for-operator"
-            job.status_reason = redact_text(reason)[:1024]
-            job.updated_at = now
-            return True
-
     def _active(self, session: Session, fence: AttemptFence) -> tuple[Job, JobAttempt]:
         job = session.get(Job, fence.job_id)
         attempt = session.scalar(select(JobAttempt).where(JobAttempt.fence == fence.fence))

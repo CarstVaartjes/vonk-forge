@@ -92,13 +92,12 @@ the driver, firmware, Netplan, or the Docker group. It installs but does not
 activate the Docker-aware site firewall; the operator supplies node-specific
 addresses and accepted host ports before the runtime helper can start.
 
-Copy the CA and edit the bootstrap configuration:
+Copy the CA:
 
 ```bash
 sudo install -o root -g vonk-agent -m 0640 controller-ca.pem \
   /etc/vonk-forge-agent/controller-ca.pem
 openssl x509 -in controller-ca.pem -outform DER | sha256sum
-sudoedit /etc/vonk-forge-agent/agent.toml
 ```
 
 Install the matching public host-runtime grant key generated with the NAS
@@ -115,50 +114,32 @@ The DER SHA-256 fingerprint command prints one line in the form
 `<64-lowercase-hex>  -`. Copy only the first field into `ca_sha256`; do not
 paste the certificate, token, or any secret into notes or logs.
 
-Set the HTTPS root origins and controller CA path explicitly:
+Registration is the authority. The supported flow ends at Fleet-backed
+registration intent and reviewed runtime inputs, not at an operator-authored
+local configuration checklist. Manual `agent.toml` editing is unsupported.
 
-```toml
-enrollment_url = "https://<ENROLLMENT_HOSTNAME>:8443/"
-controller_url = "https://<CONTROLLER_HOSTNAME>:8443/"
-ca_path = "/etc/vonk-forge-agent/controller-ca.pem"
-ca_sha256 = "<64_LOWERCASE_HEX_FROM_SHA256SUM>"
-node_id = "<NODE_ID>"
-# Required for multi-node admission; use one address from the common direct
-# TCP fabric configured by NVIDIA Sync/Cluster Assistant, or a grandfathered
-# existing site whose unchanged fabric has separate accepted evidence.
-fabric_address = "<NODE_FABRIC_IP>"
-fabric_bandwidth_mbps = 200000
-```
-
-`enrollment_url` is used only by `pair`; `controller_url` is used only after
-certificate issuance by the authenticated service. The development values are
-the exact roots `https://<ENROLLMENT_HOSTNAME>:8443/` and
+`enrollment_url` is used only for first-contact registration against
+`https://<ENROLLMENT_HOSTNAME>:8443/`. `controller_url` is used only after the
+certificate is issued for the authenticated service at
 `https://<CONTROLLER_HOSTNAME>:8443/`; do not rely on HTTPS port 443 defaults.
-Keep `data_dir` at
-`/var/lib/vonk-forge-agent` unless a reviewed packaging change says otherwise.
-An upgraded, already-paired agent can continue to run with its preserved
-legacy conffile, but an administrator must add `enrollment_url` before any
-future pairing or recovery enrollment.
+Keep `data_dir` at `/var/lib/vonk-forge-agent` unless a reviewed packaging
+change says otherwise.
 
-In the admin interface, create a one-use pairing grant for that node. The
-ordering is strict: create the grant, run `pair`, approve the pending
-enrollment, then run the exact same `pair` command again to collect the issued
-certificate. Supply the one-use token through standard input so it never
-appears in shell history:
+Fleet **Add Spark** is the next implementation step. It will remain the source
+of the node-bound registration intent, the one-use bootstrap grant, and the
+exact non-secret runtime inputs: `enrollment_url`, `controller_url`,
+`ca_path = "/etc/vonk-forge-agent/controller-ca.pem"`, `ca_sha256`, the
+assigned `node_id`, and—when multi-node admission is in scope—the node's
+direct-fabric address plus `fabric_bandwidth_mbps = 200000`. That bootstrap
+action is not an operator command currently available.
 
-```bash
-sudo -u vonk-agent -- \
-  /var/lib/vonk-forge/supervisor/current/vonk-agent pair \
-  --enrollment https://<ENROLLMENT_HOSTNAME>:8443/ \
-  --ca-sha256 <64_LOWERCASE_HEX_FROM_SHA256SUM> \
-  --token-stdin < /run/secrets/vonk-enrollment-token
-```
-
-Approve the displayed enrollment in the admin interface, then repeat the exact
-command once to collect the issued certificate. Delete the token file after
-the second successful run. If the node loses its key, expires before renewal,
-or the disk is replaced, do not copy another node's certificate: create a new
-one-use grant and repeat this same grant/pair/approve/pair flow.
+Until the emitter lands, this section is the implementation contract only. The
+packaged placeholder `agent.toml` is a materialization target for registration
+output, not an operator-authored document. The next implementation step is for
+Fleet Add Spark to write the runtime file, store the one-use token without
+exposing it in shell history, submit enrollment evidence, wait for approval,
+repeat collection when needed, remove the consumed token, and leave the
+authenticated runtime ready for validation.
 
 ## Validate and start
 
@@ -194,8 +175,8 @@ sudo systemctl restart vonk-forge-agent-supervisor.service
 sudo systemctl status vonk-forge-agent-supervisor.service
 ```
 
-The controller must show `Rust agent`, migration `complete`, protocol 3, the
-signed runtime identity, fresh inventory, `build.rootless-podman.v1`, and
+The controller must show a registered Spark with protocol 3, the signed
+runtime identity, fresh inventory, `build.rootless-podman.v1`, and
 `runtime.spark-docker-nvidia.v1`. The latter is reported only when the Docker
 client and NVIDIA CDI `nvidia.com/gpu=all` checks pass.
 Install/start admission remains controller-side: disk is checked before image
@@ -240,8 +221,8 @@ publications.
   command above, update `ca_sha256`, then restart the supervisor and confirm
   the controller still reports the same `node_id`.
 - Identity-loss recovery: for expiry, key loss, or storage replacement, create
-  a fresh one-use grant and repeat the original grant/pair/approve/pair
-  sequence. Recovery is always a new local key plus a new certificate.
+  a fresh one-use grant and repeat the original registration and approval flow
+  from Fleet Add Spark. Recovery is always a new local key plus a new certificate.
 - Start-limit recovery: `Restart=on-failure` is deliberately bounded. If
   `systemctl status` reports `start-limit-hit`, first make the controller and
   its authenticated agent endpoint healthy, then inspect the node journal for

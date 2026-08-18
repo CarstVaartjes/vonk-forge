@@ -23,7 +23,7 @@ from vonk_control.harnesses.registry import (
     HarnessRegistry,
     TrustedBuiltinComposition,
 )
-from vonk_control.package_helper_authority import PackageObjectReceiptIssuer
+from vonk_control.workload_helper_authority import WorkloadObjectReceiptIssuer
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 
 
@@ -224,7 +224,7 @@ def signed_source_bundle(tmp_path: Path):
     bundle = adapter_bundle("custom-adapter")
     store = SourceBundleStore(tmp_path / "source-bundles")
     stored = store.put(bundle.sha256, io.BytesIO(bundle.archive))
-    issuer = PackageObjectReceiptIssuer(Ed25519PrivateKey.generate())
+    issuer = WorkloadObjectReceiptIssuer(Ed25519PrivateKey.generate())
     receipt = issuer.issue_object_receipt(
         object_digest=hashlib.sha256(bundle.archive).hexdigest(),
         size=len(bundle.archive),
@@ -233,7 +233,7 @@ def signed_source_bundle(tmp_path: Path):
 
 
 def custom_registry(
-    store: SourceBundleStore, issuer: PackageObjectReceiptIssuer
+    store: SourceBundleStore, issuer: WorkloadObjectReceiptIssuer
 ) -> HarnessRegistry:
     return HarnessRegistry(
         source_bundle_store=store,
@@ -304,7 +304,7 @@ def test_registry_copies_trusted_signer_key_data_at_construction(
         source_bundle_store=store,
         trusted_signer_keys=trusted_keys,
     )
-    replacement = PackageObjectReceiptIssuer(Ed25519PrivateKey.generate())
+    replacement = WorkloadObjectReceiptIssuer(Ed25519PrivateKey.generate())
     trusted_keys.clear()
     trusted_keys[replacement.key_id] = replacement.public_key_bytes
 
@@ -455,7 +455,7 @@ def test_reserved_builtin_slug_cannot_be_taken_over_by_custom_registration(
 ) -> None:
     bundle = adapter_bundle("vllm")
     with pytest.raises(HarnessCompileError, match="reserved built-in"):
-        issuer = PackageObjectReceiptIssuer(Ed25519PrivateKey.generate())
+        issuer = WorkloadObjectReceiptIssuer(Ed25519PrivateKey.generate())
         store = SourceBundleStore(tmp_path / "source-bundles")
         stored = store.put(bundle.sha256, io.BytesIO(bundle.archive))
         registry = custom_registry(store, issuer)
@@ -684,7 +684,7 @@ def test_custom_adapter_rejects_wrong_signer_and_caller_loader(
     signed_source_bundle,
 ) -> None:
     store, issuer, receipt, _stored, bundle = signed_source_bundle
-    other = PackageObjectReceiptIssuer(Ed25519PrivateKey.generate())
+    other = WorkloadObjectReceiptIssuer(Ed25519PrivateKey.generate())
     wrong_signer_receipt = other.issue_object_receipt(
         object_digest=hashlib.sha256(bundle.archive).hexdigest(),
         size=len(bundle.archive),
@@ -801,7 +801,7 @@ def test_custom_adapter_rejects_missing_duplicate_or_noncanonical_document(
     bundle = generate_source_bundle(files)
     store = SourceBundleStore(tmp_path / "source-bundles")
     stored = store.put(bundle.sha256, io.BytesIO(bundle.archive))
-    issuer = PackageObjectReceiptIssuer(Ed25519PrivateKey.generate())
+    issuer = WorkloadObjectReceiptIssuer(Ed25519PrivateKey.generate())
     registry = custom_registry(store, issuer)
     receipt = issuer.issue_object_receipt(
         object_digest=hashlib.sha256(stored.path.read_bytes()).hexdigest(),
@@ -822,7 +822,7 @@ def test_custom_adapter_output_is_determined_by_its_signed_document(
             "custom-adapter", argv_template=["/opt/vonk/adapters/bin/alternate"]
         ),
     )
-    issuer = PackageObjectReceiptIssuer(Ed25519PrivateKey.generate())
+    issuer = WorkloadObjectReceiptIssuer(Ed25519PrivateKey.generate())
 
     def register(bundle):
         store = SourceBundleStore(tmp_path / bundle.sha256)
@@ -862,7 +862,7 @@ def test_custom_adapter_can_bind_a_signed_read_only_input_mount(
     bundle = adapter_bundle("custom-input", document=document)
     store = SourceBundleStore(tmp_path / "source-bundles")
     stored = store.put(bundle.sha256, io.BytesIO(bundle.archive))
-    issuer = PackageObjectReceiptIssuer(Ed25519PrivateKey.generate())
+    issuer = WorkloadObjectReceiptIssuer(Ed25519PrivateKey.generate())
     registry = custom_registry(store, issuer)
     identity = _source_identity(bundle)
     registry.register(
@@ -931,7 +931,7 @@ def test_custom_adapter_rejects_non_allowlisted_executables_and_shell_launchers(
     bundle = adapter_bundle("custom-adapter", document=document)
     store = SourceBundleStore(tmp_path / "source-bundles")
     stored = store.put(bundle.sha256, io.BytesIO(bundle.archive))
-    issuer = PackageObjectReceiptIssuer(Ed25519PrivateKey.generate())
+    issuer = WorkloadObjectReceiptIssuer(Ed25519PrivateKey.generate())
     registry = custom_registry(store, issuer)
 
     with pytest.raises(HarnessCompileError, match="adapter"):
@@ -949,7 +949,7 @@ def test_custom_adapter_rejects_unknown_document_fields(tmp_path: Path) -> None:
     bundle = adapter_bundle("custom-adapter", document=document)
     store = SourceBundleStore(tmp_path / "source-bundles")
     stored = store.put(bundle.sha256, io.BytesIO(bundle.archive))
-    issuer = PackageObjectReceiptIssuer(Ed25519PrivateKey.generate())
+    issuer = WorkloadObjectReceiptIssuer(Ed25519PrivateKey.generate())
     registry = custom_registry(store, issuer)
 
     with pytest.raises(HarnessCompileError, match="adapter"):
@@ -1093,7 +1093,7 @@ def test_custom_adapter_rejects_non_exact_contract_version(
     )
     store = SourceBundleStore(tmp_path / "source-bundles")
     stored = store.put(bundle.sha256, io.BytesIO(bundle.archive))
-    issuer = PackageObjectReceiptIssuer(Ed25519PrivateKey.generate())
+    issuer = WorkloadObjectReceiptIssuer(Ed25519PrivateKey.generate())
     registry = custom_registry(store, issuer)
     receipt = issuer.issue_object_receipt(
         object_digest=hashlib.sha256(stored.path.read_bytes()).hexdigest(),

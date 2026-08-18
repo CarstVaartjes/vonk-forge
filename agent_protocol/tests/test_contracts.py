@@ -488,14 +488,6 @@ def test_operation_enum_contains_only_supported_operations() -> None:
         "workload.verify",
         "agent.update",
         "agent.rollback",
-        "package.prepare",
-        "package.activate",
-        "package.health",
-        "package.stop",
-        "package.rollback",
-        "package.remove",
-        "package.repair",
-        "package.gc",
         "recipe.build.v1",
         "recipe.image.import.v1",
         "recipe.install",
@@ -503,6 +495,20 @@ def test_operation_enum_contains_only_supported_operations() -> None:
         "recipe.stop",
         "recipe.uninstall",
     }
+
+
+def test_removed_package_operation_strings_are_not_protocol_claims() -> None:
+    payload = {
+        "schema_version": 1,
+        "deployment_id": "sample-package",
+        "release_digest": "a" * 64,
+        "deployment_digest": "b" * 64,
+    }
+    raw = claim_for_operation("package.prepare", payload)
+
+    assert not schema("agent-job.schema.json").is_valid(raw)
+    with pytest.raises(AgentProtocolError, match="operation"):
+        AgentClaim.parse(raw)
 
 
 def schema(name: str) -> Draft202012Validator:

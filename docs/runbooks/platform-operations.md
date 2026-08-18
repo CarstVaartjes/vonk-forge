@@ -32,7 +32,7 @@ When DHCP changes an address, the next authenticated claim supplies the new
 observation. Route reconciliation enters maintenance before validating and
 publishing that replacement, so the prior address is not retained on failure.
 DHCP reservations remain recommended for operational stability, but neither
-the fleet document nor Compose needs a hard-coded address for each GPU node.
+PostgreSQL Fleet metadata nor Compose needs a hard-coded address for each GPU node.
 
 ## Hermes local-agent selection
 

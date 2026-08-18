@@ -6,9 +6,7 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..models.enrollment_grant_response_purpose import check_enrollment_grant_response_purpose
-from ..models.enrollment_grant_response_purpose import EnrollmentGrantResponsePurpose
-from typing import cast
+from typing import Literal, cast
 
 
 
@@ -26,14 +24,14 @@ class EnrollmentGrantResponse:
             expires_at (str):
             id (str):
             node_id (str):
-            purpose (EnrollmentGrantResponsePurpose):
+            purpose (Literal['new-node']):
             token (str):
      """
 
     expires_at: str
     id: str
     node_id: str
-    purpose: EnrollmentGrantResponsePurpose
+    purpose: Literal['new-node']
     token: str
 
 
@@ -47,7 +45,7 @@ class EnrollmentGrantResponse:
 
         node_id = self.node_id
 
-        purpose: str = self.purpose
+        purpose = self.purpose
 
         token = self.token
 
@@ -75,10 +73,9 @@ class EnrollmentGrantResponse:
 
         node_id = d.pop("node_id")
 
-        purpose = check_enrollment_grant_response_purpose(d.pop("purpose"))
-
-
-
+        purpose = cast(Literal['new-node'] , d.pop("purpose"))
+        if purpose != 'new-node':
+            raise ValueError(f"purpose must match const 'new-node', got '{purpose}'")
 
         token = d.pop("token")
 

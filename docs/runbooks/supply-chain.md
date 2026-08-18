@@ -87,7 +87,7 @@ mutable tag. Store scan/signature attestations with the release evidence.
 Generic package artifacts have an independent release cadence from
 `vonk-forge`. A generic component that fits the installed node-package ABI does
 not require a platform release. Model recipes instead use the exact
-Catalog/Library revision and execution-harness gates documented in the
+Library revision and execution-harness gates documented in the
 [recipe operations runbook](model-switching.md). The authorities are
 deliberately separate:
 

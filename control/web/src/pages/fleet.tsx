@@ -50,7 +50,7 @@ export function FleetPage({api}: {api: ControlApi}) {
       setDismissed(previouslyDismissed(result.digest) ? result.digest : "");
     }).catch(() => {
       // Fleet visibility remains useful when the update authority is
-      // temporarily unavailable; the dedicated Updates page reports it.
+      // temporarily unavailable; the update workflow reports it.
     });
     return () => { current = false; };
   }, [api]);
@@ -93,7 +93,7 @@ export function FleetPage({api}: {api: ControlApi}) {
       <div>
         <p className="fleet-kicker">Reactive control plane</p>
         <h2>Fleet</h2>
-        <p className="fleet-introduction">A live view of repository-defined nodes, their capacity, and what is actually installed and running.</p>
+        <p className="fleet-introduction">A live view of PostgreSQL-registered nodes, their capacity, and what is actually installed and running.</p>
       </div>
       <div className="connection-state" aria-label="Fleet stream state">
         <StatusPill tone={connection.tone}>{connection.label}</StatusPill>
@@ -108,7 +108,7 @@ export function FleetPage({api}: {api: ControlApi}) {
       <p>The NAS is running {bounded(skew.target.platform_version)} at <code>{bounded(skew.target.build_digest)}</code>. Review and explicitly confirm the signed rollout; this notice never updates a GPU node by itself.</p>
       <p>Affected GPU nodes: {skew.nodes.filter(node => skew.affected_nodes.includes(node.node_id)).slice(0, 1024).map(node => `${bounded(node.display_name)} (${bounded(node.node_id)})`).join(", ") || "none"}.</p>
       {skew.offline_pending.length > 0 && <p>Offline pending: {skew.offline_pending.map(bounded).join(", ")}.</p>}
-      <p className="update-actions"><a href="/updates">Review platform update</a><button type="button" onClick={dismissUpdate}>Dismiss this exact update notice</button></p>
+      <p className="update-actions"><span>Review this signed rollout through the maintenance workflow.</span><button type="button" onClick={dismissUpdate}>Dismiss this exact update notice</button></p>
     </section>}
 
     {summary && <section className="fleet-summary" aria-label="Fleet summary">
@@ -131,13 +131,13 @@ export function FleetPage({api}: {api: ControlApi}) {
         <strong>{countLabel(summary.loadedRecipes, "loaded recipe")}</strong>
         <span>{countLabel(summary.installedRecipes, "installed recipe")}</span>
         <span>{countLabel(summary.warnings, "active warning")}</span>
-        <small>{countLabel(summary.total, "repository node")}</small>
+        <small>{countLabel(summary.total, "registered node")}</small>
       </div>
     </section>}
 
     {fleet.loading && !fleet.snapshot && <section className="fleet-loading" aria-label="Loading Fleet" role="status">
       <span className="loading-orb" aria-hidden="true"/>
-      <div><h3>Joining the Fleet stream</h3><p>Loading the latest repository projection and node telemetry…</p></div>
+      <div><h3>Joining the Fleet stream</h3><p>Loading the latest registered Fleet projection and node telemetry…</p></div>
     </section>}
 
     {fleet.error && !fleet.snapshot && <section className="fleet-error" role="alert">
@@ -148,8 +148,8 @@ export function FleetPage({api}: {api: ControlApi}) {
     </section>}
 
     {fleet.snapshot && fleet.snapshot.nodes.length === 0 && <section className="fleet-empty">
-      <p className="fleet-kicker">Repository projection is ready</p>
-      <h3>No nodes in the repository Fleet</h3>
+      <p className="fleet-kicker">PostgreSQL registration projection is ready</p>
+      <h3>No registered Fleet nodes</h3>
       <p>Add the first managed node through the onboarding workflow. A silent or offline node would still appear here.</p>
     </section>}
 

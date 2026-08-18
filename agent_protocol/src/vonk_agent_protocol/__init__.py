@@ -1,5 +1,6 @@
 from .contracts import (
     AgentClaim,
+    AgentDirective,
     AgentOperation,
     AgentProgress,
     AgentProtocolError,
@@ -21,12 +22,6 @@ from .host_helper import (
     host_artifact_signing_bytes,
     host_helper_grant_signing_bytes,
 )
-from .package_operations import (
-    PACKAGE_OPERATIONS,
-    RELEASE_BOUND_PACKAGE_OPERATIONS,
-    AgentDirective,
-    PackageOperationRequest,
-)
 from .recipe_operations import RECIPE_OPERATIONS, RecipeOperationRequest
 from .workload_packages import (
     ComponentDescriptor,
@@ -44,9 +39,7 @@ from .workload_packages import (
 )
 
 __all__ = [
-    "PACKAGE_OPERATIONS",
     "RECIPE_OPERATIONS",
-    "RELEASE_BOUND_PACKAGE_OPERATIONS",
     "AgentClaim",
     "AgentDirective",
     "AgentOperation",
@@ -66,7 +59,6 @@ __all__ = [
     "PackageHelperOperation",
     "PackageHelperSignature",
     "PackageObjectReceiptClaims",
-    "PackageOperationRequest",
     "PackageReleaseGraph",
     "PackageReleaseLock",
     "RecipeOperationRequest",

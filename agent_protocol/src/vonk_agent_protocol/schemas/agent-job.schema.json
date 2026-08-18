@@ -11,85 +11,15 @@
     "attempt": {"type": "integer", "minimum": 1},
     "fence": {"type": "string", "format": "uuid"},
     "node_id": {"type": "string", "pattern": "^spk_[0-9a-f]{32}$"},
-    "operation": {"enum": ["node.probe", "release.install", "workload.prepare", "workload.start", "workload.stop", "workload.health", "workload.verify", "agent.update", "agent.rollback", "package.prepare", "package.activate", "package.health", "package.stop", "package.rollback", "package.remove", "package.repair", "package.gc", "recipe.build.v1", "recipe.image.import.v1", "recipe.install", "recipe.start", "recipe.stop", "recipe.uninstall"]},
+    "operation": {"enum": ["node.probe", "release.install", "workload.prepare", "workload.start", "workload.stop", "workload.health", "workload.verify", "agent.update", "agent.rollback", "recipe.build.v1", "recipe.image.import.v1", "recipe.install", "recipe.start", "recipe.stop", "recipe.uninstall"]},
     "base_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
     "payload_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "payload": {
-      "anyOf": [
-        {"$ref": "#/$defs/safe-object"},
-        {"$ref": "#/$defs/package-release-payload"},
-        {"$ref": "#/$defs/package-gc-payload"}
-      ]
+      "$ref": "#/$defs/safe-object"
     },
     "deadline": {"type": "string", "format": "date-time", "pattern": "(?:Z|\\+00:00)$"}
   },
-  "allOf": [
-    {
-      "if": {
-        "properties": {
-          "operation": {
-            "enum": ["package.prepare", "package.activate", "package.health", "package.stop", "package.rollback", "package.remove", "package.repair"]
-          }
-        },
-        "required": ["operation"]
-      },
-      "then": {"properties": {"payload": {"$ref": "#/$defs/package-release-payload"}}}
-    },
-    {
-      "if": {
-        "properties": {"operation": {"const": "package.gc"}},
-        "required": ["operation"]
-      },
-      "then": {"properties": {"payload": {"$ref": "#/$defs/package-gc-payload"}}}
-    }
-  ],
   "$defs": {
-    "package-release-payload": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["schema_version", "deployment_id", "release_digest", "deployment_digest"],
-      "properties": {
-        "schema_version": {"const": 1},
-        "deployment_id": {"type": "string", "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"},
-        "release_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-        "deployment_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-        "deployment_config_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-        "deployment": {"$ref": "#/$defs/package-deployment"}
-      }
-    },
-    "package-deployment": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["schema_version", "deployment_id", "family_id", "release_digest", "selector", "secrets", "ports", "arguments", "routing", "resources"],
-      "properties": {
-        "schema_version": {"const": 1},
-        "deployment_id": {"type": "string", "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"},
-        "family_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"},
-        "release_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-        "selector": {"type": "object"},
-        "secrets": {
-          "type": "object",
-          "additionalProperties": {"type": "string", "pattern": "^secret://[^/\\\\]+(?:/[^/\\\\]+)*$"}
-        },
-        "ports": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 1024, "maximum": 65535}},
-        "arguments": {"type": "array", "maxItems": 128, "items": {"type": "string", "maxLength": 4096, "not": {"pattern": "[/\\\\]"}}},
-        "routing": {"type": "object", "required": ["alias", "port"], "properties": {"alias": {"type": "string"}, "port": {"type": "string"}}, "additionalProperties": false},
-        "resources": {"type": "object", "required": ["memory_bytes", "storage_bytes", "gpu_count"], "properties": {"memory_bytes": {"type": "integer", "minimum": 1}, "storage_bytes": {"type": "integer", "minimum": 1}, "gpu_count": {"type": "integer", "minimum": 0}}, "additionalProperties": false},
-        "mounts": {"type": "array", "maxItems": 64, "items": {"type": "object", "required": ["object_digest", "target", "read_only"], "properties": {"object_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "target": {"type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.?(?:/|$))(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\]+$"}, "read_only": {"const": true}}, "additionalProperties": false}},
-        "devices": {"type": "array", "maxItems": 32, "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$"}},
-        "network": {"type": "object", "required": ["mode", "egress"], "properties": {"mode": {"enum": ["none", "restricted"]}, "egress": {"type": "array", "maxItems": 64, "items": {"type": "string"}}}, "additionalProperties": false}
-      }
-    },
-    "package-gc-payload": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["schema_version", "dry_run"],
-      "properties": {
-        "schema_version": {"const": 1},
-        "dry_run": {"type": "boolean"},
-        "target_bytes": {"type": "integer", "minimum": 1, "maximum": 17592186044416}
-      }
-    },
     "safe-object": {
       "type": "object",
       "propertyNames": {

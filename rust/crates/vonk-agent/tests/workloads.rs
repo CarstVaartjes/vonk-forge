@@ -216,36 +216,6 @@ fn write_managed_run(root: &Path, run_id: &str, installation_id: &str, port: u16
     .unwrap();
 }
 
-fn write_legacy_run(root: &Path, run_id: &str, installation_id: &str, port: u16) {
-    let installation = root.join("installations").join(installation_id);
-    fs::create_dir_all(&installation).unwrap();
-    fs::write(
-        installation.join("spec.json"),
-        serde_json::to_vec(&spec()).unwrap(),
-    )
-    .unwrap();
-    let run = root.join("runs").join(run_id);
-    fs::create_dir_all(&run).unwrap();
-    fs::write(
-        run.join("lifecycle.json"),
-        serde_json::to_vec(&serde_json::json!({
-            "installation_id": installation_id,
-            "placement": {
-                "rank": 0,
-                "role": "entrypoint",
-                "world_size": 1,
-                "local_address": null,
-                "master_address": null,
-                "master_port": null,
-                "port": port,
-                "reserved_memory_bytes": 1024
-            }
-        }))
-        .unwrap(),
-    )
-    .unwrap();
-}
-
 fn one_response_server(status: u16) -> (u16, thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -1403,74 +1373,6 @@ fn managed_recipe_run_snapshot_skips_one_corrupt_record_and_reports_other_runs()
     assert_eq!(observations[0].run_id, healthy);
     assert!(!observations[0].ready);
     assert_eq!(runner.calls.borrow().len(), 1);
-}
-
-#[test]
-fn forged_valid_legacy_lifecycle_is_ignored_and_never_becomes_agent_metadata() {
-    let directory = tempdir().unwrap();
-    let run_id = "45ea6921-50c9-4971-be2a-4cd04ce05069";
-    write_legacy_run(
-        directory.path(),
-        run_id,
-        "cb555393-764b-4eb6-8f15-b416d289428f",
-        8101,
-    );
-    let runner = ObservationRunner {
-        calls: RefCell::new(vec![]),
-        podman_outputs: RefCell::new(VecDeque::from([ProcessOutput {
-            success: false,
-            stdout: vec![],
-            stderr: b"no such container".to_vec(),
-        }])),
-    };
-
-    let observations = OciRuntime {
-        runner: &runner,
-        data_root: directory.path(),
-        huggingface_curl_config: None,
-    }
-    .recipe_run_observations()
-    .unwrap();
-
-    assert!(observations.is_empty());
-    assert!(runner.calls.borrow().is_empty());
-    assert!(!directory.path().join("run-metadata").join(run_id).exists());
-}
-
-#[test]
-fn stop_ignores_forged_valid_legacy_lifecycle_and_hooks() {
-    let directory = tempdir().unwrap();
-    let run_id = "45ea6921-50c9-4971-be2a-4cd04ce05069";
-    let installation_id = "cb555393-764b-4eb6-8f15-b416d289428f";
-    write_legacy_run(directory.path(), run_id, installation_id, 8101);
-    let mut workload = spec();
-    workload.lifecycle.post_stop = vec![vec!["false".to_owned()]];
-    fs::write(
-        directory
-            .path()
-            .join("installations")
-            .join(installation_id)
-            .join("spec.json"),
-        serde_json::to_vec(&workload).unwrap(),
-    )
-    .unwrap();
-    let runner = FakeRunner {
-        calls: RefCell::new(vec![]),
-        outputs: RefCell::new(VecDeque::new()),
-    };
-
-    let plan = OciRuntime {
-        runner: &runner,
-        data_root: directory.path(),
-        huggingface_curl_config: None,
-    }
-    .prepare_stop(run_id)
-    .unwrap();
-
-    assert_eq!(plan.remove, [run_id, "30"]);
-    assert!(plan.post_stop.is_empty());
-    assert!(runner.calls.borrow().is_empty());
-    assert!(!directory.path().join("run-metadata").join(run_id).exists());
 }
 
 #[test]

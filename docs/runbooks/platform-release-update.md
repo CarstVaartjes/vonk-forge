@@ -211,11 +211,11 @@ state may require restore/roll-forward instead of image rollback; use
 
 ## Review the NAS-newer fleet prompt
 
-After the control API and worker are healthy, view skew from the web Admin →
-Updates page or the CLI:
+After the control API and worker are healthy, view skew from the authenticated
+Fleet update workflow:
 
 ```bash
-vonkctl admin updates skew --json
+Fleet shows the current platform skew and affected Sparks in the browser.
 ```
 
 The prompt is expected only when a GPU node's semantic platform version or exact
@@ -236,24 +236,20 @@ it is not silently omitted.
 
 ## Plan, confirm, and monitor GPU node fan-out
 
-Create a fresh preview from the versioned release name shown by skew:
+Create a fresh preview from the versioned release name shown by skew in Fleet:
 
 ```bash
-vonkctl admin updates plan \
-  --release "$target_name" \
-  --json
+Review the exact signed release target and canary plan in Fleet.
 ```
 
 The default is one deterministic canary, a soak, and later batches of one.
 Select a preferred canary only when its placement and active workloads make it
 the safest representative. There is no compiled fleet-size limit.
 
-Confirm the exact plan digest in the web UI or CLI. This is the mutation point:
+Confirm the exact plan digest in Fleet. This is the mutation point:
 
 ```bash
-vonkctl admin updates apply \
-  --plan-digest sha256:REPLACE_PLAN_SHA256 \
-  --json
+Apply the reviewed plan from the Fleet update panel.
 ```
 
 The API issues a short-lived administrator action grant and the isolated signer
@@ -264,10 +260,10 @@ it, and ask the stable supervisor to activate it. Route withdrawal precedes
 mutation; route publication follows authenticated reconnect, readiness, and
 self-test.
 
-Monitor without starting a second rollout:
+Monitor without starting a second rollout in Fleet:
 
 ```bash
-vonkctl admin updates status REPLACE_ROLLOUT_UUID --json
+Fleet keeps the rollout status and recovery actions inline with the affected Sparks.
 ```
 
 Check the canary's reported running version, build digest, protocol, supervisor
@@ -287,8 +283,8 @@ The paused rollout's recovery worker creates the signed `agent.rollback`
 operations for nodes already changed; there is no manual rollback button or
 public rollback endpoint. Keep refreshing status while the state is paused. Do
 not try to manufacture a rollback job. Only after every required rollback is
-observed does the rollout enter `waiting-for-approval` and the web Admin →
-Updates page exposes **Approve rollout resume**. An administrator—not an
+observed does the rollout enter `waiting-for-approval` and the authenticated web
+update workflow exposes **Approve rollout resume**. An administrator—not an
 operator—may then approve resume with a bounded audit reason. Approval creates
 a fresh plan/authorization boundary; it does not reuse stale signatures. The
 CLI remains suitable for skew, plan, apply, and status; use the web workflow for

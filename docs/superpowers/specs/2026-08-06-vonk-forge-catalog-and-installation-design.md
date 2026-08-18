@@ -24,7 +24,7 @@ GPU nodes, with a separate global catalog at `vonkforge.ai`.
 The design has four related goals:
 
 1. import WorkloadRun recipes without executing untrusted recipe instructions;
-2. materialize supported recipes as verified, resource-aware deployments;
+2. materialize supported recipes as verified, resource-aware installations;
 3. let users author and test their own recipes locally, then optionally publish
    immutable revisions to the global catalog; and
 4. make the complete private cluster usable from anywhere through a
@@ -138,10 +138,10 @@ Local PostgreSQL is authoritative for:
 - locally authored recipe records and drafts;
 - imported WorkloadRun recipes and their complete import reports;
 - global recipe revisions accepted into the local catalog;
-- seeded and user-created package families;
+- seeded and user-created workload families;
 - node enrollment and current authenticated inventory;
 - artifact and container installation state per node;
-- installation plans, reservations, placements, deployments, and runs;
+- installation plans, reservations, placements, and runs;
 - observed resource use, health, logs, jobs, and audit history; and
 - global synchronization identifiers and publication state.
 
@@ -149,9 +149,9 @@ A recipe does not require a Git commit, branch, pull request, or remote
 repository before it can be installed or run. The browser interface and CLI
 use the same local API and database transactions.
 
-This decision supersedes the Git-as-authoring-authority statements in the
-generalized workload package design for package families, promoted recipe
-revisions, and deployments. Git remains appropriate for application source,
+This decision supersedes the Git-as-authoring-authority statements in the older
+workload-release designs for family records and promoted recipe revisions. Git
+remains appropriate for application source,
 migrations, seed fixtures, schemas, documentation, platform release inputs,
 and optional exported backups. Existing fleet and platform-policy Git contracts
 may be migrated separately, but they cannot become a hidden recipe execution
@@ -204,10 +204,10 @@ Workload family
 - A materialized deployment revision combines exact immutable inputs with
   local node assignment, routing, non-secret configuration, and reservations.
 
-Package families are database records, not TOML files. Installation performs
-an idempotent seed migration for standard families such as OCI, Hugging Face,
-vLLM, SGLang, and llama.cpp. Seeded rows use stable identifiers and can be
-extended by later migrations without overwriting user-created data.
+Workload families are local Library records, not TOML files. Installation uses
+retained Library entities and recipe revisions; there is no package/deployment
+compatibility table or seeded package-family API in the clean-slate control
+plane.
 
 ## Recipe contract
 

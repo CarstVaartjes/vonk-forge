@@ -6,7 +6,7 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
-use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, params};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde_json::{Value, json};
 use thiserror::Error;
 use vonk_agent_protocol::{
@@ -31,8 +31,6 @@ pub enum StateError {
     Busy,
     #[error("result state is invalid")]
     ResultState,
-    #[error("legacy Python receipt store is unsafe or incompatible")]
-    LegacyImport,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -390,149 +388,6 @@ impl StateStore {
         }
         transaction.commit()?;
         Ok(())
-    }
-
-    /// Import only terminal, canonical receipts from a stopped Python agent.
-    ///
-    /// The legacy database is opened read-only and must have its exact v1
-    /// table shape. Active work is rejected: an operator must resolve it with
-    /// the Python agent before cutover. No credential material is read.
-    pub fn import_python_receipts(&mut self, source: &Path) -> Result<usize, StateError> {
-        let metadata = fs::symlink_metadata(source)?;
-        if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-            return Err(StateError::LegacyImport);
-        }
-        let legacy = Connection::open_with_flags(
-            source,
-            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        )?;
-        legacy.execute_batch("PRAGMA query_only=ON; PRAGMA trusted_schema=OFF;")?;
-        let columns = {
-            let mut statement = legacy.prepare("PRAGMA table_info(attempts)")?;
-            statement
-                .query_map([], |row| {
-                    Ok((
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, i64>(3)?,
-                        row.get::<_, i64>(5)?,
-                    ))
-                })?
-                .collect::<Result<Vec<_>, _>>()?
-        };
-        let expected = [
-            ("node_id", "TEXT", 1, 1),
-            ("job_id", "TEXT", 1, 2),
-            ("operation_id", "TEXT", 1, 3),
-            ("attempt", "INTEGER", 1, 4),
-            ("fence", "TEXT", 1, 0),
-            ("state", "TEXT", 1, 0),
-            ("claim_json", "BLOB", 1, 0),
-            ("progress_sequence", "INTEGER", 1, 0),
-            ("progress_json", "BLOB", 0, 0),
-            ("result_json", "BLOB", 0, 0),
-            ("created_at", "TEXT", 1, 0),
-            ("updated_at", "TEXT", 1, 0),
-            ("finished_at", "TEXT", 0, 0),
-            ("acknowledged_at", "TEXT", 0, 0),
-        ];
-        if columns.len() != expected.len()
-            || columns.iter().zip(expected).any(|(actual, expected)| {
-                actual.0 != expected.0
-                    || actual.1.to_ascii_uppercase() != expected.1
-                    || actual.2 != expected.2
-                    || actual.3 != expected.3
-            })
-        {
-            return Err(StateError::LegacyImport);
-        }
-        let active: i64 = legacy.query_row(
-            "SELECT count(*) FROM attempts WHERE state='active'",
-            [],
-            |row| row.get(0),
-        )?;
-        if active != 0 {
-            return Err(StateError::LegacyImport);
-        }
-        let receipts = {
-            let mut statement = legacy.prepare(
-                "SELECT node_id,job_id,operation_id,attempt,fence,state,result_json,acknowledged_at
-                 FROM attempts ORDER BY rowid",
-            )?;
-            statement
-                .query_map([], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, u32>(3)?,
-                        row.get::<_, String>(4)?,
-                        row.get::<_, String>(5)?,
-                        row.get::<_, Vec<u8>>(6)?,
-                        row.get::<_, Option<String>>(7)?,
-                    ))
-                })?
-                .collect::<Result<Vec<_>, _>>()?
-        };
-        let mut validated = Vec::with_capacity(receipts.len());
-        for (node_id, job_id, operation_id, attempt, fence, state, body, acknowledged_at) in
-            receipts
-        {
-            let result: AgentResult = parse_strict(&body)?;
-            result.validate()?;
-            if node_id != self.node_id
-                || result.node_id != node_id
-                || result.job_id.to_string() != job_id
-                || result.operation_id.to_string() != operation_id
-                || result.attempt != attempt
-                || result.fence.to_string() != fence
-                || result.state != state
-                || canonical_json(&result)? != body
-            {
-                return Err(StateError::LegacyImport);
-            }
-            validated.push((result, body, acknowledged_at.is_some()));
-        }
-        let transaction = self
-            .connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        for (result, body, acknowledged) in &validated {
-            let existing: Option<(u32, String, Vec<u8>, i64)> = transaction
-                .query_row(
-                    "SELECT attempt,fence,result_json,result_acknowledged FROM operations
-                     WHERE operation_id=?1",
-                    [result.operation_id.to_string()],
-                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-                )
-                .optional()?;
-            if let Some((attempt, fence, stored, stored_acknowledged)) = existing {
-                if attempt != result.attempt
-                    || fence != result.fence.to_string()
-                    || stored != *body
-                    || stored_acknowledged != i64::from(*acknowledged)
-                {
-                    return Err(StateError::LegacyImport);
-                }
-                continue;
-            }
-            transaction.execute(
-                "INSERT INTO operations
-                 (operation_id,job_id,node_id,attempt,fence,deadline,state,result_json,result_acknowledged)
-                 VALUES (?1,?2,?3,?4,?5,?6,'completed',?7,?8)",
-                params![
-                    result.operation_id.to_string(),
-                    result.job_id.to_string(),
-                    result.node_id,
-                    result.attempt,
-                    result.fence.to_string(),
-                    result.deadline.to_rfc3339(),
-                    body,
-                    i64::from(*acknowledged),
-                ],
-            )?;
-        }
-        transaction.commit()?;
-        Ok(validated.len())
     }
 }
 

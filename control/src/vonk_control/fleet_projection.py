@@ -1,4 +1,4 @@
-"""Bounded typed projection of repository-authoritative Fleet state."""
+"""Bounded typed projection of PostgreSQL-authoritative Fleet state."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from .fleet_events import FleetEventRepository
 from .models import (
     AgentCertificate,
     AgentNode,
+    AgentNodeProfile,
     ClusterMapping,
     ClusterMappingNode,
     InstallationNode,
@@ -360,7 +361,7 @@ def _utc(value: datetime) -> datetime:
 
 
 class FleetProjection:
-    """Merge a fixed database query set into repository-defined Fleet nodes."""
+    """Merge a fixed database query set into enrolled Fleet nodes."""
 
     def __init__(
         self,
@@ -407,18 +408,12 @@ class FleetProjection:
             or not 0 <= event_cursor <= 9_223_372_036_854_775_807
         ):
             raise ValueError("Fleet event cursor is invalid")
-        commit, fleet_nodes = self._repository_nodes()
-        node_ids = tuple(sorted(fleet_nodes))
+        commit = self._repository.head()
         current = _utc(self._clock())
         with self._sessions.begin() as session:
-            agents = {
-                row.node_id: row
-                for row in session.scalars(
-                    select(AgentNode)
-                    .where(AgentNode.node_id.in_(node_ids))
-                    .order_by(AgentNode.node_id)
-                )
-            }
+            agents = self._registered_agents(session)
+            node_ids = tuple(agents)
+            profiles = self._node_profiles(session, node_ids)
             certificates = self._current_certificates(session, node_ids, current)
             inventories = self._latest_inventory(session, node_ids)
             telemetry = self._telemetry.latest_in_session(session, node_ids)
@@ -447,9 +442,9 @@ class FleetProjection:
             nodes=[
                 self._node(
                     node_id,
-                    fleet_nodes[node_id],
+                    profiles.get(node_id),
                     current=current,
-                    agent=agents.get(node_id),
+                    agent=agents[node_id],
                     certificate=certificates.get(node_id),
                     inventory=inventories.get(node_id),
                     telemetry=telemetry.get(node_id),
@@ -483,8 +478,7 @@ class FleetProjection:
         end_utc = end.astimezone(UTC)
         if start_utc >= end_utc:
             raise ValueError("telemetry history window is invalid")
-        _, nodes = self._repository_nodes()
-        if node_id not in nodes:
+        if node_id not in self._registered_node_ids(node_id):
             raise KeyError(node_id)
         points = self._telemetry.history(
             node_id,
@@ -507,22 +501,51 @@ class FleetProjection:
             ],
         )
 
-    def _repository_nodes(self) -> tuple[str, dict[str, Mapping[str, object]]]:
-        commit = self._repository.head()
-        document = self._repository.read_document(commit, "inventory/fleet.toml")
-        parsed = document.parsed
-        if not isinstance(parsed, Mapping) or not isinstance(
-            parsed.get("nodes"), Mapping
-        ):
-            raise TypeError("fleet document does not contain a node table")
-        nodes = {
-            node_id: value
-            for node_id, value in parsed["nodes"].items()
-            if isinstance(node_id, str) and isinstance(value, Mapping)
-        }
-        if len(nodes) > _MAX_FLEET_NODES:
-            raise ValueError("Fleet document contains more than 500 nodes")
-        return commit, nodes
+    def _registered_node_ids(self, node_id: str | None = None) -> tuple[str, ...]:
+        with self._sessions.begin() as session:
+            statement = (
+                select(AgentNode.node_id)
+                .where(
+                    AgentNode.state != "revoked",
+                    AgentNode.revoked_at.is_(None),
+                )
+                .order_by(AgentNode.node_id)
+                .limit(_MAX_FLEET_NODES + 1)
+            )
+            if node_id is not None:
+                statement = statement.where(AgentNode.node_id == node_id)
+            node_ids = tuple(session.scalars(statement))
+        if len(node_ids) > _MAX_FLEET_NODES:
+            raise ValueError("Fleet contains more than 500 registered nodes")
+        return node_ids
+
+    @staticmethod
+    def _registered_agents(session: Session) -> dict[str, AgentNode]:
+        rows = tuple(
+            session.scalars(
+                select(AgentNode)
+                .where(
+                    AgentNode.state != "revoked",
+                    AgentNode.revoked_at.is_(None),
+                )
+                .order_by(AgentNode.node_id)
+                .limit(_MAX_FLEET_NODES + 1)
+            )
+        )
+        if len(rows) > _MAX_FLEET_NODES:
+            raise ValueError("Fleet contains more than 500 registered nodes")
+        return {row.node_id: row for row in rows}
+
+    @staticmethod
+    def _node_profiles(
+        session: Session, node_ids: Sequence[str]
+    ) -> dict[str, AgentNodeProfile]:
+        rows = session.scalars(
+            select(AgentNodeProfile)
+            .where(AgentNodeProfile.node_id.in_(node_ids))
+            .order_by(AgentNodeProfile.node_id)
+        )
+        return {row.node_id: row for row in rows}
 
     @staticmethod
     def _current_certificates(
@@ -883,10 +906,10 @@ class FleetProjection:
     def _node(
         self,
         node_id: str,
-        raw: Mapping[str, object],
+        profile: AgentNodeProfile | None,
         *,
         current: datetime,
-        agent: AgentNode | None,
+        agent: AgentNode,
         certificate: AgentCertificate | None,
         inventory: NodeInventorySnapshot | None,
         telemetry: TelemetrySampleView | None,
@@ -962,14 +985,14 @@ class FleetProjection:
                     severity="warning",
                 )
             )
-        labels = raw.get("labels", {})
+        labels = {} if profile is None else profile.labels
         if not isinstance(labels, Mapping):
-            raise TypeError("fleet node labels are invalid")
+            raise TypeError("Fleet node profile labels are invalid")
         return FleetNode(
             id=node_id,
-            display_name=str(raw.get("display_name", node_id)),
-            hostname=str(raw.get("hostname", "")),
-            lifecycle=str(raw.get("lifecycle", "unknown")),
+            display_name=node_id if profile is None else profile.display_name,
+            hostname="" if profile is None else profile.hostname,
+            lifecycle="managed" if profile is None else profile.lifecycle,
             labels=dict(labels),
             connection=connection,
             inventory=inventory_state,

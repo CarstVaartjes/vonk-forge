@@ -1,6 +1,6 @@
 # Recipe activation and model changes
 
-Vonk Forge does not switch named legacy profiles. A model family can have many
+Vonk Forge does not switch named profiles. A model family can have many
 immutable model versions, and each version can have multiple recipes for a
 specific execution harness, runtime distribution, patch bundle, and topology.
 The recipe revision is the unit the controller resolves and activates.
@@ -18,10 +18,10 @@ the content-addressed model-version and recipe revision remain authoritative.
 
 ## Create or import a recipe
 
-Choose `Catalog` to create a local draft or import a WorkloadRun. The visual
+Use `Library` to create a local draft or import a WorkloadRun. The visual
 editor captures the model version, execution harness, runtime distribution,
-topology, artifact identities, endpoint aliases, and resource envelope. Use the
-advanced canonical JSON section only for custom fields or debugging.
+topology, artifact identities, endpoint aliases, and resource envelope. Use
+the advanced canonical JSON section only for custom fields or debugging.
 
 The lifecycle is deliberately explicit:
 
@@ -29,7 +29,7 @@ The lifecycle is deliberately explicit:
 2. Resolve the draft into an immutable revision.
 3. Run the source security/build gate and attach evidence from the actual test.
 4. Map the revision to one or more compatible Spark nodes.
-5. Return to Library and preview the install/load action before applying it.
+5. Stay in Library and preview the install/load action before applying it.
 
 The control API performs identity, capacity, placement, evidence, and route
 checks. The browser never invents a digest or bypasses those checks.

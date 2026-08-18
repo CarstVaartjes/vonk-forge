@@ -38,7 +38,6 @@ NODE_PATTERN = r"^spk_[0-9a-f]{32}$"
 _ACTIVE_PUBLICATION_STATES = frozenset({"completed"})
 _ADMIN_OPERATION_IDS = {
     ("post", "/api/v1/agents/enrollments/grants"): "createEnrollmentGrant",
-    ("post", "/api/v1/agents/nodes/{node_id}/migration-grant"): "createAgentMigrationGrant",
     ("get", "/api/v1/agents/enrollments"): "listAgentEnrollments",
     ("post", "/api/v1/agents/enrollments/{enrollment_id}/approve"): "approveAgentEnrollment",
     ("post", "/api/v1/agents/enrollments/{enrollment_id}/reject"): "rejectAgentEnrollment",
@@ -74,25 +73,6 @@ _ADMIN_OPERATION_IDS = {
         "post",
         "/api/v1/updates/{rollout_id}/approve-resume",
     ): "approvePlatformUpdateRecovery",
-    ("get", "/api/v1/packages/families"): "listPackageFamilies",
-    ("get", "/api/v1/packages/candidates"): "listPackageCandidates",
-    ("get", "/api/v1/packages/candidates/{candidate_id}"): "getPackageCandidate",
-    ("get", "/api/v1/packages/candidates/{candidate_id}/resolution"): "getPackageResolution",
-    ("get", "/api/v1/packages/candidates/{candidate_id}/compatibility"): "getPackageCompatibility",
-    ("post", "/api/v1/packages/candidates/{candidate_id}/validation-preview"): "previewPackageValidation",
-    ("post", "/api/v1/packages/candidates/{candidate_id}/validate"): "validatePackageCandidate",
-    ("post", "/api/v1/packages/candidates/{candidate_id}/promotion-preview"): "previewPackagePromotion",
-    ("post", "/api/v1/packages/candidates/{candidate_id}/promote"): "promotePackage",
-    ("get", "/api/v1/deployments"): "listPackageDeployments",
-    ("post", "/api/v1/deployments/{deployment_id}/rollout-preview"): "previewPackageRollout",
-    ("post", "/api/v1/deployments/{deployment_id}/rollouts"): "rolloutPackageDeployment",
-    ("get", "/api/v1/deployments/{deployment_id}/rollouts/{rollout_id}"): "getPackageRollout",
-    ("post", "/api/v1/deployments/{deployment_id}/rollouts/{rollout_id}/rollback-preview"): "previewPackageRollback",
-    ("post", "/api/v1/deployments/{deployment_id}/rollouts/{rollout_id}/rollback"): "rollbackPackageDeployment",
-    ("post", "/api/v1/deployments/{deployment_id}/repair-preview"): "previewPackageRepair",
-    ("post", "/api/v1/deployments/{deployment_id}/repair"): "repairPackage",
-    ("post", "/api/v1/packages/gc-preview"): "previewPackageGc",
-    ("post", "/api/v1/packages/gc"): "applyPackageGc",
     ("get", "/api/v1/catalog/recipes"): "listLocalRecipes",
     ("post", "/api/v1/catalog/recipes"): "createLocalRecipe",
     ("get", "/api/v1/catalog/recipes/{recipe_id}"): "getLocalRecipe",
@@ -147,8 +127,6 @@ class EndpointResponse(StrictModel):
 class AgentSummary(StrictModel):
     node_id: str = Field(pattern=NODE_PATTERN)
     state: str
-    agent_implementation: str = Field(pattern=r"^(pending|python|rust)$")
-    migration_state: str = Field(pattern=r"^(required|complete)$")
     protocol_version: int | None = Field(default=None, ge=1)
     platform_version: str | None = Field(
         default=None,
@@ -523,8 +501,6 @@ class _DurableOperationProjection:
                     "last_seen_age_seconds": age,
                     "last_seen_at": None if last_seen is None else last_seen.isoformat(),
                     "node_id": node.node_id,
-                    "agent_implementation": node.agent_implementation,
-                    "migration_state": node.migration_state,
                     "protocol_version": node.protocol_version,
                     "platform_version": node.platform_version,
                     "build_digest": node.build_digest,
@@ -813,15 +789,11 @@ class NodeStatus(StrictModel):
     inventory_stale: bool = True
     inventory_capabilities: list[str] = Field(default_factory=list, max_length=64)
     agent_state: str = "unregistered"
-    agent_implementation: str | None = None
-    agent_migration_state: str | None = None
     last_seen_at: str | None = None
     last_seen_age_seconds: float | None = Field(default=None, ge=0)
     agent_last_seen_at: str | None = None
     agent_online: bool = False
-    # Version-skew projection is deliberately nullable for pre-enrollment and
-    # legacy observations.  Keeping these fields in the typed public model
-    # prevents the dashboard from losing authenticated agent identity data.
+    # Version-skew projection remains nullable for pre-enrollment nodes.
     agent_platform_version: str | None = None
     agent_build_digest: str | None = None
     agent_active_slot: str | None = None

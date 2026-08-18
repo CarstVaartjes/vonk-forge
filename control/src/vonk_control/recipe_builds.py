@@ -567,8 +567,6 @@ def _validate_builder(node: AgentNode) -> None:
         node.state != "active"
         or node.revoked_at is not None
         or node.architecture != "linux-arm64"
-        or node.agent_implementation != "rust"
-        or node.migration_state != "complete"
         or not isinstance(node.agent_sha256, str)
         or _SHA256.fullmatch(node.agent_sha256) is None
         or "recipe.build.v1" not in node.capabilities

@@ -284,4 +284,3 @@ def test_build_agent_constructs_all_closed_handlers_with_one_credential_store(
         "aarch64": "linux-arm64",
         "x86_64": "linux-x86_64",
     }[runtime.architecture]
-    assert agent._context.packages is not None

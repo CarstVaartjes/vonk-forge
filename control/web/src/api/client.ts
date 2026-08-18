@@ -4,6 +4,7 @@ import type {paths} from "./generated";
 import type {
   AuthSession,
   AgentsResponse,
+  AuditResponse,
   AuditSummary,
   ControlApi,
   EnrollmentDecisionResponse,
@@ -15,11 +16,6 @@ import type {
   JobsResponse,
   ProposalInput,
   ProposalPreview,
-  PackageInventory,
-  PackagePlan,
-  PackageProgress,
-  PackageRemovalProgress,
-  PackageRemovalPreview,
   UpdatePlan,
   UpdateRollout,
   UpdateSkew,
@@ -46,15 +42,6 @@ import type {
   LibraryStopApplyInput,
   LibraryUninstallApplyInput,
 } from "./types";
-import type {
-  PackageCandidate,
-  PackageCandidateSummary,
-  PackageDeployment,
-  PackageFamily,
-  PackagePreview,
-  PackageRollout,
-  PackageRolloutPreview,
-} from "../pages/package-types";
 
 function csrfToken(): string | undefined {
   const cookie = document.cookie
@@ -104,62 +91,6 @@ function requireBoundUpdateTarget(value: unknown): void {
   ) {
     throw new Error("Control API update target identity is invalid");
   }
-}
-
-function packagePreview(value: PackagePlan): PackagePreview {
-  return {
-    digest: value.digest,
-    release_digest: value.release_digest ?? undefined,
-  };
-}
-
-function packageCandidateSummary(value: {
-  id: string;
-  family_id: string;
-  state: string;
-  reason_code?: string | null;
-  upstream_version: string;
-}): PackageCandidateSummary {
-  return {
-    id: value.id,
-    family_id: value.family_id,
-    channel: null,
-    provider: null,
-    state: value.state,
-    reason_code: value.reason_code ?? null,
-    upstream_version: value.upstream_version,
-    updated_at: null,
-  };
-}
-
-type PackageCandidateDocument = {
-  id: string;
-  family_id: string;
-  state: string;
-  reason_code?: string | null;
-  upstream_version: string;
-  release?: {
-    lock_digest: string;
-    components?: Array<{name: string}>;
-    dependencies?: string[];
-    provenance?: Array<{kind: string}>;
-  } | null;
-};
-
-function packageCandidate(value: PackageCandidateDocument): PackageCandidate {
-  const release = value.release;
-  return {
-    ...packageCandidateSummary(value),
-    lock: release ? {
-      digest: release.lock_digest,
-      components: (release.components ?? []).map(component => component.name),
-      dependencies: release.dependencies ?? [],
-      provenance: (release.provenance ?? []).map(item => item.kind).join(", ") || "—",
-    } : null,
-    compatibility: undefined,
-    validations: [],
-    audit: [],
-  };
 }
 
 export class ApiClient implements ControlApi {
@@ -467,14 +398,6 @@ export class ApiClient implements ControlApi {
     }));
   }
 
-  async createAgentMigrationGrant(nodeId: string, ttlSeconds: number, signal?: AbortSignal): Promise<EnrollmentGrantResponse> {
-    return resultData(await this.generated.POST("/api/v1/agents/nodes/{node_id}/migration-grant", {
-      body: {ttl_seconds: ttlSeconds},
-      params: {path: {node_id: nodeId}},
-      signal,
-    }));
-  }
-
   async approveEnrollment(enrollmentId: string): Promise<EnrollmentDecisionResponse> {
     return resultData(await this.generated.POST("/api/v1/agents/enrollments/{enrollment_id}/approve", {
       params: {path: {enrollment_id: enrollmentId}},
@@ -516,7 +439,7 @@ export class ApiClient implements ControlApi {
     }));
   }
 
-  audit() { return this.request<{events: AuditSummary[]}>("/api/v1/audit"); }
+  audit() { return this.request<AuditResponse>("/api/v1/audit"); }
   preview(input: ProposalInput) { return this.request<ProposalPreview>("/api/v1/proposals", {method: "POST", body: JSON.stringify(input)}); }
   submit(digest: string) { return this.request<Record<string, unknown>>("/api/v1/changes", {method: "POST", body: JSON.stringify({proposal_digest: digest})}); }
   async updateSkew() {
@@ -543,158 +466,5 @@ export class ApiClient implements ControlApi {
     return this.request<UpdateRollout>(`/api/v1/updates/${encodeURIComponent(rolloutId)}/approve-resume`, {
       method: "POST", body: JSON.stringify({}),
     });
-  }
-
-  async packageFamilies(): Promise<PackageFamily[]> {
-    const result = resultData(await this.generated.GET("/api/v1/packages/families", {
-      params: {query: {limit: 100}},
-    }));
-    return result.families.map(family => ({
-      id: family.id,
-      channels: family.channels,
-      channel: family.channels.join(", "),
-      promotion_mode: family.promotion_mode,
-    }));
-  }
-
-  async packageCandidates(): Promise<PackageCandidateSummary[]> {
-    const result = resultData(await this.generated.GET("/api/v1/packages/candidates", {
-      params: {query: {limit: 100}},
-    }));
-    return result.candidates.map(packageCandidateSummary);
-  }
-
-  private async candidateDocument(candidateId: string): Promise<PackageCandidateDocument> {
-    return resultData(await this.generated.GET("/api/v1/packages/candidates/{candidate_id}", {
-      params: {path: {candidate_id: candidateId}},
-    }));
-  }
-
-  async packageCandidate(candidateId: string): Promise<PackageCandidate> {
-    return packageCandidate(await this.candidateDocument(candidateId));
-  }
-
-  async previewPackageValidation(candidateId: string): Promise<PackagePreview> {
-    return packagePreview(resultData(await this.generated.POST("/api/v1/packages/candidates/{candidate_id}/validation-preview", {
-      params: {path: {candidate_id: candidateId}},
-    })));
-  }
-
-  async validatePackage(candidateId: string, previewDigest: string): Promise<PackageProgress> {
-    return resultData(await this.generated.POST("/api/v1/packages/candidates/{candidate_id}/validate", {
-      params: {path: {candidate_id: candidateId}},
-      body: {plan_digest: previewDigest},
-    }));
-  }
-
-  async packageValidation(validationId: string): Promise<PackageProgress> {
-    return resultData(await this.generated.GET("/api/v1/packages/validations/{validation_id}", {
-      params: {path: {validation_id: validationId}},
-    }));
-  }
-
-  async previewPackagePromotion(candidateId: string): Promise<PackagePreview> {
-    return packagePreview(resultData(await this.generated.POST("/api/v1/packages/candidates/{candidate_id}/promotion-preview", {
-      params: {path: {candidate_id: candidateId}},
-    })));
-  }
-
-  async promotePackage(candidateId: string, previewDigest: string): Promise<{release_digest: string}> {
-    const result = resultData(await this.generated.POST("/api/v1/packages/candidates/{candidate_id}/promote", {
-      params: {path: {candidate_id: candidateId}},
-      body: {preview_digest: previewDigest},
-    }));
-    return {release_digest: result.release_digest};
-  }
-
-  async deployments(): Promise<PackageDeployment[]> {
-    const result = resultData(await this.generated.GET("/api/v1/deployments", {
-      params: {query: {limit: 100}},
-    }));
-    return result.deployments.map(deployment => ({
-      id: deployment.id,
-      family_id: deployment.family_id ?? "",
-      release_digest: deployment.release_digest,
-      previous_release_digest: deployment.previous_release_digest ?? null,
-      state: deployment.state,
-      rollout_id: deployment.rollout_id ?? null,
-    }));
-  }
-
-  async previewPackageRollout(deploymentId: string): Promise<PackageRolloutPreview> {
-    const value = resultData(await this.generated.POST("/api/v1/deployments/{deployment_id}/rollout-preview", {
-      params: {path: {deployment_id: deploymentId}},
-    }));
-    return {
-      ...packagePreview(value),
-      canary: value.canary_node ? [value.canary_node] : [],
-      batches: value.batches ?? [],
-      offline_pending: value.offline_pending ?? [],
-      download_remaining_bytes: value.download_bytes ?? 0,
-      storage_required_bytes: value.storage_bytes ?? 0,
-    };
-  }
-
-  async startPackageRollout(deploymentId: string, previewDigest: string): Promise<{id: string; plan_digest: string}> {
-    const result = resultData(await this.generated.POST("/api/v1/deployments/{deployment_id}/rollouts", {
-      params: {path: {deployment_id: deploymentId}},
-      body: {plan_digest: previewDigest},
-    }));
-    return {id: result.id, plan_digest: result.plan_digest};
-  }
-
-  async packageRollout(deploymentId: string, rolloutId: string): Promise<PackageRollout> {
-    const result = resultData(await this.generated.GET("/api/v1/deployments/{deployment_id}/rollouts/{rollout_id}", {
-      params: {path: {deployment_id: deploymentId, rollout_id: rolloutId}, query: {limit: 100}},
-    }));
-    return {
-      id: result.id,
-      state: result.state,
-      phase: result.state,
-      failure_reason: result.failure ?? null,
-      nodes: (result.nodes ?? []).map(node => ({name: node.node_id, state: node.state})),
-    };
-  }
-
-  async previewPackageRollback(deploymentId: string, rolloutId: string): Promise<PackagePreview> {
-    return packagePreview(resultData(await this.generated.POST("/api/v1/deployments/{deployment_id}/rollouts/{rollout_id}/rollback-preview", {
-      params: {path: {deployment_id: deploymentId, rollout_id: rolloutId}},
-    })));
-  }
-
-  async rollbackPackage(deploymentId: string, rolloutId: string, previewDigest: string): Promise<{id: string}> {
-    const result = resultData(await this.generated.POST("/api/v1/deployments/{deployment_id}/rollouts/{rollout_id}/rollback", {
-      params: {path: {deployment_id: deploymentId, rollout_id: rolloutId}},
-      body: {plan_digest: previewDigest},
-    }));
-    return {id: result.id};
-  }
-
-  async packageInventory(nodeId?: string, deploymentId?: string, cursor?: string): Promise<PackageInventory> {
-    return resultData(await this.generated.GET("/api/v1/packages/inventory", {
-      params: {query: {node_id: nodeId, deployment_id: deploymentId, cursor, limit: 100}},
-    }));
-  }
-
-  async previewPackageRemoval(input: {deployment_id: string; release_digest: string; node_ids: string[]}): Promise<PackageRemovalPreview> {
-    return resultData(await this.generated.POST("/api/v1/packages/inventory/remove-preview", {
-      body: input,
-    }));
-  }
-
-  async removePackageInventory(planDigest: string): Promise<PackageRemovalProgress> {
-    return resultData(await this.generated.POST("/api/v1/packages/inventory/remove", {
-      body: {plan_digest: planDigest},
-    }));
-  }
-
-  async previewPackageGc(): Promise<PackagePlan> {
-    return resultData(await this.generated.POST("/api/v1/packages/gc-preview"));
-  }
-
-  async applyPackageGc(planDigest: string): Promise<PackageProgress> {
-    return resultData(await this.generated.POST("/api/v1/packages/gc", {
-      body: {plan_digest: planDigest},
-    }));
   }
 }

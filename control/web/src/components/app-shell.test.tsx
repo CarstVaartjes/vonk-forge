@@ -1,7 +1,8 @@
-import {render, screen, waitFor, within} from "@testing-library/react";
+import {act, render, screen, waitFor, within} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {App} from "../app";
-import type {CatalogApi, ControlApi} from "../api/types";
+import type {ControlApi} from "../api/types";
+import {AppShell} from "./app-shell";
 import {Meter} from "./meter";
 import {StatusPill} from "./status-pill";
 import {FleetIcon} from "./icons";
@@ -26,9 +27,8 @@ const apiFixture = {
       tuf_targets_version: 1,
     },
   }),
-  catalogRecipes: async () => ({recipes: []}),
   librarySnapshot: async () => ({schema_version: 1, generated_at: "2026-08-15T12:00:00Z", freshness_policy: {inventory_fresh_seconds: 300, telemetry_live_seconds: 6, telemetry_delayed_seconds: 20}, models: [], unlinked_recipes: [], next_cursor: null}),
-} as unknown as ControlApi & CatalogApi;
+} as unknown as ControlApi;
 
 afterEach(() => {
   history.replaceState(null, "", "/");
@@ -60,9 +60,21 @@ test("provides browser-equivalent local storage semantics", () => {
   expect(localStorage.key(0)).toBeNull();
 });
 
-test("keeps v1 model work in Library and Catalog without legacy profile navigation", async () => {
-  // Break caught: restoring the profile/model editors, stranding a retained
-  // route, or removing the accessible mobile control must fail this test.
+test("exposes only Fleet and Library as primary navigation", () => {
+  render(<AppShell activeRoute="fleet" onNavigate={() => undefined}>{null}</AppShell>);
+  expect(screen.getByRole("link", {name: "Fleet"})).toBeVisible();
+  expect(screen.getByRole("link", {name: "Library"})).toBeVisible();
+  expect(screen.queryByText("Agents")).not.toBeInTheDocument();
+  expect(screen.queryByText("Catalog")).not.toBeInTheDocument();
+  expect(screen.queryByText("Packages")).not.toBeInTheDocument();
+  expect(screen.queryByText("Deployments")).not.toBeInTheDocument();
+  expect(screen.queryByText("Updates")).not.toBeInTheDocument();
+  expect(screen.queryByText("Jobs")).not.toBeInTheDocument();
+});
+
+test("keeps only Fleet and Library in primary navigation while preserving the mobile control", async () => {
+  // Break caught: restoring any superseded primary route or removing the
+  // accessible mobile control must fail this test.
   const {container} = render(<App api={apiFixture}/>);
   const user = userEvent.setup();
 
@@ -77,34 +89,25 @@ test("keeps v1 model work in Library and Catalog without legacy profile navigati
   await user.click(navigationToggle);
   expect(screen.getByRole("button", {name: "Close system navigation"})).toHaveAttribute("aria-expanded", "true");
 
-  await user.click(screen.getByText("Activity"));
-  await user.click(screen.getByText("System"));
-
   const primary = screen.getByRole("navigation", {name: "Primary"});
   const routes = new Map([
     ["Fleet", "/fleet"],
     ["Library", "/library"],
-    ["Deployments", "/deployments"],
-    ["Updates", "/updates"],
-    ["Jobs", "/jobs"],
-    ["Audit", "/audit"],
-    ["Agents", "/agents"],
-    ["Packages", "/packages"],
-    ["Catalog", "/catalog"],
   ]);
   for (const [name, href] of routes) {
     expect(within(primary).getByRole("link", {name})).toHaveAttribute("href", href);
   }
-  expect(within(primary).queryByRole("link", {name: "Profiles"})).not.toBeInTheDocument();
-  expect(within(primary).queryByRole("link", {name: "Models"})).not.toBeInTheDocument();
+  for (const name of ["Agents", "Catalog", "Packages", "Deployments", "Updates", "Jobs", "Audit", "Profiles", "Models"]) {
+    expect(within(primary).queryByRole("link", {name})).not.toBeInTheDocument();
+  }
   for (const icon of container.querySelectorAll("svg")) {
     expect(icon).toHaveAttribute("aria-hidden", "true");
   }
 });
 
-test("opens the visual Library while preserving the catalog URL as an advanced workflow", async () => {
-  // Break caught: Library falls back to the raw catalog/editor workflow or
-  // the existing catalog URL is silently redirected away.
+test("does not render a replacement page for unsupported URLs", async () => {
+  // Break caught: an unsupported route silently falls back to Fleet or
+  // Library, preserving compatibility behavior instead of disappearing.
   render(<App api={apiFixture}/>);
   const user = userEvent.setup();
 
@@ -114,10 +117,17 @@ test("opens the visual Library while preserving the catalog URL as an advanced w
   expect(location.pathname).toBe("/library");
   expect(screen.getByRole("link", {name: "Library"})).toHaveAttribute("aria-current", "page");
 
-  history.pushState(null, "", "/catalog");
-  dispatchEvent(new PopStateEvent("popstate"));
-  expect(await screen.findByRole("heading", {name: "Recipe catalog"})).toBeVisible();
-  expect(location.pathname).toBe("/catalog");
+  act(() => {
+    history.pushState(null, "", "/unsupported-route");
+    dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await waitFor(() => {
+    expect(screen.queryByRole("heading", {name: "Fleet"})).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", {name: "Library"})).not.toBeInTheDocument();
+  });
+  expect(screen.getByRole("link", {name: "Fleet"})).not.toHaveAttribute("aria-current");
+  expect(screen.getByRole("link", {name: "Library"})).not.toHaveAttribute("aria-current");
+  expect(location.pathname).toBe("/unsupported-route");
 });
 
 test("moves focus to main content after mobile route activation", async () => {

@@ -5,7 +5,6 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -32,6 +31,10 @@ from vonk_control.operation_api import JobProgress, OperationApiServices, Operat
 COMMIT = "a" * 40
 DIGEST = "d" * 64
 NODE_ID = "spk_" + "1" * 32
+
+
+def _encoded(document: object) -> bytes:
+    return (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
 
 @dataclass
@@ -131,7 +134,7 @@ def _client(*, fleet=None, fleet_projection=None, operations=None, role="operato
     )
 
 
-def test_openapi_has_no_profile_reconciliation_or_legacy_document_editor() -> None:
+def test_openapi_exposes_only_current_document_contract() -> None:
     client, *_ = _client()
 
     paths = client.app.openapi()["paths"]
@@ -145,7 +148,7 @@ def test_openapi_has_no_profile_reconciliation_or_legacy_document_editor() -> No
     assert "/api/v1/documents" not in paths
 
 
-def test_fleet_is_typed_visual_state_while_nodes_status_remains_legacy_evidence() -> (
+def test_fleet_exposes_visual_state_and_node_evidence() -> (
     None
 ):
     client, operator, *_ = _client()
@@ -306,172 +309,6 @@ def test_job_status_has_typed_progress_fields_without_payloads() -> None:
     assert "result" not in encoded
 
 
-@pytest.mark.skip(reason="legacy profile reconciliation projection retired in v1")
-def test_plan_response_whitelists_nested_route_release_and_dag_fields() -> None:
-    public_digest = "1" * 64
-    plan = SimpleNamespace(
-        commit=COMMIT,
-        digest=DIGEST,
-        targets=(NODE_ID,),
-        placements={"model": (NODE_ID,)},
-        routes={
-            "model": {
-                "workload_id": "model",
-                "nodes": (NODE_ID,),
-                "entrypoint_node_id": NODE_ID,
-                "scheme": "http",
-                "port": 8000,
-                "path": "/v1",
-                "quota": {
-                    "requests_per_minute": 10,
-                    "tokens_per_minute": 1000,
-                },
-                "quota_digest": public_digest,
-                "private_evidence": "route-secret",
-            }
-        },
-        releases={
-            "model": {
-                "manifest_path": "manifests/releases/model.json",
-                "manifest_sha256": public_digest,
-                "definition_hash": public_digest,
-                "release_request": {
-                    "schema_version": 1,
-                    "target_name": "model",
-                    "oci_manifest_digest": "sha256:" + "2" * 64,
-                    "target_digest": "3" * 64,
-                    "provenance_digest": "4" * 64,
-                    "adapter_id": "systemd",
-                },
-                "workload_requests": {
-                    "prepare": {
-                        "schema_version": 1,
-                        "workload_id": "model",
-                        "release_digest": "3" * 64,
-                        "adapter_id": "systemd",
-                        "profile_digest": "5" * 64,
-                    },
-                    "start": {
-                        "schema_version": 1,
-                        "workload_id": "model",
-                        "release_digest": "3" * 64,
-                        "adapter_id": "systemd",
-                        "preparation_digest": "6" * 64,
-                    },
-                    "stop": {
-                        "schema_version": 1,
-                        "workload_id": "model",
-                        "release_digest": "3" * 64,
-                        "adapter_id": "systemd",
-                    },
-                    "health": {
-                        "schema_version": 1,
-                        "workload_id": "model",
-                        "release_digest": "3" * 64,
-                        "adapter_id": "systemd",
-                    },
-                    "verify": {
-                        "schema_version": 1,
-                        "workload_id": "model",
-                        "release_digest": "3" * 64,
-                        "adapter_id": "systemd",
-                        "expected_digest": "7" * 64,
-                    },
-                },
-                "endpoint": {"scheme": "http", "port": 8000, "path": "/v1"},
-                "private_evidence": "release-secret",
-            }
-        },
-        input_digests={"inventory/fleet.toml": "8" * 64},
-        operation_graph=SimpleNamespace(
-            reconciliation_id="22222222-2222-4222-8222-222222222222",
-            document={
-                "schema_version": 1,
-                "base_commit": COMMIT,
-                "targets": [NODE_ID],
-                "nodes": [
-                    {
-                        "operation_id": "model:node.probe",
-                        "node_id": NODE_ID,
-                        "workload_id": "model",
-                        "kind": "node.probe",
-                        "dependencies": [],
-                        "compensation_kind": None,
-                        "payload_digest": "9" * 64,
-                        "private_evidence": "operation-secret",
-                    }
-                ],
-                "private_evidence": "graph-secret",
-            },
-        ),
-        agent_protocol_range=(1, 1),
-    )
-
-    response = operation_api.plan_response(
-        plan, fleet_evidence_digest="f" * 64
-    ).model_dump(mode="json")
-
-    assert response["placements"] == {"model": [NODE_ID]}
-    assert response["routes"]["model"]["quota"] == {
-        "requests_per_minute": 10,
-        "tokens_per_minute": 1000,
-    }
-    assert response["releases"]["model"]["release_request"]["adapter_id"] == ("systemd")
-    assert response["operation_graph"]["nodes"] == [
-        {
-            "operation_id": "model:node.probe",
-            "node_id": NODE_ID,
-            "workload_id": "model",
-            "kind": "node.probe",
-            "dependencies": [],
-            "compensation_kind": None,
-            "payload_digest": "9" * 64,
-        }
-    ]
-    assert "private_evidence" not in json.dumps(response, sort_keys=True)
-
-
-def test_job_operation_progress_projects_only_bounded_phase() -> None:
-    operations = OperationApiServices(
-        endpoint=lambda _alias: {},
-        agents=lambda: (),
-        job_operations=lambda _job_id, _cursor, _limit: OperationPage(
-            (
-                {
-                    "attempt": 1,
-                    "graph_operation_id": "model:node.probe",
-                    "id": "44444444-4444-4444-8444-444444444444",
-                    "kind": "node.probe",
-                    "node_id": NODE_ID,
-                    "progress": {
-                        "phase": "checking",
-                        "private_evidence": "must-not-cross-api",
-                    },
-                    "state": "running",
-                    "updated_at": "2026-08-05T12:00:00+00:00",
-                },
-            ),
-            None,
-            JobProgress(completed=0, failed=0, running=1, total=1),
-        ),
-        resume_job=lambda _job_id: None,
-    )
-    client, operator, _reconciler, _audits = _client(operations=operations)
-
-    response = client.get(
-        "/api/v1/jobs/11111111-1111-4111-8111-111111111111",
-        headers=operator,
-    )
-
-    assert response.status_code == 200
-    assert response.json()["operations"][0]["progress"] == {"phase": "checking"}
-    assert "private_evidence" not in response.text
-
-
-def _encoded(document: dict[str, object]) -> bytes:
-    return (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode()
-
-
 def test_durable_projection_reads_only_current_activation_and_hides_agent_secrets(
     tmp_path,
 ) -> None:
@@ -588,7 +425,7 @@ def test_durable_projection_reads_only_current_activation_and_hides_agent_secret
             AgentNode(
                 node_id=NODE_ID,
                 state="active",
-                protocol_version=1,
+                protocol_version=3,
                 capabilities=["node.probe"],
                 last_seen_at=now,
             )
@@ -641,10 +478,8 @@ def test_durable_projection_reads_only_current_activation_and_hides_agent_secret
             "certificate_expires_at": (now + timedelta(days=30)).isoformat(),
             "last_seen_age_seconds": 0.0,
             "last_seen_at": now.isoformat(),
-            "agent_implementation": "python",
-            "migration_state": "required",
             "node_id": NODE_ID,
-            "protocol_version": 1,
+            "protocol_version": 3,
             "platform_version": None,
             "build_digest": None,
             "active_slot": None,

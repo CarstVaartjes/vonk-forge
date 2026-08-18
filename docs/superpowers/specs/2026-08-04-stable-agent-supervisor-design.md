@@ -227,12 +227,10 @@ workload handlers in production.
 
 The compiled `node-runtime-v1` mapping in this Task 5 design is the accepted
 legacy bootstrap policy, not the permanent catalog boundary for Mia, DS4, or
-future models. The approved generalized workload package design replaces that
-catalog role with a compiled generic package operation vocabulary, three typed
-execution backends, sandbox policy, and an unprivileged adapter ABI. A workload
-release lock selects the exact signed adapter digest; the privileged helper
-validates only backend/capability structs and never model, family, adapter, or
-release names.
+future models. The clean-slate Fleet/Library boundary removes the old
+package/deployment control-plane vocabulary. A workload release lock selects the
+exact signed adapter digest; the privileged helper validates only
+backend/capability structs and never model, family, adapter, or release names.
 
 The stable supervisor remains responsible only for the Vonk Forge agent A/B
 slots. Workload generations, adapters, environments, containers, and model

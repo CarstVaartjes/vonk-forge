@@ -22,6 +22,7 @@ export type JobsResponse = components["schemas"]["JobsResponse"];
 export type ProposalInput = {base_commit: string; changes: {path: string; document: Record<string, unknown>}[]};
 export type ProposalPreview = {base_commit: string; digest: string; patch: string; affected_documents: string[]; validation_results: string[]};
 export type AuditSummary = {request_id: string; actor: string; action: string; base_commit?: string; targets: string[]};
+export type AuditResponse = {events: AuditSummary[]};
 export type UpdateTarget = {
   build_digest: string;
   platform_version: string;
@@ -85,11 +86,6 @@ export type UpdateRollout = {
   resume_required: boolean;
   state: string;
 };
-export type PackageInventory = components["schemas"]["PackageInventoryResponse"];
-export type PackageRemovalPreview = components["schemas"]["PackageRemovalPreviewResponse"];
-export type PackageRemovalProgress = components["schemas"]["PackageProgressResponse"];
-export type PackagePlan = components["schemas"]["PackagePlanResponse"];
-export type PackageProgress = components["schemas"]["PackageProgressResponse"];
 export type CatalogRecipeSummary = components["schemas"]["RecipeSummaryResponse"];
 export type CatalogRecipeRevision = components["schemas"]["RecipeRevisionResponse"];
 export type CatalogRecipeList = components["schemas"]["RecipeListResponse"];
@@ -176,12 +172,11 @@ export interface ControlApi extends LibraryApi {
   jobs(cursor?: string): Promise<JobsResponse>;
   job(jobId: string, operationCursor?: string, targetCursor?: string): Promise<JobDetail>;
   resumeJob(jobId: string): Promise<JobResumeResponse>;
-  audit(): Promise<{events: AuditSummary[]}>;
+  audit(): Promise<AuditResponse>;
   preview(input: ProposalInput): Promise<ProposalPreview>; submit(digest: string): Promise<Record<string, unknown>>;
   agents(): Promise<AgentsResponse>;
   enrollments(): Promise<EnrollmentListResponse>;
   createEnrollmentGrant(nodeId: string, ttlSeconds: number, signal?: AbortSignal): Promise<EnrollmentGrantResponse>;
-  createAgentMigrationGrant(nodeId: string, ttlSeconds: number, signal?: AbortSignal): Promise<EnrollmentGrantResponse>;
   approveEnrollment(enrollmentId: string): Promise<EnrollmentDecisionResponse>;
   rejectEnrollment(enrollmentId: string, reason: string): Promise<EnrollmentDecisionResponse>;
   revokeAgentNode(nodeId: string): Promise<void>;
@@ -190,9 +185,4 @@ export interface ControlApi extends LibraryApi {
   applyUpdate(planDigest: string): Promise<UpdateRollout>;
   updateStatus(rolloutId: string): Promise<UpdateRollout>;
   approveUpdateResume(rolloutId: string): Promise<UpdateRollout>;
-  packageInventory(nodeId?: string, deploymentId?: string, cursor?: string): Promise<PackageInventory>;
-  previewPackageRemoval(input: {deployment_id: string; release_digest: string; node_ids: string[]}): Promise<PackageRemovalPreview>;
-  removePackageInventory(planDigest: string): Promise<PackageRemovalProgress>;
-  previewPackageGc(): Promise<PackagePlan>;
-  applyPackageGc(planDigest: string): Promise<PackageProgress>;
 }

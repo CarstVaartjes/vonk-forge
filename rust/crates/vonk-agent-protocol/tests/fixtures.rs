@@ -4,8 +4,7 @@ use std::{collections::BTreeMap, fs, path::PathBuf};
 
 use serde_json::Value;
 use vonk_agent_protocol::{
-    AgentClaim, AgentResult, EnrollmentRequest, PackageOperationRequest, canonical_json,
-    hex_sha256, parse_strict,
+    AgentClaim, AgentResult, EnrollmentRequest, canonical_json, hex_sha256, parse_strict,
 };
 
 #[test]
@@ -46,9 +45,6 @@ fn strict_rust_types_parse_shared_messages() {
     let enrollment: EnrollmentRequest =
         parse_strict(&fs::read(root.join("enrollment-request.json")).unwrap()).unwrap();
     assert_eq!(enrollment.evidence.node_id, claim.node_id);
-    let package: PackageOperationRequest =
-        parse_strict(&fs::read(root.join("workload-package.json")).unwrap()).unwrap();
-    assert_eq!(package.deployment_id, "vllm");
 }
 
 #[test]

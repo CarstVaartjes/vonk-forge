@@ -82,7 +82,6 @@ def test_focused_publication_gate_covers_auth_web_caddy_and_tailscale() -> None:
         "scripts/tests/test_dev_admin_token.py",
         "control/tests/test_dev_cohort.py",
         "control/tests/test_dev_auth_init.py",
-        "control/tests/test_browser_authentication_migration.py",
         "control/tests/test_passwords.py",
         "control/tests/test_browser_auth.py",
         "control/tests/test_auth_api.py",

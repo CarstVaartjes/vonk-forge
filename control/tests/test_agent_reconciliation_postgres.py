@@ -48,6 +48,7 @@ NODE_C = "spk_" + "c" * 32
 BASE_COMMIT = "a" * 40
 NOW = datetime(2026, 8, 5, tzinfo=UTC)
 AGENT_CAPABILITIES = (
+    "agent.runtime.rust.v1",
     "node.probe",
     "release.install",
     "workload.health",
@@ -254,7 +255,7 @@ def _system(
         "fleet_evidence_digest": "e" * 64,
         "operation_graph": graph,
         "operation_payloads": {operation_id: payload},
-        "agent_protocol_range": [1, 1],
+        "agent_protocol_range": [3, 3],
     }
     reconciliation_id = str(uuid.uuid4())
     job_id = str(uuid.uuid4())
@@ -945,7 +946,7 @@ def test_postgres_successor_authority_loss_withdraws_predecessor_before_wait(
     with sessions.begin() as session:
         node = session.get(AgentNode, NODE_A)
         assert node is not None
-        node.protocol_version = 1
+        node.protocol_version = 3
         node.capabilities = list(AGENT_CAPABILITIES)
     assert _complete(system) == old_id
     new_id, _new_job_id = _insert_successor(sessions, old_id)
@@ -995,7 +996,7 @@ def test_postgres_pending_successor_does_not_block_fail_closed_owner_withdrawal(
     with sessions.begin() as session:
         node = session.get(AgentNode, NODE_A)
         assert node is not None
-        node.protocol_version = 1
+        node.protocol_version = 3
         node.capabilities = list(AGENT_CAPABILITIES)
     assert _complete(system) == old_id
     new_id, _new_job_id = _insert_successor(sessions, old_id)
@@ -1043,7 +1044,7 @@ def test_postgres_publication_ack_crash_then_authority_loss_withdraws_routes(
     with sessions.begin() as session:
         node = session.get(AgentNode, NODE_A)
         assert node is not None
-        node.protocol_version = 1
+        node.protocol_version = 3
         node.capabilities = list(AGENT_CAPABILITIES)
 
     _sessions, operations, service, _reconciliation_id, _job_id, claim = _claimed(
@@ -1488,7 +1489,7 @@ def _compensation_system(
         "operation_payloads": {
             operation_id: payload for operation_id in operation_ids
         },
-        "agent_protocol_range": [1, 1],
+        "agent_protocol_range": [3, 3],
     }
     reconciliation_id = str(uuid.uuid4())
     job_id = str(uuid.uuid4())

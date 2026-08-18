@@ -75,7 +75,7 @@ def lock_document(
         "compatibility": {
             "architectures": ["arm64"],
             "operating_systems": ["linux"],
-            "required_capabilities": ["package-abi-v1"],
+            "required_capabilities": ["recipe-runtime-v1"],
             "minimum_memory_bytes": 4096,
             "minimum_storage_bytes": 2048,
         },

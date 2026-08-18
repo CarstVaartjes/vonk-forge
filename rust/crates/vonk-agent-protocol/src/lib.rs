@@ -207,15 +207,6 @@ pub struct EnrollmentEvidence {
     pub node_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct PackageOperationRequest {
-    pub deployment_digest: String,
-    pub deployment_id: String,
-    pub release_digest: String,
-    pub schema_version: u8,
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum RecipeOperationRequest {
     Build(RecipeBuildRequest),

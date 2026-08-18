@@ -16,12 +16,6 @@ from types import MappingProxyType
 _COMMIT = re.compile(r"[0-9a-f]{40}")
 _ROOTS = (
     "inventory/",
-    # Workload definitions and promoted release locks are Git authority for
-    # the generic package plane.  Keep them in the same immutable, read-only
-    # repository boundary as the existing model/profile documents; they must
-    # never be read from a mutable checkout path.
-    "config/package-families/",
-    "config/workload-deployments/",
     "locks/",
     "manifests/",
     "docs/audits/",

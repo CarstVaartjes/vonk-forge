@@ -59,20 +59,20 @@ def _sessions(tmp_path):
                 AgentNode(
                     node_id=NODE,
                     state="active",
-                    protocol_version=1,
+                    protocol_version=3,
                     capabilities=[],
                     last_seen_at=NOW - timedelta(seconds=90),
                 ),
                 AgentNode(
                     node_id=NEW_NODE,
                     state="retired",
-                    protocol_version=2,
+                    protocol_version=4,
                     capabilities=[],
                 ),
                 AgentNode(
                     node_id=OLD_NODE,
                     state="active",
-                    protocol_version=0,
+                    protocol_version=2,
                     capabilities=[],
                 ),
                 AgentNode(

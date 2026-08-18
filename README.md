@@ -4,14 +4,14 @@ Vonk Forge is a local-first control plane for one or more NVIDIA GB10 GPU system
 Each GPU node is onboarded independently; the Docker-capable service host runs
 separate Caddy, API/worker, PostgreSQL, LiteLLM, Hermes Agent, Prometheus, and
 Grafana services.
-Administration is available through both `vonkctl admin` and the
-web UX. The target recipe workflow is local-first: PostgreSQL is authoritative
+Administration is available through the authenticated Fleet and Library web
+workflows. The target recipe workflow is local-first: PostgreSQL is authoritative
 for recipe families, authored/imported revisions, installations, placements,
 and runs. Git/TUF remains the authority for platform source and the existing
-workload-release path while the catalog migration is completed; a recipe never
+workload-release path while the Library workflow owns local operation; a recipe never
 needs a Git commit or pull request in order to be imported or run.
 
-The initial product has no Railway or global-catalog dependency. This repository
+The initial product has no Railway or external recipe-authority dependency. This repository
 owns the GPU node/NAS runtime and its GitHub Actions platform release: one
 stable `vX.Y.Z` tag builds the signed ARM64 `vonk-forge-agent` Debian package,
 the API/worker/Hermes control images, and their signed platform manifest. The
@@ -22,9 +22,9 @@ evidence to their GitHub Release before advancing apt `stable`. The
 [agent package channel guide](docs/operations/agent-package-release.md) lists
 all four protected environments, exact keyring bootstrap commands, and channel
 switch/recovery rules. The separate `vonk-forge-web` repository
-will later publish a global catalog frontend through Cloudflare Pages and may
+may later publish a public recipe-library frontend through Cloudflare Pages and may
 add a Railway API/worker/PostgreSQL service; that future service is optional and
-never replaces the local catalog authority.
+never replaces the local Library authority.
 
 Before a real release, run `scripts/verify-platform-release --candidate X.Y.Z
 --json`. A blocked result is expected until external hardware, recovery, and
@@ -57,11 +57,9 @@ not treated as production-ready until its evidence gates are accepted.
   requiring a community container registry.
 - Build approved recipe source bundles for immutable execution-harness
   revisions, including the checked-in DeepSeek Mia and DS4 recipes.
-- Publish and operate generic, signed workload packages independently from
-  Vonk Forge platform releases. Recipe selection is owned by Catalog and
-  Library, not the package plane.
-- Review and apply NAS-to-GPU node platform skew updates through the Admin web UX
-  or `vonkctl`, with explicit signed fan-out over the outbound agent channel.
+- Review and apply NAS-to-GPU node platform skew updates through the
+  authenticated web update workflow, with explicit signed fan-out over the
+  outbound agent channel.
 
 ## Prerequisites
 
@@ -139,10 +137,6 @@ uv run --frozen pytest -q deploy/compose/tests
 scripts/verify-supply-chain --json
 ```
 
-The simulated workload acceptance and failure matrix run on manual/tagged
-workflow executions so release evidence is still produced without charging
-every PR for the longest jobs.
-
 The protected `Main` ruleset requires the three PR checks (`Ruff`, `Generated
 control clients`, and `PR contract smoke`). A successful merged PR lifecycle is
 recorded in `inventory/reports/code-host-protection.json`; heavyweight
@@ -151,36 +145,24 @@ acceptance remains outside the PR path by design.
 See [Testing and CI policy](docs/testing-and-ci.md) for the exact local tiers,
 the hosted smoke subset, and the release-only acceptance gates.
 
-Configure the authenticated control origin and restrictive token file, then
-inspect the fleet and current recipe operations:
-
-```bash
-export VONK_CONTROL_URL=https://control.example.invalid
-export VONK_CONTROL_TOKEN_FILE=/run/secrets/vonk-control-token
-uv run --project /path/to/vonk-forge vonkctl nodes status --json
-uv run --project /path/to/vonk-forge vonkctl admin fleet --json
-uv run --project /path/to/vonk-forge vonkctl admin jobs --json
-```
-
-Recipe maintenance is performed in the authenticated browser at `/library` and
-`/catalog`: Library shows current model-version families and accepted recipe
-revisions, while Catalog handles creating/importing drafts, resolving immutable
-revisions, attaching build evidence, and mapping a recipe to a cluster. Routine
-CLI commands only read server projections or invoke current package/update
-operations; they never fall back to SSH. Production work is persisted in
-PostgreSQL, claimed outbound by each GPU node agent over mTLS, and reconciled by
-the repository-less worker.
+Recipe maintenance is performed in the authenticated browser at `/library`.
+Library shows current model-version families, accepted recipe revisions, build
+evidence, and Fleet mapping/apply state. Routine CLI commands only read server
+projections for maintainers; supported operator workflows use Fleet, Library,
+and the web update flow and never fall back to SSH. Production work is persisted
+in PostgreSQL, claimed outbound by each GPU node agent over mTLS, and
+reconciled by the repository-less worker.
 
 ## Repository layout
 
 - `bin/` — repository-local command launchers
 - `src/cluster_profiles/` — current control client, typed contracts, node tooling, and CLI
 - `adapters/` — model-specific runtime definitions and lifecycle tooling
-- `config/` — platform contracts, execution harnesses, runtime fixtures, and
-  package authority; reviewed model recipes and target research live in the
-  separate standard recipe library
+- `config/` — platform contracts, execution harnesses, and runtime fixtures;
+  reviewed model recipes and target research live in the separate standard
+  recipe library
 - `nodes/` — node bootstrap, health, fabric, and recovery utilities
-- `schemas/` — JSON contracts for profiles, workloads, and health evidence
+- `schemas/` — JSON contracts for Fleet, Library, runtime, and health evidence
 - `tests/` — Python and shell test suites
 - `docs/` — architecture, security, testing, and operator runbooks
 
@@ -189,7 +171,6 @@ the repository-less worker.
 - [Documentation index](docs/README.md)
 - [Fresh development installation](docs/runbooks/fresh-development-install.md)
 - [Architecture overview](docs/architecture-overview.md)
-- [Recipe catalog and WorkloadRun operations](docs/runbooks/workload-packages.md)
 - [NAS pull-only Compose deployment](deploy/compose/README.md)
 - [Development NAS installation and runtime secrets](docs/runbooks/development-nas-installation.md)
 - [Source-first recipe containers and local builds](deploy/compose/README.md#recipe-containers-are-source-first)
@@ -197,7 +178,6 @@ the repository-less worker.
 - [Control-plane bootstrap](docs/runbooks/control-plane-bootstrap.md)
 - [Control-plane operations](docs/runbooks/control-plane-operations.md)
 - [Control-plane telemetry](docs/runbooks/control-plane-telemetry.md)
-- [`vonkctl` runbook](docs/runbooks/vonkctl.md)
 - [Inventory runbook](docs/runbooks/inventory.md)
 - [Node onboarding and health](docs/runbooks/node-onboarding.md) — add any
   number of certificate-bound GPU nodes without a fixed fleet size
@@ -206,9 +186,6 @@ the repository-less worker.
 - [GPU node agent PKI and recovery runbook](docs/runbooks/agent-pki.md)
 - [Tailnet-only NAS ingress runbook](docs/runbooks/tailscale.md)
 - [Hermes Agent runbook](docs/runbooks/hermes-agent.md)
-- [Workload package operations](docs/runbooks/workload-packages.md) — generic
-  family/release publication, rollout, rollback, repair, GC, and first-release
-  evidence
 - [Platform update runbook](docs/runbooks/platform-update.md) — NAS/GPU node
   platform skew and recovery boundaries
 

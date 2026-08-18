@@ -8,8 +8,6 @@ from sqlalchemy.orm import sessionmaker
 from vonk_control import telemetry_maintenance
 from vonk_control.jobs import JobService
 from vonk_control.models import Base
-from vonk_control.package_rollout_worker import PackageRolloutWorker
-from vonk_control.package_validation_runner import PackageValidationRunner
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.route_runtime import AtomicRouteBundlePublisher
 from vonk_control.settings import Settings, SettingsError, WorkerSettings
@@ -27,7 +25,7 @@ def _jobs(tmp_path) -> JobService:
     )
 
 
-def test_production_worker_has_no_automatic_direct_transport_fallback(
+def test_production_worker_fails_unknown_generic_work(
     tmp_path,
 ) -> None:
     jobs = _jobs(tmp_path)
@@ -38,12 +36,11 @@ def test_production_worker_has_no_automatic_direct_transport_fallback(
         "worker",
         {},
         reconciliations=None,
-        quarantine_unlinked=True,
     ).run_once() is True
     persisted = jobs.get(job.id)
-    assert persisted.state == "waiting-for-operator"
-    assert persisted.status_reason == "legacy unlinked job requires operator review"
-    assert persisted.current_attempt == 0
+    assert persisted.state == "failed"
+    assert persisted.status_reason == "unsupported job kind: probe"
+    assert persisted.current_attempt == 1
 
 
 def test_production_builder_wires_signer_queue_route_boundary_and_update_worker(
@@ -97,10 +94,8 @@ def test_production_builder_wires_signer_queue_route_boundary_and_update_worker(
     )
 
     assert isinstance(worker._updates, UpdateRolloutWorker)
-    assert isinstance(worker._packages, PackageRolloutWorker)
-    assert isinstance(worker._validation, PackageValidationRunner)
-    assert worker._validation._agent_jobs is agent_jobs
-    assert worker._packages._orchestrator._agent_jobs is agent_jobs
+    assert not hasattr(worker, "_packages")
+    assert not hasattr(worker, "_validation")
     assert worker._updates._orchestrator._agent_jobs is agent_jobs
     assert isinstance(worker._updates._routes, ProductionUpdateRouteBoundary)
     assert worker._updates._routes is worker._updates._orchestrator._routes
@@ -166,48 +161,3 @@ def test_production_worker_settings_reject_raw_or_cross_origin_authority(
     monkeypatch.setenv("VONK_WORKER_API_TOKEN_FILE", str(token))
     with pytest.raises(SettingsError, match="fixed HTTP origin"):
         WorkerSettings.from_env_and_secrets()
-
-
-def test_legacy_direct_transport_defaults_disabled(monkeypatch) -> None:
-    monkeypatch.setenv("VONK_DEPLOYMENT_MODE", "test")
-    monkeypatch.setenv(
-        "VONK_DATABASE_URL",
-        "postgresql://control:test@postgres/control",
-    )
-    monkeypatch.delenv("VONK_LEGACY_DIRECT_TRANSPORT", raising=False)
-
-    assert Settings.from_env_and_secrets().legacy_direct_transport == ""
-
-
-def test_only_exact_test_selector_can_authorize_legacy_transport(monkeypatch) -> None:
-    monkeypatch.setenv("VONK_DEPLOYMENT_MODE", "test")
-    monkeypatch.setenv(
-        "VONK_DATABASE_URL",
-        "postgresql://control:test@postgres/control",
-    )
-    monkeypatch.setenv(
-        "VONK_LEGACY_DIRECT_TRANSPORT",
-        "explicit-test-only",
-    )
-
-    assert (
-        Settings.from_env_and_secrets().legacy_direct_transport
-        == "explicit-test-only"
-    )
-
-    monkeypatch.setenv("VONK_LEGACY_DIRECT_TRANSPORT", "enabled")
-    with pytest.raises(SettingsError, match="legacy direct transport"):
-        Settings.from_env_and_secrets()
-
-
-def test_production_rejects_legacy_selector_before_loading_other_secrets(
-    monkeypatch,
-) -> None:
-    monkeypatch.setenv("VONK_DEPLOYMENT_MODE", "production")
-    monkeypatch.setenv(
-        "VONK_LEGACY_DIRECT_TRANSPORT",
-        "explicit-test-only",
-    )
-
-    with pytest.raises(SettingsError, match="forbidden in production"):
-        Settings.from_env_and_secrets()

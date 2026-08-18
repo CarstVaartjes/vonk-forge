@@ -188,16 +188,9 @@ publishers across workstations and is safe to retain. A successful run removes
 both hidden transaction states from the project and leaves exactly
 `docker-compose.yaml` plus `secrets/`.
 
-An existing installation with a valid 21-file browser-access generation can be
-upgraded without rotating its CA, control database password, or other
-authority: repeat the generator command once with
-`--upgrade-litellm-key-management`, back up the resulting 22-file generation,
-and republish it. This add-only migration creates only
-`litellm-database-password`, preserves every existing secret byte, and safely
-accepts a retry after interruption. A valid pre-browser 17-file generation
-first needs `--upgrade-browser-access`; an older valid 15-file generation first
-needs `--upgrade-host-runtime-authority`. Each transition refuses partial,
-unknown, symlinked, or inconsistent state.
+This is a fresh-install bundle. If an older or incomplete secret directory is
+present, preserve any required evidence separately and generate a new bundle
+in a new directory; the clean-slate generator does not upgrade old layouts.
 
 ## 4. Configure names and start the NAS stack
 
@@ -265,19 +258,12 @@ On every Ubuntu 24.04 ARM64 node:
    `sudo apt update && sudo apt install vonk-forge-agent`.
    Require `Linger=yes`, the `vonk-agent` user bus, and rootless Podman with the
    systemd cgroup manager exactly as shown in that guide before pairing.
-3. Copy only `controller-ca` and `host-runtime-grant-public-key` from the
-   private local source bundle to the node. Never copy either corresponding
-   private key.
-4. Install the CA at `/etc/vonk-forge-agent/controller-ca.pem`, owned by
-   `root:vonk-agent` with mode `0640`.
-5. Install the helper authority public key at
-   `/etc/vonk-forge-agent/host-helper-authority.pub`, owned by `root:root` with
-   mode `0644`.
-6. Set the two explicit `:8443` HTTPS origins, CA path, independently computed
-   DER SHA-256 fingerprint, unique node ID, and (for multi-node use) the
-   node's direct-fabric address and measured 200000 Mb/s bandwidth in
-   `/etc/vonk-forge-agent/agent.toml`.
-7. Create the root-owned `docker-firewall.conf`, including every accepted
+3. Registration is the authority. In Fleet, **Add Spark** is the next
+   implementation step: it records the node-bound bootstrap grant, copies only
+   the public CA and `host-runtime-grant-public-key`, and defines the runtime
+   inputs for that Spark. Manual `agent.toml` editing is unsupported, and the
+   bootstrap action is not an operator command currently available.
+4. Create the root-owned `docker-firewall.conf`, including every accepted
    bridge-published and host-network endpoint port, then enable the signed
    `vonk-forge-docker-firewall.service` before the package-helper socket. It
    installs persistent Docker-aware `DOCKER-USER` policy for every accepted
@@ -287,7 +273,7 @@ On every Ubuntu 24.04 ARM64 node:
    contract from the workload runbook and run the packaged check after Docker
    restart and host reboot.
 
-Use the exact commands and minimal configuration in
+Use the exact installation commands and reviewed registration contract in
 [Install the Vonk Forge agent](../operations/install-vonk-agent.md). Do not add
 the agent account to Docker, sudo, or an NVIDIA administration group.
 
@@ -297,22 +283,19 @@ source-first two-Spark tensor-parallel workload.
 
 ## 6. Pair and start one node at a time
 
-For each node, complete this order without reusing its one-use token:
+For each node, complete this order without reusing its one-use grant:
 
-1. Create a pairing grant for that exact node ID in the administrator UI.
-2. Save the token in a private root-readable file on that node.
-3. Run the installation guide's exact
-   `/var/lib/vonk-forge/supervisor/current/vonk-agent pair ... --token-stdin`
-   command; the controller records a pending enrollment.
-4. Compare the displayed node, CSR, host, hardware, agent, and boot evidence,
-   then approve it.
-5. Repeat the same pair command to collect the issued certificate and remove
-   the token file.
-6. Enable the package-helper socket and agent supervisor as documented in the
-   agent installation guide.
+1. Create the node-bound registration intent in Fleet through **Add Spark**.
+2. Review the runtime inputs and approval evidence in Fleet; registration is
+   the authority and the bootstrap action remains the next implementation step,
+   not an operator command currently available.
+3. After the emitter lands, return here to materialize the local runtime file
+   and certificate collection through that Fleet-issued action.
+4. Until then, keep the node at the reviewed registration boundary and do not
+   hand-author `agent.toml` or substitute an SSH/bootstrap script.
 
 The controller must show the same certificate-bound node ID, Rust protocol 3,
-migration `complete`, and fresh inventory. Repeat for each additional node.
+and fresh inventory. Repeat for each additional node.
 If a resolved controller outage left the node at `start-limit-hit`, use the
 installation guide's bounded
 [start-limit recovery](../operations/install-vonk-agent.md#rotation-recovery-and-removal);
@@ -323,14 +306,14 @@ state, do not continue with a retained database or selected volumes. Run the
 development-only procedure in
 [Clean development reset](../operators/execution-harnesses.md#clean-development-reset).
 That procedure removes every control volume and verifies exact fresh head
-`0027_execution_harness_catalog`; it has no compatibility or prototype import
+`0001_fleet_library_baseline`; it has no compatibility or prototype import
 path. Afterward, the initializer recreates administrator subject `admin` from
 the retained verifier, but the operator must establish a fresh browser session
-and repeat the one-use grant/pair/approve/pair sequence for every Spark. Use new
-acceptance paths. A pre-reset login, session, pairing token, enrollment, route,
-or evidence file is never proof for the fresh installation. Spark-local caches
-may survive only as untrusted candidates until their exact content digests are
-verified again.
+and repeat the reviewed registration and approval flow for every Spark. Use
+new acceptance paths. A pre-reset login, session, pairing token, enrollment,
+route, or evidence file is never proof for the fresh installation. Spark-local
+caches may survive only as untrusted candidates until their exact content
+digests are verified again.
 
 ## 7. Prove the installation
 

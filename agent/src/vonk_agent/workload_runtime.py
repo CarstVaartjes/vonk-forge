@@ -173,7 +173,7 @@ def protocol_component(
 class ProtocolAcquisition:
     """Adapt signed wire descriptors to the internal provider ABI.
 
-    PackageOperationRequest carries protocol ``ComponentDescriptor`` values.
+    Protocol workload documents carry ``ComponentDescriptor`` values.
     The acquisition engine intentionally accepts a narrower internal type so
     that untrusted wire objects cannot bypass source-policy validation.  Keep
     this conversion at the production composition boundary and preserve all

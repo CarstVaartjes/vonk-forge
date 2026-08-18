@@ -209,10 +209,10 @@ class GenerationStartupSettings:
             nonce = os.environ.get("VONK_CONTROL_START_NONCE", "")
             try:
                 protocol_minimum = int(
-                    os.environ.get("VONK_AGENT_PROTOCOL_MINIMUM", "1")
+                    os.environ.get("VONK_AGENT_PROTOCOL_MINIMUM", "3")
                 )
                 protocol_maximum = int(
-                    os.environ.get("VONK_AGENT_PROTOCOL_MAXIMUM", "1")
+                    os.environ.get("VONK_AGENT_PROTOCOL_MAXIMUM", "3")
                 )
             except ValueError as error:
                 raise SettingsError("agent protocol range is invalid") from error
@@ -265,7 +265,6 @@ class Settings:
     repository_path: Path
     state_path: Path
     deployment_mode: str
-    legacy_direct_transport: str
     token_signing_key: bytes
     metrics_token: str
     git_signing_key_path: Path | None
@@ -298,7 +297,6 @@ class Settings:
     package_helper_grant_private_key_path: Path | None = None
     package_helper_receipt_private_key_path: Path | None = None
     host_runtime_grant_private_key_path: Path | None = None
-    workload_signer_socket_path: Path = Path("/run/vonk-workload-signer/signer.sock")
     global_catalog_url: str = "https://vonkforge.ai"
 
     @property
@@ -310,14 +308,6 @@ class Settings:
         mode = os.environ.get("VONK_DEPLOYMENT_MODE", "development")
         if mode not in {"development", "test", "production"}:
             raise SettingsError("VONK_DEPLOYMENT_MODE is invalid")
-        legacy_direct_transport = os.environ.get(
-            "VONK_LEGACY_DIRECT_TRANSPORT",
-            "",
-        )
-        if legacy_direct_transport not in {"", "explicit-test-only"}:
-            raise SettingsError("legacy direct transport selector is invalid")
-        if mode == "production" and legacy_direct_transport:
-            raise SettingsError("legacy direct transport is forbidden in production")
         agent_ca_provider = os.environ.get("VONK_AGENT_CA_PROVIDER", "")
         agent_runtime = os.environ.get(
             "VONK_AGENT_RUNTIME",
@@ -551,7 +541,6 @@ class Settings:
             repository_path=Path(os.environ.get("VONK_REPOSITORY_PATH", "/srv/vonk-forge/repository")),
             state_path=Path(os.environ.get("VONK_STATE_PATH", "/srv/vonk-forge/state")),
             deployment_mode=mode,
-            legacy_direct_transport=legacy_direct_transport,
             token_signing_key=signing_key,
             metrics_token=metrics_token,
             git_signing_key_path=git_signing_key_path,
@@ -584,10 +573,6 @@ class Settings:
             package_helper_grant_private_key_path=package_helper_grant_private_key_path,
             package_helper_receipt_private_key_path=package_helper_receipt_private_key_path,
             host_runtime_grant_private_key_path=host_runtime_grant_private_key_path,
-            workload_signer_socket_path=_absolute_root(
-                "VONK_WORKLOAD_SIGNER_SOCKET",
-                "/run/vonk-workload-signer/signer.sock",
-            ),
             global_catalog_url=global_catalog_url,
         )
 
@@ -610,11 +595,6 @@ class WorkerSettings:
         mode = os.environ.get("VONK_DEPLOYMENT_MODE", "development")
         if mode not in {"development", "test", "production"}:
             raise SettingsError("VONK_DEPLOYMENT_MODE is invalid")
-        legacy = os.environ.get("VONK_LEGACY_DIRECT_TRANSPORT", "")
-        if legacy not in {"", "explicit-test-only"}:
-            raise SettingsError("legacy direct transport selector is invalid")
-        if mode == "production" and legacy:
-            raise SettingsError("legacy direct transport is forbidden in production")
         database_url = _secret(
             "VONK_DATABASE_URL_FILE",
             production=mode == "production",

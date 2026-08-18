@@ -19,6 +19,7 @@ from vonk_control.fleet_projection import (
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
+    AgentNodeProfile,
     Base,
     ClusterMapping,
     ClusterMappingNode,
@@ -73,9 +74,7 @@ class Repository:
         return COMMIT
 
     def read_document(self, commit: str, path: str) -> SimpleNamespace:
-        assert (commit, path) == (COMMIT, "inventory/fleet.toml")
-        self.calls.append("fleet")
-        return SimpleNamespace(parsed={"nodes": self.nodes})
+        raise AssertionError(f"unexpected document read: {commit} {path}")
 
 
 def _inventory(
@@ -165,7 +164,90 @@ def _certificate(
     )
 
 
-def test_read_uses_repository_membership_latest_rows_and_a_bounded_query_set() -> None:
+def _profile(
+    node_id: str,
+    *,
+    display_name: str,
+    hostname: str,
+    lifecycle: str = "managed",
+    labels: dict[str, str] | None = None,
+) -> AgentNodeProfile:
+    return AgentNodeProfile(
+        node_id=node_id,
+        display_name=display_name,
+        hostname=hostname,
+        lifecycle=lifecycle,
+        labels={} if labels is None else labels,
+    )
+
+
+def test_fleet_is_empty_when_repository_has_old_nodes_but_database_has_no_agents() -> (
+    None
+):
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+
+    projection = FleetProjection(Repository(), sessions, clock=lambda: NOW)
+
+    assert projection.read().nodes == []
+
+
+def test_fleet_contains_registered_node_absent_from_repository() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    with sessions.begin() as session:
+        session.add(
+            AgentNode(
+                node_id=NODE_A,
+                state="active",
+                capabilities=[],
+                last_seen_at=NOW,
+            )
+        )
+
+    projection = FleetProjection(Repository({}), sessions, clock=lambda: NOW)
+
+    snapshot = projection.read()
+    assert [node.id for node in snapshot.nodes] == ["spk_" + "1" * 32]
+    assert snapshot.nodes[0].display_name == "spk_" + "1" * 32
+
+
+def test_fleet_excludes_revoked_agent_nodes() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    with sessions.begin() as session:
+        session.add(
+            AgentNode(
+                node_id=NODE_A,
+                state="revoked",
+                capabilities=[],
+                last_seen_at=NOW,
+                revoked_at=NOW,
+            )
+        )
+
+    projection = FleetProjection(
+        Repository(
+            {
+                NODE_A: {
+                    "display_name": "Alpha",
+                    "hostname": "alpha.internal",
+                    "lifecycle": "managed",
+                    "labels": {},
+                }
+            }
+        ),
+        sessions,
+        clock=lambda: NOW,
+    )
+
+    assert [node.id for node in projection.read().nodes] == []
+
+
+def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set() -> None:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
@@ -194,14 +276,31 @@ def test_read_uses_repository_membership_latest_rows_and_a_bounded_query_set() -
                 ),
                 AgentNode(
                     node_id=EXTRA_NODE,
-                    state="active",
+                    state="revoked",
                     architecture="linux-arm64",
                     capabilities=[],
                     last_seen_at=NOW,
+                    revoked_at=NOW,
                 ),
             ]
         )
         session.flush()
+        session.add_all(
+            [
+                _profile(
+                    NODE_A,
+                    display_name="Alpha",
+                    hostname="alpha.internal",
+                    labels={"rack": "left"},
+                ),
+                _profile(
+                    NODE_B,
+                    display_name="Beta",
+                    hostname="beta.internal",
+                    labels={"rack": "right"},
+                ),
+            ]
+        )
         session.add_all(
             [
                 _certificate(NODE_A, "bounded-a"),
@@ -256,7 +355,7 @@ def test_read_uses_repository_membership_latest_rows_and_a_bounded_query_set() -
     snapshot = FleetProjection(repository, sessions, clock=lambda: NOW).read()
     event.remove(engine, "before_cursor_execute", record_statement)
 
-    assert repository.calls == ["head", "fleet"]
+    assert repository.calls == ["head"]
     assert snapshot.model_dump(mode="json") == {
         "schema_version": 1,
         "event_cursor": 7,
@@ -391,7 +490,7 @@ def test_read_uses_repository_membership_latest_rows_and_a_bounded_query_set() -
         ],
     }
     selects = [statement for statement in statements if statement.startswith("select")]
-    assert len(selects) == 9
+    assert len(selects) == 10
     certificate_reads = [
         statement for statement in selects if "agent_certificates" in statement
     ]
@@ -716,8 +815,6 @@ def test_connection_uses_certificate_authority_and_finite_offline_precedence() -
         )
         for node in snapshot.nodes
     ] == [
-        ("unregistered", "missing", "unregistered", "unregistered"),
-        ("revoked", "valid", "offline", "agent-revoked"),
         ("pending", "revoked", "offline", "agent-inactive"),
         ("active", "missing", "offline", "certificate-missing"),
         ("active", "revoked", "offline", "certificate-revoked"),
@@ -1239,20 +1336,22 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank() -> None:
         "run.degraded",
     ]
 
-    repository_only = (
-        FleetProjection(
-            Repository({NODE_A: nodes[NODE_A]}), sessions, clock=lambda: NOW
-        )
-        .read()
-        .nodes[0]
-    )
+    with sessions.begin() as session:
+        node = session.get(AgentNode, NODE_B)
+        assert node is not None
+        node.state = "revoked"
+        node.revoked_at = NOW
+
+    registered_visible = FleetProjection(
+        Repository({NODE_A: nodes[NODE_A]}), sessions, clock=lambda: NOW
+    ).read().nodes[0]
     external_install = next(
         value
-        for value in repository_only.installed
+        for value in registered_visible.installed
         if value.installation_id == complete_installation_id
     )
     external_run = next(
-        value for value in repository_only.loaded if value.run_id == healthy_run_id
+        value for value in registered_visible.loaded if value.run_id == healthy_run_id
     )
 
     assert (
@@ -1270,7 +1369,7 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank() -> None:
     ) == ([0], [NODE_A], False, "degraded", "external-member")
 
 
-def test_history_is_repository_authorized_raw_bounded_and_chronological() -> None:
+def test_history_is_postgresql_registration_authorized_raw_bounded_and_chronological() -> None:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
@@ -1565,34 +1664,35 @@ def test_projection_selects_only_the_latest_512_current_installation_groups() ->
     assert "install-000" not in installation_ids
 
 
-def test_projection_rejects_more_than_500_repository_nodes_before_state_queries() -> (
+def test_projection_rejects_more_than_500_registered_nodes_before_state_queries() -> (
     None
 ):
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    nodes = {
-        f"spk_{index:032x}": {
-            "display_name": f"Node {index}",
-            "hostname": f"node-{index}.internal",
-            "lifecycle": "managed",
-            "labels": {},
-        }
-        for index in range(1, 502)
-    }
+    with sessions.begin() as session:
+        session.add_all(
+            [
+                AgentNode(
+                    node_id=f"spk_{index:032x}",
+                    state="active",
+                    capabilities=[],
+                )
+                for index in range(1, 502)
+            ]
+        )
     statements: list[str] = []
 
     def record_statement(_connection, _cursor, statement, _parameters, _context, _many):
         statements.append(" ".join(statement.split()).lower())
 
     event.listen(engine, "before_cursor_execute", record_statement)
-    with pytest.raises(ValueError, match="more than 500 nodes"):
-        FleetProjection(Repository(nodes), sessions, clock=lambda: NOW).read()
+    with pytest.raises(ValueError, match="more than 500 registered nodes"):
+        FleetProjection(Repository({}), sessions, clock=lambda: NOW).read()
     event.remove(engine, "before_cursor_execute", record_statement)
 
-    assert [value for value in statements if value.startswith("select")] == [
-        (
-            "select fleet_event_cursor.last_id from fleet_event_cursor "
-            "where fleet_event_cursor.singleton_id = ?"
-        )
-    ]
+    selects = [value for value in statements if value.startswith("select")]
+    assert len(selects) == 2
+    assert "from fleet_event_cursor" in selects[0]
+    assert "from agent_nodes" in selects[1]
+    assert "agent_node_profiles" not in " ".join(selects)

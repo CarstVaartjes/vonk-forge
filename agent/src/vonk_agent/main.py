@@ -18,17 +18,11 @@ from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
-from uuid import uuid4
 
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from vonk_agent_protocol import AgentClaim, AgentDirective, AgentProgress, AgentResult
-from vonk_agent_protocol.workload_packages import (
-    OciBundleMetadata,
-    PackageHelperOperation,
-    SignedPackageHelperGrant,
-    SignedPackageObjectReceipt,
-)
+from vonk_agent_protocol.workload_packages import OciBundleMetadata
 
 from cluster_profiles.update_trust import UpdateTrust
 
@@ -46,13 +40,6 @@ from .deadlines import MonotonicDeadline
 from .nvidia_tools import InstalledPolicy
 from .oci import ORASClient, ORASPolicy
 from .operations import OperationContext, OperationExecution, OperationRegistry
-from .package_helper_client import (
-    PackageHelperAdapterFactory,
-    PackageHelperAuthorityVerifier,
-    UnixPackageHelperClient,
-)
-from .package_helper_protocol import HelperExecutionBody, HelperRequest
-from .package_trust import WorkloadTrust
 from .packages.backends import (
     Backend,
     BackendInvocation,
@@ -61,21 +48,6 @@ from .packages.backends import (
     PythonRuntimePolicy,
     ResourcePolicy,
 )
-from .packages.engine import PackageEngine
-from .packages.fetch import AcquisitionEngine
-from .packages.gc import PackageGarbageCollector
-from .packages.materialize import Materializer
-from .packages.providers import (
-    GitSnapshotProvider,
-    HuggingFaceProvider,
-    OCIFetchProvider,
-    ProviderRegistry,
-    PythonArtifactProvider,
-    SignedIndexProvider,
-    SourcePolicy,
-    VerifiedHTTPSProvider,
-)
-from .packages.store import ContentStore
 from .probe import PinnedNodeProbe
 from .readiness import ReadinessReporter
 from .releases import ReleaseInstaller
@@ -89,24 +61,11 @@ from .update import (
     PlatformTUFRouteFetcher,
 )
 from .update_trust import BoundedHTTPSFetcher, TUFReleaseTrust
-from .workload_runtime import (
-    HTTPSProviderTransport,
-    ProtocolAcquisition,
-    WorkloadTUFSource,
-)
 from .workloads import WorkloadOperations
 
 
 class AgentControl(Protocol):
     def claim(self) -> AgentClaim | None: ...
-
-    def package_helper_receipts(
-        self, payload: Mapping[str, object]
-    ) -> tuple[Mapping[str, object], ...]: ...
-
-    def package_helper_grant(
-        self, payload: Mapping[str, object]
-    ) -> Mapping[str, object]: ...
 
     def heartbeat(
         self, progress: AgentProgress
@@ -120,7 +79,7 @@ class AgentControl(Protocol):
 
 
 def _local_workload_os_identities() -> tuple[str, ...]:
-    """Return bounded Linux distribution identities for package preflight."""
+    """Return bounded Linux distribution identities for workload compatibility."""
 
     identities: list[str] = ["linux"]
     try:
@@ -188,13 +147,6 @@ def _validate_workload_compatibility(
         isinstance(value, str) for value in required_capabilities
     ):
         raise ValueError("workload capability policy is invalid")
-    if not set(required_capabilities) <= {
-        "package-abi-v1",
-        "package-backend-native-v1",
-        "package-backend-python-venv-v1",
-        "package-backend-oci-v1",
-    }:
-        raise ValueError("workload capability is unavailable")
     backends = compatibility.get("backends", ())
     if not isinstance(backends, (tuple, list)) or len(backends) != 1 or backends[0] not in {
         "native",
@@ -203,12 +155,8 @@ def _validate_workload_compatibility(
     }:
         raise ValueError("workload backend policy is invalid")
     if backends[0] == "python-venv":
-        if "package-backend-python-venv-v1" not in required_capabilities:
-            raise ValueError("workload Python runtime capability is unavailable")
         _validate_python_runtime_components(lock)
     elif backends[0] == "oci":
-        if "package-backend-oci-v1" not in required_capabilities:
-            raise ValueError("workload OCI runtime capability is unavailable")
         _oci_bundle_metadata(lock)
     elif backends[0] != "native":
         raise ValueError("workload backend runtime capability is unavailable")
@@ -815,7 +763,7 @@ def build_agent(
     )
     updates = AgentUpdater(
         architecture=protocol_architecture,
-        protocol_version=1,
+        protocol_version=3,
         staging_root=_AGENT_UPDATE_STAGING_ROOT,
         trust=platform_trust,
         transport=ORASAgentTransport(
@@ -830,171 +778,6 @@ def build_agent(
         ).free,
     )
 
-    # Workload packages use a completely separate TUF cache and source route.
-    # The protocol lock remains the only catalog: every descriptor is converted
-    # at operation time and fetched directly from its immutable upstream.
-    package_root = config.state_root / "packages"
-    config.state_root.mkdir(mode=0o700, parents=True, exist_ok=True)
-    os.chmod(config.state_root, 0o700)
-    package_store = ContentStore(package_root)
-    workload_metadata_root = runtime.workload_tuf.metadata_root
-    workload_target_root = runtime.workload_tuf.target_root
-    workload_fetcher = BoundedHTTPSFetcher(
-        config.control_origin,
-        credential_provider=credentials,
-    )
-    workload_source = WorkloadTUFSource(
-        workload_metadata_root,
-        workload_target_root,
-        f"{config.control_origin}/agent/v1/workload-tuf/metadata/",
-        f"{config.control_origin}/agent/v1/workload-tuf/targets/",
-        runtime.read_workload_bootstrap_root(),
-        workload_fetcher,
-    )
-    workload_transport = HTTPSProviderTransport(policy=SourcePolicy())
-    verified_https = VerifiedHTTPSProvider(
-        workload_transport,
-        policy=SourcePolicy(),
-    )
-    provider_registry = ProviderRegistry(
-        (
-            verified_https,
-            GitSnapshotProvider(verified_https),
-            OCIFetchProvider(verified_https),
-            HuggingFaceProvider(verified_https),
-            PythonArtifactProvider(verified_https),
-            SignedIndexProvider(verified_https),
-        )
-    )
-    acquisition = ProtocolAcquisition(
-        AcquisitionEngine(package_store, provider_registry),
-        platform=protocol_architecture,
-    )
-    materializer = Materializer(package_store)
-
-    def package_preflight(lock, _request, _binding) -> None:
-        if getattr(_request, "deployment", None) is None:
-            raise ValueError("workload deployment projection is missing")
-        _validate_workload_compatibility(
-            lock,
-            protocol_architecture,
-            available_storage_bytes=shutil.disk_usage(package_root).free,
-            request=_request,
-        )
-
-    def package_cancelled(binding) -> bool:
-        try:
-            return state.operation(binding).cancel_requested
-        except Exception:  # noqa: BLE001 - cancellation is best-effort on state loss
-            return False
-
-    helper_client: UnixPackageHelperClient | None = None
-
-    def package_helper() -> UnixPackageHelperClient:
-        nonlocal helper_client
-        if helper_client is None:
-            # Public keys are installed by the host installer and are read
-            # lazily so constructing an agent for inspection never creates a
-            # local authority or silently falls back to an unsigned helper.
-            verifier = PackageHelperAuthorityVerifier.from_files()
-            helper_client = UnixPackageHelperClient(verifier)
-        return helper_client
-
-    def package_request_factory(
-        lock,
-        generation_id,
-        _generation_path,
-        _objects,
-        operation,
-        invocation,
-        _deadline,
-        *,
-        package_request=None,
-    ) -> HelperRequest:
-        adapter = getattr(lock, "adapter", None)
-        backend_invocation = _backend_invocation_for_workload(
-            lock,
-            package_request,
-            release_digest=invocation.release_digest,
-            generation=invocation.generation,
-        )
-        descriptors = tuple(
-            item
-            for item in (*tuple(getattr(lock, "components", ())), adapter)
-            if item is not None
-        )
-        object_payload = [
-            {
-                "object_digest": str(item.digest).removeprefix("sha256:"),
-                "size": item.size,
-            }
-            for item in descriptors
-        ]
-        common = {
-            "schema_version": 1,
-            "request_id": str(uuid4()),
-            "node_id": invocation.node_id,
-            "job_id": invocation.job_id,
-            "operation_id": invocation.operation_id,
-            "attempt": invocation.attempt,
-            "fence": invocation.fence,
-            "release_digest": invocation.release_digest,
-            "generation": generation_id,
-        }
-        receipts = client.package_helper_receipts(
-            {**common, "objects": object_payload}
-        )
-        parsed_receipts = tuple(
-            SignedPackageObjectReceipt.parse(item) for item in receipts
-        )
-        body = HelperExecutionBody(
-            schema_version=1,
-            request_id=common["request_id"],
-            node_id=invocation.node_id,
-            job_id=invocation.job_id,
-            operation_id=invocation.operation_id,
-            attempt=invocation.attempt,
-            fence=invocation.fence,
-            operation=PackageHelperOperation(operation.value),
-            invocation=backend_invocation,
-            receipts=parsed_receipts,
-        )
-        grant_document = client.package_helper_grant(
-            {
-                **common,
-                "operation": body.operation.value,
-                "request_digest": body.digest,
-                "expires_in_seconds": 30,
-            }
-        )
-        return HelperRequest(body, SignedPackageHelperGrant.parse(grant_document))
-
-    class _LazyPackageHelperClient:
-        def submit(self, request, *, deadline=None):
-            return package_helper().submit(request, deadline=deadline)
-
-    package_adapter_factory = PackageHelperAdapterFactory(
-        _LazyPackageHelperClient(), package_request_factory
-    )
-
-    packages = PackageEngine(
-        state=package_store.state,
-        trust=WorkloadTrust(workload_source),
-        acquisition=acquisition,
-        materializer=materializer,
-        generation_root=package_root / "generations",
-        pointer_root=package_root / "pointers",
-        adapter_factory=package_adapter_factory,
-        preflight=package_preflight,
-        progress=lambda _binding, _value: None,
-        cancelled=package_cancelled,
-        garbage_collector=PackageGarbageCollector(
-            package_store.state,
-            package_store,
-            clock_ns=time.time_ns,
-            cancelled=package_cancelled,
-        ),
-    )
     context = OperationContext(
         node_id=config.node_id,
         state=state,
@@ -1002,7 +785,6 @@ def build_agent(
         releases=releases,
         workloads=workloads,
         updates=updates,
-        packages=packages,
     )
     return Agent(
         client,

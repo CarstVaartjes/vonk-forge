@@ -38,11 +38,6 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     Run,
-    /// Import terminal receipts from a stopped legacy Python agent.
-    MigratePythonState {
-        #[arg(long)]
-        source: PathBuf,
-    },
     Pair {
         #[arg(long)]
         enrollment: Url,
@@ -59,12 +54,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = AgentConfig::load(&cli.config)?;
     match cli.command {
         Command::Run => run_agent(&config).await?,
-        Command::MigratePythonState { source } => {
-            let mut state =
-                StateStore::open(&config.data_dir.join("state.sqlite"), &config.node_id)?;
-            let imported = state.import_python_receipts(&source)?;
-            println!("imported {imported} terminal Python receipts");
-        }
         Command::Pair {
             enrollment,
             ca_sha256,

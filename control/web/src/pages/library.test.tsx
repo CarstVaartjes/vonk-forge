@@ -74,9 +74,9 @@ test("shows visual recipe truth and selects only one complete placement group on
   expect(within(detail).getByText("Build succeeded")).toBeVisible();
   expect(within(detail).getByText("Installation installed")).toBeVisible();
   expect(within(detail).getByText("Visual recipe fields are bounded to the selected immutable revision.")).toBeVisible();
-  expect(within(detail).getByRole("link", {name: "Source and build"})).toHaveAttribute("href", "/catalog/recipe-chat/source");
-  expect(within(detail).getByRole("link", {name: "Cluster mapping"})).toHaveAttribute("href", "/catalog/recipe-chat/map");
-  expect(within(detail).getByRole("link", {name: "Raw editor"})).toHaveAttribute("href", "/catalog/recipe-chat");
+  expect(within(detail).queryByRole("link", {name: "Source and build"})).not.toBeInTheDocument();
+  expect(within(detail).queryByRole("link", {name: "Cluster mapping"})).not.toBeInTheDocument();
+  expect(within(detail).queryByRole("link", {name: "Raw editor"})).not.toBeInTheDocument();
 
   const groups = within(detail).getByRole("region", {name: "Complete placement groups"});
   const select = within(groups).getByRole("button", {name: "Select complete group node-alpha and node-beta"});
@@ -400,13 +400,14 @@ test("recovers in place from snapshot and recipe-detail request errors", async (
   expect(await screen.findByRole("region", {name: "Qwen Chat recipe authority"})).toBeVisible();
 });
 
-test("offers the advanced catalog workflow when the Library is empty", async () => {
-  // Break caught: an empty local fixture produces a blank workspace with no
-  // explicit route to create or import a recipe.
+test("keeps the empty Library state inside the reduced workspace", async () => {
+  // Break caught: an empty local fixture still advertises a deleted workflow
+  // instead of keeping the operator in the Library.
   history.replaceState(null, "", "/library");
   const empty = {...librarySnapshot, models: [], unlinked_recipes: []};
   render(<App api={{librarySnapshot: async () => empty} as unknown as ControlApi}/>);
 
   expect(await screen.findByRole("heading", {name: "No recipes in the Library"})).toBeVisible();
-  expect(screen.getByRole("link", {name: "Open advanced catalog"})).toHaveAttribute("href", "/catalog");
+  expect(screen.getByText("Recipes will appear here after they are added to the local library authority.")).toBeVisible();
+  expect(screen.queryByRole("link", {name: "Open advanced catalog"})).not.toBeInTheDocument();
 });

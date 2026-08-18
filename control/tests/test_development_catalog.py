@@ -17,7 +17,7 @@ from vonk_control.models import Base
 from vonk_control.recipe_contract import recipe_content_sha256, validate_recipe
 
 ROOT = Path(__file__).resolve().parents[2]
-LEGACY_ROOTS = (
+RETIRED_ROOTS = (
     ROOT / "config/catalog/development",
     ROOT / "config/recipes/development",
 )
@@ -64,7 +64,7 @@ def _resolve_native_entities(service: CatalogService) -> None:
 
 
 def test_prototype_development_catalog_and_recipe_trees_are_absent() -> None:
-    assert all(not root.exists() for root in LEGACY_ROOTS)
+    assert all(not root.exists() for root in RETIRED_ROOTS)
 
 
 def test_native_deepseek_entities_resolve_in_exact_dependency_order(

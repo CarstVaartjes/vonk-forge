@@ -149,24 +149,14 @@ jobs:
           uv run --python 3.12 --project control --frozen --with-editable .
           --with pytest==9.1.1 pytest -q
           tests/runbooks/test_development_nas_installation.py
-          tests/runbooks/test_workload_packages.py
           tests/test_ci_platform_boundaries.py
           tests/test_container_release_workflow.py
-          control/tests/test_unknown_workload_package_e2e.py
-          tests/e2e/test_workload_package_failure_matrix.py
-      - name: Run focused control package contracts
+      - name: Run focused control cleanup contracts
         run: >-
           uv run --project control --frozen --with-editable . pytest -q
-          control/tests/test_package_api.py
-          control/tests/test_package_services.py
-          control/tests/test_package_action_plans.py
-          control/tests/test_package_validation.py
-          control/tests/test_package_validation_runner.py
-          control/tests/test_package_rollout_worker.py
+          control/tests/test_api.py
+          control/tests/test_migrations.py
           control/tests/test_production_worker.py
-          control/tests/test_agent_jobs.py -k package_validation
-      - name: Run focused web package workflow
-        run: npm test --prefix control/web -- --run src/pages/packages.test.tsx
 
   repository-suite:
     name: Complete repository suite (${{ matrix.shard.label }})
@@ -315,73 +305,20 @@ jobs:
           test "$AGENT_RESULT" = success
           test "$WEB_RESULT" = success
 
-  workload-package-evidence:
-    name: Workload package acceptance evidence
-    needs: [lint, rust, generated-clients, test, catalog-runtime]
+  release-metadata:
+    name: Validate container release tag
     if: >-
-      (github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'push' && github.ref_type == 'tag')) &&
-      always() &&
       needs.lint.result == 'success' &&
       needs.rust.result == 'success' &&
       needs.generated-clients.result == 'success' &&
       needs.test.result == 'success' &&
-      needs.catalog-runtime.result == 'success'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install uv and Python
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
-        with:
-          version: "0.12.1"
-          python-version: "3.12"
-          enable-cache: true
-      - name: Run simulated unknown-package acceptance
-        shell: bash
-        run: |
-          set -euo pipefail
-          install -d -m 0700 inventory/reports
-          if [[ ! -x scripts/accept-workload-packages ]]; then
-            echo "::notice::W18 acceptance helper is not present on this ref; no workload evidence was generated"
-            exit 0
-          fi
-          scripts/accept-workload-packages --mode simulated --json
-      - name: Run workload failure matrix evidence
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ ! -x scripts/accept-workload-package-failures ]]; then
-            echo "::notice::W19 failure-matrix helper is not present on this ref; no failure evidence was generated"
-            exit 0
-          fi
-          scripts/accept-workload-package-failures \
-            --output inventory/reports/workload-package-failure-matrix.json --json \
-            > workload-package-failure-matrix.stdout.json
-      - name: Upload workload acceptance evidence
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: workload-package-evidence-${{ github.run_id }}
-          if-no-files-found: ignore
-          retention-days: 14
-          path: |
-            inventory/reports/workload-package-acceptance.json
-            inventory/reports/workload-package-failure-matrix.json
-            workload-package-failure-matrix.stdout.json
-
-  release-metadata:
-    name: Validate container release tag
-    if: >-
-      needs.workload-package-evidence.result == 'success' &&
+      needs.catalog-runtime.result == 'success' &&
       vars.VONK_CONTAINER_RELEASES_ENABLED == 'true' &&
       vars.VONK_PLATFORM_RELEASES_ENABLED == 'true' &&
       github.event_name == 'push' &&
       github.ref_type == 'tag' &&
       startsWith(github.ref_name, 'v')
-    needs: [workload-package-evidence]
+    needs: [lint, rust, generated-clients, test, catalog-runtime]
     runs-on: ubuntu-latest
     permissions:
       contents: read

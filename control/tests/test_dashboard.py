@@ -1,7 +1,6 @@
 import json
 from datetime import UTC, datetime, timedelta
 
-import pytest
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from vonk_control.dashboard import DashboardService
@@ -9,7 +8,7 @@ from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
 )
-from vonk_control.models import AgentNode, Base, Observation
+from vonk_control.models import AgentNode, AgentNodeProfile, Base, Observation
 
 NOW = datetime(2026, 8, 5, 12, 0, tzinfo=UTC)
 
@@ -17,45 +16,50 @@ NOW = datetime(2026, 8, 5, 12, 0, tzinfo=UTC)
 class Repository:
     def head(self): return "a" * 40
     def read_document(self, commit, path):
-        return type("Document", (), {"parsed": {"schema_version": 2, "nodes": {
-            "spk_00000000000000000000000000000001": {"display_name": "Alpha", "hostname": "alpha", "lifecycle": "ready", "management": {"host": "alpha.local", "user": "admin", "port": 22}, "labels": {"zone": "lab"}}
-        }}})()
+        raise AssertionError(f"unexpected document read: {commit} {path}")
 
 
-def test_dashboard_rejects_nonmapping_fleet_document_as_type_error() -> None:
-    class InvalidRepository(Repository):
-        def read_document(self, commit, path):
-            return type("Document", (), {"parsed": []})()
+def test_dashboard_does_not_read_the_repository_fleet_document(tmp_path) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'empty-dashboard.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
 
-    with pytest.raises(TypeError, match="node table"):
-        DashboardService(InvalidRepository(), None).fleet()
+    assert DashboardService(Repository(), sessions, clock=lambda: NOW).fleet() == {
+        "commit": "a" * 40,
+        "nodes": [],
+    }
 
 
 class PresenceRepository:
     def head(self): return "b" * 40
     def read_document(self, commit, path):
-        nodes = {
-            "spk_" + character * 32: {
-                "display_name": name,
-                "hostname": f"{name.lower()}.lan",
-                "lifecycle": "ready",
-            }
-            for character, name in (
-                ("a", "Active"),
-                ("b", "Stale"),
-                ("c", "Revoked"),
-                ("d", "Missing"),
-            )
-        }
-        return type("Document", (), {"parsed": {"schema_version": 2, "nodes": nodes}})()
+        raise AssertionError(f"unexpected document read: {commit} {path}")
 
 
-def test_dashboard_joins_repository_fleet_with_latest_observation(tmp_path) -> None:
+def test_dashboard_joins_registered_fleet_with_latest_observation(tmp_path) -> None:
     engine = create_engine(f"sqlite:///{tmp_path / 'dashboard.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     with sessions.begin() as session:
-        session.add(Observation(node_id="spk_00000000000000000000000000000001", kind="health", payload={"status": "healthy"}, observed_at=datetime(2026, 8, 3, tzinfo=UTC)))
+        node_id = "spk_00000000000000000000000000000001"
+        session.add_all(
+            [
+                AgentNode(node_id=node_id, state="active", capabilities=[]),
+                AgentNodeProfile(
+                    node_id=node_id,
+                    display_name="Alpha",
+                    hostname="alpha",
+                    lifecycle="ready",
+                    labels={"zone": "lab"},
+                ),
+                Observation(
+                    node_id=node_id,
+                    kind="health",
+                    payload={"status": "healthy"},
+                    observed_at=datetime(2026, 8, 3, tzinfo=UTC),
+                ),
+            ]
+        )
     result = DashboardService(
         Repository(),
         sessions,
@@ -79,6 +83,14 @@ def test_fleet_queries_only_latest_health_per_node(tmp_path) -> None:
     with sessions.begin() as session:
         session.add_all(
             (
+                AgentNode(node_id=node_id, state="active", capabilities=[]),
+                AgentNodeProfile(
+                    node_id=node_id,
+                    display_name="Alpha",
+                    hostname="alpha",
+                    lifecycle="ready",
+                    labels={"zone": "lab"},
+                ),
                 Observation(
                     node_id=node_id,
                     kind="health",
@@ -139,8 +151,6 @@ def test_dashboard_projects_agent_availability_without_addresses(tmp_path) -> No
                     node_id=active,
                     state="active",
                     capabilities=[],
-                    agent_implementation="rust",
-                    migration_state="complete",
                     protocol_version=3,
                     last_seen_at=NOW - timedelta(seconds=149),
                 ),
@@ -162,6 +172,27 @@ def test_dashboard_projects_agent_availability_without_addresses(tmp_path) -> No
                     kind="management-address",
                     payload={"address": "10.0.0.42"},
                     observed_at=NOW,
+                ),
+                AgentNodeProfile(
+                    node_id=active,
+                    display_name="Active",
+                    hostname="active.lan",
+                    lifecycle="ready",
+                    labels={},
+                ),
+                AgentNodeProfile(
+                    node_id=stale,
+                    display_name="Stale",
+                    hostname="stale.lan",
+                    lifecycle="ready",
+                    labels={},
+                ),
+                AgentNodeProfile(
+                    node_id=revoked,
+                    display_name="Revoked",
+                    hostname="revoked.lan",
+                    lifecycle="ready",
+                    labels={},
                 ),
             )
         )
@@ -198,8 +229,6 @@ def test_dashboard_projects_agent_availability_without_addresses(tmp_path) -> No
     nodes = {node["display_name"]: node for node in result["nodes"]}
     assert nodes["Active"]["agent_state"] == "active"
     assert nodes["Active"]["agent_online"] is True
-    assert nodes["Active"]["agent_implementation"] == "rust"
-    assert nodes["Active"]["agent_migration_state"] == "complete"
     assert nodes["Active"]["compatibility"] == "supported"
     assert nodes["Active"]["inventory_stale"] is False
     assert nodes["Active"]["inventory_age_seconds"] == 10
@@ -210,21 +239,10 @@ def test_dashboard_projects_agent_availability_without_addresses(tmp_path) -> No
     ]
     assert nodes["Active"]["memory_available_bytes"] == 15_000
     assert nodes["Active"]["disk_available_bytes"] == 7_000
-    assert nodes["Stale"]["agent_migration_state"] == "required"
     assert nodes["Active"]["agent_last_seen_at"] == (NOW - timedelta(seconds=149)).isoformat()
     assert nodes["Stale"]["agent_state"] == "active"
     assert nodes["Stale"]["agent_online"] is False
-    assert nodes["Revoked"]["agent_state"] == "revoked"
-    assert nodes["Revoked"]["agent_online"] is False
-    assert nodes["Missing"]["agent_state"] == "unregistered"
-    assert nodes["Missing"]["agent_last_seen_at"] is None
-    assert nodes["Missing"]["agent_online"] is False
-    assert nodes["Missing"]["healthy"] is None
-    assert nodes["Missing"]["stale"] is True
-    assert nodes["Missing"]["probe_age_seconds"] is None
-    assert nodes["Missing"]["inventory_stale"] is True
-    assert nodes["Missing"]["inventory_age_seconds"] is None
-    assert nodes["Missing"]["inventory_capabilities"] == []
+    assert "Revoked" not in nodes
     encoded = json.dumps(result, sort_keys=True)
     assert "10.0.0.42" not in encoded
     assert "management-address" not in encoded

@@ -15,8 +15,10 @@ def _git(root: Path, *args: str) -> str:
 @pytest.fixture
 def proposals(tmp_path: Path):
     root = tmp_path / "repo"; root.mkdir(); _git(root, "init", "-q")
-    (root / "config/package-families").mkdir(parents=True)
-    (root / "config/package-families/base.toml").write_text('schema_version = 2\nid = "base"\nname = "Base"\n')
+    (root / "docs/audits").mkdir(parents=True)
+    (root / "docs/audits/base.toml").write_text(
+        'schema_version = 2\nid = "base"\nname = "Base"\n'
+    )
     _git(root, "add", "."); _git(root, "commit", "-qm", "base")
     repository = RepositoryService(root)
     return ProposalService(repository, head=repository.head), repository.head()

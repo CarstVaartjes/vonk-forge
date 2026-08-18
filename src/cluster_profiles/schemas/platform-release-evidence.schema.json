@@ -3,7 +3,7 @@
   "$id": "https://vonk-forge.invalid/schemas/platform-release-evidence.schema.json",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "candidate", "status", "evidence_sha256", "evidence_kinds", "physical_evidence_key_id", "physical_update_gates", "workload_packages", "missing_gates", "digest"],
+  "required": ["schema_version", "candidate", "status", "evidence_sha256", "evidence_kinds", "physical_evidence_key_id", "physical_update_gates", "missing_gates", "digest"],
   "properties": {
     "schema_version": {"const": 1},
     "candidate": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$"},
@@ -27,24 +27,6 @@
         "control_host_update_recovery": {"type": "boolean"},
         "signed_platform_update_manifest": {"type": "boolean"},
         "node_canary_and_rollback": {"type": "boolean"}
-      }
-    },
-    "workload_packages": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["unknown_family_without_agent_update", "agent_digest_unchanged", "release_two_activated", "offline_release_one_rollback", "unsigned_release_rejected", "unapproved_release_rejected", "ssh_calls", "agent_update_calls", "failure_matrix", "evidence_sha256", "missing_gates"],
-      "properties": {
-        "unknown_family_without_agent_update": {"type": "boolean"},
-        "agent_digest_unchanged": {"type": "boolean"},
-        "release_two_activated": {"type": "boolean"},
-        "offline_release_one_rollback": {"type": "boolean"},
-        "unsigned_release_rejected": {"type": "boolean"},
-        "unapproved_release_rejected": {"type": "boolean"},
-        "ssh_calls": {"type": ["integer", "null"], "minimum": 0},
-        "agent_update_calls": {"type": ["integer", "null"], "minimum": 0},
-        "failure_matrix": {"type": "boolean"},
-        "evidence_sha256": {"type": "object", "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"}},
-        "missing_gates": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
       }
     },
     "missing_gates": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},

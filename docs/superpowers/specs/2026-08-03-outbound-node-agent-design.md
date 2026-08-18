@@ -80,10 +80,8 @@ legacy lifecycle vocabulary is:
 - `agent.update`
 - `agent.rollback`
 
-The generalized workload package follow-on adds only generic package
-operations (`package.prepare`, `package.activate`, `package.health`,
-`package.stop`, `package.rollback`, `package.remove`, `package.repair`, and
-`package.gc`). This compiled registry is
+The clean-slate control-plane boundary removes the old package/deployment
+operation vocabulary from orchestration. The retained compiled registry remains
 the safe operation vocabulary, not a catalog of workload families, model IDs,
 adapter IDs, images, checkpoints, or releases.
 
@@ -241,8 +239,7 @@ model repositories and weights continue to use their defined immutable sources
 and GPU node-local caches. The architecture imposes no fixed GPU node count, though
 defaults are optimized for small administrator and node populations.
 
-The generalized workload package plane defined in
-`2026-08-05-generalized-workload-package-system-design.md` is independent from
-this platform update plane. `agent.update` updates Vonk Forge itself; it must
-never be used to deliver an ordinary workload family, adapter, runtime,
-container, dependency, or model release.
+Fleet/Library workload state is independent from this platform update plane.
+`agent.update` updates Vonk Forge itself; it must never be used to deliver an
+ordinary workload family, adapter, runtime, container, dependency, or model
+release.

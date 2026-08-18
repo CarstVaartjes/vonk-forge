@@ -48,12 +48,11 @@ hosts. It is never replaced by a green hosted smoke test.
 
 ## When the longer jobs run
 
-The workload acceptance and failure-matrix jobs run only from an intentional
-manual dispatch or a version tag. Container publication and release metadata
-are additionally protected by the release environment and external gates.
-Ordinary pushes do not run CI; a pull request to `main` runs only the three
-required checks above. Concurrency cancels superseded pull-request runs so a
-stale commit does not consume another complete check cycle.
+Container publication and release metadata are protected by the release
+environment and external gates. Ordinary pushes do not run CI; a pull request
+to `main` runs only the three required checks above. Concurrency cancels
+superseded pull-request runs so a stale commit does not consume another
+complete check cycle.
 
 If a change needs a longer check, run it locally and attach its bounded report
 to the pull request. Use `workflow_dispatch` only when hosted evidence itself

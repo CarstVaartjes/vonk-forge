@@ -173,7 +173,7 @@ def _lock(
             "compatibility": {
                 "architectures": ["arm64"],
                 "operating_systems": ["linux"],
-                "required_capabilities": ["package-abi-v1"],
+                "required_capabilities": ["recipe-runtime-v1"],
                 "minimum_storage_bytes": max(1, sum(item.size for item in components)),
             },
             "validation": [],
@@ -408,7 +408,7 @@ def test_consumes_the_shared_release_lock_without_a_compiled_family_catalog(
             "compatibility": {
                 "architectures": ["arm64"],
                 "operating_systems": ["linux"],
-                "required_capabilities": ["package-abi-v1"],
+                "required_capabilities": ["recipe-runtime-v1"],
                 "minimum_storage_bytes": payload.size + adapter.size,
             },
             "validation": [],

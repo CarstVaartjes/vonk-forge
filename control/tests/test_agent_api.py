@@ -71,6 +71,7 @@ NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
 NODE_C = "spk_" + "c" * 32
 CAPABILITIES = [
+    "agent.runtime.rust.v1",
     "node.probe",
     "release.install",
     "workload.health",
@@ -178,6 +179,28 @@ class Authority(CertificateAuthority):
             raise RuntimeError("provider unavailable")
 
 
+class CurrentAgentClient(TestClient):
+    """Supply the current Rust claim envelope for terse authenticated tests."""
+
+    def post(self, url, *args, headers=None, json=None, **kwargs):
+        if (
+            url == "/agent/v1/claim"
+            and headers is not None
+            and headers.get("x-vonk-agent-verified") == "1"
+        ):
+            body = {
+                "capabilities": CAPABILITIES,
+                "lease_seconds": 60,
+                "node_id": headers["x-vonk-agent-node"],
+                "protocol_version": 3,
+                "wait_seconds": 0,
+            }
+            if isinstance(json, dict):
+                body.update(json)
+            json = body
+        return super().post(url, *args, headers=headers, json=json, **kwargs)
+
+
 @pytest.fixture
 def agent_system(tmp_path):
     engine = create_engine(
@@ -239,7 +262,7 @@ def agent_system(tmp_path):
         trusted_agent_proxy_auth=b"p" * 32,
     )
     app.state.test_audits = audits
-    return TestClient(app), services, codec, clock
+    return CurrentAgentClient(app), services, codec, clock
 
 
 def agent_headers(node: str, serial: str) -> dict[str, str]:
@@ -1187,7 +1210,7 @@ def test_authenticated_claim_records_protocol_contact_for_metrics(agent_system) 
             "capabilities": CAPABILITIES,
             "lease_seconds": 30,
             "node_id": NODE_A,
-            "protocol_version": 1,
+            "protocol_version": 3,
             "runtime_identity": {
                 "active_slot": "B",
                 "architecture": "linux-arm64",
@@ -1205,7 +1228,7 @@ def test_authenticated_claim_records_protocol_contact_for_metrics(agent_system) 
         node = session.get(AgentNode, NODE_A)
         assert node is not None
         assert node.last_seen_at.replace(tzinfo=UTC) == clock.now
-        assert node.protocol_version == 1
+        assert node.protocol_version == 3
         assert node.capabilities == CAPABILITIES
         assert node.platform_version == "1.2.3"
         assert node.build_digest == "sha256:" + "b" * 64
@@ -1323,7 +1346,7 @@ def test_unknown_claim_capability_is_rejected_without_contact(agent_system) -> N
             "capabilities": CAPABILITIES + ["shell.exec"],
             "lease_seconds": 30,
             "node_id": NODE_A,
-            "protocol_version": 1,
+            "protocol_version": 3,
             "wait_seconds": 0,
         },
     )
@@ -1351,7 +1374,7 @@ def test_control_accepts_next_agent_update_capabilities_during_rollout(
             "capabilities": capabilities,
             "lease_seconds": 30,
             "node_id": NODE_A,
-            "protocol_version": 1,
+            "protocol_version": 3,
             "wait_seconds": 0,
         },
     )
@@ -1374,7 +1397,7 @@ def test_authenticated_heartbeat_preserves_claim_advertised_protocol_after_exact
     claim = client.post(
         "/agent/v1/claim",
         headers=agent_headers(NODE_A, "serial-a"),
-        json={"protocol_version": 2},
+        json={"protocol_version": 3},
     ).json()
     with services.sessions.begin() as session:
         node = session.get(AgentNode, NODE_A)
@@ -1413,7 +1436,7 @@ def test_authenticated_heartbeat_preserves_claim_advertised_protocol_after_exact
         node = session.get(AgentNode, NODE_A)
         assert node is not None
         assert node.last_seen_at.replace(tzinfo=UTC) == clock.now
-        assert node.protocol_version == 2
+        assert node.protocol_version == 3
         presence = session.get(AgentPresence, NODE_A)
         assert presence is not None
         assert presence.management_address == "10.0.0.43"
@@ -1431,7 +1454,7 @@ def test_authenticated_result_preserves_claim_advertised_protocol_after_exact_fe
     claim = client.post(
         "/agent/v1/claim",
         headers=agent_headers(NODE_A, "serial-a"),
-        json={"protocol_version": 2},
+        json={"protocol_version": 3},
     ).json()
     with services.sessions.begin() as session:
         node = session.get(AgentNode, NODE_A)
@@ -1470,7 +1493,7 @@ def test_authenticated_result_preserves_claim_advertised_protocol_after_exact_fe
         node = session.get(AgentNode, NODE_A)
         assert node is not None
         assert node.last_seen_at.replace(tzinfo=UTC) == clock.now
-        assert node.protocol_version == 2
+        assert node.protocol_version == 3
         presence = session.get(AgentPresence, NODE_A)
         assert presence is not None
         assert presence.management_address == "10.0.0.44"
@@ -1489,7 +1512,7 @@ def test_exact_fenced_probe_success_writes_bounded_durable_health(agent_system) 
             "capabilities": CAPABILITIES,
             "lease_seconds": 30,
             "node_id": NODE_A,
-            "protocol_version": 1,
+            "protocol_version": 3,
             "wait_seconds": 0,
         },
     ).json()
@@ -1575,7 +1598,7 @@ def test_untrusted_and_stale_requests_do_not_record_agent_contact(agent_system) 
         json={
             "lease_seconds": 30,
             "node_id": NODE_A,
-            "protocol_version": 1,
+            "protocol_version": 3,
             "wait_seconds": 0,
         },
     )
@@ -1794,32 +1817,6 @@ def test_enrollment_routes_are_admin_only_and_pending_exact_replay_is_idempotent
     replay = client.post("/agent/v1/enroll", json=body)
     assert first.status_code == replay.status_code == 202
     assert first.content == replay.content == canonical_message(first.json())
-
-
-def test_rust_migration_grant_is_admin_only_and_bound_to_legacy_node(
-    agent_system,
-) -> None:
-    client, _services, codec, _clock = agent_system
-    endpoint = f"/api/v1/agents/nodes/{NODE_A}/migration-grant"
-
-    assert (
-        client.post(
-            endpoint,
-            headers=admin_headers(codec, "operator"),
-            json={"ttl_seconds": 60},
-        ).status_code
-        == 403
-    )
-    response = client.post(
-        endpoint,
-        headers=admin_headers(codec),
-        json={"ttl_seconds": 60},
-    )
-
-    assert response.status_code == 201
-    assert response.json()["node_id"] == NODE_A
-    assert response.json()["purpose"] == "rust-migration"
-    assert len(response.json()["token"]) == 43
 
 
 def test_rust_agent_enrollment_shape_remains_controller_compatible(

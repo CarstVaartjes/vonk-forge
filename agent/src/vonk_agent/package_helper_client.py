@@ -389,7 +389,7 @@ class PackageHelperAdapterExecutor:
 
 
 class PackageHelperAdapterFactory:
-    """Callable seam matching ``PackageEngine.adapter_factory``."""
+    """Callable seam for constructing package-helper adapter executors."""
 
     def __init__(
         self, client: PackageHelperClient, request_factory: Callable[..., object]

@@ -17,7 +17,7 @@ def repository(tmp_path: Path) -> tuple[Path, Path]:
     git(root, "config", "user.name", "Fixture")
     git(root, "config", "user.email", "fixture@example.test")
     (root / "inventory").mkdir()
-    (root / "inventory/fleet.toml").write_text("schema_version = 2\n")
+    (root / "inventory/topology.json").write_text('{"schema_version": 1}\n')
     git(root, "add", ".")
     git(root, "commit", "-q", "-m", "base")
     key = tmp_path / "signing-key"
@@ -26,9 +26,9 @@ def repository(tmp_path: Path) -> tuple[Path, Path]:
 
 
 def patch_for(root: Path, text: str) -> bytes:
-    (root / "inventory/fleet.toml").write_text(text)
+    (root / "inventory/topology.json").write_text(text)
     patch = subprocess.run(["git", "-C", root, "diff", "--binary"], capture_output=True, check=True).stdout
-    git(root, "restore", "inventory/fleet.toml")
+    git(root, "restore", "inventory/topology.json")
     return patch
 
 
@@ -36,14 +36,14 @@ def test_repository_code_host_creates_signed_commit_without_checkout_mutation(tm
     root, key = repository(tmp_path)
     git(root, "config", "gpg.ssh.program", "false")
     base = git(root, "rev-parse", "HEAD")
-    patch = patch_for(root, "schema_version = 2\n# reviewed\n")
+    patch = patch_for(root, '{"schema_version": 1, "reviewed": true}\n')
     host = RepositoryCodeHost(root, signing_key=key, lock_path=tmp_path / "git.lock")
 
     commit = host.create_change("deploy", base, patch, "reviewed change", signed=True)
 
     assert git(root, "rev-parse", "deploy") == commit
     assert git(root, "rev-parse", "HEAD") == commit
-    assert (root / "inventory/fleet.toml").read_text() == "schema_version = 2\n# reviewed\n"
+    assert (root / "inventory/topology.json").read_text() == '{"schema_version": 1, "reviewed": true}\n'
     assert "gpgsig" in git(root, "cat-file", "commit", commit)
     assert host.reachable_from(commit, "deploy")
 

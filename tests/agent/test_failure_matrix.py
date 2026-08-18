@@ -192,23 +192,3 @@ def test_large_fleet_override_is_explicitly_parsed_and_removes_only_cli_guard() 
             allow_large_fleet=False,
             safety_threshold=16,
         )
-
-
-def test_workload_failure_matrix_has_bounded_recovery_dispositions() -> None:
-    completed = subprocess.run(
-        [ROOT / "scripts/accept-workload-package-failures", "--json"],
-        check=True,
-        capture_output=True,
-    )
-    report = json.loads(completed.stdout)
-    assert report["failure_matrix"] is True
-    assert report["restart_recovery"] == "passed"
-    assert report["gc_restart_recovery"] == "passed"
-    dispositions = {case["disposition"] for case in report["cases"]}
-    assert dispositions == {"safe-to-retry", "compensate", "operator-intervention"}
-    assert all(
-        case["node_id"].startswith("spk_")
-        and len(case["release_digest"]) == 64
-        and len(case["fence"]) == 36
-        for case in report["cases"]
-    )

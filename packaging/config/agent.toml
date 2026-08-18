@@ -1,4 +1,5 @@
-# Replace these bootstrap placeholders before pairing the node.
+# Bootstrap placeholders only: registration generates the node-specific runtime
+# inputs, and manual editing is unsupported.
 enrollment_url = "https://enroll.vonkforge.invalid/"
 controller_url = "https://controller.vonkforge.invalid/"
 ca_path = "/etc/vonk-forge-agent/controller-ca.pem"

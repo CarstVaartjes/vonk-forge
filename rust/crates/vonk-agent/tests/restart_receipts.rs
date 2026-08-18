@@ -5,7 +5,7 @@ use serde_json::json;
 use tempfile::tempdir;
 use uuid::Uuid;
 use vonk_agent::state::{BeginDecision, StateStore};
-use vonk_agent_protocol::{AgentClaim, AgentResult, canonical_json, hex_sha256};
+use vonk_agent_protocol::{AgentClaim, canonical_json, hex_sha256};
 
 const NODE_ID: &str = "spk_0123456789abcdef0123456789abcdef";
 
@@ -67,80 +67,4 @@ fn interrupted_mutation_is_not_executed_twice_after_restart() {
     assert!(
         matches!(decision, BeginDecision::Replay(ref result) if result.state == "waiting-for-operator")
     );
-}
-
-fn create_python_state(path: &std::path::Path, claim: &AgentClaim, active: bool) -> AgentResult {
-    let connection = rusqlite::Connection::open(path).unwrap();
-    connection
-        .execute_batch(
-            "CREATE TABLE attempts (
-          node_id TEXT NOT NULL, job_id TEXT NOT NULL, operation_id TEXT NOT NULL,
-          attempt INTEGER NOT NULL, fence TEXT NOT NULL UNIQUE,
-          state TEXT NOT NULL, claim_json BLOB NOT NULL,
-          progress_sequence INTEGER NOT NULL, progress_json BLOB, result_json BLOB,
-          created_at TEXT NOT NULL, updated_at TEXT NOT NULL, finished_at TEXT,
-          acknowledged_at TEXT, PRIMARY KEY (node_id,job_id,operation_id,attempt)
-        );",
-        )
-        .unwrap();
-    let result = AgentResult {
-        attempt: claim.attempt,
-        deadline: claim.deadline,
-        fence: claim.fence,
-        job_id: claim.job_id,
-        node_id: claim.node_id.clone(),
-        operation_id: claim.operation_id,
-        result: json!({"installed": true}),
-        schema_version: 1,
-        state: "succeeded".to_owned(),
-    };
-    connection
-        .execute(
-            "INSERT INTO attempts VALUES (?1,?2,?3,?4,?5,?6,?7,0,NULL,?8,?9,?9,?10,NULL)",
-            rusqlite::params![
-                claim.node_id,
-                claim.job_id.to_string(),
-                claim.operation_id.to_string(),
-                claim.attempt,
-                claim.fence.to_string(),
-                if active { "active" } else { "succeeded" },
-                canonical_json(claim).unwrap(),
-                if active {
-                    None
-                } else {
-                    Some(canonical_json(&result).unwrap())
-                },
-                "2026-08-07T00:00:00+00:00",
-                if active {
-                    None
-                } else {
-                    Some("2026-08-07T00:00:01+00:00")
-                },
-            ],
-        )
-        .unwrap();
-    result
-}
-
-#[test]
-fn terminal_python_receipts_are_imported_without_credentials() {
-    let directory = tempdir().unwrap();
-    let legacy = directory.path().join("agent-state.sqlite3");
-    let expected = create_python_state(&legacy, &claim(), false);
-    let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
-
-    assert_eq!(state.import_python_receipts(&legacy).unwrap(), 1);
-    assert_eq!(state.pending_results().unwrap(), vec![expected]);
-    assert_eq!(state.import_python_receipts(&legacy).unwrap(), 1);
-}
-
-#[test]
-fn active_python_work_blocks_cutover() {
-    let directory = tempdir().unwrap();
-    let legacy = directory.path().join("agent-state.sqlite3");
-    create_python_state(&legacy, &claim(), true);
-    let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
-
-    assert!(state.import_python_receipts(&legacy).is_err());
-    assert!(state.pending_results().unwrap().is_empty());
 }

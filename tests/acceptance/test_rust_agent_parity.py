@@ -1,10 +1,4 @@
-"""Release-gate map for the Python-to-Rust GPU node-agent cutover.
-
-The old agent and the recipe-native Rust agent intentionally do not advertise
-the same operation set. This guard prevents "parity" from being implemented by
-lying about unsupported legacy operations: each outcome must instead have a
-named executable test in the authoritative layer that now owns it.
-"""
+"""Release-gate map for the recipe-native GPU node agent."""
 
 from pathlib import Path
 
@@ -15,7 +9,7 @@ def _source(relative: str) -> str:
     return (ROOT / relative).read_text(encoding="utf-8")
 
 
-def test_cutover_outcome_matrix_has_executable_owners() -> None:
+def test_agent_outcome_matrix_has_executable_owners() -> None:
     coverage = {
         "enrollment": (
             "rust/crates/vonk-agent/tests/pairing.rs",
@@ -45,16 +39,12 @@ def test_cutover_outcome_matrix_has_executable_owners() -> None:
             "control/tests/test_agent_api.py",
             "test_human_enrollment_mutations_audit_only_success",
         ),
-        "migration": (
-            "control/tests/test_agent_jobs.py",
-            "test_python_cutover_requires_migration_certificate_and_retires_old_identity",
-        ),
     }
     for outcome, (path, test_name) in coverage.items():
         assert test_name in _source(path), f"{outcome} lost its executable owner"
 
 
-def test_production_rust_capabilities_are_exact_and_legacy_python_is_not_packaged() -> None:
+def test_production_rust_capabilities_are_exact_and_python_agent_is_not_packaged() -> None:
     main = _source("rust/crates/vonk-agent/src/main.rs")
     for capability in (
         "agent.runtime.rust.v1",
@@ -64,15 +54,15 @@ def test_production_rust_capabilities_are_exact_and_legacy_python_is_not_package
         "recipe.uninstall",
     ):
         assert f'"{capability}"' in main
-    for legacy in ("agent.update", "agent.rollback", "package.prepare"):
-        assert f'"{legacy}"' not in main
+    for retired in ("agent.update", "agent.rollback", "package.prepare"):
+        assert f'"{retired}"' not in main
 
     package_builder = _source("scripts/build-agent-deb")
     assert 'BINARIES = ("vonk-agent", "vonk-agent-helper", "vonk-agent-supervisor")' in package_builder
     assert "vonk_agent" not in package_builder
 
 
-def test_release_workflow_runs_every_cutover_owner_before_publication() -> None:
+def test_release_workflow_runs_every_agent_owner_before_publication() -> None:
     orchestrator = _source(".github/workflows/agent-release.yml")
     package_builder = _source(".github/actions/agent-package-build/action.yml")
 

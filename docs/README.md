@@ -55,7 +55,7 @@ Normal administration uses the stable private Tailscale HTTPS
 - [Control-plane bootstrap](runbooks/control-plane-bootstrap.md)
 - [Control-plane operations](runbooks/control-plane-operations.md) — Fleet,
   Library, recipe placement, resource previews, and safe action semantics
-- [Model catalog](operators/model-catalog.md) — model identity, recipes,
+- [Model and recipe identities](operators/model-catalog.md) — model identity, recipes,
   topology, install/update, and exact-revision rollback
 - [Model target ledger](operators/model-targets.md) — current defaults,
   candidates, blocked upstreams, and the path from research to an accepted
@@ -68,8 +68,6 @@ Normal administration uses the stable private Tailscale HTTPS
   freshness, resolutions, retention, and troubleshooting
 - [Node onboarding and health](runbooks/node-onboarding.md)
 - [Recipe operations](runbooks/model-switching.md)
-- [Generic workload package operations](runbooks/workload-packages.md)
-- [Global catalog import and publication](runbooks/global-catalog.md)
 - [Vonk Forge agent installation](operations/install-vonk-agent.md)
 - [Accepted development system evidence](audits/2026-08-15-development-system-acceptance.md)
 - [DGX Spark platform-alignment audit](audits/2026-08-12-dgx-spark-platform-alignment.md)

@@ -23,8 +23,7 @@ pub enum ConfigError {
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct AgentConfig {
-    #[serde(default)]
-    pub enrollment_url: Option<Url>,
+    pub enrollment_url: Url,
     pub controller_url: Url,
     pub ca_path: PathBuf,
     pub ca_sha256: String,
@@ -59,9 +58,7 @@ impl AgentConfig {
     }
 
     fn validate(&self) -> Result<(), ConfigError> {
-        if let Some(enrollment_url) = &self.enrollment_url {
-            validate_origin(enrollment_url, "enrollment_url")?;
-        }
+        validate_origin(&self.enrollment_url, "enrollment_url")?;
         validate_origin(&self.controller_url, "controller_url")?;
         for (path, name) in [(&self.ca_path, "ca_path"), (&self.data_dir, "data_dir")] {
             if !canonical_absolute(path) {

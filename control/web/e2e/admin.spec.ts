@@ -6,7 +6,7 @@ test.beforeEach(async ({page}) => {
   await page.route("**/api/v1/auth/session", route => route.fulfill({json: {subject: "admin", role: "administrator", expires_at: "2099-01-01T00:00:00Z"}}));
 });
 
-test("the redesigned shell makes Library and Catalog the recipe workflow", async ({page}) => {
+test("the redesigned shell exposes only Fleet and Library", async ({page}) => {
   await page.route("**/api/v1/fleet", route => route.fulfill({json: {schema_version: 1, event_cursor: 0, generated_at: new Date().toISOString(), repository_commit: commit, nodes: []}}));
   await page.route("**/api/v1/library**", route => route.fulfill({json: {
     schema_version: 1,
@@ -18,21 +18,7 @@ test("the redesigned shell makes Library and Catalog the recipe workflow", async
   }}));
   await page.goto("/library");
   await expect(page.getByRole("heading", {name: "Library"})).toBeVisible();
-  await expect(page.getByRole("link", {name: "Catalog"})).toBeVisible();
-  await expect(page.getByRole("link", {name: "Profiles"})).toHaveCount(0);
-  await expect(page.getByRole("link", {name: "Models"})).toHaveCount(0);
-  await page.getByRole("link", {name: "Catalog"}).click();
-  await expect(page.getByRole("heading", {name: "Recipe catalog"})).toBeVisible();
-});
-
-test("packages remain usable at a mobile viewport", async ({page}) => {
-  await page.setViewportSize({width: 390, height: 844});
-  await page.route("**/api/v1/packages/families**", route => route.fulfill({json: {families: [], total: 0}}));
-  await page.route("**/api/v1/packages/candidates**", route => route.fulfill({json: {candidates: [], total: 0}}));
-  await page.route("**/api/v1/packages/inventory**", route => route.fulfill({json: {nodes: [], total: 0}}));
-  await page.goto("/packages");
-  await expect(page.getByRole("heading", {name: "Workload packages"})).toBeVisible();
-  await page.getByRole("button", {name: "Open system navigation"}).click();
-  await expect(page.getByRole("navigation", {name: "Primary"})).toBeVisible();
-  await expect(page.locator(".shell")).toHaveCSS("grid-template-columns", "390px");
+  const primaryLinks = page.getByRole("navigation", {name: "Primary"}).getByRole("link");
+  await expect(primaryLinks).toHaveText(["Fleet", "Library"]);
+  await expect(page).toHaveURL(/\/library$/);
 });

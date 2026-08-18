@@ -43,15 +43,13 @@ def test_pr_smoke_runs_locked_web_and_focused_contracts() -> None:
         "run": "npm ci --prefix control/web",
     }
     repository_step = "Run focused repository contracts"
-    control_step = "Run focused control package contracts"
-    web_test_step = "Run focused web package workflow"
+    control_step = "Run focused control cleanup contracts"
 
     assert web_step in steps
     step_names = [step["name"] for step in steps]
     assert repository_step in step_names
     assert control_step in step_names
-    assert web_test_step in step_names
-    assert step_names.index(web_step["name"]) < step_names.index(web_test_step)
+    assert step_names.index(web_step["name"]) < step_names.index(control_step)
 
     workflow = (ROOT / ".github/workflows/ci.yml").read_text()
     test_job_lines = _workflow_job_lines(workflow, "test")

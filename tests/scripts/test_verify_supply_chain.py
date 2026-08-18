@@ -55,7 +55,7 @@ def _copy(tmp_path: Path) -> Path:
         "control/src/vonk_control/library_contract.py",
         "control/src/vonk_control/recipe_routes.py",
         "control/src/vonk_control/models.py",
-        "control/migrations/versions/0015_recipe_catalog.py",
+        "control/migrations/versions/0001_fleet_library_baseline.py",
         "control/web/package-lock.json", "control/Dockerfile",
         "deploy/compose/compose.yaml", "deploy/compose/images.lock.json",
         "deploy/compose/compose.dev.images.yaml",
@@ -319,7 +319,7 @@ def test_supply_chain_manifest_binds_v1_recipe_catalog_authority(
         "control/src/vonk_control/auth.py",
         "control/src/vonk_control/recipe_routes.py",
         "control/src/vonk_control/models.py",
-        "control/migrations/versions/0015_recipe_catalog.py",
+        "control/migrations/versions/0001_fleet_library_baseline.py",
         "scripts/accept-recipe",
         "scripts/run-development-slices",
         "scripts/qualify-recipe",
@@ -336,7 +336,7 @@ def test_supply_chain_manifest_binds_v1_recipe_catalog_authority(
         "control/src/vonk_control/auth.py",
         "control/src/vonk_control/recipe_routes.py",
         "control/src/vonk_control/models.py",
-        "control/migrations/versions/0015_recipe_catalog.py",
+        "control/migrations/versions/0001_fleet_library_baseline.py",
     ),
 )
 def test_supply_chain_manifest_binds_recipe_authority_edges(

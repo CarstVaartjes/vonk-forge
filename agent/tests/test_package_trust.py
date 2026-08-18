@@ -53,7 +53,7 @@ def package_lock() -> PackageReleaseLock:
             "compatibility": {
                 "architectures": ["arm64"],
                 "operating_systems": ["linux"],
-                "required_capabilities": ["package-abi-v1"],
+                "required_capabilities": ["recipe-runtime-v1"],
                 "minimum_storage_bytes": 2048,
             },
             "validation": [{"kind": "component-digest", "component": "payload"}],

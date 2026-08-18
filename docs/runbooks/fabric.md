@@ -1,7 +1,7 @@
 # Direct ConnectX-7 fabric
 
 The local `scripts/validate_fabric.py` SSH boundary uses the same
-developer-machine transport selection as `vonkctl`: `ssh` on macOS and native
+developer-machine transport selection as the repository node tooling: `ssh` on macOS and native
 Linux, `ssh.exe` on WSL when available, and `VONK_SSH_BIN` as an explicit
 override. This applies only to local-to-GPU node commands. The pinned
 GPU node-1-to-GPU node-2 fabric SSH command remains a nested remote command and is
