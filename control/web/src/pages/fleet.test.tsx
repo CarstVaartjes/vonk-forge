@@ -1,6 +1,6 @@
 import {act, fireEvent, render, screen, within} from "@testing-library/react";
 import type {ControlApi, TelemetryPoint, VisualFleetNode, VisualFleetSnapshot} from "../api/types";
-import {FleetPage} from "./fleet";
+import {ENROLLMENT_GRANT_TTL_SECONDS, FleetPage} from "./fleet";
 
 const NOW = new Date("2026-08-15T12:00:00Z");
 const GIB = 1024 ** 3;
@@ -177,13 +177,16 @@ test("offers retry after an initial error and then shows the empty Fleet state",
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   expect(visualFleet).toHaveBeenCalledTimes(2);
 });
-test("offers Spark onboarding with a generated identity-free bootstrap command", async () => {
+test("renders a complete shell-quoted Spark bootstrap command", async () => {
   const visualFleet = vi.fn().mockResolvedValue(snapshot([]));
   const api = control(visualFleet) as ControlApi;
   api.agents = vi.fn().mockResolvedValue({agents: []});
   api.enrollments = vi.fn().mockResolvedValue({enrollments: []});
   api.createEnrollmentGrant = vi.fn().mockResolvedValue({
     id: "grant-1", purpose: "new-node", token: "secret-token", expires_at: "2099-01-01T00:00:00Z",
+    controller_endpoint: "https://controller.example.test:9443",
+    enrollment_endpoint: "https://enrollment.example.test:9444",
+    ca_fingerprint: "a".repeat(64),
   });
   render(<FleetPage api={api}/>);
   await flush();
@@ -191,6 +194,17 @@ test("offers Spark onboarding with a generated identity-free bootstrap command",
   expect(screen.getByText(/generates its immutable/i)).toBeVisible();
   fireEvent.click(screen.getByRole("button", {name: "Create one-time enrollment command"}));
   await flush();
-  expect(api.createEnrollmentGrant).toHaveBeenCalledWith(900);
-  expect(screen.getByText(/vonk-agent bootstrap --token secret-token/)).toBeVisible();
+  expect(api.createEnrollmentGrant).toHaveBeenCalledWith(ENROLLMENT_GRANT_TTL_SECONDS);
+  const command = document.querySelector<HTMLElement>(".onboarding-command")!;
+  expect(command).toBeVisible();
+  expect(command.textContent).toBe([
+    "vonk-agent bootstrap " + "\\",
+    "  --token 'secret-token' " + "\\",
+    "  --controller-endpoint 'https://controller.example.test:9443' " + "\\",
+    "  --enrollment-endpoint 'https://enrollment.example.test:9444' " + "\\",
+    "  --ca-fingerprint 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'",
+  ].join("\n"));
+  expect(command).not.toHaveTextContent("--config");
+  expect(command).not.toHaveTextContent("--state-root");
+  expect(command).not.toHaveTextContent("--ca-path");
 });
