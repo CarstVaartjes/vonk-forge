@@ -9,7 +9,7 @@ import re
 import stat
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path, PurePosixPath
+from typing import Protocol
 from urllib.parse import urlsplit
 
 from cryptography import x509

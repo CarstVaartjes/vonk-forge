@@ -655,8 +655,11 @@
           },
           "state": {
             "enum": [
+              "pending_review",
               "approved",
-              "rejected"
+              "rejected",
+              "expired",
+              "certificate_issued"
             ],
             "title": "State",
             "type": "string"
@@ -9831,6 +9834,31 @@
           }
         ],
         "summary": "Fleet Event Stream"
+      }
+    },
+    "/api/v1/identity-history": {
+      "get": {
+        "operationId": "listIdentityHistory",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Listidentityhistory",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Identity History View"
       }
     },
     "/api/v1/jobs": {

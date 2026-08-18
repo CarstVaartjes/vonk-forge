@@ -307,6 +307,45 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['node_id'], ['agent_nodes.node_id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('node_id')
     )
+    op.create_table('agent_profiles',
+    sa.Column('node_id', sa.String(length=36), nullable=False),
+    sa.Column('display_name', sa.String(length=200), nullable=False),
+    sa.Column('hostname', sa.String(length=255), nullable=False),
+    sa.Column('lifecycle', sa.String(length=16), nullable=False),
+    sa.Column('labels', sa.JSON(), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
+    sa.ForeignKeyConstraint(['node_id'], ['agent_nodes.node_id'], ondelete='CASCADE'),
+    sa.PrimaryKeyConstraint('node_id')
+    )
+
+    op.create_table('recipes',
+    sa.Column('recipe_id', sa.String(length=128), nullable=False),
+    sa.Column('slug', sa.String(length=128), nullable=False),
+    sa.Column('title', sa.String(length=200), nullable=False),
+    sa.Column('source', sa.Text(), nullable=False),
+    sa.Column('created_by', sa.String(length=200), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
+    sa.PrimaryKeyConstraint('recipe_id'),
+    sa.UniqueConstraint('slug')
+    )
+    op.create_table('recipe_revisions',
+    sa.Column('revision_id', sa.String(length=128), nullable=False),
+    sa.Column('recipe_id', sa.String(length=128), nullable=False),
+    sa.Column('revision_number', sa.Integer(), nullable=False),
+    sa.Column('content', sa.JSON(), nullable=False),
+    sa.Column('content_digest', sa.String(length=64), nullable=False),
+    sa.Column('created_by', sa.String(length=200), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.CheckConstraint('revision_number >= 1', name='ck_recipe_revision_number'),
+    sa.ForeignKeyConstraint(['recipe_id'], ['recipes.recipe_id'], ondelete='CASCADE'),
+    sa.PrimaryKeyConstraint('revision_id'),
+    sa.UniqueConstraint('recipe_id', 'revision_number', name='uq_recipe_revision_number'),
+    sa.UniqueConstraint('recipe_id', 'content_digest', name='uq_recipe_revision_digest')
+    )
+    op.create_index(op.f('ix_recipe_revisions_recipe_id'), 'recipe_revisions', ['recipe_id'], unique=False)
+    op.create_index(op.f('ix_recipe_revisions_content_digest'), 'recipe_revisions', ['content_digest'], unique=False)
+
     op.create_table('catalog_entity_revisions',
     sa.Column('id', sa.String(length=36), nullable=False),
     sa.Column('entity_id', sa.String(length=36), nullable=False),
@@ -1198,6 +1237,11 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_catalog_entity_revisions_entity_id'), table_name='catalog_entity_revisions')
     op.drop_index(op.f('ix_catalog_entity_revisions_content_sha256'), table_name='catalog_entity_revisions')
     op.drop_table('catalog_entity_revisions')
+    op.drop_index(op.f('ix_recipe_revisions_content_digest'), table_name='recipe_revisions')
+    op.drop_index(op.f('ix_recipe_revisions_recipe_id'), table_name='recipe_revisions')
+    op.drop_table('recipe_revisions')
+    op.drop_table('recipes')
+    op.drop_table('agent_profiles')
     op.drop_table('agent_node_profiles')
     op.drop_index(op.f('ix_agent_enrollments_state'), table_name='agent_enrollments')
     op.drop_index(op.f('ix_agent_enrollments_node_id'), table_name='agent_enrollments')

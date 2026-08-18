@@ -777,25 +777,6 @@ def _enrollment_view(enrollment: AgentEnrollment) -> dict[str, object]:
     }
 
 
-def _enrollment_view(enrollment: AgentEnrollment) -> dict[str, object]:
-    return {
-        "id": enrollment.id,
-        "node_id": enrollment.node_id,
-        "state": enrollment.state,
-        "csr_public_key_fingerprint": enrollment.csr_public_key_fingerprint,
-        "host_key_fingerprint": enrollment.host_key_fingerprint,
-        "hardware_fingerprint": enrollment.hardware_fingerprint,
-        "agent_digest": enrollment.agent_digest,
-        "boot_id": enrollment.boot_id,
-        "created_at": _now(enrollment.created_at).isoformat(),
-        "decision_actor": enrollment.decision_actor,
-        "decided_at": _now(enrollment.decided_at).isoformat()
-        if enrollment.decided_at
-        else None,
-        "rejection_reason": enrollment.rejection_reason,
-        "certificate_serial": enrollment.certificate_serial,
-        "certificate_fingerprint": enrollment.certificate_fingerprint,
-    }
 
 
 def _references_digest(value: object, digest: str) -> bool:
@@ -1271,7 +1252,7 @@ def install_agent_routes(
         return EnrollmentDecisionResponse(
             id=enrollment_id,
             node_id=issued.node_id,
-            state="certificate_issued",
+            state="approved",
         )
 
     @human.post(

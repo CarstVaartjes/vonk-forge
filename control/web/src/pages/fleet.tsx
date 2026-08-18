@@ -1,5 +1,5 @@
 import {useEffect, useMemo, useRef, useState} from "react";
-import type {ControlApi, UpdateSkew} from "../api/types";
+import type {ControlApi, EnrollmentGrantResponse, UpdateSkew} from "../api/types";
 import {NodeCard} from "../components/node-card";
 import {NodeDetail} from "../components/node-detail";
 import {StatusPill} from "../components/status-pill";
@@ -34,11 +34,50 @@ function connectionPresentation(connection: ReturnType<typeof useFleetStream>["c
   }
 }
 
+function SparkOnboarding({api, onClose}: {api: ControlApi; onClose(): void}) {
+  const [nodeId, setNodeId] = useState("");
+  const [grant, setGrant] = useState<EnrollmentGrantResponse>();
+  const [error, setError] = useState("");
+  const [creating, setCreating] = useState(false);
+
+  async function createGrant() {
+    setCreating(true);
+    setError("");
+    try {
+      setGrant(await api.createEnrollmentGrant(nodeId.trim(), 900));
+    } catch (value) {
+      setError(value instanceof Error ? value.message : "The enrollment grant could not be created.");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  return <div className="library-dialog-backdrop">
+    <div className="library-action-dialog" role="dialog" aria-modal="true" aria-labelledby="spark-onboarding-title">
+      <header><div><p className="fleet-kicker">Secure node enrollment</p><h3 id="spark-onboarding-title">Add Spark</h3></div><button type="button" className="icon-button" onClick={onClose} aria-label="Close Add Spark">×</button></header>
+      <div className="library-action-dialog-body">
+        {!grant && <>
+          <label htmlFor="spark-node-id">Spark node ID</label>
+          <input id="spark-node-id" value={nodeId} onChange={event => setNodeId(event.target.value)} placeholder="spk_…" autoFocus/>
+          {error && <p role="alert">{error}</p>}
+        </>}
+        {grant && <>
+          <p>Run this one-time command on the Spark. The token expires at {grant.expires_at} and is not shown again after closing this dialog.</p>
+          <code>{`vonk-agent bootstrap --node-id ${grant.node_id} --token ${grant.token}`}</code>
+        </>}
+      </div>
+      <footer>{grant ? <button type="button" className="button" onClick={onClose}>Done</button> : <><button type="button" className="button secondary" onClick={onClose}>Cancel</button><button type="button" className="button" disabled={!nodeId.trim() || creating} onClick={() => void createGrant()}>{creating ? "Creating…" : "Create one-time enrollment command"}</button></>}</footer>
+    </div>
+  </div>;
+}
+
+
 export function FleetPage({api}: {api: ControlApi}) {
   const fleet = useFleetStream(api);
   const [skew, setSkew] = useState<UpdateSkew>();
   const [dismissed, setDismissed] = useState("");
   const [selectedNodeId, setSelectedNodeId] = useState<string>();
+  const [onboarding, setOnboarding] = useState(false);
   const detailTrigger = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
@@ -87,7 +126,6 @@ export function FleetPage({api}: {api: ControlApi}) {
   }
 
   const showUpdate = skew?.prompt_required === true && dismissed !== skew.digest;
-
   return <div className="fleet-page">
     <header className="fleet-hero">
       <div>
@@ -95,11 +133,15 @@ export function FleetPage({api}: {api: ControlApi}) {
         <h2>Fleet</h2>
         <p className="fleet-introduction">A live view of PostgreSQL-registered nodes, their capacity, and what is actually installed and running.</p>
       </div>
-      <div className="connection-state" aria-label="Fleet stream state">
-        <StatusPill tone={connection.tone}>{connection.label}</StatusPill>
-        {fleet.snapshot && <small>Event {fleet.snapshot.event_cursor} · repository {fleet.snapshot.repository_commit.slice(0, 8)}</small>}
+      <div className="fleet-hero-actions">
+        <button type="button" className="button" aria-label="Add Spark" onClick={() => setOnboarding(true)}>+ Add Spark</button>
+        <div className="connection-state" aria-label="Fleet stream state">
+          <StatusPill tone={connection.tone}>{connection.label}</StatusPill>
+          {fleet.snapshot && <small>Event {fleet.snapshot.event_cursor} · repository {fleet.snapshot.repository_commit.slice(0, 8)}</small>}
+        </div>
       </div>
     </header>
+    {onboarding && <SparkOnboarding api={api} onClose={() => setOnboarding(false)}/>}
 
     <p className="sr-only" aria-live="polite" aria-atomic="true">{announcement}</p>
 
