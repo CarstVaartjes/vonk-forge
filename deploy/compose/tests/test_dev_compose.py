@@ -136,7 +136,7 @@ def test_source_compose_advertises_the_actual_alembic_head(tmp_path: Path) -> No
     }
     alembic_heads = _alembic_heads()
 
-    assert alembic_heads == {"0027_execution_harness_catalog"}
+    assert alembic_heads == {"0001_fleet_library_baseline"}
     assert {
         *advertised_revisions,
         dev_cohort.DEVELOPMENT_DATABASE_REVISION,

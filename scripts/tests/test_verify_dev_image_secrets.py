@@ -22,7 +22,7 @@ SOURCE_COMMIT = "0123456789abcdef0123456789abcdef01234567"
 OTHER_COMMIT = "fedcba9876543210fedcba9876543210fedcba98"
 SOURCE_REPOSITORY = "https://github.com/CarstVaartjes/vonk-forge"
 OTHER_REPOSITORY = "https://github.com/example/fork"
-BUILD_DIGEST = "sha256:6175d9ed69ec10f2c4903e3d0466e2dd5cf41f547f4787a3f4de06de9037f872"
+BUILD_DIGEST = "sha256:060aad6cb641311ac0e198b6b50ec022b96e6797c429db5f09d5cfcea79f73ba"
 
 
 def _embedded_identity_document(**overrides: object) -> dict[str, object]:
@@ -33,7 +33,7 @@ def _embedded_identity_document(**overrides: object) -> dict[str, object]:
         "image_role": "api",
         "platform_version": "0.1.0",
         "protocol_maximum": 3,
-        "protocol_minimum": 1,
+        "protocol_minimum": 3,
         "schema_version": 1,
         "source_commit": SOURCE_COMMIT,
         "source_repository": SOURCE_REPOSITORY,
