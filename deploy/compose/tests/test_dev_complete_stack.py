@@ -106,6 +106,7 @@ import http.client
 import http.cookies
 import json
 import sys
+import time
 
 hostname = sys.argv[1]
 password = sys.stdin.read()
@@ -136,9 +137,13 @@ csrf = cookies["vonk_csrf"].value
 session_status, _, session_body = request(
     "GET", "/api/v1/auth/session", headers={"Cookie": cookie_header}
 )
-fleet_status, _, fleet_body = request(
-    "GET", "/api/v1/fleet", headers={"Cookie": cookie_header}
-)
+for _ in range(60):
+    fleet_status, _, fleet_body = request(
+        "GET", "/api/v1/fleet", headers={"Cookie": cookie_header}
+    )
+    if fleet_status != 503:
+        break
+    time.sleep(1)
 logout_status, logout_headers, logout_body = request(
     "POST",
     "/api/v1/auth/logout",
