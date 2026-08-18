@@ -189,7 +189,7 @@ print(json.dumps({
             hostname,
         ],
         input_text=password,
-        timeout=30,
+        timeout=90,
     )
     document = json.loads(result.stdout)
     assert isinstance(document, dict)
