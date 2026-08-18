@@ -95,8 +95,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends skopeo
+          if command -v skopeo >/dev/null 2>&1; then
+            exit 0
+          fi
+          if timeout --foreground 120s sudo apt-get install --yes --no-install-recommends skopeo; then
+            exit 0
+          fi
+          for attempt in 1 2 3; do
+            timeout --foreground 120s sudo apt-get update \
+              -o Acquire::Retries=3 \
+              -o Acquire::http::Timeout=30 \
+              -o Acquire::https::Timeout=30 || true
+            if timeout --foreground 120s sudo apt-get install --yes --no-install-recommends skopeo; then
+              exit 0
+            fi
+          done
+          echo "unable to install skopeo after bounded retries" >&2
+          exit 1
 
       - name: Build exact OCI archives
         shell: bash
@@ -363,8 +378,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends skopeo
+          if command -v skopeo >/dev/null 2>&1; then
+            exit 0
+          fi
+          if timeout --foreground 120s sudo apt-get install --yes --no-install-recommends skopeo; then
+            exit 0
+          fi
+          for attempt in 1 2 3; do
+            timeout --foreground 120s sudo apt-get update \
+              -o Acquire::Retries=3 \
+              -o Acquire::http::Timeout=30 \
+              -o Acquire::https::Timeout=30 || true
+            if timeout --foreground 120s sudo apt-get install --yes --no-install-recommends skopeo; then
+              exit 0
+            fi
+          done
+          echo "unable to install skopeo after bounded retries" >&2
+          exit 1
       - name: Download accepted OCI archives
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
