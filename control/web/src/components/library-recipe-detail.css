@@ -363,6 +363,30 @@
   border-radius: 0.65rem;
   padding: 0.7rem;
 }
+.library-digest-confirmation {
+  border-left: 2px solid var(--mint);
+  display: grid;
+  gap: 0.3rem;
+  margin: 1rem 0 0;
+  padding: 0.65rem 0.75rem;
+}
+
+.library-digest-confirmation span {
+  color: var(--text-subtle);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.library-digest-confirmation code {
+  color: var(--mint-strong);
+  overflow-wrap: anywhere;
+}
+
+.library-digest-confirmation small {
+  color: var(--text-muted);
+}
 
 .library-advanced-content {
   display: grid;

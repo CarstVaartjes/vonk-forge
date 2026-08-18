@@ -70,12 +70,12 @@ export function LibraryPlacement({actionsDisabled = false, detail, onReview, pol
         <p>{topology.reasons.find(reason => reason.code.includes("truncated"))?.detail ?? `The bounded search evaluated ${topology.evaluated_group_count} complete groups.`} This is bounded advisory evidence, not a globally optimal placement.</p>
       </div>}
       <LibraryReasons reasons={topology.reasons}/>
-      <div className="placement-groups">{topology.recommendations.map(group => {
+      <div className="placement-groups">{topology.recommendations.filter(group => group.eligible).map(group => {
         const key = groupKey(topology.topology_name, group);
         const selected = selectedGroup === key;
         return <article key={key} className={`placement-group${selected ? " is-selected" : ""}`}>
           <button type="button" className="placement-selector" aria-pressed={selected} onClick={() => setSelectedGroup(key)} aria-label={`Select complete group ${group.node_ids.join(" and ")}`}>
-            <span>{group.node_ids.join(" + ")}</span><small>{group.nodes.length} ranks · complete group</small>
+            <span>{group.node_ids.join(" + ")}</span><small>{group.nodes.length} ranks · eligible complete group</small>
           </button>
           {selected && group.preview_targets.length > 0 && <div className="placement-actions" role="region" aria-label="Selected group actions">
             {group.preview_targets.map((target, index) => <button
@@ -89,12 +89,13 @@ export function LibraryPlacement({actionsDisabled = false, detail, onReview, pol
           <GroupEvidence group={group} policy={policy} selected={selected}/>
         </article>;
       })}</div>
-      {(topology.rejected_groups.length > 0 || topology.rejected_nodes.length > 0) && <details className="placement-rejections">
+      {topology.recommendations.every(group => !group.eligible) && <p className="library-placeholder">No eligible Spark group is available for this topology. Review unavailable placement evidence below.</p>}
+      {(topology.rejected_groups.length > 0 || topology.rejected_nodes.length > 0 || topology.recommendations.some(group => !group.eligible)) && <details className="placement-rejections">
         <summary>Unavailable placement evidence</summary>
-        {topology.rejected_groups.map(group => <RejectedEvidence key={groupKey(topology.topology_name, group)} group={group} policy={policy}/>)}
+        {topology.recommendations.filter(group => !group.eligible).map(group => <RejectedEvidence key={groupKey(topology.topology_name, group)} group={group} policy={policy}/>) }
+        {topology.rejected_groups.map(group => <RejectedEvidence key={groupKey(topology.topology_name, group)} group={group} policy={policy}/>) }
         {topology.rejected_nodes.map(node => <div key={node.node_id} className="rejected-node"><strong>{node.node_id}</strong><LibraryReasons reasons={node.reasons}/></div>)}
         {topology.rejected_evidence_truncated && <p className="bounded-copy">Rejected evidence is also truncated at the published server limit.</p>}
       </details>}
-    </section>)}
-  </section>;
+    </section>)}</section>;
 }

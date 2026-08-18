@@ -159,6 +159,38 @@ def test_recipe_library_import_records_exact_commit_and_is_idempotent(
         assert receipt.redacted_source["commit"] == "a" * 40
 
 
+def test_remote_recipe_preview_is_exact_and_replay_persists_local_copy(
+    service: CatalogService, recipe_document: dict[str, object]
+) -> None:
+    _seed_recipe_dependencies(service, recipe_document)
+    digest = recipe_content_sha256(recipe_document)
+    remote = GlobalRecipeRevision(
+        publisher="vonk-forge", slug="synthetic-tiny-openai",
+        recipe_id="00000000-0000-4000-8000-000000000010", revision_number=3,
+        revision_id="10000000-0000-4000-8000-000000000010", content_sha256=digest,
+        published_at="2026-08-07T10:00:00+00:00", document=recipe_document,
+    )
+    preview = service.preview_recipe_library(remote)
+    assert preview.source_sha256 == digest
+    assert len(preview.report) == 1
+    imported = service.import_recipe_library_preview("admin", preview)
+    assert imported.source_kind == "recipe_library"
+    assert service.get_recipe(imported.recipe_id).document == recipe_document
+
+
+def test_remote_recipe_preview_rejects_tampered_digest(
+    service: CatalogService, recipe_document: dict[str, object]
+) -> None:
+    _seed_recipe_dependencies(service, recipe_document)
+    remote = GlobalRecipeRevision(
+        publisher="vonk-forge", slug="synthetic-tiny-openai",
+        recipe_id="00000000-0000-4000-8000-000000000010", revision_number=1,
+        revision_id="10000000-0000-4000-8000-000000000010", content_sha256="a" * 64,
+        published_at="2026-08-07T10:00:00+00:00", document=recipe_document,
+    )
+    with pytest.raises(CatalogValidationError, match="remote digest"):
+        service.preview_recipe_library(remote)
+
 def test_resolved_recipe_can_start_a_new_draft_without_mutating_the_resolution(
     service: CatalogService, recipe_document: dict[str, object]
 ) -> None:

@@ -16,6 +16,7 @@ DEFAULT_CONFIG_PATH = Path("/etc/vonk-forge-agent/config.json")
 DEFAULT_STATE_ROOT = Path("/var/lib/vonk-forge-agent")
 MAX_CONFIG_BYTES = MAX_IDENTITY_BYTES = 64 * 1024
 _NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
+_FINGERPRINT = re.compile(r"[0-9a-f]{64}\Z")
 _DNS = re.compile(
     r"(?=.{1,253}\Z)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?))*\Z"
 )
@@ -26,6 +27,7 @@ _FIELDS = {
     "certificate_path",
     "private_key_path",
     "ca_path",
+    "ca_fingerprint",
     "poll_min_seconds",
     "poll_max_seconds",
     "state_root",
@@ -47,6 +49,7 @@ class AgentConfig:
     certificate_path: Path
     private_key_path: Path
     ca_path: Path
+    ca_fingerprint: str
     poll_min_seconds: int
     poll_max_seconds: int
     state_root: Path
@@ -112,6 +115,11 @@ class AgentConfig:
         node_id = document["node_id"]
         if not isinstance(node_id, str) or not _NODE_ID.fullmatch(node_id):
             raise AgentConfigError("node ID is not canonical")
+        ca_fingerprint = document["ca_fingerprint"]
+        if not isinstance(ca_fingerprint, str) or not _FINGERPRINT.fullmatch(
+            ca_fingerprint
+        ):
+            raise AgentConfigError("CA fingerprint is not canonical")
         minimum, maximum = _poll(
             document["poll_min_seconds"], document["poll_max_seconds"]
         )
@@ -122,6 +130,7 @@ class AgentConfig:
             paths["certificate_path"],
             paths["private_key_path"],
             paths["ca_path"],
+            ca_fingerprint,
             minimum,
             maximum,
             paths["state_root"],

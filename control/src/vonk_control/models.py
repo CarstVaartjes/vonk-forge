@@ -467,6 +467,15 @@ class LoginSession(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class AgentProfile(Base):
+    __tablename__ = "agent_profiles"
+    node_id: Mapped[str] = mapped_column(ForeignKey("agent_nodes.node_id", ondelete="CASCADE"), primary_key=True)
+    display_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    hostname: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    lifecycle: Mapped[str] = mapped_column(String(16), nullable=False, default="managed")
+    labels: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
 class AgentNode(Base):
     __tablename__ = "agent_nodes"
     __table_args__ = (
@@ -2222,3 +2231,41 @@ class ResourceReservation(Base):
         DateTime(timezone=True), nullable=False
     )
     released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+class Recipe(Base):
+    """Greenfield Library recipe identity owned by PostgreSQL."""
+
+    __tablename__ = "recipes"
+    recipe_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    slug: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    created_by: Mapped[str] = mapped_column(String(200), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class RecipeRevision(Base):
+    """Content-addressed immutable revision in the greenfield Library."""
+
+    __tablename__ = "recipe_revisions"
+    __table_args__ = (
+        UniqueConstraint("recipe_id", "revision_number", name="uq_recipe_revision_number"),
+        UniqueConstraint("recipe_id", "content_digest", name="uq_recipe_revision_digest"),
+        CheckConstraint("revision_number >= 1", name="ck_recipe_revision_number"),
+    )
+    revision_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    recipe_id: Mapped[str] = mapped_column(
+        ForeignKey("recipes.recipe_id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    revision_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    content: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    content_digest: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    created_by: Mapped[str] = mapped_column(String(200), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+@event.listens_for(RecipeRevision, "before_update")
+@event.listens_for(RecipeRevision, "before_delete")
+def _recipe_revision_is_immutable(_mapper, _connection, target: RecipeRevision) -> None:
+    raise ValueError("recipe revisions are immutable")

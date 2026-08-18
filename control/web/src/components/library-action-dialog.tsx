@@ -178,13 +178,17 @@ export function LibraryActionDialog({alias, api, evidence, onApplied, onClose, o
     }
   }
 
+  const digest = plan && "plan_digest" in plan ? plan.plan_digest : plan && "placement_digest" in plan ? plan.placement_digest : undefined;
   return <div className="library-dialog-backdrop">
     <div className="library-action-dialog" ref={dialog} role="dialog" aria-modal="true" aria-labelledby={titleId} onKeyDown={onKeyDown}>
       <header><div><p className="fleet-kicker">Server authority preview</p><h3 id={titleId}>Review {name}</h3></div><button ref={close} type="button" className="icon-button" onClick={onClose} aria-label="Close review">×</button></header>
       <div className="library-action-dialog-body">
         {loading && <p role="status">Loading {name} preview…</p>}
         {previewError && <div className="fleet-error" role="alert"><p>{previewError}</p><button type="button" onClick={() => setPreviewAttempt(value => value + 1)}>Retry preview</button></div>}
-        {plan && <Plan evidence={evidence} plan={plan} policy={policy} previewReceivedAt={previewReceivedAt} target={target}/>}
+        {plan && <>
+          <Plan evidence={evidence} plan={plan} policy={policy} previewReceivedAt={previewReceivedAt} target={target}/>
+          {digest && <p className="library-digest-confirmation"><span>Exact authority digest</span><code>{digest}</code><small>Applying uses this reviewed digest; if authority changes, the action is rejected and must be previewed again.</small></p>}
+        </>}
         {applyError && <div className="fleet-error" role="alert"><p>{applyError}</p><p>The reviewed authority remains open. Review again if the underlying state changed.</p>{stale && <button type="button" onClick={() => setPreviewAttempt(value => value + 1)}>Review fresh preview</button>}</div>}
       </div>
       <footer>

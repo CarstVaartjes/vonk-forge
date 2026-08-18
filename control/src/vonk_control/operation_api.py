@@ -61,6 +61,7 @@ _ADMIN_OPERATION_IDS = {
     ("post", "/api/v1/changes"): "submitChange",
     ("get", "/api/v1/jobs"): "listJobs",
     ("get", "/api/v1/audit"): "listAuditEvents",
+    ("get", "/api/v1/identity-history"): "listIdentityHistory",
     ("get", "/api/v1/jobs/{job_id}"): "getJob",
     ("post", "/api/v1/jobs/{job_id}/resume"): "resumeJob",
     ("get", "/api/v1/jobs/{job_id}/logs"): "listJobLogs",

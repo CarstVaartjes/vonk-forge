@@ -51,7 +51,7 @@ from .agent_api import (
     active_agent_identity,
     install_agent_routes,
 )
-from .audit import AuditRecord
+from .audit import AuditRecord, IdentityHistoryRecord
 from .auth import (
     MUTATION_ROLES,
     Actor,
@@ -858,6 +858,7 @@ class JobQueue(Protocol):
 class AuditSink(Protocol):
     def append(self, event: AuditRecord) -> None: ...
     def list(self, *, limit: int = 100) -> list[AuditRecord]: ...
+    def identity_history(self, *, limit: int = 100) -> list[IdentityHistoryRecord]: ...
 
 
 def refresh_fleet_metrics(
@@ -1513,6 +1514,22 @@ def create_app(
                     "targets": list(event.targets),
                 }
                 for event in audits.list()
+            ]
+        }
+    @app.get("/api/v1/identity-history", operation_id="listIdentityHistory")
+    def identity_history_view(_actor: Actor = authenticated_actor) -> dict[str, object]:
+        return {
+            "identities": [
+                {
+                    "node_id": record.node_id,
+                    "agent_state": record.agent_state,
+                    "certificate_serial": record.certificate_serial,
+                    "certificate_fingerprint": record.certificate_fingerprint,
+                    "certificate_generation": record.certificate_generation,
+                    "enrolled_at": record.enrolled_at,
+                    "revoked_at": record.revoked_at,
+                }
+                for record in audits.identity_history()
             ]
         }
 

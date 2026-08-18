@@ -29,7 +29,7 @@ def _valid_document(tmp_path: Path) -> dict[str, object]:
         "node_id": NODE_ID,
         "certificate_path": _regular_file(tmp_path / "node.crt"),
         "private_key_path": _regular_file(tmp_path / "node.key", mode=0o600),
-        "ca_path": _regular_file(tmp_path / "ca.crt"),
+        "ca_fingerprint": "a" * 64,
         "poll_min_seconds": 2,
         "poll_max_seconds": 30,
         "state_root": str(tmp_path / "state"),
@@ -73,6 +73,34 @@ def test_valid_configuration_is_immutable_and_typed(tmp_path: Path) -> None:
     assert config.enrollment_token_path == Path(document["enrollment_token_path"])
     with pytest.raises(AttributeError):
         config.node_id = "spk_ffffffffffffffffffffffffffffffff"  # type: ignore[misc]
+
+def test_configuration_accepts_valid_ca_fingerprint(tmp_path: Path) -> None:
+    config = AgentConfig.load(_write_config(tmp_path, _valid_document(tmp_path)))
+
+    assert config.ca_fingerprint == "a" * 64
+
+
+@pytest.mark.parametrize(
+    "fingerprint",
+    ["A" * 64, "a" * 63, "a" * 65, "g" * 64, "a" * 63 + " ", 123],
+    ids=["uppercase", "short", "long", "non-hex", "whitespace", "non-string"],
+)
+def test_configuration_rejects_malformed_ca_fingerprint(
+    tmp_path: Path, fingerprint: object
+) -> None:
+    document = _valid_document(tmp_path)
+    document["ca_fingerprint"] = fingerprint
+
+    with pytest.raises(AgentConfigError, match="fingerprint"):
+        AgentConfig.load(_write_config(tmp_path, document))
+
+
+def test_configuration_rejects_missing_ca_fingerprint(tmp_path: Path) -> None:
+    document = _valid_document(tmp_path)
+    document.pop("ca_fingerprint")
+
+    with pytest.raises(AgentConfigError):
+        AgentConfig.load(_write_config(tmp_path, document))
 
 
 def test_configuration_allows_exact_bootstrap_and_post_enrollment_file_states(

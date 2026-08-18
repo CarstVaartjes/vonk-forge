@@ -177,3 +177,25 @@ test("offers retry after an initial error and then shows the empty Fleet state",
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   expect(visualFleet).toHaveBeenCalledTimes(2);
 });
+test("offers Spark onboarding and keeps revoked Sparks out of active cards", async () => {
+  const nodeId = "spk_0123456789abcdef0123456789abcdef";
+  const visualFleet = vi.fn().mockResolvedValue(snapshot([]));
+  const api = control(visualFleet) as ControlApi;
+  api.agents = vi.fn().mockResolvedValue({agents: [{
+    node_id: nodeId, state: "revoked", agent_implementation: "rust", capabilities: [],
+    certificate_expires_at: null, last_seen_at: null, stale: true, migration_state: "none",
+  }]});
+  api.enrollments = vi.fn().mockResolvedValue({enrollments: []});
+  api.createEnrollmentGrant = vi.fn().mockResolvedValue({
+    id: "grant-1", node_id: nodeId, purpose: "new-node", token: "secret-token", expires_at: "2099-01-01T00:00:00Z",
+  });
+  render(<FleetPage api={api}/>);
+  await flush();
+  expect(screen.getByRole("button", {name: "Add Spark"})).toBeVisible();
+  expect(screen.queryByText(nodeId)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", {name: "Add Spark"}));
+  fireEvent.change(screen.getByLabelText("Spark node ID"), {target: {value: nodeId}});
+  fireEvent.click(screen.getByRole("button", {name: "Create one-time enrollment command"}));
+  await flush();
+  expect(screen.getByText(/secret-token/)).toBeVisible();
+});
