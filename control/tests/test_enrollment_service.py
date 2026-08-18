@@ -45,14 +45,14 @@ def service():
     return svc, sessions, clock
 
 
-def request(actor="admin", node="spk_" + "a" * 32) -> GrantRequest:
+def request(actor="admin", node="spk_" + "a" * 32, ttl_seconds=60) -> GrantRequest:
     return GrantRequest(
         node,
         Actor(actor, "administrator" if actor == "admin" else actor),
         "https://controller",
         "https://enroll",
         "sha256:ca",
-        60,
+        ttl_seconds,
         {"source": "test"},
     )
 
@@ -74,6 +74,16 @@ def test_creation_returns_deterministic_response_and_exposes_token_once(service)
     assert row.token_verifier != result.token
     assert row.consumed_at is None
     assert json.loads(row.metadata)["source"] == "test"
+
+
+def test_creation_accepts_maximum_contract_ttl_and_rejects_above_it(service):
+    svc, _, clock = service
+
+    result = svc.create(request(ttl_seconds=900))
+
+    assert result.expires_at == clock.value + timedelta(seconds=900)
+    with pytest.raises(EnrollmentGrantError, match="between one and 900 seconds"):
+        svc.create(request(ttl_seconds=901))
 
 
 

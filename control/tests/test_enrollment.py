@@ -213,6 +213,22 @@ def enroll(service: EnrollmentService, *, node_id: str = NODE_ID, request: bytes
     return service.submit(grant.token, request, evidence(request, node_id=node_id))
 
 
+@pytest.mark.parametrize("ttl_seconds", (0, 901))
+def test_grant_creation_rejects_ttl_outside_bounded_contract(service, ttl_seconds: int) -> None:
+    enrollment, _, _, _ = service
+
+    with pytest.raises(ValueError, match="between one and 900 seconds"):
+        enrollment.create(NODE_ID, "admin", ttl_seconds)
+
+
+def test_grant_creation_accepts_maximum_contract_ttl(service) -> None:
+    enrollment, _, clock, _ = service
+
+    grant = enrollment.create(NODE_ID, "admin", 900)
+
+    assert grant.expires_at == clock.now + timedelta(seconds=900)
+
+
 def test_grant_is_single_use_and_requires_administrator_approval(service) -> None:
     enrollment, sessions, _, authority = service
     request = csr()

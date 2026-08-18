@@ -48,6 +48,7 @@ from .auth import (
 from .enrollment import (
     EnrollmentDenied,
     EnrollmentService,
+    MAX_ENROLLMENT_GRANT_TTL_SECONDS,
     PendingEnrollment,
     RemoteRevocationUncertain,
     RenewalInProgress,
@@ -191,7 +192,7 @@ class EnrollmentRateLimiter:
 
 class GrantRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    ttl_seconds: int = Field(ge=1, le=600)
+    ttl_seconds: int = Field(ge=1, le=MAX_ENROLLMENT_GRANT_TTL_SECONDS)
 
 class EnrollmentSubmitRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")

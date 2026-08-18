@@ -1819,6 +1819,26 @@ def test_enrollment_routes_are_admin_only_and_pending_exact_replay_is_idempotent
     assert first.content == replay.content == canonical_message(first.json())
 
 
+def test_enrollment_grant_ttl_accepts_nine_hundred_and_rejects_above_contract(
+    agent_system,
+) -> None:
+    client, _, codec, _ = agent_system
+
+    accepted = client.post(
+        "/api/v1/agents/enrollments/grants",
+        headers=admin_headers(codec),
+        json={"ttl_seconds": 900},
+    )
+    rejected = client.post(
+        "/api/v1/agents/enrollments/grants",
+        headers=admin_headers(codec),
+        json={"ttl_seconds": 901},
+    )
+
+    assert accepted.status_code == 201
+    assert rejected.status_code == 422
+
+
 def test_rust_agent_enrollment_shape_remains_controller_compatible(
     agent_system,
 ) -> None:
