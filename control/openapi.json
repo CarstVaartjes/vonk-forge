@@ -1218,7 +1218,7 @@
         "additionalProperties": false,
         "properties": {
           "ttl_seconds": {
-            "maximum": 600.0,
+            "maximum": 900.0,
             "minimum": 1.0,
             "title": "Ttl Seconds",
             "type": "integer"
