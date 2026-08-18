@@ -203,7 +203,7 @@ def test_development_without_a_cohort_keeps_explicit_local_source_identity(
     assert settings.process_image == (
         f"ghcr.io/example/control-api@sha256:{GENERATION_SHA_A}"
     )
-    assert (settings.protocol_minimum, settings.protocol_maximum) == (1, 1)
+    assert (settings.protocol_minimum, settings.protocol_maximum) == (3, 3)
 
 
 @pytest.mark.parametrize("role", ("api", "worker"))

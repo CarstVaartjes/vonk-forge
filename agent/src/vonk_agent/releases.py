@@ -159,8 +159,8 @@ class ReleaseDescriptor:
         if document["schema_version"] != 1 or isinstance(document["schema_version"], bool):
             raise ReleaseValidationError("release descriptor version is invalid")
         target_length = _bounded_int(document["target_length"], 1, 1 << 30, "target length")
-        protocol_min = _bounded_int(document["protocol_min_version"], 3, 3, "protocol range")
-        protocol_max = _bounded_int(document["protocol_max_version"], 3, 3, "protocol range")
+        protocol_min = _bounded_int(document["protocol_min_version"], 1, 1, "protocol range")
+        protocol_max = _bounded_int(document["protocol_max_version"], 1, 1, "protocol range")
         origin = _https_origin(document["registry_origin"])
         repository = document["repository"]
         if not isinstance(repository, str) or not _REPOSITORY.fullmatch(repository):

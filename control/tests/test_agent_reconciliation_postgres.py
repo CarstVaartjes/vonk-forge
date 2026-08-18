@@ -254,7 +254,7 @@ def _system(
         "fleet_evidence_digest": "e" * 64,
         "operation_graph": graph,
         "operation_payloads": {operation_id: payload},
-        "agent_protocol_range": [1, 1],
+        "agent_protocol_range": [3, 3],
     }
     reconciliation_id = str(uuid.uuid4())
     job_id = str(uuid.uuid4())
@@ -1488,7 +1488,7 @@ def _compensation_system(
         "operation_payloads": {
             operation_id: payload for operation_id in operation_ids
         },
-        "agent_protocol_range": [1, 1],
+        "agent_protocol_range": [3, 3],
     }
     reconciliation_id = str(uuid.uuid4())
     job_id = str(uuid.uuid4())

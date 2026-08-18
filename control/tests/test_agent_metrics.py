@@ -72,7 +72,7 @@ def _sessions(tmp_path):
                 AgentNode(
                     node_id=OLD_NODE,
                     state="active",
-                    protocol_version=3,
+                    protocol_version=2,
                     capabilities=[],
                 ),
                 AgentNode(
