@@ -3,52 +3,49 @@
 ## Goal
 
 Make the development deployment use the same Compose service topology and
-runtime contracts as production. Development may use separate synthetic
-credentials, PKI state, and disposable data, but it must consume the same
-published GitHub Actions images and exercise the same service boundaries,
-health checks, certificate provider, and renewal behavior.
+runtime contracts as production. Development and production are mutually
+exclusive release channels for a deployment, not concurrent environments on
+one network. The only runtime selection is the published GitHub Actions image
+and version; credentials, PKI, data, endpoints, volumes, and service behavior
+follow the same deployment contract.
 
 ## Requirements
 
 1. Development must not build local images, use `dev-local` image tags, inject a
    local source-origin repository, or bypass GitHub Actions image publication.
 2. Development and production must share one production-shaped Compose service
-   graph. Mode-specific values must come from environment/configuration and
-   separate secret/state roots, not from a second runtime topology.
+   graph and the same runtime inputs. They must not use separate secret/state
+   roots in the deployed channel.
 3. Development must include the production control bootstrap, signers,
    registry, Prometheus, Grafana, LiteLLM, Caddy, and Tailscale service
    boundaries. Development-only cohort/bootstrap preparation may remain as
    initialization stages, but cannot replace production runtime services.
 4. Both modes must use the same Step CA-backed agent PKI contract, including
    server trust, client trust, certificate issuance, renewal, and health
-   checks. Development uses a separate disposable Step CA authority.
+   checks. The selected channel uses the deployment's configured Step CA
+   authority and state.
 5. The development wrapper must pull the immutable image references selected by
    the GitHub Actions development channel. It must not clone the source into a
    runtime repository volume or substitute local images.
-6. Development data and credentials must remain isolated from production. A
-   development reset may remove development volumes without affecting
-   production state.
+6. Development must use the same credential, PKI, data, endpoint, and volume
+   contract as production. Development and production are never concurrent on
+   one network; switching channels is an operator-selected deployment change.
 7. Existing production security boundaries must remain intact: network
    segmentation, secret projection, non-root service identities, firewall
    behavior, and fail-closed TLS/mTLS checks.
 8. Tests must assert topology parity and that the development wrapper consumes
    published image references without local build/source-origin behavior.
 9. Documentation must describe one deployment model with development and
-   production inputs, instead of presenting development as a separate runtime
-   architecture. Hostnames, management CIDRs, published ports, service names,
-   network mappings, and secret projection contracts are shared; only the
-   selected published image/version and isolated credential, PKI, and data
-   values differ.
+   production as release channels. The selected published image/version is the
+   only runtime input that differs.
 
 ## Non-goals
 
-- Sharing production credentials, PKI private keys, databases, or persistent
-  volumes with development.
+- Running development and production concurrently on one network.
 - Changing the production release or image-publication workflow beyond the
   inputs required to make the development deployment consume its published
   channel.
-- Replacing the existing development data reset and synthetic-credential
-  conveniences.
+- Changing the selected image/version release workflow.
 
 ## Acceptance criteria
 
@@ -60,5 +57,4 @@ health checks, certificate provider, and renewal behavior.
   exercised by production.
 - Compose/configuration contract tests pass for both modes.
 - The development and production documentation identifies the selected
-  published image/version and isolated credential, PKI, and data values as the
-  only deployment inputs that differ; endpoint and network mappings are shared.
+  published image/version as the only deployment input that differs.

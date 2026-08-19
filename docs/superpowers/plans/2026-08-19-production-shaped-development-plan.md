@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make development consume the production-shaped Compose graph and GitHub Actions-published images while retaining isolated synthetic credentials, PKI, and data.
+**Goal:** Make development consume the production-shaped Compose graph and GitHub Actions-published images, with the selected image/version as the only runtime difference from production.
 
-**Architecture:** Promote the production Compose graph to the runtime source of truth and layer development inputs over it. Keep development-only cohort selection and secret preparation as explicit initialization steps, but make them feed the same production service boundaries rather than replacing them.
+**Architecture:** Promote the production Compose graph to the sole runtime source of truth. Development and production are mutually exclusive release channels; the deployment selects a published image/version while retaining the same credentials, PKI, persistent data, endpoints, volumes, and service boundaries.
 
 **Tech Stack:** Docker Compose, GitHub Actions immutable image references, Python development bootstrap tooling, Step CA, Caddy, pytest, YAML contract tests.
 
@@ -14,9 +14,10 @@
 
 - Development must not build local images, use `dev-local` tags, inject a source-origin repository, or bypass GitHub Actions image publication.
 - Development and production must share one production-shaped Compose service graph.
-- Development must use a separate disposable Step CA authority and separate state/data.
+- Development and production are not concurrent environments on one network.
 - Development and production share hostnames, management CIDRs, published ports,
-  service names, network mappings, and secret projection contracts.
+  service names, network mappings, secret projection contracts, credentials, PKI,
+  persistent data, and volumes.
 - Existing production security boundaries must remain intact.
 - Tests must prove topology parity and published-image consumption.
 
@@ -53,11 +54,11 @@
 **Interfaces:**
 - Consumes the service mapping from Task 1.
 - Produces a production-shaped Compose graph with mode-specific image,
-  secret, state, and port inputs.
+  image/version input only.
 
 - [ ] **Step 1: Extend the failing parity test** to require production service names and shared security-sensitive configuration, while allowing only documented mode-specific inputs.
 - [ ] **Step 2: Run the test** and confirm the current development graph fails.
-- [ ] **Step 3: Refactor Compose sources** so the production graph is the base and development supplies an explicit overlay for published development image references, synthetic state roots, local ports, and initialization configuration.
+- [ ] **Step 3: Refactor Compose sources** so the production graph is the sole runtime graph and development supplies only the published image/version references.
 - [ ] **Step 4: Remove the development image-template path** that substitutes `vonk-forge-api:dev-local`, `vonk-forge-worker:dev-local`, and a source-origin repository.
 - [ ] **Step 5: Run `docker compose config` contract tests** for both production and development inputs and verify the parity test passes.
 - [ ] **Step 6: Commit** with `git add deploy/compose && git commit -m "refactor: share production compose topology"`.
@@ -78,7 +79,7 @@
 - [ ] **Step 1: Add failing wrapper assertions** for published immutable image references, absence of `--build`, absence of `dev-local`, and absence of source-origin injection.
 - [ ] **Step 2: Run the focused wrapper tests** and verify they fail against the current script.
 - [ ] **Step 3: Implement image-channel resolution** using the repository’s existing GitHub Actions publication metadata and pass the resolved digests into the shared Compose graph.
-- [ ] **Step 4: Keep local ports and disposable volume naming as wrapper inputs only.**
+- [ ] **Step 4: Remove local port overrides, disposable volume naming, and development-only secret projections from the deployed development channel.**
 - [ ] **Step 5: Run wrapper/configuration tests** and verify the published-image assertions pass.
 - [ ] **Step 6: Commit** with `git add scripts/dev-compose scripts/tests/test_dev_image_acceptance.py deploy/compose/tests/test_dev_compose.py .github/workflows/dev-images.yml && git commit -m "feat: run development from published images"`.
 
@@ -94,16 +95,16 @@
 - Test: existing agent PKI/control integration tests
 
 **Interfaces:**
-- Consumes isolated development PKI state.
+- Consumes the deployment's configured Step CA state.
 - Produces the same Step CA service and certificate renewal contract used by
-  production, with development-only authority material.
+  production for the selected image channel.
 
 - [ ] **Step 1: Add a failing test** requiring the development graph to include the Step CA service, its isolated state, and the same Caddy/API trust projections as production.
 - [ ] **Step 2: Run the focused PKI tests** and verify they fail against the built-in development CA path.
-- [ ] **Step 3: Generate or provision the disposable development Step CA material** without changing the production PKI files or trust roots.
+- [ ] **Step 3: Use the same Step CA inputs and persistent PKI paths as the production-shaped deployment; temporary test roots belong only to test harnesses.**
 - [ ] **Step 4: Wire development service dependencies and secret projections** to the shared Step CA contract.
 - [ ] **Step 5: Remove the development-only controller server certificate rotation path** once Step CA/Caddy owns the server certificate lifecycle; retain validation that reports provider expiry clearly.
-- [ ] **Step 6: Run the PKI and enrollment/renewal tests** and verify the same protocol succeeds in development.
+- [ ] **Step 6: Run the PKI and enrollment/renewal tests** and verify the same protocol succeeds for the development image channel.
 - [ ] **Step 7: Commit** with `git add deploy/compose control/src/vonk_control/dev_bootstrap.py scripts/dev-runtime-secrets.py deploy/compose/tests scripts/tests && git commit -m "feat: use the production PKI flow in development"`.
 
 ### Task 5: Align documentation and reset behavior
@@ -115,11 +116,12 @@
 - Modify: relevant documentation contract tests
 
 **Interfaces:**
-- Documents one production-shaped deployment model with isolated mode inputs.
+- Documents one production-shaped deployment model with release-channel image
+  selection.
 
 - [ ] **Step 1: Add failing documentation assertions** requiring published-image usage, shared topology, Step CA, and explicit isolation boundaries.
 - [ ] **Step 2: Run the documentation tests** and verify they fail against the split development instructions.
-- [ ] **Step 3: Rewrite the development instructions** to describe the shared graph, GitHub Actions image channel, isolated PKI/data, and reset commands.
+- [ ] **Step 3: Rewrite the development instructions** to describe the shared graph, GitHub Actions image channel, same PKI/data contract, and channel-switch/reset commands.
 - [ ] **Step 4: Run documentation and Compose contract tests** and verify they pass.
 - [ ] **Step 5: Commit** with `git add deploy/compose/README.md docs/runbooks docs/superpowers && git commit -m "docs: describe production-shaped development"`.
 
