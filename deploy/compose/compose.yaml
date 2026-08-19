@@ -75,7 +75,7 @@ services:
     cap_add: [CHOWN, DAC_OVERRIDE, FOWNER]
     security_opt: [no-new-privileges:true]
     command: [python, -m, vonk_control.compose_secret_init]
-    secrets: [admin-grant-private-key, package-helper-grant-private-key, package-helper-receipt-private-key, host-runtime-grant-private-key]
+    secrets: [admin-grant-private-key, package-helper-grant-private-key, package-helper-receipt-private-key, host-runtime-grant-private-key, agent-update-authority-key, admin-grant-public-key, agent-tuf-bootstrap-root]
     volumes:
       - normalized-private-keys:/normalized
 
@@ -207,9 +207,9 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     environment:
-      VONK_AGENT_UPDATE_AUTHORITY_KEY_FILE: /run/secrets/agent-update-authority-key
-      VONK_ADMIN_GRANT_PUBLIC_KEY_FILE: /run/secrets/admin-grant-public-key
-      VONK_AGENT_TUF_BOOTSTRAP_ROOT_FILE: /run/secrets/agent-tuf-bootstrap-root
+      VONK_AGENT_UPDATE_AUTHORITY_KEY_FILE: /run/vonk-normalized-secrets/agent-update-authority-key
+      VONK_ADMIN_GRANT_PUBLIC_KEY_FILE: /run/vonk-normalized-secrets/admin-grant-public-key
+      VONK_AGENT_TUF_BOOTSTRAP_ROOT_FILE: /run/vonk-normalized-secrets/agent-tuf-bootstrap-root
       VONK_AGENT_TUF_METADATA_ROOT: /publication/metadata
       VONK_AGENT_TUF_TARGET_ROOT: /publication/targets
       VONK_AGENT_TUF_VERIFIED_METADATA_ROOT: /verifier/metadata
@@ -220,11 +220,12 @@ services:
       VONK_PLATFORM_VERSION: ${VONK_PLATFORM_VERSION:?set released platform version}
       VONK_PLATFORM_RELEASE_DIGEST: ${VONK_PLATFORM_RELEASE_DIGEST:?set released platform digest}
       VONK_PLATFORM_BUILD_DIGEST: ${VONK_PLATFORM_BUILD_DIGEST:?set released build digest}
-    secrets: [agent-update-authority-key, admin-grant-public-key, agent-tuf-bootstrap-root]
+    secrets: []
     volumes:
       - agent-tuf-publication:/publication:ro
       - signer-tuf-verifier:/verifier
       - update-signer-socket:/run/vonk-signer
+      - normalized-private-keys:/run/vonk-normalized-secrets:ro
       - type: bind
         source: ${CONTROL_IDENTITY_PATH:?set control identity directory path}
         target: /control-identity

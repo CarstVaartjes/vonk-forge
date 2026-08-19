@@ -24,6 +24,18 @@ def prepare() -> None:
             owner_gid=10001,
             mode=0o400,
         )
+    for name in (
+        "agent-update-authority-key",
+        "admin-grant-public-key",
+        "agent-tuf-bootstrap-root",
+    ):
+        stage_private_key(
+            Path(f"/run/secrets/{name}"),
+            Path(f"/normalized/{name}"),
+            owner_uid=10003,
+            owner_gid=10001,
+            mode=0o400,
+        )
 
 
 if __name__ == "__main__":
