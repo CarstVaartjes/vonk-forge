@@ -1327,7 +1327,7 @@ def test_compose_initializes_route_volume_for_unprivileged_control_worker() -> N
     )
     services = json.loads(rendered.stdout)["services"]
     bootstrap = services["control-bootstrap"]
-    assert bootstrap["network_mode"] == "none"
+    assert set(bootstrap["networks"]) == {"data"}
     assert bootstrap["user"] == "0:0"
     assert bootstrap["cap_drop"] == ["ALL"]
     assert set(bootstrap["cap_add"]) == {"CHOWN", "FOWNER", "DAC_OVERRIDE"}

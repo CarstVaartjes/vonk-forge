@@ -1,5 +1,5 @@
 services:
-  control-secret-init:
+  control-bootstrap:
     secrets:
       - agent-intermediate-key
 

@@ -5,7 +5,7 @@ x-bounded-logging: &bounded-logging
     max-file: "5"
 
 services:
-  control-secret-init:
+  control-bootstrap:
     secrets:
       - agent-ca-credential
       - agent-ca-provisioner-public-jwk

@@ -2,4 +2,4 @@
 # Keep this include instead of maintaining a second service graph.
 include:
   - compose.yaml
-  - compose.builtin-ca.yaml
+  - compose.step-ca.yaml

@@ -6,6 +6,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[3]
 PRODUCTION_COMPOSE = ROOT / "deploy/compose/compose.yaml"
+PRODUCTION_CA_COMPOSE = ROOT / "deploy/compose/compose.step-ca.yaml"
 HERMES_COMPOSE = ROOT / "deploy/compose/hermes-agent/compose.yaml"
 DEVELOPMENT_COMPOSE = ROOT / "deploy/compose/compose.dev.images.yaml"
 DEVELOPMENT_WRAPPER = ROOT / "scripts/dev-compose"
@@ -27,12 +28,14 @@ def _services(path: Path, *, _seen: set[Path] | None = None) -> set[str]:
 
 
 def test_development_uses_the_production_runtime_service_graph() -> None:
-    assert _services(DEVELOPMENT_COMPOSE) == _services(PRODUCTION_COMPOSE)
+    assert _services(DEVELOPMENT_COMPOSE) == (
+        _services(PRODUCTION_COMPOSE) | _services(PRODUCTION_CA_COMPOSE)
+    )
 
 
-def test_development_bundle_selects_the_builtin_agent_ca_overlay() -> None:
+def test_development_bundle_selects_the_production_agent_ca_overlay() -> None:
     document = yaml.safe_load(DEVELOPMENT_COMPOSE.read_text(encoding="utf-8"))
-    assert document["include"] == ["compose.yaml", "compose.builtin-ca.yaml"]
+    assert document["include"] == ["compose.yaml", "compose.step-ca.yaml"]
 
 
 def test_development_wrapper_selects_published_images_only() -> None:

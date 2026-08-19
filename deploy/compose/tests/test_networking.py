@@ -252,7 +252,7 @@ def test_worker_has_a_distinct_minimal_image_and_runtime_boundary() -> None:
         "/verifier",
     }
     bootstrap = services["control-bootstrap"]
-    assert bootstrap["network_mode"] == "none"
+    assert set(bootstrap["networks"]) == {"data"}
     assert any(
         item.get("source") == "update-signer-socket"
         and item.get("target") == "/update-socket"
@@ -344,43 +344,29 @@ def test_bootstrap_prepares_signer_directories() -> None:
 
 def test_file_backed_private_keys_are_normalized_before_bootstrap() -> None:
     services = _rendered()["services"]
-    init = services["control-secret-init"]
     api = services["control-api"]
     worker = services["control-worker"]
     bootstrap = services["control-bootstrap"]
 
-    assert init["command"] == ["python", "-m", "vonk_control.compose_secret_init"]
-    assert init["secrets"] == [
-        {"source": "admin-grant-private-key", "target": "/run/secrets/admin-grant-private-key"},
-        {"source": "package-helper-grant-private-key", "target": "/run/secrets/package-helper-grant-private-key"},
-        {"source": "package-helper-receipt-private-key", "target": "/run/secrets/package-helper-receipt-private-key"},
-        {"source": "host-runtime-grant-private-key", "target": "/run/secrets/host-runtime-grant-private-key"},
-        {"source": "agent-update-authority-key", "target": "/run/secrets/agent-update-authority-key"},
-        {"source": "admin-grant-public-key", "target": "/run/secrets/admin-grant-public-key"},
-        {"source": "agent-tuf-bootstrap-root", "target": "/run/secrets/agent-tuf-bootstrap-root"},
-        {"source": "database-url", "target": "/run/secrets/database-url"},
-        {"source": "token-signing-key", "target": "/run/secrets/token-signing-key"},
-        {"source": "metrics-token", "target": "/run/secrets/metrics-token"},
-        {"source": "git-signing-key", "target": "/run/secrets/git-signing-key"},
-        {"source": "agent-client-ca", "target": "/run/secrets/agent-client-ca"},
-        {"source": "agent-intermediate-certificate", "target": "/run/secrets/agent-intermediate-certificate"},
-        {"source": "controller-ca", "target": "/run/secrets/controller-ca"},
-        {"source": "agent-proxy-auth", "target": "/run/secrets/agent-proxy-auth"},
-        {"source": "worker-api-token", "target": "/run/secrets/worker-api-token"},
-        {"source": "litellm-master-key", "target": "/run/secrets/litellm-master-key"},
-        {"source": "litellm-upstream-key", "target": "/run/secrets/litellm-upstream-key"},
-        {"source": "litellm-database-url", "target": "/run/secrets/litellm-database-url"},
-        {"source": "grafana-admin-password", "target": "/run/secrets/grafana-admin-password"},
-        {"source": "agent-ca-credential", "target": "/run/secrets/agent-ca-credential"},
-        {"source": "agent-ca-provisioner-public-jwk", "target": "/run/secrets/agent-ca-provisioner-public-jwk"},
-        {"source": "step-ca-root-certificate", "target": "/run/secrets/step-ca-root-certificate"},
-        {"source": "step-ca-intermediate-key", "target": "/run/secrets/step-ca-intermediate-key"},
-        {"source": "step-ca-password", "target": "/run/secrets/step-ca-password"},
-    ]
-    assert bootstrap["depends_on"]["control-secret-init"] == {
-        "condition": "service_completed_successfully",
+    assert "control-secret-init" not in services
+    assert bootstrap["depends_on"]["postgres"] == {
+        "condition": "service_healthy",
         "required": True,
     }
+    assert set(bootstrap["networks"]) == {"data"}
+    bootstrap_secrets = {secret["source"] for secret in bootstrap["secrets"]}
+    assert {
+        "admin-grant-private-key",
+        "package-helper-grant-private-key",
+        "package-helper-receipt-private-key",
+        "host-runtime-grant-private-key",
+        "agent-update-authority-key",
+        "admin-grant-public-key",
+        "agent-tuf-bootstrap-root",
+        "database-url",
+    } <= bootstrap_secrets
+    normalized = {volume["target"]: volume for volume in bootstrap["volumes"]}
+    assert normalized["/normalized"].get("read_only") is not True
     assert api["environment"]["VONK_PACKAGE_HELPER_GRANT_PRIVATE_KEY_FILE"] == (
         "/run/vonk-normalized-secrets/package-helper-grant-private-key"
     )
@@ -414,7 +400,7 @@ def test_admin_grant_signing_key_is_available_only_to_bootstrap() -> None:
     assert "admin-grant-private-key" not in secret_sources["control-worker"]
     assert "admin-grant-private-key" not in secret_sources["control-signer"]
     assert "admin-grant-private-key" in {
-        secret["source"] for secret in services["control-secret-init"]["secrets"]
+        secret["source"] for secret in services["control-bootstrap"]["secrets"]
     }
 
 
