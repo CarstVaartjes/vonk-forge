@@ -44,6 +44,7 @@ def test_development_wrapper_selects_published_images_only() -> None:
 def test_hermes_is_opt_in_in_the_shared_production_graph() -> None:
     document = yaml.safe_load(HERMES_COMPOSE.read_text(encoding="utf-8"))
     assert document["services"]["hermes-agent"]["profiles"] == ["hermes"]
+    assert "profile-required" in document["x-hermes-service"]["image"]
 
     runbook = (ROOT / "docs/runbooks/development-nas-installation.md").read_text(
         encoding="utf-8"

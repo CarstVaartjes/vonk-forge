@@ -1,5 +1,9 @@
 x-hermes-service: &hermes-service
-  image: ${HERMES_AGENT_IMAGE:?set a digest-pinned Vonk Forge Hermes image}
+  # Compose interpolates included anchors even when their service profile is
+  # disabled. Keep the base control-plane graph self-contained; enabling the
+  # hermes profile requires replacing this inert fallback with a published,
+  # digest-pinned Vonk Forge Hermes image in .env.
+  image: ${HERMES_AGENT_IMAGE:-ghcr.io/carstvaartjes/vonk-forge-hermes:profile-required}
   logging:
     driver: local
     options:

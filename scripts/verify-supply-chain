@@ -507,13 +507,22 @@ def image_errors(root: Path) -> list[str]:
             "target": "managed",
         },
     ]
+    required_deployment_releases = expected_releases[:2]
+    hermes_is_opt_in = (
+        "profiles: [hermes]" in compose
+        and "HERMES_AGENT_IMAGE:-ghcr.io/carstvaartjes/vonk-forge-hermes:profile-required"
+        in compose
+    )
     if releases != expected_releases or any(
         f"${{{release['environment']}:?" not in compose
-        for release in expected_releases
+        for release in required_deployment_releases
+    ) or not (
+        f"${{{expected_releases[2]['environment']}:?" in compose
+        or hermes_is_opt_in
     ):
         errors.append(
-            "API, worker, and Hermes release images must be explicitly "
-            "digest-pinned at deployment"
+            "API and worker release images must be explicitly digest-pinned; "
+            "Hermes must be either digest-pinned or explicitly opt-in"
         )
     for release in expected_releases:
         context = root / release["context"]

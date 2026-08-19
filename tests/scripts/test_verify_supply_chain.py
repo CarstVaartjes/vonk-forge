@@ -528,7 +528,7 @@ def test_image_lock_contains_the_pinned_hermes_build_base() -> None:
     assert not any("ai-devbox" in name for name in lock["build_bases"])
 
 
-def test_image_lock_declares_all_three_public_release_artifacts() -> None:
+def test_image_lock_declares_all_three_release_artifacts() -> None:
     lock = json.loads((ROOT / "deploy/compose/images.lock.json").read_text())
 
     assert lock["release_images"] == [
@@ -557,6 +557,17 @@ def test_image_lock_declares_all_three_public_release_artifacts() -> None:
             "target": "managed",
         },
     ]
+
+
+def test_verifier_accepts_opt_in_hermes_compose_profile() -> None:
+    result = subprocess.run(
+        [SCRIPT, "--root", ROOT, "--generate", "--json"],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_verifier_rejects_stale_sbom_after_lock_change(tmp_path: Path) -> None:
