@@ -22,12 +22,12 @@ x-selected-generation-environment: &selected-generation-environment
 x-api-environment: &api-environment
   <<: *selected-generation-environment
   VONK_DEPLOYMENT_MODE: production
-  VONK_DATABASE_URL_FILE: /run/secrets/database-url
-  VONK_TOKEN_SIGNING_KEY_FILE: /run/secrets/token-signing-key
-  VONK_METRICS_TOKEN_FILE: /run/secrets/metrics-token
+  VONK_DATABASE_URL_FILE: /run/vonk-normalized-secrets/database-url
+  VONK_TOKEN_SIGNING_KEY_FILE: /run/vonk-normalized-secrets/token-signing-key
+  VONK_METRICS_TOKEN_FILE: /run/vonk-normalized-secrets/metrics-token
   VONK_REPOSITORY_PATH: /repository
   VONK_STATE_PATH: /state
-  VONK_GIT_SIGNING_KEY_FILE: /run/secrets/git-signing-key
+  VONK_GIT_SIGNING_KEY_FILE: /run/vonk-normalized-secrets/git-signing-key
   VONK_DEPLOYMENT_BRANCH: ${DEPLOYMENT_BRANCH:-deploy}
   VONK_REQUIRED_CHECKS: ${REQUIRED_CHECKS:-}
   VONK_GLOBAL_CATALOG_URL: ${VONK_GLOBAL_CATALOG_URL:-https://vonkforge.ai}
@@ -38,10 +38,10 @@ x-api-environment: &api-environment
   VONK_AGENT_TUF_TARGET_ROOT: /agent-tuf/targets
   VONK_AGENT_CONTROLLER_ORIGIN: https://${VONK_AGENT_HOSTNAME:?set Caddy agent hostname}:8443
   VONK_AGENT_ENROLLMENT_ORIGIN: https://${VONK_AGENT_ENROLL_HOSTNAME:?set Caddy enrollment hostname}:8443
-  VONK_CONTROLLER_CA_FILE: /run/secrets/controller-ca
+  VONK_CONTROLLER_CA_FILE: /run/vonk-normalized-secrets/controller-ca
   VONK_WORKLOAD_TUF_METADATA_ROOT: /workload-tuf/metadata
   VONK_WORKLOAD_TUF_TARGET_ROOT: /workload-tuf/targets
-  VONK_WORKER_API_TOKEN_FILE: /run/secrets/worker-api-token
+  VONK_WORKER_API_TOKEN_FILE: /run/vonk-normalized-secrets/worker-api-token
   VONK_ADMIN_GRANT_PRIVATE_KEY_FILE: /run/vonk-api-secrets/admin-grant-private-key.pem
   VONK_PACKAGE_HELPER_GRANT_PRIVATE_KEY_FILE: /run/vonk-normalized-secrets/package-helper-grant-private-key
   VONK_PACKAGE_HELPER_RECEIPT_PRIVATE_KEY_FILE: /run/vonk-normalized-secrets/package-helper-receipt-private-key
@@ -52,8 +52,8 @@ x-api-environment: &api-environment
 x-worker-environment: &worker-environment
   <<: *selected-generation-environment
   VONK_DEPLOYMENT_MODE: production
-  VONK_DATABASE_URL_FILE: /run/secrets/database-url
-  VONK_WORKER_API_TOKEN_FILE: /run/secrets/worker-api-token
+  VONK_DATABASE_URL_FILE: /run/vonk-normalized-secrets/database-url
+  VONK_WORKER_API_TOKEN_FILE: /run/vonk-normalized-secrets/worker-api-token
   VONK_INTERNAL_API_URL: http://control-api:8000
   VONK_MANAGEMENT_CIDRS: ${VONK_MANAGEMENT_CIDRS:?set trusted GPU node management CIDRs}
   VONK_DIRECT_FABRIC_CIDRS: ${VONK_DIRECT_FABRIC_CIDRS:-}
@@ -73,7 +73,7 @@ services:
     cap_add: [CHOWN, DAC_OVERRIDE, FOWNER]
     security_opt: [no-new-privileges:true]
     command: [python, -m, vonk_control.compose_secret_init]
-    secrets: [admin-grant-private-key, package-helper-grant-private-key, package-helper-receipt-private-key, host-runtime-grant-private-key, agent-update-authority-key, admin-grant-public-key, agent-tuf-bootstrap-root]
+    secrets: [admin-grant-private-key, package-helper-grant-private-key, package-helper-receipt-private-key, host-runtime-grant-private-key, agent-update-authority-key, admin-grant-public-key, agent-tuf-bootstrap-root, database-url, token-signing-key, metrics-token, git-signing-key, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, worker-api-token, litellm-master-key, litellm-upstream-key, litellm-database-url, grafana-admin-password]
     volumes:
       - normalized-private-keys:/normalized
 
@@ -138,7 +138,7 @@ services:
     security_opt: [no-new-privileges:true]
     environment:
       <<: *api-environment
-    secrets: [database-url, token-signing-key, metrics-token, git-signing-key, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, worker-api-token]
+    secrets: []
     volumes:
       - ${REPOSITORY_PATH:?set repository path}:/repository
       - control-state:/state
@@ -175,9 +175,10 @@ services:
     security_opt: [no-new-privileges:true]
     environment:
       <<: *worker-environment
-    secrets: [database-url, worker-api-token]
+    secrets: []
     volumes:
       - route-publications:/routes
+      - normalized-private-keys:/run/vonk-normalized-secrets:ro
       - litellm-supervisor-state:/supervisor:ro
       - control-state:/state
       - update-signer-socket:/run/vonk-signer
@@ -251,13 +252,17 @@ services:
     environment:
       DISABLE_ADMIN_UI: "False"
       LITELLM_UI_PATH: /tmp/litellm-ui
+      LITELLM_MASTER_KEY_FILE: /run/vonk-normalized-secrets/litellm-master-key
+      LITELLM_UPSTREAM_KEY_FILE: /run/vonk-normalized-secrets/litellm-upstream-key
+      LITELLM_DATABASE_URL_FILE: /run/vonk-normalized-secrets/litellm-database-url
       SERVER_ROOT_PATH: /litellm
       STORE_MODEL_IN_DB: "False"
-    secrets: [litellm-master-key, litellm-upstream-key, litellm-database-url]
+    secrets: []
     volumes:
       - ./litellm/bootstrap-config.json:/app/bootstrap-config.json:ro
       - ./litellm/entrypoint.sh:/app/vonk-entrypoint:ro
       - ./litellm/config_supervisor.py:/app/config-supervisor.py:ro
+      - normalized-private-keys:/run/vonk-normalized-secrets:ro
       - route-publications:/routes:ro
       - litellm-supervisor-state:/supervisor:rw
     tmpfs: [/tmp]
@@ -283,11 +288,12 @@ services:
       - --web.enable-lifecycle=false
     read_only: true
     user: "65534:65534"
-    secrets: [metrics-token]
+    secrets: []
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./prometheus/alerts.yaml:/etc/prometheus/alerts.yaml:ro
       - prometheus-data:/prometheus
+      - normalized-private-keys:/run/vonk-normalized-secrets:ro
     tmpfs: [/tmp]
     networks: [application]
     depends_on:
@@ -302,15 +308,16 @@ services:
     environment:
       GF_AUTH_ANONYMOUS_ENABLED: "false"
       GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana-admin-password
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/vonk-normalized-secrets/grafana-admin-password
       GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s/grafana/"
       GF_SERVER_SERVE_FROM_SUB_PATH: "true"
       GF_USERS_ALLOW_SIGN_UP: "false"
-    secrets: [grafana-admin-password]
+    secrets: []
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
+      - normalized-private-keys:/run/vonk-normalized-secrets:ro
     tmpfs: [/tmp]
     networks: [application, ingress]
     depends_on: [prometheus]

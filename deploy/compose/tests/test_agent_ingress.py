@@ -343,7 +343,7 @@ def _settings_result(rendered: dict, tmp_path: Path) -> subprocess.CompletedProc
 def test_development_image_compose_enables_complete_builtin_agent_settings(
     tmp_path: Path,
 ) -> None:
-    rendered = _rendered("compose.dev.images.yaml")
+    rendered = _rendered("compose.dev.images.yaml", "compose.builtin-ca.yaml")
     services = rendered["services"]
     api = services["control-api"]
     caddy = services["caddy"]
@@ -354,20 +354,25 @@ def test_development_image_compose_enables_complete_builtin_agent_settings(
     assert provider == "builtin"
     assert proxy_auth == "A" * 30 + "_-"
     assert management == "10.0.0.0/24"
-    assert direct_fabric == ""
+    assert direct_fabric == "192.168.100.0/24,192.168.101.0/24"
 
     assert api["environment"]["VONK_AGENT_RUNTIME"] == "enabled"
     assert api["environment"]["VONK_AGENT_BUILTIN_CA_BOOTSTRAP"] == "1"
-    assert api["environment"]["VONK_MANAGEMENT_CIDRS_FILE"] == (
-        "/run/secrets/management-cidrs"
-    )
+    assert api["environment"]["VONK_MANAGEMENT_CIDRS"] == "10.0.0.0/24"
     assert set(caddy["networks"]) == {
-        "application",
+        "agent-proxy",
+        "hermes-inference",
         "ingress",
         "litellm-edge",
+        "registry-edge",
         "tailnet-web-edge",
     }
-    assert set(api["networks"]) == {"application", "data", "ingress"}
+    assert set(api["networks"]) == {
+        "agent-proxy",
+        "application",
+        "data",
+        "worker-authority",
+    }
     assert set(services["litellm"]["networks"]) == {
         "cluster-egress",
         "litellm-data",
@@ -375,7 +380,7 @@ def test_development_image_compose_enables_complete_builtin_agent_settings(
     }
     assert services["litellm"].get("ports") in (None, [])
     assert caddy["depends_on"]["control-api"] == {
-        "condition": "service_healthy",
+        "condition": "service_started",
         "required": True,
     }
 
@@ -384,7 +389,7 @@ def test_agent_bootstrap_uses_distinct_https_origins_and_public_ca_only() -> Non
     rendered = _rendered()
     api = rendered["services"]["control-api"]
     environment = api["environment"]
-    api_secrets = {secret["source"] for secret in api["secrets"]}
+    api_secrets = {secret["source"] for secret in api.get("secrets", [])}
 
     assert environment["VONK_AGENT_CONTROLLER_ORIGIN"] == (
         "https://agents.test.example:8443"
@@ -392,8 +397,14 @@ def test_agent_bootstrap_uses_distinct_https_origins_and_public_ca_only() -> Non
     assert environment["VONK_AGENT_ENROLLMENT_ORIGIN"] == (
         "https://enroll.test.example:8443"
     )
-    assert environment["VONK_CONTROLLER_CA_FILE"] == "/run/secrets/controller-ca"
-    assert "controller-ca" in api_secrets
+    assert environment["VONK_CONTROLLER_CA_FILE"] == (
+        "/run/vonk-normalized-secrets/controller-ca"
+    )
+    assert api_secrets == set()
+    assert any(
+        volume["target"] == "/run/vonk-normalized-secrets"
+        for volume in api["volumes"]
+    )
     assert "controller-server-key" not in api_secrets
     assert "agent-intermediate-key" not in api_secrets
 
@@ -896,21 +907,44 @@ def test_rendered_production_boundary_has_only_caddy_public_and_step_ca_private(
     assert "step-ca" in services
     assert not services["step-ca"].get("ports")
     assert {secret["source"] for secret in services["caddy"]["secrets"]} >= {"agent-client-ca", "agent-proxy-auth"}
-    assert {secret["source"] for secret in services["control-api"]["secrets"]} >= {
-        "agent-client-ca", "agent-intermediate-certificate", "agent-ca-credential", "agent-proxy-auth",
-    }
-    assert "agent-intermediate-key" not in {secret["source"] for secret in services["control-api"]["secrets"]}
+    assert services["control-api"].get("secrets", []) == []
+    assert services["control-api"]["environment"]["VONK_AGENT_CLIENT_CA_FILE"] == (
+        "/run/vonk-normalized-secrets/agent-client-ca"
+    )
+    assert services["control-api"]["environment"]["VONK_AGENT_PROXY_AUTH_FILE"] == (
+        "/run/vonk-normalized-secrets/agent-proxy-auth"
+    )
+    assert services["step-ca"]["secrets"] == []
+    assert services["step-ca"]["command"][-1] == (
+        "/run/vonk-normalized-secrets/step-ca/password"
+    )
+    assert "step-ca/intermediate-key" in (
+        ROOT / "deploy/compose/step-ca/ca.json"
+    ).read_text()
     assert "root-private" not in json.dumps(services["step-ca"], sort_keys=True).lower()
 
 
 def test_builtin_ca_override_is_explicit_and_only_it_mounts_the_builtin_signing_key() -> None:
     production = _rendered()
     builtin = _rendered("compose.yaml", "compose.builtin-ca.yaml")
-    production_secrets = {secret["source"] for secret in production["services"]["control-api"]["secrets"]}
-    builtin_secrets = {secret["source"] for secret in builtin["services"]["control-api"]["secrets"]}
-    assert "agent-intermediate-key" not in production_secrets
-    assert "agent-intermediate-key" in builtin_secrets
-    assert "agent-ca-credential" not in builtin_secrets
+    production_secrets = {
+        secret["source"]
+        for secret in production["services"]["control-api"].get("secrets", [])
+    }
+    builtin_secrets = {
+        secret["source"]
+        for secret in builtin["services"]["control-api"].get("secrets", [])
+    }
+    assert production_secrets == set()
+    assert builtin_secrets == set()
+    assert {
+        secret["source"]
+        for secret in builtin["services"]["control-secret-init"]["secrets"]
+    } >= {"agent-intermediate-key"}
+    assert "agent-ca-credential" not in {
+        secret["source"]
+        for secret in builtin["services"]["control-secret-init"]["secrets"]
+    }
     assert builtin["services"]["control-api"]["environment"]["VONK_AGENT_CA_PROVIDER"] == "builtin"
     assert builtin["services"]["control-api"]["environment"]["VONK_AGENT_BUILTIN_CA_BOOTSTRAP"] == "1"
     assert "VONK_AGENT_CA_CREDENTIAL_FILE" not in builtin["services"]["control-api"]["environment"]
@@ -925,7 +959,10 @@ def test_provider_overlays_require_only_their_own_secrets() -> None:
     for name in ("AGENT_CA_CREDENTIAL_FILE", "STEP_CA_ROOT_CERTIFICATE_FILE", "STEP_CA_INTERMEDIATE_KEY_FILE", "STEP_CA_PASSWORD_FILE"):
         builtin_environment.pop(name)
     builtin = _rendered("compose.yaml", "compose.builtin-ca.yaml", environment=builtin_environment)
-    assert "agent-ca-credential" not in {secret["source"] for secret in builtin["services"]["control-api"]["secrets"]}
+    assert "agent-ca-credential" not in {
+        secret["source"]
+        for secret in builtin["services"]["control-secret-init"]["secrets"]
+    }
 
     missing_step_secret = _environment()
     missing_step_secret.pop("STEP_CA_PASSWORD_FILE")

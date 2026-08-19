@@ -23,7 +23,7 @@ def stage_private_key(
     owner_gid: int = 0,
     mode: int = 0o444,
 ) -> Path:
-    """Copy a file-backed private key into a Docker-managed volume atomically."""
+    """Copy a file-backed runtime secret into a Docker-managed volume atomically."""
     source = Path(source)
     destination = Path(destination)
     try:
@@ -32,7 +32,7 @@ def stage_private_key(
             os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC,
         )
     except OSError as error:
-        raise RuntimeSecretError("private key source is unsafe") from error
+        raise RuntimeSecretError("runtime secret source is unsafe") from error
     try:
         before = os.fstat(descriptor)
         if (
@@ -40,7 +40,7 @@ def stage_private_key(
             or before.st_nlink != 1
             or not 0 < before.st_size <= _MAX_PRIVATE_KEY_BYTES
         ):
-            raise RuntimeSecretError("private key source is unsafe")
+            raise RuntimeSecretError("runtime secret source is unsafe")
         content = bytearray()
         while len(content) <= _MAX_PRIVATE_KEY_BYTES:
             chunk = os.read(
@@ -52,9 +52,9 @@ def stage_private_key(
             content.extend(chunk)
         after = os.fstat(descriptor)
         if len(content) != before.st_size or _identity(before) != _identity(after):
-            raise RuntimeSecretError("private key changed while read")
+            raise RuntimeSecretError("runtime secret changed while read")
     except OSError as error:
-        raise RuntimeSecretError("private key cannot be read") from error
+        raise RuntimeSecretError("runtime secret cannot be read") from error
     finally:
         os.close(descriptor)
 
@@ -62,7 +62,9 @@ def stage_private_key(
     parent.mkdir(mode=0o750, parents=True, exist_ok=True)
     if os.geteuid() == 0:
         os.chown(parent, 0, 10001)
-    os.chmod(parent, 0o750)
+    # Consumers use different UIDs. The directory is traversable, while each
+    # staged file remains owner-readable only.
+    os.chmod(parent, 0o755)
     temporary = parent / f".{destination.name}.{secrets.token_hex(12)}.new"
     try:
         descriptor = os.open(
@@ -86,7 +88,7 @@ def stage_private_key(
             temporary.unlink()
         except FileNotFoundError:
             pass
-        raise RuntimeSecretError("private key staging failed") from error
+        raise RuntimeSecretError("runtime secret staging failed") from error
 
 
 def _identity(value: os.stat_result) -> tuple[int, ...]:

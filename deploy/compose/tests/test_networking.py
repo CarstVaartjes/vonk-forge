@@ -181,6 +181,21 @@ def test_litellm_runs_the_bind_mounted_entrypoint_through_shell() -> None:
     assert litellm["entrypoint"] == ["/bin/sh", "/app/vonk-entrypoint"]
 
 
+def test_non_root_runtime_services_use_normalized_secret_volume() -> None:
+    services = _rendered()["services"]
+    for service in ("control-api", "control-worker", "litellm", "prometheus", "grafana"):
+        assert "normalized-private-keys" in {
+            item["source"] for item in services[service]["volumes"]
+        }
+        assert services[service].get("secrets", []) == []
+    assert services["litellm"]["environment"]["LITELLM_MASTER_KEY_FILE"] == (
+        "/run/vonk-normalized-secrets/litellm-master-key"
+    )
+    assert services["grafana"]["environment"]["GF_SECURITY_ADMIN_PASSWORD__FILE"] == (
+        "/run/vonk-normalized-secrets/grafana-admin-password"
+    )
+
+
 def test_worker_has_a_distinct_minimal_image_and_runtime_boundary() -> None:
     services = _rendered()["services"]
     api = services["control-api"]
@@ -189,11 +204,12 @@ def test_worker_has_a_distinct_minimal_image_and_runtime_boundary() -> None:
     assert api["image"] != worker["image"]
     assert api["image"].startswith("example/control-api:")
     assert worker["image"].startswith("example/control-worker:")
-    worker_secrets = {item["source"] for item in worker["secrets"]}
-    assert worker_secrets == {"database-url", "worker-api-token"}
-    api_secrets = {item["source"] for item in api["secrets"]}
-    assert "agent-update-authority-key" not in api_secrets
-    assert "admin-grant-private-key" not in api_secrets
+    assert worker.get("secrets", []) == []
+    assert api.get("secrets", []) == []
+    for service in ("control-api", "control-worker"):
+        assert "normalized-private-keys" in {
+            item["source"] for item in services[service]["volumes"]
+        }
     assert {item["source"]: item.get("read_only", False) for item in api["volumes"]}[
         "api-admin-grant-runtime"
     ] is True
@@ -203,6 +219,7 @@ def test_worker_has_a_distinct_minimal_image_and_runtime_boundary() -> None:
         "/state",
         "/run/vonk-signer",
         "/run/vonk-forge/control-identity",
+        "/run/vonk-normalized-secrets",
     }
     assert "VONK_REPOSITORY_PATH" not in worker["environment"]
     assert "VONK_GIT_SIGNING_KEY_FILE" not in worker["environment"]
@@ -329,6 +346,7 @@ def test_file_backed_private_keys_are_normalized_before_bootstrap() -> None:
     services = _rendered()["services"]
     init = services["control-secret-init"]
     api = services["control-api"]
+    worker = services["control-worker"]
     bootstrap = services["control-bootstrap"]
 
     assert init["command"] == ["python", "-m", "vonk_control.compose_secret_init"]
@@ -340,6 +358,24 @@ def test_file_backed_private_keys_are_normalized_before_bootstrap() -> None:
         {"source": "agent-update-authority-key", "target": "/run/secrets/agent-update-authority-key"},
         {"source": "admin-grant-public-key", "target": "/run/secrets/admin-grant-public-key"},
         {"source": "agent-tuf-bootstrap-root", "target": "/run/secrets/agent-tuf-bootstrap-root"},
+        {"source": "database-url", "target": "/run/secrets/database-url"},
+        {"source": "token-signing-key", "target": "/run/secrets/token-signing-key"},
+        {"source": "metrics-token", "target": "/run/secrets/metrics-token"},
+        {"source": "git-signing-key", "target": "/run/secrets/git-signing-key"},
+        {"source": "agent-client-ca", "target": "/run/secrets/agent-client-ca"},
+        {"source": "agent-intermediate-certificate", "target": "/run/secrets/agent-intermediate-certificate"},
+        {"source": "controller-ca", "target": "/run/secrets/controller-ca"},
+        {"source": "agent-proxy-auth", "target": "/run/secrets/agent-proxy-auth"},
+        {"source": "worker-api-token", "target": "/run/secrets/worker-api-token"},
+        {"source": "litellm-master-key", "target": "/run/secrets/litellm-master-key"},
+        {"source": "litellm-upstream-key", "target": "/run/secrets/litellm-upstream-key"},
+        {"source": "litellm-database-url", "target": "/run/secrets/litellm-database-url"},
+        {"source": "grafana-admin-password", "target": "/run/secrets/grafana-admin-password"},
+        {"source": "agent-ca-credential", "target": "/run/secrets/agent-ca-credential"},
+        {"source": "agent-ca-provisioner-public-jwk", "target": "/run/secrets/agent-ca-provisioner-public-jwk"},
+        {"source": "step-ca-root-certificate", "target": "/run/secrets/step-ca-root-certificate"},
+        {"source": "step-ca-intermediate-key", "target": "/run/secrets/step-ca-intermediate-key"},
+        {"source": "step-ca-password", "target": "/run/secrets/step-ca-password"},
     ]
     assert bootstrap["depends_on"]["control-secret-init"] == {
         "condition": "service_completed_successfully",
@@ -350,6 +386,21 @@ def test_file_backed_private_keys_are_normalized_before_bootstrap() -> None:
     )
     assert api["environment"]["VONK_HOST_RUNTIME_GRANT_PRIVATE_KEY_FILE"] == (
         "/run/vonk-normalized-secrets/host-runtime-grant-private-key"
+    )
+    for variable, name in (
+        ("VONK_DATABASE_URL_FILE", "database-url"),
+        ("VONK_TOKEN_SIGNING_KEY_FILE", "token-signing-key"),
+        ("VONK_METRICS_TOKEN_FILE", "metrics-token"),
+        ("VONK_GIT_SIGNING_KEY_FILE", "git-signing-key"),
+        ("VONK_CONTROLLER_CA_FILE", "controller-ca"),
+        ("VONK_WORKER_API_TOKEN_FILE", "worker-api-token"),
+    ):
+        assert api["environment"][variable] == f"/run/vonk-normalized-secrets/{name}"
+    assert worker["environment"]["VONK_DATABASE_URL_FILE"] == (
+        "/run/vonk-normalized-secrets/database-url"
+    )
+    assert worker["environment"]["VONK_WORKER_API_TOKEN_FILE"] == (
+        "/run/vonk-normalized-secrets/worker-api-token"
     )
 
 
@@ -410,7 +461,7 @@ def test_litellm_routes_use_a_dedicated_atomic_config_volume() -> None:
     assert litellm_volumes["/supervisor"]["source"] == "litellm-supervisor-state"
     assert "VONK_LITELLM_CONFIG_PATH" not in services["control-worker"]["environment"]
     assert "litellm-upstream-key" not in {
-        secret["source"] for secret in services["control-worker"]["secrets"]
+        secret["source"] for secret in services["control-worker"].get("secrets", [])
     }
     assert services["litellm"]["user"] == "10002:10001"
     assert services["litellm"]["cap_drop"] == ["ALL"]

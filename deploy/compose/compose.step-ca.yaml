@@ -5,22 +5,32 @@ x-bounded-logging: &bounded-logging
     max-file: "5"
 
 services:
+  control-secret-init:
+    secrets:
+      - agent-ca-credential
+      - agent-ca-provisioner-public-jwk
+      - step-ca-root-certificate
+      - step-ca-intermediate-key
+      - step-ca-password
+
   control-api:
     environment:
       VONK_AGENT_CA_PROVIDER: step-ca
       VONK_AGENT_RUNTIME: enabled
-      VONK_AGENT_CLIENT_CA_FILE: /run/secrets/agent-client-ca
-      VONK_AGENT_INTERMEDIATE_CERTIFICATE_FILE: /run/secrets/agent-intermediate-certificate
-      VONK_AGENT_CA_CREDENTIAL_FILE: /run/secrets/agent-ca-credential
-      VONK_AGENT_CA_PROVISIONER_PUBLIC_JWK_FILE: /run/secrets/agent-ca-provisioner-public-jwk
-      VONK_AGENT_CA_ROOT_FILE: /run/secrets/step-ca-root-certificate
+      VONK_AGENT_CLIENT_CA_FILE: /run/vonk-normalized-secrets/agent-client-ca
+      VONK_AGENT_INTERMEDIATE_CERTIFICATE_FILE: /run/vonk-normalized-secrets/agent-intermediate-certificate
+      VONK_AGENT_CA_CREDENTIAL_FILE: /run/vonk-normalized-secrets/agent-ca-credential
+      VONK_AGENT_CA_PROVISIONER_PUBLIC_JWK_FILE: /run/vonk-normalized-secrets/agent-ca-provisioner-public-jwk
+      VONK_AGENT_CA_ROOT_FILE: /run/vonk-normalized-secrets/step-ca-root-certificate
       VONK_AGENT_CA_URL: https://step-ca:9000
       VONK_AGENT_CA_PROVISIONER_NAME: ${AGENT_CA_PROVISIONER_NAME:-vonk-forge-agent}
       VONK_AGENT_CA_PROVISIONER_KID: ${AGENT_CA_PROVISIONER_KID:?set agent CA provisioner key ID}
       VONK_AGENT_CA_TIMEOUT_SECONDS: ${AGENT_CA_TIMEOUT_SECONDS:-3}
       VONK_AGENT_CA_MAX_RESPONSE_BYTES: ${AGENT_CA_MAX_RESPONSE_BYTES:-65536}
-      VONK_AGENT_PROXY_AUTH_FILE: /run/secrets/agent-proxy-auth
-    secrets: [agent-ca-credential, agent-ca-provisioner-public-jwk, step-ca-root-certificate]
+      VONK_AGENT_PROXY_AUTH_FILE: /run/vonk-normalized-secrets/agent-proxy-auth
+    secrets: []
+    volumes:
+      - normalized-private-keys:/run/vonk-normalized-secrets:ro
     networks: [ca]
     depends_on:
       step-ca: {condition: service_healthy}
@@ -30,23 +40,17 @@ services:
     restart: unless-stopped
     logging: *bounded-logging
     read_only: true
-    command: [step-ca, /home/step/config/ca.json, --password-file, /run/secrets/step-ca-password]
-    secrets:
-      - source: step-ca-root-certificate
-        target: root_ca.crt
-      - source: agent-intermediate-certificate
-        target: intermediate_ca.crt
-      - source: step-ca-intermediate-key
-        target: intermediate_ca_key
-      - source: step-ca-password
-        target: step-ca-password
+    command: [step-ca, /home/step/config/ca.json, --password-file, /run/vonk-normalized-secrets/step-ca/password]
+    user: "1000:1000"
+    secrets: []
     volumes:
       - ${STEP_CA_CONFIG_FILE:?set generated step-ca configuration file}:/home/step/config/ca.json:ro
       - step-ca-data:/home/step/db
+      - normalized-private-keys:/run/vonk-normalized-secrets:ro
     tmpfs: [/tmp]
     networks: [ca]
     healthcheck:
-      test: [CMD, step, ca, health, --ca-url, https://127.0.0.1:9000, --root, /run/secrets/root_ca.crt]
+      test: [CMD, step, ca, health, --ca-url, https://127.0.0.1:9000, --root, /run/vonk-normalized-secrets/step-ca/root-certificate]
       interval: 15s
       timeout: 5s
       retries: 10

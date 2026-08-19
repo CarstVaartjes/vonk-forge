@@ -1330,7 +1330,7 @@ def test_compose_initializes_route_volume_for_unprivileged_control_worker() -> N
     assert bootstrap["network_mode"] == "none"
     assert bootstrap["user"] == "0:0"
     assert bootstrap["cap_drop"] == ["ALL"]
-    assert set(bootstrap["cap_add"]) == {"CHOWN", "FOWNER"}
+    assert set(bootstrap["cap_add"]) == {"CHOWN", "FOWNER", "DAC_OVERRIDE"}
     assert bootstrap["healthcheck"]["test"] == ["CMD", "test", "-f", "/tmp/bootstrap-ready"]
     assert services["control-worker"]["depends_on"]["control-bootstrap"] == {
         "condition": "service_healthy",
@@ -1356,6 +1356,11 @@ def test_compose_initializes_route_volume_for_unprivileged_control_worker() -> N
 
 
 def test_development_image_compose_mounts_staged_acknowledging_supervisor() -> None:
+    environment = os.environ.copy()
+    for line in (ROOT / "deploy/compose/tests/test.env").read_text().splitlines():
+        if line and not line.startswith("#"):
+            name, value = line.split("=", 1)
+            environment[name] = value
     result = subprocess.run(
         [
             "docker",
@@ -1369,27 +1374,22 @@ def test_development_image_compose_mounts_staged_acknowledging_supervisor() -> N
         check=True,
         capture_output=True,
         text=True,
+        env=environment,
     )
     services = json.loads(result.stdout)["services"]
     litellm = services["litellm"]
     worker = services["control-worker"]
     volumes = {volume["target"]: volume for volume in litellm["volumes"]}
 
-    assert litellm["entrypoint"] == ["/run/vonk-runtime/litellm-entrypoint.sh"]
-    assert volumes["/run/vonk-runtime"] == {
-        "type": "volume",
-        "source": "dev-runtime-config",
-        "target": "/run/vonk-runtime",
-        "read_only": True,
-        "volume": {},
-    }
+    assert litellm["entrypoint"] == ["/bin/sh", "/app/vonk-entrypoint"]
     assert volumes["/routes"]["read_only"] is True
     assert volumes["/supervisor"].get("read_only", False) is False
+    assert volumes["/run/vonk-normalized-secrets"]["read_only"] is True
 
     worker_volumes = {volume["target"]: volume for volume in worker["volumes"]}
     assert worker_volumes["/routes"].get("read_only", False) is False
     assert worker_volumes["/supervisor"]["read_only"] is True
-    assert worker["depends_on"]["litellm"] == {
+    assert worker["depends_on"]["control-signer"] == {
         "condition": "service_healthy",
         "required": True,
     }
