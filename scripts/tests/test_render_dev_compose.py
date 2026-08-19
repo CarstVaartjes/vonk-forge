@@ -534,7 +534,9 @@ def test_rendered_compose_is_image_only_and_has_exact_runtime_boundaries(
         EXPECTED_SECRET_NAMES - {"postgres-password"}
     )
     assert services["migrate"].get("secrets", []) == []
-    assert services["control-api"].get("secrets", []) == []
+    assert services["control-api"].get("secrets", []) == [
+        {"source": "controller-ca", "target": "/run/secrets/controller-ca"}
+    ]
     assert volumes["control-api"]["/run/secrets"] == {
         "type": "volume",
         "source": "dev-api-secrets",

@@ -513,7 +513,9 @@ def test_image_template_enables_only_the_explicit_builtin_agent_authority() -> N
         "/run/secrets/management-cidrs"
     )
 
-    assert api.get("secrets", []) == []
+    assert api.get("secrets", []) == [
+        {"source": "controller-ca", "target": "/run/secrets/controller-ca"}
+    ]
 
     api_volumes = _volumes_by_target(api)
     worker_volumes = _volumes_by_target(worker)
