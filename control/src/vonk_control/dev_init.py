@@ -54,6 +54,7 @@ _PROJECTION_FILES = {
             "agent-ca-certificate",
             "agent-ca-key",
             "agent-proxy-auth",
+            "controller-ca",
             "management-cidrs",
             "token-signing-key",
         }
@@ -1015,7 +1016,7 @@ def stage_runtime_secrets(
     agent_ca_certificate = _read_source_secret(source, "agent-ca-certificate")
     agent_ca_key = _read_source_secret(source, "agent-ca-key")
     agent_proxy_auth = _read_source_secret(source, "agent-proxy-auth")
-    _read_source_secret(source, "controller-ca")
+    controller_ca = _read_source_secret(source, "controller-ca")
     controller_server_certificate = _read_source_secret(
         source, "controller-server-certificate"
     )
@@ -1165,6 +1166,7 @@ def stage_runtime_secrets(
                 ("agent-ca-certificate", agent_ca_certificate),
                 ("agent-ca-key", agent_ca_key),
                 ("agent-proxy-auth", agent_proxy_auth),
+                ("controller-ca", controller_ca),
                 ("management-cidrs", management_cidrs),
                 ("token-signing-key", token_signing_key),
             ):

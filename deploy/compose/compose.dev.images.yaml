@@ -328,7 +328,6 @@ services:
       - dev-supervisor-state:/supervisor:ro
       - dev-api-secrets:/run/secrets:ro
       - dev-image-cohort:/cohort:ro
-    secrets: [controller-ca]
     networks: [application, data, ingress]
     ports: ["127.0.0.1:${VONK_DEV_PORT:-8080}:8000"]
     depends_on:

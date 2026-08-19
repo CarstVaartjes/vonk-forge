@@ -890,6 +890,7 @@ def test_stage_runtime_secrets_projects_exact_disjoint_service_authority(
         "agent-ca-certificate",
         "agent-ca-key",
         "agent-proxy-auth",
+        "controller-ca",
         "database-url",
         "git-signing-key",
         "host-runtime-grant-private-key",
@@ -1082,6 +1083,7 @@ def test_stage_runtime_secrets_creates_disjoint_service_projections(
         "agent-ca-certificate",
         "agent-ca-key",
         "agent-proxy-auth",
+        "controller-ca",
         "database-url",
         "git-signing-key",
         "host-runtime-grant-private-key",
@@ -1100,6 +1102,9 @@ def test_stage_runtime_secrets_creates_disjoint_service_projections(
     )
     assert (api_root / "database-url").read_bytes() == (
         b"postgresql://vonk:secret@postgres/vonk\n"
+    )
+    assert (api_root / "controller-ca").read_bytes() == (
+        b"controller-ca-public-sentinel\n"
     )
     assert (worker_root / "database-url").read_bytes() == (
         b"postgresql://vonk:secret@postgres/vonk\n"
@@ -1337,6 +1342,7 @@ def test_stage_runtime_secrets_preserves_generated_credentials_and_refreshes_inp
         "agent-ca-certificate",
         "agent-ca-key",
         "agent-proxy-auth",
+        "controller-ca",
         "database-url",
         "git-signing-key",
         "host-runtime-grant-private-key",

@@ -152,7 +152,7 @@ def test_image_template_keeps_private_authority_with_its_exact_service() -> None
         "tailscale-gateway",
     }
     assert secret_consumers["agent-ca-key"] == {"dev-bootstrap"}
-    assert secret_consumers["controller-ca"] == {"control-api", "dev-bootstrap"}
+    assert secret_consumers["controller-ca"] == {"dev-bootstrap"}
     assert secret_consumers["controller-server-key"] == {"dev-bootstrap"}
     assert secret_consumers["litellm-master-key"] == {"dev-bootstrap"}
     assert secret_consumers["litellm-database-password"] == {"dev-bootstrap"}
