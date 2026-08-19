@@ -50,6 +50,15 @@ def _rebase_relative_paths(value: object, prefix: str) -> object:
     return value
 
 
+def _merge_values(base: object, incoming: object) -> object:
+    if isinstance(base, dict) and isinstance(incoming, dict):
+        merged = dict(base)
+        for key, value in incoming.items():
+            merged[key] = _merge_values(merged[key], value) if key in merged else value
+        return merged
+    return incoming
+
+
 def _compose_document(path: Path, seen: set[Path] | None = None) -> dict[str, object]:
     seen = set() if seen is None else seen
     path = path.resolve()
@@ -72,16 +81,9 @@ def _compose_document(path: Path, seen: set[Path] | None = None) -> dict[str, ob
         prefix = str(Path(included_path).parent)
         if prefix != ".":
             child = _rebase_relative_paths(child, prefix)  # type: ignore[assignment]
-        for key, value in child.items():
-            if isinstance(value, dict) and isinstance(merged.get(key), dict):
-                merged[key] = {**merged[key], **value}  # type: ignore[index]
-            else:
-                merged[key] = value
+        merged = _merge_values(merged, child)  # type: ignore[assignment]
     for key, value in document.items():
-        if isinstance(value, dict) and isinstance(merged.get(key), dict):
-            merged[key] = {**merged[key], **value}  # type: ignore[index]
-        else:
-            merged[key] = value
+        merged = _merge_values(merged, {key: value})  # type: ignore[assignment]
     return merged
 
 
@@ -98,6 +100,22 @@ def _replace_image_tokens(value: object, replacements: dict[str, str]) -> object
     return value
 
 
+def _count_template_token(path: Path, needle: str, seen: set[Path] | None = None) -> int:
+    seen = set() if seen is None else seen
+    path = path.resolve()
+    if path in seen:
+        return 0
+    seen.add(path)
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    includes = document.get("include", []) if isinstance(document, dict) else []
+    count = path.read_text(encoding="utf-8").count(needle)
+    for included in includes:
+        included_path = included if isinstance(included, str) else included.get("path")
+        if isinstance(included_path, str):
+            count += _count_template_token(path.parent / included_path, needle, seen)
+    return count
+
+
 def render(template: Path, output: Path, api_image: str, worker_image: str, *, channel: str) -> None:
     if channel not in {"dev", "pinned"}:
         raise ValueError("channel must be dev or pinned")
@@ -107,10 +125,9 @@ def render(template: Path, output: Path, api_image: str, worker_image: str, *, c
         raise ValueError("template must be an existing regular file")
     if not output.parent.is_dir():
         raise ValueError("output parent must exist")
-    source_text = template.read_text(encoding="utf-8")
-    if source_text.count(TOKENS["api"]) != 2 or source_text.count(TOKENS["worker"]) != 6:
-        raise ValueError("template control image inputs changed")
     document = _compose_document(template)
+    if _count_template_token(template, TOKENS["api"]) != 2 or _count_template_token(template, TOKENS["worker"]) != 6:
+        raise ValueError("template control image inputs changed")
     document = _replace_image_tokens(
         document,
         {TOKENS["api"]: api_image, TOKENS["worker"]: worker_image},

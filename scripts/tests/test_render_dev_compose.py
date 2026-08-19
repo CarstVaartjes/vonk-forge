@@ -8,6 +8,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE = ROOT / "deploy/compose/compose.yaml"
+DEVELOPMENT_TEMPLATE = ROOT / "deploy/compose/compose.dev.images.yaml"
 DIGEST = "a" * 64
 API_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-api:dev@sha256:{DIGEST}"
 WORKER_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-worker:dev@sha256:{DIGEST}"
@@ -43,3 +44,18 @@ def test_render_inlines_compose_includes(tmp_path: Path) -> None:
     assert not (tmp_path / "step-ca").exists()
     assert not (tmp_path / "bin").exists()
     assert not (tmp_path / "trust").exists()
+
+
+def test_render_accepts_development_template_and_inlines_builtin_ca(tmp_path: Path) -> None:
+    output = tmp_path / "docker-compose.yaml"
+
+    _renderer().render(
+        DEVELOPMENT_TEMPLATE, output, API_IMAGE, WORKER_IMAGE, channel="pinned"
+    )
+
+    document = yaml.safe_load(output.read_text(encoding="utf-8"))
+    assert document["services"]["control-api"]["environment"]["VONK_AGENT_CA_PROVIDER"] == "builtin"
+    assert document["services"]["control-api"]["environment"]["VONK_AGENT_INTERMEDIATE_KEY_FILE"] == (
+        "/run/vonk-normalized-secrets/agent-intermediate-key"
+    )
+    assert "agent-intermediate-key" in document["services"]["control-secret-init"]["secrets"]

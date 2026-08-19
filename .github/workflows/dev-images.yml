@@ -179,11 +179,13 @@ jobs:
           api_digest=$(skopeo manifest-digest "$api_manifest")
           worker_digest=$(skopeo manifest-digest "$worker_manifest")
           scripts/render-dev-compose \
+            --template deploy/compose/compose.dev.images.yaml \
             --output "$publication_root/docker-compose.pinned.yml" \
             --api-image "ghcr.io/carstvaartjes/vonk-forge-api:dev-sha-$GITHUB_SHA@$api_digest" \
             --worker-image "ghcr.io/carstvaartjes/vonk-forge-worker:dev-sha-$GITHUB_SHA@$worker_digest" \
             --commit "$GITHUB_SHA"
           scripts/render-dev-compose \
+            --template deploy/compose/compose.dev.images.yaml \
             --output "$publication_root/docker-compose.dev.yml" \
             --api-image "ghcr.io/carstvaartjes/vonk-forge-api:dev" \
             --worker-image "ghcr.io/carstvaartjes/vonk-forge-worker:dev" \
