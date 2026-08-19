@@ -15,6 +15,80 @@ class RuntimeSecretError(RuntimeError):
     """A private runtime secret cannot be projected safely."""
 
 
+def stage_private_key(
+    source: Path,
+    destination: Path,
+    *,
+    owner_uid: int = 0,
+    owner_gid: int = 0,
+    mode: int = 0o444,
+) -> Path:
+    """Copy a file-backed private key into a Docker-managed volume atomically."""
+    source = Path(source)
+    destination = Path(destination)
+    try:
+        descriptor = os.open(
+            source,
+            os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC,
+        )
+    except OSError as error:
+        raise RuntimeSecretError("private key source is unsafe") from error
+    try:
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_nlink != 1
+            or not 0 < before.st_size <= _MAX_PRIVATE_KEY_BYTES
+        ):
+            raise RuntimeSecretError("private key source is unsafe")
+        content = bytearray()
+        while len(content) <= _MAX_PRIVATE_KEY_BYTES:
+            chunk = os.read(
+                descriptor,
+                min(4096, _MAX_PRIVATE_KEY_BYTES + 1 - len(content)),
+            )
+            if not chunk:
+                break
+            content.extend(chunk)
+        after = os.fstat(descriptor)
+        if len(content) != before.st_size or _identity(before) != _identity(after):
+            raise RuntimeSecretError("private key changed while read")
+    except OSError as error:
+        raise RuntimeSecretError("private key cannot be read") from error
+    finally:
+        os.close(descriptor)
+
+    parent = destination.parent
+    parent.mkdir(mode=0o750, parents=True, exist_ok=True)
+    if os.geteuid() == 0:
+        os.chown(parent, 0, 10001)
+    os.chmod(parent, 0o750)
+    temporary = parent / f".{destination.name}.{secrets.token_hex(12)}.new"
+    try:
+        descriptor = os.open(
+            temporary,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+            mode,
+        )
+        try:
+            os.fchown(descriptor, owner_uid, owner_gid)
+            os.fchmod(descriptor, mode)
+            offset = 0
+            while offset < len(content):
+                offset += os.write(descriptor, content[offset:])
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        os.replace(temporary, destination)
+        return destination
+    except OSError as error:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+        raise RuntimeSecretError("private key staging failed") from error
+
+
 def _identity(value: os.stat_result) -> tuple[int, ...]:
     return (
         value.st_dev,
