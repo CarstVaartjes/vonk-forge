@@ -23,6 +23,11 @@ fi
 
 oauth_client_id_file=${VONK_DEV_TAILSCALE_OAUTH_CLIENT_ID_FILE:?set private Tailscale OAuth client ID file path}
 oauth_client_secret_file=${VONK_DEV_TAILSCALE_OAUTH_CLIENT_SECRET_FILE:?set private Tailscale OAuth client secret file path}
+secrets_path_hint=${VONK_DEV_SECRETS_DIR:-$repository_root/.dev/vonk-forge-secrets}
+server_certificate_before=
+if [[ -f "$secrets_path_hint/controller-server-certificate" ]]; then
+  server_certificate_before=$(sha256sum "$secrets_path_hint/controller-server-certificate" | awk '{print $1}')
+fi
 
 if [[ "$#" -eq 0 ]]; then
   set -- up -d --wait --pull never
@@ -36,7 +41,6 @@ elif [[ "$1" == up ]]; then
   [[ "$has_wait" == true ]] || set -- "$@" --wait
   [[ "$has_pull" == true ]] || set -- "$@" --pull never
 fi
-
 if [[ -n ${VONK_DEV_SECRETS_DIR:-} ]]; then
   secrets_dir=$(PYTHONPATH="$repository_root/control/src${PYTHONPATH:+:$PYTHONPATH}" \
     python3 "$secrets_helper" \
@@ -52,6 +56,11 @@ else
     --management-cidrs "$management_cidrs" \
     --tailscale-oauth-client-id-file "$oauth_client_id_file" \
     --tailscale-oauth-client-secret-file "$oauth_client_secret_file")
+fi
+server_certificate_after=$(sha256sum "$secrets_dir/controller-server-certificate" | awk '{print $1}')
+server_certificate_rotated=false
+if [[ -n "$server_certificate_before" && "$server_certificate_before" != "$server_certificate_after" ]]; then
+  server_certificate_rotated=true
 fi
 
 expected_commit=$(git -C "$repository_root" rev-parse --verify 'HEAD^{commit}')
@@ -119,9 +128,15 @@ if [[ -n ${VONK_DEV_SYNTHETIC_CONTROL_HOSTNAME_GENERATION:-} ]]; then
 EOF
 fi
 
-docker compose \
-  --project-name "$project_name" \
-  --project-directory "$workspace" \
-  --file "$workspace/docker-compose.yml" \
-  --file "$overlay" \
-  "$@"
+compose=(
+  docker compose
+  --project-name "$project_name"
+  --project-directory "$workspace"
+  --file "$workspace/docker-compose.yml"
+  --file "$overlay"
+)
+if [[ "$server_certificate_rotated" == true && "$1" == up ]]; then
+  printf '%s\n' 'Controller certificate rotated; refreshing Caddy TLS material.'
+  "${compose[@]}" up -d --wait --pull never --force-recreate dev-bootstrap caddy
+fi
+"${compose[@]}" "$@"

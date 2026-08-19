@@ -19,7 +19,7 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 from cryptography import x509
-from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PrivateKey,
     Ed25519PublicKey,
@@ -728,6 +728,80 @@ def test_generates_idempotent_local_runtime_secret_store_without_leaking_values(
             "tailscale-oauth-client-secret",
         },
     )
+
+
+def test_rotates_expired_controller_server_certificate_without_rotating_authorities(
+    tmp_path: Path,
+) -> None:
+    protected_parent = tmp_path / "protected"
+    protected_parent.mkdir(mode=0o700)
+    secrets_dir = protected_parent / "runtime"
+    oauth_files = _write_oauth_inputs(tmp_path / "oauth-inputs")
+    created = _run_generator(secrets_dir, oauth_files=oauth_files)
+    assert created.returncode == 0, created.stderr
+
+    old_server = _certificate(secrets_dir / "controller-server-certificate")
+    controller_ca = _certificate(secrets_dir / "controller-ca")
+    controller_key = _private_key(secrets_dir / "controller-ca-key")
+    server_key = _private_key(secrets_dir / "controller-server-key")
+    assert isinstance(controller_key, Ed25519PrivateKey)
+    assert isinstance(server_key, Ed25519PrivateKey)
+    expired = (
+        x509.CertificateBuilder()
+        .subject_name(old_server.subject)
+        .issuer_name(controller_ca.subject)
+        .public_key(server_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(dt.datetime(2020, 1, 1, tzinfo=dt.UTC))
+        .not_valid_after(dt.datetime(2020, 1, 2, tzinfo=dt.UTC))
+        .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+        .add_extension(
+            x509.KeyUsage(
+                digital_signature=True,
+                content_commitment=False,
+                key_encipherment=False,
+                data_encipherment=False,
+                key_agreement=False,
+                key_cert_sign=False,
+                crl_sign=False,
+                encipher_only=None,
+                decipher_only=None,
+            ),
+            critical=True,
+        )
+        .add_extension(
+            x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False
+        )
+        .add_extension(
+            old_server.extensions.get_extension_for_class(
+                x509.SubjectAlternativeName
+            ).value,
+            critical=False,
+        )
+        .sign(controller_key, algorithm=None)
+    )
+    (secrets_dir / "controller-server-certificate").write_bytes(
+        expired.public_bytes(serialization.Encoding.PEM)
+    )
+
+    before = {
+        name: (secrets_dir / name).read_bytes()
+        for name in LOCAL_SOURCE_SECRET_NAMES
+        if name != "controller-server-certificate"
+    }
+    rotated = _run_generator(secrets_dir, oauth_files=oauth_files)
+
+    assert rotated.returncode == 0, rotated.stderr
+    new_server = _certificate(secrets_dir / "controller-server-certificate")
+    assert new_server.serial_number != expired.serial_number
+    assert new_server.not_valid_after_utc > dt.datetime.now(dt.UTC)
+    assert _certificate(secrets_dir / "controller-ca").fingerprint(
+        hashes.SHA256()
+    ) == controller_ca.fingerprint(hashes.SHA256())
+    assert {
+        name: (secrets_dir / name).read_bytes()
+        for name in before
+    } == before
 
 
 @pytest.mark.parametrize("fault", ["mode", "symlink", "hardlink"])

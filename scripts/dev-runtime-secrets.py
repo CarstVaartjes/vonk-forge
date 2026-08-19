@@ -38,6 +38,11 @@ _MAX_OAUTH_VALUE_BYTES = 4 * 1024
 _PRIVATE_MODE = 0o600
 _UNSAFE_GENERATION_FILESYSTEMS = frozenset({"9p", "cifs", "drvfs", "smb3"})
 _HOST_LABEL = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?")
+_CONTROLLER_SERVER_CERTIFICATE_ROTATION_WINDOW = dt.timedelta(days=30)
+_SERVER_CERTIFICATE_ROTATION_PREFIX = ".controller-server-certificate-rotation-"
+_SERVER_CERTIFICATE_ROTATION_NAME = re.compile(
+    r"\.controller-server-certificate-rotation-[0-9a-f]{32}\Z"
+)
 
 DEPLOYMENT_SECRET_NAMES = frozenset(
     {
@@ -652,31 +657,27 @@ def _ca_certificate(common_name: str, key: Ed25519PrivateKey) -> x509.Certificat
     )
 
 
-def _secret_bundle(
+def _server_certificate(
     *,
-    management_cidrs: tuple[str, ...],
+    controller_ca: x509.Certificate,
+    controller_key: Ed25519PrivateKey,
+    server_key: Ed25519PrivateKey,
     enroll_hostname: str,
     agent_hostname: str,
     registry_hostname: str,
-    tailscale_oauth_client_id: bytes,
-    tailscale_oauth_client_secret: bytes,
-) -> dict[str, bytes]:
-    agent_key = Ed25519PrivateKey.generate()
-    controller_key = Ed25519PrivateKey.generate()
-    server_key = Ed25519PrivateKey.generate()
-    signing_key = Ed25519PrivateKey.generate()
-    host_runtime_key = Ed25519PrivateKey.generate()
-    agent_ca = _ca_certificate("Vonk Forge Development Agent CA", agent_key)
-    controller_ca = _ca_certificate(
-        "Vonk Forge Development Controller CA", controller_key
-    )
+) -> x509.Certificate:
     now = dt.datetime.now(dt.UTC)
-    server_subject = x509.Name(
-        [x509.NameAttribute(NameOID.COMMON_NAME, "Vonk Forge Development Controller")]
-    )
-    server_certificate = (
+    return (
         x509.CertificateBuilder()
-        .subject_name(server_subject)
+        .subject_name(
+            x509.Name(
+                [
+                    x509.NameAttribute(
+                        NameOID.COMMON_NAME, "Vonk Forge Development Controller"
+                    )
+                ]
+            )
+        )
         .issuer_name(controller_ca.subject)
         .public_key(server_key.public_key())
         .serial_number(x509.random_serial_number())
@@ -711,6 +712,42 @@ def _secret_bundle(
             critical=False,
         )
         .sign(controller_key, algorithm=None)
+    )
+
+
+def _server_certificate_needs_rotation(
+    certificate: x509.Certificate, *, now: dt.datetime | None = None
+) -> bool:
+    current = now or dt.datetime.now(dt.UTC)
+    _before, after = _certificate_window(certificate)
+    return after <= current + _CONTROLLER_SERVER_CERTIFICATE_ROTATION_WINDOW
+
+
+def _secret_bundle(
+    *,
+    management_cidrs: tuple[str, ...],
+    enroll_hostname: str,
+    agent_hostname: str,
+    registry_hostname: str,
+    tailscale_oauth_client_id: bytes,
+    tailscale_oauth_client_secret: bytes,
+) -> dict[str, bytes]:
+    agent_key = Ed25519PrivateKey.generate()
+    controller_key = Ed25519PrivateKey.generate()
+    server_key = Ed25519PrivateKey.generate()
+    signing_key = Ed25519PrivateKey.generate()
+    host_runtime_key = Ed25519PrivateKey.generate()
+    agent_ca = _ca_certificate("Vonk Forge Development Agent CA", agent_key)
+    controller_ca = _ca_certificate(
+        "Vonk Forge Development Controller CA", controller_key
+    )
+    server_certificate = _server_certificate(
+        controller_ca=controller_ca,
+        controller_key=controller_key,
+        server_key=server_key,
+        enroll_hostname=enroll_hostname,
+        agent_hostname=agent_hostname,
+        registry_hostname=registry_hostname,
     )
     password = secrets.token_hex(32)
     litellm_database_password = secrets.token_hex(32)
@@ -821,6 +858,7 @@ def _validate_bundle(
     enroll_hostname: str,
     agent_hostname: str,
     registry_hostname: str,
+    allow_expired_server_certificate: bool = False,
 ) -> None:
     if set(bundle) != RUNTIME_SECRET_NAMES:
         raise RuntimeSecretError("development secret bundle is incomplete")
@@ -973,7 +1011,10 @@ def _validate_bundle(
         != {enroll_hostname, agent_hostname, registry_hostname}
         or not agent_before <= now <= agent_after
         or not controller_before <= now <= controller_after
-        or not server_before <= now <= server_after
+        or (
+            not allow_expired_server_certificate
+            and not server_before <= now <= server_after
+        )
     ):
         raise RuntimeSecretError(
             "development secret certificate constraints are invalid"
@@ -1013,6 +1054,95 @@ def _validate_bundle(
             raise RuntimeSecretError(f"development token {name} is invalid") from error
         if bundle[name] != (value + "\n").encode("ascii") or len(decoded) < 32:
             raise RuntimeSecretError(f"development token {name} is invalid")
+
+
+def _recover_server_certificate_rotation(directory: int) -> None:
+    for name in os.listdir(directory):
+        if not _SERVER_CERTIFICATE_ROTATION_NAME.fullmatch(name):
+            continue
+        _read_file(directory, name)
+        try:
+            os.unlink(name, dir_fd=directory)
+        except OSError as error:
+            raise RuntimeSecretError(
+                "development server certificate rotation cannot be recovered"
+            ) from error
+    os.fsync(directory)
+
+
+def _rotate_server_certificate(
+    directory: int,
+    bundle: dict[str, bytes],
+    *,
+    enroll_hostname: str,
+    agent_hostname: str,
+    registry_hostname: str,
+) -> bytes:
+    current_name = "controller-server-certificate"
+    try:
+        current = os.stat(current_name, dir_fd=directory, follow_symlinks=False)
+    except OSError as error:
+        raise RuntimeSecretError(
+            "development server certificate cannot be rotated safely"
+        ) from error
+    if (
+        not stat.S_ISREG(current.st_mode)
+        or current.st_uid != os.geteuid()
+        or current.st_nlink != 1
+        or stat.S_IMODE(current.st_mode) != _PRIVATE_MODE
+    ):
+        raise RuntimeSecretError(
+            "development server certificate cannot be rotated safely"
+        )
+    controller_ca = x509.load_pem_x509_certificate(bundle["controller-ca"])
+    controller_key = serialization.load_pem_private_key(
+        bundle["controller-ca-key"], password=None
+    )
+    server_key = serialization.load_pem_private_key(
+        bundle["controller-server-key"], password=None
+    )
+    if not isinstance(controller_key, Ed25519PrivateKey) or not isinstance(
+        server_key, Ed25519PrivateKey
+    ):
+        raise RuntimeSecretError(
+            "development server certificate key material is invalid"
+        )
+    replacement = _server_certificate(
+        controller_ca=controller_ca,
+        controller_key=controller_key,
+        server_key=server_key,
+        enroll_hostname=enroll_hostname,
+        agent_hostname=agent_hostname,
+        registry_hostname=registry_hostname,
+    ).public_bytes(serialization.Encoding.PEM)
+    temporary_name = _SERVER_CERTIFICATE_ROTATION_PREFIX + secrets.token_hex(16)
+    temporary: _OwnedEntry | None = None
+    try:
+        temporary = _create_owned_file(directory, temporary_name, replacement)
+        current_after = os.stat(current_name, dir_fd=directory, follow_symlinks=False)
+        if (current.st_dev, current.st_ino) != (
+            current_after.st_dev,
+            current_after.st_ino,
+        ):
+            raise RuntimeSecretError(
+                "development server certificate changed during rotation"
+            )
+        os.replace(
+            temporary_name,
+            current_name,
+            src_dir_fd=directory,
+            dst_dir_fd=directory,
+        )
+        temporary.name = current_name
+        os.fsync(directory)
+        return replacement
+    except OSError as error:
+        raise RuntimeSecretError(
+            "development server certificate rotation failed"
+        ) from error
+    finally:
+        if temporary is not None:
+            _close_owned_entry(temporary)
 
 
 def _open_existing_directory(
@@ -2207,6 +2337,7 @@ def prepare_runtime_secrets(
             existing_descriptor, existing_metadata = existing
             if os.listdir(existing_descriptor):
                 _acquire_mutation_lock(existing_descriptor)
+            _recover_server_certificate_rotation(existing_descriptor)
             _remove_oauth_receipt_temporary(parent, oauth_receipt_name)
             oauth_recovery = _recover_rotations(
                 existing_descriptor, parent, oauth_receipt_name
@@ -2229,7 +2360,29 @@ def prepare_runtime_secrets(
                     enroll_hostname=enroll,
                     agent_hostname=agent,
                     registry_hostname=registry,
+                    allow_expired_server_certificate=True,
                 )
+                if _server_certificate_needs_rotation(
+                    x509.load_pem_x509_certificate(
+                        bundle["controller-server-certificate"]
+                    )
+                ):
+                    bundle["controller-server-certificate"] = (
+                        _rotate_server_certificate(
+                            existing_descriptor,
+                            bundle,
+                            enroll_hostname=enroll,
+                            agent_hostname=agent,
+                            registry_hostname=registry,
+                        )
+                    )
+                    _validate_bundle(
+                        bundle,
+                        management_cidrs=cidrs,
+                        enroll_hostname=enroll,
+                        agent_hostname=agent,
+                        registry_hostname=registry,
+                    )
                 if rotate_admin_password:
                     _rotate_admin_password(
                         existing_descriptor,
