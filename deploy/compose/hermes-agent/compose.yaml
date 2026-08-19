@@ -24,7 +24,7 @@ x-hermes-service: &hermes-service
     - /tmp:size=2g,mode=1777
     - /var/tmp:size=1g,mode=1777
   environment: &hermes-environment
-    API_SERVER_CORS_ORIGINS: ${HERMES_DASHBOARD_ORIGIN:?set the exact Hermes dashboard HTTPS origin}
+    API_SERVER_CORS_ORIGINS: ${HERMES_DASHBOARD_ORIGIN:-https://hermes-profile-required.invalid}
     API_SERVER_ENABLED: "true"
     API_SERVER_HOST: 0.0.0.0
     API_SERVER_MODEL_NAME: hermes-agent
@@ -38,13 +38,13 @@ x-hermes-service: &hermes-service
     - hermes-api-key
   volumes: &hermes-volumes
     - type: bind
-      source: ${HERMES_DATA_ROOT:?set Hermes data root}/data
+      source: ${HERMES_DATA_ROOT:-/tmp/vonk-forge-hermes-profile-required}/data
       target: /opt/data
     - type: bind
-      source: ${HERMES_DATA_ROOT:?set Hermes data root}/workspaces
+      source: ${HERMES_DATA_ROOT:-/tmp/vonk-forge-hermes-profile-required}/workspaces
       target: /workspace
     - type: bind
-      source: ${HERMES_DATA_ROOT:?set Hermes data root}/cache
+      source: ${HERMES_DATA_ROOT:-/tmp/vonk-forge-hermes-profile-required}/cache
       target: /opt/data/home/.cache
 
 services:
@@ -95,7 +95,7 @@ services:
 
 secrets:
   hermes-api-key:
-    file: ${HERMES_API_KEY_FILE:?set Hermes API key secret file}
+    file: ${HERMES_API_KEY_FILE:-/dev/null}
 
 networks:
   tailnet-hermes-edge:
