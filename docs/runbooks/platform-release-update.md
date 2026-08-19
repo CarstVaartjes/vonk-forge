@@ -293,8 +293,9 @@ the administrator-only approval until an equivalent CLI command is present.
 An offline node remains `offline-pending` and is not counted as successfully
 updated. When it reconnects, re-run skew and create a fresh plan. Never bypass
 the queue with SSH. If the agent cannot establish outbound mTLS, use
-[SSH recovery](ssh-recovery.md) only to restore the installed agent/supervisor
-and its trust configuration, then return to the standard signed update path.
+[SSH recovery](ssh-recovery.md) only to restore the installed agent, Rust
+supervisor, and trust configuration, then return to the standard signed update
+path.
 
 ## Final verification and evidence
 
@@ -312,7 +313,10 @@ scripts/accept-platform-update \
 ```
 
 This report is always `evidence_kind: simulated`. It proves contract and failure
-injection coverage, not a physical update. It deliberately leaves these release
+injection coverage for the control host, rollout planner, API, and administrator
+client, not a physical update. Rust agent A/B activation and rollback are covered
+by the locked Rust workspace and package-release tests; this simulator does not
+substitute a Python agent implementation. It deliberately leaves these release
 gates open:
 
 - `signed-platform-update-manifest-evidence`;

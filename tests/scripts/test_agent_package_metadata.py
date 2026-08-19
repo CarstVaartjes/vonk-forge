@@ -30,7 +30,6 @@ def metadata_workspace(tmp_path: Path) -> Path:
         "Cargo.toml",
         "pyproject.toml",
         "control/pyproject.toml",
-        "agent/pyproject.toml",
         "scripts/agent-package-metadata",
     ):
         source = ROOT / relative
@@ -99,8 +98,10 @@ def test_metadata_rejects_noncanonical_release_inputs(
 
 def test_metadata_rejects_mismatched_workspace_versions(tmp_path: Path) -> None:
     workspace = metadata_workspace(tmp_path)
-    agent_project = workspace / "agent/pyproject.toml"
-    agent_project.write_text(agent_project.read_text().replace('version = "0.1.0"', 'version = "0.1.1"'))
+    control_project = workspace / "control/pyproject.toml"
+    control_project.write_text(
+        control_project.read_text().replace('version = "0.1.0"', 'version = "0.1.1"')
+    )
 
     result = run_metadata(
         "production", "tag", "v0.1.0", SHA, "0", root=workspace

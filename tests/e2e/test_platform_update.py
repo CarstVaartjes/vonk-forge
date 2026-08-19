@@ -28,49 +28,6 @@ def _run(*arguments: object) -> subprocess.CompletedProcess[str]:
     )
 
 
-def test_fleet_simulation_executes_the_real_agent_update_contract(
-    tmp_path: Path,
-) -> None:
-    program = "\n".join(
-        (
-            "import json, os, runpy",
-            "from pathlib import Path",
-            'os.environ["VONK_PLATFORM_UPDATE_LOCKED_ENV"] = "1"',
-            f"module = runpy.run_path({str(SCRIPT)!r})",
-            f"print(json.dumps(module['_fleet_scenario'](Path({str(tmp_path)!r}))))",
-        )
-    )
-    result = subprocess.run(
-        [
-            "uv",
-            "run",
-            "--quiet",
-            "--project",
-            ROOT / "control",
-            "--with-editable",
-            ROOT,
-            "python",
-            "-c",
-            program,
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=30,
-    )
-
-    assert result.returncode == 0, result.stderr
-    report = json.loads(result.stdout)
-
-    assert report["agent_update"]["staged_target_slot"] == "B"
-    assert report["agent_update"]["rollback_target_slot"] == "A"
-    assert report["platform_target_name"] == (
-        "platform/releases/2.0.0/" + report["platform_target_sha256"] + ".json"
-    )
-    assert report["release_digest"] == "sha256:" + report["platform_target_sha256"]
-    assert report["tuf_targets_version"] == 7
-
-
 def test_admin_simulation_confirms_the_exact_versioned_target() -> None:
     target_name = "platform/releases/2.0.0/" + "d" * 64 + ".json"
     plan_digest = "sha256:" + "e" * 64
@@ -172,9 +129,7 @@ def test_acceptance_exercises_the_staged_update_contract_without_ssh() -> None:
     assert report["ssh_used_for_standard_path"] is False
     assert report["interfaces_exercised"] == [
         "ControlUpgrade",
-        "AgentUpdater",
         "PlatformRelease",
-        "SupervisorSlotState",
         "UpdateAuthorizationAuthority",
         "UpdateOrchestrator",
         "UpdatePlanner",
@@ -183,7 +138,6 @@ def test_acceptance_exercises_the_staged_update_contract_without_ssh() -> None:
         "vonkctl update command contract with simulated client",
     ]
     assert report["scenarios"] == {
-        "agent_ab_rollback": "passed",
         "canary_failure_pause": "passed",
         "compatible_rolling_update": "passed",
         "admin_confirmation_route_contract": "passed",
@@ -216,13 +170,7 @@ def test_acceptance_exercises_the_staged_update_contract_without_ssh() -> None:
         "administrator-approved-resume",
         "sixteen-nodes-accepted",
     ]
-    assert report["fleet"]["agent_update"] == {
-        "activation_request_count": 1,
-        "previous_slot": "A",
-        "rollback_request_count": 1,
-        "rollback_target_slot": "A",
-        "staged_target_slot": "B",
-    }
+    assert "agent_update" not in report["fleet"]
     assert report["fleet"]["final_model_probe"] == {
         "health": "healthy",
         "repository_revision": "f" * 40,

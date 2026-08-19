@@ -4,22 +4,19 @@
 from __future__ import annotations
 
 import argparse
-from configparser import ConfigParser
 import json
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+from configparser import ConfigParser
 from pathlib import Path
 
 UNITS = (
     "vonk-forge-agent.service",
     "vonk-forge-agent-supervisor.service",
-    "vonk-forge-agent-activation.service",
-    "vonk-forge-agent-activation.path",
-    "vonk-forge-agent-rollback.service",
-    "vonk-forge-agent-rollback.path",
+    "vonk-forge-docker-firewall.service",
     "vonk-forge-package-helper.service",
     "vonk-forge-package-helper.socket",
 )
@@ -49,16 +46,25 @@ def _install(root: Path, repository: Path) -> None:
         root / "usr/lib/systemd/system",
         symlinks=True,
     )
-    unit_root = root / "etc/systemd/system"
-    executable_root = root / "usr/libexec"
-    unit_root.mkdir(parents=True)
-    executable_root.mkdir(parents=True)
+    unit_root = root / "usr/lib/systemd/system"
+    unit_root.mkdir(parents=True, exist_ok=True)
+    docker_unit = unit_root / "docker.service"
+    if not docker_unit.exists():
+        docker_unit.write_text(
+            "[Unit]\nDescription=Disposable Docker verification fixture\n"
+            "[Service]\nType=oneshot\nExecStart=/usr/bin/true\n"
+        )
     for name in UNITS:
-        shutil.copy2(repository / "agent/systemd" / name, unit_root / name)
-    shutil.copy2(
-        repository / "agent/supervisor/vonk-agent-supervisor",
-        executable_root / "vonk-agent-supervisor",
-    )
+        shutil.copy2(repository / "packaging/systemd" / name, unit_root / name)
+    for path in (
+        "usr/bin/true",
+        "usr/lib/vonk-forge/vonk-agent-helper",
+        "usr/lib/vonk-forge/vonk-agent-supervisor",
+        "usr/lib/vonk-forge/vonk-forge-docker-firewall",
+    ):
+        target = root / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2("/bin/true", target)
 
 
 def _verify(root: Path) -> None:
@@ -67,7 +73,7 @@ def _verify(root: Path) -> None:
             "systemd-analyze",
             "verify",
             f"--root={root}",
-            *(f"/etc/systemd/system/{name}" for name in UNITS),
+            *(f"/usr/lib/systemd/system/{name}" for name in UNITS),
         ]
     )
     if verified.returncode != 0:
@@ -94,7 +100,7 @@ def _security(root: Path, name: str) -> dict[str, object]:
     ambient = by_field.get("AmbientCapabilities")
     ptrace = by_field.get("CapabilityBoundingSet_CAP_SYS_PTRACE")
     if not isinstance(ambient, dict) or not isinstance(ptrace, dict):
-        raise RuntimeError(f"capability analysis for {name} is unavailable")
+        raise TypeError(f"capability analysis for {name} is unavailable")
     rendered = _run(
         [
             "systemd-analyze",
@@ -120,9 +126,9 @@ def _security(root: Path, name: str) -> dict[str, object]:
 
 
 def _package_helper_socket(root: Path) -> dict[str, str]:
-    unit_root = root / "etc/systemd/system"
+    unit_root = root / "usr/lib/systemd/system"
     agent = ConfigParser(interpolation=None, strict=False)
-    helper = ConfigParser(interpolation=None, strict=True)
+    helper = ConfigParser(interpolation=None, strict=False)
     socket_unit = ConfigParser(interpolation=None, strict=True)
     if not agent.read(unit_root / "vonk-forge-agent.service"):
         raise RuntimeError("agent service is unavailable")
@@ -163,15 +169,11 @@ def verify(repository: Path) -> dict[str, object]:
         _verify(root)
         package_helper_socket = _package_helper_socket(root)
         units = {name: _security(root, name) for name in SECURITY_UNITS}
-        supervisor = "vonk-forge-agent-supervisor.service"
         if any(unit["ambient_capabilities"] for unit in units.values()):
             raise RuntimeError("agent services must not receive ambient capabilities")
         for name, unit in units.items():
-            expected_ptrace = name == supervisor
-            if unit["cap_sys_ptrace"] is not expected_ptrace:
-                raise RuntimeError(
-                    f"CAP_SYS_PTRACE boundary for {name} does not match policy"
-                )
+            if unit["cap_sys_ptrace"]:
+                raise RuntimeError(f"CAP_SYS_PTRACE boundary for {name} does not match policy")
     return {
         "package_helper_socket": package_helper_socket,
         "schema_version": 1,
@@ -188,7 +190,13 @@ def main() -> int:
     repository = Path(__file__).resolve().parents[1]
     try:
         report = verify(repository)
-    except (OSError, RuntimeError, subprocess.SubprocessError, json.JSONDecodeError) as error:
+    except (
+        OSError,
+        RuntimeError,
+        TypeError,
+        subprocess.SubprocessError,
+        json.JSONDecodeError,
+    ) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1
     if arguments.json:

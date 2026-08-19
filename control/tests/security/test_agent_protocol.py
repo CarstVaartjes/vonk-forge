@@ -161,30 +161,21 @@ def test_protocol_has_no_arbitrary_operation_member() -> None:
 
 def test_release_artifacts_install_the_exact_protocol_wheel() -> None:
     control_project = (ROOT / "control/pyproject.toml").read_text()
-    agent_project_path = ROOT / "agent/pyproject.toml"
-    agent_lock_path = ROOT / "agent/uv.lock"
     protocol_wheel_path = PROTOCOL_WHEEL
     dockerignore_path = ROOT / ".dockerignore"
     dockerfile = (ROOT / "control/Dockerfile").read_text()
 
-    assert agent_project_path.is_file()
-    assert agent_lock_path.is_file()
     assert protocol_wheel_path.is_file()
     assert dockerignore_path.is_file()
-    agent_project = agent_project_path.read_text()
-    agent_lock = tomllib.loads(agent_lock_path.read_text())
     control_lock = tomllib.loads((ROOT / "control/uv.lock").read_text())
     protocol_sources = [
         package["source"]
-        for lock in (agent_lock, control_lock)
-        for package in lock["package"]
+        for package in control_lock["package"]
         if package["name"] == "vonk-agent-protocol"
     ]
 
     assert '"vonk-agent-protocol==2.1.0"' in control_project
-    assert '"vonk-agent-protocol==2.1.0"' in agent_project
     assert protocol_sources == [
-        {"path": "../inventory/wheels/vonk_agent_protocol-2.1.0-py3-none-any.whl"},
         {"path": "../inventory/wheels/vonk_agent_protocol-2.1.0-py3-none-any.whl"},
     ]
     assert "COPY control/pyproject.toml ./" in dockerfile
@@ -207,10 +198,10 @@ def test_release_artifacts_install_the_exact_protocol_wheel() -> None:
     assert all(not line.startswith("!") for line in lines[last_include + 1:])
 
 
-def test_agent_environment_installs_the_verified_protocol_wheel() -> None:
+def test_control_environment_installs_the_verified_protocol_wheel() -> None:
     result = subprocess.run(
         [
-            "uv", "run", "--project", "agent", "python", "-c",
+            "uv", "run", "--project", "control", "python", "-c",
             "import importlib.metadata, json; d = importlib.metadata.distribution('vonk-agent-protocol'); print((d._path / 'direct_url.json').read_text())",
         ],
         cwd=ROOT,
@@ -219,8 +210,8 @@ def test_agent_environment_installs_the_verified_protocol_wheel() -> None:
         text=True,
     )
     direct_url = json.loads(result.stdout)
-    agent_lock = tomllib.loads((ROOT / "agent/uv.lock").read_text())
-    package = next(package for package in agent_lock["package"] if package["name"] == "vonk-agent-protocol")
+    control_lock = tomllib.loads((ROOT / "control/uv.lock").read_text())
+    package = next(package for package in control_lock["package"] if package["name"] == "vonk-agent-protocol")
 
     assert direct_url["url"].endswith("/inventory/wheels/vonk_agent_protocol-2.1.0-py3-none-any.whl")
     assert package["wheels"] == [{"filename": "vonk_agent_protocol-2.1.0-py3-none-any.whl", "hash": f"sha256:{PROTOCOL_WHEEL_HASH}"}]

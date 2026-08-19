@@ -22,6 +22,8 @@ def _copy(tmp_path: Path) -> Path:
         ".github/workflows/workload-artifacts.yml",
         ".github/release-allowed-signers",
         ".github/dependabot.yml",
+        "Cargo.toml",
+        "Cargo.lock",
         "pyproject.toml",
         "schemas/control-deployment-bundle.schema.json",
         "schemas/platform-update-manifest.schema.json",
@@ -35,7 +37,7 @@ def _copy(tmp_path: Path) -> Path:
         "src/cluster_profiles/platform_release.py",
         "src/cluster_profiles/schemas/control-deployment-bundle.schema.json",
         "src/cluster_profiles/schemas/platform-update-manifest.schema.json",
-        "agent/pyproject.toml", "agent/uv.lock", "agent_protocol/pyproject.toml",
+        "agent_protocol/pyproject.toml",
         ".dockerignore", "agent_protocol/uv.lock", "control/pyproject.toml", "control/uv.lock",
         "bin/vonk-control-offline",
         "control/src/vonk_control/offline.py",
@@ -83,6 +85,8 @@ def _copy(tmp_path: Path) -> Path:
         "deploy/compose/step-ca/ca.json",
         "deploy/compose/trust/litellm-cosign.pub",
         "scripts/build-control-deployment-bundle",
+        "scripts/build-agent-deb",
+        "scripts/build-agent-package-evidence",
         "scripts/build-host-updater-artifact",
         "scripts/build-platform-manifest",
         "scripts/collect-platform-artifact-evidence",
@@ -103,6 +107,8 @@ def _copy(tmp_path: Path) -> Path:
         "scripts/verify-platform-release",
         "scripts/verify-public-image-inputs",
         "scripts/verify-dev-image-secrets",
+        "scripts/verify-agent-deb",
+        "scripts/verify-agent-systemd",
         "scripts/verify-supply-chain",
         "scripts/accept-recipe",
         "scripts/run-development-slices",
@@ -131,6 +137,8 @@ def _copy(tmp_path: Path) -> Path:
         ROOT / "agent_protocol/src",
         target / "agent_protocol/src",
     )
+    shutil.copytree(ROOT / "rust", target / "rust")
+    shutil.copytree(ROOT / "packaging", target / "packaging")
     subprocess.run(
         [SCRIPT, "--root", target, "--generate", "--json"],
         check=True,
@@ -164,6 +172,9 @@ def test_verifier_accepts_locked_offline_evidence(tmp_path: Path) -> None:
     assert result.returncode == 0
     assert '"ok":true' in result.stdout
     assert "inventory/sbom/agent-protocol.spdx.json" in result.stdout
+    assert "inventory/sbom/agent-rust.spdx.json" in result.stdout
+    assert "inventory/sbom/agent-python.spdx.json" not in result.stdout
+    assert not (repository / "inventory/sbom/agent-python.spdx.json").exists()
 
 
 def test_verifier_accepts_write_manifest_alias(tmp_path: Path) -> None:
@@ -622,7 +633,7 @@ def test_verifier_rejects_a_root_dockerignore_change(tmp_path: Path) -> None:
 
 def test_verifier_rejects_a_protocol_lock_hash_that_does_not_match_the_wheel(tmp_path: Path) -> None:
     repository = _copy(tmp_path)
-    lock = repository / "agent/uv.lock"
+    lock = repository / "control/uv.lock"
     wheel = repository / "inventory/wheels/vonk_agent_protocol-2.1.0-py3-none-any.whl"
     wheel_hash = hashlib.sha256(wheel.read_bytes()).hexdigest()
     lock.write_text(lock.read_text().replace(wheel_hash, "0" * 64))

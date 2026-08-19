@@ -984,9 +984,6 @@ def test_fleet_library_only_docs_do_not_advertise_removed_operator_surfaces() ->
         r"\bprototype catalog\b": "prototype catalog",
         r"\bcatalog reads\b": "catalog reads",
         r"\bcatalog reference": "catalog reference",
-        r"agent/tests/packages/test_engine\.py": "deleted agent package engine test",
-        r"agent/tests/test_package_operations\.py": "deleted package operations test",
-        r"agent/tests/test_workload_preflight\.py": "deleted workload preflight test",
         r"agent_protocol/tests/test_package_operations\.py": (
             "deleted protocol package operations test"
         ),

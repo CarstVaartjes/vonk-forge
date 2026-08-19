@@ -62,6 +62,20 @@ def test_production_rust_capabilities_are_exact_and_python_agent_is_not_packaged
     assert "vonk_agent" not in package_builder
 
 
+def test_debian_package_is_the_only_agent_installer_authority() -> None:
+    package_builder = _source("scripts/build-agent-deb")
+    for binary in ("vonk-agent", "vonk-agent-helper", "vonk-agent-supervisor"):
+        assert binary in package_builder
+    for unit in (
+        "vonk-forge-agent.service",
+        "vonk-forge-agent-supervisor.service",
+        "vonk-forge-docker-firewall.service",
+        "vonk-forge-package-helper.service",
+        "vonk-forge-package-helper.socket",
+    ):
+        assert (ROOT / "packaging/systemd" / unit).is_file()
+
+
 def test_release_workflow_runs_every_agent_owner_before_publication() -> None:
     orchestrator = _source(".github/workflows/agent-release.yml")
     package_builder = _source(".github/actions/agent-package-build/action.yml")

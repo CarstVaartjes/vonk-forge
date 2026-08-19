@@ -12,7 +12,6 @@ VERSION_FILES = (
     (ROOT / "Cargo.toml", ("workspace", "package", "version")),
     (ROOT / "pyproject.toml", ("project", "version")),
     (ROOT / "control/pyproject.toml", ("project", "version")),
-    (ROOT / "agent/pyproject.toml", ("project", "version")),
 )
 SEMVER = r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
 SEMVER_RE = re.compile(rf"^{SEMVER}$")
@@ -27,9 +26,9 @@ def workspace_version() -> str:
             value: object = tomllib.loads(path.read_text())
             for key in keys:
                 if not isinstance(value, dict):
-                    raise ValueError
+                    raise TypeError
                 value = value[key]
-        except (KeyError, OSError, tomllib.TOMLDecodeError, ValueError) as error:
+        except (KeyError, OSError, TypeError, tomllib.TOMLDecodeError) as error:
             raise ValueError("workspace version is invalid") from error
         if not isinstance(value, str) or SEMVER_RE.fullmatch(value) is None:
             raise ValueError("workspace version is invalid")

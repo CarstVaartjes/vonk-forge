@@ -87,12 +87,6 @@ jobs:
         run: >-
           uv run --project control --frozen pytest -q
           control/tests/test_host_helper_authority.py
-      - name: Verify Python supervisor migration fixtures
-        run: >-
-          uv run --project agent --frozen pytest -q
-          agent/tests/test_slot_artifact.py
-          agent/tests/test_supervisor.py
-          -k 'rust_slot_manifest or rust_supervisor'
       - name: Record GPU node service exposure
         shell: bash
         run: |
@@ -256,22 +250,6 @@ jobs:
             --with pytest-xdist==3.8.0 pytest -q -n auto --dist loadfile \
             "${shard_tests[@]}"
 
-  agent-suite:
-    name: Complete Python agent suite
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install uv and Python
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
-        with:
-          version: "0.12.1"
-          python-version: "3.12"
-          enable-cache: true
-      - name: Run complete Python agent suite
-        run: uv run --project agent --frozen pytest agent/tests -q
-
   web-suite:
     name: Complete admin web suite
     runs-on: ubuntu-24.04
@@ -288,7 +266,7 @@ jobs:
 
   catalog-runtime:
     name: Catalog and service suites
-    needs: [repository-suite, control-suite, agent-suite, web-suite]
+    needs: [repository-suite, control-suite, web-suite]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -297,12 +275,10 @@ jobs:
         env:
           REPOSITORY_RESULT: ${{ needs.repository-suite.result }}
           CONTROL_RESULT: ${{ needs.control-suite.result }}
-          AGENT_RESULT: ${{ needs.agent-suite.result }}
           WEB_RESULT: ${{ needs.web-suite.result }}
         run: |
           test "$REPOSITORY_RESULT" = success
           test "$CONTROL_RESULT" = success
-          test "$AGENT_RESULT" = success
           test "$WEB_RESULT" = success
 
   release-metadata:

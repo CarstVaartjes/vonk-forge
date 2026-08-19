@@ -48,21 +48,12 @@ if os.environ.get("VONK_PLATFORM_UPDATE_LOCKED_ENV") != "1":
 sys.path[:0] = [
     str(ROOT / "src"),
     str(ROOT / "control/src"),
-    str(ROOT / "agent/src"),
 ]
 
 from cryptography.hazmat.primitives.asymmetric import ed25519
-from vonk_agent.deadlines import MonotonicDeadline
-from vonk_agent.update import (
-    AgentRollbackCommand,
-    AgentUpdateCommand,
-    AgentUpdater,
-    PendingActivation,
-    PlatformAuthorizationEvidence,
-    SupervisorActivationRequest,
-    SupervisorRollbackRequest,
-    SupervisorSlotState,
-)
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
@@ -100,9 +91,6 @@ from vonk_control.upgrade import (
     UpgradeConflict,
     UpgradePhase,
 )
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import Session, sessionmaker
 
 from cluster_profiles.cli import main as vonkctl_main
 from cluster_profiles.platform_release import PlatformRelease
@@ -1137,37 +1125,6 @@ def _fleet_scenario(workspace: Path) -> dict[str, object]:
     )
     if len(plan.batches) != 2 or plan.batches[0] != (plan.canary_node,):
         raise RuntimeError("rollout plan did not isolate a canary")
-    initial = SupervisorSlotState(
-        active_slot="A",
-        previous_slot=None,
-        status="stable",
-        slot_sha256={"A": SHA_C, "B": None},
-    )
-    pending = SupervisorSlotState(
-        active_slot="A",
-        previous_slot=None,
-        status="pending",
-        slot_sha256={"A": SHA_C, "B": agent_payload_sha256},
-    )
-    rolled_back = SupervisorSlotState(
-        active_slot="A",
-        previous_slot="B",
-        status="stable",
-        slot_sha256={"A": SHA_C, "B": agent_payload_sha256},
-    )
-    resumed = SupervisorSlotState(
-        active_slot="B",
-        previous_slot="A",
-        status="stable",
-        slot_sha256={"A": SHA_C, "B": agent_payload_sha256},
-    )
-    if (
-        initial.active_slot != pending.active_slot
-        or rolled_back.active_slot != "A"
-        or resumed.active_slot != "B"
-    ):
-        raise RuntimeError("agent A/B rollback trace is invalid")
-
     class _ReleaseSource:
         def refresh(self, target_name: str) -> tuple[bytes, int]:
             expected = (
@@ -1206,102 +1163,6 @@ def _fleet_scenario(workspace: Path) -> dict[str, object]:
     )
     if signed["signature"]["key_id"] != authority.key_id:
         raise RuntimeError("signed update authorization identity is invalid")
-
-    class _Trust:
-        def authorize(
-            self,
-            artifact: object,
-            release: object,
-            platform_target_name: str,
-            deadline: MonotonicDeadline,
-        ) -> PlatformAuthorizationEvidence:
-            del artifact, release
-            deadline.check()
-            if platform_target_name != target_name:
-                raise RuntimeError("agent trust target changed")
-            return PlatformAuthorizationEvidence(
-                prepared.target_sha256, prepared.targets_version
-            )
-
-    class _Transport:
-        def fetch(
-            self,
-            artifact: object,
-            destination: Path,
-            deadline: MonotonicDeadline,
-        ) -> None:
-            del artifact
-            deadline.check()
-            destination.write_bytes(agent_content)
-
-    class _Supervisor:
-        def __init__(self) -> None:
-            self.state = initial
-            self.activations: list[SupervisorActivationRequest] = []
-            self.rollbacks: list[SupervisorRollbackRequest] = []
-
-        def inspect(self) -> SupervisorSlotState:
-            return self.state
-
-        def request_activation(self, request: SupervisorActivationRequest) -> None:
-            self.activations.append(request)
-
-        def request_rollback(
-            self, request: SupervisorRollbackRequest
-        ) -> PendingActivation:
-            self.rollbacks.append(request)
-            return PendingActivation(
-                previous_slot="B",
-                target_slot="A",
-                artifact_sha256=SHA_C,
-                platform_version="1.0.0",
-                build_digest="sha256:" + SHA_C,
-                status="pending-rollback",
-            )
-
-    supervisor = _Supervisor()
-    updater = AgentUpdater(
-        architecture="linux-arm64",
-        protocol_version=1,
-        staging_root=workspace / "agent-staging",
-        trust=_Trust(),
-        transport=_Transport(),
-        supervisor=supervisor,
-        available_bytes=lambda: 1024 * 1024,
-    )
-    command = AgentUpdateCommand.parse(signed)
-    update_deadline = MonotonicDeadline.bind(datetime.now(UTC) + timedelta(seconds=30))
-    activation = updater.apply(
-        updater.plan(
-            command.artifact,
-            command.release,
-            command.authorization,
-            command.signature,
-            update_deadline,
-        ),
-        update_deadline,
-    )
-    rollback_signed = authority.authorize_rollback(
-        operation_id="33333333-3333-4333-8333-333333333333",
-        fence="44444444-4444-4444-8444-444444444444",
-        expires_at=expiry,
-        current_slot="B",
-        current_sha256=agent_payload_sha256,
-        current_generation=2,
-        node_id=plan.canary_node,
-        attempt=1,
-        claim_deadline=expiry,
-        now=now,
-    )
-    rollback_command = AgentRollbackCommand.parse(rollback_signed)
-    rollback = updater.rollback(
-        rollback_command,
-        update_deadline,
-        rollback_command.authorization.operation_id,
-        rollback_command.authorization.fence,
-    )
-    if activation.target_slot != "B" or rollback["target_slot"] != "A":
-        raise RuntimeError("agent A/B update and rollback failed")
     updated_observations = (
         *(
             AgentObservation(
@@ -1333,20 +1194,8 @@ def _fleet_scenario(workspace: Path) -> dict[str, object]:
         simulated_model_probe["health"] == "healthy"
         and simulated_model_probe["route_status"] == 200
     )
-    slots = {
-        node_id: ["A", "B", "A", "B"]
-        for batch in orchestration["batches"]
-        for node_id in batch
-    }
     return {
         **orchestration,
-        "agent_update": {
-            "activation_request_count": len(supervisor.activations),
-            "previous_slot": activation.previous_slot,
-            "rollback_request_count": len(supervisor.rollbacks),
-            "rollback_target_slot": rollback["target_slot"],
-            "staged_target_slot": activation.target_slot,
-        },
         "final_model_probe": simulated_model_probe,
         "final_model_verified": final_model_verified,
         "final_online_current": final_online_current,
@@ -1358,7 +1207,6 @@ def _fleet_scenario(workspace: Path) -> dict[str, object]:
         "signed_authorization_receipt_sha256": "sha256:"
         + hashlib.sha256(_canonical(signed["receipt"])).hexdigest(),
         "signed_plan_digest": plan.plan_digest,
-        "slot_transition": slots,
         "tuf_targets_version": prepared.targets_version,
     }
 
@@ -1585,10 +1433,6 @@ def simulate() -> dict[str, object]:
         str(fleet["signed_plan_digest"]), str(fleet["platform_target_name"])
     )
     scenario_evidence = {
-        "agent_ab_rollback": (
-            fleet["agent_update"]["staged_target_slot"] == "B"
-            and fleet["agent_update"]["rollback_target_slot"] == "A"
-        ),
         "canary_failure_pause": "rollout-paused" in fleet["canary_failure_trace"],
         "compatible_rolling_update": (
             len(fleet["batches"]) == 16
@@ -1648,9 +1492,7 @@ def simulate() -> dict[str, object]:
         "host": host,
         "interfaces_exercised": [
             "ControlUpgrade",
-            "AgentUpdater",
             "PlatformRelease",
-            "SupervisorSlotState",
             "UpdateAuthorizationAuthority",
             "UpdateOrchestrator",
             "UpdatePlanner",

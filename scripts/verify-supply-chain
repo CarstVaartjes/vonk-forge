@@ -19,6 +19,7 @@ from pathlib import Path
 
 IMAGE = re.compile(r"^[^\s@]+(?::[^\s@]+)?@sha256:[0-9a-f]{64}$")
 PROTOCOL_WHEEL = "inventory/wheels/vonk_agent_protocol-2.1.0-py3-none-any.whl"
+RETIRED_SBOMS = ("inventory/sbom/agent-python.spdx.json",)
 UV_LOCK_PACKAGE = re.compile(r"(?m)^\[\[package\]\]\n")
 UV_LOCK_SCALAR = re.compile(r'(?m)^(name|version) = "([^"\\\r\n]+)"$')
 
@@ -107,6 +108,23 @@ def packages_python(lock: bytes) -> list[tuple[str, str]]:
     return sorted({(package["name"], package["version"]) for package in uv_lock_packages(lock)})
 
 
+def packages_cargo(lock: bytes) -> list[tuple[str, str]]:
+    document = tomllib.loads(lock.decode("utf-8"))
+    packages = document.get("package")
+    if not isinstance(packages, list) or not packages:
+        raise ValueError("Cargo lock contains no package records")
+    result: set[tuple[str, str]] = set()
+    for package in packages:
+        if not isinstance(package, dict):
+            raise TypeError("Cargo lock package record is invalid")
+        name = package.get("name")
+        version = package.get("version")
+        if not isinstance(name, str) or not isinstance(version, str):
+            raise TypeError("Cargo lock package record is invalid")
+        result.add((name, version))
+    return sorted(result)
+
+
 def packages_web(lock: bytes) -> list[tuple[str, str]]:
     raw = json.loads(lock)
     packages = set()
@@ -122,39 +140,42 @@ def workload_package_inputs(root: Path) -> tuple[str, ...]:
     """Return generic package implementation files bound by release evidence.
 
     The verifier is also used by small isolated fixture repositories in the
-    test suite, so absent package trees are treated as an older baseline.  A
-    complete Vonk Forge checkout always has all three boundaries and therefore
-    gets every package implementation file hashed into the supply-chain
-    manifest.
+    test suite, so absent optional control package modules are treated as an
+    older baseline. A complete checkout binds the surviving control and shared
+    protocol implementations here; Rust package sources are bound separately.
     """
 
     paths: list[str] = []
-    roots = (
-        root / "agent/src/vonk_agent/packages",
-        root / "control/src/vonk_control",
-    )
+    roots = (root / "control/src/vonk_control",)
     for directory in roots:
         if not directory.is_dir():
             continue
         for path in sorted(directory.glob("package_*.py")):
             paths.append(path.relative_to(root).as_posix())
-        if directory.name == "packages":
-            for path in sorted(directory.glob("*.py")):
-                paths.append(path.relative_to(root).as_posix())
-    for relative in (
-        "agent/src/vonk_agent/workload_runtime.py",
-        "agent/src/vonk_agent/package_operations.py",
-        "agent/src/vonk_agent/package_trust.py",
-        "agent/src/vonk_agent/package_helper.py",
-        "agent/src/vonk_agent/package_helper_protocol.py",
-        "agent/src/vonk_agent/package_helper_client.py",
-    ):
-        path = root / relative
-        if path.is_file():
-            paths.append(relative)
     protocol = root / "agent_protocol/src/vonk_agent_protocol/workload_packages.py"
     if protocol.is_file():
         paths.append(protocol.relative_to(root).as_posix())
+    return tuple(dict.fromkeys(paths))
+
+
+def rust_package_inputs(root: Path) -> tuple[str, ...]:
+    paths = [
+        "Cargo.toml",
+        "Cargo.lock",
+        "scripts/build-agent-deb",
+        "scripts/build-agent-package-evidence",
+        "scripts/verify-agent-deb",
+        "scripts/verify-agent-systemd",
+    ]
+    for relative in ("rust", "packaging"):
+        directory = root / relative
+        if not directory.is_dir():
+            raise ValueError(f"Rust package source is missing: {relative}")
+        paths.extend(
+            path.relative_to(root).as_posix()
+            for path in sorted(directory.rglob("*"))
+            if path.is_file()
+        )
     return tuple(dict.fromkeys(paths))
 
 
@@ -312,23 +333,21 @@ def spdx(
 
 
 def expected(root: Path) -> tuple[dict[str, bytes], bytes, dict[str, object]]:
-    python_lock = (root / "control/uv.lock").read_bytes()
-    agent_lock = (root / "agent/uv.lock").read_bytes()
+    control_lock = (root / "control/uv.lock").read_bytes()
+    cargo_lock = (root / "Cargo.lock").read_bytes()
     protocol_lock = (root / "agent_protocol/uv.lock").read_bytes()
     web_lock = (root / "control/web/package-lock.json").read_bytes()
     protocol_project = tomllib.loads((root / "agent_protocol/pyproject.toml").read_text())
     version = protocol_project["project"]["version"]
-    if not isinstance(version, str) or any(
-        protocol_version(lock) != version for lock in (python_lock, agent_lock)
-    ):
-        raise ValueError("control and agent must resolve the exact protocol version")
+    if not isinstance(version, str) or protocol_version(control_lock) != version:
+        raise ValueError("control must resolve the exact protocol version")
     wheel = protocol_wheel(root)
     wheel_sha256 = digest(wheel)
-    if any(protocol_wheel_hash(lock) != wheel_sha256 for lock in (python_lock, agent_lock)):
-        raise ValueError("control and agent lock hashes must match the verified protocol wheel")
+    if protocol_wheel_hash(control_lock) != wheel_sha256:
+        raise ValueError("control lock hash must match the verified protocol wheel")
     sboms = {
-        "inventory/sbom/control-python.spdx.json": spdx("control-python", python_lock, packages_python(python_lock), protocol_wheel_sha256=wheel_sha256),
-        "inventory/sbom/agent-python.spdx.json": spdx("agent-python", agent_lock, packages_python(agent_lock), protocol_wheel_sha256=wheel_sha256),
+        "inventory/sbom/control-python.spdx.json": spdx("control-python", control_lock, packages_python(control_lock), protocol_wheel_sha256=wheel_sha256),
+        "inventory/sbom/agent-rust.spdx.json": spdx("agent-rust", cargo_lock, packages_cargo(cargo_lock)),
         "inventory/sbom/agent-protocol.spdx.json": spdx("agent-protocol", protocol_lock, packages_python(protocol_lock), protocol_wheel_sha256=wheel_sha256),
         "inventory/sbom/control-web.spdx.json": spdx("control-web", web_lock, packages_web(web_lock)),
     }
@@ -351,7 +370,7 @@ def expected(root: Path) -> tuple[dict[str, bytes], bytes, dict[str, object]]:
         "src/cluster_profiles/platform_release.py",
         "src/cluster_profiles/schemas/control-deployment-bundle.schema.json",
         "src/cluster_profiles/schemas/platform-update-manifest.schema.json",
-        "agent/pyproject.toml", "agent/uv.lock", "agent_protocol/pyproject.toml",
+        "agent_protocol/pyproject.toml",
         "agent_protocol/uv.lock", "control/pyproject.toml", "control/uv.lock",
         "bin/vonk-control-offline",
         "control/src/vonk_control/offline.py",
@@ -414,6 +433,7 @@ def expected(root: Path) -> tuple[dict[str, bytes], bytes, dict[str, object]]:
         "src/cluster_profiles/update_trust.py",
     )
     input_paths += workload_package_inputs(root)
+    input_paths += rust_package_inputs(root)
     input_paths += recipe_catalog_inputs(root)
     deployment_bundle = control_deployment_bundle(root)
     manifest = {
@@ -578,6 +598,8 @@ def verify(root: Path, generate: bool) -> tuple[list[str], dict[str, object]]:
         return [*errors, f"could not generate expected supply-chain evidence: {type(error).__name__}: {error}"], {}
     manifest_path = root / "inventory/sbom/manifest.json"
     if generate:
+        for path in RETIRED_SBOMS:
+            (root / path).unlink(missing_ok=True)
         for path, content in sboms.items():
             target = root / path
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -587,6 +609,9 @@ def verify(root: Path, generate: bool) -> tuple[list[str], dict[str, object]]:
         wheel_path.write_bytes(wheel)
         manifest_path.write_bytes(canonical(manifest))
     else:
+        for path in RETIRED_SBOMS:
+            if (root / path).exists():
+                errors.append(f"retired SBOM is still present: {path}")
         for path, content in sboms.items():
             target = root / path
             if not target.is_file() or target.read_bytes() != content:
