@@ -4,7 +4,48 @@ import os
 from pathlib import Path
 
 import pytest
-from vonk_control.runtime_init import RuntimeSecretError, install_admin_grant_key
+from vonk_control.runtime_init import (
+    RuntimeSecretError,
+    install_admin_grant_key,
+    stage_private_key,
+)
+
+
+def test_admin_grant_key_can_be_staged_without_host_owner_assumptions(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source.pem"
+    source.write_bytes(b"private-admin-grant-key\n")
+    source.chmod(0o660)
+    destination = tmp_path / "normalized" / "admin-grant-private-key.pem"
+
+    stage_private_key(
+        source,
+        destination,
+        owner_uid=os.geteuid(),
+        owner_gid=os.getegid(),
+    )
+
+    assert destination.read_bytes() == b"private-admin-grant-key\n"
+    assert destination.stat().st_mode & 0o777 == 0o444
+
+
+def test_staged_api_private_key_is_owned_by_the_api_and_private(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source.pem"
+    source.write_bytes(b"private-api-key\n")
+    destination = tmp_path / "normalized" / "api-key"
+
+    stage_private_key(
+        source,
+        destination,
+        owner_uid=os.geteuid(),
+        owner_gid=os.getegid(),
+        mode=0o400,
+    )
+
+    assert destination.stat().st_mode & 0o777 == 0o400
 
 
 def test_admin_grant_key_is_copied_to_a_private_api_runtime_file(

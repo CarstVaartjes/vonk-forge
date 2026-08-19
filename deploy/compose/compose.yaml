@@ -46,9 +46,9 @@ x-api-environment: &api-environment
   VONK_WORKLOAD_SIGNER_SOCKET: /run/vonk-workload-signer/signer.sock
   VONK_WORKER_API_TOKEN_FILE: /run/secrets/worker-api-token
   VONK_ADMIN_GRANT_PRIVATE_KEY_FILE: /run/vonk-api-secrets/admin-grant-private-key.pem
-  VONK_PACKAGE_HELPER_GRANT_PRIVATE_KEY_FILE: /run/secrets/package-helper-grant-private-key
-  VONK_PACKAGE_HELPER_RECEIPT_PRIVATE_KEY_FILE: /run/secrets/package-helper-receipt-private-key
-  VONK_HOST_RUNTIME_GRANT_PRIVATE_KEY_FILE: /run/secrets/host-runtime-grant-private-key
+  VONK_PACKAGE_HELPER_GRANT_PRIVATE_KEY_FILE: /run/vonk-normalized-secrets/package-helper-grant-private-key
+  VONK_PACKAGE_HELPER_RECEIPT_PRIVATE_KEY_FILE: /run/vonk-normalized-secrets/package-helper-receipt-private-key
+  VONK_HOST_RUNTIME_GRANT_PRIVATE_KEY_FILE: /run/vonk-normalized-secrets/host-runtime-grant-private-key
   VONK_CONTROL_IDENTITY_ROOT: /run/vonk-forge/control-identity
   VONK_CONTROL_PROCESS_IMAGE: ${CONTROL_API_IMAGE:?set a digest-pinned control-api image}
 
@@ -65,6 +65,21 @@ x-worker-environment: &worker-environment
   VONK_CONTROL_PROCESS_IMAGE: ${CONTROL_WORKER_IMAGE:?set a digest-pinned control-worker image}
 
 services:
+  control-secret-init:
+    image: ${CONTROL_WORKER_IMAGE:?set a digest-pinned control-worker image}
+    restart: "no"
+    logging: *bounded-logging
+    user: "0:0"
+    read_only: true
+    network_mode: none
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER]
+    security_opt: [no-new-privileges:true]
+    command: [python, -m, vonk_control.compose_secret_init]
+    secrets: [admin-grant-private-key, package-helper-grant-private-key, package-helper-receipt-private-key, host-runtime-grant-private-key]
+    volumes:
+      - normalized-private-keys:/normalized
+
   control-bootstrap:
     image: ${CONTROL_WORKER_IMAGE:?set a digest-pinned control-worker image}
     restart: unless-stopped
@@ -73,10 +88,14 @@ services:
     read_only: true
     network_mode: none
     cap_drop: [ALL]
-    cap_add: [CHOWN, FOWNER]
+    # The fresh Docker volume is root-owned and not writable by other users.
+    # DAC_OVERRIDE lets this root bootstrap process initialize its directories
+    # before assigning ownership to the runtime identities.
+    cap_add: [CHOWN, FOWNER, DAC_OVERRIDE]
     security_opt: [no-new-privileges:true]
     command: [python, -m, vonk_control.compose_bootstrap]
-    secrets: [admin-grant-private-key]
+    depends_on:
+      control-secret-init: {condition: service_completed_successfully}
     volumes:
       - route-publications:/routes
       - litellm-supervisor-state:/supervisor
@@ -86,6 +105,7 @@ services:
       - workload-signer-socket:/workload-signer-socket
       - workload-tuf-publication:/workload-publication
       - api-admin-grant-runtime:/api-runtime
+      - normalized-private-keys:/normalized:ro
     tmpfs: [/tmp]
     healthcheck:
       test: [CMD, test, -f, /tmp/bootstrap-ready]
@@ -101,7 +121,9 @@ services:
       POSTGRES_USER: control
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres-password
     secrets: [postgres-password]
-    volumes: [postgres-data:/var/lib/postgresql/data]
+    # PostgreSQL 18 stores the cluster in a major-version-specific subdirectory.
+    # Mount the parent so future pg_upgrade operations can work across versions.
+    volumes: [postgres-data:/var/lib/postgresql]
     networks: [data, litellm-data]
     healthcheck:
       test: [CMD-SHELL, "pg_isready -U control -d control"]
@@ -120,7 +142,7 @@ services:
     security_opt: [no-new-privileges:true]
     environment:
       <<: *api-environment
-    secrets: [database-url, token-signing-key, metrics-token, git-signing-key, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, worker-api-token, package-helper-grant-private-key, package-helper-receipt-private-key, host-runtime-grant-private-key]
+    secrets: [database-url, token-signing-key, metrics-token, git-signing-key, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, worker-api-token]
     volumes:
       - ${REPOSITORY_PATH:?set repository path}:/repository
       - control-state:/state
@@ -129,6 +151,7 @@ services:
       - workload-signer-socket:/run/vonk-workload-signer:ro
       - route-publications:/routes
       - api-admin-grant-runtime:/run/vonk-api-secrets:ro
+      - normalized-private-keys:/run/vonk-normalized-secrets:ro
       - type: bind
         source: ${CONTROL_IDENTITY_PATH:?set control identity directory path}
         target: /run/vonk-forge/control-identity
@@ -463,3 +486,4 @@ volumes:
   workload-tuf-publication: {}
   workload-signer-socket: {}
   api-admin-grant-runtime: {}
+  normalized-private-keys: {}

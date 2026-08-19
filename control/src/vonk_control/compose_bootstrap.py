@@ -38,7 +38,7 @@ def prepare() -> None:
         _directory(str(workload / name), 10003, 10001, 0o750)
 
     install_admin_grant_key(
-        Path("/run/secrets/admin-grant-private-key"),
+        Path("/normalized/admin-grant-private-key"),
         Path("/api-runtime"),
     )
     Path("/tmp/bootstrap-ready").touch()

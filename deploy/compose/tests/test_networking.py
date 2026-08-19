@@ -49,6 +49,7 @@ def _rendered() -> dict:
         "TAILSCALE_IMAGE": "tailscale/tailscale:v1.98.8@sha256:d54b2e6a9c09f0e5ec52e82b9ad4af3d446b54a7c08075e92f11c39dd410105f",
         "AGENT_CLIENT_CA_FILE": "/dev/null",
         "AGENT_INTERMEDIATE_CERTIFICATE_FILE": "/dev/null",
+        "CONTROLLER_CA_FILE": "/dev/null",
         "AGENT_PROXY_AUTH_FILE": "/dev/null",
         "AGENT_CA_CREDENTIAL_FILE": "/dev/null",
         "AGENT_CA_PROVISIONER_PUBLIC_JWK_FILE": "/dev/null",
@@ -314,8 +315,34 @@ def test_selected_api_and_worker_receive_one_dynamic_exact_generation_identity()
 
 def test_bootstrap_prepares_signer_directories() -> None:
     bootstrap = _rendered()["services"]["control-bootstrap"]
+    assert "DAC_OVERRIDE" in bootstrap["cap_add"]
     assert bootstrap["command"] == ["python", "-m", "vonk_control.compose_bootstrap"]
     assert bootstrap["healthcheck"]["test"] == ["CMD", "test", "-f", "/tmp/bootstrap-ready"]
+
+
+def test_file_backed_private_keys_are_normalized_before_bootstrap() -> None:
+    services = _rendered()["services"]
+    init = services["control-secret-init"]
+    api = services["control-api"]
+    bootstrap = services["control-bootstrap"]
+
+    assert init["command"] == ["python", "-m", "vonk_control.compose_secret_init"]
+    assert init["secrets"] == [
+        {"source": "admin-grant-private-key", "target": "/run/secrets/admin-grant-private-key"},
+        {"source": "package-helper-grant-private-key", "target": "/run/secrets/package-helper-grant-private-key"},
+        {"source": "package-helper-receipt-private-key", "target": "/run/secrets/package-helper-receipt-private-key"},
+        {"source": "host-runtime-grant-private-key", "target": "/run/secrets/host-runtime-grant-private-key"},
+    ]
+    assert bootstrap["depends_on"]["control-secret-init"] == {
+        "condition": "service_completed_successfully",
+        "required": True,
+    }
+    assert api["environment"]["VONK_PACKAGE_HELPER_GRANT_PRIVATE_KEY_FILE"] == (
+        "/run/vonk-normalized-secrets/package-helper-grant-private-key"
+    )
+    assert api["environment"]["VONK_HOST_RUNTIME_GRANT_PRIVATE_KEY_FILE"] == (
+        "/run/vonk-normalized-secrets/host-runtime-grant-private-key"
+    )
 
 
 def test_admin_grant_signing_key_is_available_only_to_bootstrap() -> None:
@@ -327,27 +354,20 @@ def test_admin_grant_signing_key_is_available_only_to_bootstrap() -> None:
     assert "admin-grant-private-key" not in secret_sources["control-api"]
     assert "admin-grant-private-key" not in secret_sources["control-worker"]
     assert "admin-grant-private-key" not in secret_sources["control-signer"]
-    assert "admin-grant-private-key" in {secret["source"] for secret in services["control-bootstrap"]["secrets"]}
+    assert "admin-grant-private-key" in {
+        secret["source"] for secret in services["control-secret-init"]["secrets"]
+    }
 
 
 
 
-def test_tailnet_backends_have_readiness_checks() -> None:
+def test_caddy_has_readiness_checks() -> None:
     services = _rendered()["services"]
 
     assert services["caddy"]["healthcheck"]["test"] == [
         "CMD-SHELL",
         "wget -q -O /dev/null http://127.0.0.1:8080/healthz",
     ]
-    assert set(services["hermes-agent"]["networks"]) == {
-        "hermes-egress",
-        "hermes-inference",
-        "tailnet-hermes-edge",
-    }
-    assert "8642" in json.dumps(services["hermes-agent"]["healthcheck"]["test"])
-    assert "9119" in json.dumps(services["hermes-agent"]["healthcheck"]["test"])
-    assert services["hermes-agent"]["environment"]["HERMES_UID"] == "1100"
-    assert services["hermes-agent"]["environment"]["HERMES_GID"] == "1100"
 
 
 def test_litellm_routes_use_a_dedicated_atomic_config_volume() -> None:
@@ -387,6 +407,14 @@ def test_litellm_routes_use_a_dedicated_atomic_config_volume() -> None:
     assert services["litellm"]["user"] == "10002:10001"
     assert services["litellm"]["cap_drop"] == ["ALL"]
     assert services["litellm"]["security_opt"] == ["no-new-privileges:true"]
+
+
+def test_postgres_mounts_the_parent_directory_for_postgres_18() -> None:
+    postgres_volumes = _rendered()["services"]["postgres"]["volumes"]
+
+    assert {
+        volume["source"]: volume["target"] for volume in postgres_volumes
+    }["postgres-data"] == "/var/lib/postgresql"
 
 
 def test_caddy_disables_admin_and_sets_edge_guards() -> None:

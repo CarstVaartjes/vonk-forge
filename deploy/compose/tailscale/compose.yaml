@@ -74,10 +74,6 @@ services:
       caddy:
         condition: service_healthy
         restart: true
-      hermes-agent:
-        condition: service_healthy
-        restart: true
-        required: false
 
 secrets:
   tailscale-oauth-client-id:
