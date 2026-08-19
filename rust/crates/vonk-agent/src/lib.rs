@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod base_images;
+pub mod bootstrap;
 pub mod build_source;
 pub mod client;
 pub mod config;

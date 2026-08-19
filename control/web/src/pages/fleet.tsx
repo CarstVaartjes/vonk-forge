@@ -32,7 +32,7 @@ function shellQuote(value: string): string {
 
 function bootstrapCommand(grant: EnrollmentGrantResponse): string {
   return [
-    "vonk-agent bootstrap \\",
+    "sudo /var/lib/vonk-forge/supervisor/current/vonk-agent bootstrap \\",
     "  --token " + shellQuote(grant.token) + " \\",
     "  --controller-endpoint " + shellQuote(grant.controller_endpoint) + " \\",
     "  --enrollment-endpoint " + shellQuote(grant.enrollment_endpoint) + " \\",

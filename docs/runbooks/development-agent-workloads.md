@@ -353,26 +353,23 @@ scp '<LOCAL_SECRETS_DIR>/host-runtime-grant-public-key' \
 
 On each node, install the CA and helper public key as documented in
 [Install the Vonk Forge agent](../operations/install-vonk-agent.md).
-Registration is the authority. Fleet **Add Spark** is the next implementation
-step: it records the node-bound bootstrap grant and the node-specific runtime
-inputs, including the two explicit `:8443` origins, the DER `ca_sha256`, that
-node's unique `node_id`, and any required `fabric_address` plus
-`fabric_bandwidth_mbps = 200000`. That next implementation step is not an
-operator command currently available. Manual `agent.toml` editing is
-unsupported.
+Registration is the authority. Fleet **Add Spark** records the node-bound
+bootstrap grant and the two explicit `:8443` origins plus DER CA fingerprint.
+Manual `agent.toml` editing is unsupported; the shipped Rust bootstrap command
+generates the node's unique `spk_…` identity and materializes the packaged
+placeholder at the canonical paths.
 
 Pair one node at a time in this strict order:
 
-1. Create the node-bound registration intent in the administrator interface.
-2. Review the Fleet-issued runtime inputs and pending enrollment evidence.
-3. Approve the pending enrollment after comparing the node, CSR, host-key,
-   hardware, agent, and boot evidence.
-4. Leave the node at that reviewed registration boundary until the Fleet
-   bootstrap emitter exists; do not script a substitute or hand-author
-   `agent.toml`.
-5. After the emitter lands, resume this step with the Fleet-issued bootstrap
-   action, then enable the package-helper socket and supervisor and confirm
-   the controller reports the certificate-bound `spk_` identity.
+1. Create the node-bound registration intent through Fleet **Add Spark**.
+2. Run the displayed
+   `/var/lib/vonk-forge/supervisor/current/vonk-agent bootstrap` command exactly
+   as issued on that node.
+3. Review and approve the pending enrollment after comparing the node, CSR,
+   host-key, hardware, agent, and boot evidence.
+4. Run the same command once more, then enable the package-helper socket and
+   supervisor and confirm the controller reports the certificate-bound `spk_`
+   identity.
 
 Hostnames and IP addresses are observations; the certificate-bound `spk_`
 value is identity.

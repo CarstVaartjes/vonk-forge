@@ -36,7 +36,7 @@ tokio = { version = "1.47.1", features = ["fs", "io-util", "macros", "rt-multi-t
 tokio-util = { version = "0.7.16", features = ["io"] }
 toml = "1.1.4"
 url = { version = "2.5.4", features = ["serde"] }
-uuid = { version = "1.17.0", features = ["serde"] }
+uuid = { version = "1.17.0", features = ["serde", "v4"] }
 wait-timeout = "0.2.1"
 x509-parser = "0.18.1"
 

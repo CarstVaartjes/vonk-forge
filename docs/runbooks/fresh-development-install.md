@@ -258,11 +258,13 @@ On every Ubuntu 24.04 ARM64 node:
    `sudo apt update && sudo apt install vonk-forge-agent`.
    Require `Linger=yes`, the `vonk-agent` user bus, and rootless Podman with the
    systemd cgroup manager exactly as shown in that guide before pairing.
-3. Registration is the authority. In Fleet, **Add Spark** is the next
-   implementation step: it records the node-bound bootstrap grant, copies only
-   the public CA and `host-runtime-grant-public-key`, and defines the runtime
-   inputs for that Spark. Manual `agent.toml` editing is unsupported, and the
-   bootstrap action is not an operator command currently available.
+3. Registration is the authority. In Fleet, **Add Spark** records the
+   node-bound bootstrap grant and defines the runtime inputs for that Spark.
+   Copy only the public CA and `host-runtime-grant-public-key`; manual
+   `agent.toml` editing is unsupported. Run the displayed
+   `/var/lib/vonk-forge/supervisor/current/vonk-agent bootstrap` command exactly
+   as issued, approve the pending evidence, then run the same command again to
+   collect the issued identity.
 4. Create the root-owned `docker-firewall.conf`, including every accepted
    bridge-published and host-network endpoint port, then enable the signed
    `vonk-forge-docker-firewall.service` before the package-helper socket. It
@@ -286,13 +288,15 @@ source-first two-Spark tensor-parallel workload.
 For each node, complete this order without reusing its one-use grant:
 
 1. Create the node-bound registration intent in Fleet through **Add Spark**.
-2. Review the runtime inputs and approval evidence in Fleet; registration is
-   the authority and the bootstrap action remains the next implementation step,
-   not an operator command currently available.
-3. After the emitter lands, return here to materialize the local runtime file
-   and certificate collection through that Fleet-issued action.
-4. Until then, keep the node at the reviewed registration boundary and do not
-   hand-author `agent.toml` or substitute an SSH/bootstrap script.
+2. Run the exact Fleet-issued
+   `/var/lib/vonk-forge/supervisor/current/vonk-agent bootstrap` command. It
+   uses `/etc/vonk-forge-agent/agent.toml`, `/var/lib/vonk-forge-agent`, and
+   `/etc/vonk-forge-agent/controller-ca.pem`; do not add path flags or
+   hand-author the TOML.
+3. Review the pending approval evidence in Fleet and approve only the matching
+   node.
+4. Run the same command once more to collect the issued identity, then start
+   the supervisor.
 
 The controller must show the same certificate-bound node ID, Rust protocol 3,
 and fresh inventory. Repeat for each additional node.

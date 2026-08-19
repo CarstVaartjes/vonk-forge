@@ -39,6 +39,7 @@ ROUTE_LEASE_PLAN = (
     ROOT / "docs/superpowers/plans/2026-08-16-route-serving-lease-authority.md"
 )
 EXECUTION_HARNESSES = ROOT / "docs/operators/execution-harnesses.md"
+FLEET_ONBOARDING_HANDOVER = ROOT / "docs/handover-fleet-onboarding.md"
 MODEL_CATALOG = ROOT / "docs/operators/model-catalog.md"
 RECIPE_LIBRARY = ROOT / "docs/operators/recipe-library.md"
 
@@ -219,7 +220,7 @@ def test_mia_runbook_distinguishes_image_receipts_from_model_loading() -> None:
         assert required in text
 
 
-def test_active_agent_install_stops_at_registration_boundary_without_operator_authored_toml() -> (
+def test_active_agent_install_uses_fleet_bootstrap_without_operator_authored_toml() -> (
     None
 ):
     text = _normalized_text(INSTALL_AGENT)
@@ -233,11 +234,12 @@ def test_active_agent_install_stops_at_registration_boundary_without_operator_au
     for required in (
         "registration is the authority",
         "Add Spark",
-        "next implementation step",
-        "not an operator command currently available",
+        "/var/lib/vonk-forge/supervisor/current/vonk-agent bootstrap",
+        "same command once more",
     ):
         assert required.lower() in text.lower()
-    assert "generated bootstrap command" not in text.lower()
+    assert "next implementation step" not in text.lower()
+    assert "not an operator command currently available" not in text.lower()
 
 
 def test_agent_ca_fingerprint_is_derived_from_der_and_used_without_command_output_noise() -> (
@@ -254,7 +256,7 @@ def test_agent_ca_fingerprint_is_derived_from_der_and_used_without_command_outpu
         fingerprint_block,
     )
     assert "<64-lowercase-hex> -" in text
-    assert "Copy only the first field into `ca_sha256`" in text
+    assert "Compare only the first field with the Fleet command's `--ca-fingerprint`" in text
     assert "DER SHA-256" in text
 
 
@@ -334,11 +336,35 @@ def test_fresh_spark_install_does_not_claim_nvidia_platform_ownership() -> None:
 def test_onboarding_preserves_the_one_use_grant_pair_approve_pair_sequence() -> None:
     steps = _ordered_steps(_section(NODE_ONBOARDING, "Install and pair the agent"))
 
-    assert len(steps) == 1
+    assert len(steps) == 4
     assert "add spark" in steps[0].lower()
-    assert "next implementation step" in steps[0].lower()
-    assert "not an operator command currently available" in steps[0].lower()
+    assert "/var/lib/vonk-forge/supervisor/current/vonk-agent bootstrap" in steps[1]
+    assert "approve" in steps[2].lower()
+    assert "same command" in steps[3].lower()
     assert "`vonk-agent pair`" not in _section(NODE_ONBOARDING, "Install and pair the agent")
+
+
+def test_current_fleet_onboarding_docs_use_one_shipped_rust_bootstrap_contract() -> None:
+    command = "/var/lib/vonk-forge/supervisor/current/vonk-agent bootstrap"
+    contract_docs = (
+        FLEET_ONBOARDING_HANDOVER,
+        INSTALL_AGENT,
+        EXECUTION_HARNESSES,
+        NODE_ONBOARDING,
+        DEV_WORKLOADS,
+        FRESH_DEVELOPMENT_INSTALL,
+    )
+    combined = "\n".join(path.read_text() for path in contract_docs)
+
+    for path in contract_docs:
+        assert command in path.read_text(), path
+    assert "/etc/vonk-forge-agent/agent.toml" in combined
+    assert "/var/lib/vonk-forge-agent" in combined
+    assert "/etc/vonk-forge-agent/controller-ca.pem" in combined
+    assert "/etc/vonk-forge-agent/config.json" not in combined
+    assert "vonk-agent pair" not in combined
+    assert "next implementation step" not in combined
+    assert "not an operator command currently available" not in combined
 
 
 def test_generic_path_covers_secret_safe_backup_identity_recovery_and_package_removal() -> (
@@ -502,7 +528,7 @@ def test_complete_development_workload_runbook_has_every_operator_phase() -> Non
     assert "scripts/dev-admin-token" in text
     assert "docs/operations/agent-package-release.md#install-the-dev-channel" in text
     assert "Add Spark" in text
-    assert "next implementation step" in text
+    assert "/var/lib/vonk-forge/supervisor/current/vonk-agent bootstrap" in text
     assert "vonk-agent pair" not in text
     assert "scripts/qualify-recipe" in text
     for phase in ("model-single", "model-multinode"):

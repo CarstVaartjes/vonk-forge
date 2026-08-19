@@ -205,21 +205,24 @@ rm -f "$PWD/.state/recipe-acceptance/admin-token"
 ```
 
 After the reset, sign in as the newly recreated `admin`. For each Spark, create
-a different one-use grant in that fresh browser session, place it in the
-node-local mode-`0600` file shown below, run the command, approve the displayed
-pending enrollment in the browser, then run the same command once more:
+a different one-use grant in that fresh browser session, run the exact command
+displayed by Fleet, approve the displayed pending enrollment in the browser,
+then run the same command once more:
 
 ```bash
-sudo -u vonk-agent -- \
-  /var/lib/vonk-forge/supervisor/current/vonk-agent pair \
-  --enrollment https://<ENROLLMENT_HOSTNAME>:8443/ \
-  --ca-sha256 <64_LOWERCASE_HEX_FROM_SHA256SUM> \
-  --token-stdin < /run/secrets/vonk-enrollment-token
+sudo /var/lib/vonk-forge/supervisor/current/vonk-agent bootstrap \
+  --token '<ONE_USE_TOKEN>' \
+  --controller-endpoint 'https://<CONTROLLER_HOSTNAME>:8443/' \
+  --enrollment-endpoint 'https://<ENROLLMENT_HOSTNAME>:8443/' \
+  --ca-fingerprint '<64_LOWERCASE_HEX_FROM_SHA256SUM>'
 ```
 
-Start the supervisor only after the second pairing succeeds and verify both
-fresh `spk_…` identities and inventories in Fleet. Then create fresh token files
-as described in
+The command uses `/etc/vonk-forge-agent/agent.toml`,
+`/var/lib/vonk-forge-agent`, and
+`/etc/vonk-forge-agent/controller-ca.pem`; do not add local path flags or edit
+the TOML. Start the supervisor only after the second bootstrap succeeds and
+verify both fresh `spk_…` identities and inventories in Fleet. Then create
+fresh token files as described in
 [Development agent workload acceptance](../runbooks/development-agent-workloads.md)
 and run the physical ladders with new evidence paths:
 

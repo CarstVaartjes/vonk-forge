@@ -111,12 +111,13 @@ sudo install -o root -g root -m 0644 host-runtime-grant-public-key \
 ```
 
 The DER SHA-256 fingerprint command prints one line in the form
-`<64-lowercase-hex>  -`. Copy only the first field into `ca_sha256`; do not
-paste the certificate, token, or any secret into notes or logs.
+`<64-lowercase-hex>  -`. Compare only the first field with the Fleet command's
+`--ca-fingerprint`; do not paste the certificate, token, or any secret into
+notes or logs.
 
-Registration is the authority. The supported flow ends at Fleet-backed
-registration intent and reviewed runtime inputs, not at an operator-authored
-local configuration checklist. Manual `agent.toml` editing is unsupported.
+Registration is the authority. The supported flow uses the Fleet-issued
+bootstrap command and reviewed runtime inputs, not an operator-authored local
+configuration checklist. Manual `agent.toml` editing is unsupported.
 
 `enrollment_url` is used only for first-contact registration against
 `https://<ENROLLMENT_HOSTNAME>:8443/`. `controller_url` is used only after the
@@ -125,25 +126,28 @@ certificate is issued for the authenticated service at
 Keep `data_dir` at `/var/lib/vonk-forge-agent` unless a reviewed packaging
 change says otherwise.
 
-Fleet **Add Spark** is the next implementation step. It will remain the source
-of the node-bound registration intent, the one-use bootstrap token, and the
-exact runtime inputs supplied to bootstrap: `enrollment_url`,
-`controller_url`, and `ca_sha256`, along with the assigned `node_id` and—when
-multi-node admission is in scope—the node's direct-fabric address plus
-`fabric_bandwidth_mbps = 200000`. The installed agent supplies the canonical
-local paths: `/etc/vonk-forge-agent/config.json`,
-`/var/lib/vonk-forge-agent`, and
-`/etc/vonk-forge-agent/controller-ca.pem`; explicit absolute path overrides
-remain available for recovery and testing. That bootstrap action is not an
-operator command currently available.
+Fleet **Add Spark** is the source of the node-bound registration intent, the
+one-use bootstrap token, and the exact runtime inputs supplied to bootstrap:
+the enrollment and controller HTTPS origins plus the controller CA
+fingerprint. Run the generated command exactly as displayed on that Spark:
 
-Until the emitter lands, this section is the implementation contract only. The
-packaged placeholder `agent.toml` is a materialization target for registration
-output, not an operator-authored document. The next implementation step is for
-Fleet Add Spark to write the runtime file, store the one-use token without
-exposing it in shell history, submit enrollment evidence, wait for approval,
-repeat collection when needed, remove the consumed token, and leave the
-authenticated runtime ready for validation.
+```bash
+sudo /var/lib/vonk-forge/supervisor/current/vonk-agent bootstrap \
+  --token '<ONE_USE_TOKEN>' \
+  --controller-endpoint 'https://<CONTROLLER_HOSTNAME>:8443/' \
+  --enrollment-endpoint 'https://<ENROLLMENT_HOSTNAME>:8443/' \
+  --ca-fingerprint '<64_LOWERCASE_HEX_FROM_SHA256SUM>'
+```
+
+The installed Rust agent supplies `/etc/vonk-forge-agent/agent.toml`,
+`/var/lib/vonk-forge-agent`, and
+`/etc/vonk-forge-agent/controller-ca.pem`; there are no local path flags in the
+Fleet command. Bootstrap replaces only the packaged placeholder, generates the
+canonical `spk_…` node ID locally, and never writes the token to `agent.toml`.
+After the first command reports `pending-approval`, compare the evidence in
+Fleet and approve it, then run the same command once more to collect and
+persist the issued identity. A matching completed configuration is preserved;
+conflicting non-placeholder values fail closed.
 
 ## Validate and start
 

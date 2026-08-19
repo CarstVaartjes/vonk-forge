@@ -83,11 +83,19 @@ match again.
 After the host record is accepted, install the package and pair the agent by
 following [Install the Vonk Forge agent](../operations/install-vonk-agent.md).
 
-1. Registration is the authority: manual `agent.toml` editing is unsupported,
-   and Fleet **Add Spark** is the next implementation step. It records the
-   node-bound bootstrap grant and runtime inputs, but the bootstrap action is
-   not an operator command currently available, so the supported runbook stops
-   at that reviewed registration boundary until the emitter lands.
+1. In Fleet, select **Add Spark** and create a fresh one-use grant for this
+   node. Registration is the authority; manual `agent.toml` editing is
+   unsupported.
+2. Run the generated
+   `/var/lib/vonk-forge/supervisor/current/vonk-agent bootstrap` command exactly
+   as displayed on the Spark. It materializes the packaged `agent.toml`
+   placeholder with `/var/lib/vonk-forge-agent` and the installed controller CA
+   path, without persisting the token.
+3. Compare the pending enrollment evidence in Fleet and approve it only when
+   the node, CSR, host-key, hardware, agent, and boot evidence match.
+4. Run the same command once more to collect the issued identity, then start
+   the supervisor and require the certificate-bound `spk_…` identity and fresh
+   inventory in Fleet.
 
 ## How an accepted GPU node appears online
 

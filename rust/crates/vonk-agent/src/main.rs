@@ -2,14 +2,19 @@
 
 use std::{
     future::Future,
-    io::{self, Read},
+    io::{self, Read, Write},
     path::{Path, PathBuf},
+    process::{Command as ProcessCommand, Stdio},
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use clap::{Parser, Subcommand};
 use url::Url;
 use vonk_agent::{
+    bootstrap::{
+        BootstrapRequest, data_directory_owner, generate_node_id, materialize_config,
+        parse_bootstrap_fingerprint, parse_bootstrap_origin, parse_bootstrap_token,
+    },
     client::{AgentHttpClient, ClientError},
     config::{AgentConfig, DEFAULT_CONFIG_PATH},
     executor::{LoopError, RecipeExecutor, run_once},
@@ -38,6 +43,16 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     Run,
+    Bootstrap {
+        #[arg(long, value_parser = parse_bootstrap_token)]
+        token: String,
+        #[arg(long, value_parser = parse_bootstrap_origin)]
+        controller_endpoint: Url,
+        #[arg(long, value_parser = parse_bootstrap_origin)]
+        enrollment_endpoint: Url,
+        #[arg(long, value_parser = parse_bootstrap_fingerprint)]
+        ca_fingerprint: String,
+    },
     Pair {
         #[arg(long)]
         enrollment: Url,
@@ -51,9 +66,23 @@ enum Command {
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
-    let config = AgentConfig::load(&cli.config)?;
     match cli.command {
-        Command::Run => run_agent(&config).await?,
+        Command::Run => run_agent(&AgentConfig::load(&cli.config)?).await?,
+        Command::Bootstrap {
+            token,
+            controller_endpoint,
+            enrollment_endpoint,
+            ca_fingerprint,
+        } => {
+            let request = BootstrapRequest::new(
+                token,
+                controller_endpoint,
+                enrollment_endpoint,
+                ca_fingerprint,
+            )?;
+            let config = materialize_config(&cli.config, &request, &generate_node_id())?;
+            bootstrap_pair(&cli.config, &config, &request)?;
+        }
         Command::Pair {
             enrollment,
             ca_sha256,
@@ -64,15 +93,71 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             let mut token = String::new();
             io::stdin().take(4096).read_to_string(&mut token)?;
-            let executable = std::env::current_exe()?;
-            let evidence = collect_evidence(&executable)?;
-            match pair(&config, &enrollment, token.trim(), &ca_sha256, evidence).await? {
-                EnrollmentOutcome::Pending(pending) => {
-                    println!("pairing {} is {}", pending.id, pending.state);
-                }
-                EnrollmentOutcome::Issued => println!("paired {}", config.node_id),
-            }
+            pair_agent(
+                &AgentConfig::load(&cli.config)?,
+                &enrollment,
+                token.trim(),
+                &ca_sha256,
+            )
+            .await?;
         }
+    }
+    Ok(())
+}
+
+fn bootstrap_pair(
+    config_path: &Path,
+    config: &AgentConfig,
+    request: &BootstrapRequest,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (uid, gid) = data_directory_owner(config)?;
+    let executable = std::env::current_exe()?;
+    let mut child = ProcessCommand::new("/usr/bin/setpriv")
+        .arg("--reuid")
+        .arg(uid.to_string())
+        .arg("--regid")
+        .arg(gid.to_string())
+        .arg("--clear-groups")
+        .arg("--")
+        .arg(executable)
+        .env("HOME", &config.data_dir)
+        .env("XDG_DATA_HOME", &config.data_dir)
+        .current_dir(&config.data_dir)
+        .arg("--config")
+        .arg(config_path)
+        .arg("pair")
+        .arg("--enrollment")
+        .arg(request.enrollment_endpoint().as_str())
+        .arg("--ca-sha256")
+        .arg(request.ca_fingerprint())
+        .arg("--token-stdin")
+        .stdin(Stdio::piped())
+        .spawn()?;
+    child
+        .stdin
+        .take()
+        .ok_or("bootstrap pairing input is unavailable")?
+        .write_all(request.token().as_bytes())?;
+    let status = child.wait()?;
+    if !status.success() {
+        return Err("bootstrap pairing failed".into());
+    }
+    Ok(())
+}
+
+async fn pair_agent(
+    config: &AgentConfig,
+    enrollment: &Url,
+    token: &str,
+    ca_sha256: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let executable = std::env::current_exe()?;
+    let evidence = collect_evidence(&executable)?;
+    match pair(config, enrollment, token, ca_sha256, evidence).await? {
+        EnrollmentOutcome::Pending(pending) => {
+            println!("pairing {} is {}", pending.id, pending.state);
+        }
+        EnrollmentOutcome::Issued => println!("paired {}", config.node_id),
     }
     Ok(())
 }
