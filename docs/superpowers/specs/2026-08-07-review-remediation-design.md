@@ -28,6 +28,6 @@ Anonymous rate limiting is keyed by the trusted client address, never an attacke
 
 ## Delivery and verification
 
-Local CI runs the complete control, Python agent, Rust workspace, and web suites that protect catalog and runtime behavior. The global release workflow builds and signs one immutable GHCR digest, then configures Railway services to deploy that digest. It never performs a second source build for production.
+Local CI runs the complete control, Rust workspace, and web suites that protect catalog and runtime behavior. The global release workflow builds and signs one immutable GHCR digest, then configures Railway services to deploy that digest. It never performs a second source build for production.
 
 Acceptance requires focused regression tests for every reviewed failure, the full suites in both repositories, schema/contract verification, generated API checks, formatting, and clean worktrees before push.

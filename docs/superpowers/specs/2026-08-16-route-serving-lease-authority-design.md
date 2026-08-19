@@ -29,7 +29,7 @@ Process termination is useful cleanup, but it cannot be the security boundary.
    small supervisor endpoint can evaluate the current lease for every request;
    Caddy forwards only on a `2xx` result. This is a standard `forward_auth`
    deployment and fails closed when the authority is unavailable.
-2. **Make the Python supervisor a full reverse proxy.** This would let it own
+2. **Make the application supervisor a full reverse proxy.** This would let it own
    port 4000 directly, but correctly proxying streaming HTTP, disconnects,
    request bodies, and LiteLLM UI behavior would recreate mature Caddy behavior
    in application code.

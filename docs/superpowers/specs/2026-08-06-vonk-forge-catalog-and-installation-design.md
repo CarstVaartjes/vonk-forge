@@ -533,10 +533,9 @@ dependencies at service start. It also installs:
 - explicit repair, update, rollback, and removal behavior.
 
 `uvx` remains suitable for a one-off readiness diagnostic or development tool,
-but not as the permanent service lifecycle. The existing Python agent remains a
-behavioral oracle during the contract-driven Rust transition and is removed
-from the production package only after protocol, failure, update, and physical
-GPU node parity pass.
+but not as the permanent service lifecycle. The accepted agent protocol remains
+the behavioral oracle for the Rust implementation across protocol, failure,
+update, and physical GPU-node parity checks.
 
 ### Pairing and agent trust
 

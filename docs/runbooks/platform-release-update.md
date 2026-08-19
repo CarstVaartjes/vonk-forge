@@ -316,7 +316,7 @@ This report is always `evidence_kind: simulated`. It proves contract and failure
 injection coverage for the control host, rollout planner, API, and administrator
 client, not a physical update. Rust agent A/B activation and rollback are covered
 by the locked Rust workspace and package-release tests; this simulator does not
-substitute a Python agent implementation. It deliberately leaves these release
+substitute the physical agent implementation. It deliberately leaves these release
 gates open:
 
 - `signed-platform-update-manifest-evidence`;

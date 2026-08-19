@@ -795,7 +795,7 @@ Run: `uv run --project control --frozen python -m pytest control/tests -q`
 
 Run: `uv run --frozen python -m pytest tests scripts/tests -q`
 
-Run: `uv run --project agent --frozen python -m pytest agent/tests -q`
+Run: `cargo test -p vonk-agent --locked`
 
 Run: `cargo test --manifest-path agent/rust/Cargo.toml --all-targets`
 

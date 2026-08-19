@@ -70,7 +70,7 @@
 
 **Files:** `.github/workflows/ci.yml` and any existing test scripts it invokes.
 
-**Interfaces:** CI gates the complete control, Python agent, Rust workspace, web unit/build, contract, and generated-API checks.
+**Interfaces:** CI gates the complete control, Rust agent, web unit/build, contract, and generated-API checks.
 
 - [ ] Add or update workflow validation tests if the repository has a workflow test harness; otherwise validate the workflow with actionlint.
 - [ ] Expand jobs without duplicating release-only work and keep dependency installs frozen/locked.
