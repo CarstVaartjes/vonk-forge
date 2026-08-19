@@ -43,7 +43,6 @@ x-api-environment: &api-environment
   VONK_CONTROLLER_CA_FILE: /run/secrets/controller-ca
   VONK_WORKLOAD_TUF_METADATA_ROOT: /workload-tuf/metadata
   VONK_WORKLOAD_TUF_TARGET_ROOT: /workload-tuf/targets
-  VONK_WORKLOAD_SIGNER_SOCKET: /run/vonk-workload-signer/signer.sock
   VONK_WORKER_API_TOKEN_FILE: /run/secrets/worker-api-token
   VONK_ADMIN_GRANT_PRIVATE_KEY_FILE: /run/vonk-api-secrets/admin-grant-private-key.pem
   VONK_PACKAGE_HELPER_GRANT_PRIVATE_KEY_FILE: /run/vonk-normalized-secrets/package-helper-grant-private-key
@@ -102,7 +101,6 @@ services:
       - update-signer-socket:/update-socket
       - signer-tuf-verifier:/verifier
       - agent-tuf-publication:/agent-publication
-      - workload-signer-socket:/workload-signer-socket
       - workload-tuf-publication:/workload-publication
       - api-admin-grant-runtime:/api-runtime
       - normalized-private-keys:/normalized:ro
@@ -148,7 +146,6 @@ services:
       - control-state:/state
       - agent-tuf-publication:/agent-tuf
       - workload-tuf-publication:/workload-tuf:ro
-      - workload-signer-socket:/run/vonk-workload-signer:ro
       - route-publications:/routes
       - api-admin-grant-runtime:/run/vonk-api-secrets:ro
       - normalized-private-keys:/run/vonk-normalized-secrets:ro
@@ -163,7 +160,6 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
       control-bootstrap: {condition: service_healthy}
-      workload-signer: {condition: service_healthy}
     healthcheck:
       test: [CMD, python, -m, vonk_control.healthcheck]
       interval: 10s
@@ -199,40 +195,6 @@ services:
       postgres: {condition: service_healthy}
       control-bootstrap: {condition: service_healthy}
       control-signer: {condition: service_healthy}
-
-  workload-signer:
-    image: ${CONTROL_WORKER_IMAGE:?set a digest-pinned control-worker image}
-    restart: unless-stopped
-    logging: *bounded-logging
-    command: [python, -m, vonk_control.workload_signer]
-    read_only: true
-    user: "10003:10001"
-    network_mode: none
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
-    environment:
-      VONK_WORKLOAD_SIGNER_SOCKET: /run/vonk-workload-signer/signer.sock
-      VONK_WORKLOAD_TUF_METADATA_ROOT: /workload-tuf/metadata
-      VONK_WORKLOAD_TUF_TARGET_ROOT: /workload-tuf/targets
-      VONK_WORKLOAD_REPOSITORY_PATH: /repository
-      VONK_DEPLOYMENT_BRANCH: ${DEPLOYMENT_BRANCH:-deploy}
-      VONK_WORKLOAD_SIGNER_PEER_UID: "10001"
-      VONK_WORKLOAD_RELEASES_KEY_FILE: /run/secrets/workload-releases-key
-      VONK_WORKLOAD_SNAPSHOT_KEY_FILE: /run/secrets/workload-snapshot-key
-      VONK_WORKLOAD_TIMESTAMP_KEY_FILE: /run/secrets/workload-timestamp-key
-    secrets: [workload-releases-key, workload-snapshot-key, workload-timestamp-key]
-    volumes:
-      - ${REPOSITORY_PATH:?set repository path}:/repository:ro
-      - workload-tuf-publication:/workload-tuf
-      - workload-signer-socket:/run/vonk-workload-signer
-    tmpfs: [/tmp]
-    depends_on:
-      control-bootstrap: {condition: service_healthy}
-    healthcheck:
-      test: [CMD, python, -c, "import os,stat; assert stat.S_ISSOCK(os.stat('/run/vonk-workload-signer/signer.sock').st_mode)"]
-      interval: 5s
-      timeout: 3s
-      retries: 12
 
   control-signer:
     image: ${CONTROL_WORKER_IMAGE:?set a digest-pinned control-worker image}
@@ -449,12 +411,6 @@ secrets:
     file: "${PACKAGE_HELPER_RECEIPT_PRIVATE_KEY_FILE:?set workload package helper receipt private key file}"
   host-runtime-grant-private-key:
     file: "${HOST_RUNTIME_GRANT_PRIVATE_KEY_FILE:?set host runtime grant private key file}"
-  workload-releases-key:
-    file: "${WORKLOAD_RELEASES_KEY_FILE:?set workload TUF releases signing key file}"
-  workload-snapshot-key:
-    file: "${WORKLOAD_SNAPSHOT_KEY_FILE:?set workload TUF snapshot signing key file}"
-  workload-timestamp-key:
-    file: "${WORKLOAD_TIMESTAMP_KEY_FILE:?set workload TUF timestamp signing key file}"
 
 networks:
   ingress: {}
@@ -484,6 +440,5 @@ volumes:
   signer-tuf-verifier: {}
   agent-tuf-publication: {}
   workload-tuf-publication: {}
-  workload-signer-socket: {}
   api-admin-grant-runtime: {}
   normalized-private-keys: {}

@@ -35,7 +35,7 @@ def test_render_inlines_compose_includes(tmp_path: Path) -> None:
     assert "hermes-agent" in document["services"]
     assert document["services"]["hermes-agent"]["profiles"] == ["hermes"]
     assert text.count(API_IMAGE) >= 2
-    assert text.count(WORKER_IMAGE) >= 7
+    assert text.count(WORKER_IMAGE) >= 6
     assert (tmp_path / "Caddyfile").is_file()
     assert (tmp_path / "tailscale/configure.sh").is_file()
     assert "./tailscale/configure.sh:/usr/local/bin/configure-tailscale:ro" in text

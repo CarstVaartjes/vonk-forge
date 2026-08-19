@@ -31,8 +31,6 @@ def prepare() -> None:
     for name in ("metadata", "targets"):
         _directory(str(agent / name), 10001, 10001, 0o750)
 
-    os.chown("/workload-signer-socket", 10003, 10001)
-    os.chmod("/workload-signer-socket", 0o710)
     workload = _directory("/workload-publication", 10001, 10001, 0o750)
     for name in ("metadata", "targets"):
         _directory(str(workload / name), 10003, 10001, 0o750)
