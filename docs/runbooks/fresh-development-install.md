@@ -373,7 +373,8 @@ returns. Closing every terminal must not affect browser availability.
   **Logout** when finished. A restart without Pull is not an update.
 - GPU nodes: after the accepted APT `dev` publication is complete, follow
   [Update and switch channels](../operations/agent-package-release.md#update-and-switch-channels).
-  Apt stages the signed inactive slot; activate and prove one canary node,
-  wait for fresh controller inventory, then repeat on the next node.
+  Run `sudo vonk-agent-upgrade` on each node. For a manually controlled
+  canary, activate and prove one node, wait for fresh controller inventory,
+  then repeat on the next node.
 - Never substitute production `latest` tags or a local build. Production is
   selected only through its signed release and trusted host updater.
