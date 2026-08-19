@@ -36,8 +36,8 @@ x-api-environment: &api-environment
   VONK_AGENT_ARTIFACT_ROOT: /state/agent-artifacts
   VONK_AGENT_TUF_METADATA_ROOT: /agent-tuf/metadata
   VONK_AGENT_TUF_TARGET_ROOT: /agent-tuf/targets
-  VONK_AGENT_CONTROLLER_ORIGIN: https://${VONK_AGENT_HOSTNAME:?set Caddy agent hostname}:${VONK_BACKEND_PORT:-8443}
-  VONK_AGENT_ENROLLMENT_ORIGIN: https://${VONK_AGENT_ENROLL_HOSTNAME:?set Caddy enrollment hostname}:${VONK_BACKEND_PORT:-8443}
+  VONK_AGENT_CONTROLLER_ORIGIN: https://${VONK_AGENT_HOSTNAME:?set Caddy agent hostname}:8443
+  VONK_AGENT_ENROLLMENT_ORIGIN: https://${VONK_AGENT_ENROLL_HOSTNAME:?set Caddy enrollment hostname}:8443
   VONK_CONTROLLER_CA_FILE: /run/secrets/controller-ca
   VONK_WORKLOAD_TUF_METADATA_ROOT: /workload-tuf/metadata
   VONK_WORKLOAD_TUF_TARGET_ROOT: /workload-tuf/targets
@@ -322,7 +322,7 @@ services:
     read_only: true
     ports:
       - target: 8443
-        published: "${VONK_BACKEND_PORT:-8443}"
+        published: 8443
         host_ip: ${NAS_LAN_IP:?set reserved NAS LAN IP}
         protocol: tcp
     volumes:
@@ -337,7 +337,7 @@ services:
       VONK_AGENT_ENROLL_HOSTNAME: ${VONK_AGENT_ENROLL_HOSTNAME:?set Caddy enrollment hostname}
       VONK_AGENT_HOSTNAME: ${VONK_AGENT_HOSTNAME:?set Caddy agent hostname}
       VONK_REGISTRY_HOSTNAME: ${VONK_REGISTRY_HOSTNAME:?set Caddy registry hostname}
-      VONK_BACKEND_PORT: ${VONK_BACKEND_PORT:-8443}
+      VONK_BACKEND_PORT: "8443"
     secrets: [agent-client-ca, agent-proxy-auth]
     networks: [ingress, agent-proxy, registry-edge, tailnet-web-edge, hermes-inference, litellm-edge]
     depends_on:

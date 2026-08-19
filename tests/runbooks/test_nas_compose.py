@@ -99,6 +99,8 @@ def test_compose_uses_nas_parser_safe_project_and_port_fields() -> None:
     text = COMPOSE.read_text()
     assert not text.startswith("name:")
     assert "target: 8443" in text
+    assert "published: 8443" in text
+    assert "${VONK_BACKEND_PORT" not in text
 
 
 def test_default_grafana_image_matches_the_audited_lock() -> None:
