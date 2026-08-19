@@ -154,12 +154,10 @@ jobs:
         run: |
           set -euo pipefail
           mapfile -t runtime_images < <(
-            sed -nE \
-              's/^[[:space:]]+image:[[:space:]]+([a-z0-9][a-z0-9.\/:_-]*@sha256:[0-9a-f]{64})$/\1/p' \
-              deploy/compose/compose.yaml \
+            jq -r '.images[]' deploy/compose/images.lock.json \
               | sort -u
           )
-          test "${#runtime_images[@]}" = 4
+          test "${#runtime_images[@]}" = 7
           for runtime_image in "${runtime_images[@]}"; do
             [[ "$runtime_image" =~ ^[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}$ ]]
             docker pull "$runtime_image"
