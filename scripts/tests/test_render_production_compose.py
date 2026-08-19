@@ -34,7 +34,7 @@ def test_render_replaces_every_control_image_without_resolving_operator_inputs(
 
     text = output.read_text(encoding="utf-8")
     assert text.count(API_IMAGE) == 2
-    assert text.count(WORKER_IMAGE) == 6
+    assert text.count(WORKER_IMAGE) == 5
     assert "CONTROL_API_IMAGE" not in text
     assert "CONTROL_WORKER_IMAGE" not in text
     assert "${NAS_LAN_IP:?set reserved NAS LAN IP}" in text
