@@ -29,9 +29,6 @@ def _rendered() -> dict:
         "PACKAGE_HELPER_GRANT_PRIVATE_KEY_FILE": "/dev/null",
         "PACKAGE_HELPER_RECEIPT_PRIVATE_KEY_FILE": "/dev/null",
         "HOST_RUNTIME_GRANT_PRIVATE_KEY_FILE": "/dev/null",
-        "WORKLOAD_RELEASES_KEY_FILE": "/dev/null",
-        "WORKLOAD_SNAPSHOT_KEY_FILE": "/dev/null",
-        "WORKLOAD_TIMESTAMP_KEY_FILE": "/dev/null",
         "ADMIN_GRANT_PUBLIC_KEY_FILE": "/dev/null",
         "AGENT_TUF_BOOTSTRAP_ROOT_FILE": "/dev/null",
         "CONTROL_IDENTITY_PATH": "/srv/vonk-forge/control-identity",
@@ -229,25 +226,16 @@ def test_worker_has_a_distinct_minimal_image_and_runtime_boundary() -> None:
     )
 
 
-def test_workload_signer_isolated_from_api_and_platform_signer() -> None:
+def test_deleted_workload_signer_path_is_absent_from_fresh_graph() -> None:
     services = _rendered()["services"]
-    signer = services["workload-signer"]
-    assert signer["network_mode"] == "none"
-    assert signer["user"] == "10003:10001"
-    assert signer["cap_drop"] == ["ALL"]
-    assert {item["source"] for item in signer["secrets"]} == {
-        "workload-releases-key",
-        "workload-snapshot-key",
-        "workload-timestamp-key",
-    }
-    api = services["control-api"]
+    assert "workload-signer" not in services
+    assert "workload-signer-socket" not in _rendered()["volumes"]
+    assert "VONK_WORKLOAD_SIGNER_SOCKET" not in services["control-api"]["environment"]
     assert not {
         "workload-releases-key",
         "workload-snapshot-key",
         "workload-timestamp-key",
-    } & {item["source"] for item in api["secrets"]}
-    assert services["control-bootstrap"]["network_mode"] == "none"
-    assert services["control-signer"]["secrets"] != signer["secrets"]
+    } & set(_rendered()["secrets"])
 
 
 def test_selected_services_reopen_the_root_owned_identity_directory_read_only() -> None:
