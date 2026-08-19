@@ -46,6 +46,7 @@ x-hermes-service: &hermes-service
 services:
   hermes-agent:
     <<: *hermes-service
+    profiles: [hermes]
     hostname: hermes-agent
     restart: unless-stopped
     networks:
