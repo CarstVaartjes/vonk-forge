@@ -16,6 +16,7 @@ PREINST = ROOT / "packaging/debian/preinst"
 POSTINST = ROOT / "packaging/debian/postinst"
 PRERM = ROOT / "packaging/debian/prerm"
 DOCKER_FIREWALL = ROOT / "packaging/bin/vonk-forge-docker-firewall"
+UPGRADE_SCRIPT = ROOT / "packaging/bin/vonk-agent-upgrade"
 
 
 def _aarch64_fixture(path: Path, marker: bytes) -> None:
@@ -257,6 +258,9 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
         ["/usr/bin/dpkg-deb", "--extract", first_deb, payload], check=True
     )
     assert (payload / "etc/vonk-forge-agent/containers-storage.conf").is_file()
+    upgrade_script = payload / "usr/bin/vonk-agent-upgrade"
+    assert upgrade_script.read_bytes() == UPGRADE_SCRIPT.read_bytes()
+    assert stat.S_IMODE(upgrade_script.stat().st_mode) == 0o555
     unit = (payload / "lib/systemd/system/vonk-forge-agent.service").read_text()
     assert "Environment=HOME=/var/lib/vonk-forge-agent" in unit
     assert "Environment=XDG_RUNTIME_DIR=/run/vonk-forge-agent" in unit

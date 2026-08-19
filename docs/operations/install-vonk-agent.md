@@ -70,11 +70,25 @@ sudo apt update
 sudo apt install vonk-forge-agent
 ```
 
+After the package has installed the upgrade helper, a normal agent upgrade is
+one command:
+
+```bash
+sudo vonk-agent-upgrade
+```
+
+The helper updates the APT package, verifies that the staged agent supports
+the current Fleet bootstrap contract, activates it through the supervisor, and
+waits for both agent services to become healthy. It refuses to activate an
+older incompatible package. If it reports that `bootstrap` is missing, update
+the agent repository or release the matching agent package before retrying.
+
 This first installation initializes signed slot A. Later apt upgrades stage the
-inactive slot and deliberately keep the current agent active. Use the
-[canary activation procedure](agent-package-release.md#update-and-switch-channels)
-for every upgrade; do not treat `apt install --only-upgrade` as rollout
-completion.
+inactive slot and deliberately keep the current agent active until
+`vonk-agent-upgrade` activates and proves it. Do not treat
+`apt install --only-upgrade` by itself as rollout completion. For a manually
+controlled canary rollout across multiple nodes, use the
+[canary activation procedure](agent-package-release.md#update-and-switch-channels).
 
 The maintainer script creates the unprivileged account, allocates the first
 non-overlapping standard subordinate UID and GID ranges permitted by

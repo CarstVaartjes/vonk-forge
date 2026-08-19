@@ -244,6 +244,12 @@ pending `vonk-forge-dev-gateway` host if the console presents it. Check the
 enable Funnel to resolve this condition: Funnel grants public-internet ingress
 and is unrelated to private Service-host approval.
 
+The **Machines** page showing `vonk-forge-dev-gateway` as **Connected** is not
+enough: it only confirms that the gateway joined the tailnet. Before opening
+the browser URL, verify that **Services → Advertised → vonk-forge** shows at
+least one connected host and the HTTPS 443 endpoint. The browser URL will not
+work while the Service shows `0 hosts`.
+
 The connected `vonk-forge-dev-gateway` host must not carry Tailscale's
 **Ephemeral** label. That label means the project is running an older Compose
 artifact whose OAuth default can discard the gateway identity after an

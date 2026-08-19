@@ -380,10 +380,17 @@ def build(
             0o644,
         )
         firewall_helper = source("packaging/bin/vonk-forge-docker-firewall")
+        upgrade_script = source("packaging/bin/vonk-agent-upgrade")
         install_file(
             stage,
             "usr/lib/vonk-forge/vonk-forge-docker-firewall",
             firewall_helper,
+            0o555,
+        )
+        install_file(
+            stage,
+            "usr/bin/vonk-agent-upgrade",
+            upgrade_script,
             0o555,
         )
         for name in (
@@ -402,7 +409,11 @@ def build(
         documents = evidence(
             version,
             epoch,
-            {**binaries, "vonk-forge-docker-firewall": firewall_helper},
+            {
+                **binaries,
+                "vonk-forge-docker-firewall": firewall_helper,
+                "vonk-agent-upgrade": upgrade_script,
+            },
         )
         for name, raw in documents.items():
             install_file(stage, f"usr/share/doc/{PACKAGE}/{name}", raw, 0o644)
