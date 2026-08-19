@@ -30,6 +30,11 @@ def test_development_uses_the_production_runtime_service_graph() -> None:
     assert _services(DEVELOPMENT_COMPOSE) == _services(PRODUCTION_COMPOSE)
 
 
+def test_development_bundle_selects_the_builtin_agent_ca_overlay() -> None:
+    document = yaml.safe_load(DEVELOPMENT_COMPOSE.read_text(encoding="utf-8"))
+    assert document["include"] == ["compose.yaml", "compose.builtin-ca.yaml"]
+
+
 def test_development_wrapper_selects_published_images_only() -> None:
     source = DEVELOPMENT_WRAPPER.read_text(encoding="utf-8")
 
@@ -39,6 +44,9 @@ def test_development_wrapper_selects_published_images_only() -> None:
     assert "build:" not in source
     assert "ghcr.io/carstvaartjes/vonk-forge-api" in source
     assert "ghcr.io/carstvaartjes/vonk-forge-worker" in source
+
+    workflow = DEVELOPMENT_WORKFLOW.read_text(encoding="utf-8")
+    assert workflow.count("--template deploy/compose/compose.dev.images.yaml") == 2
 
 
 def test_hermes_is_opt_in_in_the_shared_production_graph() -> None:
