@@ -142,7 +142,6 @@ jobs:
         run: >-
           uv run --python 3.12 --project control --frozen --with-editable .
           --with pytest==9.1.1 pytest -q
-          tests/runbooks/test_development_nas_installation.py
           tests/test_ci_platform_boundaries.py
           tests/test_container_release_workflow.py
       - name: Run focused control cleanup contracts

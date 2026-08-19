@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render a public mutable or digest-pinned development Compose artifact."""
+"""Render the canonical production Compose graph for the development channel."""
 
 from __future__ import annotations
 
@@ -7,266 +7,78 @@ import argparse
 import os
 import re
 import shutil
-import subprocess
 import tempfile
 from pathlib import Path
 
-PUBLIC_IMAGES = {
-    "api": "ghcr.io/carstvaartjes/vonk-forge-api",
-    "worker": "ghcr.io/carstvaartjes/vonk-forge-worker",
-}
-PINNED_IMAGE_PATTERN = re.compile(
-    r"^(?P<repository>ghcr\.io/carstvaartjes/vonk-forge-(?P<role>api|worker))"
-    r":dev-sha-(?P<commit>[0-9a-f]{40})"
-    r"@sha256:(?P<digest>[0-9a-f]{64})$"
+IMAGE = re.compile(
+    r"^ghcr\.io/carstvaartjes/vonk-forge-(api|worker):"
+    r"(?:dev|dev-sha-[0-9a-f]{40})(?:@sha256:[0-9a-f]{64})?$"
 )
-COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
-UNRESOLVED_TOKEN = re.compile(r"__VONK_[A-Z0-9_]+__")
-ALLOWED_COMPOSE_INTERPOLATIONS = {
-    "VONK_AGENT_PORT": "${VONK_AGENT_PORT:-8443}",
-    "VONK_DEV_INFERENCE_PORT": "${VONK_DEV_INFERENCE_PORT:-4000}",
-    "VONK_DEV_PORT": "${VONK_DEV_PORT:-8080}",
-}
-IMAGE_TOKENS = {
-    "__VONK_API_IMAGE__": "api image",
-    "__VONK_WORKER_IMAGE__": "worker image",
-}
-COMMIT_TOKEN = "__VONK_EXPECTED_COMMIT__"
-PROJECT_DECLARATION = "name: vonk-forge-dev\n\n"
-PINNED_EXTENSION = f'x-pinned-expected-commit: "{COMMIT_TOKEN}"\n'
-PINNED_COMPATIBILITY_BLOCK = (
-    "# Compatibility input for the current pinned renderer. Task 5 must retain this\n"
-    "# token only for pinned output and omit it entirely from mutable output.\n"
-    f"{PINNED_EXTENSION}"
-)
-SYNTHETIC_SECRETS = {
-    "admin-password-verifier": "synthetic-admin-password-verifier\n",
-    "agent-ca-certificate": "synthetic-agent-ca-certificate\n",
-    "agent-ca-key": "synthetic-agent-ca-key\n",
-    "agent-proxy-auth": "synthetic-agent-proxy-auth\n",
-    "controller-ca": "synthetic-controller-ca\n",
-    "controller-server-certificate": "synthetic-controller-server-certificate\n",
-    "controller-server-key": "synthetic-controller-server-key\n",
-    "postgres-password": "synthetic-postgres-password\n",
-    "database-url": "postgresql+psycopg://control:synthetic@postgres:5432/control\n",
-    "git-signing-key": "synthetic-git-signing-key\n",
-    "host-runtime-grant-private-key": "synthetic-host-runtime-grant-private-key\n",
-    "litellm-database-password": "a" * 64 + "\n",
-    "litellm-master-key": "synthetic-litellm-master-key\n",
-    "litellm-upstream-key": "synthetic-litellm-upstream-key\n",
-    "management-cidrs": "127.0.0.1/32\n",
-    "token-signing-key": "synthetic-token-signing-key-00000000\n",
-    "tailscale-oauth-client-id": "synthetic-tailscale-client-id\n",
-    "tailscale-oauth-client-secret": "synthetic-tailscale-client-secret\n",
+TOKENS = {
+    "api": "${CONTROL_API_IMAGE:?set a digest-pinned control-api image}",
+    "worker": "${CONTROL_WORKER_IMAGE:?set a digest-pinned control-worker image}",
 }
 
 
-def _validate_image(
-    image: str, role: str, commit: str | None, channel: str
-) -> None:
-    if channel == "dev":
-        if image != f"{PUBLIC_IMAGES[role]}:dev":
-            raise ValueError(f"{role} image must be the exact bare public :dev image")
-        return
-    match = PINNED_IMAGE_PATTERN.fullmatch(image)
-    if match is None or match.group("repository") != PUBLIC_IMAGES[role]:
-        raise ValueError(f"{role} image must be a public digest-pinned development image")
-    if match.group("commit") != commit:
-        raise ValueError(f"{role} image development tag must match the expected commit")
+def _validate(role: str, image: str, channel: str) -> None:
+    if IMAGE.fullmatch(image) is None:
+        raise ValueError(f"{role} image must be an immutable published development image")
 
 
-def _validate_inputs(
-    template: Path,
-    output: Path,
-    api_image: str,
-    worker_image: str,
-    commit: str | None,
-    channel: str,
-) -> str:
+def render(template: Path, output: Path, api_image: str, worker_image: str, *, channel: str) -> None:
     if channel not in {"dev", "pinned"}:
         raise ValueError("channel must be dev or pinned")
-    if channel == "dev" and commit is not None:
-        raise ValueError("expected commit is forbidden for the mutable dev channel")
-    if channel == "pinned" and (
-        commit is None or not COMMIT_PATTERN.fullmatch(commit)
-    ):
-        raise ValueError("expected commit must be exactly 40 lowercase hexadecimal characters")
-    if not template.is_file():
+    _validate("API", api_image, channel)
+    _validate("worker", worker_image, channel)
+    if not template.is_file() or template.is_symlink():
         raise ValueError("template must be an existing regular file")
-    try:
-        same_file = template.samefile(output)
-    except FileNotFoundError:
-        same_file = template.resolve() == output.resolve()
-    if same_file:
-        raise ValueError("template and output must be different files")
     if not output.parent.is_dir():
         raise ValueError("output parent must exist")
-    _validate_image(api_image, "api", commit, channel)
-    _validate_image(worker_image, "worker", commit, channel)
     text = template.read_text(encoding="utf-8")
-    if text.count(PROJECT_DECLARATION) != 1 or not text.startswith(
-        PROJECT_DECLARATION
-    ):
-        raise ValueError("template must contain the development project name once")
-    for token, label in IMAGE_TOKENS.items():
-        if text.count(token) != 1:
-            raise ValueError(f"template must contain the {label} token exactly once")
-    if (
-        text.count(COMMIT_TOKEN) != 1
-        or text.count(PINNED_EXTENSION) != 1
-        or text.count(PINNED_COMPATIBILITY_BLOCK) != 1
-    ):
-        raise ValueError("template must contain the expected commit token exactly once")
-    return text
-
-
-def _render_template(
-    text: str,
-    api_image: str,
-    worker_image: str,
-    commit: str | None,
-    channel: str,
-) -> str:
-    rendered = text.replace("__VONK_API_IMAGE__", api_image).replace(
-        "__VONK_WORKER_IMAGE__", worker_image
-    )
-    if channel == "dev":
-        rendered = rendered.replace(PINNED_COMPATIBILITY_BLOCK, "", 1)
-    else:
-        assert commit is not None
-        rendered = rendered.replace(COMMIT_TOKEN, commit, 1)
-    if UNRESOLVED_TOKEN.search(rendered):
-        raise ValueError("template contains unresolved __VONK_*__ token")
-    rendered = rendered.removeprefix(PROJECT_DECLARATION)
-    validated = rendered
-    for name, expression in ALLOWED_COMPOSE_INTERPOLATIONS.items():
-        if validated.count(expression) != 1 or validated.count(name) != 1:
-            raise ValueError(
-                f"template must contain exactly one {expression} expression for {name}"
-            )
-        validated = validated.replace(expression, "", 1)
-    if "$" in validated:
-        raise ValueError("template contains unsupported Compose interpolation")
-    return rendered
-
-
-def _write_synthetic_secrets(root: Path) -> None:
-    secret_root = root / "secrets"
-    secret_root.mkdir(mode=0o700)
-    for name, value in SYNTHETIC_SECRETS.items():
-        path = secret_root / name
-        path.write_text(value, encoding="utf-8")
-        path.chmod(0o600)
-
-
-def _validate_compose(stage: Path) -> None:
-    subprocess.run(
-        ("docker", "compose", "-f", str(stage), "config", "-q"),
-        cwd=stage.parent,
-        check=True,
-        capture_output=True,
-        text=True,
-        env={
-            "PATH": os.environ["PATH"],
-            "VONK_AGENT_PORT": "8443",
-            "VONK_DEV_INFERENCE_PORT": "4000",
-            "VONK_DEV_PORT": "8080",
-        },
-    )
-
-
-def _write_publish_stage(output: Path, rendered: str) -> Path:
-    descriptor, name = tempfile.mkstemp(
-        prefix=".render-dev-compose-output-", dir=output.parent
-    )
-    stage = Path(name)
+    if text.count(TOKENS["api"]) != 2 or text.count(TOKENS["worker"]) != 6:
+        raise ValueError("template control image inputs changed")
+    rendered = text.replace(TOKENS["api"], api_image).replace(TOKENS["worker"], worker_image)
+    if "VONK_DEPLOYMENT_MODE: production" not in rendered:
+        raise ValueError("development channel must render the production graph")
+    # The production graph includes the shared Tailscale/Hermes files and
+    # mounts its configuration assets relative to the Compose project.
+    for asset in template.parent.iterdir():
+        if asset.name.startswith("compose") or asset.name == "tests":
+            continue
+        destination = output.parent / asset.name
+        if asset.is_dir():
+            shutil.copytree(asset, destination, dirs_exist_ok=True)
+        else:
+            shutil.copy2(asset, destination)
+    descriptor, staged_name = tempfile.mkstemp(prefix=".render-dev-compose-", dir=output.parent)
+    staged = Path(staged_name)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
             stream.write(rendered)
             stream.flush()
             os.fsync(stream.fileno())
-        stage.chmod(0o644)
+        staged.chmod(0o644)
+        os.replace(staged, output)
     except BaseException:
-        stage.unlink(missing_ok=True)
+        staged.unlink(missing_ok=True)
         raise
-    return stage
-
-
-def render(
-    template: Path,
-    output: Path,
-    api_image: str,
-    worker_image: str,
-    commit: str | None = None,
-    *,
-    channel: str = "pinned",
-) -> None:
-    """Validate and atomically render a NAS Compose project file."""
-    template_text = _validate_inputs(
-        template, output, api_image, worker_image, commit, channel
-    )
-    rendered = _render_template(
-        template_text, api_image, worker_image, commit, channel
-    )
-    publish_stage: Path | None = None
-    validation_root: Path | None = None
-    try:
-        publish_stage = _write_publish_stage(output, rendered)
-        validation_root = Path(
-            tempfile.mkdtemp(
-                prefix=".render-dev-compose-validation-", dir=output.parent
-            )
-        )
-        (validation_root / output.name).write_text(rendered, encoding="utf-8")
-        _write_synthetic_secrets(validation_root)
-        _validate_compose(validation_root / output.name)
-
-        # Remove synthetic secret data and all validation state before the
-        # only operation that can change the published output.
-        shutil.rmtree(validation_root)
-        validation_root = None
-        os.replace(publish_stage, output)
-        publish_stage = None
-    except BaseException as failure:
-        cleanup_failures: list[BaseException] = []
-        if validation_root is not None:
-            try:
-                shutil.rmtree(validation_root)
-            except BaseException as cleanup_failure:  # noqa: BLE001 - preserve cleanup failures
-                cleanup_failures.append(cleanup_failure)
-        if publish_stage is not None:
-            try:
-                publish_stage.unlink(missing_ok=True)
-            except BaseException as cleanup_failure:  # noqa: BLE001 - preserve cleanup failures
-                cleanup_failures.append(cleanup_failure)
-        if cleanup_failures:
-            raise BaseExceptionGroup(
-                "render failed and temporary artifact cleanup also failed",
-                [failure, *cleanup_failures],
-            ) from failure
-        raise
-
-
-def _arguments() -> argparse.Namespace:
-    root = Path(__file__).resolve().parents[1]
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--template", type=Path, default=root / "deploy/compose/compose.dev.images.yaml")
-    parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--api-image", required=True)
-    parser.add_argument("--worker-image", required=True)
-    parser.add_argument("--commit")
-    parser.add_argument("--channel", choices=("dev", "pinned"), default="pinned")
-    return parser.parse_args()
 
 
 def main() -> None:
-    arguments = _arguments()
+    root = Path(__file__).resolve().parents[1]
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--template", type=Path, default=root / "deploy/compose/compose.yaml")
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--api-image", required=True)
+    parser.add_argument("--worker-image", required=True)
+    parser.add_argument("--channel", choices=("dev", "pinned"), default="pinned")
+    parser.add_argument("--commit")
+    arguments = parser.parse_args()
     render(
         arguments.template,
         arguments.output,
         arguments.api_image,
         arguments.worker_image,
-        arguments.commit,
         channel=arguments.channel,
     )
 
