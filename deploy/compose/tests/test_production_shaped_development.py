@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[3]
 PRODUCTION_COMPOSE = ROOT / "deploy/compose/compose.yaml"
 DEVELOPMENT_COMPOSE = ROOT / "deploy/compose/compose.dev.images.yaml"
 DEVELOPMENT_WRAPPER = ROOT / "scripts/dev-compose"
+DEVELOPMENT_WORKFLOW = ROOT / ".github/workflows/dev-images.yml"
 
 
 def _services(path: Path, *, _seen: set[Path] | None = None) -> set[str]:
@@ -37,3 +38,10 @@ def test_development_wrapper_selects_published_images_only() -> None:
     assert "build:" not in source
     assert "ghcr.io/carstvaartjes/vonk-forge-api" in source
     assert "ghcr.io/carstvaartjes/vonk-forge-worker" in source
+
+
+def test_development_image_workflow_validates_the_canonical_graph_with_test_inputs() -> None:
+    source = DEVELOPMENT_WORKFLOW.read_text(encoding="utf-8")
+
+    assert "--env-file deploy/compose/tests/test.env" in source
+    assert "test_dev_complete_stack.py" not in source
