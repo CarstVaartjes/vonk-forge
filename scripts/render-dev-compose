@@ -51,6 +51,12 @@ def _rebase_relative_paths(value: object, prefix: str) -> object:
 
 
 def _merge_values(base: object, incoming: object) -> object:
+    if isinstance(base, list) and isinstance(incoming, list):
+        merged = list(base)
+        for item in incoming:
+            if item not in merged:
+                merged.append(item)
+        return merged
     if isinstance(base, dict) and isinstance(incoming, dict):
         merged = dict(base)
         for key, value in incoming.items():

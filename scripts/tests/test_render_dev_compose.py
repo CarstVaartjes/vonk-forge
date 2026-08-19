@@ -58,4 +58,6 @@ def test_render_accepts_development_template_and_inlines_builtin_ca(tmp_path: Pa
     assert document["services"]["control-api"]["environment"]["VONK_AGENT_INTERMEDIATE_KEY_FILE"] == (
         "/run/vonk-normalized-secrets/agent-intermediate-key"
     )
-    assert "agent-intermediate-key" in document["services"]["control-secret-init"]["secrets"]
+    init_secrets = document["services"]["control-secret-init"]["secrets"]
+    assert "admin-grant-private-key" in init_secrets
+    assert "agent-intermediate-key" in init_secrets
