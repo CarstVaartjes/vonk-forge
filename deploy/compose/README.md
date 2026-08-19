@@ -260,7 +260,7 @@ Keep the checked-in upstream image pins (`POSTGRES_IMAGE`, `CADDY_IMAGE`,
 ### NAS paths and networking
 
 Set `COMPOSE_PROJECT_NAME`, `REPOSITORY_PATH`, `HERMES_DATA_ROOT`,
-`NAS_LAN_IP`, `VONK_BACKEND_PORT`, `VONK_MANAGEMENT_CIDRS`, and optional
+`NAS_LAN_IP`, `VONK_MANAGEMENT_CIDRS`, and optional
 `VONK_DIRECT_FABRIC_CIDRS`. `REPOSITORY_PATH` is the platform/release checkout
 mounted into the API as data; it is not the Compose source or the recipe
 catalog database.

@@ -205,16 +205,27 @@ def test_worker_has_a_distinct_minimal_image_and_runtime_boundary() -> None:
     signer = services["control-signer"]
     assert signer["network_mode"] == "none"
     assert signer["user"] == "10003:10001"
-    assert {item["source"] for item in signer["secrets"]} == {
-        "admin-grant-public-key",
-        "agent-tuf-bootstrap-root",
-        "agent-update-authority-key",
+    assert signer.get("secrets", []) == []
+    assert "normalized-private-keys" in {
+        item["source"] for item in signer["volumes"]
     }
-    assert "database-url" not in {item["source"] for item in signer["secrets"]}
+    assert signer["environment"]["VONK_AGENT_UPDATE_AUTHORITY_KEY_FILE"] == (
+        "/run/vonk-normalized-secrets/agent-update-authority-key"
+    )
+    assert signer["environment"]["VONK_ADMIN_GRANT_PUBLIC_KEY_FILE"] == (
+        "/run/vonk-normalized-secrets/admin-grant-public-key"
+    )
+    assert signer["environment"]["VONK_AGENT_TUF_BOOTSTRAP_ROOT_FILE"] == (
+        "/run/vonk-normalized-secrets/agent-tuf-bootstrap-root"
+    )
+    assert "database-url" not in {
+        item["source"] for item in signer.get("secrets", [])
+    }
     assert {item["target"] for item in signer["volumes"]} == {
         "/control-identity",
         "/publication",
         "/run/vonk-signer",
+        "/run/vonk-normalized-secrets",
         "/verifier",
     }
     bootstrap = services["control-bootstrap"]
@@ -320,6 +331,9 @@ def test_file_backed_private_keys_are_normalized_before_bootstrap() -> None:
         {"source": "package-helper-grant-private-key", "target": "/run/secrets/package-helper-grant-private-key"},
         {"source": "package-helper-receipt-private-key", "target": "/run/secrets/package-helper-receipt-private-key"},
         {"source": "host-runtime-grant-private-key", "target": "/run/secrets/host-runtime-grant-private-key"},
+        {"source": "agent-update-authority-key", "target": "/run/secrets/agent-update-authority-key"},
+        {"source": "admin-grant-public-key", "target": "/run/secrets/admin-grant-public-key"},
+        {"source": "agent-tuf-bootstrap-root", "target": "/run/secrets/agent-tuf-bootstrap-root"},
     ]
     assert bootstrap["depends_on"]["control-secret-init"] == {
         "condition": "service_completed_successfully",
@@ -336,7 +350,7 @@ def test_file_backed_private_keys_are_normalized_before_bootstrap() -> None:
 def test_admin_grant_signing_key_is_available_only_to_bootstrap() -> None:
     services = _rendered()["services"]
     secret_sources = {
-        name: {secret["source"] for secret in services[name]["secrets"]}
+        name: {secret["source"] for secret in services[name].get("secrets", [])}
         for name in ("control-api", "control-worker", "control-signer")
     }
     assert "admin-grant-private-key" not in secret_sources["control-api"]

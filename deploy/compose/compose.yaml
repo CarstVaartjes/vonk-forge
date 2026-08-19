@@ -2,8 +2,6 @@ include:
   - tailscale/compose.yaml
   - hermes-agent/compose.yaml
 
-name: ${COMPOSE_PROJECT_NAME:-vonk-forge-control}
-
 x-bounded-logging: &bounded-logging
   driver: local
   options:
@@ -38,8 +36,8 @@ x-api-environment: &api-environment
   VONK_AGENT_ARTIFACT_ROOT: /state/agent-artifacts
   VONK_AGENT_TUF_METADATA_ROOT: /agent-tuf/metadata
   VONK_AGENT_TUF_TARGET_ROOT: /agent-tuf/targets
-  VONK_AGENT_CONTROLLER_ORIGIN: https://${VONK_AGENT_HOSTNAME:?set Caddy agent hostname}:${VONK_BACKEND_PORT:-8443}
-  VONK_AGENT_ENROLLMENT_ORIGIN: https://${VONK_AGENT_ENROLL_HOSTNAME:?set Caddy enrollment hostname}:${VONK_BACKEND_PORT:-8443}
+  VONK_AGENT_CONTROLLER_ORIGIN: https://${VONK_AGENT_HOSTNAME:?set Caddy agent hostname}:8443
+  VONK_AGENT_ENROLLMENT_ORIGIN: https://${VONK_AGENT_ENROLL_HOSTNAME:?set Caddy enrollment hostname}:8443
   VONK_CONTROLLER_CA_FILE: /run/secrets/controller-ca
   VONK_WORKLOAD_TUF_METADATA_ROOT: /workload-tuf/metadata
   VONK_WORKLOAD_TUF_TARGET_ROOT: /workload-tuf/targets
@@ -75,7 +73,7 @@ services:
     cap_add: [CHOWN, DAC_OVERRIDE, FOWNER]
     security_opt: [no-new-privileges:true]
     command: [python, -m, vonk_control.compose_secret_init]
-    secrets: [admin-grant-private-key, package-helper-grant-private-key, package-helper-receipt-private-key, host-runtime-grant-private-key]
+    secrets: [admin-grant-private-key, package-helper-grant-private-key, package-helper-receipt-private-key, host-runtime-grant-private-key, agent-update-authority-key, admin-grant-public-key, agent-tuf-bootstrap-root]
     volumes:
       - normalized-private-keys:/normalized
 
@@ -207,9 +205,9 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     environment:
-      VONK_AGENT_UPDATE_AUTHORITY_KEY_FILE: /run/secrets/agent-update-authority-key
-      VONK_ADMIN_GRANT_PUBLIC_KEY_FILE: /run/secrets/admin-grant-public-key
-      VONK_AGENT_TUF_BOOTSTRAP_ROOT_FILE: /run/secrets/agent-tuf-bootstrap-root
+      VONK_AGENT_UPDATE_AUTHORITY_KEY_FILE: /run/vonk-normalized-secrets/agent-update-authority-key
+      VONK_ADMIN_GRANT_PUBLIC_KEY_FILE: /run/vonk-normalized-secrets/admin-grant-public-key
+      VONK_AGENT_TUF_BOOTSTRAP_ROOT_FILE: /run/vonk-normalized-secrets/agent-tuf-bootstrap-root
       VONK_AGENT_TUF_METADATA_ROOT: /publication/metadata
       VONK_AGENT_TUF_TARGET_ROOT: /publication/targets
       VONK_AGENT_TUF_VERIFIED_METADATA_ROOT: /verifier/metadata
@@ -220,11 +218,12 @@ services:
       VONK_PLATFORM_VERSION: ${VONK_PLATFORM_VERSION:?set released platform version}
       VONK_PLATFORM_RELEASE_DIGEST: ${VONK_PLATFORM_RELEASE_DIGEST:?set released platform digest}
       VONK_PLATFORM_BUILD_DIGEST: ${VONK_PLATFORM_BUILD_DIGEST:?set released build digest}
-    secrets: [agent-update-authority-key, admin-grant-public-key, agent-tuf-bootstrap-root]
+    secrets: []
     volumes:
       - agent-tuf-publication:/publication:ro
       - signer-tuf-verifier:/verifier
       - update-signer-socket:/run/vonk-signer
+      - normalized-private-keys:/run/vonk-normalized-secrets:ro
       - type: bind
         source: ${CONTROL_IDENTITY_PATH:?set control identity directory path}
         target: /control-identity
@@ -322,8 +321,8 @@ services:
     logging: *bounded-logging
     read_only: true
     ports:
-      - target: ${VONK_BACKEND_PORT:-8443}
-        published: "${VONK_BACKEND_PORT:-8443}"
+      - target: 8443
+        published: 8443
         host_ip: ${NAS_LAN_IP:?set reserved NAS LAN IP}
         protocol: tcp
     volumes:
@@ -338,7 +337,7 @@ services:
       VONK_AGENT_ENROLL_HOSTNAME: ${VONK_AGENT_ENROLL_HOSTNAME:?set Caddy enrollment hostname}
       VONK_AGENT_HOSTNAME: ${VONK_AGENT_HOSTNAME:?set Caddy agent hostname}
       VONK_REGISTRY_HOSTNAME: ${VONK_REGISTRY_HOSTNAME:?set Caddy registry hostname}
-      VONK_BACKEND_PORT: ${VONK_BACKEND_PORT:-8443}
+      VONK_BACKEND_PORT: "8443"
     secrets: [agent-client-ca, agent-proxy-auth]
     networks: [ingress, agent-proxy, registry-edge, tailnet-web-edge, hermes-inference, litellm-edge]
     depends_on:
