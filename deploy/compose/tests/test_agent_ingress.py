@@ -56,6 +56,7 @@ def _environment() -> dict[str, str]:
         "LITELLM_UPSTREAM_KEY_FILE": "/dev/null",
         "LITELLM_DATABASE_URL_FILE": "/dev/null",
         "AGENT_CLIENT_CA_FILE": "/dev/null",
+        "CONTROLLER_CA_FILE": "/dev/null",
         "AGENT_INTERMEDIATE_CERTIFICATE_FILE": "/dev/null",
         "AGENT_PROXY_AUTH_FILE": "/dev/null",
         "AGENT_CA_CREDENTIAL_FILE": "/dev/null",
@@ -303,6 +304,7 @@ def _settings_result(rendered: dict, tmp_path: Path) -> subprocess.CompletedProc
         "VONK_AGENT_CA_CREDENTIAL_FILE": "test-provider-credential\n",
         "VONK_AGENT_CA_PROVISIONER_PUBLIC_JWK_FILE": "test-provider-public-jwk\n",
         "VONK_AGENT_CA_ROOT_FILE": "test-root-certificate\n",
+        "VONK_CONTROLLER_CA_FILE": "test-controller-ca\n",
         "VONK_AGENT_INTERMEDIATE_KEY_FILE": "test-builtin-key\n",
         "VONK_AGENT_PROXY_AUTH_FILE": "A" * 30 + "_-\r\n",
         "VONK_WORKER_API_TOKEN_FILE": "W" * 32 + "\n",
@@ -379,6 +381,24 @@ def test_development_image_compose_enables_complete_builtin_agent_settings(
         "condition": "service_healthy",
         "required": True,
     }
+
+
+def test_agent_bootstrap_uses_distinct_https_origins_and_public_ca_only() -> None:
+    rendered = _rendered()
+    api = rendered["services"]["control-api"]
+    environment = api["environment"]
+    api_secrets = {secret["source"] for secret in api["secrets"]}
+
+    assert environment["VONK_AGENT_CONTROLLER_ORIGIN"] == (
+        "https://agents.test.example:8443"
+    )
+    assert environment["VONK_AGENT_ENROLLMENT_ORIGIN"] == (
+        "https://enroll.test.example:8443"
+    )
+    assert environment["VONK_CONTROLLER_CA_FILE"] == "/run/secrets/controller-ca"
+    assert "controller-ca" in api_secrets
+    assert "controller-server-key" not in api_secrets
+    assert "agent-intermediate-key" not in api_secrets
 
 
 def test_development_caddy_health_listener_is_exact_and_loopback_only() -> None:

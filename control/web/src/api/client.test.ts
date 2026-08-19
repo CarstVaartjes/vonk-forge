@@ -1,11 +1,66 @@
 import {AuthenticationRequired} from "../auth";
 import {ApiClient} from "./client";
 
+async function apiErrorMessage(detail: unknown): Promise<string> {
+  vi.stubGlobal("fetch", async () => new Response(JSON.stringify({detail}), {
+    headers: {"Content-Type": "application/json"},
+    status: 422,
+  }));
+  const error = await new ApiClient().visualFleet().then(
+    () => new Error("expected the API request to fail"),
+    reason => reason as Error,
+  );
+  expect(error).toBeInstanceOf(Error);
+  return error.message;
+}
+
 afterEach(() => {
   document.cookie = "vonk_csrf=; Max-Age=0; path=/";
   document.cookie = "other_cookie=; Max-Age=0; path=/";
   document.cookie = "third_cookie=; Max-Age=0; path=/";
   vi.unstubAllGlobals();
+});
+
+it("formats FastAPI validation details with dotted locations and messages", async () => {
+  const message = await apiErrorMessage([
+    {type: "less_than_equal", loc: ["body", "ttl_seconds"], msg: "Input should be less than or equal to 900", input: 901},
+    {type: "string_type", loc: ["body", "name"], msg: "Input should be a valid string"},
+  ]);
+
+  expect(message).toContain("body.ttl_seconds: Input should be less than or equal to 900");
+  expect(message).toContain("body.name: Input should be a valid string");
+  expect(message).not.toContain("[object Object]");
+  expect(message.length).toBeLessThanOrEqual("Control API returned 422: ".length + 256);
+});
+
+it("JSON-formats bounded nested objects without stringifying them as object tags", async () => {
+  const message = await apiErrorMessage({reason: {code: "invalid", fields: ["ttl_seconds"]}});
+
+  expect(message).toContain('{"reason":{"code":"invalid","fields":["ttl_seconds"]}}');
+  expect(message).not.toContain("[object Object]");
+  expect(message.length).toBeLessThanOrEqual("Control API returned 422: ".length + 256);
+});
+
+it("preserves plain string API details", async () => {
+  const message = await apiErrorMessage("The requested fleet is not ready");
+
+  expect(message).toContain("The requested fleet is not ready");
+  expect(message).not.toContain("[object Object]");
+  expect(message.length).toBeLessThanOrEqual("Control API returned 422: ".length + 256);
+});
+
+it("omits secret-like input fields from bounded object details", async () => {
+  const message = await apiErrorMessage({
+    reason: "invalid request",
+    input: {password: "do-not-leak", token: "also-secret"},
+    nested: {input: "nested-secret", safe: true},
+    padding: "x".repeat(400),
+  });
+
+  expect(message).not.toContain("input");
+  expect(message).not.toContain("do-not-leak");
+  expect(message).not.toContain("[object Object]");
+  expect(message.length).toBeLessThanOrEqual("Control API returned 422: ".length + 256);
 });
 
 it("keeps visual Fleet snapshots separate from reconciliation evidence", async () => {

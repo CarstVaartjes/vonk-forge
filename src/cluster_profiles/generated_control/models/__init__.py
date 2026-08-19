@@ -127,6 +127,11 @@ from .projection_reason_severity import ProjectionReasonSeverity
 from .proposal_change_request import ProposalChangeRequest
 from .proposal_change_request_document import ProposalChangeRequestDocument
 from .proposal_request import ProposalRequest
+from .public_import_request import PublicImportRequest
+from .public_recipe_list_item import PublicRecipeListItem
+from .public_recipe_list_response import PublicRecipeListResponse
+from .public_recipe_preview_response import PublicRecipePreviewResponse
+from .public_recipe_preview_response_source import PublicRecipePreviewResponseSource
 from .publication_export_request import PublicationExportRequest
 from .recipe_disk_requirements import RecipeDiskRequirements
 from .recipe_fabric import RecipeFabric
@@ -354,6 +359,11 @@ __all__ = (
     "ProposalChangeRequestDocument",
     "ProposalRequest",
     "PublicationExportRequest",
+    "PublicImportRequest",
+    "PublicRecipeListItem",
+    "PublicRecipeListResponse",
+    "PublicRecipePreviewResponse",
+    "PublicRecipePreviewResponseSource",
     "RecipeDiskRequirements",
     "RecipeFabric",
     "RecipeFabricConnectivity",

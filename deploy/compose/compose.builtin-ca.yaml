@@ -7,6 +7,7 @@ services:
       VONK_AGENT_CLIENT_CA_FILE: /run/secrets/agent-client-ca
       VONK_AGENT_INTERMEDIATE_CERTIFICATE_FILE: /run/secrets/agent-intermediate-certificate
       VONK_AGENT_INTERMEDIATE_KEY_FILE: /run/secrets/agent-intermediate-key
+      VONK_CONTROLLER_CA_FILE: /run/secrets/controller-ca
       VONK_AGENT_PROXY_AUTH_FILE: /run/secrets/agent-proxy-auth
     secrets: [agent-intermediate-key]
 

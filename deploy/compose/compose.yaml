@@ -38,6 +38,9 @@ x-api-environment: &api-environment
   VONK_AGENT_ARTIFACT_ROOT: /state/agent-artifacts
   VONK_AGENT_TUF_METADATA_ROOT: /agent-tuf/metadata
   VONK_AGENT_TUF_TARGET_ROOT: /agent-tuf/targets
+  VONK_AGENT_CONTROLLER_ORIGIN: https://${VONK_AGENT_HOSTNAME:?set Caddy agent hostname}:${VONK_BACKEND_PORT:-8443}
+  VONK_AGENT_ENROLLMENT_ORIGIN: https://${VONK_AGENT_ENROLL_HOSTNAME:?set Caddy enrollment hostname}:${VONK_BACKEND_PORT:-8443}
+  VONK_CONTROLLER_CA_FILE: /run/secrets/controller-ca
   VONK_WORKLOAD_TUF_METADATA_ROOT: /workload-tuf/metadata
   VONK_WORKLOAD_TUF_TARGET_ROOT: /workload-tuf/targets
   VONK_WORKLOAD_SIGNER_SOCKET: /run/vonk-workload-signer/signer.sock
@@ -117,7 +120,7 @@ services:
     security_opt: [no-new-privileges:true]
     environment:
       <<: *api-environment
-    secrets: [database-url, token-signing-key, metrics-token, git-signing-key, agent-client-ca, agent-intermediate-certificate, agent-proxy-auth, worker-api-token, package-helper-grant-private-key, package-helper-receipt-private-key, host-runtime-grant-private-key]
+    secrets: [database-url, token-signing-key, metrics-token, git-signing-key, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, worker-api-token, package-helper-grant-private-key, package-helper-receipt-private-key, host-runtime-grant-private-key]
     volumes:
       - ${REPOSITORY_PATH:?set repository path}:/repository
       - control-state:/state
@@ -403,6 +406,8 @@ secrets:
     file: "${AGENT_CLIENT_CA_FILE:?set agent client CA certificate secret file}"
   agent-intermediate-certificate:
     file: "${AGENT_INTERMEDIATE_CERTIFICATE_FILE:?set agent intermediate certificate secret file}"
+  controller-ca:
+    file: "${CONTROLLER_CA_FILE:?set public controller CA certificate secret file}"
   agent-proxy-auth:
     file: "${AGENT_PROXY_AUTH_FILE:?set agent proxy authentication secret file}"
   worker-api-token:

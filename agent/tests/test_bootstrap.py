@@ -33,6 +33,25 @@ def test_parse_rejects_duplicate_explicit_arguments(tmp_path: Path) -> None:
         parse_bootstrap_args(args(tmp_path) + ["--token", "B" * 43])
 
 
+def test_parse_uses_canonical_path_defaults() -> None:
+    parsed = parse_bootstrap_args(
+        [
+            "--token",
+            "A" * 43,
+            "--controller-endpoint",
+            "https://controller.example",
+            "--enrollment-endpoint",
+            "https://enroll.example",
+            "--ca-fingerprint",
+            FINGERPRINT,
+        ]
+    )
+
+    assert parsed.config_path == Path("/etc/vonk-forge-agent/config.json")
+    assert parsed.state_root == Path("/var/lib/vonk-forge-agent")
+    assert parsed.ca_path == Path("/etc/vonk-forge-agent/controller-ca.pem")
+
+
 def test_parse_rejects_invalid_fingerprint_and_unsafe_paths(tmp_path: Path) -> None:
     with pytest.raises(BootstrapError, match="fingerprint"):
         parse_bootstrap_args([*args(tmp_path)[:-8], "--ca-fingerprint", "not-a-digest"] + args(tmp_path)[-6:])

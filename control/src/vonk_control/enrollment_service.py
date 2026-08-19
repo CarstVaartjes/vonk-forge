@@ -14,8 +14,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
 from .auth import require_capability
-
-_MAX_TTL_SECONDS = 600
+from .enrollment import MAX_ENROLLMENT_GRANT_TTL_SECONDS
 
 
 @dataclass(frozen=True)
@@ -25,7 +24,7 @@ class GrantRequest:
     controller_endpoint: str
     enrollment_endpoint: str
     ca_fingerprint: str
-    ttl_seconds: int = 600
+    ttl_seconds: int = MAX_ENROLLMENT_GRANT_TTL_SECONDS
     metadata: Mapping[str, object] | None = None
 
 
@@ -67,8 +66,11 @@ class EnrollmentGrantService:
         require_capability(request.actor, "fleet:enroll")
         if not request.node_id or not request.controller_endpoint or not request.enrollment_endpoint:
             raise EnrollmentGrantError("grant identity and endpoints are required")
-        if not 0 < request.ttl_seconds <= _MAX_TTL_SECONDS:
-            raise EnrollmentGrantError("grant TTL must be between one and 600 seconds")
+        if not 0 < request.ttl_seconds <= MAX_ENROLLMENT_GRANT_TTL_SECONDS:
+            raise EnrollmentGrantError(
+                "grant TTL must be between one and "
+                f"{MAX_ENROLLMENT_GRANT_TTL_SECONDS} seconds"
+            )
         token_bytes = self._token_factory()
         if len(token_bytes) < 32:
             raise EnrollmentGrantError("token generator returned insufficient entropy")

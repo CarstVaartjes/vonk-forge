@@ -120,6 +120,12 @@ export type GlobalRecipeRevision = {
   publisher: string; slug: string; recipe_id: string; revision_number: number; revision_id: string;
   content_sha256: string; published_at: string; document: Record<string, unknown>;
 };
+export type PublicRecipe = {
+  publisher: string; slug: string; title: string; description: string; tags: string[];
+  uri: string; content_sha256: string;
+};
+export type PublicRecipeList = {repository: string; commit: string; recipes: PublicRecipe[]};
+export type PublicRecipePreview = PublicRecipe & {source: "global" | "recipe_library"};
 export interface CatalogApi {
   catalogRecipes(cursor?: string): Promise<CatalogRecipeList>;
   catalogRecipe(recipeId: string): Promise<CatalogRecipeRevision>;
@@ -129,6 +135,9 @@ export interface CatalogApi {
   forkCatalogRecipe(recipeId: string, revision: number, slug: string): Promise<CatalogRecipeRevision>;
   previewGlobalRecipe(uri: string): Promise<GlobalRecipeRevision>;
   importGlobalRecipe(uri: string, expectedContentSha256: string): Promise<CatalogRecipeRevision>;
+  listPublicRecipes(): Promise<PublicRecipeList>;
+  previewPublicRecipe(uri: string): Promise<PublicRecipePreview>;
+  importPublicRecipe(uri: string, expectedContentSha256: string): Promise<CatalogRecipeRevision>;
   attachPublicationReport(recipeId: string, report: Record<string, unknown>): Promise<void>;
   publicationExport(recipeId: string, publisher: string): Promise<Record<string, unknown>>;
   uploadSourceBundle(sha256: string, archive: Uint8Array): Promise<SourceBundleReceipt>;

@@ -32,7 +32,7 @@ from .pki import CertificateAuthority, IssuedCertificate
 
 _NODE_ID = re.compile(r"spk_[0-9a-f]{32}")
 _TOKEN = re.compile(r"[A-Za-z0-9_-]{43}")
-_MAX_GRANT_TTL_SECONDS = 600
+MAX_ENROLLMENT_GRANT_TTL_SECONDS = 900
 _MAX_CSR_BYTES = 16 * 1024
 _EVIDENCE_FIELDS = (
     "node_id",
@@ -136,8 +136,11 @@ class EnrollmentService:
         if node_id is not None:
             _validate_node_id(node_id)
         _validate_actor(actor)
-        if not 0 < ttl_seconds <= _MAX_GRANT_TTL_SECONDS:
-            raise ValueError("enrollment grant TTL must be between one and 600 seconds")
+        if not 0 < ttl_seconds <= MAX_ENROLLMENT_GRANT_TTL_SECONDS:
+            raise ValueError(
+                "enrollment grant TTL must be between one and "
+                f"{MAX_ENROLLMENT_GRANT_TTL_SECONDS} seconds"
+            )
         now = _utc(self._clock())
         token_bytes = secrets.token_bytes(32)
         token = base64.urlsafe_b64encode(token_bytes).rstrip(b"=").decode("ascii")

@@ -8,6 +8,7 @@ import {usePoliteAnnouncement} from "../hooks/use-polite-announcement";
 import {formatBytes, summarizeFleet} from "../lib/fleet";
 
 const DISMISSED_SKEW_KEY = "vonk-forge.dismissed-update-skew";
+export const ENROLLMENT_GRANT_TTL_SECONDS = 900;
 
 function bounded(value: string, maximum = 256): string {
   return value.length > maximum ? `${value.slice(0, maximum)}…` : value;
@@ -23,6 +24,20 @@ function previouslyDismissed(digest: string): boolean {
 
 function countLabel(count: number, singular: string): string {
   return `${count} ${singular}${count === 1 ? "" : "s"}`;
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\"'\"'")}'`;
+}
+
+function bootstrapCommand(grant: EnrollmentGrantResponse): string {
+  return [
+    "vonk-agent bootstrap \\",
+    "  --token " + shellQuote(grant.token) + " \\",
+    "  --controller-endpoint " + shellQuote(grant.controller_endpoint) + " \\",
+    "  --enrollment-endpoint " + shellQuote(grant.enrollment_endpoint) + " \\",
+    `  --ca-fingerprint ${shellQuote(grant.ca_fingerprint)}`,
+  ].join("\n");
 }
 
 function connectionPresentation(connection: ReturnType<typeof useFleetStream>["connection"]) {
@@ -43,7 +58,7 @@ function SparkOnboarding({api, onClose}: {api: ControlApi; onClose(): void}) {
     setCreating(true);
     setError("");
     try {
-      setGrant(await api.createEnrollmentGrant(900));
+      setGrant(await api.createEnrollmentGrant(ENROLLMENT_GRANT_TTL_SECONDS));
     } catch (value) {
       setError(value instanceof Error ? value.message : "The enrollment grant could not be created.");
     } finally {
@@ -63,7 +78,7 @@ function SparkOnboarding({api, onClose}: {api: ControlApi; onClose(): void}) {
         {grant && <>
           <div className="grant-success"><span className="success-mark" aria-hidden="true">✓</span><div><strong>One-time command ready</strong><span>Expires {grant.expires_at}. It will not be shown again after closing.</span></div></div>
           <p>Run this command on the Spark, then approve the enrollment from the Fleet queue.</p>
-          <code className="onboarding-command">vonk-agent bootstrap --token {grant.token}</code>
+          <code className="onboarding-command">{bootstrapCommand(grant)}</code>
           <dl className="grant-facts"><div><dt>Controller</dt><dd>{grant.controller_endpoint}</dd></div><div><dt>Enrollment</dt><dd>{grant.enrollment_endpoint}</dd></div><div><dt>CA fingerprint</dt><dd><code>{grant.ca_fingerprint}</code></dd></div></dl>
         </>}
       </div>

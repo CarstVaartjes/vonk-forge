@@ -48,10 +48,12 @@ from .auth import (
 from .enrollment import (
     EnrollmentDenied,
     EnrollmentService,
+    MAX_ENROLLMENT_GRANT_TTL_SECONDS,
     PendingEnrollment,
     RemoteRevocationUncertain,
     RenewalInProgress,
 )
+from .enrollment_bootstrap import EnrollmentBootstrapConfig
 from .host_helper_authority import (
     HostHelperAuthorityError,
     HostRuntimeAuthorityService,
@@ -151,6 +153,7 @@ class AgentApiServices:
     workload_helper_authority: WorkloadHelperAuthorityService | None = None
     host_runtime_authority: HostRuntimeAuthorityService | None = None
     fabric_policy: ManagementAddressPolicy | None = None
+    bootstrap: EnrollmentBootstrapConfig | None = None
 
 
 class EnrollmentRateLimiter:
@@ -191,7 +194,7 @@ class EnrollmentRateLimiter:
 
 class GrantRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    ttl_seconds: int = Field(ge=1, le=600)
+    ttl_seconds: int = Field(ge=1, le=MAX_ENROLLMENT_GRANT_TTL_SECONDS)
 
 class EnrollmentSubmitRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -1137,6 +1140,11 @@ def install_agent_routes(
     ) -> EnrollmentGrantResponse:
         _require_administrator(authenticated, "/api/v1/agents/enrollments/grants")
         required = _require_services(services)
+        if required.bootstrap is None:
+            raise HTTPException(
+                status_code=503,
+                detail="agent enrollment bootstrap is unavailable",
+            )
         try:
             grant = required.enrollment.create(None, authenticated.subject, body.ttl_seconds)
         except (TypeError, ValueError) as error:
@@ -1155,9 +1163,9 @@ def install_agent_routes(
             expires_at=_now(grant.expires_at).isoformat(),
             purpose=grant.purpose,
             token=grant.token,
-            controller_endpoint="https://vonkforge.ai",
-            enrollment_endpoint="https://vonkforge.ai",
-            ca_fingerprint="0" * 64,
+            controller_endpoint=required.bootstrap.controller_endpoint,
+            enrollment_endpoint=required.bootstrap.enrollment_endpoint,
+            ca_fingerprint=required.bootstrap.ca_fingerprint,
         )
 
     @human.get(

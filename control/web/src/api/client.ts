@@ -23,6 +23,8 @@ import type {
   CatalogRecipeList,
   CatalogRecipeRevision,
   GlobalRecipeRevision,
+  PublicRecipeList,
+  PublicRecipePreview,
   WorkloadRunApplied,
   WorkloadRunPreview,
   TelemetryHistory,
@@ -58,10 +60,45 @@ export class ApiError extends Error {
   }
 }
 
+const API_DETAIL_LIMIT = 256;
+
+function formatValidationDetail(detail: unknown): string | undefined {
+  if (typeof detail !== "object" || detail === null || Array.isArray(detail)) return undefined;
+  const record = detail as Record<string, unknown>;
+  const location = Array.isArray(record.loc)
+    ? record.loc
+      .filter((part): part is string | number => typeof part === "string" || typeof part === "number")
+      .map(String)
+      .join(".")
+    : "";
+  const message = typeof record.msg === "string" && record.msg.length > 0
+    ? record.msg
+    : typeof record.type === "string" && record.type.length > 0
+      ? record.type
+      : "";
+  if (!location && !message) return undefined;
+  return [location, message].filter(Boolean).join(": ");
+}
+
+function formatApiDetail(detail: unknown): string {
+  if (typeof detail === "string") return detail.slice(0, API_DETAIL_LIMIT);
+  if (Array.isArray(detail)) {
+    const validationDetails = detail.map(formatValidationDetail).filter((value): value is string => value !== undefined);
+    if (validationDetails.length > 0) return validationDetails.join("\n").slice(0, API_DETAIL_LIMIT);
+  }
+  try {
+    const formatted = JSON.stringify(detail, (key, value) => key === "input" ? undefined : value);
+    if (typeof formatted === "string") return formatted.slice(0, API_DETAIL_LIMIT);
+  } catch {
+    // Fall through to a stable message for values JSON cannot represent.
+  }
+  return "request failed";
+}
+
 function resultData<T>(result: {data?: T; error?: unknown; response: Response}): T {
   if (result.data === undefined) {
     const detail = typeof result.error === "object" && result.error !== null && "detail" in result.error
-      ? String(result.error.detail).slice(0, 256)
+      ? formatApiDetail(result.error.detail)
       : "request failed";
     throw new Error(`Control API returned ${result.response.status}: ${detail}`);
   }
@@ -200,6 +237,18 @@ export class ApiClient implements ControlApi {
 
   importGlobalRecipe(uri: string, expectedContentSha256: string): Promise<CatalogRecipeRevision> {
     return this.request("/api/v1/catalog/imports/global", {method: "POST", body: JSON.stringify({uri, expected_content_sha256: expectedContentSha256})});
+  }
+
+  listPublicRecipes(): Promise<PublicRecipeList> {
+    return this.request("/api/v1/catalog/public-recipes");
+  }
+
+  previewPublicRecipe(uri: string): Promise<PublicRecipePreview> {
+    return this.request("/api/v1/catalog/imports/public/preview", {method: "POST", body: JSON.stringify({uri})});
+  }
+
+  importPublicRecipe(uri: string, expectedContentSha256: string): Promise<CatalogRecipeRevision> {
+    return this.request("/api/v1/catalog/imports/public", {method: "POST", body: JSON.stringify({uri, expected_content_sha256: expectedContentSha256})});
   }
 
   async attachPublicationReport(recipeId: string, report: Record<string, unknown>): Promise<void> {

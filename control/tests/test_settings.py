@@ -450,6 +450,60 @@ def test_development_defaults_agent_runtime_to_disabled(monkeypatch) -> None:
     assert settings.worker_api_token == b""
 
 
+def test_enabled_agent_runtime_loads_distinct_origins_and_public_controller_ca_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = _configure_agent_authority(
+        tmp_path,
+        monkeypatch,
+        mode="development",
+        provider="builtin",
+    )
+    controller_ca = tmp_path / "controller-ca.pem"
+    controller_ca.write_text("public controller CA\n", encoding="utf-8")
+    monkeypatch.setenv("VONK_AGENT_RUNTIME", "enabled")
+    monkeypatch.setenv("VONK_AGENT_CA_PROVIDER", "builtin")
+    monkeypatch.setenv("VONK_AGENT_BUILTIN_CA_BOOTSTRAP", "1")
+    monkeypatch.setenv(
+        "VONK_AGENT_CONTROLLER_ORIGIN", "https://agents.example.test:8443"
+    )
+    monkeypatch.setenv(
+        "VONK_AGENT_ENROLLMENT_ORIGIN", "https://enroll.example.test:8443"
+    )
+    monkeypatch.setenv("VONK_CONTROLLER_CA_FILE", str(controller_ca))
+
+    settings = Settings.from_env_and_secrets()
+
+    assert settings.agent_controller_origin == "https://agents.example.test:8443"
+    assert settings.agent_enrollment_origin == "https://enroll.example.test:8443"
+    assert settings.controller_ca_path == controller_ca
+    assert paths["VONK_AGENT_INTERMEDIATE_KEY_FILE"].is_file()
+
+
+def test_enabled_agent_runtime_rejects_non_https_controller_origin(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_agent_authority(
+        tmp_path,
+        monkeypatch,
+        mode="development",
+        provider="builtin",
+    )
+    controller_ca = tmp_path / "controller-ca.pem"
+    controller_ca.write_text("public controller CA\n", encoding="utf-8")
+    monkeypatch.setenv("VONK_AGENT_RUNTIME", "enabled")
+    monkeypatch.setenv("VONK_AGENT_CA_PROVIDER", "builtin")
+    monkeypatch.setenv("VONK_AGENT_BUILTIN_CA_BOOTSTRAP", "1")
+    monkeypatch.setenv("VONK_AGENT_CONTROLLER_ORIGIN", "http://agents.example.test")
+    monkeypatch.setenv("VONK_AGENT_ENROLLMENT_ORIGIN", "https://enroll.example.test")
+    monkeypatch.setenv("VONK_CONTROLLER_CA_FILE", str(controller_ca))
+
+    with pytest.raises(SettingsError, match="fixed HTTPS origin"):
+        Settings.from_env_and_secrets()
+
+
 def _configure_agent_authority(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -469,6 +523,7 @@ def _configure_agent_authority(
         "VONK_AGENT_CA_CREDENTIAL_FILE": "provider-credential",
         "VONK_AGENT_CA_PROVISIONER_PUBLIC_JWK_FILE": "provider-public-jwk",
         "VONK_AGENT_CA_ROOT_FILE": "root-certificate",
+        "VONK_CONTROLLER_CA_FILE": "public-controller-ca",
         "VONK_AGENT_PROXY_AUTH_FILE": "p" * 32,
         "VONK_WORKER_API_TOKEN_FILE": "w" * 32,
     }
@@ -479,6 +534,15 @@ def _configure_agent_authority(
         paths[name] = path
     monkeypatch.setenv("VONK_DEPLOYMENT_MODE", mode)
     monkeypatch.setenv("VONK_MANAGEMENT_CIDRS", "10.0.0.0/24")
+    monkeypatch.setenv(
+        "VONK_AGENT_CONTROLLER_ORIGIN", "https://agents.example.test:8443"
+    )
+    monkeypatch.setenv(
+        "VONK_AGENT_ENROLLMENT_ORIGIN", "https://enroll.example.test:8443"
+    )
+    monkeypatch.setenv(
+        "VONK_CONTROLLER_CA_FILE", str(paths["VONK_CONTROLLER_CA_FILE"])
+    )
     if mode == "production":
         for name in (
             "VONK_DATABASE_URL_FILE",
@@ -673,6 +737,21 @@ def test_compose_is_platform_neutral_and_only_caddy_publishes_ports() -> None:
     assert "postgres:" in text and "caddy:" in text
 
 
+def _configure_enrollment_bootstrap_environment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller_ca = tmp_path / "controller-ca.pem"
+    controller_ca.write_text("public controller CA\n", encoding="utf-8")
+    monkeypatch.setenv(
+        "VONK_AGENT_CONTROLLER_ORIGIN", "https://agents.example.test:8443"
+    )
+    monkeypatch.setenv(
+        "VONK_AGENT_ENROLLMENT_ORIGIN", "https://enroll.example.test:8443"
+    )
+    monkeypatch.setenv("VONK_CONTROLLER_CA_FILE", str(controller_ca))
+
+
 def test_production_agent_boundary_requires_secret_files_and_step_ca(tmp_path: Path, monkeypatch) -> None:
     values = {
         "VONK_DATABASE_URL_FILE": "postgresql://db/control",
@@ -699,6 +778,7 @@ def test_production_agent_boundary_requires_secret_files_and_step_ca(tmp_path: P
     monkeypatch.setenv("VONK_AGENT_CA_URL", "https://step-ca:9000")
     monkeypatch.setenv("VONK_AGENT_CA_PROVISIONER_NAME", "vonk-forge-agent")
     monkeypatch.setenv("VONK_AGENT_CA_PROVISIONER_KID", "test-kid")
+    _configure_enrollment_bootstrap_environment(tmp_path, monkeypatch)
 
     settings = Settings.from_env_and_secrets()
 
@@ -744,6 +824,7 @@ def test_production_rejects_noncanonical_agent_proxy_auth(
     monkeypatch.setenv("VONK_AGENT_CA_URL", "https://step-ca:9000")
     monkeypatch.setenv("VONK_AGENT_CA_PROVISIONER_NAME", "vonk-forge-agent")
     monkeypatch.setenv("VONK_AGENT_CA_PROVISIONER_KID", "test-kid")
+    _configure_enrollment_bootstrap_environment(tmp_path, monkeypatch)
     for name, value in values.items():
         path = tmp_path / name
         path.write_text(value)
@@ -808,6 +889,7 @@ def test_production_builtin_bootstrap_requires_and_loads_the_mounted_intermediat
     monkeypatch.setenv("VONK_MANAGEMENT_CIDRS", "10.0.0.0/24")
     monkeypatch.setenv("VONK_AGENT_CA_PROVIDER", "builtin")
     monkeypatch.setenv("VONK_AGENT_BUILTIN_CA_BOOTSTRAP", "1")
+    _configure_enrollment_bootstrap_environment(tmp_path, monkeypatch)
     for name, value in values.items():
         path = tmp_path / name
         path.write_text(value)
@@ -873,6 +955,7 @@ def test_builtin_bootstrap_key_must_be_a_regular_non_symlink_file(tmp_path: Path
     monkeypatch.setenv("VONK_MANAGEMENT_CIDRS", "10.0.0.0/24")
     monkeypatch.setenv("VONK_AGENT_CA_PROVIDER", "builtin")
     monkeypatch.setenv("VONK_AGENT_BUILTIN_CA_BOOTSTRAP", "1")
+    _configure_enrollment_bootstrap_environment(tmp_path, monkeypatch)
     for name, value in values.items():
         path = tmp_path / name
         path.write_text(value)

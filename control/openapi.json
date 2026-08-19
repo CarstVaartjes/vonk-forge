@@ -1218,7 +1218,7 @@
         "additionalProperties": false,
         "properties": {
           "ttl_seconds": {
-            "maximum": 600.0,
+            "maximum": 900.0,
             "minimum": 1.0,
             "title": "Ttl Seconds",
             "type": "integer"
@@ -4142,6 +4142,182 @@
           "changes"
         ],
         "title": "ProposalRequest",
+        "type": "object"
+      },
+      "PublicImportRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_content_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Expected Content Sha256",
+            "type": "string"
+          },
+          "uri": {
+            "maxLength": 256,
+            "minLength": 100,
+            "title": "Uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "uri",
+          "expected_content_sha256"
+        ],
+        "title": "PublicImportRequest",
+        "type": "object"
+      },
+      "PublicRecipeListItem": {
+        "additionalProperties": false,
+        "properties": {
+          "content_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Content Sha256",
+            "type": "string"
+          },
+          "description": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "publisher": {
+            "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+            "title": "Publisher",
+            "type": "string"
+          },
+          "slug": {
+            "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+            "title": "Slug",
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Tags",
+            "type": "array"
+          },
+          "title": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          },
+          "uri": {
+            "maxLength": 256,
+            "minLength": 100,
+            "title": "Uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "publisher",
+          "slug",
+          "title",
+          "description",
+          "tags",
+          "uri",
+          "content_sha256"
+        ],
+        "title": "PublicRecipeListItem",
+        "type": "object"
+      },
+      "PublicRecipeListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "commit": {
+            "pattern": "^[0-9a-f]{40}$",
+            "title": "Commit",
+            "type": "string"
+          },
+          "recipes": {
+            "items": {
+              "$ref": "#/components/schemas/PublicRecipeListItem"
+            },
+            "maxItems": 100,
+            "title": "Recipes",
+            "type": "array"
+          },
+          "repository": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Repository",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repository",
+          "commit",
+          "recipes"
+        ],
+        "title": "PublicRecipeListResponse",
+        "type": "object"
+      },
+      "PublicRecipePreviewResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "content_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Content Sha256",
+            "type": "string"
+          },
+          "description": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "publisher": {
+            "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+            "title": "Publisher",
+            "type": "string"
+          },
+          "slug": {
+            "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+            "title": "Slug",
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "global",
+              "recipe_library"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Tags",
+            "type": "array"
+          },
+          "title": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          },
+          "uri": {
+            "maxLength": 256,
+            "minLength": 100,
+            "title": "Uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "publisher",
+          "slug",
+          "title",
+          "description",
+          "tags",
+          "uri",
+          "content_sha256",
+          "source"
+        ],
+        "title": "PublicRecipePreviewResponse",
         "type": "object"
       },
       "PublicationExportRequest": {
@@ -8679,6 +8855,92 @@
         "summary": "Preview Global Import"
       }
     },
+    "/api/v1/catalog/imports/public": {
+      "post": {
+        "operationId": "importPublicRecipe",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicImportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecipeRevisionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Import Public Recipe"
+      }
+    },
+    "/api/v1/catalog/imports/public/preview": {
+      "post": {
+        "operationId": "previewPublicRecipeImport",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GlobalImportPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicRecipePreviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Preview Public Import"
+      }
+    },
     "/api/v1/catalog/imports/recipe-library": {
       "post": {
         "operationId": "importRecipeLibrary",
@@ -8802,6 +9064,29 @@
           }
         ],
         "summary": "Preview"
+      }
+    },
+    "/api/v1/catalog/public-recipes": {
+      "get": {
+        "operationId": "listPublicRecipes",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicRecipeListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "List Public Recipes"
       }
     },
     "/api/v1/catalog/recipes": {
