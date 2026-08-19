@@ -175,6 +175,12 @@ def test_litellm_has_no_network_path_from_control_services() -> None:
         )
 
 
+def test_litellm_runs_the_bind_mounted_entrypoint_through_shell() -> None:
+    litellm = _rendered()["services"]["litellm"]
+
+    assert litellm["entrypoint"] == ["/bin/sh", "/app/vonk-entrypoint"]
+
+
 def test_worker_has_a_distinct_minimal_image_and_runtime_boundary() -> None:
     services = _rendered()["services"]
     api = services["control-api"]
