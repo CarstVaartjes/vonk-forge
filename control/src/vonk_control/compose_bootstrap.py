@@ -6,7 +6,23 @@ import os
 import time
 from pathlib import Path
 
-from .runtime_init import install_admin_grant_key
+from alembic import command
+from alembic.config import Config
+
+from .runtime_init import install_admin_grant_key, stage_compose_secrets
+
+
+def migrate_database(
+    database_url_path: Path = Path("/normalized/database-url"),
+    config_path: Path = Path("/srv/vonk-control/alembic.ini"),
+) -> None:
+    database_url = database_url_path.read_text(encoding="utf-8").strip()
+    if not database_url:
+        raise RuntimeError("database URL secret is empty")
+    config = Config(str(config_path))
+    # ConfigParser treats percent signs as interpolation markers.
+    config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
+    command.upgrade(config, "head")
 
 
 def _directory(path: str, uid: int, gid: int, mode: int) -> Path:
@@ -18,6 +34,8 @@ def _directory(path: str, uid: int, gid: int, mode: int) -> Path:
 
 
 def prepare() -> None:
+    stage_compose_secrets()
+    migrate_database()
     routes = _directory("/routes", 10001, 10001, 0o750)
     _directory(str(routes / "generations"), 10001, 10001, 0o750)
     _directory("/supervisor", 10002, 10001, 0o750)

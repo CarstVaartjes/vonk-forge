@@ -36,7 +36,7 @@ def test_render_inlines_compose_includes(tmp_path: Path) -> None:
     assert "hermes-agent" in document["services"]
     assert document["services"]["hermes-agent"]["profiles"] == ["hermes"]
     assert text.count(API_IMAGE) >= 2
-    assert text.count(WORKER_IMAGE) >= 6
+    assert text.count(WORKER_IMAGE) >= 5
     assert (tmp_path / "Caddyfile").is_file()
     assert (tmp_path / "tailscale/configure.sh").is_file()
     assert "./tailscale/configure.sh:/usr/local/bin/configure-tailscale:ro" in text
@@ -46,7 +46,7 @@ def test_render_inlines_compose_includes(tmp_path: Path) -> None:
     assert not (tmp_path / "trust").exists()
 
 
-def test_render_accepts_development_template_and_inlines_builtin_ca(tmp_path: Path) -> None:
+def test_render_accepts_development_template_and_inlines_step_ca(tmp_path: Path) -> None:
     output = tmp_path / "docker-compose.yaml"
 
     _renderer().render(
@@ -54,10 +54,8 @@ def test_render_accepts_development_template_and_inlines_builtin_ca(tmp_path: Pa
     )
 
     document = yaml.safe_load(output.read_text(encoding="utf-8"))
-    assert document["services"]["control-api"]["environment"]["VONK_AGENT_CA_PROVIDER"] == "builtin"
-    assert document["services"]["control-api"]["environment"]["VONK_AGENT_INTERMEDIATE_KEY_FILE"] == (
-        "/run/vonk-normalized-secrets/agent-intermediate-key"
-    )
-    init_secrets = document["services"]["control-secret-init"]["secrets"]
-    assert "admin-grant-private-key" in init_secrets
-    assert "agent-intermediate-key" in init_secrets
+    assert document["services"]["control-api"]["environment"]["VONK_AGENT_CA_PROVIDER"] == "step-ca"
+    assert "step-ca" in document["services"]
+    bootstrap_secrets = document["services"]["control-bootstrap"]["secrets"]
+    assert "admin-grant-private-key" in bootstrap_secrets
+    assert "step-ca-password" in bootstrap_secrets

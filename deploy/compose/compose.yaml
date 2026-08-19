@@ -62,28 +62,12 @@ x-worker-environment: &worker-environment
   VONK_CONTROL_PROCESS_IMAGE: ${CONTROL_WORKER_IMAGE:?set a digest-pinned control-worker image}
 
 services:
-  control-secret-init:
-    image: ${CONTROL_WORKER_IMAGE:?set a digest-pinned control-worker image}
-    restart: "no"
-    logging: *bounded-logging
-    user: "0:0"
-    read_only: true
-    network_mode: none
-    cap_drop: [ALL]
-    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER]
-    security_opt: [no-new-privileges:true]
-    command: [python, -m, vonk_control.compose_secret_init]
-    secrets: [admin-grant-private-key, package-helper-grant-private-key, package-helper-receipt-private-key, host-runtime-grant-private-key, agent-update-authority-key, admin-grant-public-key, agent-tuf-bootstrap-root, database-url, token-signing-key, metrics-token, git-signing-key, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, worker-api-token, litellm-master-key, litellm-upstream-key, litellm-database-url, grafana-admin-password]
-    volumes:
-      - normalized-private-keys:/normalized
-
   control-bootstrap:
     image: ${CONTROL_WORKER_IMAGE:?set a digest-pinned control-worker image}
     restart: unless-stopped
     logging: *bounded-logging
     user: "0:0"
     read_only: true
-    network_mode: none
     cap_drop: [ALL]
     # The fresh Docker volume is root-owned and not writable by other users.
     # DAC_OVERRIDE lets this root bootstrap process initialize its directories
@@ -92,7 +76,8 @@ services:
     security_opt: [no-new-privileges:true]
     command: [python, -m, vonk_control.compose_bootstrap]
     depends_on:
-      control-secret-init: {condition: service_completed_successfully}
+      postgres: {condition: service_healthy}
+    secrets: [admin-grant-private-key, package-helper-grant-private-key, package-helper-receipt-private-key, host-runtime-grant-private-key, agent-update-authority-key, admin-grant-public-key, agent-tuf-bootstrap-root, database-url, token-signing-key, metrics-token, git-signing-key, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, worker-api-token, litellm-master-key, litellm-upstream-key, litellm-database-url, grafana-admin-password]
     volumes:
       - route-publications:/routes
       - litellm-supervisor-state:/supervisor
@@ -101,8 +86,9 @@ services:
       - agent-tuf-publication:/agent-publication
       - workload-tuf-publication:/workload-publication
       - api-admin-grant-runtime:/api-runtime
-      - normalized-private-keys:/normalized:ro
+      - normalized-private-keys:/normalized
     tmpfs: [/tmp]
+    networks: [data]
     healthcheck:
       test: [CMD, test, -f, /tmp/bootstrap-ready]
       interval: 5s

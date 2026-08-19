@@ -340,10 +340,10 @@ def _settings_result(rendered: dict, tmp_path: Path) -> subprocess.CompletedProc
     )
 
 
-def test_development_image_compose_enables_complete_builtin_agent_settings(
+def test_development_image_compose_enables_complete_step_ca_agent_settings(
     tmp_path: Path,
 ) -> None:
-    rendered = _rendered("compose.dev.images.yaml", "compose.builtin-ca.yaml")
+    rendered = _rendered("compose.dev.images.yaml")
     services = rendered["services"]
     api = services["control-api"]
     caddy = services["caddy"]
@@ -351,13 +351,13 @@ def test_development_image_compose_enables_complete_builtin_agent_settings(
     result = _settings_result(rendered, tmp_path / "settings")
     assert result.returncode == 0, result.stderr
     provider, proxy_auth, management, direct_fabric = result.stdout.splitlines()
-    assert provider == "builtin"
+    assert provider == "step-ca"
     assert proxy_auth == "A" * 30 + "_-"
     assert management == "10.0.0.0/24"
     assert direct_fabric == "192.168.100.0/24,192.168.101.0/24"
 
     assert api["environment"]["VONK_AGENT_RUNTIME"] == "enabled"
-    assert api["environment"]["VONK_AGENT_BUILTIN_CA_BOOTSTRAP"] == "1"
+    assert "VONK_AGENT_BUILTIN_CA_BOOTSTRAP" not in api["environment"]
     assert api["environment"]["VONK_MANAGEMENT_CIDRS"] == "10.0.0.0/24"
     assert set(caddy["networks"]) == {
         "agent-proxy",
@@ -939,11 +939,11 @@ def test_builtin_ca_override_is_explicit_and_only_it_mounts_the_builtin_signing_
     assert builtin_secrets == set()
     assert {
         secret["source"]
-        for secret in builtin["services"]["control-secret-init"]["secrets"]
+        for secret in builtin["services"]["control-bootstrap"]["secrets"]
     } >= {"agent-intermediate-key"}
     assert "agent-ca-credential" not in {
         secret["source"]
-        for secret in builtin["services"]["control-secret-init"]["secrets"]
+        for secret in builtin["services"]["control-bootstrap"]["secrets"]
     }
     assert builtin["services"]["control-api"]["environment"]["VONK_AGENT_CA_PROVIDER"] == "builtin"
     assert builtin["services"]["control-api"]["environment"]["VONK_AGENT_BUILTIN_CA_BOOTSTRAP"] == "1"
@@ -961,7 +961,7 @@ def test_provider_overlays_require_only_their_own_secrets() -> None:
     builtin = _rendered("compose.yaml", "compose.builtin-ca.yaml", environment=builtin_environment)
     assert "agent-ca-credential" not in {
         secret["source"]
-        for secret in builtin["services"]["control-secret-init"]["secrets"]
+        for secret in builtin["services"]["control-bootstrap"]["secrets"]
     }
 
     missing_step_secret = _environment()

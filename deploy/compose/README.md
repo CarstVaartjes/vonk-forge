@@ -282,14 +282,14 @@ exact `svc:hermes-dashboard` HTTPS origin supplied by Tailscale.
 
 ### PKI
 
-For the production `compose.step-ca.yaml` overlay set
+For the production-shaped `compose.step-ca.yaml` overlay set
 `AGENT_CLIENT_CA_FILE`, `AGENT_INTERMEDIATE_CERTIFICATE_FILE`,
 `AGENT_PROXY_AUTH_FILE`, `AGENT_CA_CREDENTIAL_FILE`,
 `AGENT_CA_PROVISIONER_PUBLIC_JWK_FILE`, `AGENT_CA_PROVISIONER_NAME`,
 `AGENT_CA_PROVISIONER_KID`, `STEP_CA_CONFIG_FILE`,
 `STEP_CA_ROOT_CERTIFICATE_FILE`, `STEP_CA_INTERMEDIATE_KEY_FILE`, and
-`STEP_CA_PASSWORD_FILE`. `AGENT_INTERMEDIATE_KEY_FILE` is development-only for
-the mutually exclusive built-in CA overlay.
+`STEP_CA_PASSWORD_FILE`. Development uses the same provider and Compose graph,
+with separate synthetic PKI credentials and disposable CA state.
 
 ### Required secret-file paths
 
@@ -306,8 +306,7 @@ Set every required secret path in `.env`; these are paths only, never values:
 `AGENT_CA_PROVISIONER_PUBLIC_JWK_FILE`, `STEP_CA_ROOT_CERTIFICATE_FILE`,
 `STEP_CA_INTERMEDIATE_KEY_FILE`, `STEP_CA_PASSWORD_FILE`,
 `TAILSCALE_OAUTH_CLIENT_ID_FILE`, `TAILSCALE_OAUTH_CLIENT_SECRET_FILE`, and
-`HERMES_API_KEY_FILE`. The development-only built-in overlay additionally needs
-`AGENT_INTERMEDIATE_KEY_FILE`.
+`HERMES_API_KEY_FILE`.
 
 ### Tailscale and Hermes
 
@@ -322,11 +321,13 @@ their Compose defaults unless the host is deliberately sized differently.
 ## Secret files
 
 Create regular files under `/srv/vonk-forge/secrets` and parent directories mode
-`0700`. The `control-secret-init` service reads these host-backed Compose
-secrets as root and copies them into the Docker-managed `normalized-private-keys`
-volume with the exact owner needed by each non-root consumer. This is required
-for standalone Compose on NAS platforms: file-backed Compose secrets are bind
-mounts, so Compose cannot reliably remap their UID/GID/mode at container start.
+`0700`. The long-running `control-bootstrap` service reads these host-backed
+Compose secrets as root and copies them into the Docker-managed
+`normalized-private-keys` volume with the exact owner needed by each non-root
+consumer. It also applies the Alembic database migrations before reporting
+healthy. This is required for standalone Compose on NAS platforms: file-backed
+Compose secrets are bind mounts, so Compose cannot reliably remap their
+UID/GID/mode at container start.
 Keep the source files `root:root 0400`; do not add host ACLs just to make a
 non-root service read a bind-mounted secret.
 
@@ -367,7 +368,6 @@ command line.
 | `AGENT_CA_PROVISIONER_PUBLIC_JWK_FILE` → `agent-ca-public.jwk` | API `10001:10001 0400` | Public provisioner JWK. |
 | `STEP_CA_ROOT_CERTIFICATE_FILE` → `step-ca-root-certificate` | API `10001:10001 0400`; Step CA gets `1000:1000 0400` | PEM root certificate. |
 | `STEP_CA_INTERMEDIATE_KEY_FILE`, `STEP_CA_PASSWORD_FILE` → `step-ca-intermediate-key`, `step-ca-password` | Step CA `1000:1000 0400` | Encrypted intermediate private key and its one password. |
-| Development-only `AGENT_INTERMEDIATE_KEY_FILE` → `agent-intermediate-key` | API `10001:10001 0400` | Built-in CA intermediate private key; never combine this overlay with step-ca. |
 | `TAILSCALE_OAUTH_CLIENT_ID_FILE`, `TAILSCALE_OAUTH_CLIENT_SECRET_FILE` → matching `tailscale-oauth-*` files | Tailscale startup, `root:root 0400` | One OAuth client ID or secret; neither is a GitHub credential. |
 | `HERMES_API_KEY_FILE` → `hermes-api-key` | Hermes entrypoint then managed `1100:1100`; `root:root 0400` | One 32+ character key using only `A-Z`, `a-z`, `0-9`, `_`, `.`, `~`, or `-`. |
 
@@ -420,7 +420,7 @@ public document before the worker switches signers; there is deliberately no
 unsigned remote key-rotation path. Expired, replayed, source-drifted, or retried
 receipts require a newly approved and signed operation.
 
-## Bootstrap the production step-ca overlay
+## Bootstrap the production-shaped step-ca overlay
 
 Follow [agent PKI](../../docs/runbooks/agent-pki.md) first to create the
 offline root, online intermediate, provisioner material, generated
@@ -441,9 +441,9 @@ tailnet policy, and exact Services. Do this in order:
    the candidate API in inert preselection mode, selects the generation, and
    requires generation-bound API and worker readiness.
 
-The base file deliberately selects no CA provider. Select exactly one overlay:
-`compose.step-ca.yaml` for production, or the built-in CA overlay for local
-development—never both.
+The production-shaped graph uses `compose.step-ca.yaml` for both production and
+development. Development uses synthetic PKI credentials and disposable step-ca
+state; the provider topology does not change.
 
 ## Install and first selection
 
