@@ -24,6 +24,36 @@ files. Docker named volumes are the same production volume names. Do not create
 a `dev-*` volume, synthetic secret bundle, local source checkout, alternate
 hostname, alternate port, or second PKI root.
 
+Hermes is an opt-in profile, not a prerequisite for the control plane. The
+default project starts without requiring a Hermes image, Hermes API key,
+workspace, or dashboard origin. To enable Hermes, provide these additional
+`.env` values with an immutable published Hermes image and create its
+persistent data directories:
+
+```dotenv
+HERMES_AGENT_IMAGE=ghcr.io/carstvaartjes/vonk-forge-hermes:<version>@sha256:<digest>
+HERMES_API_KEY_FILE=/srv/vonk-forge/secrets/hermes-api-key
+HERMES_DATA_ROOT=/srv/vonk-forge/hermes
+HERMES_DASHBOARD_ORIGIN=https://hermes-dashboard.<tailnet>.ts.net
+```
+
+Then start the profile alongside the normal project:
+
+```bash
+sudo install -d -m 0750 /srv/vonk-forge/hermes/{data,workspaces,cache}
+docker compose --env-file .env --profile hermes up -d --wait
+```
+
+The optional setup container is run explicitly with the `setup` profile:
+
+```bash
+docker compose --env-file .env --profile setup run --rm hermes-setup
+```
+
+Do not enable the profile with a mutable tag or the upstream base image. The
+published Vonk Forge Hermes image contains the fixed UID/GID and the Vonk
+entrypoint that validates the API-key file.
+
 Keep the project directory and secrets protected by the NAS filesystem. The
 Compose file contains secret paths, not secret values. Back up the secret and
 volume data according to the production backup policy before changing image

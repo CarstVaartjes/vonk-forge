@@ -6,6 +6,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[3]
 PRODUCTION_COMPOSE = ROOT / "deploy/compose/compose.yaml"
+HERMES_COMPOSE = ROOT / "deploy/compose/hermes-agent/compose.yaml"
 DEVELOPMENT_COMPOSE = ROOT / "deploy/compose/compose.dev.images.yaml"
 DEVELOPMENT_WRAPPER = ROOT / "scripts/dev-compose"
 DEVELOPMENT_WORKFLOW = ROOT / ".github/workflows/dev-images.yml"
@@ -38,6 +39,16 @@ def test_development_wrapper_selects_published_images_only() -> None:
     assert "build:" not in source
     assert "ghcr.io/carstvaartjes/vonk-forge-api" in source
     assert "ghcr.io/carstvaartjes/vonk-forge-worker" in source
+
+
+def test_hermes_is_opt_in_in_the_shared_production_graph() -> None:
+    document = yaml.safe_load(HERMES_COMPOSE.read_text(encoding="utf-8"))
+    assert document["services"]["hermes-agent"]["profiles"] == ["hermes"]
+
+    runbook = (ROOT / "docs/runbooks/development-nas-installation.md").read_text(
+        encoding="utf-8"
+    )
+    assert "--profile hermes up -d --wait" in runbook
 
 
 def test_development_image_workflow_validates_the_canonical_graph_with_test_inputs() -> None:
