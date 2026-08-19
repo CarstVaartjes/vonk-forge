@@ -108,7 +108,7 @@ def render(template: Path, output: Path, api_image: str, worker_image: str, *, c
     if not output.parent.is_dir():
         raise ValueError("output parent must exist")
     source_text = template.read_text(encoding="utf-8")
-    if source_text.count(TOKENS["api"]) != 2 or source_text.count(TOKENS["worker"]) != 6:
+    if source_text.count(TOKENS["api"]) != 2 or source_text.count(TOKENS["worker"]) != 7:
         raise ValueError("template control image inputs changed")
     document = _compose_document(template)
     document = _replace_image_tokens(
