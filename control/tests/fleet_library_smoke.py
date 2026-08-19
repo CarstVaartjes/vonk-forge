@@ -11,6 +11,7 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 ROOT = Path(__file__).resolve().parents[2]
 CONTROL_SRC = ROOT / "control" / "src"
@@ -20,10 +21,12 @@ if str(CONTROL_SRC) not in sys.path:
 from vonk_control.agent_api import AgentApiServices
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.api import create_app
-from vonk_control.audit import MemoryAuditStore
+from vonk_control.audit import SqlAuditStore
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.enrollment import EnrollmentService
+from vonk_control.enrollment_bootstrap import EnrollmentBootstrapConfig
 from vonk_control.fleet_projection import FleetProjection
+from vonk_control.library_projection import LibraryProjection
 from vonk_control.metrics import MetricsRegistry
 from vonk_control.models import Base
 from vonk_control.pki import CertificateAuthority, IssuedCertificate
@@ -47,6 +50,11 @@ class _Authority(CertificateAuthority):
         return None
 
 
+class _Repository:
+    def head(self) -> str:
+        return "a" * 40
+
+
 def _csr() -> bytes:
     key = ed25519.Ed25519PrivateKey.generate()
     return (
@@ -65,7 +73,11 @@ def _csr() -> bytes:
 
 def run_fresh_fleet_library_smoke() -> dict[str, object]:
     now = datetime(2026, 8, 18, 12, tzinfo=UTC)
-    engine = create_engine("sqlite+pysqlite:///:memory:")
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     authority = _Authority()
@@ -92,6 +104,11 @@ def run_fresh_fleet_library_smoke() -> dict[str, object]:
         max_tuf_metadata_bytes=128,
         max_tuf_target_bytes=128,
         fabric_policy=ManagementAddressPolicy.parse("192.168.100.0/24"),
+        bootstrap=EnrollmentBootstrapConfig(
+            controller_endpoint="https://agents.example.test:8443",
+            enrollment_endpoint="https://enroll.example.test:8443",
+            ca_fingerprint="a" * 64,
+        ),
     )
     for path in (
         services.artifact_root,
@@ -101,15 +118,22 @@ def run_fresh_fleet_library_smoke() -> dict[str, object]:
         services.workload_tuf_target_root,
     ):
         path.mkdir(parents=True, exist_ok=True)
-    projection = FleetProjection(object(), sessions, clock=lambda: now)
-    audits = MemoryAuditStore()
+    projection = FleetProjection(_Repository(), sessions, clock=lambda: now)
     codec = TokenCodec(b"k" * 32)
+    library_projection = LibraryProjection(
+        sessions,
+        cursors=codec.cursor_codec(),
+        clock=lambda: now,
+    )
+    audits = SqlAuditStore(sessions, clock=lambda: now)
     app = create_app(
         jobs=operations,
         tokens=codec,
         audits=audits,
         fleet=lambda: projection.read().model_dump(mode="json"),
-        now=lambda: now,
+        fleet_projection=projection,
+        library_projection=library_projection,
+        now=lambda: int(now.timestamp()),
         agent=services,
         trusted_agent_proxy_auth=b"p" * 32,
         metrics=MetricsRegistry(),
@@ -123,7 +147,7 @@ def run_fresh_fleet_library_smoke() -> dict[str, object]:
     grant = client.post(
         "/api/v1/agents/enrollments/grants",
         headers=headers,
-        json={"node_id": NODE_ID, "ttl_seconds": 60},
+        json={"ttl_seconds": 60},
     )
     assert grant.status_code == 201, grant.text
     csr = _csr()

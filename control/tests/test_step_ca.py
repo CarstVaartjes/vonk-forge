@@ -134,6 +134,24 @@ def _provider(tmp_path: Path, handler, *, max_response_bytes: int = 64 * 1024) -
     return provider, material
 
 
+def _builder_settings(tmp_path: Path, *, direct_fabric_cidrs: str) -> SimpleNamespace:
+    material = _write_material(tmp_path)
+    return SimpleNamespace(
+        agent_runtime="enabled", agent_ca_provider="step-ca",
+        agent_controller_origin="https://agents.example.test:8443",
+        agent_enrollment_origin="https://enroll.example.test:8443",
+        controller_ca_path=material["root_path"],
+        agent_intermediate_certificate_path=material["intermediate_path"],
+        agent_intermediate_key_path=None, agent_ca_root_path=material["root_path"],
+        agent_ca_credential_path=material["credential_path"], agent_ca_url=CA_URL,
+        agent_ca_provisioner_public_jwk_path=material["public_jwk_path"],
+        agent_ca_provisioner_name="vonk-forge-agent", agent_ca_provisioner_kid=material["kid"],
+        agent_ca_timeout_seconds=2.0, agent_ca_max_response_bytes=4096,
+        agent_artifact_root=tmp_path / "artifacts",
+        management_cidrs="10.0.0.0/24", direct_fabric_cidrs=direct_fabric_cidrs,
+    )
+
+
 def _success_response(request: httpx.Request, material: dict[str, object], seen: list[dict[str, object]], *, serial: int = 1234) -> httpx.Response:
     body = json.loads(request.content)
     seen.append({"request": request, "body": body})
@@ -415,17 +433,7 @@ def test_production_agent_service_builder_selects_step_ca_and_checks_reachabilit
     engine = create_engine(f"sqlite:///{tmp_path / 'runtime.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    settings = SimpleNamespace(
-        agent_runtime="enabled", agent_ca_provider="step-ca",
-        agent_intermediate_certificate_path=tmp_path / "intermediate.pem",
-        agent_intermediate_key_path=None, agent_ca_root_path=tmp_path / "root.pem",
-        agent_ca_credential_path=tmp_path / "credential.pem", agent_ca_url=CA_URL,
-        agent_ca_provisioner_public_jwk_path=tmp_path / "public.jwk",
-        agent_ca_provisioner_name="vonk-forge-agent", agent_ca_provisioner_kid="kid",
-        agent_ca_timeout_seconds=2.0, agent_ca_max_response_bytes=4096,
-        agent_artifact_root=tmp_path / "artifacts",
-            management_cidrs="10.0.0.0/24", direct_fabric_cidrs="192.168.100.0/24",
-    )
+    settings = _builder_settings(tmp_path, direct_fabric_cidrs="192.168.100.0/24")
 
     services = build_agent_services(settings, sessions, lambda: NOW)
 
@@ -445,17 +453,7 @@ def test_production_agent_service_builder_fails_closed_on_unreachable_or_mixed_p
             raise StepCAError("step-ca request failed")
 
     monkeypatch.setattr("vonk_control.step_ca.StepCertificateAuthority", Unreachable)
-    settings = SimpleNamespace(
-        agent_runtime="enabled", agent_ca_provider="step-ca",
-        agent_intermediate_certificate_path=tmp_path / "intermediate.pem",
-        agent_intermediate_key_path=None, agent_ca_root_path=tmp_path / "root.pem",
-        agent_ca_credential_path=tmp_path / "credential.pem", agent_ca_url=CA_URL,
-        agent_ca_provisioner_public_jwk_path=tmp_path / "public.jwk",
-        agent_ca_provisioner_name="vonk-forge-agent", agent_ca_provisioner_kid="kid",
-        agent_ca_timeout_seconds=2.0, agent_ca_max_response_bytes=4096,
-        agent_artifact_root=tmp_path / "artifacts",
-        management_cidrs="10.0.0.0/24", direct_fabric_cidrs="10.0.0.240/28",
-    )
+    settings = _builder_settings(tmp_path, direct_fabric_cidrs="10.0.0.240/28")
     with pytest.raises(StepCAError, match="request failed"):
         build_agent_services(settings, object(), lambda: NOW)
 
