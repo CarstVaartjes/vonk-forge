@@ -10,6 +10,8 @@ import shutil
 import tempfile
 from pathlib import Path
 
+import yaml
+
 IMAGE = re.compile(
     r"^ghcr\.io/carstvaartjes/vonk-forge-(api|worker):"
     r"(?:dev|dev-sha-[0-9a-f]{40})(?:@sha256:[0-9a-f]{64})?$"
@@ -18,11 +20,82 @@ TOKENS = {
     "api": "${CONTROL_API_IMAGE:?set a digest-pinned control-api image}",
     "worker": "${CONTROL_WORKER_IMAGE:?set a digest-pinned control-worker image}",
 }
+RUNTIME_ASSETS = (
+    "Caddyfile",
+    "caddy/entrypoint.sh",
+    "grafana/dashboards",
+    "grafana/provisioning",
+    "litellm/bootstrap-config.json",
+    "litellm/config_supervisor.py",
+    "litellm/entrypoint.sh",
+    "prometheus/alerts.yaml",
+    "prometheus/prometheus.yml",
+    "registry/config.yml",
+    "tailscale/configure.sh",
+)
 
 
 def _validate(role: str, image: str, channel: str) -> None:
     if IMAGE.fullmatch(image) is None:
         raise ValueError(f"{role} image must be an immutable published development image")
+
+
+def _rebase_relative_paths(value: object, prefix: str) -> object:
+    if isinstance(value, str) and value.startswith("./"):
+        return f"./{prefix}/{value[2:]}"
+    if isinstance(value, dict):
+        return {key: _rebase_relative_paths(item, prefix) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_rebase_relative_paths(item, prefix) for item in value]
+    return value
+
+
+def _compose_document(path: Path, seen: set[Path] | None = None) -> dict[str, object]:
+    seen = set() if seen is None else seen
+    path = path.resolve()
+    if path in seen:
+        raise ValueError(f"Compose include cycle: {path}")
+    seen.add(path)
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(document, dict):
+        raise ValueError(f"Compose document is not a mapping: {path}")
+
+    merged: dict[str, object] = {}
+    includes = document.pop("include", [])
+    if not isinstance(includes, list):
+        raise ValueError(f"Compose include list is invalid: {path}")
+    for included in includes:
+        included_path = included if isinstance(included, str) else included.get("path")
+        if not isinstance(included_path, str):
+            raise ValueError(f"Compose include path is invalid: {path}")
+        child = _compose_document(path.parent / included_path, seen)
+        prefix = str(Path(included_path).parent)
+        if prefix != ".":
+            child = _rebase_relative_paths(child, prefix)  # type: ignore[assignment]
+        for key, value in child.items():
+            if isinstance(value, dict) and isinstance(merged.get(key), dict):
+                merged[key] = {**merged[key], **value}  # type: ignore[index]
+            else:
+                merged[key] = value
+    for key, value in document.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = {**merged[key], **value}  # type: ignore[index]
+        else:
+            merged[key] = value
+    return merged
+
+
+def _replace_image_tokens(value: object, replacements: dict[str, str]) -> object:
+    if isinstance(value, str):
+        return replacements.get(value, value)
+    if isinstance(value, dict):
+        return {
+            key: _replace_image_tokens(item, replacements)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_replace_image_tokens(item, replacements) for item in value]
+    return value
 
 
 def render(template: Path, output: Path, api_image: str, worker_image: str, *, channel: str) -> None:
@@ -34,21 +107,29 @@ def render(template: Path, output: Path, api_image: str, worker_image: str, *, c
         raise ValueError("template must be an existing regular file")
     if not output.parent.is_dir():
         raise ValueError("output parent must exist")
-    text = template.read_text(encoding="utf-8")
-    if text.count(TOKENS["api"]) != 2 or text.count(TOKENS["worker"]) != 6:
+    source_text = template.read_text(encoding="utf-8")
+    if source_text.count(TOKENS["api"]) != 2 or source_text.count(TOKENS["worker"]) != 6:
         raise ValueError("template control image inputs changed")
-    rendered = text.replace(TOKENS["api"], api_image).replace(TOKENS["worker"], worker_image)
+    document = _compose_document(template)
+    document = _replace_image_tokens(
+        document,
+        {TOKENS["api"]: api_image, TOKENS["worker"]: worker_image},
+    )
+    rendered = yaml.safe_dump(document, sort_keys=False, default_flow_style=False)
     if "VONK_DEPLOYMENT_MODE: production" not in rendered:
         raise ValueError("development channel must render the production graph")
-    # The production graph includes the shared Tailscale/Hermes files and
-    # mounts its configuration assets relative to the Compose project.
-    for asset in template.parent.iterdir():
-        if asset.name.startswith("compose") or asset.name == "tests":
-            continue
-        destination = output.parent / asset.name
+    # The inlined graph still bind-mounts these runtime assets. Keep the
+    # rendered project small: Compose fragments, build inputs, documentation,
+    # and optional CA/Hermes source files do not belong in the runtime bundle.
+    for relative in RUNTIME_ASSETS:
+        asset = template.parent / relative
+        if not asset.is_file() and not asset.is_dir():
+            raise ValueError(f"runtime asset is missing: {relative}")
+        destination = output.parent / relative
         if asset.is_dir():
             shutil.copytree(asset, destination, dirs_exist_ok=True)
         else:
+            destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(asset, destination)
     descriptor, staged_name = tempfile.mkstemp(prefix=".render-dev-compose-", dir=output.parent)
     staged = Path(staged_name)

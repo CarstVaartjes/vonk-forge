@@ -45,6 +45,10 @@ def test_hermes_is_opt_in_in_the_shared_production_graph() -> None:
     document = yaml.safe_load(HERMES_COMPOSE.read_text(encoding="utf-8"))
     assert document["services"]["hermes-agent"]["profiles"] == ["hermes"]
     assert "profile-required" in document["x-hermes-service"]["image"]
+    tailscale = yaml.safe_load(
+        (ROOT / "deploy/compose/tailscale/compose.yaml").read_text(encoding="utf-8")
+    )
+    assert "hermes-agent" not in tailscale["services"]["tailscale-configurator"]["depends_on"]
     hermes_text = HERMES_COMPOSE.read_text(encoding="utf-8")
     assert "HERMES_DASHBOARD_ORIGIN:?" not in hermes_text
     assert "HERMES_DATA_ROOT:?" not in hermes_text
