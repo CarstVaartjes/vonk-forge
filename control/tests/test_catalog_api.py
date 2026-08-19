@@ -22,6 +22,7 @@ from vonk_control.catalog_service import CatalogService
 from vonk_control.global_catalog import GlobalRecipeRevision
 from vonk_control.models import Base
 from vonk_control.recipe_contract import recipe_content_sha256
+from vonk_control.recipe_library import RecipeLibraryItem, RecipeLibrarySnapshot
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 
 
@@ -36,7 +37,7 @@ class Jobs:
         return [], None, 0
 
 
-def _catalog_app(codec, audits, service, global_catalog=None) -> FastAPI:
+def _catalog_app(codec, audits, service, global_catalog=None, recipe_library=None) -> FastAPI:
     app = FastAPI()
 
     @app.middleware("http")
@@ -76,6 +77,7 @@ def _catalog_app(codec, audits, service, global_catalog=None) -> FastAPI:
         audits=audits,
         service=service,
         global_catalog=global_catalog,
+        recipe_library=recipe_library,
     )
     return app
 
@@ -653,6 +655,82 @@ def test_explicit_recipe_library_import_records_commit_and_requires_admin(
     assert any(
         event.action == "catalog.recipe_library.import" for event in audits.list()
     )
+
+
+def test_public_recipe_import_uses_global_catalog_for_manual_uri(bridge_api) -> None:
+    client, headers, _audits, _service, remote = bridge_api
+
+    preview = client.post(
+        "/api/v1/catalog/imports/public/preview",
+        headers=headers("administrator"),
+        json={"uri": remote.uri},
+    )
+    imported = client.post(
+        "/api/v1/catalog/imports/public",
+        headers=headers("administrator"),
+        json={"uri": remote.uri, "expected_content_sha256": remote.content_sha256},
+    )
+
+    assert preview.status_code == 200
+    assert preview.json()["source"] == "global"
+    assert imported.status_code == 201, imported.text
+    assert imported.json()["origin"] == "global"
+
+
+def test_public_recipe_import_has_one_contract_for_catalog_and_manual_sources(
+    bridge_api,
+) -> None:
+    _client, _headers, audits, _service, remote = bridge_api
+
+    class Library:
+        def list(self):
+            item = RecipeLibraryItem(
+                library_commit="a" * 40,
+                source_path="recipes/synthetic-tiny-openai.json",
+                publisher=remote.publisher,
+                slug=remote.slug,
+                title="Synthetic Tiny OpenAI",
+                description="A tiny public recipe.",
+                tags=("synthetic",),
+                content_sha256=remote.content_sha256,
+                uri=remote.uri,
+                document=remote.document,
+            )
+            return RecipeLibrarySnapshot(commit="a" * 40, items=(item,))
+
+        def fetch(self, uri: str):
+            assert uri == remote.uri
+            return Library().list().items[0]
+
+    app = _catalog_app(
+        TokenCodec(b"b" * 32),
+        audits,
+        _service,
+        recipe_library=Library(),
+    )
+    catalog_client = TestClient(app)
+    token = TokenCodec(b"b" * 32).issue(Actor("administrator", "administrator"), ttl_seconds=100, now=0)
+    auth = {"Authorization": f"Bearer {token}"}
+
+    listed = catalog_client.get("/api/v1/catalog/public-recipes", headers=auth)
+    preview = catalog_client.post(
+        "/api/v1/catalog/imports/public/preview",
+        headers=auth,
+        json={"uri": remote.uri},
+    )
+    imported = catalog_client.post(
+        "/api/v1/catalog/imports/public",
+        headers=auth,
+        json={"uri": remote.uri, "expected_content_sha256": remote.content_sha256},
+    )
+
+    assert listed.status_code == 200
+    assert listed.json()["recipes"][0]["title"] == "Synthetic Tiny OpenAI"
+    assert preview.status_code == 200
+    assert preview.json()["uri"] == remote.uri
+    assert imported.status_code == 201, imported.text
+    assert imported.json()["origin"] == "recipe_library"
+    assert any(event.action == "catalog.public.import" for event in audits.list())
 
 
 def test_publication_report_and_export_are_local_json_only(

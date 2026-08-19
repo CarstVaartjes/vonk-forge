@@ -23,6 +23,8 @@ import type {
   CatalogRecipeList,
   CatalogRecipeRevision,
   GlobalRecipeRevision,
+  PublicRecipeList,
+  PublicRecipePreview,
   WorkloadRunApplied,
   WorkloadRunPreview,
   TelemetryHistory,
@@ -235,6 +237,18 @@ export class ApiClient implements ControlApi {
 
   importGlobalRecipe(uri: string, expectedContentSha256: string): Promise<CatalogRecipeRevision> {
     return this.request("/api/v1/catalog/imports/global", {method: "POST", body: JSON.stringify({uri, expected_content_sha256: expectedContentSha256})});
+  }
+
+  listPublicRecipes(): Promise<PublicRecipeList> {
+    return this.request("/api/v1/catalog/public-recipes");
+  }
+
+  previewPublicRecipe(uri: string): Promise<PublicRecipePreview> {
+    return this.request("/api/v1/catalog/imports/public/preview", {method: "POST", body: JSON.stringify({uri})});
+  }
+
+  importPublicRecipe(uri: string, expectedContentSha256: string): Promise<CatalogRecipeRevision> {
+    return this.request("/api/v1/catalog/imports/public", {method: "POST", body: JSON.stringify({uri, expected_content_sha256: expectedContentSha256})});
   }
 
   async attachPublicationReport(recipeId: string, report: Record<string, unknown>): Promise<void> {
