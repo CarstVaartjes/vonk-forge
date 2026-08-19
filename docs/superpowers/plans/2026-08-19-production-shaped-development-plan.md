@@ -15,6 +15,8 @@
 - Development must not build local images, use `dev-local` tags, inject a source-origin repository, or bypass GitHub Actions image publication.
 - Development and production must share one production-shaped Compose service graph.
 - Development must use a separate disposable Step CA authority and separate state/data.
+- Development and production share hostnames, management CIDRs, published ports,
+  service names, network mappings, and secret projection contracts.
 - Existing production security boundaries must remain intact.
 - Tests must prove topology parity and published-image consumption.
 
@@ -36,7 +38,7 @@
 
 - [ ] **Step 1: Add a failing topology-parity test** asserting that the development configuration includes the production runtime services and does not use `dev-local`, `build:`, or source-origin injection.
 - [ ] **Step 2: Run the focused test** with `uv run --frozen --group dev python -m pytest -q deploy/compose/tests/test_dev_compose.py -k parity`; verify it fails against the current split graph.
-- [ ] **Step 3: Record the mapping** in the test fixtures: production runtime services, required networks, secret projections, and persistent volume names.
+- [ ] **Step 3: Record the mapping** in the test fixtures: production runtime services, required networks, hostnames, management CIDRs, published ports, secret projections, and persistent volume names.
 - [ ] **Step 4: Run the focused test again** to verify the test still fails for the intended topology mismatch.
 - [ ] **Step 5: Commit** the failing contract test with `git add deploy/compose/tests/test_dev_compose.py && git commit -m "test: define development production topology parity"`.
 

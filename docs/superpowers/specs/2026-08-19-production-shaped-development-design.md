@@ -35,7 +35,10 @@ health checks, certificate provider, and renewal behavior.
    published image references without local build/source-origin behavior.
 9. Documentation must describe one deployment model with development and
    production inputs, instead of presenting development as a separate runtime
-   architecture.
+   architecture. Hostnames, management CIDRs, published ports, service names,
+   network mappings, and secret projection contracts are shared; only the
+   selected published image/version and isolated credential, PKI, and data
+   values differ.
 
 ## Non-goals
 
@@ -56,5 +59,6 @@ health checks, certificate provider, and renewal behavior.
 - A development node can enroll and renew through the same Step CA protocol
   exercised by production.
 - Compose/configuration contract tests pass for both modes.
-- The development and production documentation identifies only credentials,
-  PKI authority/state, and data persistence as deployment inputs that differ.
+- The development and production documentation identifies the selected
+  published image/version and isolated credential, PKI, and data values as the
+  only deployment inputs that differ; endpoint and network mappings are shared.
