@@ -523,8 +523,6 @@ def test_complete_development_workload_runbook_has_every_operator_phase() -> Non
     for heading in required_headings:
         assert f"## {heading}" in text
 
-    assert "scripts/dev-runtime-secrets.py" in text
-    assert "scripts/dev-runtime-project" in text
     assert "scripts/dev-admin-token" in text
     assert "docs/operations/agent-package-release.md#install-the-dev-channel" in text
     assert "Add Spark" in text

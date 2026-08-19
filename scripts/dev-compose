@@ -1,36 +1,25 @@
 #!/usr/bin/env bash
-# Run the local development graph from already-built images.  The public NAS
-# artifact is rendered elsewhere. This wrapper never builds images; it creates
-# a one-use origin for the exact checked-out commit so feature branches can be
-# tested without weakening the public-main acceptance boundary.
+# Run the production-shaped deployment with the selected published development
+# application images. Development and production are mutually exclusive
+# release channels; all other Compose inputs come from the same site config.
 set -euo pipefail
-umask 077
 
 repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
-template="$repository_root/deploy/compose/compose.dev.images.yaml"
-secrets_helper="$repository_root/scripts/dev-compose-secrets.py"
-api_image='vonk-forge-api:dev-local'
-worker_image='vonk-forge-worker:dev-local'
-project_name=${VONK_DEV_PROJECT_NAME-vonk-forge-dev}
-management_cidrs=${VONK_DEV_MANAGEMENT_CIDRS-127.0.0.1/32}
-workspace=
-overlay=
+compose_file="$repository_root/deploy/compose/compose.yaml"
+api_image=${VONK_DEV_API_IMAGE:?set VONK_DEV_API_IMAGE to an immutable published GHCR API image}
+worker_image=${VONK_DEV_WORKER_IMAGE:?set VONK_DEV_WORKER_IMAGE to an immutable published GHCR worker image}
 
-if [[ ! "$project_name" =~ ^[a-z0-9][a-z0-9_-]{0,62}$ ]]; then
-  printf '%s\n' 'development Compose project name is invalid' >&2
-  exit 2
-fi
-
-oauth_client_id_file=${VONK_DEV_TAILSCALE_OAUTH_CLIENT_ID_FILE:?set private Tailscale OAuth client ID file path}
-oauth_client_secret_file=${VONK_DEV_TAILSCALE_OAUTH_CLIENT_SECRET_FILE:?set private Tailscale OAuth client secret file path}
-secrets_path_hint=${VONK_DEV_SECRETS_DIR:-$repository_root/.dev/vonk-forge-secrets}
-server_certificate_before=
-if [[ -f "$secrets_path_hint/controller-server-certificate" ]]; then
-  server_certificate_before=$(sha256sum "$secrets_path_hint/controller-server-certificate" | awk '{print $1}')
-fi
+for image in "$api_image" "$worker_image"; do
+  [[ "$image" =~ ^ghcr\.io/carstvaartjes/vonk-forge-(api|worker):dev-sha-[0-9a-f]{40}@sha256:[0-9a-f]{64}$ ]] || {
+    printf '%s\n' 'development images must be immutable dev-sha GHCR references' >&2
+    exit 2
+  }
+done
+[[ "$api_image" == ghcr.io/carstvaartjes/vonk-forge-api:* ]] || exit 2
+[[ "$worker_image" == ghcr.io/carstvaartjes/vonk-forge-worker:* ]] || exit 2
 
 if [[ "$#" -eq 0 ]]; then
-  set -- up -d --wait --pull never
+  set -- up -d --wait --pull always
 elif [[ "$1" == up ]]; then
   has_wait=false
   has_pull=false
@@ -39,104 +28,13 @@ elif [[ "$1" == up ]]; then
     [[ "$argument" == --pull || "$argument" == --pull=* ]] && has_pull=true
   done
   [[ "$has_wait" == true ]] || set -- "$@" --wait
-  [[ "$has_pull" == true ]] || set -- "$@" --pull never
-fi
-if [[ -n ${VONK_DEV_SECRETS_DIR:-} ]]; then
-  secrets_dir=$(PYTHONPATH="$repository_root/control/src${PYTHONPATH:+:$PYTHONPATH}" \
-    python3 "$secrets_helper" \
-    --repository-root "$repository_root" \
-    --management-cidrs "$management_cidrs" \
-    --tailscale-oauth-client-id-file "$oauth_client_id_file" \
-    --tailscale-oauth-client-secret-file "$oauth_client_secret_file" \
-    --external-secrets-dir "$VONK_DEV_SECRETS_DIR")
-else
-  secrets_dir=$(PYTHONPATH="$repository_root/control/src${PYTHONPATH:+:$PYTHONPATH}" \
-    python3 "$secrets_helper" \
-    --repository-root "$repository_root" \
-    --management-cidrs "$management_cidrs" \
-    --tailscale-oauth-client-id-file "$oauth_client_id_file" \
-    --tailscale-oauth-client-secret-file "$oauth_client_secret_file")
-fi
-server_certificate_after=$(sha256sum "$secrets_dir/controller-server-certificate" | awk '{print $1}')
-server_certificate_rotated=false
-if [[ -n "$server_certificate_before" && "$server_certificate_before" != "$server_certificate_after" ]]; then
-  server_certificate_rotated=true
+  [[ "$has_pull" == true ]] || set -- "$@" --pull always
 fi
 
-expected_commit=$(git -C "$repository_root" rev-parse --verify 'HEAD^{commit}')
-[[ "$expected_commit" =~ ^[0-9a-f]{40}$ ]] || {
-  printf '%s\n' 'checked-out development commit must resolve fully' >&2
-  exit 2
-}
-
-workspace=$(mktemp -d /tmp/vonk-forge-dev-compose.XXXXXXXXXX)
-cleanup() {
-  status=$?
-  trap - EXIT
-  if [[ "$workspace" =~ ^/tmp/vonk-forge-dev-compose\.[A-Za-z0-9]{10}$ \
-    && -d "$workspace" && ! -L "$workspace" ]]; then
-    rm -rf -- "$workspace"
-  fi
-  exit "$status"
-}
-trap cleanup EXIT
-
-git clone --quiet --bare "$repository_root" "$workspace/source-origin.git"
-git --git-dir="$workspace/source-origin.git" update-ref \
-  refs/heads/main "$expected_commit"
-git --git-dir="$workspace/source-origin.git" symbolic-ref HEAD refs/heads/main
-chmod -R a+rX "$workspace/source-origin.git"
-
-[[ -f "$template" && ! -L "$template" ]] || {
-  printf '%s\n' 'development image template is unavailable' >&2
-  exit 2
-}
-[[ $(grep -o '__VONK_API_IMAGE__' "$template" | wc -l) -eq 1 ]] || exit 2
-[[ $(grep -o '__VONK_WORKER_IMAGE__' "$template" | wc -l) -eq 1 ]] || exit 2
-[[ $(grep -o '__VONK_EXPECTED_COMMIT__' "$template" | wc -l) -eq 1 ]] || exit 2
-sed \
-  -e "s|__VONK_API_IMAGE__|$api_image|" \
-  -e "s|__VONK_WORKER_IMAGE__|$worker_image|" \
-  -e "s|__VONK_EXPECTED_COMMIT__|$expected_commit|" \
-  "$template" > "$workspace/docker-compose.yml"
-ln -s "$secrets_dir" "$workspace/secrets"
-
-overlay="$workspace/docker-compose.local.yaml"
-cat > "$overlay" <<EOF
-services:
-  dev-repository-init:
-    environment:
-      VONK_DEV_LOCAL_ACCEPTANCE: '1'
-      VONK_DEV_REPOSITORY_URL: file:///source-origin
-    volumes:
-      - type: bind
-        source: $workspace/source-origin.git
-        target: /source-origin
-        read_only: true
-EOF
-
-if [[ -n ${VONK_DEV_SYNTHETIC_CONTROL_HOSTNAME_GENERATION:-} ]]; then
-  synthetic_control_hostname_generation=$VONK_DEV_SYNTHETIC_CONTROL_HOSTNAME_GENERATION
-  if [[ ! "$synthetic_control_hostname_generation" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]; then
-    printf '%s\n' 'synthetic development control hostname generation is invalid' >&2
-    exit 2
-  fi
-  cat >> "$overlay" <<EOF
-  caddy:
-    environment:
-      VONK_CONTROL_HOSTNAME_GENERATION: $synthetic_control_hostname_generation
-EOF
+compose=(docker compose --project-directory "$repository_root" --file "$compose_file")
+env_file=${VONK_DEPLOYMENT_ENV_FILE:-$repository_root/.env}
+if [[ -f "$env_file" ]]; then
+  compose+=(--env-file "$env_file")
 fi
-
-compose=(
-  docker compose
-  --project-name "$project_name"
-  --project-directory "$workspace"
-  --file "$workspace/docker-compose.yml"
-  --file "$overlay"
-)
-if [[ "$server_certificate_rotated" == true && "$1" == up ]]; then
-  printf '%s\n' 'Controller certificate rotated; refreshing Caddy TLS material.'
-  "${compose[@]}" up -d --wait --pull never --force-recreate dev-bootstrap caddy
-fi
-"${compose[@]}" "$@"
+exec env "CONTROL_API_IMAGE=$api_image" "CONTROL_WORKER_IMAGE=$worker_image" \
+  "${compose[@]}" "$@"

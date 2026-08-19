@@ -60,18 +60,10 @@ jobs:
         run: |
           set -euo pipefail
           uv run --python 3.12 --frozen --with pytest==9.1.1 pytest -q \
-            deploy/compose/tests/test_dev_compose.py \
-            deploy/compose/tests/test_dev_compose_secrets.py \
-            deploy/compose/tests/test_dev_tailscale.py \
-            deploy/compose/tests/test_agent_ingress.py \
-            scripts/tests/test_render_dev_compose.py \
-            scripts/tests/test_dev_runtime_secrets.py \
-            scripts/tests/test_dev_runtime_project.py \
-            scripts/tests/test_dev_runtime_project_remote.py \
+            deploy/compose/tests/test_production_shaped_development.py \
             scripts/tests/test_dev_admin_token.py \
             scripts/tests/test_verify_dev_image_secrets.py \
-            scripts/tests/test_dev_image_acceptance.py \
-            scripts/tests/test_dev_image_workflow.py
+            scripts/tests/test_render_production_compose.py
           npm ci --prefix control/web
           npm test --prefix control/web -- --run src/auth.test.tsx src/pages/login.test.tsx src/api/client.test.ts
           npm run build --prefix control/web
@@ -164,7 +156,7 @@ jobs:
           mapfile -t runtime_images < <(
             sed -nE \
               's/^[[:space:]]+image:[[:space:]]+([a-z0-9][a-z0-9.\/:_-]*@sha256:[0-9a-f]{64})$/\1/p' \
-              deploy/compose/compose.dev.images.yaml \
+              deploy/compose/compose.yaml \
               | sort -u
           )
           test "${#runtime_images[@]}" = 4
@@ -337,11 +329,6 @@ jobs:
             --scan-path "$publication_root" \
             --scan-path "$evidence_root" \
             vonk-forge-api:dev-local vonk-forge-worker:dev-local
-          uv run --project control --frozen --with-editable . \
-            scripts/dev-image-acceptance \
-            --api-image vonk-forge-api:dev-local \
-            --worker-image vonk-forge-worker:dev-local \
-            --commit "$GITHUB_SHA"
 
       - name: Upload accepted publication inputs
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -531,6 +518,17 @@ jobs:
           path: |
             ${{ runner.temp }}/accepted/docker-compose.pinned.yml
             ${{ runner.temp }}/accepted/docker-compose.dev.yml
+            ${{ runner.temp }}/accepted/Caddyfile
+            ${{ runner.temp }}/accepted/bin
+            ${{ runner.temp }}/accepted/caddy
+            ${{ runner.temp }}/accepted/grafana
+            ${{ runner.temp }}/accepted/hermes-agent
+            ${{ runner.temp }}/accepted/litellm
+            ${{ runner.temp }}/accepted/prometheus
+            ${{ runner.temp }}/accepted/registry
+            ${{ runner.temp }}/accepted/step-ca
+            ${{ runner.temp }}/accepted/tailscale
+            ${{ runner.temp }}/accepted/trust
 
       - name: Advance accepted development aliases
         shell: bash

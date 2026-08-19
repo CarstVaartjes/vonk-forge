@@ -14,20 +14,15 @@ authored/imported recipe revisions, WorkloadRun import reports, installations,
 placements, and runs; those records remain available when Git or the optional
 global catalog is unavailable.
 
-## Local NAS development stack
+## Development release channel
 
-Use the image-only development stack to try the control API, bundled web
-interface, PostgreSQL catalog, and worker on any Docker Compose-capable NAS.
-GitHub Actions builds and accepts the API and worker from `main`, then publishes
-the bare mutable `:dev` `docker-compose.dev.yml` artifact. Publish it once as
-`docker-compose.yaml` with `scripts/dev-runtime-project-remote` when the NAS is
-reached through Windows/WSL, or with the underlying
-`scripts/dev-runtime-project` on a POSIX-capable direct mount. Normal
-development is a Docker-UI pull/redeploy of that unchanged file, never a
-checkout build, manual copy, file replacement, or restart. Keep
-`docker-compose.pinned.yml` for explicit reproduction or state-aware recovery.
-Signed releases publish `docker-compose.production.yml` from the full production
-graph, but it is selected only through the production host updater.
+Development and production use this same Compose graph and the same site
+configuration. They are mutually exclusive release channels for one
+deployment, not two stacks intended to share a network. The only selected
+runtime difference is the immutable API and worker image version published by
+GitHub Actions. Use `scripts/dev-compose` with `VONK_DEV_API_IMAGE` and
+`VONK_DEV_WORKER_IMAGE` set to those GHCR references; it does not build images,
+clone source, create synthetic credentials, or select alternate ports/volumes.
 
 The production graph uses one persistent, network-isolated `control-bootstrap`
 service for privileged shared-volume preparation. It remains healthy after
@@ -69,32 +64,10 @@ for secure generation, host ownership and modes, generic NAS UI import,
 rotation, backup, and first-start checks. No GitHub, registry, TUF, mTLS,
 Cloudflare, or production credential belongs in this project.
 
-Repository contributors with prebuilt `dev-local` images can exercise the same
-graph locally:
-
-```bash
-scripts/dev-compose
-curl --fail http://127.0.0.1:8080/api/v1/readyz
-scripts/dev-compose logs -f control-api
-scripts/dev-compose down
-```
-
-The wrapper creates `.dev/vonk-forge-secrets/` locally and never commits it.
-The API remains bound to loopback on port `8080` for deterministic acceptance
-and break-glass recovery. Normal NAS administration uses the stable private
-Tailscale HTTPS `svc:vonk-forge` Service in a browser without an SSH or
-PowerShell tunnel; follow
-[Open the stable browser URL](../../docs/runbooks/development-nas-installation.md#open-the-stable-browser-url).
-Set `VONK_DEV_PORT` before starting if the port is already in use. This stack is for development only:
-its synthetic platform identity and database are not valid production release
-evidence, and `scripts/dev-compose down -v` removes its development volumes.
-
-The development secret helper checks the persisted controller server certificate
-on every deployment. It renews an expired certificate, or one within 30 days of
-expiry, while preserving the controller CA and enrolled-agent trust. The wrapper
-then recreates `dev-bootstrap` and Caddy so the renewed certificate reaches the
-TLS endpoint. Production deployments use externally managed certificates and
-must renew them through their certificate provider.
+The wrapper reads the same `.env`, secret paths, PKI state, named volumes,
+hostnames, and management policy as the production deployment. Do not create a
+parallel development secret or data root. Certificate issuance and renewal
+remain the shared Step CA/Caddy responsibility described in the PKI runbook.
 
 ## Recipe containers are source-first
 

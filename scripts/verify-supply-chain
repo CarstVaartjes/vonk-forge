@@ -415,7 +415,6 @@ def expected(root: Path) -> tuple[dict[str, bytes], bytes, dict[str, object]]:
         "scripts/agent-apt-metadata",
         "scripts/agent-apt-state",
         "scripts/container-release-metadata",
-        "scripts/dev-image-acceptance",
         "scripts/dev-image-metadata",
         "scripts/promote-image-aliases",
         "scripts/verify-release-tag-authority",
