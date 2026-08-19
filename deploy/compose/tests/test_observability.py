@@ -27,7 +27,7 @@ def test_grafana_is_only_reachable_via_caddy_and_has_no_anonymous_admin() -> Non
     assert "ports" not in grafana
     assert set(grafana["networks"]) == {"application", "ingress"}
     assert grafana["environment"]["GF_AUTH_ANONYMOUS_ENABLED"] == "false"
-    assert grafana["environment"]["GF_SECURITY_ADMIN_PASSWORD__FILE"] == "/run/secrets/grafana-admin-password"
+    assert grafana["environment"]["GF_SECURITY_ADMIN_PASSWORD__FILE"] == "/run/vonk-normalized-secrets/grafana-admin-password"
     caddy = (ROOT / "deploy/compose/Caddyfile").read_text()
     assert "handle /grafana/*" in caddy and "grafana:3000" in caddy
 

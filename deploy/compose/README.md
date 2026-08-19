@@ -322,10 +322,13 @@ their Compose defaults unless the host is deliberately sized differently.
 ## Secret files
 
 Create regular files under `/srv/vonk-forge/secrets` and parent directories mode
-`0700`. Compose bind-backs each secret file, so host ownership and mode must
-allow the **actual consuming container UID** to read it. Do not use a blanket
-`root:root 0600` rule: it prevents the explicitly non-root API, worker,
-LiteLLM, Prometheus, and Grafana services from reading their secret mounts.
+`0700`. The `control-secret-init` service reads these host-backed Compose
+secrets as root and copies them into the Docker-managed `normalized-private-keys`
+volume with the exact owner needed by each non-root consumer. This is required
+for standalone Compose on NAS platforms: file-backed Compose secrets are bind
+mounts, so Compose cannot reliably remap their UID/GID/mode at container start.
+Keep the source files `root:root 0400`; do not add host ACLs just to make a
+non-root service read a bind-mounted secret.
 
 The Compose service users are `10001:10001` for control-api and control-worker,
 `10003:10001` for the networkless control-signer,
@@ -337,30 +340,18 @@ secret before dropping privileges. Re-check these identities after changing an
 image pin with `docker image inspect IMAGE --format '{{.Config.User}}'` and,
 for the pinned step-ca image, `docker run --rm --entrypoint id STEP_CA_IMAGE`.
 
-For a secret with one non-root consumer, use its exact owner and mode `0400`.
-For a secret shared by different UIDs, retain `root:root 0400` and grant only
-the listed service UIDs read access with POSIX ACLs. For example, the metrics
-token is read by both control-api (`10001`) and Prometheus (`65534`):
-
-```bash
-sudo chown root:root /srv/vonk-forge/secrets/metrics-token
-sudo chmod 0400 /srv/vonk-forge/secrets/metrics-token
-sudo setfacl -m u:10001:r,u:65534:r /srv/vonk-forge/secrets/metrics-token
-sudo getfacl /srv/vonk-forge/secrets/metrics-token
-```
-
 Use one value per file, with a final newline only where the consumer format
 permits it; never export a secret into `.env`, shell history, or a Compose
 command line.
 
-| `.env` path key → file | Consumer UID(s), host ownership/mode | Required content |
+| `.env` path key → file | Staged consumer projection | Required content |
 | --- | --- | --- |
-| `DATABASE_URL_FILE` → `database-url` | `10001:10001`, `10001:10001 0400` | PostgreSQL URL. |
+| `DATABASE_URL_FILE` → `database-url` | API/worker `10001:10001 0400` | PostgreSQL URL. |
 | `POSTGRES_PASSWORD_FILE` → `postgres-password` | PostgreSQL startup, `root:root 0400` | One PostgreSQL password. |
-| `TOKEN_SIGNING_KEY_FILE` → `token-signing-key` | API `10001:10001`, `10001:10001 0400` | At least 32 bytes. |
-| `METRICS_TOKEN_FILE` → `metrics-token` | API `10001`, Prometheus `65534`; `root:root 0400` plus ACLs | At least 16 non-whitespace characters. |
-| `GIT_SIGNING_KEY_FILE` → `git-signing-key` | API `10001:10001`, `10001:10001 0400` | Private SSH signing key. |
-| `WORKER_API_TOKEN_FILE` → `worker-api-token` | API/worker `10001:10001`, `10001:10001 0400` | One unpadded base64url token, at least 32 characters. |
+| `TOKEN_SIGNING_KEY_FILE` → `token-signing-key` | API `10001:10001 0400` | At least 32 bytes. |
+| `METRICS_TOKEN_FILE` → `metrics-token` | API `10001:10001 0400`; Prometheus gets a separate `65534:65534 0400` projection | At least 16 non-whitespace characters. |
+| `GIT_SIGNING_KEY_FILE` → `git-signing-key` | API `10001:10001 0400` | Private SSH signing key. |
+| `WORKER_API_TOKEN_FILE` → `worker-api-token` | API/worker `10001:10001 0400` | One unpadded base64url token, at least 32 characters. |
 | `AGENT_UPDATE_AUTHORITY_KEY_FILE` → `agent-update-authority-key` | Signer only, `10003:10001 0400` | Ed25519 PKCS#8 PEM. The API, worker, and every GPU node must never receive this private key. |
 | `ADMIN_GRANT_PUBLIC_KEY_FILE` → `admin-grant-public-key` | Signer only, `10003:10001 0400` | Canonical public document for the separate API admin-action grant authority. |
 | `PACKAGE_HELPER_GRANT_PRIVATE_KEY_FILE` → `package-helper-grant-private-key` | Control API `10001:10001`, `10001:10001 0400` | Dedicated Ed25519 PKCS#8 PEM for short-lived workload-helper grants; never install on a GPU node. |
@@ -369,14 +360,14 @@ command line.
 | `AGENT_TUF_BOOTSTRAP_ROOT_FILE` → `agent-tuf-bootstrap-root` | Signer only, `10003:10001 0400` | Explicit trusted public TUF root for platform releases. The corresponding offline root private key never enters the NAS. |
 | `LITELLM_MASTER_KEY_FILE`, `LITELLM_UPSTREAM_KEY_FILE`, `LITELLM_DATABASE_URL_FILE` → matching `litellm-*` files | LiteLLM `10002:10001`, `10002:10001 0400` | Respectively the master key, dedicated upstream key, and PostgreSQL URL. |
 | `GRAFANA_ADMIN_PASSWORD_FILE` → `grafana-admin-password` | Grafana `472:472`, `472:472 0400` | One Grafana administrator password. |
-| `AGENT_CLIENT_CA_FILE` → `agent-client-ca` | API `10001` and Caddy startup; `root:root 0400` plus ACL `u:10001:r` | PEM trust bundle. |
-| `AGENT_INTERMEDIATE_CERTIFICATE_FILE` → `agent-intermediate-certificate` | API `10001`, step-ca `1000`; `root:root 0400` plus `u:10001:r,u:1000:r` ACLs | PEM intermediate certificate. |
-| `AGENT_PROXY_AUTH_FILE` → `agent-proxy-auth` | API `10001` and Caddy startup; `root:root 0400` plus ACL `u:10001:r` | One unpadded base64url token, at least 32 characters. |
-| `AGENT_CA_CREDENTIAL_FILE` → `agent-ca-credential` | API `10001:10001`, `10001:10001 0400` | Private provisioner credential. |
-| `AGENT_CA_PROVISIONER_PUBLIC_JWK_FILE` → `agent-ca-public.jwk` | API `10001`, step-ca `1000`; `root:root 0400` plus `u:10001:r,u:1000:r` ACLs | Public provisioner JWK. |
-| `STEP_CA_ROOT_CERTIFICATE_FILE` → `step-ca-root-certificate` | API `10001`, step-ca `1000`; `root:root 0400` plus `u:10001:r,u:1000:r` ACLs | PEM root certificate. |
-| `STEP_CA_INTERMEDIATE_KEY_FILE`, `STEP_CA_PASSWORD_FILE` → `step-ca-intermediate-key`, `step-ca-password` | step-ca `1000:1000`, `1000:1000 0400` | Encrypted intermediate private key and its one password. |
-| Development-only `AGENT_INTERMEDIATE_KEY_FILE` → `agent-intermediate-key` | API `10001:10001`, `10001:10001 0400` | Built-in CA intermediate private key; never combine this overlay with step-ca. |
+| `AGENT_CLIENT_CA_FILE` → `agent-client-ca` | API `10001:10001 0400`; Caddy reads its root-startup secret | PEM trust bundle. |
+| `AGENT_INTERMEDIATE_CERTIFICATE_FILE` → `agent-intermediate-certificate` | API `10001:10001 0400`; Step CA gets `1000:1000 0400` | PEM intermediate certificate. |
+| `AGENT_PROXY_AUTH_FILE` → `agent-proxy-auth` | API `10001:10001 0400`; Caddy reads its root-startup secret | One unpadded base64url token, at least 32 characters. |
+| `AGENT_CA_CREDENTIAL_FILE` → `agent-ca-credential` | API `10001:10001 0400` | Private provisioner credential. |
+| `AGENT_CA_PROVISIONER_PUBLIC_JWK_FILE` → `agent-ca-public.jwk` | API `10001:10001 0400` | Public provisioner JWK. |
+| `STEP_CA_ROOT_CERTIFICATE_FILE` → `step-ca-root-certificate` | API `10001:10001 0400`; Step CA gets `1000:1000 0400` | PEM root certificate. |
+| `STEP_CA_INTERMEDIATE_KEY_FILE`, `STEP_CA_PASSWORD_FILE` → `step-ca-intermediate-key`, `step-ca-password` | Step CA `1000:1000 0400` | Encrypted intermediate private key and its one password. |
+| Development-only `AGENT_INTERMEDIATE_KEY_FILE` → `agent-intermediate-key` | API `10001:10001 0400` | Built-in CA intermediate private key; never combine this overlay with step-ca. |
 | `TAILSCALE_OAUTH_CLIENT_ID_FILE`, `TAILSCALE_OAUTH_CLIENT_SECRET_FILE` → matching `tailscale-oauth-*` files | Tailscale startup, `root:root 0400` | One OAuth client ID or secret; neither is a GitHub credential. |
 | `HERMES_API_KEY_FILE` → `hermes-api-key` | Hermes entrypoint then managed `1100:1100`; `root:root 0400` | One 32+ character key using only `A-Z`, `a-z`, `0-9`, `_`, `.`, `~`, or `-`. |
 

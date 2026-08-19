@@ -16,7 +16,7 @@ read_secret() {
     export "$variable=$value"
 }
 
-read_secret LITELLM_MASTER_KEY /run/secrets/litellm-master-key
-read_secret LITELLM_UPSTREAM_KEY /run/secrets/litellm-upstream-key
-read_secret LITELLM_DATABASE_URL /run/secrets/litellm-database-url
+read_secret LITELLM_MASTER_KEY "${LITELLM_MASTER_KEY_FILE:-/run/secrets/litellm-master-key}"
+read_secret LITELLM_UPSTREAM_KEY "${LITELLM_UPSTREAM_KEY_FILE:-/run/secrets/litellm-upstream-key}"
+read_secret LITELLM_DATABASE_URL "${LITELLM_DATABASE_URL_FILE:-/run/secrets/litellm-database-url}"
 exec python /app/config-supervisor.py

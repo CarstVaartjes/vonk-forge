@@ -1,7 +1,7 @@
 {
-  "root": "/run/secrets/root_ca.crt",
-  "crt": "/run/secrets/intermediate_ca.crt",
-  "key": "/run/secrets/intermediate_ca_key",
+  "root": "/run/vonk-normalized-secrets/step-ca/root-certificate",
+  "crt": "/run/vonk-normalized-secrets/step-ca/intermediate-certificate",
+  "key": "/run/vonk-normalized-secrets/step-ca/intermediate-key",
   "address": ":9000",
   "insecureAddress": "",
   "dnsNames": ["step-ca"],

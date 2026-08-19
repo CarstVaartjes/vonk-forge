@@ -9,6 +9,6 @@ scrape_configs:
   - job_name: vonk-control
     scheme: http
     metrics_path: /metrics
-    bearer_token_file: /run/secrets/metrics-token
+    bearer_token_file: /run/vonk-normalized-secrets/prometheus-metrics-token
     static_configs:
       - targets: [control-api:8000]

@@ -549,13 +549,13 @@ def test_pinned_step_ca_issues_tracked_leaf_profile_and_serves_fresh_crl(tmp_pat
     subprocess.run([
         "docker", "run", "-d", "--name", container, "-p", "127.0.0.1::9000",
         "-v", f"{generated_config}:/home/step/config/ca.json:ro",
-        "-v", f"{root}:/run/secrets/root_ca.crt:ro",
-        "-v", f"{intermediate}:/run/secrets/intermediate_ca.crt:ro",
-        "-v", f"{intermediate_key}:/run/secrets/intermediate_ca_key:ro",
-        "-v", f"{intermediate_password}:/run/secrets/step-ca-password:ro",
+        "-v", f"{root}:/run/vonk-normalized-secrets/step-ca/root-certificate:ro",
+        "-v", f"{intermediate}:/run/vonk-normalized-secrets/step-ca/intermediate-certificate:ro",
+        "-v", f"{intermediate_key}:/run/vonk-normalized-secrets/step-ca/intermediate-key:ro",
+        "-v", f"{intermediate_password}:/run/vonk-normalized-secrets/step-ca/password:ro",
         "-v", f"{database}:/home/step/db",
         "--entrypoint", "step-ca", STEP_CA_IMAGE,
-        "/home/step/config/ca.json", "--password-file", "/run/secrets/step-ca-password",
+        "/home/step/config/ca.json", "--password-file", "/run/vonk-normalized-secrets/step-ca/password",
     ], check=True, capture_output=True, text=True, timeout=30)
     try:
         port_output = subprocess.run(
