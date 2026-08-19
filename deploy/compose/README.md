@@ -89,6 +89,13 @@ Set `VONK_DEV_PORT` before starting if the port is already in use. This stack is
 its synthetic platform identity and database are not valid production release
 evidence, and `scripts/dev-compose down -v` removes its development volumes.
 
+The development secret helper checks the persisted controller server certificate
+on every deployment. It renews an expired certificate, or one within 30 days of
+expiry, while preserving the controller CA and enrolled-agent trust. The wrapper
+then recreates `dev-bootstrap` and Caddy so the renewed certificate reaches the
+TLS endpoint. Production deployments use externally managed certificates and
+must renew them through their certificate provider.
+
 ## Recipe containers are source-first
 
 The Compose deployment and recipe workloads are separate layers. Compose starts

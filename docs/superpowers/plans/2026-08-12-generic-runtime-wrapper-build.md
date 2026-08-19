@@ -314,7 +314,7 @@ Stop, withdraw, and uninstall the two-node deployment. Remove only exact tempora
 ```bash
 uv run --frozen ruff check .
 uv run --project control --frozen pytest control/tests -q
-uv run --project agent --frozen pytest agent/tests -q
+cargo test -p vonk-agent --locked
 uv run --frozen pytest scripts/tests tests -q
 cargo fmt --manifest-path Cargo.toml --all -- --check
 cargo clippy --manifest-path Cargo.toml --workspace --all-targets -- -D warnings

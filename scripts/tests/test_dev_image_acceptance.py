@@ -902,6 +902,15 @@ def test_local_wrapper_uses_a_one_use_source_origin_without_building() -> None:
     assert "file:///source-origin" in text
 
 
+def test_local_wrapper_refreshes_caddy_after_development_certificate_rotation() -> None:
+    text = LOCAL_WRAPPER.read_text(encoding="utf-8")
+
+    assert "server_certificate_before" in text
+    assert "server_certificate_after" in text
+    assert "--force-recreate dev-bootstrap caddy" in text
+    assert "Controller certificate rotated" in text
+
+
 def test_acceptance_scans_authoritative_inputs_before_mutating_randomized_fixture_images() -> (
     None
 ):
