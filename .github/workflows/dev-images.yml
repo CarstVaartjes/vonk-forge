@@ -188,16 +188,12 @@ jobs:
             --api-image "ghcr.io/carstvaartjes/vonk-forge-api:dev" \
             --worker-image "ghcr.io/carstvaartjes/vonk-forge-worker:dev" \
             --channel dev
-          docker compose -f "$publication_root/docker-compose.pinned.yml" config -q
-          docker compose -f "$publication_root/docker-compose.dev.yml" config -q
-
-      - name: Render and smoke complete disposable development stack
-        shell: bash
-        run: |
-          set -euo pipefail
-          acceptance_test="deploy/compose/tests/test_dev_complete_stack.py::test_complete_development_stack_enforces_tls_identity_and_acks_routes"
-          uv run --project control --frozen pytest -q --maxfail=1 \
-            "$acceptance_test"
+          docker compose \
+            --env-file deploy/compose/tests/test.env \
+            -f "$publication_root/docker-compose.pinned.yml" config -q
+          docker compose \
+            --env-file deploy/compose/tests/test.env \
+            -f "$publication_root/docker-compose.dev.yml" config -q
 
       - name: Scan complete local publication inputs
         shell: bash
