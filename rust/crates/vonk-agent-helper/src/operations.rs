@@ -16,8 +16,7 @@ use vonk_agent_protocol::{
 use wait_timeout::ChildExt;
 
 use crate::protocol::{
-    AgentSlot, ContainerRuntimeAction, HostOperation, ManagedArea, RestartUnit,
-    artifact_signing_bytes,
+    ContainerRuntimeAction, HostOperation, ManagedArea, RestartUnit, artifact_signing_bytes,
 };
 
 const MAX_ARTIFACT_BYTES: u64 = 1024 * 1024 * 1024;
@@ -47,7 +46,6 @@ pub struct ManagedRoots {
     pub models: PathBuf,
     pub state: PathBuf,
     pub workloads: PathBuf,
-    pub slots: PathBuf,
     pub incoming: PathBuf,
     pub runtime_requests: PathBuf,
     pub runtime_image_receipts: PathBuf,
@@ -61,7 +59,6 @@ impl ManagedRoots {
             models: data.join("models"),
             state: data.join("state"),
             workloads: data.join("workloads"),
-            slots: data.join("slots"),
             incoming: data.join("incoming"),
             runtime_requests: data.join("runtime-requests"),
             runtime_image_receipts: data.join("runtime-images"),
@@ -102,7 +99,6 @@ impl CommandRunner for ProcessCommandRunner {
                     | "/usr/bin/dpkg"
                     | "/usr/bin/systemctl"
                     | "/usr/bin/systemd-run"
-                    | "/usr/lib/vonk-forge/vonk-agent-supervisor"
                     | DOCKER_FIREWALL
                     | "/usr/bin/docker"
                     | "/usr/bin/setfacl"
@@ -205,7 +201,6 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 &roots.models,
                 &roots.state,
                 &roots.workloads,
-                &roots.slots,
                 &roots.incoming,
             ]
             .iter()
@@ -239,14 +234,6 @@ impl<R: CommandRunner> OperationExecutor<R> {
             } => {
                 let path = self.create_managed_directory(area, relative_path)?;
                 ("directory-created", path.to_string_lossy().into_owned())
-            }
-            HostOperation::ActivateAgentSlot {
-                slot,
-                artifact_sha256,
-                artifact_signature,
-            } => {
-                self.activate_slot(slot, artifact_sha256, artifact_signature)?;
-                ("slot-activated", artifact_sha256.clone())
             }
             HostOperation::InstallVonkDeb {
                 package_sha256,
@@ -337,39 +324,6 @@ impl<R: CommandRunner> OperationExecutor<R> {
         Ok(current)
     }
 
-    fn activate_slot(
-        &self,
-        slot: &AgentSlot,
-        digest: &str,
-        detached_signature: &str,
-    ) -> Result<(), OperationError> {
-        self.require_directory(&self.roots.slots)?;
-        let slot_name = match slot {
-            AgentSlot::A => "a",
-            AgentSlot::B => "b",
-        };
-        let artifact = self.roots.slots.join(slot_name).join("vonk-agent");
-        self.verify_artifact(&artifact, "agent", digest, detached_signature)?;
-
-        let result = self
-            .runner
-            .run(
-                Path::new("/usr/lib/vonk-forge/vonk-agent-supervisor"),
-                &[
-                    "activate".to_owned(),
-                    "--slot".to_owned(),
-                    slot_name.to_owned(),
-                    "--sha256".to_owned(),
-                    digest.to_owned(),
-                ],
-            )
-            .map_err(|_| OperationError::CommandFailed)?;
-        if !result.success {
-            return Err(OperationError::CommandFailed);
-        }
-        Ok(())
-    }
-
     fn install_package(
         &self,
         digest: &str,
@@ -420,7 +374,6 @@ impl<R: CommandRunner> OperationExecutor<R> {
     fn restart_unit(&self, unit: &RestartUnit) -> Result<&'static str, OperationError> {
         let unit = match unit {
             RestartUnit::Agent => "vonk-forge-agent.service",
-            RestartUnit::Supervisor => "vonk-forge-agent-supervisor.service",
             RestartUnit::Helper => "vonk-forge-package-helper.service",
         };
         if matches!(unit, "vonk-forge-package-helper.service") {

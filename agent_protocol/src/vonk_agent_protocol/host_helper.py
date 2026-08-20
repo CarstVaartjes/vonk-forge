@@ -29,14 +29,8 @@ class ManagedArea(StrEnum):
     WORKLOADS = "workloads"
 
 
-class AgentSlot(StrEnum):
-    A = "a"
-    B = "b"
-
-
 class RestartUnit(StrEnum):
     AGENT = "agent"
-    SUPERVISOR = "supervisor"
     HELPER = "helper"
 
 
@@ -50,7 +44,6 @@ class ContainerRuntimeAction(StrEnum):
 
 class HostOperationKind(StrEnum):
     CREATE_MANAGED_DIRECTORY = "create-managed-directory"
-    ACTIVATE_AGENT_SLOT = "activate-agent-slot"
     INSTALL_VONK_DEB = "install-vonk-deb"
     RESTART_VONK_UNIT = "restart-vonk-unit"
     SCHEDULE_REBOOT = "schedule-reboot"
@@ -94,23 +87,6 @@ class HostHelperOperation:
             if not _relative_path(relative):
                 raise AgentProtocolError("managed relative path is invalid")
             return {"area": area.value, "relative_path": relative}
-        if self.kind is HostOperationKind.ACTIVATE_AGENT_SLOT:
-            _exact(
-                values,
-                {"slot", "artifact_sha256", "artifact_signature"},
-                "slot activation operation",
-            )
-            try:
-                slot = AgentSlot(values["slot"])
-            except (TypeError, ValueError) as error:
-                raise AgentProtocolError("agent slot is invalid") from error
-            _digest(values["artifact_sha256"], "agent artifact")
-            _signature(values["artifact_signature"], "agent artifact")
-            return {
-                "slot": slot.value,
-                "artifact_sha256": values["artifact_sha256"],
-                "artifact_signature": values["artifact_signature"],
-            }
         if self.kind is HostOperationKind.INSTALL_VONK_DEB:
             _exact(
                 values,
@@ -201,7 +177,10 @@ class HostHelperGrantClaims:
             raise AgentProtocolError("host helper request ID is invalid") from error
         if str(request_id) != self.request_id or request_id.version != 4:
             raise AgentProtocolError("host helper request ID is invalid")
-        if not isinstance(self.node_id, str) or _NODE_ID.fullmatch(self.node_id) is None:
+        if (
+            not isinstance(self.node_id, str)
+            or _NODE_ID.fullmatch(self.node_id) is None
+        ):
             raise AgentProtocolError("host helper node ID is invalid")
         if (
             not isinstance(self.issued_at, int)
@@ -209,7 +188,9 @@ class HostHelperGrantClaims:
             or self.issued_at <= 0
             or not isinstance(self.expires_at, int)
             or isinstance(self.expires_at, bool)
-            or not 1 <= self.expires_at - self.issued_at <= MAX_HOST_HELPER_GRANT_SECONDS
+            or not 1
+            <= self.expires_at - self.issued_at
+            <= MAX_HOST_HELPER_GRANT_SECONDS
         ):
             raise AgentProtocolError("host helper grant expiry is invalid")
         if type(self.operation) is not HostHelperOperation:
@@ -292,9 +273,10 @@ class SignedHostHelperGrant:
     def __post_init__(self) -> None:
         if self.schema_version != 1 or isinstance(self.schema_version, bool):
             raise AgentProtocolError("signed host helper grant version is invalid")
-        if type(self.claims) is not HostHelperGrantClaims or type(
-            self.signature
-        ) is not HostHelperSignature:
+        if (
+            type(self.claims) is not HostHelperGrantClaims
+            or type(self.signature) is not HostHelperSignature
+        ):
             raise AgentProtocolError("signed host helper grant is invalid")
 
     @classmethod

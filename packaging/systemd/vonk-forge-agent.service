@@ -2,7 +2,6 @@
 Description=Vonk Forge outbound agent
 Wants=network-online.target
 After=network-online.target vonk-forge-package-helper.socket
-PartOf=vonk-forge-agent-supervisor.service
 StartLimitIntervalSec=300
 StartLimitBurst=5
 
@@ -11,12 +10,11 @@ Type=simple
 User=vonk-agent
 Group=vonk-agent
 SupplementaryGroups=
-ExecStart=/usr/lib/vonk-forge/vonk-agent-supervisor run-agent
+ExecStart=/usr/lib/vonk-forge/vonk-agent --config /etc/vonk-forge-agent/agent.toml run
 Environment=HOME=/var/lib/vonk-forge-agent
 Environment=XDG_DATA_HOME=/var/lib/vonk-forge-agent
 Environment=XDG_RUNTIME_DIR=/run/vonk-forge-agent
 Environment=CONTAINERS_STORAGE_CONF=/etc/vonk-forge-agent/containers-storage.conf
-LoadCredential=activation-challenge:/var/lib/vonk-forge/supervisor/activation-challenge
 Restart=on-failure
 RestartSec=5s
 TimeoutStartSec=30s
@@ -70,7 +68,7 @@ Delegate=yes
 RemoveIPC=yes
 SystemCallArchitectures=native
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
-ReadOnlyPaths=/var/lib/vonk-forge/slots /var/lib/vonk-forge/supervisor /etc/vonk-forge-agent /usr/lib/vonk-forge
+ReadOnlyPaths=/etc/vonk-forge-agent /usr/lib/vonk-forge
 ReadWritePaths=/var/lib/vonk-forge-agent /run/vonk-forge-agent
 
 [Install]

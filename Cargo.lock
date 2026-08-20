@@ -1850,23 +1850,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "vonk-agent-supervisor"
-version = "0.1.0"
-dependencies = [
- "clap",
- "hex",
- "ring",
- "rustix",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "thiserror",
- "vonk-agent-protocol",
- "wait-timeout",
-]
-
-[[package]]
 name = "wait-timeout"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

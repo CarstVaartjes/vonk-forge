@@ -21,7 +21,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = "vonk-forge-agent"
 TARGET = "aarch64-unknown-linux-gnu"
-BINARIES = ("vonk-agent", "vonk-agent-helper", "vonk-agent-supervisor")
+BINARIES = ("vonk-agent", "vonk-agent-helper")
 SEMVER = r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
 PACKAGE_VERSION = re.compile(
     rf"(?:{SEMVER}|{SEMVER}~dev\.(?:0|[1-9][0-9]*)\+g[0-9a-f]{{12}})\Z"
@@ -31,6 +31,8 @@ DEVELOPMENT_VERSION = re.compile(
 )
 MAX_EPOCH = 4_102_444_800
 MAX_BINARY_BYTES = 512 * 1024 * 1024
+ARTIFACT_DOMAIN = b"VONK-HOST-ARTIFACT-V1\x00agent\x00"
+ED25519_SPKI_PREFIX = bytes.fromhex("302a300506032b6570032100")
 
 
 class BuildError(RuntimeError):
@@ -145,6 +147,50 @@ def source(relative: str) -> bytes:
     if not path.is_file() or path.is_symlink():
         raise BuildError(f"required packaging source is unsafe: {relative}")
     return path.read_bytes()
+
+
+def sign_agent(
+    temporary: Path,
+    private_key: Path,
+    artifact: bytes,
+) -> tuple[bytes, bytes]:
+    public_der = run(
+        [
+            "/usr/bin/openssl",
+            "pkey",
+            "-in",
+            str(private_key),
+            "-pubout",
+            "-outform",
+            "DER",
+        ],
+        cwd=Path("/"),
+    )
+    if (
+        not public_der.startswith(ED25519_SPKI_PREFIX)
+        or len(public_der) != len(ED25519_SPKI_PREFIX) + 32
+    ):
+        raise BuildError("release key is not Ed25519")
+    claims = temporary / "artifact.claims"
+    claims.write_bytes(ARTIFACT_DOMAIN + hashlib.sha256(artifact).digest())
+    signature = run(
+        [
+            "/usr/bin/openssl",
+            "pkeyutl",
+            "-sign",
+            "-inkey",
+            str(private_key),
+            "-rawin",
+            "-in",
+            str(claims),
+        ],
+        cwd=Path("/"),
+    )
+    if len(signature) != 64:
+        raise BuildError("release signature is invalid")
+    return signature.hex().encode() + b"\n", public_der[
+        len(ED25519_SPKI_PREFIX) :
+    ].hex().encode() + b"\n"
 
 
 def evidence(version: str, epoch: int, binaries: dict[str, bytes]) -> dict[str, bytes]:
@@ -330,41 +376,31 @@ def build(
     with tempfile.TemporaryDirectory(prefix="vonk-agent-deb-") as temporary:
         stage = Path(temporary) / "root"
         stage.mkdir()
-        release = "usr/lib/vonk-forge/release"
-        install_file(stage, f"{release}/vonk-agent", binaries["vonk-agent"], 0o555)
+        install_file(
+            stage,
+            "usr/lib/vonk-forge/vonk-agent",
+            binaries["vonk-agent"],
+            0o555,
+        )
         install_file(
             stage,
             "usr/lib/vonk-forge/vonk-agent-helper",
             binaries["vonk-agent-helper"],
             0o555,
         )
+        artifact_signature, release_public_key = sign_agent(
+            Path(temporary), private_key, binaries["vonk-agent"]
+        )
         install_file(
             stage,
-            "usr/lib/vonk-forge/vonk-agent-supervisor",
-            binaries["vonk-agent-supervisor"],
-            0o555,
+            "usr/lib/vonk-forge/release/artifact.sig",
+            artifact_signature,
+            0o644,
         )
-        signed = Path(temporary) / "signed"
-        signed.mkdir()
-        run(
-            [
-                str(ROOT / "scripts/sign-agent-release"),
-                "--artifact",
-                str(stage / release / "vonk-agent"),
-                "--private-key",
-                str(private_key),
-                "--output",
-                str(signed),
-            ]
-        )
-        for name in ("manifest-a.json", "manifest-b.json", "artifact.sig"):
-            install_file(
-                stage, f"{release}/{name}", (signed / name).read_bytes(), 0o644
-            )
         install_file(
             stage,
             "usr/share/keyrings/vonk-forge-release.pub",
-            (signed / "release.pub").read_bytes(),
+            release_public_key,
             0o644,
         )
         install_file(
@@ -395,7 +431,6 @@ def build(
         )
         for name in (
             "vonk-forge-agent.service",
-            "vonk-forge-agent-supervisor.service",
             "vonk-forge-docker-firewall.service",
             "vonk-forge-package-helper.service",
             "vonk-forge-package-helper.socket",
@@ -425,10 +460,14 @@ def build(
         install_file(
             stage, "DEBIAN/conffiles", source("packaging/debian/conffiles"), 0o644
         )
-        for name in ("postinst", "prerm"):
+        for name in ("prerm",):
             install_file(
                 stage, f"DEBIAN/{name}", source(f"packaging/debian/{name}"), 0o755
             )
+        postinst = source("packaging/debian/postinst").replace(
+            b"@VERSION@", version.encode()
+        )
+        install_file(stage, "DEBIAN/postinst", postinst, 0o755)
         preinst = source("packaging/debian/preinst").replace(
             b"@VERSION@", version.encode()
         )

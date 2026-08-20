@@ -6,101 +6,94 @@ script="$repo_root/packaging/bin/vonk-agent-upgrade"
 test_root="$(mktemp -d)"
 trap 'rm -rf -- "$test_root"' EXIT
 
-make_fixture() {
-  local name="$1" with_bootstrap="$2"
-  local root="$test_root/$name"
-  mkdir -p "$root/usr/lib/vonk-forge" \
-    "$root/var/lib/vonk-forge/slots/b" \
-    "$root/var/lib/vonk-forge/supervisor"
+root="$test_root/root"
+bin="$test_root/bin"
+log="$test_root/actions.log"
+mkdir -p "$root/usr/lib/vonk-forge" "$bin"
 
-  cat > "$root/usr/lib/vonk-forge/vonk-agent-supervisor" <<'FAKE'
-#!/usr/bin/env bash
-set -euo pipefail
+write_agent() {
+  local version="$1"
+  local healthy="$2"
+  local target="$root/usr/lib/vonk-forge/vonk-agent"
+  local staged="$target.new"
+  {
+    printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail'
+    printf 'version=%q\n' "$version"
+    printf 'healthy=%q\n' "$healthy"
+    cat <<'AGENT'
 case "${1:-}" in
-  package-staging-slot)
-    printf 'b\n'
-    ;;
-  activate)
-    printf 'activate %s\n' "$*" >> "${UPGRADE_ACTION_LOG:?}"
-    slot=''
-    while (( $# > 0 )); do
-      if [[ "$1" == '--slot' ]]; then slot="$2"; shift 2; else shift; fi
-    done
-    ln -sfn "../../slots/$slot" \
-      "${VONK_AGENT_UPGRADE_ROOT:?}/var/lib/vonk-forge/supervisor/current"
-    ;;
-  *)
-    printf 'unexpected supervisor command: %s\n' "$*" >&2
-    exit 99
-    ;;
+  *) printf 'agent %s\n' "$*" >> "${UPGRADE_ACTION_LOG:?}" ;;
 esac
-FAKE
-  chmod +x "$root/usr/lib/vonk-forge/vonk-agent-supervisor"
-
-  if [[ "$with_bootstrap" == yes ]]; then
-    cat > "$root/var/lib/vonk-forge/slots/b/vonk-agent" <<'AGENT'
-#!/usr/bin/env bash
-if [[ "${1:-}" == '--help' ]]; then
-  printf 'Commands:\n  run\n  bootstrap\n  pair\n'
-elif [[ "${1:-}" == '--version' ]]; then
-  printf 'vonk-agent 1.2.3\n'
-fi
+case "${1:-}" in
+  --version) printf 'vonk-agent %s\n' "$version" ;;
+  self-test) [[ "$healthy" == yes ]] ;;
+  *) exit 2 ;;
+esac
 AGENT
-  else
-    cat > "$root/var/lib/vonk-forge/slots/b/vonk-agent" <<'AGENT'
-#!/usr/bin/env bash
-if [[ "${1:-}" == '--help' ]]; then
-  printf 'Commands:\n  run\n  pair\n'
-fi
-AGENT
-  fi
-  chmod +x "$root/var/lib/vonk-forge/slots/b/vonk-agent"
-  printf '{"status":"stable"}\n' > "$root/var/lib/vonk-forge/supervisor/state.json"
-  printf '%s\n' "$root"
+  } > "$staged"
+  chmod +x "$staged"
+  mv -f "$staged" "$target"
 }
 
-mkdir -p "$test_root/bin"
-cat > "$test_root/bin/apt-get" <<'FAKE'
-#!/usr/bin/env bash
-set -euo pipefail
-printf '%s\n' "$*" >> "${UPGRADE_ACTION_LOG:?}"
-FAKE
-cat > "$test_root/bin/systemctl" <<'FAKE'
-#!/usr/bin/env bash
-set -euo pipefail
-if [[ "${1:-}" == is-active && "${2:-}" == --quiet ]]; then exit 0; fi
-exit 0
-FAKE
-chmod +x "$test_root/bin/apt-get" "$test_root/bin/systemctl"
+write_agent 1.0.0 yes
 
-incompatible_root="$(make_fixture incompatible no)"
-if PATH="$test_root/bin:$PATH" \
-  UPGRADE_ACTION_LOG="$test_root/incompatible.log" \
-  VONK_AGENT_UPGRADE_ROOT="$incompatible_root" \
+cat > "$bin/apt-get" <<'FAKE'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'apt-get %s\n' "$*" >> "${UPGRADE_ACTION_LOG:?}"
+if [[ "$*" == 'install --only-upgrade --yes vonk-forge-agent' ]]; then
+  "${WRITE_UPGRADED_AGENT:?}" 1.1.0 "${UPGRADED_HEALTH:-yes}"
+fi
+FAKE
+cat > "$bin/systemctl" <<'FAKE'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'systemctl %s\n' "$*" >> "${UPGRADE_ACTION_LOG:?}"
+if [[ "${1:-}" == is-active && "${2:-}" == --quiet ]]; then
+  [[ "${3:-}" == vonk-forge-agent.service ]]
+fi
+FAKE
+cat > "$bin/write-upgraded-agent" <<FAKE
+#!/usr/bin/env bash
+set -euo pipefail
+$(declare -f write_agent)
+root=$(printf '%q' "$root")
+write_agent "\$1" "\$2"
+FAKE
+chmod +x "$bin/apt-get" "$bin/systemctl" "$bin/write-upgraded-agent"
+
+UPGRADE_ACTION_LOG="$log" \
+VONK_AGENT_UPGRADE_ROOT="$root" \
+VONK_AGENT_UPGRADE_TEST_MODE=1 \
+VONK_AGENT_UPGRADE_APT_GET="$bin/apt-get" \
+VONK_AGENT_UPGRADE_SYSTEMCTL="$bin/systemctl" \
+VONK_AGENT_UPGRADE_AGENT="$root/usr/lib/vonk-forge/vonk-agent" \
+WRITE_UPGRADED_AGENT="$bin/write-upgraded-agent" \
+  "$script" > "$test_root/output"
+
+grep -Fxq 'apt-get update' "$log"
+grep -Fxq 'apt-get install --only-upgrade --yes vonk-forge-agent' "$log"
+grep -Fxq 'systemctl restart vonk-forge-agent.service' "$log"
+grep -Fxq 'systemctl is-active --quiet vonk-forge-agent.service' "$log"
+grep -Fxq 'agent self-test' "$log"
+grep -Fxq 'agent --version' "$log"
+grep -Fq 'upgrade complete: vonk-agent 1.1.0 is healthy' "$test_root/output"
+! grep -Eiq 'supervisor|slot|activate|bootstrap' "$log" "$test_root/output"
+
+write_agent 1.0.0 yes
+if UPGRADE_ACTION_LOG="$log" \
+  VONK_AGENT_UPGRADE_ROOT="$root" \
   VONK_AGENT_UPGRADE_TEST_MODE=1 \
-  VONK_AGENT_UPGRADE_APT_GET="$test_root/bin/apt-get" \
-  VONK_AGENT_UPGRADE_SYSTEMCTL="$test_root/bin/systemctl" \
-  "$script" > "$test_root/incompatible.out" 2>&1
+  VONK_AGENT_UPGRADE_APT_GET="$bin/apt-get" \
+  VONK_AGENT_UPGRADE_SYSTEMCTL="$bin/systemctl" \
+  VONK_AGENT_UPGRADE_AGENT="$root/usr/lib/vonk-forge/vonk-agent" \
+  WRITE_UPGRADED_AGENT="$bin/write-upgraded-agent" \
+  UPGRADED_HEALTH=no \
+    "$script" > "$test_root/unhealthy-output" 2>&1
 then
-  printf 'upgrade accepted an agent without bootstrap\n' >&2
+  printf '%s\n' 'upgrade accepted an unhealthy direct agent' >&2
   exit 1
 fi
-grep -Fq 'staged agent does not support bootstrap' "$test_root/incompatible.out" || {
-  cat "$test_root/incompatible.out" >&2
-  exit 1
-}
-! grep -Fq 'activate' "$test_root/incompatible.log"
+! grep -Fq 'upgrade complete' "$test_root/unhealthy-output"
 
-compatible_root="$(make_fixture compatible yes)"
-PATH="$test_root/bin:$PATH" \
-  UPGRADE_ACTION_LOG="$test_root/compatible.log" \
-  VONK_AGENT_UPGRADE_ROOT="$compatible_root" \
-  VONK_AGENT_UPGRADE_TEST_MODE=1 \
-  VONK_AGENT_UPGRADE_APT_GET="$test_root/bin/apt-get" \
-  VONK_AGENT_UPGRADE_SYSTEMCTL="$test_root/bin/systemctl" \
-  VONK_AGENT_UPGRADE_POLL_SECONDS=0 \
-  "$script" > "$test_root/compatible.out"
-grep -Fq 'activate' "$test_root/compatible.log"
-grep -Fq 'upgrade complete' "$test_root/compatible.out"
-
-printf 'vonk-agent upgrade wrapper: PASS\n'
+printf 'vonk-agent direct upgrade wrapper: PASS\n'

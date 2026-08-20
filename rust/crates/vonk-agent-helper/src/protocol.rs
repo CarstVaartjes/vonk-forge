@@ -37,17 +37,9 @@ pub enum ManagedArea {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum AgentSlot {
-    A,
-    B,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum RestartUnit {
     Agent,
-    Supervisor,
     Helper,
 }
 
@@ -67,11 +59,6 @@ pub enum HostOperation {
     CreateManagedDirectory {
         area: ManagedArea,
         relative_path: String,
-    },
-    ActivateAgentSlot {
-        slot: AgentSlot,
-        artifact_sha256: String,
-        artifact_signature: String,
     },
     InstallVonkDeb {
         package_sha256: String,
@@ -99,11 +86,6 @@ impl HostOperation {
             Self::CreateManagedDirectory { relative_path, .. } => {
                 valid_relative_path(relative_path)
             }
-            Self::ActivateAgentSlot {
-                artifact_sha256,
-                artifact_signature,
-                ..
-            } => valid_digest(artifact_sha256) && valid_signature(artifact_signature),
             Self::InstallVonkDeb {
                 package_sha256,
                 package_signature,

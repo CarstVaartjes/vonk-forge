@@ -3,7 +3,7 @@ use chrono::{DateTime, FixedOffset, Utc};
 use serde_json::{Value, json};
 use std::{future::Future, path::Path, time::Duration};
 
-use crate::supervisor_readiness::AgentRuntimeIdentity;
+use crate::runtime_identity::AgentRuntimeIdentity;
 use crate::{
     client::{AgentHttpClient, ClientError},
     health::{HealthEvidence, wait_ready},
@@ -668,9 +668,7 @@ mod tests {
         ExecutionResult, Executor, LoopClient, run_once_with_heartbeat_interval,
         wait_ready_with_runtime_guard,
     };
-    use crate::{
-        client::ClientError, state::StateStore, supervisor_readiness::AgentRuntimeIdentity,
-    };
+    use crate::{client::ClientError, runtime_identity::AgentRuntimeIdentity, state::StateStore};
     use async_trait::async_trait;
     use chrono::{DateTime, Duration as ChronoDuration, FixedOffset, Utc};
     use serde_json::json;

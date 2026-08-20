@@ -22,15 +22,10 @@ path() {
 }
 
 apt_get="${VONK_AGENT_UPGRADE_APT_GET:-/usr/bin/apt-get}"
-supervisor="${VONK_AGENT_UPGRADE_SUPERVISOR:-$(path /usr/lib/vonk-forge/vonk-agent-supervisor)}"
+agent="${VONK_AGENT_UPGRADE_AGENT:-$(path /usr/lib/vonk-forge/vonk-agent)}"
 systemctl="${VONK_AGENT_UPGRADE_SYSTEMCTL:-/usr/bin/systemctl}"
-sha256sum_command="${VONK_AGENT_UPGRADE_SHA256SUM:-/usr/bin/sha256sum}"
-state="$(path /var/lib/vonk-forge/supervisor/state.json)"
-slots="$(path /var/lib/vonk-forge/slots)"
-poll_seconds="${VONK_AGENT_UPGRADE_POLL_SECONDS:-2}"
-max_attempts="${VONK_AGENT_UPGRADE_MAX_ATTEMPTS:-90}"
 
-for required in "$apt_get" "$supervisor" "$systemctl" "$sha256sum_command"; do
+for required in "$apt_get" "$agent" "$systemctl"; do
   if [[ ! -x "$required" ]]; then
     printf 'required executable is unavailable: %s\n' "$required" >&2
     exit 1
@@ -41,54 +36,17 @@ printf '%s\n' 'Updating the Vonk Forge agent package...'
 "$apt_get" update
 "$apt_get" install --only-upgrade --yes vonk-forge-agent
 
-stage_slot="$("$supervisor" package-staging-slot)"
-case "$stage_slot" in
-  a|b) ;;
-  *)
-    printf 'invalid staged slot reported by supervisor: %s\n' "$stage_slot" >&2
-    exit 1
-    ;;
-esac
-stage_agent="$slots/$stage_slot/vonk-agent"
-if [[ ! -x "$stage_agent" ]]; then
-  printf 'staged agent is unavailable: %s\n' "$stage_agent" >&2
+if [[ ! -x "$agent" ]]; then
+  printf 'installed agent is unavailable: %s\n' "$agent" >&2
+  exit 1
+fi
+"$systemctl" restart vonk-forge-agent.service
+"$systemctl" is-active --quiet vonk-forge-agent.service
+"$agent" self-test
+version="$("$agent" --version)"
+if [[ ! "$version" =~ ^vonk-agent\ [0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  printf 'installed agent version is invalid: %s\n' "$version" >&2
   exit 1
 fi
 
-help_output="$("$stage_agent" --help 2>&1 || true)"
-if ! grep -Eq '^[[:space:]]+bootstrap([[:space:]]|$)' <<<"$help_output"; then
-  printf '%s\n' 'staged agent does not support bootstrap; refusing activation' >&2
-  printf '%s\n' 'Install a package built from the same release as the control plane.' >&2
-  exit 1
-fi
-
-stage_digest="$("$sha256sum_command" "$stage_agent" | awk '{print $1}')"
-if [[ ! "$stage_digest" =~ ^[[:xdigit:]]{64}$ ]]; then
-  printf 'could not calculate a valid staged-agent digest: %s\n' "$stage_digest" >&2
-  exit 1
-fi
-
-printf 'Activating staged agent %s (%s)...\n' "$stage_slot" "$stage_digest"
-"$supervisor" activate --slot "$stage_slot" --sha256 "$stage_digest"
-
-for (( attempt=1; attempt<=max_attempts; attempt++ )); do
-  if "$systemctl" is-active --quiet vonk-forge-agent-supervisor.service \
-    && "$systemctl" is-active --quiet vonk-forge-agent.service
-  then
-    printf 'upgrade complete: slot %s is healthy\n' "$stage_slot"
-    if [[ -r "$state" ]]; then
-      cat "$state"
-    fi
-    exit 0
-  fi
-  sleep "$poll_seconds"
-done
-
-printf '%s\n' 'agent upgrade did not become healthy' >&2
-if [[ -r "$state" ]]; then
-  printf '%s\n' 'final supervisor state:' >&2
-  cat "$state" >&2
-fi
-"$systemctl" --no-pager --full status \
-  vonk-forge-agent-supervisor.service vonk-forge-agent.service >&2 || true
-exit 1
+printf 'upgrade complete: %s is healthy\n' "$version"

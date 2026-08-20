@@ -10,7 +10,6 @@ from .contracts import (
     validate_schema_message,
 )
 from .host_helper import (
-    AgentSlot,
     ContainerRuntimeAction,
     HostHelperGrantClaims,
     HostHelperOperation,
@@ -46,7 +45,6 @@ __all__ = [
     "AgentProgress",
     "AgentProtocolError",
     "AgentResult",
-    "AgentSlot",
     "ComponentDescriptor",
     "ContainerRuntimeAction",
     "HostHelperGrantClaims",

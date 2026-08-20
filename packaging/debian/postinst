@@ -1,6 +1,9 @@
 #!/bin/sh
 set -eu
 
+package_version='@VERSION@'
+agent_semver=${package_version%%~dev.*}
+
 if [ "${1:-}" != configure ]; then
     exit 0
 fi
@@ -104,56 +107,24 @@ install -d -o vonk-agent -g vonk-agent -m 0700 \
     /var/lib/vonk-forge-agent/installations \
     /var/lib/vonk-forge-agent/run-metadata \
     /var/lib/vonk-forge-agent/runs
-install -d -o root -g root -m 0755 /var/lib/vonk-forge/slots
 install -d -o root -g root -m 0700 \
     /var/lib/vonk-forge/helper \
     /var/lib/vonk-forge/helper/requests \
     /var/lib/vonk-forge/incoming \
     /var/lib/vonk-forge/runtime-images
-# The supervisor remains root-owned and non-writable by the runtime account,
-# while the dedicated group may traverse it to read the verified state and
-# execute the active slot selected by the root supervisor.
-install -d -o root -g vonk-agent -m 0750 /var/lib/vonk-forge/supervisor
-
-release=/usr/lib/vonk-forge/release
-state=/var/lib/vonk-forge/supervisor/state.json
-if [ ! -e "$state" ]; then
-    target=a
-else
-    saved_umask=$(umask)
-    umask 077
-    exec 9>/var/lib/vonk-forge/supervisor/supervisor.lock
-    umask "$saved_umask"
-    /usr/bin/flock -x 9
-    target=$(
-        /usr/lib/vonk-forge/vonk-agent-supervisor package-staging-slot
-    )
-    case "$target" in
-        a|b) ;;
-        *) echo "vonk-forge-agent: package staging slot is invalid" >&2; exit 1 ;;
-    esac
-fi
-
-slot=/var/lib/vonk-forge/slots/$target
-install -d -o root -g root -m 0755 "$slot"
-install -o root -g root -m 0555 "$release/vonk-agent" "$slot/.vonk-agent.new"
-install -o root -g root -m 0644 "$release/manifest-$target.json" "$slot/.manifest.json.new"
-sync -f "$slot/.vonk-agent.new" "$slot/.manifest.json.new"
-mv -f "$slot/.vonk-agent.new" "$slot/vonk-agent"
-mv -f "$slot/.manifest.json.new" "$slot/manifest.json"
-sync -f "$slot"
-
-if [ ! -e "$state" ]; then
-    /usr/lib/vonk-forge/vonk-agent-supervisor initialize --slot a
-fi
-
 deb-systemd-helper enable vonk-forge-package-helper.socket >/dev/null || true
-deb-systemd-helper enable vonk-forge-agent-supervisor.service >/dev/null || true
+deb-systemd-helper enable vonk-forge-agent.service >/dev/null || true
 if [ -f /etc/vonk-forge-agent/docker-firewall.conf ]; then
     deb-systemd-helper enable vonk-forge-docker-firewall.service >/dev/null || true
 fi
 if [ -d /run/systemd/system ]; then
     systemctl --system daemon-reload >/dev/null || true
+    if [ -n "${2:-}" ]; then
+        deb-systemd-invoke restart vonk-forge-agent.service >/dev/null
+        systemctl --system is-active --quiet vonk-forge-agent.service
+        [ "$(/usr/lib/vonk-forge/vonk-agent --version)" = "vonk-agent $agent_semver" ]
+        /usr/lib/vonk-forge/vonk-agent self-test
+    fi
 fi
 
 exit 0

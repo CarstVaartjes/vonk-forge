@@ -3,7 +3,6 @@ members = [
     "rust/crates/vonk-agent-protocol",
     "rust/crates/vonk-agent",
     "rust/crates/vonk-agent-helper",
-    "rust/crates/vonk-agent-supervisor",
 ]
 resolver = "3"
 

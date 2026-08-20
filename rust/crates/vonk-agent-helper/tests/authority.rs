@@ -11,8 +11,8 @@ use vonk_agent_helper::operations::{
     CommandOutput, CommandRunner, ManagedRoots, OperationExecutor,
 };
 use vonk_agent_helper::protocol::{
-    AgentSlot, ContainerRuntimeAction, GrantClaims, GrantSignature, GrantVerifier, HostOperation,
-    ManagedArea, PeerIdentity, RestartUnit, SignedGrant, canonical_signing_bytes, parse_request,
+    ContainerRuntimeAction, GrantClaims, GrantSignature, GrantVerifier, HostOperation, ManagedArea,
+    PeerIdentity, RestartUnit, SignedGrant, canonical_signing_bytes, parse_request,
 };
 use vonk_agent_protocol::{HostRuntimeAction, HostRuntimeRequest, canonical_json, hex_sha256};
 
@@ -84,11 +84,6 @@ fn every_permitted_operation_has_an_exact_typed_shape() {
             area: ManagedArea::Models,
             relative_path: "sha256/aa".to_owned(),
         },
-        HostOperation::ActivateAgentSlot {
-            slot: AgentSlot::B,
-            artifact_sha256: "a".repeat(64),
-            artifact_signature: "b".repeat(128),
-        },
         HostOperation::InstallVonkDeb {
             package_sha256: "c".repeat(64),
             package_signature: "d".repeat(128),
@@ -147,12 +142,30 @@ fn rejects_unknown_fields_and_untyped_process_control() {
 }
 
 #[test]
+fn protocol_rejects_removed_slot_and_supervisor_operations() {
+    for operation in [
+        serde_json::json!({
+            "type": "activate-agent-slot",
+            "slot": "a",
+            "artifact_sha256": "a".repeat(64),
+            "artifact_signature": "b".repeat(128),
+        }),
+        serde_json::json!({
+            "type": "restart-vonk-unit",
+            "unit": "supervisor",
+        }),
+    ] {
+        assert!(serde_json::from_value::<HostOperation>(operation).is_err());
+    }
+}
+
+#[test]
 fn authority_rejects_expiry_bad_signature_and_users_outside_agent_group() {
     let signer = signer(7);
     let verifier = grant_verifier(&signer);
     let request = signed(
         HostOperation::RestartVonkUnit {
-            unit: RestartUnit::Supervisor,
+            unit: RestartUnit::Agent,
         },
         &signer,
     );
@@ -312,7 +325,6 @@ fn fixture() -> (TempDir, ManagedRoots, RecordingRunner, Ed25519KeyPair) {
     let roots = ManagedRoots::under(&data);
     fs::create_dir_all(&roots.models).unwrap();
     fs::create_dir_all(&roots.state).unwrap();
-    fs::create_dir_all(&roots.slots).unwrap();
     fs::create_dir_all(&roots.incoming).unwrap();
     (temp, roots, RecordingRunner::default(), signer(9))
 }
@@ -875,7 +887,7 @@ fn managed_directory_creation_rejects_traversal_and_symlink_escape() {
 }
 
 #[test]
-fn artifacts_are_verified_before_slot_or_package_mutation() {
+fn artifacts_are_verified_before_package_mutation() {
     let (_temp, roots, runner, release) = fixture();
     let executor = OperationExecutor::new(
         roots.clone(),
@@ -884,37 +896,6 @@ fn artifacts_are_verified_before_slot_or_package_mutation() {
         None,
     )
     .unwrap();
-
-    let slot = roots.slots.join("a");
-    fs::create_dir_all(&slot).unwrap();
-    let agent = slot.join("vonk-agent");
-    fs::write(&agent, b"trusted agent").unwrap();
-    let digest = vonk_agent_protocol::hex_sha256(b"trusted agent");
-    let signature = release.sign(
-        vonk_agent_helper::protocol::artifact_signing_bytes("agent", &digest)
-            .unwrap()
-            .as_slice(),
-    );
-    executor
-        .execute(&HostOperation::ActivateAgentSlot {
-            slot: AgentSlot::A,
-            artifact_sha256: digest.clone(),
-            artifact_signature: hex::encode(signature.as_ref()),
-        })
-        .unwrap();
-    assert_eq!(
-        runner.calls.lock().unwrap()[0],
-        (
-            PathBuf::from("/usr/lib/vonk-forge/vonk-agent-supervisor"),
-            vec![
-                "activate".to_owned(),
-                "--slot".to_owned(),
-                "a".to_owned(),
-                "--sha256".to_owned(),
-                digest,
-            ],
-        )
-    );
 
     let bad_package = "e".repeat(64);
     fs::write(
@@ -930,7 +911,7 @@ fn artifacts_are_verified_before_slot_or_package_mutation() {
             })
             .is_err()
     );
-    assert_eq!(runner.calls.lock().unwrap().len(), 1);
+    assert!(runner.calls.lock().unwrap().is_empty());
 }
 
 #[test]

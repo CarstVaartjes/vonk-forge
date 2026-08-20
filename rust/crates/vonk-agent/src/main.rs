@@ -2,19 +2,14 @@
 
 use std::{
     future::Future,
-    io::{self, Read, Write},
+    io::{self, Read},
     path::{Path, PathBuf},
-    process::{Command as ProcessCommand, Stdio},
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use clap::{Parser, Subcommand};
 use url::Url;
 use vonk_agent::{
-    bootstrap::{
-        BootstrapRequest, data_directory_owner, generate_node_id, materialize_config,
-        parse_bootstrap_fingerprint, parse_bootstrap_origin, parse_bootstrap_token,
-    },
     client::{AgentHttpClient, ClientError},
     config::{AgentConfig, DEFAULT_CONFIG_PATH},
     executor::{LoopError, RecipeExecutor, run_once},
@@ -23,8 +18,8 @@ use vonk_agent::{
     pair::{EnrollmentOutcome, collect_evidence, pair},
     process::SystemProcessRunner,
     rotation::rotate_if_due,
+    runtime_identity::AgentRuntimeIdentity,
     state::{StateStore, backoff_delay},
-    supervisor_readiness::SupervisorReadiness,
     telemetry::{
         SystemFileSystemProvider, TelemetryCollector, TelemetryPaths, TelemetryQueue,
         TelemetrySchedule, read_boot_id,
@@ -43,16 +38,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     Run,
-    Bootstrap {
-        #[arg(long, value_parser = parse_bootstrap_token)]
-        token: String,
-        #[arg(long, value_parser = parse_bootstrap_origin)]
-        controller_endpoint: Url,
-        #[arg(long, value_parser = parse_bootstrap_origin)]
-        enrollment_endpoint: Url,
-        #[arg(long, value_parser = parse_bootstrap_fingerprint)]
-        ca_fingerprint: String,
-    },
+    SelfTest,
     Pair {
         #[arg(long)]
         enrollment: Url,
@@ -68,20 +54,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     match cli.command {
         Command::Run => run_agent(&AgentConfig::load(&cli.config)?).await?,
-        Command::Bootstrap {
-            token,
-            controller_endpoint,
-            enrollment_endpoint,
-            ca_fingerprint,
-        } => {
-            let request = BootstrapRequest::new(
-                token,
-                controller_endpoint,
-                enrollment_endpoint,
-                ca_fingerprint,
-            )?;
-            let config = materialize_config(&cli.config, &request, &generate_node_id())?;
-            bootstrap_pair(&cli.config, &config, &request)?;
+        Command::SelfTest => {
+            AgentRuntimeIdentity::from_current_executable()?;
         }
         Command::Pair {
             enrollment,
@@ -105,46 +79,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn bootstrap_pair(
-    config_path: &Path,
-    config: &AgentConfig,
-    request: &BootstrapRequest,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let (uid, gid) = data_directory_owner(config)?;
-    let executable = std::env::current_exe()?;
-    let mut child = ProcessCommand::new("/usr/bin/setpriv")
-        .arg("--reuid")
-        .arg(uid.to_string())
-        .arg("--regid")
-        .arg(gid.to_string())
-        .arg("--clear-groups")
-        .arg("--")
-        .arg(executable)
-        .env("HOME", &config.data_dir)
-        .env("XDG_DATA_HOME", &config.data_dir)
-        .current_dir(&config.data_dir)
-        .arg("--config")
-        .arg(config_path)
-        .arg("pair")
-        .arg("--enrollment")
-        .arg(request.enrollment_endpoint().as_str())
-        .arg("--ca-sha256")
-        .arg(request.ca_fingerprint())
-        .arg("--token-stdin")
-        .stdin(Stdio::piped())
-        .spawn()?;
-    child
-        .stdin
-        .take()
-        .ok_or("bootstrap pairing input is unavailable")?
-        .write_all(request.token().as_bytes())?;
-    let status = child.wait()?;
-    if !status.success() {
-        return Err("bootstrap pairing failed".into());
-    }
-    Ok(())
-}
-
 async fn pair_agent(
     config: &AgentConfig,
     enrollment: &Url,
@@ -163,13 +97,13 @@ async fn pair_agent(
 }
 
 async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error>> {
-    let supervisor_readiness = SupervisorReadiness::from_process_environment()?;
+    let runtime_identity = AgentRuntimeIdentity::from_current_executable()?;
     rotate_if_due(config).await?;
     let client = AgentHttpClient::from_config(config)?;
     let mut state = StateStore::open(&config.data_dir.join("state.sqlite"), &config.node_id)?;
     state.recover_interrupted()?;
     let (client_updates, telemetry_client) = tokio::sync::watch::channel(client.clone());
-    let control = run_control_lane(config, supervisor_readiness, client, state, client_updates);
+    let control = run_control_lane(config, runtime_identity, client, state, client_updates);
     let telemetry = run_telemetry_lane(
         config.data_dir.clone(),
         telemetry_client,
@@ -187,7 +121,7 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
 
 async fn run_control_lane(
     config: &AgentConfig,
-    mut supervisor_readiness: SupervisorReadiness,
+    runtime_identity: AgentRuntimeIdentity,
     mut client: AgentHttpClient,
     mut state: StateStore,
     client_updates: tokio::sync::watch::Sender<AgentHttpClient>,
@@ -221,7 +155,6 @@ async fn run_control_lane(
             .collect()?;
             match client.report_inventory(&inventory).await {
                 Ok(()) => {
-                    supervisor_readiness.report()?;
                     failures = 0;
                     next_inventory =
                         tokio::time::Instant::now() + std::time::Duration::from_secs(60);
@@ -278,7 +211,7 @@ async fn run_control_lane(
                 &executor,
                 &capabilities,
                 wait_seconds,
-                supervisor_readiness.runtime_identity(),
+                Some(&runtime_identity),
             )
             .await
         };
