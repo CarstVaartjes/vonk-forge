@@ -16,6 +16,12 @@ the published Rust agent and guides secure pairing. Neither flow requires a Git
 checkout. Development and production run the same topology and behavior; only
 their immutable release identities differ.
 
+Each curl invocation completes its entire side of the setup. It may prompt for
+required choices and secrets through `/dev/tty`, but it must not finish by
+asking the operator to download another installer, change permissions, or run a
+second setup command. After the NAS command, the directory is ready to upload;
+after the Spark command, the installed agent is paired, running, and verified.
+
 This is a clean-slate design. Remove obsolete compatibility, migration, Python
 Spark, Git-authority, built-in CA, A/B slot, and supervisor paths instead of
 preserving them.
@@ -201,4 +207,3 @@ Delete, rather than deprecate:
 - tests that only enforce documentation text or removed compatibility behavior.
 
 Git history is retained.
-
