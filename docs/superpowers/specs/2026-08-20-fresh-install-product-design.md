@@ -41,9 +41,10 @@ does not consume the wizard input. It downloads a versioned setup executable
 for the local OS and architecture, verifies it against the selected signed
 release manifest, and executes it without `sudo` or Docker.
 
-The wizard asks for:
+The public endpoint selects the current accepted stable release. Development
+publishes the same artifact graph through CI for acceptance, but is not another
+operator-facing install command. The wizard asks for:
 
-- development or production channel and an optional exact version;
 - the NAS LAN address and public port;
 - the desired Tailscale hostname and an auth key;
 - external provider credentials that cannot be generated locally;
@@ -85,9 +86,11 @@ never runs as root.
 
 On a fresh Spark, the installer prompts through `/dev/tty` for the enrollment
 endpoint and a short-lived pairing token without placing the token in process
-arguments. It installs a single agent binary and a direct systemd service. The
-pairing command waits for approval with a bounded, visible status loop and then
-materializes the mTLS identity and configuration atomically.
+arguments. Creating that single-use token is the administrator's approval; a
+valid submission immediately issues the certificate. The installer discovers
+and pins the controller trust root from the enrollment bootstrap endpoint,
+installs a single agent binary and direct systemd service, and materializes the
+mTLS identity and configuration atomically.
 
 On an existing Spark, the same command performs an in-place package upgrade,
 restarts the direct service, and verifies both local health and the version

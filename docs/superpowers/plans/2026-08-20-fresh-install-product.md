@@ -168,8 +168,10 @@ installers. All legacy and alternate runtime paths are deleted.
 
 - [ ] Make `pair` the sole fresh enrollment command.
 - [ ] Read tokens from `/dev/tty` or stdin; never accept secrets on argv.
-- [ ] Add grant, list, approve, reject, and revoke commands to `vonkctl`.
-- [ ] Make pairing poll visibly through approval and atomically install identity.
+- [ ] Make grant creation the explicit administrator authorization; remove the
+      redundant approve/reject ceremony.
+- [ ] Publish bounded controller trust bootstrap metadata and make pairing
+      atomically install the immediately issued identity.
 - [ ] Remove `bootstrap`, flat credentials, and duplicate enrollment services.
 
 ### Task 9: Build the versioned NAS preparation artifact
@@ -203,8 +205,8 @@ installers. All legacy and alternate runtime paths are deleted.
 - Modify: GitHub Pages/release publication workflow
 - Test: bootstrap shell tests and end-to-end artifact verification
 
-- [ ] With no arguments or environment setup, prompt for channel and optional
-      exact version, then resolve the supported workstation platform.
+- [ ] With no arguments or environment setup, resolve the current accepted
+      stable release and supported workstation platform.
 - [ ] Download and verify the signed manifest and setup executable.
 - [ ] Execute as the caller and preserve interactive `/dev/tty` input.
 - [ ] Complete by creating or upgrading `./vonk-forge`; do not require a second
@@ -220,9 +222,9 @@ installers. All legacy and alternate runtime paths are deleted.
 - Modify: Debian repository/release workflows
 - Test: amd64 and arm64 package installation/upgrade tests
 
-- [ ] With no arguments or environment setup, prompt for channel and optional
-      exact version and resolve and verify an immutable package before
-      privilege escalation.
+- [ ] With no arguments or environment setup, resolve the current accepted
+      stable release and verify its immutable package before privilege
+      escalation.
 - [ ] Invoke sudo only for package/repository installation and service control.
 - [ ] Pair on first install and verify controller-observed identity.
 - [ ] Upgrade directly on subsequent runs while preserving identity.
