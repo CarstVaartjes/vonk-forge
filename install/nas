@@ -9,6 +9,8 @@ fail() {
     exit 1
 }
 
+[ "$#" -eq 0 ] || fail "this installer does not accept arguments"
+
 case $(uname -s) in
     Linux) platform=linux ;;
     Darwin) platform=darwin ;;

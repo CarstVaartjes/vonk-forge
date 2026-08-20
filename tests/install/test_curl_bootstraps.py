@@ -168,6 +168,21 @@ def test_nas_bootstrap_reuses_the_same_command_for_upgrade(tmp_path: Path) -> No
     assert not forbidden.exists()
 
 
+def test_nas_bootstrap_rejects_user_arguments(tmp_path: Path) -> None:
+    result, receipt, forbidden = _run_bootstrap(
+        tmp_path,
+        "nas",
+        system="Linux",
+        machine="x86_64",
+        arguments=("--output", "/tmp/untrusted"),
+    )
+
+    assert result.returncode != 0
+    assert "does not accept arguments" in result.stderr
+    assert not receipt.exists()
+    assert not forbidden.exists()
+
+
 def test_spark_bootstrap_rejects_non_linux_before_downloading(tmp_path: Path) -> None:
     result, receipt, forbidden = _run_bootstrap(
         tmp_path, "spark", system="Darwin", machine="arm64"
