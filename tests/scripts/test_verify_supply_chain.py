@@ -18,6 +18,7 @@ def _copy(tmp_path: Path) -> Path:
         ".github/actions/agent-package-build/action.yml",
         ".github/actions/agent-apt-publish/action.yml",
         ".github/workflows/dev-images.yml",
+        ".github/workflows/installer-publication.yml",
         ".github/workflows/workload-artifacts.yml",
         ".github/release-allowed-signers",
         ".github/dependabot.yml",
@@ -26,6 +27,7 @@ def _copy(tmp_path: Path) -> Path:
         "pyproject.toml",
         "schemas/control-deployment-bundle.schema.json",
         "schemas/platform-release-manifest.schema.json",
+        "schemas/install-release-manifest.schema.json",
         "schemas/workload-artifact-build.schema.json",
         "schemas/global/catalog-entity-v1.schema.json",
         "schemas/global/recipe-v1.schema.json",
@@ -85,7 +87,9 @@ def _copy(tmp_path: Path) -> Path:
         "scripts/promote-image-aliases",
         "scripts/verify-release-tag-authority",
         "scripts/render-dev-compose",
+        "scripts/render-install-bootstrap",
         "scripts/render-production-compose",
+        "scripts/install-release-publication",
         "scripts/refuse-existing-image-version",
         "scripts/validate-container-release-digests",
         "scripts/verify-public-image-inputs",
@@ -178,6 +182,34 @@ def test_supply_chain_manifest_binds_deployment_bundle_publisher(
     repository = _copy(tmp_path)
     publisher = repository / "scripts/publish-control-deployment-bundle"
     publisher.write_bytes(publisher.read_bytes() + b"\n# drift\n")
+
+    result = subprocess.run(
+        [SCRIPT, "--root", repository, "--json"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "manifest" in " ".join(json.loads(result.stdout)["errors"]).lower()
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        ".github/workflows/installer-publication.yml",
+        "schemas/install-release-manifest.schema.json",
+        "scripts/install-release-publication",
+        "scripts/render-install-bootstrap",
+    ),
+)
+def test_supply_chain_manifest_binds_installer_publication_contract(
+    tmp_path: Path,
+    path: str,
+) -> None:
+    repository = _copy(tmp_path)
+    candidate = repository / path
+    candidate.write_bytes(candidate.read_bytes() + b"\n# publication drift\n")
 
     result = subprocess.run(
         [SCRIPT, "--root", repository, "--json"],

@@ -109,6 +109,7 @@ jobs:
           install -d -m 0700 "$publication_root"
           api_archive="$publication_root/vonk-forge-api.oci.tar"
           worker_archive="$publication_root/vonk-forge-worker.oci.tar"
+          hermes_archive="$publication_root/vonk-forge-hermes.oci.tar"
           common_labels=(
             --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
             --label "org.opencontainers.image.revision=$GITHUB_SHA"
@@ -122,6 +123,15 @@ jobs:
             --provenance=mode=max \
             "${common_labels[@]}" \
             .
+          docker buildx build \
+            --file deploy/compose/hermes-agent/Dockerfile \
+            --target managed \
+            --platform linux/amd64 \
+            --output "type=oci,dest=$hermes_archive" \
+            --sbom=true \
+            --provenance=mode=max \
+            "${common_labels[@]}" \
+            deploy/compose/hermes-agent
           docker buildx build \
             --file control/Dockerfile \
             --target worker \
@@ -142,6 +152,9 @@ jobs:
           skopeo copy --override-os linux --override-arch amd64 \
             "oci-archive:$RUNNER_TEMP/accepted/vonk-forge-worker.oci.tar" \
             docker-daemon:vonk-forge-worker:dev-local
+          skopeo copy --override-os linux --override-arch amd64 \
+            "oci-archive:$RUNNER_TEMP/accepted/vonk-forge-hermes.oci.tar" \
+            docker-daemon:vonk-forge-hermes:dev-local
 
       - name: Preload pinned runtime dependencies
         shell: bash
@@ -164,16 +177,20 @@ jobs:
           publication_root="$RUNNER_TEMP/accepted"
           api_manifest="$RUNNER_TEMP/vonk-forge-api.manifest.json"
           worker_manifest="$RUNNER_TEMP/vonk-forge-worker.manifest.json"
+          hermes_manifest="$RUNNER_TEMP/vonk-forge-hermes.manifest.json"
           skopeo inspect --raw \
             "oci-archive:$publication_root/vonk-forge-api.oci.tar" \
             > "$api_manifest"
           skopeo inspect --raw \
             "oci-archive:$publication_root/vonk-forge-worker.oci.tar" \
             > "$worker_manifest"
+          skopeo inspect --raw \
+            "oci-archive:$publication_root/vonk-forge-hermes.oci.tar" \
+            > "$hermes_manifest"
           api_digest=$(skopeo manifest-digest "$api_manifest")
           worker_digest=$(skopeo manifest-digest "$worker_manifest")
-          hermes_image=$(sed -n 's/^HERMES_AGENT_IMAGE=//p' deploy/compose/tests/test.env)
-          [[ "$hermes_image" =~ ^[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}$ ]]
+          hermes_digest=$(skopeo manifest-digest "$hermes_manifest")
+          hermes_image="ghcr.io/carstvaartjes/vonk-forge-hermes:dev-sha-$GITHUB_SHA@$hermes_digest"
           scripts/render-dev-compose \
             --template deploy/compose/compose.dev.images.yaml \
             --output "$publication_root/docker-compose.pinned.yml" \
@@ -230,12 +247,12 @@ jobs:
           printf '%s' 'task-6-publication-canary-api' > "$canary_root/api"
           printf '%s' 'task-6-publication-canary-worker' > "$canary_root/worker"
           chmod 0600 "$canary_root/api" "$canary_root/worker"
-          for role in api worker; do
-            if [[ "$role" == api ]]; then
-              image=vonk-forge-api:dev-local
-            else
-              image=vonk-forge-worker:dev-local
-            fi
+          for role in api worker hermes; do
+            case "$role" in
+              api) image=vonk-forge-api:dev-local ;;
+              worker) image=vonk-forge-worker:dev-local ;;
+              hermes) image=vonk-forge-hermes:dev-local ;;
+            esac
             archive="$publication_root/vonk-forge-$role.oci.tar"
             layout="$layout_root/$role"
             install -d -m 0700 "$layout"
@@ -325,6 +342,7 @@ jobs:
           compression-level: 0
           path: |
             ${{ runner.temp }}/accepted/vonk-forge-api.oci.tar
+            ${{ runner.temp }}/accepted/vonk-forge-hermes.oci.tar
             ${{ runner.temp }}/accepted/vonk-forge-worker.oci.tar
             ${{ runner.temp }}/accepted/docker-compose.pinned.yml
             ${{ runner.temp }}/accepted/docker-compose.dev.yml
@@ -394,6 +412,7 @@ jobs:
         shell: bash
         env:
           API_IMAGE: ${{ needs.build-and-accept.outputs.api_image }}
+          HERMES_IMAGE: ghcr.io/carstvaartjes/vonk-forge-hermes
           IMMUTABLE_TAG: ${{ needs.build-and-accept.outputs.immutable_tag }}
           WORKER_IMAGE: ${{ needs.build-and-accept.outputs.worker_image }}
         run: |
@@ -435,27 +454,30 @@ jobs:
             "$RUNNER_TEMP/accepted/vonk-forge-api.oci.tar" "$API_IMAGE")
           worker_digest=$(publish_immutable worker \
             "$RUNNER_TEMP/accepted/vonk-forge-worker.oci.tar" "$WORKER_IMAGE")
-          printf 'api_digest=%s\nworker_digest=%s\n' \
-            "$api_digest" "$worker_digest" >> "$GITHUB_OUTPUT"
+          hermes_digest=$(publish_immutable hermes \
+            "$RUNNER_TEMP/accepted/vonk-forge-hermes.oci.tar" "$HERMES_IMAGE")
+          printf 'api_digest=%s\nworker_digest=%s\nhermes_digest=%s\n' \
+            "$api_digest" "$worker_digest" "$hermes_digest" \
+            >> "$GITHUB_OUTPUT"
 
       - name: Verify immutable manifests and attestations
         shell: bash
         env:
           API_DIGEST: ${{ steps.publish.outputs.api_digest }}
           API_IMAGE: ${{ needs.build-and-accept.outputs.api_image }}
+          HERMES_DIGEST: ${{ steps.publish.outputs.hermes_digest }}
+          HERMES_IMAGE: ghcr.io/carstvaartjes/vonk-forge-hermes
           IMMUTABLE_TAG: ${{ needs.build-and-accept.outputs.immutable_tag }}
           WORKER_DIGEST: ${{ steps.publish.outputs.worker_digest }}
           WORKER_IMAGE: ${{ needs.build-and-accept.outputs.worker_image }}
         run: |
           set -euo pipefail
-          for identity in api worker; do
-            if [[ "$identity" == api ]]; then
-              image=$API_IMAGE
-              digest=$API_DIGEST
-            else
-              image=$WORKER_IMAGE
-              digest=$WORKER_DIGEST
-            fi
+          for identity in api worker hermes; do
+            case "$identity" in
+              api) image=$API_IMAGE; digest=$API_DIGEST ;;
+              worker) image=$WORKER_IMAGE; digest=$WORKER_DIGEST ;;
+              hermes) image=$HERMES_IMAGE; digest=$HERMES_DIGEST ;;
+            esac
             observed=$(skopeo inspect --format '{{.Digest}}' \
               "docker://$image:${IMMUTABLE_TAG}")
             [[ "$observed" == "$digest" ]]
@@ -493,6 +515,13 @@ jobs:
         with:
           subject-name: ${{ needs.build-and-accept.outputs.worker_image }}
           subject-digest: ${{ steps.publish.outputs.worker_digest }}
+          push-to-registry: true
+
+      - name: Sign accepted Hermes image provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ghcr.io/carstvaartjes/vonk-forge-hermes
+          subject-digest: ${{ steps.publish.outputs.hermes_digest }}
           push-to-registry: true
 
       - name: Upload Compose artifact

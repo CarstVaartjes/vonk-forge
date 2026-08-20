@@ -142,6 +142,7 @@ esac
             **os.environ,
             "API_IMAGE": "ghcr.io/example/api",
             "GITHUB_OUTPUT": str(output),
+            "HERMES_IMAGE": "ghcr.io/example/hermes",
             "IMMUTABLE_TAG": "dev-sha-" + "b" * 40,
             "PATH": f"{fake_bin}:{os.environ['PATH']}",
             "RUNNER_TEMP": str(tmp_path),
@@ -156,6 +157,7 @@ esac
     assert output.read_text().splitlines() == [
         f"api_digest={digest}",
         f"worker_digest={digest}",
+        f"hermes_digest={digest}",
     ]
 
 
