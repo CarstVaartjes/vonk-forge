@@ -271,7 +271,7 @@ def test_write_all_retries_deterministic_partial_writes() -> None:
     assert received == b"abcdef"
 
 
-def test_https_tunnel_performs_hostname_verified_tls_over_a_command(
+def test_https_tunnel_performs_bounded_post_with_hostname_verified_tls(
     tmp_path: Path,
 ) -> None:
     key = tmp_path / "key.pem"
@@ -309,7 +309,10 @@ def test_https_tunnel_performs_hostname_verified_tls_over_a_command(
         connection, _ = listener.accept()
         with context.wrap_socket(connection, server_side=True) as tls:
             request = tls.recv(4096)
-            assert request.startswith(b"GET /ready HTTP/1.1\r\nHost: localhost\r\n")
+            assert request.startswith(b"POST /login HTTP/1.1\r\nHost: localhost\r\n")
+            assert b"Content-Type: application/json\r\n" in request
+            assert b"Content-Length: 19\r\n" in request
+            assert request.endswith(b'\r\n\r\n{"subject":"admin"}')
             tls.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
         listener.close()
 
@@ -334,11 +337,14 @@ def test_https_tunnel_performs_hostname_verified_tls_over_a_command(
     response = https_over_command(
         [sys.executable, tunnel, str(port)],
         server_hostname="localhost",
-        path="/ready",
+        path="/login",
         cwd=tmp_path,
         environment={"PATH": "/usr/bin:/bin"},
         timeout=5,
         ca_file=certificate,
+        method="POST",
+        body=b'{"subject":"admin"}',
+        headers={"Content-Type": "application/json"},
     )
     server.join(timeout=5)
 

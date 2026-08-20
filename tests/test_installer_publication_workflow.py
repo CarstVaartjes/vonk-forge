@@ -176,15 +176,44 @@ def test_spark_acceptance_is_native_on_both_linux_architectures() -> None:
 
 def test_spark_job_gate_is_owned_only_by_the_native_arm64_workload_runner() -> None:
     spark = _workflow()["jobs"]["spark-acceptance"]
-    run = _steps(spark)[
+    steps = _steps(spark)
+    publication = steps["Download exact Spark publication graph"]
+    assert publication["uses"].startswith("actions/download-artifact@")
+    assert publication["with"] == {
+        "name": (
+            "installer-candidate-${{ needs.authority.outputs.channel }}-"
+            "${{ needs.candidate.outputs.generation }}"
+        ),
+        "path": "${{ runner.temp }}/spark-publication",
+    }
+    run = steps[
         "Run packaged Spark pairing, job, renewal, and upgrade acceptance"
     ]["run"]
 
-    assert "linux-amd64) gates='[\"spark_amd64\",\"spark_pairing\"]'" in run
+    immutable_root = (
+        '"$RUNNER_TEMP/spark-publication/installer-publication/objects"'
+    )
+    assert "test \"$VONK_ACCEPTANCE_PLATFORM\" = linux-amd64 || " in run
+    assert "test \"$VONK_ACCEPTANCE_PLATFORM\" = linux-arm64" in run
+    assert "tests/acceptance/test_spark_lifecycle.py run" in run
+    assert f"--object-root {immutable_root}" in run
     assert (
-        "linux-arm64) gates='[\"spark_arm64\",\"spark_job\","
-        "\"spark_renewal\",\"spark_upgrade\"]'"
+        "--candidate-release "
+        f'{immutable_root[:-1]}/artifacts/$VONK_ACCEPTANCE_CHANNEL/releases/'
+        '$VONK_ACCEPTANCE_GENERATION/release.json"'
     ) in run
+    assert (
+        "--baseline-release "
+        f'{immutable_root[:-1]}/artifacts/$VONK_ACCEPTANCE_CHANNEL/releases/'
+        '$VONK_ACCEPTANCE_GENERATION/acceptance-baseline/release.json"'
+    ) in run
+    assert (
+        '--output "$RUNNER_TEMP/spark-acceptance/report-'
+        '$VONK_ACCEPTANCE_PLATFORM.json"'
+    ) in run
+    assert "jq " not in run
+    assert "schema_version:1" not in run
+    assert "gates=" not in run
 
 
 def test_complete_acceptance_is_signed_before_the_channel_can_advance() -> None:

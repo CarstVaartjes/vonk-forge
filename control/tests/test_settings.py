@@ -164,6 +164,33 @@ def test_enabled_agent_runtime_loads_distinct_origins_and_public_controller_ca_p
     assert settings.agent_enrollment_origin == "https://enroll.example.test:8443"
     assert settings.controller_ca_path == controller_ca
     assert settings.agent_ca_url == "https://step-ca:9000"
+    assert settings.agent_ca_certificate_lifetime_seconds == 24 * 60 * 60
+
+
+@pytest.mark.parametrize("value", ("89", "86401", "not-a-number"))
+def test_agent_certificate_lifetime_is_bounded_for_isolated_acceptance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    value: str,
+) -> None:
+    _configure_agent_authority(tmp_path, monkeypatch, mode="development")
+    monkeypatch.setenv("VONK_AGENT_RUNTIME", "enabled")
+    monkeypatch.setenv("VONK_AGENT_CA_CERTIFICATE_LIFETIME_SECONDS", value)
+
+    with pytest.raises(SettingsError, match="certificate lifetime"):
+        Settings.from_env_and_secrets()
+
+
+def test_agent_certificate_lifetime_accepts_a_bounded_acceptance_value(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _configure_agent_authority(tmp_path, monkeypatch, mode="development")
+    monkeypatch.setenv("VONK_AGENT_RUNTIME", "enabled")
+    monkeypatch.setenv("VONK_AGENT_CA_CERTIFICATE_LIFETIME_SECONDS", "90")
+
+    settings = Settings.from_env_and_secrets()
+
+    assert settings.agent_ca_certificate_lifetime_seconds == 90
 
 
 def test_enabled_agent_runtime_rejects_non_https_controller_origin(

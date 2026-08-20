@@ -107,8 +107,8 @@ test("previews Load authority, applies its digest, and keeps partial grouped pro
   await user.click(within(dialog).getByRole("button", {name: "Load selected installation"}));
   expect(applyLibraryLoad).toHaveBeenCalledWith({installation_id: "installation-chat", alias: "qwen-chat", plan_digest: "load-plan-digest", request_key: expect.any(String)}, expect.any(AbortSignal));
   const progress = await screen.findByRole("region", {name: "Load operation progress"});
-  expect(within(progress).getByText("Operation incomplete")).toBeVisible();
-  expect(within(progress).getByText("1 of 2 ranks completed · 1 failed")).toBeVisible();
+  expect(await within(progress).findByText("Operation incomplete")).toBeVisible();
+  expect(await within(progress).findByText("1 of 2 ranks completed · 1 failed")).toBeVisible();
   expect(within(progress).getByText("node-alpha + node-beta")).toBeVisible();
   expect(selector).toHaveAttribute("aria-pressed", "true");
   expect(within(selector.closest("article")!).getByRole("button", {name: "Review Load"})).toBeDisabled();

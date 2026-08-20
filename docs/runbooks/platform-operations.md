@@ -1,9 +1,23 @@
 # Operate a PostgreSQL-authoritative GPU node platform
 
-Onboard each GPU node independently with `node-install`; never place an address,
-name, or assumed fleet size in code. After acceptance, emit its canonical fleet
-record and submit it through the admin CLI or web UX. Model versions and recipes
-follow the same immutable preview, evidence, and persisted proposal path.
+Create an enrollment grant in the Vonk Forge administration UI, then onboard
+each GPU node independently by running the sole supported installer on the
+Spark itself:
+
+```sh
+curl -fsSL https://install.vonkforge.ai/spark | sh
+```
+
+For the development channel, use the same workflow with development artifacts:
+
+```sh
+curl -fsSL https://install.vonkforge.ai/dev/spark | sh
+```
+
+Never place an address, name, or assumed fleet size in code. After pairing, the
+agent publishes its certificate-bound identity and observed capabilities.
+Model versions and recipes follow the same immutable preview, evidence, and
+persisted proposal path.
 
 The control worker reconciles only an accepted authority revision. It withdraws the
 affected route first, leases stable node IDs in sorted order, applies exact

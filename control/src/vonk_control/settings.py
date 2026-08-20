@@ -135,6 +135,7 @@ class Settings:
     agent_ca_provisioner_kid: str
     agent_ca_timeout_seconds: float
     agent_ca_max_response_bytes: int
+    agent_ca_certificate_lifetime_seconds: int
     agent_artifact_root: Path
     workload_tuf_metadata_root: Path
     workload_tuf_target_root: Path
@@ -260,10 +261,24 @@ class Settings:
             agent_ca_max_response_bytes = int(os.environ.get("VONK_AGENT_CA_MAX_RESPONSE_BYTES", str(64 * 1024)))
         except ValueError as error:
             raise SettingsError("Smallstep timeout and response limit must be numeric") from error
+        try:
+            agent_ca_certificate_lifetime_seconds = int(
+                os.environ.get(
+                    "VONK_AGENT_CA_CERTIFICATE_LIFETIME_SECONDS", str(24 * 60 * 60)
+                )
+            )
+        except ValueError as error:
+            raise SettingsError(
+                "Smallstep certificate lifetime must be numeric"
+            ) from error
         if not 0 < agent_ca_timeout_seconds <= 30:
             raise SettingsError("Smallstep timeout must be between zero and 30 seconds")
         if not 1024 <= agent_ca_max_response_bytes <= 1024 * 1024:
             raise SettingsError("Smallstep response limit must be between 1024 bytes and one MiB")
+        if not 90 <= agent_ca_certificate_lifetime_seconds <= 24 * 60 * 60:
+            raise SettingsError(
+                "Smallstep certificate lifetime must be between 90 and 86400 seconds"
+            )
         agent_proxy_auth = (
             _agent_proxy_auth_secret("VONK_AGENT_PROXY_AUTH_FILE", production=True)
             if agent_enabled else b""
@@ -351,6 +366,9 @@ class Settings:
             agent_ca_provisioner_kid=agent_ca_provisioner_kid,
             agent_ca_timeout_seconds=agent_ca_timeout_seconds,
             agent_ca_max_response_bytes=agent_ca_max_response_bytes,
+            agent_ca_certificate_lifetime_seconds=(
+                agent_ca_certificate_lifetime_seconds
+            ),
             agent_artifact_root=agent_artifact_root,
             workload_tuf_metadata_root=workload_tuf_metadata_root,
             workload_tuf_target_root=workload_tuf_target_root,

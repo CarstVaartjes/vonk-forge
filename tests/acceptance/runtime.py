@@ -14,6 +14,8 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
+MAXIMUM_HTTPS_BODY_BYTES = 2 * 1024 * 1024
+
 
 class AcceptanceError(RuntimeError):
     pass
@@ -295,6 +297,8 @@ def https_over_command(
     client_key: Path | None = None,
     headers: Mapping[str, str] | None = None,
     accepted_statuses: set[int] | None = None,
+    method: str = "GET",
+    body: bytes | None = None,
 ) -> bytes:
     request_headers = {} if headers is None else dict(headers)
     allowed_statuses = set(range(200, 300)) if accepted_statuses is None else set(
@@ -308,6 +312,10 @@ def https_over_command(
         or not path.startswith("/")
         or any(character in path for character in "\0\r\n")
         or (client_certificate is None) != (client_key is None)
+        or method not in {"DELETE", "GET", "PATCH", "POST", "PUT"}
+        or (body is not None and not isinstance(body, bytes))
+        or (body is not None and len(body) > MAXIMUM_HTTPS_BODY_BYTES)
+        or (method == "GET" and body is not None)
         or not allowed_statuses
         or any(
             not isinstance(status, int) or isinstance(status, bool) or not 100 <= status <= 599
@@ -324,6 +332,7 @@ def https_over_command(
             not isinstance(name, str) or not isinstance(value, str)
             for name, value in request_headers.items()
         )
+        or any(name.lower() in {"connection", "content-length", "host"} for name in request_headers)
     ):
         raise AcceptanceError("HTTPS tunnel request is invalid")
     process = subprocess.Popen(
@@ -374,14 +383,16 @@ def https_over_command(
                 receive_tls()
             except ssl.SSLWantWriteError:
                 flush_tls()
+        payload = b"" if body is None else body
         request = (
-            f"GET {path} HTTP/1.1\r\n"
+            f"{method} {path} HTTP/1.1\r\n"
             f"Host: {server_hostname}\r\n"
             "Connection: close\r\n"
             "User-Agent: vonk-forge-acceptance\r\n"
             + "".join(f"{name}: {value}\r\n" for name, value in request_headers.items())
+            + (f"Content-Length: {len(payload)}\r\n" if body is not None else "")
             + "\r\n"
-        ).encode("ascii")
+        ).encode("ascii") + payload
         offset = 0
         while offset < len(request):
             try:
@@ -399,6 +410,8 @@ def https_over_command(
                 if not chunk:
                     break
                 response.extend(chunk)
+                if len(response) > MAXIMUM_HTTPS_BODY_BYTES:
+                    raise AcceptanceError("HTTPS tunnel response is too large")
             except ssl.SSLWantReadError:
                 flush_tls()
                 receive_tls()

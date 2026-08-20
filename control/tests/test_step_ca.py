@@ -105,12 +105,19 @@ def _csr(node_id: str = NODE_ID) -> bytes:
     )
 
 
-def _leaf(csr_pem: bytes, material: dict[str, object], *, now: datetime = NOW, serial: int = 1234) -> x509.Certificate:
+def _leaf(
+    csr_pem: bytes,
+    material: dict[str, object],
+    *,
+    now: datetime = NOW,
+    serial: int = 1234,
+    lifetime: timedelta = timedelta(hours=24),
+) -> x509.Certificate:
     request = x509.load_pem_x509_csr(csr_pem)
     return (
         x509.CertificateBuilder().subject_name(request.subject)
         .issuer_name(material["intermediate"].subject).public_key(request.public_key())
-        .serial_number(serial).not_valid_before(now).not_valid_after(now + timedelta(hours=24))
+        .serial_number(serial).not_valid_before(now).not_valid_after(now + lifetime)
         .add_extension(x509.KeyUsage(True, False, False, False, False, False, False, False, False), critical=True)
         .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH]), critical=False)
         .add_extension(request.extensions.get_extension_for_class(x509.SubjectAlternativeName).value, critical=False)
@@ -221,6 +228,53 @@ def test_renewal_uses_new_signed_csr_and_fresh_serial(tmp_path: Path) -> None:
     claims = jwt.decode(seen[0]["body"]["ott"], options={"verify_signature": False})
     assert claims["jti"] == request_id
     assert issued.serial == "5678"
+
+
+def test_provider_issues_the_configured_bounded_acceptance_lifetime(
+    tmp_path: Path,
+) -> None:
+    material = _write_material(tmp_path)
+    seen: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        seen.append(body)
+        leaf = _leaf(
+            body["csr"].encode(),
+            material,
+            lifetime=timedelta(seconds=90),
+        )
+        return httpx.Response(
+            201,
+            json={
+                "crt": leaf.public_bytes(serialization.Encoding.PEM).decode(),
+                "ca": material["intermediate_path"].read_text(),
+                "certChain": [
+                    leaf.public_bytes(serialization.Encoding.PEM).decode(),
+                    material["intermediate_path"].read_text(),
+                ],
+            },
+        )
+
+    provider = StepCertificateAuthority(
+        ca_url=CA_URL,
+        root_certificate_path=material["root_path"],
+        intermediate_certificate_path=material["intermediate_path"],
+        provisioner_name="vonk-forge-agent",
+        provisioner_kid=material["kid"],
+        credential_path=material["credential_path"],
+        provisioner_public_jwk_path=material["public_jwk_path"],
+        certificate_lifetime_seconds=90,
+        transport=httpx.MockTransport(handler),
+    )
+
+    issued = provider.issue_node(NODE_ID, _csr(), NOW)
+
+    assert seen[0]["notAfter"] == "2026-08-04T12:01:30Z"
+    certificate = x509.load_pem_x509_certificate(issued.certificate_pem)
+    assert certificate.not_valid_after_utc - certificate.not_valid_before_utc == (
+        timedelta(seconds=90)
+    )
 
 
 def test_revocation_is_authenticated_passive_and_idempotent_in_effect(tmp_path: Path) -> None:

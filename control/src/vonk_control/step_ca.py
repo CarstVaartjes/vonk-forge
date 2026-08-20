@@ -56,6 +56,7 @@ class StepCertificateAuthority(CertificateAuthority):
         timeout_seconds: float = 3.0,
         max_response_bytes: int = 64 * 1024,
         clock_skew_seconds: int = 30,
+        certificate_lifetime_seconds: int = 24 * 60 * 60,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         parsed = urlsplit(ca_url)
@@ -75,6 +76,14 @@ class StepCertificateAuthority(CertificateAuthority):
             raise ValueError("CA response limit must be between 1024 bytes and one MiB")
         if not 0 <= clock_skew_seconds <= 60:
             raise ValueError("CA clock skew must be between zero and 60 seconds")
+        if (
+            not isinstance(certificate_lifetime_seconds, int)
+            or isinstance(certificate_lifetime_seconds, bool)
+            or not 90 <= certificate_lifetime_seconds <= 24 * 60 * 60
+        ):
+            raise ValueError(
+                "certificate lifetime must be between 90 and 86400 seconds"
+            )
 
         root_pem = _read_regular_secret_file(root_certificate_path)
         intermediate_pem = _read_regular_secret_file(intermediate_certificate_path)
@@ -82,7 +91,8 @@ class StepCertificateAuthority(CertificateAuthority):
         public_jwk_bytes = _read_regular_secret_file(provisioner_public_jwk_path)
         self._root = _one_certificate(root_pem, "root")
         self._intermediate = _one_certificate(intermediate_pem, "intermediate")
-        _verify_ca_chain(self._root, self._intermediate)
+        self._lifetime = timedelta(seconds=certificate_lifetime_seconds)
+        _verify_ca_chain(self._root, self._intermediate, self._lifetime)
         try:
             credential_jwk = jwt.PyJWK.from_json(credential_pem.decode("ascii"))
             credential = credential_jwk.key
@@ -203,7 +213,7 @@ class StepCertificateAuthority(CertificateAuthority):
                 request_id=request_id,
             ),
             "notBefore": _rfc3339(timestamp),
-            "notAfter": _rfc3339(timestamp + _LIFETIME),
+            "notAfter": _rfc3339(timestamp + self._lifetime),
         })
         if not isinstance(response, dict) or not {"crt", "ca", "certChain"} <= set(response):
             raise StepCAError("step-ca returned an invalid sign response")
@@ -297,7 +307,7 @@ class StepCertificateAuthority(CertificateAuthority):
             expected_skid = x509.SubjectKeyIdentifier.from_public_key(leaf.public_key())
             if leaf.extensions.get_extension_for_class(x509.SubjectKeyIdentifier).value != expected_skid:
                 raise StepCAError("step-ca returned a mismatched subject key identifier")
-        if leaf.not_valid_after_utc - leaf.not_valid_before_utc != _LIFETIME:
+        if leaf.not_valid_after_utc - leaf.not_valid_before_utc != self._lifetime:
             raise StepCAError("step-ca returned an invalid certificate lifetime")
         if abs(leaf.not_valid_before_utc - requested_at) > self._clock_skew:
             raise StepCAError("step-ca returned a certificate outside the allowed clock skew")
@@ -367,7 +377,11 @@ def _one_certificate(pem: bytes, label: str, *, provider_error: bool = False) ->
     return certificate
 
 
-def _verify_ca_chain(root: x509.Certificate, intermediate: x509.Certificate) -> None:
+def _verify_ca_chain(
+    root: x509.Certificate,
+    intermediate: x509.Certificate,
+    certificate_lifetime: timedelta = _LIFETIME,
+) -> None:
     if root.subject != root.issuer:
         raise ValueError("root certificate must be self-issued")
     try:
@@ -401,8 +415,8 @@ def _verify_ca_chain(root: x509.Certificate, intermediate: x509.Certificate) -> 
         raise ValueError("root certificate is not currently valid")
     if intermediate.not_valid_before_utc > now or intermediate.not_valid_after_utc <= now:
         raise ValueError("intermediate certificate is not currently valid")
-    if intermediate.not_valid_after_utc <= now + _LIFETIME:
-        raise ValueError("intermediate certificate cannot cover a 24-hour leaf")
+    if intermediate.not_valid_after_utc <= now + certificate_lifetime:
+        raise ValueError("intermediate certificate cannot cover the configured leaf lifetime")
     if intermediate.not_valid_after_utc > root.not_valid_after_utc:
         raise ValueError("intermediate certificate outlives configured root")
 

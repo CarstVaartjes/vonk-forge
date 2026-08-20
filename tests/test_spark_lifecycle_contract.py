@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import os
 import subprocess
 import sys
+from argparse import Namespace
 from pathlib import Path
 
 import pytest
@@ -26,6 +28,16 @@ ARM64_PHASES = [
     "candidate-upgraded",
     "direct-rust-agent-healthy",
 ]
+
+
+def _acceptance_module():
+    specification = importlib.util.spec_from_file_location(
+        "spark_lifecycle_acceptance", ENTRY_POINT
+    )
+    assert specification is not None and specification.loader is not None
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module
 
 
 def _publication_graph() -> dict[str, object]:
@@ -467,3 +479,107 @@ def test_report_is_emitted_only_from_complete_generation_bound_evidence(
         "status": "passed",
         "version": "1.2.3",
     }
+
+
+def _run_arguments(
+    objects: Path, candidate: Path, baseline: Path, output: Path
+) -> Namespace:
+    return Namespace(
+        candidate_release=candidate,
+        baseline_release=baseline,
+        object_root=objects,
+        output=output,
+        channel="dev",
+        version="1.2.3",
+        source_sha=SOURCE_SHA,
+        generation=GENERATION,
+        run_id=42,
+        platform="linux-arm64",
+    )
+
+
+def test_run_owns_observation_validation_cleanup_and_report_emission(
+    tmp_path: Path,
+) -> None:
+    """Removing observation or cleanup must make the real run fail closed."""
+    acceptance = _acceptance_module()
+    objects, candidate, baseline, _ = _graph_inputs(tmp_path)
+    report = tmp_path / "report.json"
+    events: list[str] = []
+
+    class ObservedLifecycle:
+        def __init__(self, graph: dict[str, object]) -> None:
+            proof = _arm64_proof()
+            proof["publication_graph"] = graph
+            installation = proof["installation"]
+            assert isinstance(installation, dict)
+            baseline_identity = installation["baseline"]
+            candidate_identity = installation["candidate"]
+            assert isinstance(baseline_identity, dict)
+            assert isinstance(candidate_identity, dict)
+            baseline_identity["package_sha256"] = graph["baseline_package_sha256"]
+            candidate_identity["package_sha256"] = graph["candidate_package_sha256"]
+            self.proof = proof
+
+        def __enter__(self):
+            events.append("controller-started")
+            return self
+
+        def observe(self) -> dict[str, object]:
+            events.append("lifecycle-observed")
+            return self.proof
+
+        def __exit__(self, *_error: object) -> None:
+            events.append("controller-removed-with-volumes")
+
+    acceptance.run_lifecycle(
+        _run_arguments(objects, candidate, baseline, report),
+        lifecycle_factory=lambda _arguments, graph: ObservedLifecycle(graph),
+    )
+
+    assert events == [
+        "controller-started",
+        "lifecycle-observed",
+        "controller-removed-with-volumes",
+    ]
+    emitted = json.loads(report.read_text())
+    assert emitted["schema_version"] == 2
+    assert emitted["status"] == "passed"
+    assert emitted["lifecycle"]["completed_phases"] == ARM64_PHASES
+    assert emitted["lifecycle"]["proof"]["publication_graph"]["generation"] == (
+        GENERATION
+    )
+
+
+def test_run_failure_removes_controller_volumes_without_emitting_report(
+    tmp_path: Path,
+) -> None:
+    acceptance = _acceptance_module()
+    objects, candidate, baseline, _ = _graph_inputs(tmp_path)
+    report = tmp_path / "report.json"
+    events: list[str] = []
+
+    class FailedLifecycle:
+        def __enter__(self):
+            events.append("controller-started")
+            return self
+
+        def observe(self) -> dict[str, object]:
+            events.append("lifecycle-failed")
+            raise acceptance.LifecycleError("observed lifecycle failed")
+
+        def __exit__(self, *_error: object) -> None:
+            events.append("controller-removed-with-volumes")
+
+    with pytest.raises(acceptance.LifecycleError, match="observed lifecycle failed"):
+        acceptance.run_lifecycle(
+            _run_arguments(objects, candidate, baseline, report),
+            lifecycle_factory=lambda _arguments, _graph: FailedLifecycle(),
+        )
+
+    assert events == [
+        "controller-started",
+        "lifecycle-failed",
+        "controller-removed-with-volumes",
+    ]
+    assert not report.exists()

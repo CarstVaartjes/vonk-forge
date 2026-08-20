@@ -598,21 +598,36 @@ def _model_qualification(
 
 
 class Runner:
-    def __init__(self, args: argparse.Namespace) -> None:
+    def __init__(
+        self,
+        args: argparse.Namespace,
+        *,
+        control_client: Client | None = None,
+        inference_client: Client | None = None,
+    ) -> None:
         self.args = args
         self.states = PHASE_STATES[args.phase]
         self.api_base = _base_url(args.api_base, "control API")
         self.inference_base = _base_url(
             args.inference_base or args.api_base, "inference API"
         )
-        admin_token = _read_token(args.admin_token_file)
-        inference_token = _read_token(args.inference_token_file)
-        self.control = Client(self.api_base, admin_token, timeout=args.timeout_seconds)
-        self.inference = Client(
-            self.inference_base, inference_token, timeout=args.timeout_seconds
-        )
-        # Tokens remain only inside the clients and are never persisted or printed.
-        del admin_token, inference_token
+        if (control_client is None) != (inference_client is None):
+            raise SliceError("development slice clients are incomplete")
+        if control_client is None:
+            admin_token = _read_token(args.admin_token_file)
+            inference_token = _read_token(args.inference_token_file)
+            self.control = Client(
+                self.api_base, admin_token, timeout=args.timeout_seconds
+            )
+            self.inference = Client(
+                self.inference_base, inference_token, timeout=args.timeout_seconds
+            )
+            # Tokens remain only inside the clients and are never persisted or printed.
+            del admin_token, inference_token
+        else:
+            assert inference_client is not None
+            self.control = control_client
+            self.inference = inference_client
         default_recipes = {
             "synthetic": SYNTHETIC_ROOT / "recipe.json",
             "model-single": ROOT / NATIVE_INPUTS["model-single"]["recipe"],

@@ -216,6 +216,9 @@ def build_agent_services(
         provisioner_public_jwk_path=settings.agent_ca_provisioner_public_jwk_path,
         timeout_seconds=settings.agent_ca_timeout_seconds,
         max_response_bytes=settings.agent_ca_max_response_bytes,
+        certificate_lifetime_seconds=(
+            settings.agent_ca_certificate_lifetime_seconds
+        ),
     )
     workload_tuf_metadata_root = getattr(
         settings,
