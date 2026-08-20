@@ -33,6 +33,9 @@ def _run_bootstrap(
         "if [ \"${1:-}\" = --template ]; then printf 'payload=%s\\n' \"$(cat \"$2\")\" >> \"$VONK_TEST_RECEIPT\"; fi\n"
     )
     digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+    package = tmp_path / "vonk-forge-agent.deb"
+    package.write_bytes(b"exact published Debian package\n")
+    package_digest = hashlib.sha256(package.read_bytes()).hexdigest()
     payload = tmp_path / "published-nas-payload.json"
     payload.write_text('{"schema_version":1}\n')
     payload_digest = hashlib.sha256(payload.read_bytes()).hexdigest()
@@ -47,6 +50,11 @@ def _run_bootstrap(
         "@SPARK_LINUX_ARM64_SHA256@",
     ):
         source = source.replace(placeholder, digest)
+    for placeholder in (
+        "@SPARK_LINUX_AMD64_PACKAGE_SHA256@",
+        "@SPARK_LINUX_ARM64_PACKAGE_SHA256@",
+    ):
+        source = source.replace(placeholder, package_digest)
     source = source.replace("@NAS_PAYLOAD_SHA256@", payload_digest)
     rendered.write_text(source)
     _fake_command(
@@ -59,7 +67,7 @@ def _run_bootstrap(
         "curl",
         'destination=\nurl=\nwhile [ "$#" -gt 0 ]; do\n'
         '  case "$1" in -o) destination=$2; shift 2 ;; -*) shift ;; *) url=$1; shift ;; esac\n'
-        'done\ncase "$url" in */payload.json) source=$VONK_TEST_PAYLOAD ;; *) source=$VONK_TEST_ARTIFACT ;; esac\n'
+        'done\ncase "$url" in */payload.json) source=$VONK_TEST_PAYLOAD ;; *.deb) source=$VONK_TEST_PACKAGE ;; *) source=$VONK_TEST_ARTIFACT ;; esac\n'
         'cp "$source" "$destination"\n',
     )
     forbidden = tmp_path / "forbidden-tools"
@@ -76,6 +84,7 @@ def _run_bootstrap(
         "TMPDIR": str(tmp_path),
         "VONK_INSTALL_BASE_URL": "https://install.example.test/artifacts",
         "VONK_TEST_ARTIFACT": str(artifact),
+        "VONK_TEST_PACKAGE": str(package),
         "VONK_TEST_PAYLOAD": str(payload),
         "VONK_TEST_RECEIPT": str(receipt),
         "VONK_TEST_FORBIDDEN": str(forbidden),
@@ -94,8 +103,8 @@ def _run_bootstrap(
 @pytest.mark.parametrize(
     ("kind", "system", "machine", "arguments", "expected_arguments"),
     (
-        ("spark", "Linux", "x86_64", (), ""),
-        ("spark", "Linux", "aarch64", (), ""),
+        ("spark", "Linux", "x86_64", (), "--package"),
+        ("spark", "Linux", "aarch64", (), "--package"),
     ),
 )
 def test_curl_bootstrap_verifies_and_runs_the_native_installer(
@@ -115,7 +124,13 @@ def test_curl_bootstrap_verifies_and_runs_the_native_installer(
     )
 
     assert result.returncode == 0, result.stderr
-    assert receipt.read_text().rstrip().endswith(f"|{expected_arguments}")
+    invocation = receipt.read_text().rstrip().split("|", 1)[1].split()
+    assert invocation[0] == expected_arguments
+    if kind == "spark":
+        assert invocation[2] == "--package-sha256"
+        assert invocation[3] == hashlib.sha256(
+            (tmp_path / "vonk-forge-agent.deb").read_bytes()
+        ).hexdigest()
     assert not forbidden.exists()
 
 
@@ -164,6 +179,21 @@ def test_spark_bootstrap_rejects_non_linux_before_downloading(tmp_path: Path) ->
     assert not forbidden.exists()
 
 
+def test_spark_bootstrap_rejects_user_arguments(tmp_path: Path) -> None:
+    result, receipt, forbidden = _run_bootstrap(
+        tmp_path,
+        "spark",
+        system="Linux",
+        machine="x86_64",
+        arguments=("--package", "/tmp/untrusted.deb"),
+    )
+
+    assert result.returncode != 0
+    assert "does not accept arguments" in result.stderr
+    assert not receipt.exists()
+    assert not forbidden.exists()
+
+
 def test_bootstrap_never_executes_an_unpinned_download(tmp_path: Path) -> None:
     result, receipt, forbidden = _run_bootstrap(
         tmp_path, "spark", system="Linux", machine="x86_64"
@@ -183,6 +213,7 @@ def test_bootstrap_never_executes_an_unpinned_download(tmp_path: Path) -> None:
             "TMPDIR": str(tmp_path),
             "VONK_INSTALL_BASE_URL": "https://install.example.test/artifacts",
             "VONK_TEST_ARTIFACT": str(tmp_path / "published-installer"),
+            "VONK_TEST_PACKAGE": str(tmp_path / "vonk-forge-agent.deb"),
             "VONK_TEST_RECEIPT": str(receipt),
             "VONK_TEST_FORBIDDEN": str(forbidden),
         },

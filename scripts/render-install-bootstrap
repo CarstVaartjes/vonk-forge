@@ -11,7 +11,6 @@ import stat
 import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 PLATFORMS = {
     "nas": ("linux-amd64", "linux-arm64", "darwin-amd64", "darwin-arm64"),
@@ -70,7 +69,12 @@ def _artifact_arguments(values: list[str]) -> dict[str, Path]:
     return result
 
 
-def render(kind: str, artifacts: dict[str, Path], payload: Path | None = None) -> bytes:
+def render(
+    kind: str,
+    artifacts: dict[str, Path],
+    payload: Path | None = None,
+    packages: dict[str, Path] | None = None,
+) -> bytes:
     expected = set(PLATFORMS[kind])
     if set(artifacts) != expected:
         raise RenderError(f"{kind} installer platforms are incomplete")
@@ -88,6 +92,8 @@ def render(kind: str, artifacts: dict[str, Path], payload: Path | None = None) -
             raise RenderError(f"bootstrap template is missing {platform}")
         rendered = rendered.replace(placeholder, digest)
     if kind == "nas":
+        if packages:
+            raise RenderError("nas bootstrap does not accept Spark packages")
         if payload is None:
             raise RenderError("nas release payload is missing")
         payload_digest = hashlib.sha256(
@@ -96,8 +102,21 @@ def render(kind: str, artifacts: dict[str, Path], payload: Path | None = None) -
         if rendered.count("@NAS_PAYLOAD_SHA256@") != 1:
             raise RenderError("bootstrap template is missing the NAS payload")
         rendered = rendered.replace("@NAS_PAYLOAD_SHA256@", payload_digest)
-    elif payload is not None:
-        raise RenderError("spark bootstrap does not accept a NAS payload")
+    else:
+        if payload is not None:
+            raise RenderError("spark bootstrap does not accept a NAS payload")
+        if packages is None or set(packages) != expected:
+            raise RenderError("spark package platforms are incomplete")
+        for platform, path in packages.items():
+            digest = hashlib.sha256(
+                _read_regular(path, f"{platform} package", MAX_ARTIFACT_BYTES)
+            ).hexdigest()
+            placeholder = f"@SPARK_{platform}_PACKAGE_SHA256@".upper().replace(
+                "-", "_"
+            )
+            if rendered.count(placeholder) != 1:
+                raise RenderError(f"bootstrap template is missing {platform} package")
+            rendered = rendered.replace(placeholder, digest)
     if PLACEHOLDER.search(rendered):
         raise RenderError("bootstrap template has unresolved digests")
     return rendered.encode("ascii")
@@ -127,6 +146,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--kind", choices=tuple(PLATFORMS), required=True)
     parser.add_argument("--artifact", action="append", default=[])
     parser.add_argument("--payload", type=Path)
+    parser.add_argument("--package", action="append", default=[])
     parser.add_argument("--output", type=Path, required=True)
     arguments = parser.parse_args(argv)
     try:
@@ -134,6 +154,7 @@ def main(argv: list[str] | None = None) -> int:
             arguments.kind,
             _artifact_arguments(arguments.artifact),
             arguments.payload,
+            _artifact_arguments(arguments.package),
         )
         _write_new(arguments.output, rendered)
     except (OSError, RenderError) as error:

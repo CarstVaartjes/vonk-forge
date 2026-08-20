@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 
-
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/render-install-bootstrap"
 
@@ -46,8 +45,15 @@ def test_renderer_pins_every_supported_native_installer(
         command.extend(("--artifact", f"{platform}={artifact}"))
     if kind == "nas":
         command.extend(("--payload", str(payload)))
+    else:
+        for platform in artifacts:
+            package = tmp_path / f"agent-{platform}.deb"
+            package.write_bytes(f"Debian package for {platform}\n".encode())
+            command.extend(("--package", f"{platform}={package}"))
 
-    result = subprocess.run(command, cwd=ROOT, text=True, capture_output=True)
+    result = subprocess.run(
+        command, cwd=ROOT, text=True, capture_output=True, check=False
+    )
 
     assert result.returncode == 0, result.stderr
     rendered = output.read_text()
@@ -56,6 +62,10 @@ def test_renderer_pins_every_supported_native_installer(
         assert hashlib.sha256(artifact.read_bytes()).hexdigest() in rendered
     if kind == "nas":
         assert hashlib.sha256(payload.read_bytes()).hexdigest() in rendered
+    else:
+        for platform in artifacts:
+            package = tmp_path / f"agent-{platform}.deb"
+            assert hashlib.sha256(package.read_bytes()).hexdigest() in rendered
     assert result.stdout == f"sha256:{hashlib.sha256(output.read_bytes()).hexdigest()}\n"
 
 
@@ -96,6 +106,7 @@ def test_renderer_fails_closed_on_missing_duplicate_or_unsafe_inputs(
             cwd=ROOT,
             text=True,
             capture_output=True,
+            check=False,
         )
         assert result.returncode == 2
         assert not output.exists()
