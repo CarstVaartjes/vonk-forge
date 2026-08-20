@@ -21,8 +21,10 @@ pub enum RuntimeIdentityError {
 static BUILD_DIGEST_MARKER: &str =
     concat!("VONK_AGENT_BUILD_DIGEST=", env!("VONK_AGENT_BUILD_DIGEST"));
 #[used]
-static SEMANTIC_VERSION_MARKER: &str =
-    concat!("VONK_AGENT_SEMANTIC_VERSION=", env!("VONK_AGENT_SEMANTIC_VERSION"));
+static SEMANTIC_VERSION_MARKER: &str = concat!(
+    "VONK_AGENT_SEMANTIC_VERSION=",
+    env!("VONK_AGENT_SEMANTIC_VERSION")
+);
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]

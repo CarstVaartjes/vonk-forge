@@ -853,9 +853,7 @@ fn release_artifact_prefix(
     } else {
         ""
     };
-    format!(
-        "artifacts/{channel}/releases/{generation}/{baseline}spark/current/{platform}/"
-    )
+    format!("artifacts/{channel}/releases/{generation}/{baseline}spark/current/{platform}/")
 }
 
 pub fn apply_setup_from(
@@ -1969,24 +1967,14 @@ mod tests {
     #[test]
     fn acceptance_only_release_resolves_only_its_immutable_baseline_graph() {
         assert_eq!(
-            release_artifact_prefix(
-                "dev",
-                &"a".repeat(64),
-                "linux-arm64",
-                true,
-            ),
+            release_artifact_prefix("dev", &"a".repeat(64), "linux-arm64", true,),
             format!(
                 "artifacts/dev/releases/{}/acceptance-baseline/spark/current/linux-arm64/",
                 "a".repeat(64)
             )
         );
         assert_eq!(
-            release_artifact_prefix(
-                "stable",
-                &"b".repeat(64),
-                "linux-amd64",
-                false,
-            ),
+            release_artifact_prefix("stable", &"b".repeat(64), "linux-amd64", false,),
             format!(
                 "artifacts/stable/releases/{}/spark/current/linux-amd64/",
                 "b".repeat(64)
