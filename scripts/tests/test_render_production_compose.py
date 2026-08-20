@@ -12,9 +12,9 @@ SCRIPT = ROOT / "scripts/render-production-compose"
 DEV_SCRIPT = ROOT / "scripts/render-dev-compose"
 TEMPLATE = ROOT / "deploy/compose/compose.yaml"
 DIGEST = "a" * 64
-API_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-api:latest@sha256:{DIGEST}"
-WORKER_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-worker:latest@sha256:{DIGEST}"
-HERMES_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-hermes:latest@sha256:{DIGEST}"
+API_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-api:v1.2.3@sha256:{DIGEST}"
+WORKER_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-worker:v1.2.3@sha256:{DIGEST}"
+HERMES_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-hermes:v1.2.3@sha256:{DIGEST}"
 DEV_API_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-api:dev-sha-{'b' * 40}@sha256:{DIGEST}"
 DEV_WORKER_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-worker:dev-sha-{'b' * 40}@sha256:{DIGEST}"
 DEV_HERMES_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-hermes:dev-sha-{'b' * 40}@sha256:{DIGEST}"
@@ -118,6 +118,7 @@ def test_render_replaces_every_control_image_without_resolving_operator_inputs(
     "image",
     (
         "ghcr.io/carstvaartjes/vonk-forge-api:latest",
+        f"ghcr.io/carstvaartjes/vonk-forge-api:latest@sha256:{DIGEST}",
         f"ghcr.io/carstvaartjes/vonk-forge-api:dev@sha256:{DIGEST}",
         f"ghcr.io/example/vonk-forge-api:latest@sha256:{DIGEST}",
     ),

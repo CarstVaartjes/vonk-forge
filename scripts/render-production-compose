@@ -19,7 +19,8 @@ HERMES_TOKEN = "${HERMES_AGENT_IMAGE:?set a digest-pinned Hermes image}"
 TOKEN_COUNTS = {API_TOKEN: 1, WORKER_TOKEN: 1, HERMES_TOKEN: 1}
 IMAGE_PATTERN = re.compile(
     r"ghcr\.io/carstvaartjes/vonk-forge-(?P<role>api|worker|hermes)"
-    r":latest@sha256:[0-9a-f]{64}\Z"
+    r":v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+    r"@sha256:[0-9a-f]{64}\Z"
 )
 
 
@@ -27,7 +28,7 @@ def _validate_image(image: str, role: str) -> None:
     match = IMAGE_PATTERN.fullmatch(image)
     if match is None or match.group("role") != role:
         raise ValueError(
-            f"{role} image must be the public production alias locked by digest"
+            f"{role} image must use an immutable production version locked by digest"
         )
 
 
