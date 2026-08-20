@@ -52,6 +52,7 @@ SEMVER_TEXT = (
 )
 PACKAGE_VERSION = re.compile(
     rf"(?:{SEMVER_TEXT}|{SEMVER_TEXT}\+lifecycle\.1|"
+    rf"{SEMVER_TEXT}~acceptance\.1\+g[0-9a-f]{{12}}|"
     rf"{SEMVER_TEXT}~dev\.(?:0|[1-9][0-9]*)\+g[0-9a-f]{{12}})\Z"
 )
 ARCHITECTURES = {"arm64": 183, "amd64": 62}

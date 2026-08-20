@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import stat
 import struct
@@ -253,15 +254,16 @@ def test_postinst_creates_stable_root_owned_native_machine_evidence() -> None:
 
 
 @pytest.mark.parametrize(
-    "package_version",
+    ("package_version", "expected_semantic"),
     (
-        "0.1.0",
-        "0.1.0~dev.418+g0123456789ab",
-        "0.1.0+lifecycle.1",
+        ("0.1.0", "0.1.0"),
+        ("0.1.0~dev.418+g0123456789ab", "0.1.0"),
+        ("0.1.0+lifecycle.1", "0.1.0"),
+        ("0.0.0~acceptance.1+g0123456789ab", "0.0.0"),
     ),
 )
 def test_postinst_derives_the_exact_cargo_semantic_version(
-    tmp_path: Path, package_version: str
+    tmp_path: Path, package_version: str, expected_semantic: str
 ) -> None:
     source = POSTINST.read_text().replace("@VERSION@", package_version)
     prefix = source[: source.index('if [ "${1:-}" != configure ]')]
@@ -274,7 +276,7 @@ def test_postinst_derives_the_exact_cargo_semantic_version(
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout == "0.1.0\n"
+    assert result.stdout == f"{expected_semantic}\n"
 
 
 def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> None:
@@ -544,6 +546,21 @@ def test_builder_allows_only_an_explicit_lower_acceptance_baseline(
         ).stdout.strip()
         == version
     )
+    verified = subprocess.run(
+        [VERIFY, "--json", package],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert verified.returncode == 0, verified.stderr or verified.stdout
+    assert json.loads(verified.stdout) == {
+        "architecture": "arm64",
+        "ok": True,
+        "package": "vonk-forge-agent",
+        "sha256": hashlib.sha256(package.read_bytes()).hexdigest(),
+        "version": version,
+    }
 
 
 def test_builder_rejects_a_build_digest_that_is_not_embedded_in_the_agent(

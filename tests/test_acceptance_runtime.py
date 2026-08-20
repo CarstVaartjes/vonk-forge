@@ -73,6 +73,73 @@ def test_interactive_runner_rejects_secret_in_descendant_process_environment(
         )
 
 
+def test_interactive_runner_rejects_secret_in_fast_exit_argv_before_fork(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(AcceptanceError, match="process listing"):
+        run_interactive(
+            ["/bin/true", "--pairing=token-value"],
+            cwd=tmp_path,
+            environment={"PATH": "/usr/bin:/bin"},
+            responses=[],
+            timeout=1,
+            forbidden_values=["token-value"],
+        )
+
+
+@pytest.mark.parametrize(
+    "environment",
+    (
+        {"PATH": "/usr/bin:/bin", "PAIRING_token-value": "safe"},
+        {"PATH": "/usr/bin:/bin", "PAIRING_TOKEN": "prefix-token-value-suffix"},
+    ),
+)
+def test_interactive_runner_rejects_secret_in_fast_exit_environment_before_fork(
+    tmp_path: Path, environment: dict[str, str]
+) -> None:
+    with pytest.raises(AcceptanceError, match="process listing"):
+        run_interactive(
+            ["/bin/true"],
+            cwd=tmp_path,
+            environment=environment,
+            responses=[],
+            timeout=1,
+            forbidden_values=["token-value"],
+        )
+
+
+def test_interactive_runner_monitors_reparented_descendants_after_root_exit(
+    tmp_path: Path,
+) -> None:
+    middle = tmp_path / "middle.py"
+    middle.write_text(
+        "import os,signal,subprocess,sys,time\n"
+        "signal.signal(signal.SIGHUP, signal.SIG_IGN)\n"
+        "value = sys.stdin.readline().strip()\n"
+        "time.sleep(0.2)\n"
+        "subprocess.Popen(['/bin/sleep', '1'], env=os.environ | {'LEAK': value})\n"
+        "time.sleep(0.5)\n"
+    )
+    root = tmp_path / "root.py"
+    root.write_text(
+        "import signal,subprocess,sys\n"
+        "signal.signal(signal.SIGHUP, signal.SIG_IGN)\n"
+        "child = subprocess.Popen([sys.executable, sys.argv[1]], stdin=subprocess.PIPE, text=True)\n"
+        "child.stdin.write('token-value\\n')\n"
+        "child.stdin.close()\n"
+    )
+
+    with pytest.raises(AcceptanceError, match="process listing"):
+        run_interactive(
+            [sys.executable, root, middle],
+            cwd=tmp_path,
+            environment={"PATH": "/usr/bin:/bin"},
+            responses=[],
+            timeout=2,
+            forbidden_values=["token-value"],
+        )
+
+
 def test_interactive_runner_can_allow_upgrade_prompts_to_be_unchanged(
     tmp_path: Path,
 ) -> None:

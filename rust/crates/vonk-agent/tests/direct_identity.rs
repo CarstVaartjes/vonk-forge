@@ -12,7 +12,10 @@ fn direct_identity_binds_version_build_and_binary_to_the_executable() {
 
     let identity = AgentRuntimeIdentity::from_executable(&executable).unwrap();
 
-    assert_eq!(identity.semantic_version, env!("CARGO_PKG_VERSION"));
+    assert_eq!(
+        identity.semantic_version,
+        env!("VONK_AGENT_SEMANTIC_VERSION")
+    );
     assert_eq!(
         identity.architecture,
         if cfg!(target_arch = "aarch64") {

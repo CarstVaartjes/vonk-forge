@@ -29,7 +29,11 @@ use vonk_agent::{
 };
 
 #[derive(Parser)]
-#[command(name = "vonk-agent", version, about = "Vonk Forge outbound agent")]
+#[command(
+    name = "vonk-agent",
+    version = env!("VONK_AGENT_SEMANTIC_VERSION"),
+    about = "Vonk Forge outbound agent"
+)]
 struct Cli {
     #[arg(long, default_value = DEFAULT_CONFIG_PATH)]
     config: PathBuf,

@@ -44,8 +44,10 @@ current_semantic=${current_version%%~*}
 current_semantic=${current_semantic%%+*}
 next_semantic=${next_version%%~*}
 next_semantic=${next_semantic%%+*}
-if [[ "$current_semantic" != "$next_semantic" ]]; then
-  printf '%s\n' 'native lifecycle package semantic versions disagree' >&2
+semantic_version='(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)'
+if [[ ! "$current_semantic" =~ ^$semantic_version$ ]] \
+  || [[ ! "$next_semantic" =~ ^$semantic_version$ ]]; then
+  printf '%s\n' 'native lifecycle semantic version is invalid' >&2
   exit 2
 fi
 
@@ -83,6 +85,8 @@ runuser=${VONK_AGENT_LIFECYCLE_RUNUSER:-/usr/sbin/runuser}
 systemd_analyze=${VONK_AGENT_LIFECYCLE_SYSTEMD_ANALYZE:-/usr/bin/systemd-analyze}
 verify=${VONK_AGENT_LIFECYCLE_VERIFY:-$(cd "$(dirname "$0")" && pwd)/verify-agent-deb}
 machine=${VONK_AGENT_LIFECYCLE_MACHINE:-$(uname -m)}
+dpkg_version_format="\${Version}"
+dpkg_status_format="\${db:Status-Abbrev}"
 
 for required in "$dpkg" "$dpkg_deb" "$dpkg_query" "$runuser" \
   "$systemd_analyze" "$verify" /usr/bin/openssl /usr/bin/sha256sum; do
@@ -95,6 +99,11 @@ if [[ "$machine" != "$expected_machine" ]]; then
   printf 'native lifecycle architecture mismatch: expected %s, got %s\n' \
     "$expected_machine" "$machine" >&2
   exit 1
+fi
+if ! "$dpkg" --compare-versions "$current_version" lt "$next_version" \
+  || ! "$dpkg" --compare-versions "$current_semantic" lt "$next_semantic"; then
+  printf '%s\n' 'native lifecycle versions are not strictly increasing' >&2
+  exit 2
 fi
 
 for package in "$current_package" "$next_package"; do
@@ -109,7 +118,7 @@ trap 'rm -rf -- "$temporary"' EXIT
 downgrade_log=${VONK_AGENT_LIFECYCLE_DOWNGRADE_LOG:-$temporary/downgrade.log}
 
 env SYSTEMD_OFFLINE=1 "$dpkg" -i "$current_package"
-test "$("$dpkg_query" -W -f='${Version}' vonk-forge-agent)" = "$current_version"
+test "$("$dpkg_query" -W -f="$dpkg_version_format" vonk-forge-agent)" = "$current_version"
 test -x "$agent"
 test "$("$agent" --version)" = "vonk-agent $current_semantic"
 
@@ -152,6 +161,18 @@ sed -i \
 printf '\n# lifecycle-preserved\n' >> "$config"
 install -m 0600 /dev/null "$data_dir/lifecycle-preserved"
 
+baseline_self_test=$("$agent" --config "$config" self-test)
+grep -F '"architecture":"'"$architecture"'"' <<< "$baseline_self_test" >/dev/null
+grep -F '"semantic_version":"'"$current_semantic"'"' <<< "$baseline_self_test" >/dev/null
+grep -E '"build_digest":"sha256:[0-9a-f]{64}"' \
+  <<< "$baseline_self_test" >/dev/null
+grep -E '"binary_digest":"[0-9a-f]{64}"' <<< "$baseline_self_test" >/dev/null
+grep -F '"self_test_passed":true' <<< "$baseline_self_test" >/dev/null
+baseline_build_digest=$(sed -nE 's/.*"build_digest":"(sha256:[0-9a-f]{64})".*/\1/p' \
+  <<< "$baseline_self_test")
+baseline_binary_digest=$(sed -nE 's/.*"binary_digest":"([0-9a-f]{64})".*/\1/p' \
+  <<< "$baseline_self_test")
+
 if [[ "${VONK_AGENT_LIFECYCLE_TEST_MODE:-0}" != 1 ]]; then
   chown -R vonk-agent:vonk-agent "$data_dir" "$runtime_dir"
   getent passwd vonk-agent >/dev/null
@@ -167,14 +188,14 @@ fi
   XDG_DATA_HOME="$data_dir" \
   XDG_CONFIG_HOME="$data_dir/.config" \
   XDG_RUNTIME_DIR="$runtime_dir" \
-  CONTAINERS_STORAGE_CONF=$(path /etc/vonk-forge-agent/containers-storage.conf) \
+  CONTAINERS_STORAGE_CONF="$(path /etc/vonk-forge-agent/containers-storage.conf)" \
   sh -c 'cd / && exec podman info --format "{{.Host.Security.Rootless}}"' \
   | grep -Fx true >/dev/null
 
 env SYSTEMD_OFFLINE=1 "$dpkg" --unpack "$next_package"
-[[ "$("$dpkg_query" -W -f='${db:Status-Abbrev}' vonk-forge-agent)" = iU* ]]
+[[ "$("$dpkg_query" -W -f="$dpkg_status_format" vonk-forge-agent)" = iU* ]]
 env SYSTEMD_OFFLINE=1 "$dpkg" --configure -a
-test "$("$dpkg_query" -W -f='${Version}' vonk-forge-agent)" = "$next_version"
+test "$("$dpkg_query" -W -f="$dpkg_version_format" vonk-forge-agent)" = "$next_version"
 grep -Fx '# lifecycle-preserved' "$config" >/dev/null
 test -f "$data_dir/lifecycle-preserved"
 test "$("$agent" --version)" = "vonk-agent $next_semantic"
@@ -182,6 +203,13 @@ self_test=$("$agent" --config "$config" self-test)
 grep -F '"architecture":"'"$architecture"'"' <<< "$self_test" >/dev/null
 grep -F '"semantic_version":"'"$next_semantic"'"' <<< "$self_test" >/dev/null
 grep -F '"self_test_passed":true' <<< "$self_test" >/dev/null
+candidate_build_digest=$(sed -nE 's/.*"build_digest":"(sha256:[0-9a-f]{64})".*/\1/p' \
+  <<< "$self_test")
+candidate_binary_digest=$(sed -nE 's/.*"binary_digest":"([0-9a-f]{64})".*/\1/p' \
+  <<< "$self_test")
+test -n "$candidate_build_digest" && test -n "$candidate_binary_digest"
+test "$candidate_build_digest" != "$baseline_build_digest"
+test "$candidate_binary_digest" != "$baseline_binary_digest"
 
 if env SYSTEMD_OFFLINE=1 "$dpkg" -i "$current_package" \
   >"$downgrade_log" 2>&1; then
@@ -194,7 +222,7 @@ env SYSTEMD_OFFLINE=1 "$dpkg" --remove vonk-forge-agent
 test -f "$config"
 test -f "$data_dir/lifecycle-preserved"
 env SYSTEMD_OFFLINE=1 "$dpkg" -i "$next_package"
-test "$("$dpkg_query" -W -f='${Version}' vonk-forge-agent)" = "$next_version"
+test "$("$dpkg_query" -W -f="$dpkg_version_format" vonk-forge-agent)" = "$next_version"
 grep -Fx '# lifecycle-preserved' "$config" >/dev/null
 test -f "$data_dir/lifecycle-preserved"
 test "$("$agent" --version)" = "vonk-agent $next_semantic"

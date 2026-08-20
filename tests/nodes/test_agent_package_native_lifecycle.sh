@@ -15,10 +15,12 @@ mkdir -p "$bin" "$root/etc/vonk-forge-agent" \
   "$root/usr/lib/vonk-forge" "$root/var/lib/vonk-forge-agent"
 : > "$log"
 printf 'absent\n' > "$state"
-printf '0.0.0\n' > "$version_state"
+printf 'absent\n' > "$version_state"
 
-current="$test_root/vonk-forge-agent_0.1.0_amd64.deb"
-next="$test_root/vonk-forge-agent_0.1.0+lifecycle.1_amd64.deb"
+baseline_version=0.0.0~acceptance.1+g0123456789ab
+candidate_version=0.1.0
+current="$test_root/vonk-forge-agent_${baseline_version}_amd64.deb"
+next="$test_root/vonk-forge-agent_${candidate_version}_amd64.deb"
 : > "$current"
 : > "$current.sha256"
 : > "$next"
@@ -40,10 +42,27 @@ cat > "$root/usr/lib/vonk-forge/vonk-agent" <<'AGENT'
 set -euo pipefail
 printf 'agent %s\n' "$*" >> "${LIFECYCLE_ACTION_LOG:?}"
 case "${1:-}" in
-  --version) printf 'vonk-agent 0.1.0\n' ;;
+  --version)
+    semantic=$(cat "${LIFECYCLE_VERSION_STATE:?}")
+    semantic=${semantic%%~*}
+    semantic=${semantic%%+*}
+    printf 'version %s\n' "$semantic" >> "${LIFECYCLE_ACTION_LOG:?}"
+    printf 'vonk-agent %s\n' "$semantic"
+    ;;
   --config)
     [[ "${3:-}" == self-test ]]
-    printf '%s\n' '{"semantic_version":"0.1.0","build_digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","binary_digest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","architecture":"linux-amd64","self_test_passed":true}'
+    semantic=$(cat "${LIFECYCLE_VERSION_STATE:?}")
+    semantic=${semantic%%~*}
+    semantic=${semantic%%+*}
+    printf 'self-test %s\n' "$semantic" >> "${LIFECYCLE_ACTION_LOG:?}"
+    if [[ "$semantic" == 0.0.0 ]]; then
+      build=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+      binary=cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+    else
+      build=dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+      binary=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+    fi
+    printf '{"semantic_version":"%s","build_digest":"sha256:%s","binary_digest":"%s","architecture":"linux-amd64","self_test_passed":true}\n' "$semantic" "$build" "$binary"
     ;;
   *) exit 2 ;;
 esac
@@ -89,12 +108,15 @@ cat > "$bin/dpkg" <<'DPKG'
 set -euo pipefail
 printf 'dpkg %s\n' "$*" >> "${LIFECYCLE_ACTION_LOG:?}"
 case "${1:-}" in
+  --compare-versions)
+    /usr/bin/dpkg --compare-versions "$2" "$3" "$4"
+    ;;
   -i|--install)
     package=${2##*/}
     candidate=${package#vonk-forge-agent_}
     candidate=${candidate%_amd64.deb}
     installed=$(cat "${LIFECYCLE_VERSION_STATE:?}")
-    if [[ "$installed" == 0.1.0+lifecycle.1 && "$candidate" == 0.1.0 ]]; then
+    if [[ "$installed" == 0.1.0 && "$candidate" == 0.0.0~acceptance.1+g0123456789ab ]]; then
       printf '%s\n' 'vonk-forge-agent: refusing downgrade' >&2
       exit 1
     fi
@@ -102,7 +124,10 @@ case "${1:-}" in
     printf 'ii \n' > "${LIFECYCLE_STATE:?}"
     ;;
   --unpack)
-    printf '0.1.0+lifecycle.1\n' > "${LIFECYCLE_VERSION_STATE:?}"
+    package=${2##*/}
+    candidate=${package#vonk-forge-agent_}
+    candidate=${candidate%_amd64.deb}
+    printf '%s\n' "$candidate" > "${LIFECYCLE_VERSION_STATE:?}"
     printf 'iU \n' > "${LIFECYCLE_STATE:?}"
     ;;
   --configure) printf 'ii \n' > "${LIFECYCLE_STATE:?}" ;;
@@ -140,7 +165,7 @@ env \
   VONK_AGENT_LIFECYCLE_SYSTEMD_ANALYZE="$bin/systemd-analyze" \
   VONK_AGENT_LIFECYCLE_TEST_MODE=1 \
   VONK_AGENT_LIFECYCLE_VERIFY="$bin/verify-agent-deb" \
-  "$helper" linux-amd64 "$current" "$next" 0.1.0 0.1.0+lifecycle.1
+  "$helper" linux-amd64 "$current" "$next" "$baseline_version" "$candidate_version"
 
 test "$(grep -Fc 'verify --json' "$log")" = 2
 grep -Fxq "dpkg -i $current" "$log"
@@ -148,7 +173,10 @@ grep -Fxq "dpkg --unpack $next" "$log"
 grep -Fxq 'dpkg --configure -a' "$log"
 grep -Fxq "dpkg -i $next" "$log"
 test "$(grep -Fc 'dpkg --remove vonk-forge-agent' "$log")" = 2
-test "$(grep -Fc 'agent --config ' "$log")" = 2
+grep -Fxq 'version 0.0.0' "$log"
+grep -Fxq 'self-test 0.0.0' "$log"
+grep -Fxq 'version 0.1.0' "$log"
+test "$(grep -Fc 'self-test 0.1.0' "$log")" = 2
 grep -Fq 'refusing downgrade' "$test_root/downgrade.log"
 grep -Fxq '# lifecycle-preserved' "$root/etc/vonk-forge-agent/agent.toml"
 test -f "$root/var/lib/vonk-forge-agent/lifecycle-preserved"

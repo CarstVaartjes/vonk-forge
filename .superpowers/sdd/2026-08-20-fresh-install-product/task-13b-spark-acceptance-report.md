@@ -128,3 +128,74 @@ slice:
 - `deploy/compose/Caddyfile`
 - `deploy/compose/tests/test_agent_ingress.py`
 - `docs/runbooks/platform-operations.md`
+
+## Task 13B1 prerequisite review fix round
+
+Base: `0d147c42`
+
+Scope remained limited to the reviewed prerequisite behavior. Task 13B2 and
+`tests/acceptance/test_spark_lifecycle.py` were not started.
+
+### Fixes
+
+- Extended `scripts/verify-agent-deb` by exactly one canonical alternative:
+  `MAJOR.MINOR.PATCH~acceptance.1+g<12 lowercase hex>`. The real builder output
+  now crosses the verifier boundary successfully; ordinary, lifecycle, and
+  development grammar remains unchanged.
+- Replaced native lifecycle semantic equality with two strict checks:
+  `dpkg --compare-versions` must establish both lower Debian package ordering
+  and lower canonical semantic ordering. The helper now executes baseline
+  `--version` and self-test before upgrade, verifies native architecture and
+  build/binary digest shapes, and requires the candidate semantic, build, and
+  binary identities to be strictly newer/different after upgrade.
+- Bound Clap's `--version` output to the build-script-provided
+  `VONK_AGENT_SEMANTIC_VERSION`, matching runtime identity and self-test. A real
+  compiled Rust integration test covers CLI output, self-test, architecture,
+  build digest, binary digest, and pass state under both the ordinary candidate
+  build and an explicit `0.0.0` baseline build.
+- Added synchronous forbidden-value inspection of every argv element and every
+  environment key/value before `pty.fork`. Runtime monitoring now follows the
+  PTY process group independently of parent relationships, so reparenting or
+  reaping the root process does not terminate descendant inspection. Error
+  cleanup terminates the process group even if the root was already reaped.
+
+### TDD red evidence
+
+- Real acceptance-baseline builder/verifier regression failed with verifier
+  JSON `{"error": "package version is not canonical", "ok": false}`.
+- Lower-baseline native lifecycle regression exited 2 with
+  `native lifecycle package semantic versions disagree`.
+- The compiled `0.0.0` Rust identity regression reported
+  `left: "vonk-agent 0.1.0\\n"`,
+  `right: "vonk-agent 0.0.0\\n"`.
+- Fast-exit argv, environment-key, environment-value, and delayed reparented
+  descendant PTY regressions all failed with `DID NOT RAISE AcceptanceError`.
+
+### TDD green evidence
+
+- Real baseline builder/verifier regression: 1 passed.
+- Native lower-baseline-to-candidate lifecycle executable:
+  `native linux-amd64 package lifecycle: PASS` and
+  `native direct-package lifecycle helper: PASS`.
+- Compiled baseline semantic identity integration: 1 passed with
+  `VONK_AGENT_SEMANTIC_VERSION=0.0.0`.
+- PTY fast-exit and reparented-descendant regressions: 4 passed; complete PTY
+  runtime file: 14 passed.
+
+### Final evidence
+
+- Full prerequisite pytest command plus new cases: `203 passed in 54.01s`.
+- `cargo test --locked -p vonk-agent`: 146 tests passed, 0 failed; doc tests
+  also passed.
+- Explicit compiled baseline command with
+  `VONK_AGENT_SEMANTIC_VERSION=0.0.0`: 1 passed, 0 failed.
+- `cargo test --locked -p vonk-spark-setup`: 34 tests passed, 0 failed; doc
+  tests also passed.
+- Native lifecycle executable and ShellCheck 0.11.0 on both changed shell
+  files: exit 0.
+- Pinned `ruff==0.16.1` on all changed Python files: `All checks passed!`.
+- Existing four action/workflow files parsed as YAML mappings:
+  `parsed 4 YAML files`.
+
+The prior CI-only and physical-Spark gaps remain unchanged; this fix round does
+not claim the Task 13B publication gate is complete.

@@ -29,28 +29,24 @@ def write_all(write: Callable[[bytes], int], payload: bytes) -> None:
         offset += count
 
 
-def _process_tree(root_pid: int) -> set[int]:
-    parents: dict[int, int] = {}
+def _process_group(root_pid: int) -> set[int]:
+    members: set[int] = set()
     for entry in Path("/proc").iterdir():
         if not entry.name.isdigit():
             continue
         try:
             suffix = (entry / "stat").read_text().rpartition(") ")[2].split()
-            parents[int(entry.name)] = int(suffix[1])
+            if int(suffix[2]) == root_pid:
+                members.add(int(entry.name))
         except (IndexError, OSError, ValueError):
             continue
-    tree = {root_pid}
-    while descendants := {
-        pid for pid, parent in parents.items() if parent in tree and pid not in tree
-    }:
-        tree.update(descendants)
-    return tree
+    return members
 
 
 def _assert_process_values_absent(root_pid: int, forbidden: Sequence[bytes]) -> None:
     if not forbidden:
         return
-    for pid in _process_tree(root_pid):
+    for pid in _process_group(root_pid):
         for name in ("cmdline", "environ"):
             try:
                 content = Path(f"/proc/{pid}/{name}").read_bytes()
@@ -80,6 +76,13 @@ def run_interactive(
         raise AcceptanceError("interactive command is invalid")
     argv = [os.fspath(value) for value in command]
     forbidden = tuple(value.encode("utf-8") for value in forbidden_values)
+    child_environment = dict(environment)
+    invocation_values = [
+        *(os.fsencode(value) for value in argv),
+        *(os.fsencode(value) for item in child_environment.items() for value in item),
+    ]
+    if any(secret in value for secret in forbidden for value in invocation_values):
+        raise AcceptanceError("secret value appeared in an acceptance process listing")
     pending = list(responses)
     transcript = bytearray()
     matched_through = 0
@@ -88,13 +91,13 @@ def run_interactive(
     if pid == 0:
         try:
             os.chdir(cwd)
-            os.execvpe(argv[0], argv, dict(environment))
+            os.execvpe(argv[0], argv, child_environment)
         except OSError:
             os._exit(127)
 
     status: int | None = None
     try:
-        while status is None:
+        while status is None or _process_group(pid):
             _assert_process_values_absent(pid, forbidden)
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -120,9 +123,10 @@ def run_interactive(
                         matched_through = position + len(prompt)
                         pending.pop(0)
             _assert_process_values_absent(pid, forbidden)
-            child, observed_status = os.waitpid(pid, os.WNOHANG)
-            if child == pid:
-                status = observed_status
+            if status is None:
+                child, observed_status = os.waitpid(pid, os.WNOHANG)
+                if child == pid:
+                    status = observed_status
         exit_code = os.waitstatus_to_exitcode(status)
         rendered = transcript.decode("utf-8", errors="replace")
         for _, answer in responses:
@@ -137,11 +141,11 @@ def run_interactive(
             raise AcceptanceError(f"interactive prompts were not observed: {missing}")
         return rendered
     except BaseException:
+        try:
+            os.killpg(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
         if status is None:
-            try:
-                os.killpg(pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
             child, _ = os.waitpid(pid, 0)
             if child != pid:
                 raise AcceptanceError("interactive child could not be reaped")
