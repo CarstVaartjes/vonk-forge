@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
+
+import pytest
 
 from tests.acceptance.runtime import AcceptanceError
 
@@ -25,6 +28,162 @@ def test_only_hermes_bundle_receives_the_expensive_reference_rollout(
     hermes = tmp_path / "hermes"
 
     assert acceptance.reference_rollout_bundles(default, hermes) == (hermes,)
+
+
+def _serve_status(*, hermes: bool) -> dict[str, object]:
+    services: dict[str, object] = {
+        "svc:vonk-forge": {
+            "TCP": {"443": {"HTTPS": True}},
+            "Web": {
+                "vonk-forge.acceptance.example.test:443": {
+                    "Handlers": {"/": {"Proxy": "http://caddy:8080"}}
+                }
+            },
+        }
+    }
+    if hermes:
+        services.update(
+            {
+                "svc:hermes-api": {
+                    "TCP": {"443": {"HTTPS": True}},
+                    "Web": {
+                        "hermes-api.acceptance.example.test:443": {
+                            "Handlers": {
+                                "/": {"Proxy": "http://hermes-agent:8642"}
+                            }
+                        }
+                    },
+                },
+                "svc:hermes-dashboard": {
+                    "TCP": {"443": {"HTTPS": True}},
+                    "Web": {
+                        "hermes-dashboard.acceptance.example.test:443": {
+                            "Handlers": {
+                                "/": {"Proxy": "http://hermes-agent:9119"}
+                            }
+                        }
+                    },
+                },
+            }
+        )
+    return {"Services": services}
+
+
+def _serve_configuration(*, hermes: bool) -> dict[str, object]:
+    services: dict[str, object] = {
+        "svc:vonk-forge": {"endpoints": {"tcp:443": "http://caddy:8080"}}
+    }
+    if hermes:
+        services.update(
+            {
+                "svc:hermes-api": {
+                    "endpoints": {"tcp:443": "http://hermes-agent:8642"}
+                },
+                "svc:hermes-dashboard": {
+                    "endpoints": {"tcp:443": "http://hermes-agent:9119"}
+                },
+            }
+        )
+    return {"version": "0.0.1", "services": services}
+
+
+def test_tailnet_serve_configuration_requires_exact_selected_upstreams() -> None:
+    acceptance = _acceptance_module()
+    status = _serve_status(hermes=True)
+    configuration = _serve_configuration(hermes=True)
+
+    acceptance.assert_tailnet_serve_configuration(
+        json.dumps(status),
+        json.dumps(configuration),
+        hermes=True,
+        tailnet_suffix="acceptance.example.test",
+    )
+
+    invalid: list[dict[str, object]] = []
+    extra_service = _serve_configuration(hermes=True)
+    extra_service["services"]["svc:unexpected"] = {  # type: ignore[index]
+        "endpoints": {"tcp:443": "http://unexpected:9999"}
+    }
+    invalid.append(extra_service)
+    missing_service = _serve_configuration(hermes=True)
+    del missing_service["services"]["svc:hermes-dashboard"]  # type: ignore[index]
+    invalid.append(missing_service)
+    wrong_target = _serve_configuration(hermes=True)
+    wrong_target["services"]["svc:hermes-api"]["endpoints"]["tcp:443"] = (  # type: ignore[index]
+        "http://caddy:8080"
+    )
+    invalid.append(wrong_target)
+    wrong_port = _serve_configuration(hermes=True)
+    wrong_port["services"]["svc:vonk-forge"]["endpoints"] = {  # type: ignore[index]
+        "tcp:8443": "http://caddy:8080"
+    }
+    invalid.append(wrong_port)
+    extra_route = _serve_configuration(hermes=True)
+    extra_route["services"]["svc:vonk-forge"]["endpoints"]["tcp:80"] = (  # type: ignore[index]
+        "http://caddy:8080"
+    )
+    invalid.append(extra_route)
+
+    for document in invalid:
+        with pytest.raises(AcceptanceError, match="Serve configuration"):
+            acceptance.assert_tailnet_serve_configuration(
+                json.dumps(status),
+                json.dumps(document),
+                hermes=True,
+                tailnet_suffix="acceptance.example.test",
+            )
+
+
+def test_tailnet_serve_status_requires_the_exact_selected_routes() -> None:
+    acceptance = _acceptance_module()
+    default = _serve_status(hermes=False)
+    hermes = _serve_status(hermes=True)
+
+    acceptance.assert_tailnet_serve_status(
+        json.dumps(default), hermes=False, tailnet_suffix="acceptance.example.test"
+    )
+    acceptance.assert_tailnet_serve_status(
+        json.dumps(hermes), hermes=True, tailnet_suffix="acceptance.example.test"
+    )
+
+    invalid: list[dict[str, object]] = []
+    extra_service = _serve_status(hermes=True)
+    extra_service["Services"]["svc:unexpected"] = {  # type: ignore[index]
+        "TCP": {"443": {"HTTPS": True}},
+        "Web": {"unexpected.acceptance.example.test:443": {"Handlers": {"/": {"Proxy": "http://unexpected:9999"}}}},
+    }
+    invalid.append(extra_service)
+    missing_service = _serve_status(hermes=True)
+    del missing_service["Services"]["svc:hermes-dashboard"]  # type: ignore[index]
+    invalid.append(missing_service)
+    wrong_target = _serve_status(hermes=True)
+    wrong_target["Services"]["svc:hermes-api"]["Web"][  # type: ignore[index]
+        "hermes-api.acceptance.example.test:443"
+    ]["Handlers"]["/"]["Proxy"] = "http://caddy:8080"  # type: ignore[index]
+    invalid.append(wrong_target)
+    wrong_port = _serve_status(hermes=True)
+    wrong_port["Services"]["svc:vonk-forge"]["TCP"] = {"8443": {"HTTPS": True}}  # type: ignore[index]
+    invalid.append(wrong_port)
+    wrong_protocol = _serve_status(hermes=True)
+    wrong_protocol["Services"]["svc:vonk-forge"]["TCP"]["443"] = {"HTTP": True}  # type: ignore[index]
+    invalid.append(wrong_protocol)
+    node_listener = _serve_status(hermes=True)
+    node_listener["TCP"] = {"443": {"HTTPS": True}}
+    invalid.append(node_listener)
+
+    for document in invalid:
+        with pytest.raises(AcceptanceError, match="Serve status"):
+            acceptance.assert_tailnet_serve_status(
+                json.dumps(document),
+                hermes=True,
+                tailnet_suffix="acceptance.example.test",
+            )
+    with pytest.raises(AcceptanceError, match="Serve status"):
+        acceptance.assert_tailnet_serve_status(
+            '{"Services":{},"Services":{}}',
+            hermes=False,
+            tailnet_suffix="acceptance.example.test",
+        )
 
 
 def test_routed_service_checks_require_authentication_and_expected_data(

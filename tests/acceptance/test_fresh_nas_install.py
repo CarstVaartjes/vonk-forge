@@ -645,6 +645,132 @@ def verify_routed_service_behavior(
         raise AcceptanceError("registry route returned an unexpected API response")
 
 
+def _json_object_without_duplicate_keys(
+    pairs: list[tuple[str, object]],
+) -> dict[str, object]:
+    document: dict[str, object] = {}
+    for key, value in pairs:
+        if not isinstance(key, str) or key in document:
+            raise ValueError("JSON object has duplicate or invalid keys")
+        document[key] = value
+    return document
+
+
+def _same_json_shape(actual: object, expected: object) -> bool:
+    if type(actual) is not type(expected):
+        return False
+    if isinstance(expected, dict):
+        return (
+            isinstance(actual, dict)
+            and actual.keys() == expected.keys()
+            and all(_same_json_shape(actual[key], value) for key, value in expected.items())
+        )
+    if isinstance(expected, list):
+        return (
+            isinstance(actual, list)
+            and len(actual) == len(expected)
+            and all(_same_json_shape(left, right) for left, right in zip(actual, expected))
+        )
+    return actual == expected
+
+
+def _expected_tailnet_serve_status(
+    *, hermes: bool, tailnet_suffix: str
+) -> dict[str, object]:
+    services: dict[str, object] = {
+        "svc:vonk-forge": {
+            "TCP": {"443": {"HTTPS": True}},
+            "Web": {
+                f"vonk-forge.{tailnet_suffix}:443": {
+                    "Handlers": {"/": {"Proxy": "http://caddy:8080"}}
+                }
+            },
+        }
+    }
+    if hermes:
+        services.update(
+            {
+                "svc:hermes-api": {
+                    "TCP": {"443": {"HTTPS": True}},
+                    "Web": {
+                        f"hermes-api.{tailnet_suffix}:443": {
+                            "Handlers": {
+                                "/": {"Proxy": "http://hermes-agent:8642"}
+                            }
+                        }
+                    },
+                },
+                "svc:hermes-dashboard": {
+                    "TCP": {"443": {"HTTPS": True}},
+                    "Web": {
+                        f"hermes-dashboard.{tailnet_suffix}:443": {
+                            "Handlers": {
+                                "/": {"Proxy": "http://hermes-agent:9119"}
+                            }
+                        }
+                    },
+                },
+            }
+        )
+    return {"Services": services}
+
+
+def _expected_tailnet_serve_configuration(*, hermes: bool) -> dict[str, object]:
+    services: dict[str, object] = {
+        "svc:vonk-forge": {"endpoints": {"tcp:443": "http://caddy:8080"}}
+    }
+    if hermes:
+        services.update(
+            {
+                "svc:hermes-api": {
+                    "endpoints": {"tcp:443": "http://hermes-agent:8642"}
+                },
+                "svc:hermes-dashboard": {
+                    "endpoints": {"tcp:443": "http://hermes-agent:9119"}
+                },
+            }
+        )
+    return {"version": "0.0.1", "services": services}
+
+
+def _parse_tailnet_serve_json(raw: str, *, label: str) -> object:
+    try:
+        return json.loads(
+            raw,
+            object_pairs_hook=_json_object_without_duplicate_keys,
+            parse_constant=lambda _value: (_ for _ in ()).throw(ValueError()),
+        )
+    except (TypeError, ValueError, json.JSONDecodeError) as error:
+        raise AcceptanceError(f"Tailscale Serve {label} is invalid JSON") from error
+
+
+def assert_tailnet_serve_status(
+    raw: str, *, hermes: bool, tailnet_suffix: str
+) -> None:
+    if SAFE_DNS_SUFFIX.fullmatch(tailnet_suffix) is None:
+        raise AcceptanceError("Tailscale Serve status suffix is invalid")
+    document = _parse_tailnet_serve_json(raw, label="status")
+    expected = _expected_tailnet_serve_status(
+        hermes=hermes, tailnet_suffix=tailnet_suffix
+    )
+    if not _same_json_shape(document, expected):
+        raise AcceptanceError("Tailscale Serve status does not match selected topology")
+
+
+def assert_tailnet_serve_configuration(
+    status: str, configuration: str, *, hermes: bool, tailnet_suffix: str
+) -> None:
+    assert_tailnet_serve_status(
+        status, hermes=hermes, tailnet_suffix=tailnet_suffix
+    )
+    document = _parse_tailnet_serve_json(configuration, label="configuration")
+    expected = _expected_tailnet_serve_configuration(hermes=hermes)
+    if not _same_json_shape(document, expected):
+        raise AcceptanceError(
+            "Tailscale Serve configuration does not match selected topology"
+        )
+
+
 def verify_tailscale_services(
     bundle: Path, *, hermes: bool, tailnet_suffix: str
 ) -> None:
@@ -678,13 +804,26 @@ def verify_tailscale_services(
         ],
         cwd=bundle,
     ).stdout
-    expected = ["svc:vonk-forge"]
-    if hermes:
-        expected.extend(("svc:hermes-api", "svc:hermes-dashboard"))
-    if any(service not in serve for service in expected):
-        raise AcceptanceError("Tailscale HTTPS service publication is incomplete")
-    if not hermes and "svc:hermes-" in serve:
-        raise AcceptanceError("Hermes was advertised while disabled")
+    configuration = run(
+        [
+            *reference_compose(),
+            "exec",
+            "-T",
+            "tailscale-gateway",
+            "tailscale",
+            "--socket=/var/run/tailscale/tailscaled.sock",
+            "serve",
+            "get-config",
+            "--all",
+        ],
+        cwd=bundle,
+    ).stdout
+    assert_tailnet_serve_configuration(
+        serve,
+        configuration,
+        hermes=hermes,
+        tailnet_suffix=tailnet_suffix,
+    )
 
     urls = [f"https://vonk-forge.{tailnet_suffix}/healthz"]
     if hermes:
