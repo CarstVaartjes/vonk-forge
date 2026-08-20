@@ -1,4 +1,4 @@
-"""Durable, administrator-approved enrollment for immutable GPU node agent identities."""
+"""Durable token-authorized enrollment for immutable GPU node identities."""
 
 from __future__ import annotations
 
@@ -90,7 +90,6 @@ class _IssuanceClaim:
     node_id: str
     csr_pem: bytes
     purpose: str
-    actor: str
 
 
 @dataclass(frozen=True)
@@ -196,7 +195,7 @@ class EnrollmentService:
                     failure = "enrollment grant is consumed"
                 elif not _replay_matches(enrollment, csr, evidence):
                     failure = "enrollment replay does not match original request"
-                elif enrollment.state == "approved":
+                elif enrollment.state == "certificate_issued":
                     outcome = _issued(enrollment)
                 elif enrollment.state == "issuing":
                     wait_for_enrollment_id = enrollment.id
@@ -236,8 +235,6 @@ class EnrollmentService:
                         agent_digest=values["agent_digest"],
                         boot_id=values["boot_id"],
                         created_at=now,
-                        decision_actor=grant.created_by,
-                        decided_at=now,
                     )
                     _lock_node_issuance(session, node_id)
                     if session.get(AgentNode, node_id) is not None:
@@ -262,7 +259,6 @@ class EnrollmentService:
                             node_id,
                             csr_pem,
                             grant.purpose,
-                            grant.created_by,
                         )
                 else:
                     grant.consumed_at = now
@@ -300,8 +296,6 @@ class EnrollmentService:
                         session,
                         enrollment,
                         issued,
-                        claim.actor,
-                        now,
                         purpose=claim.purpose,
                     )
                     if enrollment.certificate_generation is None:
@@ -327,7 +321,7 @@ class EnrollmentService:
                 enrollment = session.get(AgentEnrollment, enrollment_id)
                 if enrollment is None:
                     raise EnrollmentDenied("enrollment state is invalid")
-                if enrollment.state == "approved":
+                if enrollment.state == "certificate_issued":
                     return _issued(enrollment)
                 if enrollment.state != "issuing":
                     raise EnrollmentDenied("enrollment state is invalid")
@@ -882,8 +876,6 @@ def _persist_issued_enrollment(
     session: Session,
     enrollment: AgentEnrollment,
     issued: IssuedCertificate,
-    actor: str,
-    now: datetime,
     *,
     purpose: str,
 ) -> None:
@@ -920,9 +912,7 @@ def _persist_issued_enrollment(
             chain_pem=chain_pem,
         )
     )
-    enrollment.state = "approved"
-    enrollment.decision_actor = actor
-    enrollment.decided_at = now
+    enrollment.state = "certificate_issued"
     enrollment.certificate_pem = certificate_pem
     enrollment.chain_pem = chain_pem
     enrollment.certificate_serial = issued.serial
@@ -965,7 +955,7 @@ def _issued(enrollment: AgentEnrollment) -> IssuedCertificate:
             enrollment.certificate_generation,
         )
     ):
-        raise RuntimeError("approved enrollment is missing certificate metadata")
+        raise RuntimeError("issued enrollment is missing certificate metadata")
     return IssuedCertificate(
         node_id=enrollment.node_id,
         certificate_pem=enrollment.certificate_pem.encode("ascii"),  # type: ignore[union-attr]

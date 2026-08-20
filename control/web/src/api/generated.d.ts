@@ -1307,10 +1307,6 @@ export interface components {
             created_at: string;
             /** Csr Public Key Fingerprint */
             csr_public_key_fingerprint: string;
-            /** Decided At */
-            decided_at?: string | null;
-            /** Decision Actor */
-            decision_actor?: string | null;
             /** Hardware Fingerprint */
             hardware_fingerprint: string;
             /** Host Key Fingerprint */

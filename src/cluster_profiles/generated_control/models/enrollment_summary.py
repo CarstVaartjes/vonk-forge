@@ -34,8 +34,6 @@ class EnrollmentSummary:
             state (str):
             certificate_fingerprint (Union[None, Unset, str]):
             certificate_serial (Union[None, Unset, str]):
-            decided_at (Union[None, Unset, str]):
-            decision_actor (Union[None, Unset, str]):
      """
 
     agent_digest: str
@@ -49,8 +47,6 @@ class EnrollmentSummary:
     state: str
     certificate_fingerprint: Union[None, Unset, str] = UNSET
     certificate_serial: Union[None, Unset, str] = UNSET
-    decided_at: Union[None, Unset, str] = UNSET
-    decision_actor: Union[None, Unset, str] = UNSET
 
 
 
@@ -87,18 +83,6 @@ class EnrollmentSummary:
         else:
             certificate_serial = self.certificate_serial
 
-        decided_at: Union[None, Unset, str]
-        if isinstance(self.decided_at, Unset):
-            decided_at = UNSET
-        else:
-            decided_at = self.decided_at
-
-        decision_actor: Union[None, Unset, str]
-        if isinstance(self.decision_actor, Unset):
-            decision_actor = UNSET
-        else:
-            decision_actor = self.decision_actor
-
 
         field_dict: dict[str, Any] = {}
 
@@ -117,10 +101,6 @@ class EnrollmentSummary:
             field_dict["certificate_fingerprint"] = certificate_fingerprint
         if certificate_serial is not UNSET:
             field_dict["certificate_serial"] = certificate_serial
-        if decided_at is not UNSET:
-            field_dict["decided_at"] = decided_at
-        if decision_actor is not UNSET:
-            field_dict["decision_actor"] = decision_actor
 
         return field_dict
 
@@ -167,26 +147,6 @@ class EnrollmentSummary:
         certificate_serial = _parse_certificate_serial(d.pop("certificate_serial", UNSET))
 
 
-        def _parse_decided_at(data: object) -> Union[None, Unset, str]:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            return cast(Union[None, Unset, str], data)
-
-        decided_at = _parse_decided_at(d.pop("decided_at", UNSET))
-
-
-        def _parse_decision_actor(data: object) -> Union[None, Unset, str]:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            return cast(Union[None, Unset, str], data)
-
-        decision_actor = _parse_decision_actor(d.pop("decision_actor", UNSET))
-
-
         enrollment_summary = cls(
             agent_digest=agent_digest,
             boot_id=boot_id,
@@ -199,8 +159,6 @@ class EnrollmentSummary:
             state=state,
             certificate_fingerprint=certificate_fingerprint,
             certificate_serial=certificate_serial,
-            decided_at=decided_at,
-            decision_actor=decision_actor,
         )
 
         return enrollment_summary

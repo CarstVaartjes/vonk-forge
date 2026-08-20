@@ -737,6 +737,12 @@ class AgentEnrollmentGrant(Base):
 
 class AgentEnrollment(Base):
     __tablename__ = "agent_enrollments"
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('issuing', 'certificate_issued')",
+            name="ck_agent_enrollments_state",
+        ),
+    )
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )
@@ -757,8 +763,6 @@ class AgentEnrollment(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True
     )
-    decision_actor: Mapped[str | None] = mapped_column(String(200))
-    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     certificate_pem: Mapped[str | None] = mapped_column(Text)
     chain_pem: Mapped[str | None] = mapped_column(Text)
     certificate_serial: Mapped[str | None] = mapped_column(String(128), unique=True)

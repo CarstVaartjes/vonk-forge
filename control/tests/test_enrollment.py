@@ -294,8 +294,9 @@ def test_grant_is_single_use_and_immediately_issues_authorized_certificate(
         )
         assert stored_grant.purpose == "new-node"
         assert not hasattr(stored_grant, "token")
-        assert stored is not None and stored.state == "approved"
-        assert stored.decision_actor == "admin"
+        assert stored is not None and stored.state == "certificate_issued"
+        assert not hasattr(stored, "decision_actor")
+        assert not hasattr(stored, "decided_at")
         assert stored.csr_public_key_fingerprint == public_key_fingerprint(request)
         assert certificate is not None and certificate.node_id == NODE_ID
         assert node is not None and node.state == "active"
@@ -926,7 +927,7 @@ def test_postgres_enrollment_persists_node_before_certificate(
         stored = session.scalar(select(AgentEnrollment))
         assert (
             stored is not None
-            and stored.state == "approved"
+            and stored.state == "certificate_issued"
             and stored.certificate_serial == issued.serial
         )
 
@@ -1005,7 +1006,7 @@ def test_postgres_same_node_enrollment_race_issues_exactly_once(
             session.scalar(
                 select(func.count())
                 .select_from(AgentEnrollment)
-                .where(AgentEnrollment.state == "approved")
+                .where(AgentEnrollment.state == "certificate_issued")
             )
             == 1
         )

@@ -750,30 +750,6 @@
             "title": "Csr Public Key Fingerprint",
             "type": "string"
           },
-          "decided_at": {
-            "anyOf": [
-              {
-                "maxLength": 64,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Decided At"
-          },
-          "decision_actor": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Decision Actor"
-          },
           "hardware_fingerprint": {
             "maxLength": 512,
             "minLength": 1,

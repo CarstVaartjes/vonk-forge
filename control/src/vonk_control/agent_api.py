@@ -211,9 +211,7 @@ _ENROLLMENT_API_STATES = frozenset({"issuing", "certificate_issued"})
 
 
 def _enrollment_api_state(enrollment: AgentEnrollment) -> str:
-    if enrollment.state == "approved":
-        return "certificate_issued"
-    return "issuing"
+    return enrollment.state
 
 
 class EnrollmentGrantResponse(BaseModel):
@@ -246,8 +244,6 @@ class EnrollmentSummary(BaseModel):
     agent_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     boot_id: str = Field(min_length=1, max_length=512)
     created_at: str = Field(min_length=1, max_length=64)
-    decision_actor: str | None = Field(default=None, max_length=200)
-    decided_at: str | None = Field(default=None, max_length=64)
     certificate_serial: str | None = Field(default=None, max_length=256)
     certificate_fingerprint: str | None = Field(default=None, max_length=512)
 
@@ -739,10 +735,6 @@ def _enrollment_view(enrollment: AgentEnrollment) -> dict[str, object]:
         "agent_digest": enrollment.agent_digest,
         "boot_id": enrollment.boot_id,
         "created_at": _now(enrollment.created_at).isoformat(),
-        "decision_actor": enrollment.decision_actor,
-        "decided_at": _now(enrollment.decided_at).isoformat()
-        if enrollment.decided_at
-        else None,
         "certificate_serial": enrollment.certificate_serial,
         "certificate_fingerprint": enrollment.certificate_fingerprint,
     }
@@ -1159,11 +1151,7 @@ def install_agent_routes(
             if state is not None:
                 if state not in _ENROLLMENT_API_STATES:
                     raise HTTPException(status_code=422, detail="state is invalid")
-                persistence_state = {
-                    "issuing": "issuing",
-                    "certificate_issued": "approved",
-                }[state]
-                statement = statement.where(AgentEnrollment.state == persistence_state)
+                statement = statement.where(AgentEnrollment.state == state)
             if cursor is not None:
                 cursor_record = session.get(AgentEnrollment, cursor)
                 if cursor_record is None:

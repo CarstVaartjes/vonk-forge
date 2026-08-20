@@ -3404,7 +3404,7 @@ def test_enrollment_listing_paginates_stably_and_can_filter_issuing(
                     id=str(uuid.uuid4()),
                     grant_id=grant_id,
                     node_id=NODE_A,
-                    state="issuing" if index == 0 else "approved",
+                    state="issuing" if index == 0 else "certificate_issued",
                     csr_pem="csr",
                     csr_public_key_pem="pem",
                     csr_public_key_fingerprint="a" * 64,
@@ -3420,6 +3420,23 @@ def test_enrollment_listing_paginates_stably_and_can_filter_issuing(
     ).json()
     assert len(first["enrollments"]) == 100
     assert first["next_cursor"]
+    assert all(
+        set(item)
+        == {
+            "id",
+            "node_id",
+            "state",
+            "csr_public_key_fingerprint",
+            "host_key_fingerprint",
+            "hardware_fingerprint",
+            "agent_digest",
+            "boot_id",
+            "created_at",
+            "certificate_serial",
+            "certificate_fingerprint",
+        }
+        for item in first["enrollments"]
+    )
     second = client.get(
         f"/api/v1/agents/enrollments?limit=100&cursor={first['next_cursor']}",
         headers=admin_headers(codec),
