@@ -8,7 +8,6 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts/agent-package-metadata"
 SHA = "0123456789abcdef0123456789abcdef01234567"
 
 
@@ -23,8 +22,6 @@ def run_metadata(*arguments: str, root: Path = ROOT) -> subprocess.CompletedProc
 
 
 def metadata_workspace(tmp_path: Path) -> Path:
-    if not SCRIPT.is_file():
-        pytest.skip("agent-package-metadata has not been implemented")
     workspace = tmp_path / "workspace"
     for relative in (
         "Cargo.toml",
