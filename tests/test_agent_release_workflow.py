@@ -105,6 +105,11 @@ def package_step_run(step_name: str) -> str:
     return workflow_step_run(PACKAGE_WORKFLOW.read_text(), step_name)
 
 
+def write_executable(path: Path, body: str) -> None:
+    path.write_text(f"#!/bin/sh\nset -eu\n{body}\n")
+    path.chmod(0o755)
+
+
 def apt_workflow() -> str:
     return APT_WORKFLOW.read_text()
 
@@ -289,6 +294,50 @@ def test_reusable_agent_package_build_validates_authority_before_key_use() -> No
     assert "openssl pkey" in text
     assert "-pubout -outform DER" in text
     assert "sha256sum" in text
+
+
+def test_cross_compiler_install_includes_target_glibc_headers(
+    tmp_path: Path,
+) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    sudo_log = tmp_path / "sudo.log"
+    write_executable(fake_bin / "uname", 'printf "%s\\n" aarch64')
+    write_executable(
+        fake_bin / "sudo",
+        'printf "%s\\n" "$*" >> "$SUDO_LOG"',
+    )
+    write_executable(fake_bin / "rustup", ":")
+
+    result = subprocess.run(
+        [
+            "/bin/bash",
+            "-c",
+            package_step_run("Install pinned Rust toolchain"),
+        ],
+        cwd=ROOT,
+        env={
+            **os.environ,
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+            "SUDO_LOG": str(sudo_log),
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    install = next(
+        line
+        for line in sudo_log.read_text().splitlines()
+        if line.startswith("apt-get install ")
+    )
+    installed = set(install.split()[4:])
+    assert installed == {
+        "binutils-x86-64-linux-gnu",
+        "gcc-x86-64-linux-gnu",
+        "libc6-dev-amd64-cross",
+    }
 
 
 def test_reusable_agent_package_build_validates_publication_authority() -> None:

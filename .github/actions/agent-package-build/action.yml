@@ -169,7 +169,8 @@ runs:
         test "$(uname -m)" = aarch64
         sudo apt-get update
         sudo apt-get install --no-install-recommends -y \
-          binutils-x86-64-linux-gnu gcc-x86-64-linux-gnu
+          binutils-x86-64-linux-gnu gcc-x86-64-linux-gnu \
+          libc6-dev-amd64-cross
         rustup set profile minimal
         rustup toolchain install 1.97.1 --component clippy,rustfmt
         rustup default 1.97.1
