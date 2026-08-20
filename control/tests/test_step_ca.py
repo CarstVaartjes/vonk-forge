@@ -580,13 +580,19 @@ def test_pinned_step_ca_issues_tracked_leaf_profile_and_serves_fresh_crl(tmp_pat
             socket, "getaddrinfo",
             lambda host, *args, **kwargs: real_getaddrinfo("127.0.0.1" if host == "step-ca" else host, *args, **kwargs),
         )
-        provider = StepCertificateAuthority(
-            ca_url=f"https://step-ca:{port}", root_certificate_path=root,
-            intermediate_certificate_path=intermediate,
-            provisioner_name="vonk-forge-agent", provisioner_kid=kid,
-            credential_path=private_jwk, provisioner_public_jwk_path=public_jwk,
-            timeout_seconds=2.0,
-        )
+        def authority(mapped_port: str) -> StepCertificateAuthority:
+            return StepCertificateAuthority(
+                ca_url=f"https://step-ca:{mapped_port}",
+                root_certificate_path=root,
+                intermediate_certificate_path=intermediate,
+                provisioner_name="vonk-forge-agent",
+                provisioner_kid=kid,
+                credential_path=private_jwk,
+                provisioner_public_jwk_path=public_jwk,
+                timeout_seconds=2.0,
+            )
+
+        provider = authority(port)
         deadline = time.monotonic() + 15
         while True:
             try:
@@ -628,6 +634,18 @@ def test_pinned_step_ca_issues_tracked_leaf_profile_and_serves_fresh_crl(tmp_pat
             text=True,
             timeout=60,
         )
+        restarted_port_output = subprocess.run(
+            ["docker", "port", container, "9000/tcp"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        ).stdout.strip()
+        restarted_port = restarted_port_output.rsplit(":", 1)[1]
+        # Docker may reassign an anonymous host port on restart. Production
+        # reaches step-ca through its stable Compose service address, so renew
+        # the test client against the container's current test-only mapping.
+        provider = authority(restarted_port)
         deadline = time.monotonic() + 45
         while True:
             try:
