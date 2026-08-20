@@ -16,6 +16,12 @@ the published Rust agent and guides secure pairing. Neither flow requires a Git
 checkout. Development and production run the same topology and behavior; only
 their immutable release identities differ.
 
+The development channel exposes the identical no-argument workflows at
+`https://install.vonkforge.ai/dev/nas` and
+`https://install.vonkforge.ai/dev/spark`. Those URLs select development
+artifact identities; they do not introduce flags, follow-up commands, or a
+different deployment model.
+
 Each curl invocation completes its entire side of the setup. It may prompt for
 required choices and secrets through `/dev/tty`, but it must not finish by
 asking the operator to download another installer, change permissions, or run a

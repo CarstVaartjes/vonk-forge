@@ -82,7 +82,7 @@ services:
       VONK_AGENT_CA_TIMEOUT_SECONDS: ${AGENT_CA_TIMEOUT_SECONDS:-3}
       VONK_AGENT_CA_MAX_RESPONSE_BYTES: ${AGENT_CA_MAX_RESPONSE_BYTES:-65536}
       VONK_AGENT_PROXY_AUTH_FILE: /run/vonk-normalized-secrets/agent-proxy-auth
-    secrets: [package-helper-grant-private-key, package-helper-receipt-private-key, host-runtime-grant-private-key, database-url, token-signing-key, metrics-token, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, worker-api-token, litellm-master-key, litellm-upstream-key, litellm-database-url, grafana-admin-password, agent-ca-credential, agent-ca-provisioner-public-jwk, step-ca-root-certificate, step-ca-intermediate-key, step-ca-password, step-ca-config]
+    secrets: [admin-password, package-helper-grant-private-key, package-helper-receipt-private-key, host-runtime-grant-private-key, database-url, token-signing-key, metrics-token, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, worker-api-token, litellm-master-key, litellm-upstream-key, litellm-database-url, grafana-admin-password, agent-ca-credential, agent-ca-provisioner-public-jwk, step-ca-root-certificate, step-ca-intermediate-key, step-ca-password, step-ca-config]
     volumes:
       - control-state:/state
       - workload-tuf-publication:/workload-tuf
@@ -300,6 +300,8 @@ services:
       retries: 10
 
 secrets:
+  admin-password:
+    file: "${ADMIN_PASSWORD_FILE:?set Vonk administrator password secret file}"
   database-url:
     file: "${DATABASE_URL_FILE:?set database URL secret file}"
   postgres-password:

@@ -24,17 +24,13 @@ class SharedRuntimePaths:
     workload_publication: Path = Path("/workload-tuf")
 
 
-def stage_private_key(
-    source: Path,
-    destination: Path,
-    *,
-    owner_uid: int = 0,
-    owner_gid: int = 0,
-    mode: int = 0o444,
-) -> Path:
-    """Copy a file-backed runtime secret into a Docker-managed volume atomically."""
+def read_runtime_secret(
+    source: Path, *, maximum_bytes: int = _MAX_PRIVATE_KEY_BYTES
+) -> bytes:
+    """Read one bounded regular Compose secret without following a symlink."""
+    if not 0 < maximum_bytes <= _MAX_PRIVATE_KEY_BYTES:
+        raise RuntimeSecretError("runtime secret size bound is invalid")
     source = Path(source)
-    destination = Path(destination)
     try:
         descriptor = os.open(
             source,
@@ -47,14 +43,14 @@ def stage_private_key(
         if (
             not stat.S_ISREG(before.st_mode)
             or before.st_nlink != 1
-            or not 0 < before.st_size <= _MAX_PRIVATE_KEY_BYTES
+            or not 0 < before.st_size <= maximum_bytes
         ):
             raise RuntimeSecretError("runtime secret source is unsafe")
         content = bytearray()
-        while len(content) <= _MAX_PRIVATE_KEY_BYTES:
+        while len(content) <= maximum_bytes:
             chunk = os.read(
                 descriptor,
-                min(4096, _MAX_PRIVATE_KEY_BYTES + 1 - len(content)),
+                min(4096, maximum_bytes + 1 - len(content)),
             )
             if not chunk:
                 break
@@ -66,6 +62,20 @@ def stage_private_key(
         raise RuntimeSecretError("runtime secret cannot be read") from error
     finally:
         os.close(descriptor)
+    return bytes(content)
+
+
+def stage_private_key(
+    source: Path,
+    destination: Path,
+    *,
+    owner_uid: int = 0,
+    owner_gid: int = 0,
+    mode: int = 0o444,
+) -> Path:
+    """Copy a file-backed runtime secret into a Docker-managed volume atomically."""
+    content = read_runtime_secret(source)
+    destination = Path(destination)
 
     parent = destination.parent
     parent.mkdir(mode=0o750, parents=True, exist_ok=True)

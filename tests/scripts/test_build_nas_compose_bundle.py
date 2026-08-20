@@ -93,6 +93,7 @@ def test_payload_is_complete_self_contained_and_fresh_install_only(
         "VONK_REGISTRY_HOSTNAME",
     }
     assert {item["file"] for item in payload["secrets"]} == {
+        "admin-password",
         "tailscale-oauth-client-id",
         "tailscale-oauth-client-secret",
         "litellm-upstream-key",

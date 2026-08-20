@@ -33,6 +33,7 @@ SERVICES = {
     "registry",
 }
 SECRET_FILES = {
+    "admin-password": "admin-password",
     "tailscale-oauth-client-id": "tailscale-oauth-client-id",
     "tailscale-oauth-client-secret": "tailscale-oauth-client-secret",
     "hermes-api-key": "hermes-api-key",
@@ -189,6 +190,11 @@ def _payload(document: dict[str, Any]) -> dict[str, object]:
             _required_value("VONK_REGISTRY_HOSTNAME", "Registry hostname"),
         ],
         "secrets": [
+            {
+                "file": "admin-password",
+                "prompt": "Vonk Forge administrator password",
+                "generate_bytes": None,
+            },
             {
                 "file": "tailscale-oauth-client-id",
                 "prompt": "Tailscale OAuth client ID",

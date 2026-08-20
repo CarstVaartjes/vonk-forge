@@ -17,6 +17,7 @@ def _rendered() -> dict:
         "PROMETHEUS_IMAGE": "prom/prometheus:1@sha256:" + "e" * 64,
         "GRAFANA_IMAGE": "grafana/grafana:1@sha256:" + "f" * 64,
         "DATABASE_URL_FILE": "/dev/null",
+        "ADMIN_PASSWORD_FILE": "/dev/null",
         "POSTGRES_PASSWORD_FILE": "/dev/null",
         "TOKEN_SIGNING_KEY_FILE": "/dev/null",
         "METRICS_TOKEN_FILE": "/dev/null",
@@ -177,6 +178,9 @@ def test_non_root_runtime_services_use_normalized_secret_volume() -> None:
         assert services[service].get("secrets", []) == []
     assert "normalized-private-keys" in {
         item["source"] for item in services["control-api"]["volumes"]
+    }
+    assert "admin-password" in {
+        item["source"] for item in services["control-api"]["secrets"]
     }
     assert services["litellm"]["environment"]["LITELLM_MASTER_KEY_FILE"] == (
         "/run/vonk-normalized-secrets/litellm-master-key"

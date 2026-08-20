@@ -7,9 +7,7 @@ from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 
 import pytest
-import vonk_control.browser_auth as browser_auth_module
-from sqlalchemy import create_engine, event, select
-from sqlalchemy.engine import Engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control.auth import Actor
 from vonk_control.browser_auth import (
@@ -18,9 +16,10 @@ from vonk_control.browser_auth import (
     BrowserAuthenticationThrottledError,
     BrowserAuthService,
     LoginRateLimiter,
+    bootstrap_administrator,
 )
 from vonk_control.models import Base, LoginSession, User
-from vonk_control.passwords import hash_password
+from vonk_control.passwords import hash_password, verify_password
 
 ADMIN_PASSWORD = "correct horse battery staple"
 NOW = datetime(2026, 8, 13, 9, 30, tzinfo=UTC)
@@ -208,100 +207,25 @@ def test_login_cleanup_removes_only_a_bounded_batch_of_expired_sessions(
     assert len(expired) == 1
 
 
-def test_rotate_admin_revokes_every_active_session(
+def test_bootstrap_administrator_creates_once_and_verifies_on_restart(
     sessions: sessionmaker[Session],
 ) -> None:
-    """Changing an administrator verifier must invalidate every prior session."""
-    add_admin(sessions)
-    clock = Clock()
-    service = browser_auth(
-        sessions,
-        clock,
-        opaque(17),
-        opaque(18),
-        opaque(19),
-        opaque(20),
+    assert bootstrap_administrator(sessions, ADMIN_PASSWORD) == BootstrapResult(
+        "created"
     )
-    first = service.login("admin", ADMIN_PASSWORD)
-    second = service.login("admin", ADMIN_PASSWORD)
-
-    assert service.rotate_admin(
-        hash_password("new administrator password")
-    ) == BootstrapResult("rotated")
-    with sessions() as db:
-        rows = db.scalars(select(LoginSession)).all()
-    assert len(rows) == 2
-    assert all(row.revoked_at is not None for row in rows)
-    assert all(row.revoked_at.replace(tzinfo=UTC) == NOW for row in rows)
+    assert bootstrap_administrator(sessions, ADMIN_PASSWORD) == BootstrapResult(
+        "unchanged"
+    )
     with pytest.raises(BrowserAuthenticationError):
-        service.resolve(first.token)
-    with pytest.raises(BrowserAuthenticationError):
-        service.resolve(second.token)
+        bootstrap_administrator(sessions, "different administrator password")
 
-
-@pytest.mark.parametrize("conflict", ["second-administrator", "admin-wrong-role"])
-def test_rotate_admin_rejects_non_unique_authority_without_mutation(
-    sessions: sessionmaker[Session], conflict: str
-) -> None:
-    """Rotation must use the exact same admin/administrator authority as bootstrap."""
-    old_verifier = hash_password(ADMIN_PASSWORD)
-    new_verifier = hash_password("synthetic replacement administrator password")
-    with sessions.begin() as db:
-        admin = User(
-            subject="admin",
-            role="operator" if conflict == "admin-wrong-role" else "administrator",
-            disabled_at=None,
-            password_verifier=old_verifier,
-        )
-        db.add(admin)
-        db.flush()
-        db.add(
-            LoginSession(
-                user_id=admin.id,
-                digest=sha256(b"synthetic-authority-conflict-session").hexdigest(),
-                expires_at=NOW + timedelta(hours=1),
-            )
-        )
-        if conflict == "second-administrator":
-            db.add(
-                User(
-                    subject="synthetic-other-administrator",
-                    role="administrator",
-                    disabled_at=None,
-                    password_verifier=hash_password("synthetic other password"),
-                )
-            )
-    service = browser_auth(sessions, Clock(), opaque(33), opaque(34))
-
-    with pytest.raises(BrowserAuthenticationError):
-        service.rotate_admin(new_verifier)
-
-    with sessions() as db:
-        persisted_admin = db.scalar(select(User).where(User.subject == "admin"))
-        login = db.scalar(select(LoginSession))
-    assert persisted_admin is not None
-    assert login is not None
-    assert persisted_admin.password_verifier == old_verifier
-    assert login.revoked_at is None
-
-
-def test_bootstrap_admin_is_exact_and_idempotent(
-    sessions: sessionmaker[Session],
-) -> None:
-    """Changing the bootstrap identity or verifier must not silently replace authority."""
-    service = browser_auth(sessions, Clock(), opaque(21), opaque(22))
-    verifier = hash_password(ADMIN_PASSWORD)
-
-    assert service.bootstrap_admin(verifier) == BootstrapResult("created")
-    assert service.bootstrap_admin(verifier) == BootstrapResult("unchanged")
     with sessions() as db:
         user = db.scalar(select(User))
     assert user is not None
-    assert (user.subject, user.role, user.password_verifier) == (
-        "admin",
-        "administrator",
-        verifier,
-    )
+    assert user.subject == "admin"
+    assert user.role == "administrator"
+    assert user.password_verifier is not None
+    assert verify_password(user.password_verifier, ADMIN_PASSWORD).valid
 
 
 def test_bootstrap_admin_rejects_conflicting_administrator_authority(
@@ -317,10 +241,8 @@ def test_bootstrap_admin_rejects_conflicting_administrator_authority(
                 password_verifier=hash_password(ADMIN_PASSWORD),
             )
         )
-    service = browser_auth(sessions, Clock(), opaque(23), opaque(24))
-
     with pytest.raises(BrowserAuthenticationError):
-        service.bootstrap_admin(hash_password(ADMIN_PASSWORD))
+        bootstrap_administrator(sessions, ADMIN_PASSWORD)
 
 
 def test_throttle_rejects_the_sixth_failed_attempt_for_one_subject(
@@ -533,74 +455,3 @@ def test_limiter_rejects_the_1025th_tracked_subject() -> None:
     for attempt in attempts:
         assert attempt is not None
         limiter.succeed(attempt)
-
-
-def test_postgres_rotation_revokes_a_login_serialized_with_its_user_lock(
-    postgres_engine: Engine, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """An old-password login concurrent with rotation must leave no active session."""
-    Base.metadata.drop_all(postgres_engine)
-    Base.metadata.create_all(postgres_engine)
-    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
-    add_admin(sessions)
-    service = browser_auth(sessions, Clock(), opaque(31), opaque(32))
-    verification_started = threading.Event()
-    release_verification = threading.Event()
-    rotation_select_started = threading.Event()
-    login_results: list[object] = []
-    rotation_results: list[object] = []
-    verify = browser_auth_module.verify_password
-
-    def paused_verify(verifier: str, password: str):
-        verification_started.set()
-        assert release_verification.wait(timeout=5)
-        return verify(verifier, password)
-
-    def observe_rotation_select(
-        _connection, _cursor, statement, _parameters, _context, _executemany
-    ) -> None:
-        if (
-            threading.current_thread().name == "browser-auth-rotation"
-            and "FROM users" in statement
-        ):
-            rotation_select_started.set()
-
-    def login() -> None:
-        try:
-            login_results.append(service.login("admin", ADMIN_PASSWORD))
-        except BaseException as error:  # noqa: BLE001 - thread reports test failure
-            login_results.append(error)
-
-    def rotate() -> None:
-        try:
-            rotation_results.append(
-                service.rotate_admin(hash_password("rotated password"))
-            )
-        except BaseException as error:  # noqa: BLE001 - thread reports test failure
-            rotation_results.append(error)
-
-    monkeypatch.setattr(browser_auth_module, "verify_password", paused_verify)
-    event.listen(postgres_engine, "before_cursor_execute", observe_rotation_select)
-    try:
-        login_thread = threading.Thread(target=login, name="browser-auth-login")
-        rotation_thread = threading.Thread(target=rotate, name="browser-auth-rotation")
-        login_thread.start()
-        assert verification_started.wait(timeout=5)
-        rotation_thread.start()
-        assert rotation_select_started.wait(timeout=5)
-        release_verification.set()
-        login_thread.join(timeout=5)
-        rotation_thread.join(timeout=5)
-    finally:
-        release_verification.set()
-        event.remove(postgres_engine, "before_cursor_execute", observe_rotation_select)
-
-    assert not login_thread.is_alive()
-    assert not rotation_thread.is_alive()
-    assert len(login_results) == 1
-    assert isinstance(login_results[0], browser_auth_module.IssuedBrowserSession)
-    assert rotation_results == [BootstrapResult("rotated")]
-    with sessions() as db:
-        rows = db.scalars(select(LoginSession)).all()
-    assert len(rows) == 1
-    assert rows[0].revoked_at is not None

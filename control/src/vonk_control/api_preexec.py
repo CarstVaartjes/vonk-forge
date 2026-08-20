@@ -7,9 +7,11 @@ import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from .db import initialize_database
+from .browser_auth import bootstrap_administrator
+from .db import build_engine, initialize_database, session_factory
 from .runtime_init import (
     prepare_shared_volumes,
+    read_runtime_secret,
     stage_compose_secrets,
 )
 
@@ -29,6 +31,22 @@ def prepare_owned_state() -> None:
         encoding="utf-8"
     ).strip()
     initialize_database(database_url)
+    initialize_administrator(database_url, _SOURCE_SECRETS / "admin-password")
+
+
+def initialize_administrator(database_url: str, password_path: Path) -> None:
+    raw = read_runtime_secret(password_path, maximum_bytes=257)
+    if not raw.endswith(b"\n") or raw[:-1].find(b"\n") >= 0 or b"\0" in raw:
+        raise RuntimeError("administrator password secret is invalid")
+    try:
+        password = raw[:-1].decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise RuntimeError("administrator password secret is invalid") from error
+    engine = build_engine(database_url)
+    try:
+        bootstrap_administrator(session_factory(engine), password)
+    finally:
+        engine.dispose()
 
 
 def _probe_source_secrets(path: Path) -> None:

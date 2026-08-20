@@ -20,6 +20,10 @@ installers. All legacy and alternate runtime paths are deleted.
 - Each side has exactly one stable, no-argument entry point:
   `curl -fsSL https://install.vonkforge.ai/nas | sh` and
   `curl -fsSL https://install.vonkforge.ai/spark | sh`.
+- Development exercises the identical no-argument entry points at
+  `curl -fsSL https://install.vonkforge.ai/dev/nas | sh` and
+  `curl -fsSL https://install.vonkforge.ai/dev/spark | sh`; only resolved
+  immutable artifact identities differ.
 - Each curl command resolves and verifies every artifact it needs, performs the
   complete workflow, and exits with either a usable result or a specific error;
   it never prints a required follow-up setup command.
@@ -214,6 +218,8 @@ installers. All legacy and alternate runtime paths are deleted.
 - [ ] Fail closed on unsupported systems, stale manifests, digest mismatches, or
       missing signatures.
 - [ ] Publish at `https://install.vonkforge.ai/nas`.
+- [ ] Publish the identical development flow at
+      `https://install.vonkforge.ai/dev/nas`.
 
 ### Task 11: Publish the Spark curl endpoint
 
@@ -232,6 +238,8 @@ installers. All legacy and alternate runtime paths are deleted.
       local/controller verification in this one invocation; print no required
       follow-up command.
 - [ ] Publish at `https://install.vonkforge.ai/spark`.
+- [ ] Publish the identical development flow at
+      `https://install.vonkforge.ai/dev/spark`.
 
 ### Task 12: Make release publication atomic and required
 
