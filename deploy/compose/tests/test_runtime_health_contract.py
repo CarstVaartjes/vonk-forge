@@ -137,14 +137,11 @@ def test_tailscale_browser_forwarding_crosses_only_an_internal_edge() -> None:
     assert "tailnet-control-plane" not in services["caddy"]["networks"]
 
 
-def test_hermes_dependency_is_optional_but_healthy_when_profile_is_selected() -> None:
-    """Catches advertising Hermes before its real profiled process is ready."""
-    configurator = _rendered(hermes=True)["services"]["tailscale-configurator"]
-    assert configurator["depends_on"]["hermes-agent"] == {
-        "condition": "service_healthy",
-        "required": False,
-        "restart": True,
-    }
+def test_default_and_hermes_graphs_do_not_couple_configurator_startup_to_profile() -> None:
+    """Catches disabled-profile dependency warnings in the default graph."""
+    for hermes in (False, True):
+        configurator = _rendered(hermes=hermes)["services"]["tailscale-configurator"]
+        assert set(configurator["depends_on"]) == {"caddy", "tailscale-gateway"}
 
 
 def _acceptance_failure_or_skip(message: str) -> None:

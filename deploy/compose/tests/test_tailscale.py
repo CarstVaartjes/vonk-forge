@@ -4,6 +4,7 @@ import json
 import os
 import socket
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -40,6 +41,101 @@ HERMES_MAP = {
         },
     },
 }
+
+
+def _write_stateful_tailscale(tmp_path: Path) -> tuple[Path, Path]:
+    state = tmp_path / "service-map.json"
+    calls = tmp_path / "tailscale-calls.log"
+    fake = tmp_path / "tailscale"
+    fake.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, os, pathlib, sys, time\n"
+        "state = pathlib.Path(os.environ['TS_TEST_STATE'])\n"
+        "calls = pathlib.Path(os.environ['TS_TEST_CALLS'])\n"
+        "args = [arg for arg in sys.argv[1:] if not arg.startswith('--socket=')]\n"
+        "with calls.open('a', encoding='utf-8') as stream:\n"
+        "    stream.write(' '.join(args) + '\\n')\n"
+        "def load():\n"
+        "    if not state.exists():\n"
+        "        return {'version': '0.0.1', 'services': {}}\n"
+        "    return json.loads(state.read_text(encoding='utf-8'))\n"
+        "def save(value):\n"
+        "    temporary = state.with_name(state.name + '.' + str(os.getpid()))\n"
+        "    temporary.write_text(json.dumps(value, sort_keys=True, separators=(',', ':')), encoding='utf-8')\n"
+        "    temporary.replace(state)\n"
+        "if args == ['status', '--json']:\n"
+        '    print(\'{"Self":{"CapMap":{"services/vonk-forge":[]}}}\')\n'
+        "elif args == ['serve', 'get-config', '--all']:\n"
+        "    time.sleep(float(os.environ.get('TS_TEST_READ_DELAY', '0')))\n"
+        "    print(json.dumps(load(), sort_keys=True, separators=(',', ':')))\n"
+        "elif args == ['serve', 'status', '--json']:\n"
+        "    time.sleep(float(os.environ.get('TS_TEST_READ_DELAY', '0')))\n"
+        "    services = {name: {'TCP': {'443': {'HTTPS': True}}} for name in load()['services']}\n"
+        "    print(json.dumps({'Services': services}, sort_keys=True, separators=(',', ':')))\n"
+        "elif args == ['serve', 'reset']:\n"
+        "    save({'version': '0.0.1', 'services': {}})\n"
+        "elif args and args[0] == 'serve' and any(arg.startswith('--service=') for arg in args):\n"
+        "    service = next(arg.split('=', 1)[1] for arg in args if arg.startswith('--service='))\n"
+        "    upstream = args[-1]\n"
+        "    value = load()\n"
+        "    value['services'][service] = {'endpoints': {'tcp:443': upstream}}\n"
+        "    save(value)\n",
+        encoding="utf-8",
+    )
+    fake.chmod(0o755)
+    return state, calls
+
+
+def _write_hermes_http_nc(tmp_path: Path) -> Path:
+    requests = tmp_path / "hermes-http-requests.log"
+    fake = tmp_path / "nc"
+    fake.write_text(
+        "#!/usr/bin/env python3\n"
+        "import os, pathlib, sys\n"
+        "request = sys.stdin.read()\n"
+        "with pathlib.Path(os.environ['HERMES_TEST_REQUESTS']).open('a', encoding='utf-8') as stream:\n"
+        "    stream.write(request.replace('\\r', '<CR>') + '\\n---\\n')\n"
+        "ready = pathlib.Path(os.environ['HERMES_TEST_READY']).exists()\n"
+        "expected = 'Authorization: Bearer ' + os.environ['HERMES_TEST_KEY'] + '\\r\\n'\n"
+        "if request.startswith('GET /health HTTP/1.1\\r\\n'):\n"
+        "    status = 200 if ready and expected in request else (401 if expected not in request else 503)\n"
+        "elif request.startswith('GET / HTTP/1.1\\r\\n'):\n"
+        "    status = 200 if ready else 503\n"
+        "else:\n"
+        "    sys.exit(0)\n"
+        "reason = 'OK' if status == 200 else 'Unavailable'\n"
+        "sys.stdout.write(f'HTTP/1.1 {status} {reason}\\r\\nContent-Length: 0\\r\\n\\r\\n')\n",
+        encoding="utf-8",
+    )
+    fake.chmod(0o755)
+    return requests
+
+
+def _write_logging_mktemp(tmp_path: Path) -> Path:
+    allocations = tmp_path / "mktemp-allocations.log"
+    fake = tmp_path / "mktemp"
+    fake.write_text(
+        "#!/bin/sh\n"
+        'result=$(/usr/bin/mktemp "$@") || exit $?\n'
+        'printf \'%s\\n\' "$result" >>"$TS_TEST_MKTEMP_ALLOCATIONS"\n'
+        "printf '%s\\n' \"$result\"\n",
+        encoding="utf-8",
+    )
+    fake.chmod(0o755)
+    return allocations
+
+
+def _wait_for_service_map(state: Path, expected: dict[str, object]) -> None:
+    deadline = time.monotonic() + 8
+    while time.monotonic() < deadline:
+        try:
+            if json.loads(state.read_text(encoding="utf-8")) == expected:
+                return
+        except (FileNotFoundError, json.JSONDecodeError):
+            pass
+        time.sleep(0.05)
+    actual = state.read_text(encoding="utf-8") if state.exists() else "<missing>"
+    pytest.fail(f"service map did not converge: {actual}")
 
 
 def test_default_gateway_reconciles_only_the_vonk_service(tmp_path: Path) -> None:
@@ -167,7 +263,7 @@ def test_gateway_is_persistent_userspace_and_unpublished() -> None:
     }
 
 
-def test_configurator_waits_for_every_exact_backend_health_gate() -> None:
+def test_configurator_discovers_optional_hermes_without_a_profile_dependency() -> None:
     configurator = _rendered()["services"]["tailscale-configurator"]
 
     assert configurator["image"] == TAILSCALE_IMAGE
@@ -180,14 +276,12 @@ def test_configurator_waits_for_every_exact_backend_health_gate() -> None:
     volumes = _volume_targets(configurator)
     assert volumes["/var/run/tailscale"]["type"] == "volume"
     assert volumes["/usr/local/bin/configure-tailscale"]["read_only"] is True
+    assert {secret["target"] for secret in configurator["secrets"]} == {
+        "/run/secrets/hermes-api-key"
+    }
     assert configurator["restart"] == "unless-stopped"
     assert configurator["depends_on"] == {
         "caddy": {"condition": "service_healthy", "required": True, "restart": True},
-        "hermes-agent": {
-            "condition": "service_healthy",
-            "required": False,
-            "restart": True,
-        },
         "tailscale-gateway": {
             "condition": "service_healthy",
             "required": True,
@@ -301,9 +395,11 @@ def test_configurator_advertises_hermes_when_both_profile_endpoints_are_availabl
     calls = tmp_path / "calls.log"
     repaired = tmp_path / "repaired"
     fake = tmp_path / "tailscale"
-    nc = tmp_path / "nc"
-    nc.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    nc.chmod(0o755)
+    requests = _write_hermes_http_nc(tmp_path)
+    ready = tmp_path / "hermes-ready"
+    ready.touch()
+    key = tmp_path / "hermes-api-key"
+    key.write_text("test-hermes-key\n", encoding="utf-8")
     expected_map = json.dumps(HERMES_MAP, sort_keys=True, separators=(",", ":"))
     healthy_status = json.dumps(
         {
@@ -342,6 +438,10 @@ def test_configurator_advertises_hermes_when_both_profile_endpoints_are_availabl
                 "PATH": f"{tmp_path}:{os.environ['PATH']}",
                 "TS_CONFIGURE_ONCE": "1",
                 "TS_SOCKET_PATH": str(socket_path),
+                "HERMES_API_KEY_PATH": str(key),
+                "HERMES_TEST_KEY": "test-hermes-key",
+                "HERMES_TEST_READY": str(ready),
+                "HERMES_TEST_REQUESTS": str(requests),
             },
             capture_output=True,
             text=True,
@@ -355,6 +455,87 @@ def test_configurator_advertises_hermes_when_both_profile_endpoints_are_availabl
     invocation_log = calls.read_text(encoding="utf-8")
     for service in HERMES_MAP["services"]:
         assert f"serve advertise {service}" in invocation_log
+    request_log = requests.read_text(encoding="utf-8")
+    assert "GET /health HTTP/1.1<CR>" in request_log
+    assert "Authorization: Bearer test-hermes-key<CR>" in request_log
+    assert "GET / HTTP/1.1<CR>" in request_log
+
+
+def test_reconciler_tracks_authenticated_hermes_readiness_and_is_concurrency_safe(
+    tmp_path: Path,
+) -> None:
+    """Catches TCP-only readiness, stale advertisements, and shared scratch files."""
+    socket_path = tmp_path / "tailscaled.sock"
+    daemon_socket = socket.socket(socket.AF_UNIX)
+    daemon_socket.bind(str(socket_path))
+    state, calls = _write_stateful_tailscale(tmp_path)
+    requests = _write_hermes_http_nc(tmp_path)
+    allocations = _write_logging_mktemp(tmp_path)
+    ready = tmp_path / "hermes-ready"
+    key = tmp_path / "hermes-api-key"
+    key.write_text("transition-key\n", encoding="utf-8")
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    environment = os.environ | {
+        "PATH": f"{tmp_path}:{os.environ['PATH']}",
+        "TMPDIR": str(scratch),
+        "TS_SOCKET_PATH": str(socket_path),
+        "TS_RECONCILE_INTERVAL_SECONDS": "1",
+        "TS_TEST_STATE": str(state),
+        "TS_TEST_CALLS": str(calls),
+        "TS_TEST_READ_DELAY": "0.05",
+        "TS_TEST_MKTEMP_ALLOCATIONS": str(allocations),
+        "HERMES_API_KEY_PATH": str(key),
+        "HERMES_TEST_KEY": "transition-key",
+        "HERMES_TEST_READY": str(ready),
+        "HERMES_TEST_REQUESTS": str(requests),
+    }
+    reconciler = subprocess.Popen(
+        ["/bin/sh", COMPOSE / "tailscale/configure.sh"],
+        env=environment,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        _wait_for_service_map(state, DEFAULT_MAP)
+        ready.touch()
+        _wait_for_service_map(state, HERMES_MAP)
+        ready.unlink()
+        _wait_for_service_map(state, DEFAULT_MAP)
+        ready.touch()
+        _wait_for_service_map(state, HERMES_MAP)
+
+        healthchecks = [
+            subprocess.Popen(
+                ["/bin/sh", COMPOSE / "tailscale/configure.sh"],
+                env=environment | {"TS_HEALTHCHECK_ONLY": "1"},
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            for _ in range(4)
+        ]
+        results = [healthcheck.communicate(timeout=8) for healthcheck in healthchecks]
+        assert [healthcheck.returncode for healthcheck in healthchecks] == [
+            0,
+            0,
+            0,
+            0,
+        ], results
+    finally:
+        reconciler.terminate()
+        try:
+            stdout, stderr = reconciler.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            reconciler.kill()
+            stdout, stderr = reconciler.communicate(timeout=5)
+        daemon_socket.close()
+    assert reconciler.returncode in {-15, 0}, (stdout, stderr)
+    allocated = allocations.read_text(encoding="utf-8").splitlines()
+    assert len(allocated) >= 5
+    assert len(allocated) == len(set(allocated))
+    assert not list(scratch.iterdir())
 
 
 def test_grants_example_is_exact_service_least_privilege() -> None:

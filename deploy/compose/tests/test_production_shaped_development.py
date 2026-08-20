@@ -98,13 +98,9 @@ def test_hermes_is_opt_in_in_the_shared_production_graph() -> None:
     tailscale = yaml.safe_load(
         (ROOT / "deploy/compose/tailscale/compose.yaml").read_text(encoding="utf-8")
     )
-    assert tailscale["services"]["tailscale-configurator"]["depends_on"][
-        "hermes-agent"
-    ] == {
-        "condition": "service_healthy",
-        "required": False,
-        "restart": True,
-    }
+    configurator = tailscale["services"]["tailscale-configurator"]
+    assert "hermes-agent" not in configurator["depends_on"]
+    assert configurator["secrets"] == ["hermes-api-key"]
     hermes_text = HERMES_COMPOSE.read_text(encoding="utf-8")
     assert "HERMES_DASHBOARD_ORIGIN:?" not in hermes_text
     assert "HERMES_DATA_ROOT:?" not in hermes_text

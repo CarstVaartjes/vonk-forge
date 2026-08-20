@@ -66,6 +66,8 @@ services:
     volumes:
       - tailscale-socket:/var/run/tailscale
       - ./configure.sh:/usr/local/bin/configure-tailscale:ro
+    secrets:
+      - hermes-api-key
     tmpfs:
       - /tmp:size=16m,mode=1777
     depends_on:
@@ -74,10 +76,6 @@ services:
         restart: true
       caddy:
         condition: service_healthy
-        restart: true
-      hermes-agent:
-        condition: service_healthy
-        required: false
         restart: true
     healthcheck:
       test: [CMD-SHELL, "TS_HEALTHCHECK_ONLY=1 /bin/sh /usr/local/bin/configure-tailscale"]
