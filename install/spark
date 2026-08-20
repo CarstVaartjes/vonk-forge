@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+umask 077
 
 kind=spark
 base_url=${VONK_INSTALL_BASE_URL:-https://install.vonkforge.ai/artifacts}
@@ -23,10 +24,12 @@ case "$platform-$architecture" in
     linux-amd64)
         expected='@SPARK_LINUX_AMD64_SHA256@'
         package_expected='@SPARK_LINUX_AMD64_PACKAGE_SHA256@'
+        package_version='@SPARK_LINUX_AMD64_PACKAGE_VERSION@'
         ;;
     linux-arm64)
         expected='@SPARK_LINUX_ARM64_SHA256@'
         package_expected='@SPARK_LINUX_ARM64_PACKAGE_SHA256@'
+        package_version='@SPARK_LINUX_ARM64_PACKAGE_VERSION@'
         ;;
     *) fail "this platform is not supported" ;;
 esac
@@ -34,6 +37,18 @@ esac
 case "$expected" in *[!0-9a-f]*) fail "this installer endpoint is not published correctly" ;; esac
 [ "${#package_expected}" -eq 64 ] || fail "this installer endpoint is not published correctly"
 case "$package_expected" in *[!0-9a-f]*) fail "this installer endpoint is not published correctly" ;; esac
+case "$package_version" in
+    ''|*[!A-Za-z0-9.+~:-]*) fail "this installer endpoint is not published correctly" ;;
+esac
+
+[ -r /etc/os-release ] || fail "Spark installation requires Debian or Ubuntu"
+# shellcheck disable=SC1091
+. /etc/os-release
+case "${ID:-}" in debian|ubuntu) ;; *) fail "Spark installation requires Debian or Ubuntu" ;; esac
+[ -d /run/systemd/system ] || fail "Spark installation requires systemd"
+for required in curl dpkg-deb apt-get sudo systemctl; do
+    command -v "$required" >/dev/null 2>&1 || fail "$required is required"
+done
 
 temporary=$(mktemp -d "${TMPDIR:-/tmp}/vonk-${kind}.XXXXXX") || fail "cannot create a temporary directory"
 cleanup() {
@@ -43,7 +58,7 @@ trap cleanup EXIT HUP INT TERM
 
 artifact="$temporary/vonk-${kind}-setup"
 url="$base_url/$kind/current/$platform-$architecture/vonk-${kind}-setup"
-package="$temporary/vonk-forge-agent_0.0.0_${architecture}.deb"
+package="$temporary/vonk-forge-agent_${package_version}_${architecture}.deb"
 package_url="$base_url/$kind/current/$platform-$architecture/vonk-forge-agent.deb"
 
 curl -fsSL --proto '=https' --tlsv1.2 "$url" -o "$artifact" || fail "cannot download the setup program"
@@ -66,4 +81,9 @@ package_actual=$(sha256 "$package")
 [ "$package_actual" = "$package_expected" ] || fail "the agent package failed checksum verification"
 
 chmod 0700 "$artifact"
-"$artifact" --package "$package" --package-sha256 "$package_expected"
+"$artifact" \
+    --package "$package" \
+    --package-sha256 "$package_expected" \
+    --package-version "$package_version" \
+    --package-architecture "$architecture" \
+    --setup-sha256 "$expected"

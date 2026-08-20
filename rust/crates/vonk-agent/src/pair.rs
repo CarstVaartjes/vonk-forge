@@ -23,6 +23,7 @@ use crate::{
 };
 
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
+const MACHINE_EVIDENCE_PATH: &str = "/var/lib/vonk-forge-agent/machine-evidence";
 
 #[derive(Debug, Error)]
 pub enum PairingError {
@@ -265,14 +266,35 @@ pub fn verify_ca_pin(ca_pem: &[u8], expected: &str) -> Result<(), PairingError> 
 }
 
 pub fn collect_evidence(agent_path: &Path) -> Result<EnrollmentEvidence, PairingError> {
-    let machine = bounded_file(Path::new("/etc/machine-id"))?;
-    let host_key = bounded_file(Path::new("/etc/ssh/ssh_host_ed25519_key.pub"))?;
+    collect_evidence_from(
+        agent_path,
+        Path::new("/etc/machine-id"),
+        Path::new("/proc/sys/kernel/random/boot_id"),
+        Path::new(MACHINE_EVIDENCE_PATH),
+    )
+}
+
+fn collect_evidence_from(
+    agent_path: &Path,
+    machine_path: &Path,
+    boot_path: &Path,
+    native_evidence_path: &Path,
+) -> Result<EnrollmentEvidence, PairingError> {
+    let machine = bounded_file(machine_path)?;
+    let native_evidence = bounded_file(native_evidence_path)?;
+    if native_evidence.len() != 64
+        || !native_evidence
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(PairingError::Response);
+    }
     Ok(EnrollmentEvidence {
         agent_digest: hex::encode(Sha256::digest(fs::read(agent_path)?)),
-        boot_id: bounded_file(Path::new("/proc/sys/kernel/random/boot_id"))?,
+        boot_id: bounded_file(boot_path)?,
         csr_public_key_fingerprint: String::new(),
         hardware_fingerprint: hex::encode(Sha256::digest(machine.as_bytes())),
-        host_key_fingerprint: hex::encode(Sha256::digest(host_key.as_bytes())),
+        host_key_fingerprint: hex::encode(Sha256::digest(native_evidence.as_bytes())),
         node_id: String::new(),
     })
 }
@@ -335,4 +357,40 @@ pub fn validate_issued(
         return Err(PairingError::Certificate);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn enrollment_evidence_uses_native_machine_evidence_without_ssh() {
+        let directory = tempfile::tempdir().unwrap();
+        let agent = directory.path().join("vonk-agent");
+        let machine = directory.path().join("machine-id");
+        let boot = directory.path().join("boot-id");
+        let native = directory.path().join("machine-evidence");
+        fs::write(&agent, b"agent bytes").unwrap();
+        fs::write(&machine, b"machine-id\n").unwrap();
+        fs::write(&boot, b"boot-id\n").unwrap();
+        fs::write(
+            &native,
+            b"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n",
+        )
+        .unwrap();
+
+        let evidence = collect_evidence_from(&agent, &machine, &boot, &native).unwrap();
+
+        assert_eq!(evidence.boot_id, "boot-id");
+        assert_eq!(
+            evidence.hardware_fingerprint,
+            hex::encode(Sha256::digest(b"machine-id"))
+        );
+        assert_eq!(
+            evidence.host_key_fingerprint,
+            hex::encode(Sha256::digest(
+                b"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+            ))
+        );
+    }
 }

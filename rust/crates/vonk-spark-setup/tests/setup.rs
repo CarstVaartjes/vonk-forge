@@ -1,9 +1,10 @@
-use std::{collections::VecDeque, fs, path::PathBuf};
+use std::{collections::VecDeque, fs, path::PathBuf, process::Command as ProcessCommand};
 
 use sha2::{Digest, Sha256};
 use tempfile::tempdir;
 use vonk_spark_setup::{
-    Command, CommandOutput, CommandRunner, InstallPaths, Prompt, SetupRequest, run_setup,
+    Command, CommandOutput, CommandRunner, InstallPaths, Prompt, SetupRequest, handoff_to_root,
+    run_setup,
 };
 
 const TOKEN: &str = "A123456789012345678901234567890123456789012";
@@ -21,6 +22,27 @@ impl RecordingRunner {
                 CommandOutput::success(ca.to_vec()),
                 CommandOutput::success_empty(),
                 CommandOutput::success_empty(),
+                CommandOutput::success_empty(),
+                CommandOutput::success_empty(),
+                CommandOutput::success_empty(),
+                CommandOutput::success_empty(),
+                CommandOutput::success(b"4242\n".to_vec()),
+                CommandOutput::success_empty(),
+                CommandOutput::success_empty(),
+                CommandOutput::success(b"4242\n".to_vec()),
+                CommandOutput::success_empty(),
+                CommandOutput::success_empty(),
+                CommandOutput::success(b"4242\n".to_vec()),
+                CommandOutput::success_empty(),
+            ]
+            .into(),
+        }
+    }
+
+    fn for_upgrade() -> Self {
+        Self {
+            commands: Vec::new(),
+            outputs: [
                 CommandOutput::success_empty(),
                 CommandOutput::success_empty(),
                 CommandOutput::success_empty(),
@@ -93,26 +115,42 @@ fn ca() -> Vec<u8> {
 }
 
 fn package(path: &std::path::Path) {
-    let body = b"2.0\n";
-    let header = format!(
-        "{:<16}{:<12}{:<6}{:<6}{:<8}{:<10}`\n",
-        "debian-binary/",
-        0,
-        0,
-        0,
-        0o100644,
-        body.len()
-    );
+    package_with_identity(path, "vonk-forge-agent", "1.0.0", "amd64");
+}
+
+fn package_with_identity(path: &std::path::Path, package: &str, version: &str, architecture: &str) {
+    let root = path
+        .parent()
+        .unwrap()
+        .join(format!("package-{package}-{architecture}"));
+    fs::create_dir_all(root.join("DEBIAN")).unwrap();
     fs::write(
-        path,
-        [b"!<arch>\n".as_slice(), header.as_bytes(), body].concat(),
+        root.join("DEBIAN/control"),
+        format!(
+            "Package: {package}\nVersion: {version}\nArchitecture: {architecture}\nMaintainer: test <test@example.test>\nDescription: test package\n"
+        ),
     )
     .unwrap();
+    let status = ProcessCommand::new("/usr/bin/dpkg-deb")
+        .args(["--build", "--root-owner-group"])
+        .arg(&root)
+        .arg(path)
+        .status()
+        .unwrap();
+    assert!(status.success());
 }
 
 fn request(package: PathBuf) -> SetupRequest {
     let digest = hex::encode(Sha256::digest(fs::read(&package).unwrap()));
-    SetupRequest::new(package, digest, PathBuf::from("/opt/vonk-spark-setup")).unwrap()
+    SetupRequest::new(
+        package,
+        digest,
+        "1.0.0".to_owned(),
+        "amd64".to_owned(),
+        "b".repeat(64),
+        PathBuf::from("/opt/vonk-spark-setup"),
+    )
+    .unwrap()
 }
 
 fn paths(root: &std::path::Path) -> InstallPaths {
@@ -140,6 +178,7 @@ fn fresh_setup_stages_verified_package_before_sudo_and_pipes_pairing_token() {
     let package_path = temporary.path().join("vonk-forge-agent_1.0.0_amd64.deb");
     package(&package_path);
     let ca = ca();
+    fs::create_dir_all(paths(temporary.path()).config.parent().unwrap()).unwrap();
     let mut runner = RecordingRunner::with_ca(&ca);
     let mut prompt = Answers::fresh(&ca);
 
@@ -152,38 +191,37 @@ fn fresh_setup_stages_verified_package_before_sudo_and_pipes_pairing_token() {
 
     assert!(result.is_ok(), "{result:?}");
     assert!(runner.commands[0].program.ends_with("curl"));
-    let sudo = runner
+    let privileged = runner
         .commands
         .iter()
-        .filter(|command| command.program.ends_with("sudo"))
+        .filter(|command| command.program != std::path::Path::new("/usr/bin/curl"))
         .collect::<Vec<_>>();
     assert!(
-        sudo[0]
+        privileged[0]
             .args
             .iter()
-            .any(|argument| argument == "/usr/bin/apt-get")
+            .any(|argument| argument == "update")
     );
-    assert!(sudo[0].args.iter().any(|argument| argument == "update"));
     assert!(
-        sudo[1]
+        privileged[1]
             .args
             .iter()
             .any(|argument| argument.ends_with("vonk-forge-agent_1.0.0_amd64.deb"))
     );
     assert!(
-        sudo.iter().all(|command| !command
+        privileged
+            .iter()
+            .all(|command| command.program != std::path::Path::new("/usr/bin/sudo")),
+        "the privileged phase must consume root-owned artifacts without nested sudo"
+    );
+    assert!(
+        privileged.iter().all(|command| !command
             .args
             .iter()
             .any(|argument| argument.ends_with("vonk-agent-upgrade"))),
         "a fresh install cannot invoke a helper that is not installed yet"
     );
-    assert!(sudo.iter().any(|command| {
-        command
-            .args
-            .iter()
-            .any(|argument| argument == "--privileged-write")
-    }));
-    let pair = sudo
+    let pair = privileged
         .iter()
         .find(|command| command.args.iter().any(|argument| argument == "pair"))
         .unwrap();
@@ -203,9 +241,16 @@ fn changed_or_non_debian_package_fails_before_any_command_can_escalate() {
     let package_path = temporary.path().join("vonk-forge-agent_1.0.0_amd64.deb");
     fs::write(&package_path, b"not a debian archive").unwrap();
     let digest = hex::encode(Sha256::digest(fs::read(&package_path).unwrap()));
-    let request =
-        SetupRequest::new(package_path, digest, PathBuf::from("/opt/vonk-spark-setup")).unwrap();
-    let mut runner = RecordingRunner::default();
+    let request = SetupRequest::new(
+        package_path,
+        digest,
+        "1.0.0".to_owned(),
+        "amd64".to_owned(),
+        "b".repeat(64),
+        PathBuf::from("/opt/vonk-spark-setup"),
+    )
+    .unwrap();
+    let mut runner = RecordingRunner::for_upgrade();
     let mut prompt = Answers::fresh(&ca());
 
     let result = run_setup(&request, &paths(temporary.path()), &mut prompt, &mut runner);
@@ -214,6 +259,43 @@ fn changed_or_non_debian_package_fails_before_any_command_can_escalate() {
     assert!(
         runner.commands.is_empty(),
         "invalid package must stop before curl or sudo"
+    );
+}
+
+#[test]
+fn root_handoff_reverifies_root_owned_copies_before_privileged_setup() {
+    let temporary = tempdir().unwrap();
+    let package_path = temporary.path().join("vonk-forge-agent_1.0.0_amd64.deb");
+    package(&package_path);
+    let executable = temporary.path().join("vonk-spark-setup");
+    fs::write(&executable, b"verified setup executable").unwrap();
+    let executable_digest = hex::encode(Sha256::digest(b"verified setup executable"));
+    let package_digest = hex::encode(Sha256::digest(fs::read(&package_path).unwrap()));
+    let request = SetupRequest::new(
+        package_path,
+        package_digest,
+        "1.0.0".to_owned(),
+        "amd64".to_owned(),
+        executable_digest.clone(),
+        executable,
+    )
+    .unwrap();
+    let mut runner = RecordingRunner::default();
+
+    handoff_to_root(&request, &mut runner).unwrap();
+
+    assert_eq!(runner.commands.len(), 1);
+    let command = &runner.commands[0];
+    assert_eq!(command.program, std::path::Path::new("/usr/bin/sudo"));
+    assert_eq!(&command.args[..2], ["/bin/sh", "-ceu"]);
+    assert!(command.args[2].contains("/usr/bin/install -o root -g root -m 0700"));
+    assert!(command.args[2].contains("/usr/bin/sha256sum --check --status"));
+    assert!(command.args[2].contains("--privileged"));
+    assert!(
+        command
+            .args
+            .iter()
+            .any(|argument| argument == &executable_digest)
     );
 }
 
@@ -257,7 +339,7 @@ fn a_verified_archive_with_an_untrusted_package_name_never_reaches_sudo() {
 }
 
 #[test]
-fn existing_install_preserves_identity_and_uses_direct_package_upgrade_only() {
+fn existing_install_preserves_identity_and_resolves_dependencies_with_apt() {
     let temporary = tempdir().unwrap();
     let package_path = temporary.path().join("vonk-forge-agent_1.0.0_amd64.deb");
     package(&package_path);
@@ -266,7 +348,7 @@ fn existing_install_preserves_identity_and_uses_direct_package_upgrade_only() {
     fs::create_dir_all(install_paths.agent.parent().unwrap()).unwrap();
     fs::write(&install_paths.config, paired_config(&install_paths)).unwrap();
     fs::write(&install_paths.agent, "existing agent").unwrap();
-    let mut runner = RecordingRunner::default();
+    let mut runner = RecordingRunner::for_upgrade();
     let mut prompt = Answers::fresh(&ca());
 
     let result = run_setup(
@@ -277,37 +359,72 @@ fn existing_install_preserves_identity_and_uses_direct_package_upgrade_only() {
     );
 
     assert!(result.is_ok(), "{result:?}");
-    assert_eq!(runner.commands.len(), 1);
-    assert!(runner.commands[0].program.ends_with("sudo"));
+    assert!(runner.commands.iter().any(|command| {
+        command.program == std::path::Path::new("/usr/bin/apt-get")
+            && command
+                .args
+                .iter()
+                .any(|argument| argument.ends_with("vonk-forge-agent_1.0.0_amd64.deb"))
+    }));
+    let install = runner
+        .commands
+        .iter()
+        .find(|command| {
+            command.program == std::path::Path::new("/usr/bin/apt-get")
+                && command.args.iter().any(|argument| argument == "install")
+        })
+        .unwrap();
+    assert_eq!(
+        install.env.get("DEBIAN_FRONTEND").map(String::as_str),
+        Some("noninteractive")
+    );
     assert!(
-        runner.commands[0]
+        install
+            .args
+            .iter()
+            .any(|argument| argument == "Dpkg::Options::=--force-confold")
+    );
+    assert!(runner.commands.iter().all(|command| {
+        !command
             .args
             .iter()
             .any(|argument| argument.ends_with("vonk-agent-upgrade"))
+    }));
+}
+
+#[test]
+fn actual_debian_metadata_must_match_the_selected_release_and_host() {
+    let temporary = tempdir().unwrap();
+    let package_path = temporary.path().join("vonk-forge-agent_1.0.0_amd64.deb");
+    package_with_identity(&package_path, "vonk-forge-agent", "1.0.0", "arm64");
+    let mut runner = RecordingRunner::default();
+    let mut prompt = Answers::fresh(&ca());
+
+    let result = run_setup(
+        &request(package_path),
+        &paths(temporary.path()),
+        &mut prompt,
+        &mut runner,
     );
+
+    assert!(format!("{result:?}").contains("PackageIdentity"));
     assert!(
-        runner.commands[0]
-            .args
-            .iter()
-            .all(|argument| argument != "pair" && argument != "--privileged-write")
+        runner.commands.is_empty(),
+        "metadata mismatch must fail before prompts or commands"
     );
 }
 
 #[test]
-fn packaged_placeholder_configuration_retries_the_fresh_pairing_flow() {
+fn installed_package_without_generated_configuration_retries_fresh_pairing() {
     let temporary = tempdir().unwrap();
     let package_path = temporary.path().join("vonk-forge-agent_1.0.0_amd64.deb");
     package(&package_path);
     let install_paths = paths(temporary.path());
-    fs::create_dir_all(install_paths.config.parent().unwrap()).unwrap();
     fs::create_dir_all(install_paths.agent.parent().unwrap()).unwrap();
-    fs::write(
-        &install_paths.config,
-        "enrollment_url = \"https://enroll.vonkforge.invalid/\"\ncontroller_url = \"https://controller.vonkforge.invalid/\"\nca_path = \"/etc/vonk-forge-agent/controller-ca.pem\"\nca_sha256 = \"0000000000000000000000000000000000000000000000000000000000000000\"\ndata_dir = \"/var/lib/vonk-forge-agent\"\nnode_id = \"spk_00000000000000000000000000000000\"\npoll_min_seconds = 2\npoll_max_seconds = 60\n",
-    )
-    .unwrap();
+    fs::create_dir_all(install_paths.config.parent().unwrap()).unwrap();
     fs::write(&install_paths.agent, "unpaired agent").unwrap();
     let ca = ca();
+    fs::create_dir_all(install_paths.config.parent().unwrap()).unwrap();
     let mut runner = RecordingRunner::with_ca(&ca);
     let mut prompt = Answers::fresh(&ca);
 

@@ -30,6 +30,10 @@ def _run_bootstrap(
     artifact.write_text(
         "#!/bin/sh\n"
         "printf '%s\\n' \"$0|$*\" > \"$VONK_TEST_RECEIPT\"\n"
+        "printf 'mode=%s\\n' \"$(stat -c %a \"$0\" 2>/dev/null || stat -f %Lp \"$0\")\" >> \"$VONK_TEST_RECEIPT\"\n"
+        "previous=\nfor argument in \"$@\"; do\n"
+        "  if [ \"$previous\" = --package ]; then printf 'package-mode=%s\\n' \"$(stat -c %a \"$argument\" 2>/dev/null || stat -f %Lp \"$argument\")\" >> \"$VONK_TEST_RECEIPT\"; fi\n"
+        "  previous=$argument\ndone\n"
         "if [ \"${1:-}\" = --template ]; then printf 'payload=%s\\n' \"$(cat \"$2\")\" >> \"$VONK_TEST_RECEIPT\"; fi\n"
     )
     digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
@@ -55,6 +59,8 @@ def _run_bootstrap(
         "@SPARK_LINUX_ARM64_PACKAGE_SHA256@",
     ):
         source = source.replace(placeholder, package_digest)
+    source = source.replace("@SPARK_LINUX_AMD64_PACKAGE_VERSION@", "1.0.0")
+    source = source.replace("@SPARK_LINUX_ARM64_PACKAGE_VERSION@", "1.0.0")
     source = source.replace("@NAS_PAYLOAD_SHA256@", payload_digest)
     rendered.write_text(source)
     _fake_command(
@@ -96,6 +102,7 @@ def _run_bootstrap(
         text=True,
         capture_output=True,
         check=False,
+        preexec_fn=lambda: os.umask(0o002),
     )
     return result, receipt, forbidden
 
@@ -124,13 +131,25 @@ def test_curl_bootstrap_verifies_and_runs_the_native_installer(
     )
 
     assert result.returncode == 0, result.stderr
-    invocation = receipt.read_text().rstrip().split("|", 1)[1].split()
+    invocation = receipt.read_text().splitlines()[0].split("|", 1)[1].split()
     assert invocation[0] == expected_arguments
     if kind == "spark":
         assert invocation[2] == "--package-sha256"
         assert invocation[3] == hashlib.sha256(
             (tmp_path / "vonk-forge-agent.deb").read_bytes()
         ).hexdigest()
+        assert invocation[4:] == [
+            "--package-version",
+            "1.0.0",
+            "--package-architecture",
+            "amd64" if machine == "x86_64" else "arm64",
+            "--setup-sha256",
+            hashlib.sha256(
+                (tmp_path / "published-installer").read_bytes()
+            ).hexdigest(),
+        ]
+        assert receipt.read_text().splitlines()[1] == "mode=700"
+        assert receipt.read_text().splitlines()[2] == "package-mode=600"
     assert not forbidden.exists()
 
 
@@ -149,7 +168,7 @@ def test_nas_bootstrap_needs_no_arguments_and_supplies_verified_payload(
     lines = receipt.read_text().splitlines()
     invocation = lines[0].split("|", 1)[1].split()
     assert invocation[0] == "--template"
-    assert lines[1] == 'payload={"schema_version":1}'
+    assert lines[2] == 'payload={"schema_version":1}'
     assert invocation[2:] == []
     assert not forbidden.exists()
 

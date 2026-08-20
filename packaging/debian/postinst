@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+umask 077
 
 package_version='@VERSION@'
 agent_semver=${package_version%%~*}
@@ -108,6 +109,24 @@ install -d -o vonk-agent -g vonk-agent -m 0700 \
     /var/lib/vonk-forge-agent/installations \
     /var/lib/vonk-forge-agent/run-metadata \
     /var/lib/vonk-forge-agent/runs
+machine_evidence=/var/lib/vonk-forge-agent/machine-evidence
+if [ -e "$machine_evidence" ] || [ -L "$machine_evidence" ]; then
+    if [ ! -f "$machine_evidence" ] || [ -L "$machine_evidence" ] \
+        || [ "$(stat -c '%U:%G:%a' "$machine_evidence")" != root:vonk-agent:640 ] \
+        || [ "$(wc -l < "$machine_evidence")" -ne 1 ] \
+        || ! grep -Eq '^[0-9a-f]{64}$' "$machine_evidence"; then
+        echo "vonk-forge-agent: native machine evidence is unsafe" >&2
+        exit 1
+    fi
+else
+    machine_evidence_new=$(mktemp /var/lib/vonk-forge-agent/.machine-evidence.XXXXXX)
+    trap 'rm -f -- "$machine_evidence_new"' EXIT HUP INT TERM
+    openssl rand -hex 32 > "$machine_evidence_new"
+    install -o root -g vonk-agent -m 0640 \
+        "$machine_evidence_new" "$machine_evidence"
+    rm -f -- "$machine_evidence_new"
+    trap - EXIT HUP INT TERM
+fi
 install -d -o root -g root -m 0700 \
     /var/lib/vonk-forge/helper \
     /var/lib/vonk-forge/helper/requests \

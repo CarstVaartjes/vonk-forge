@@ -511,12 +511,6 @@ def build(
         )
         install_file(
             stage,
-            "etc/vonk-forge-agent/agent.toml",
-            source("packaging/config/agent.toml"),
-            0o644,
-        )
-        install_file(
-            stage,
             "etc/vonk-forge-agent/containers-storage.conf",
             source("packaging/config/containers-storage.conf"),
             0o644,

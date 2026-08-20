@@ -29,7 +29,6 @@ REQUIRED_EXECUTABLE = {
 }
 REQUIRED_PAYLOAD = {
     *REQUIRED_ELF,
-    "etc/vonk-forge-agent/agent.toml",
     "etc/vonk-forge-agent/containers-storage.conf",
     "lib/systemd/system/vonk-forge-agent.service",
     "lib/systemd/system/vonk-forge-docker-firewall.service",
@@ -207,11 +206,8 @@ def _verify_control(control: Path) -> None:
     if not REQUIRED_CONTROL.issubset(names):
         raise VerificationError("Debian control archive is incomplete")
     conffiles = (control / "conffiles").read_text(encoding="utf-8").splitlines()
-    if conffiles != [
-        "/etc/vonk-forge-agent/agent.toml",
-        "/etc/vonk-forge-agent/containers-storage.conf",
-    ]:
-        raise VerificationError("agent configuration is not preserved as a conffile")
+    if conffiles != ["/etc/vonk-forge-agent/containers-storage.conf"]:
+        raise VerificationError("package conffile set is invalid")
     for name in ("postinst", "preinst", "prerm"):
         raw = (control / name).read_bytes()
         mode = stat.S_IMODE((control / name).stat().st_mode)
@@ -222,6 +218,9 @@ def _verify_control(control: Path) -> None:
         "adduser",
         "usermod --add-subuids",
         "usermod --add-subgids",
+        "machine_evidence=/var/lib/vonk-forge-agent/machine-evidence",
+        "openssl rand -hex 32",
+        "install -o root -g vonk-agent -m 0640",
         "deb-systemd-helper enable vonk-forge-agent.service",
         "deb-systemd-invoke restart vonk-forge-agent.service",
         "--config /etc/vonk-forge-agent/agent.toml self-test",

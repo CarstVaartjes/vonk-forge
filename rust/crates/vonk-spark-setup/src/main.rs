@@ -1,10 +1,11 @@
 #![forbid(unsafe_code)]
 
-use std::{io, path::PathBuf};
+use std::path::PathBuf;
 
 use clap::Parser;
 use vonk_spark_setup::{
-    InstallPaths, SetupRequest, SystemCommandRunner, TtyPrompt, privileged_write_from, run_setup,
+    InstallPaths, SetupRequest, SystemCommandRunner, TtyPrompt, handoff_to_root, run_setup,
+    validate_system_host,
 };
 
 #[derive(Parser)]
@@ -14,12 +15,18 @@ use vonk_spark_setup::{
     about = "Install or upgrade Vonk Forge on a Spark"
 )]
 struct Cli {
-    #[arg(long, hide = true, required_unless_present = "privileged_write")]
-    package: Option<PathBuf>,
-    #[arg(long, hide = true, required_unless_present = "privileged_write")]
-    package_sha256: Option<String>,
     #[arg(long, hide = true)]
-    privileged_write: bool,
+    package: PathBuf,
+    #[arg(long, hide = true)]
+    package_sha256: String,
+    #[arg(long, hide = true)]
+    package_version: String,
+    #[arg(long, hide = true)]
+    package_architecture: String,
+    #[arg(long, hide = true)]
+    setup_sha256: String,
+    #[arg(long, hide = true)]
+    privileged: bool,
 }
 
 fn main() {
@@ -32,19 +39,25 @@ fn main() {
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     let paths = InstallPaths::system();
-    if cli.privileged_write {
-        if cli.package.is_some() || cli.package_sha256.is_some() {
-            return Err("privileged writer does not accept setup arguments".into());
-        }
-        return privileged_write_from(io::stdin(), &paths).map_err(Into::into);
-    }
     let request = SetupRequest::new(
-        cli.package.ok_or("package is required")?,
-        cli.package_sha256.ok_or("package SHA-256 is required")?,
+        cli.package,
+        cli.package_sha256,
+        cli.package_version,
+        cli.package_architecture,
+        cli.setup_sha256,
         std::env::current_exe()?,
     )?;
-    let mut prompt = TtyPrompt::open()?;
+    validate_system_host(&request)?;
     let mut runner = SystemCommandRunner;
+    let root = rustix::process::geteuid().as_raw() == 0;
+    if !cli.privileged && !root {
+        handoff_to_root(&request, &mut runner)?;
+        return Ok(());
+    }
+    if cli.privileged && !root {
+        return Err("privileged setup must run as root".into());
+    }
+    let mut prompt = TtyPrompt::open()?;
     run_setup(&request, &paths, &mut prompt, &mut runner)?;
     Ok(())
 }
