@@ -16,6 +16,8 @@ WORKER_IMAGE = (
 HERMES_IMAGE = (
     f"ghcr.io/carstvaartjes/vonk-forge-hermes:dev-sha-{'a' * 40}@sha256:{DIGEST}"
 )
+DEV_API_IMAGE = "ghcr.io/carstvaartjes/vonk-forge-api:dev"
+DEV_WORKER_IMAGE = "ghcr.io/carstvaartjes/vonk-forge-worker:dev"
 
 
 SCRIPT = ROOT / "scripts/render-dev-compose"
@@ -158,6 +160,47 @@ def test_render_rejects_the_mutable_development_image_alias(tmp_path: Path) -> N
     result = _run_renderer(
         output,
         api_image=f"ghcr.io/carstvaartjes/vonk-forge-api:dev@sha256:{DIGEST}",
+        channel="dev",
+    )
+
+    assert result.returncode != 0
+    assert "immutable published development image" in result.stderr
+
+
+def test_render_dev_accepts_workflow_mutable_aliases_and_pins_the_rest(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "docker-compose.yaml"
+
+    result = _run_renderer(
+        output,
+        api_image=DEV_API_IMAGE,
+        worker_image=DEV_WORKER_IMAGE,
+        channel="dev",
+    )
+
+    assert result.returncode == 0, result.stderr
+    document = yaml.safe_load(output.read_text(encoding="utf-8"))
+    services = document["services"]
+    assert services["control-api"]["image"] == DEV_API_IMAGE
+    assert services["control-api"]["pull_policy"] == "always"
+    assert services["control-worker"]["image"] == DEV_WORKER_IMAGE
+    assert services["control-worker"]["pull_policy"] == "always"
+    assert services["hermes-agent"]["image"] == HERMES_IMAGE
+    assert all(
+        "@sha256:" in service["image"]
+        for name, service in services.items()
+        if name not in {"control-api", "control-worker"}
+    )
+
+
+def test_render_dev_rejects_role_swapped_mutable_aliases(tmp_path: Path) -> None:
+    output = tmp_path / "docker-compose.yaml"
+
+    result = _run_renderer(
+        output,
+        api_image=DEV_WORKER_IMAGE,
+        worker_image=DEV_API_IMAGE,
         channel="dev",
     )
 
