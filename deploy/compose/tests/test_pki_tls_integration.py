@@ -144,6 +144,7 @@ def _tls_request(
     root: Path,
     path: str,
     *,
+    method: str = "GET",
     client_certificate: Path | None = None,
     client_key: Path | None = None,
 ) -> tuple[bytes, bytes]:
@@ -156,7 +157,12 @@ def _tls_request(
     ):
         peer = tls.getpeercert(binary_form=True)
         tls.sendall(
-            f"GET {path} HTTP/1.1\r\nHost: {hostname}\r\nConnection: close\r\n\r\n".encode()
+            (
+                f"{method} {path} HTTP/1.1\r\n"
+                f"Host: {hostname}\r\n"
+                "Content-Length: 0\r\n"
+                "Connection: close\r\n\r\n"
+            ).encode()
         )
         response = bytearray()
         while block := tls.recv(65536):
@@ -248,7 +254,11 @@ def test_caddy_serves_one_generated_controller_identity_on_each_pki_sni(
         expected_der = server.public_bytes(serialization.Encoding.DER)
 
         peer, enrollment = _tls_request(
-            tls_port, HOSTNAMES[0], material["root"], "/agent/v1/enroll"
+            tls_port,
+            HOSTNAMES[0],
+            material["root"],
+            "/agent/v1/enroll",
+            method="POST",
         )
         assert peer == expected_der
         assert enrollment.startswith(b"HTTP/1.1 502")
