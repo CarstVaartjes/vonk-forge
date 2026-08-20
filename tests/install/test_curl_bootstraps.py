@@ -43,6 +43,10 @@ def _run_bootstrap(
     payload = tmp_path / "published-nas-payload.json"
     payload.write_text('{"schema_version":1}\n')
     payload_digest = hashlib.sha256(payload.read_bytes()).hexdigest()
+    release_manifest = tmp_path / "release.json"
+    release_manifest.write_text('{"schema_version":1}\n')
+    release_signature = tmp_path / "release.sig"
+    release_signature.write_text("signed-release\n")
     rendered = tmp_path / f"install-{kind}"
     source = (ROOT / "install" / kind).read_text()
     for placeholder in (
@@ -94,6 +98,8 @@ def _run_bootstrap(
         "VONK_TEST_PAYLOAD": str(payload),
         "VONK_TEST_RECEIPT": str(receipt),
         "VONK_TEST_FORBIDDEN": str(forbidden),
+        "VONK_INSTALL_RELEASE_MANIFEST": str(release_manifest),
+        "VONK_INSTALL_RELEASE_SIGNATURE": str(release_signature),
     }
     result = subprocess.run(
         ["sh", str(rendered), *arguments],
@@ -134,19 +140,11 @@ def test_curl_bootstrap_verifies_and_runs_the_native_installer(
     invocation = receipt.read_text().splitlines()[0].split("|", 1)[1].split()
     assert invocation[0] == expected_arguments
     if kind == "spark":
-        assert invocation[2] == "--package-sha256"
-        assert invocation[3] == hashlib.sha256(
-            (tmp_path / "vonk-forge-agent.deb").read_bytes()
-        ).hexdigest()
-        assert invocation[4:] == [
-            "--package-version",
-            "1.0.0",
-            "--package-architecture",
-            "amd64" if machine == "x86_64" else "arm64",
-            "--setup-sha256",
-            hashlib.sha256(
-                (tmp_path / "published-installer").read_bytes()
-            ).hexdigest(),
+        assert invocation[2:] == [
+            "--release-manifest",
+            str(tmp_path / "release.json"),
+            "--release-signature",
+            str(tmp_path / "release.sig"),
         ]
         assert receipt.read_text().splitlines()[1] == "mode=700"
         assert receipt.read_text().splitlines()[2] == "package-mode=600"

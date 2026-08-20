@@ -21,13 +21,17 @@ use uuid::Uuid;
 const MAX_PACKAGE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_CA_BYTES: usize = 64 * 1024;
 const MAX_BOOTSTRAP_BYTES: usize = 128 * 1024;
+const MAX_RELEASE_BYTES: usize = 1024 * 1024;
+const MAX_RELEASE_SIGNATURE_BYTES: usize = 16 * 1024;
 const CONFIG_PATH: &str = "/etc/vonk-forge-agent/agent.toml";
 const CA_PATH: &str = "/etc/vonk-forge-agent/controller-ca.pem";
 const AGENT_PATH: &str = "/usr/lib/vonk-forge/vonk-agent";
 const SERVICE: &str = "vonk-forge-agent.service";
 const DATA_DIR: &str = "/var/lib/vonk-forge-agent";
 const APPLY_FRAME_MAGIC: &[u8] = b"VONK-SPARK-APPLY-V1\0";
-const MAX_APPLY_FRAME_BYTES: usize = 256 * 1024;
+const MAX_APPLY_FRAME_BYTES: usize = 2 * 1024 * 1024;
+const INSTALLER_RELEASE_PUBLIC_KEY: &[u8] =
+    include_bytes!("../../../../install/installer-release-public.pem");
 const ROOT_HANDOFF: &str = r#"
 umask 077
 root=$(/usr/bin/mktemp -d /var/tmp/vonk-spark-setup.XXXXXX)
@@ -36,8 +40,7 @@ setup=$root/vonk-spark-setup
 package=$root/vonk-forge-agent.deb
 /usr/bin/install -o root -g root -m 0700 -- "$1" "$setup"
 /usr/bin/install -o root -g root -m 0600 -- "$2" "$package"
-printf '%s  %s\n' "$3" "$setup" | /usr/bin/sha256sum --check --status
-"$setup" __apply --package "$package"
+"$setup" __apply
 "#;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -107,11 +110,92 @@ pub trait Prompt {
 #[derive(Debug, Clone)]
 pub struct SetupRequest {
     package: PathBuf,
-    expected_sha256: String,
-    expected_version: String,
-    expected_architecture: String,
-    expected_executable_sha256: String,
+    release_manifest: PathBuf,
+    release_signature: PathBuf,
     executable: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReleaseAuthority {
+    public_key_pem: Vec<u8>,
+}
+
+impl ReleaseAuthority {
+    pub fn canonical() -> Self {
+        Self {
+            public_key_pem: INSTALLER_RELEASE_PUBLIC_KEY.to_vec(),
+        }
+    }
+
+    pub fn from_pem(public_key_pem: Vec<u8>) -> Result<Self, SetupError> {
+        if public_key_pem.is_empty()
+            || public_key_pem.len() > 16 * 1024
+            || !public_key_pem.starts_with(b"-----BEGIN PUBLIC KEY-----\n")
+            || !public_key_pem.ends_with(b"-----END PUBLIC KEY-----\n")
+        {
+            return Err(SetupError::ReleaseSignature);
+        }
+        Ok(Self { public_key_pem })
+    }
+
+    fn verify(&self, manifest: &[u8], encoded_signature: &[u8]) -> Result<(), SetupError> {
+        if manifest.is_empty()
+            || manifest.len() > MAX_RELEASE_BYTES
+            || encoded_signature.is_empty()
+            || encoded_signature.len() > MAX_RELEASE_SIGNATURE_BYTES
+            || !encoded_signature.ends_with(b"\n")
+            || encoded_signature[..encoded_signature.len() - 1].contains(&b'\n')
+        {
+            return Err(SetupError::ReleaseSignature);
+        }
+        let directory = secure_tempdir("vonk-spark-release.")?;
+        let key = directory.path().join("release-public.pem");
+        let claims = directory.path().join("release.json");
+        let encoded_signature_path = directory.path().join("release.sig.b64");
+        let signature_path = directory.path().join("release.sig");
+        fs::write(&key, &self.public_key_pem).map_err(SetupError::PrivilegedWrite)?;
+        fs::write(&claims, manifest).map_err(SetupError::PrivilegedWrite)?;
+        fs::write(&encoded_signature_path, encoded_signature)
+            .map_err(SetupError::PrivilegedWrite)?;
+        let decoded = ProcessCommand::new("/usr/bin/openssl")
+            .args(["base64", "-d", "-A", "-in"])
+            .arg(&encoded_signature_path)
+            .args(["-out"])
+            .arg(&signature_path)
+            .env_clear()
+            .env("LANG", "C.UTF-8")
+            .env("LC_ALL", "C.UTF-8")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map_err(|_| SetupError::ReleaseSignature)?;
+        let decoded_size = fs::metadata(&signature_path)
+            .map_err(|_| SetupError::ReleaseSignature)?
+            .len();
+        if !decoded.success() || decoded_size == 0 || decoded_size > 1024 {
+            return Err(SetupError::ReleaseSignature);
+        }
+        let status = ProcessCommand::new("/usr/bin/openssl")
+            .args(["dgst", "-sha256", "-verify"])
+            .arg(&key)
+            .args(["-signature"])
+            .arg(&signature_path)
+            .arg(&claims)
+            .env_clear()
+            .env("LANG", "C.UTF-8")
+            .env("LC_ALL", "C.UTF-8")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map_err(|_| SetupError::ReleaseSignature)?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(SetupError::ReleaseSignature)
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -182,14 +266,6 @@ impl CallerIdentity {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct PackagePlan {
-    sha256: String,
-    version: String,
-    architecture: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "kebab-case", deny_unknown_fields)]
 enum ApplyOperation {
     Fresh {
@@ -213,14 +289,44 @@ enum ApplyOperation {
 struct ApplyEnvelope {
     schema_version: u8,
     caller_uid: u32,
-    setup_sha256: String,
-    package: PackagePlan,
+    release_manifest: Vec<u8>,
+    release_signature: Vec<u8>,
     plan: ApplyOperation,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReleaseDocument {
+    artifacts: BTreeMap<String, ReleaseArtifact>,
+    bootstraps: BTreeMap<String, ReleaseArtifact>,
+    channel: String,
+    generation: String,
+    images: BTreeMap<String, String>,
+    schema_version: u8,
+    source_sha: String,
+    version: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReleaseArtifact {
+    path: String,
+    sha256: String,
+    size: u64,
+}
+
+struct VerifiedRelease {
+    raw: Vec<u8>,
+    signature: Vec<u8>,
+    package: ReleaseArtifact,
+    setup: ReleaseArtifact,
+    version: String,
+    architecture: String,
 }
 
 pub struct PreparedSetup {
     executable: PathBuf,
-    setup_sha256: String,
+    sudo: PathBuf,
     staged: StagedPackage,
     frame: Vec<u8>,
 }
@@ -236,20 +342,16 @@ impl PreparedSetup {
 }
 
 impl SetupRequest {
-    pub fn new(
+    pub fn from_signed_release(
         package: PathBuf,
-        expected_sha256: String,
-        expected_version: String,
-        expected_architecture: String,
-        expected_executable_sha256: String,
+        release_manifest: PathBuf,
+        release_signature: PathBuf,
         executable: PathBuf,
     ) -> Result<Self, SetupError> {
         if !package.is_absolute()
+            || !release_manifest.is_absolute()
+            || !release_signature.is_absolute()
             || !executable.is_absolute()
-            || !valid_sha256(&expected_sha256)
-            || !valid_package_version(&expected_version)
-            || !matches!(expected_architecture.as_str(), "amd64" | "arm64")
-            || !valid_sha256(&expected_executable_sha256)
         {
             return Err(SetupError::UnsafeInput(
                 "release-controlled setup arguments",
@@ -257,10 +359,8 @@ impl SetupRequest {
         }
         Ok(Self {
             package,
-            expected_sha256,
-            expected_version,
-            expected_architecture,
-            expected_executable_sha256,
+            release_manifest,
+            release_signature,
             executable,
         })
     }
@@ -271,7 +371,7 @@ pub fn handoff_to_root(
     runner: &mut dyn CommandRunner,
 ) -> Result<(), SetupError> {
     let command = Command::new(
-        "/usr/bin/sudo",
+        &prepared.sudo,
         [
             "/bin/sh".to_owned(),
             "-ceu".to_owned(),
@@ -279,7 +379,6 @@ pub fn handoff_to_root(
             "vonk-spark-root-handoff".to_owned(),
             prepared.executable.display().to_string(),
             prepared.staged.path().display().to_string(),
-            prepared.setup_sha256.clone(),
         ],
     )
     .with_stdin(prepared.frame.clone());
@@ -291,6 +390,8 @@ pub struct InstallPaths {
     pub config: PathBuf,
     pub ca: PathBuf,
     pub agent: PathBuf,
+    pub staging_root: PathBuf,
+    pub sudo: PathBuf,
     pub service: String,
     pub required_owner: Option<u32>,
 }
@@ -301,6 +402,8 @@ impl InstallPaths {
             config: PathBuf::from(CONFIG_PATH),
             ca: PathBuf::from(CA_PATH),
             agent: PathBuf::from(AGENT_PATH),
+            staging_root: PathBuf::from("/var/tmp"),
+            sudo: PathBuf::from("/usr/bin/sudo"),
             service: SERVICE.to_owned(),
             required_owner: Some(0),
         }
@@ -319,6 +422,8 @@ pub enum SetupError {
     PackageFormat,
     #[error("setup package identity does not match the selected release")]
     PackageIdentity,
+    #[error("immutable installer release signature or claims are invalid")]
+    ReleaseSignature,
     #[error(
         "Spark installation requires Debian or Ubuntu with systemd on the selected architecture"
     )]
@@ -343,7 +448,7 @@ pub enum SetupError {
     PrivilegedWrite(#[source] io::Error),
 }
 
-pub fn validate_system_host(request: &SetupRequest) -> Result<(), SetupError> {
+pub fn validate_system_host(_request: &SetupRequest) -> Result<(), SetupError> {
     let os_release =
         fs::read_to_string("/etc/os-release").map_err(|_| SetupError::UnsupportedHost)?;
     let architecture = match std::env::consts::ARCH {
@@ -355,7 +460,7 @@ pub fn validate_system_host(request: &SetupRequest) -> Result<(), SetupError> {
         &os_release,
         Path::new("/run/systemd/system").is_dir(),
         architecture,
-        &request.expected_architecture,
+        architecture,
     )?;
     for executable in [
         "/bin/rm",
@@ -365,6 +470,7 @@ pub fn validate_system_host(request: &SetupRequest) -> Result<(), SetupError> {
         "/usr/bin/dpkg-deb",
         "/usr/bin/install",
         "/usr/bin/mktemp",
+        "/usr/bin/openssl",
         "/usr/bin/setpriv",
         "/usr/bin/sha256sum",
         "/usr/bin/sudo",
@@ -404,14 +510,37 @@ pub fn prepare_setup(
     runner: &mut dyn CommandRunner,
     caller: CallerIdentity,
 ) -> Result<PreparedSetup, SetupError> {
+    prepare_setup_with_authority(
+        request,
+        paths,
+        prompt,
+        runner,
+        caller,
+        &ReleaseAuthority::canonical(),
+    )
+}
+
+pub fn prepare_setup_with_authority(
+    request: &SetupRequest,
+    paths: &InstallPaths,
+    prompt: &mut dyn Prompt,
+    runner: &mut dyn CommandRunner,
+    caller: CallerIdentity,
+    authority: &ReleaseAuthority,
+) -> Result<PreparedSetup, SetupError> {
     caller.authenticate_for(paths)?;
     let caller_uid = caller.require_unprivileged()?;
-    verify_regular_file_digest(
-        &request.executable,
-        &request.expected_executable_sha256,
-        64 * 1024 * 1024,
+    let release = verified_release_from_files(request, authority)?;
+    verify_release_artifact_size(&request.executable, release.setup.size)?;
+    verify_regular_file_digest(&request.executable, &release.setup.sha256, 64 * 1024 * 1024)?;
+    verify_release_artifact_size(&request.package, release.package.size)?;
+    let staged = stage_verified_package_from(
+        &request.package,
+        &release.package.sha256,
+        &release.version,
+        &release.architecture,
+        true,
     )?;
-    let staged = stage_verified_package(request)?;
     let plan = match install_state(paths)? {
         InstallState::Fresh => {
             let enrollment_url = required_origin(prompt, "Enrollment URL")?;
@@ -454,17 +583,13 @@ pub fn prepare_setup(
     let envelope = ApplyEnvelope {
         schema_version: 1,
         caller_uid,
-        setup_sha256: request.expected_executable_sha256.clone(),
-        package: PackagePlan {
-            sha256: request.expected_sha256.clone(),
-            version: request.expected_version.clone(),
-            architecture: request.expected_architecture.clone(),
-        },
+        release_manifest: release.raw,
+        release_signature: release.signature,
         plan,
     };
     Ok(PreparedSetup {
         executable: request.executable.clone(),
-        setup_sha256: request.expected_executable_sha256.clone(),
+        sudo: paths.sudo.clone(),
         staged,
         frame: encode_apply_frame(&envelope)?,
     })
@@ -519,18 +644,143 @@ fn decode_apply_frame(input: impl Read) -> Result<ApplyEnvelope, SetupError> {
     serde_json::from_slice(payload).map_err(|_| SetupError::PrivilegedInput)
 }
 
+fn read_bounded_regular(path: &Path, maximum: usize) -> Result<Vec<u8>, SetupError> {
+    let before = fs::symlink_metadata(path).map_err(|_| SetupError::ReleaseSignature)?;
+    if !before.file_type().is_file()
+        || before.file_type().is_symlink()
+        || before.nlink() != 1
+        || before.len() == 0
+        || before.len() > maximum as u64
+        || before.permissions().mode() & 0o022 != 0
+    {
+        return Err(SetupError::ReleaseSignature);
+    }
+    let mut input = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc_nofollow())
+        .open(path)
+        .map_err(|_| SetupError::ReleaseSignature)?;
+    let open = input.metadata().map_err(|_| SetupError::ReleaseSignature)?;
+    if !same_file(&before, &open) {
+        return Err(SetupError::ReleaseSignature);
+    }
+    let mut raw = Vec::with_capacity(open.len() as usize);
+    Read::by_ref(&mut input)
+        .take((maximum + 1) as u64)
+        .read_to_end(&mut raw)
+        .map_err(|_| SetupError::ReleaseSignature)?;
+    let after = input.metadata().map_err(|_| SetupError::ReleaseSignature)?;
+    if raw.is_empty() || raw.len() > maximum || !same_file(&open, &after) {
+        return Err(SetupError::ReleaseSignature);
+    }
+    Ok(raw)
+}
+
+fn verified_release_from_files(
+    request: &SetupRequest,
+    authority: &ReleaseAuthority,
+) -> Result<VerifiedRelease, SetupError> {
+    let manifest = read_bounded_regular(&request.release_manifest, MAX_RELEASE_BYTES)?;
+    let signature = read_bounded_regular(&request.release_signature, MAX_RELEASE_SIGNATURE_BYTES)?;
+    verified_release(manifest, signature, authority)
+}
+
+fn verified_release(
+    raw: Vec<u8>,
+    signature: Vec<u8>,
+    authority: &ReleaseAuthority,
+) -> Result<VerifiedRelease, SetupError> {
+    authority.verify(&raw, &signature)?;
+    let document: ReleaseDocument =
+        serde_json::from_slice(&raw).map_err(|_| SetupError::ReleaseSignature)?;
+    let (platform, architecture) = match std::env::consts::ARCH {
+        "x86_64" => ("linux-amd64", "amd64"),
+        "aarch64" => ("linux-arm64", "arm64"),
+        _ => return Err(SetupError::ReleaseSignature),
+    };
+    if document.schema_version != 1
+        || !matches!(document.channel.as_str(), "dev" | "stable")
+        || !valid_sha256(&document.generation)
+        || document.source_sha.len() != 40
+        || !document
+            .source_sha
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        || !valid_package_version(&document.version)
+        || document.images.is_empty()
+        || document.bootstraps.is_empty()
+    {
+        return Err(SetupError::ReleaseSignature);
+    }
+    let package = document
+        .artifacts
+        .get(&format!("agent-package-{platform}"))
+        .cloned()
+        .ok_or(SetupError::ReleaseSignature)?;
+    let setup = document
+        .artifacts
+        .get(&format!("spark-setup-{platform}"))
+        .cloned()
+        .ok_or(SetupError::ReleaseSignature)?;
+    let prefix = format!(
+        "artifacts/{}/releases/{}/spark/current/{platform}/",
+        document.channel, document.generation
+    );
+    if package.path != format!("{prefix}vonk-forge-agent.deb")
+        || setup.path != format!("{prefix}vonk-spark-setup")
+        || !valid_sha256(&package.sha256)
+        || !valid_sha256(&setup.sha256)
+        || package.size < 68
+        || package.size > MAX_PACKAGE_BYTES
+        || setup.size == 0
+        || setup.size > 64 * 1024 * 1024
+    {
+        return Err(SetupError::ReleaseSignature);
+    }
+    Ok(VerifiedRelease {
+        raw,
+        signature,
+        package,
+        setup,
+        version: document.version,
+        architecture: architecture.to_owned(),
+    })
+}
+
 pub fn apply_setup_from(
     input: impl Read,
-    package_path: &Path,
     executable_path: &Path,
     paths: &InstallPaths,
     runner: &mut dyn CommandRunner,
     caller: CallerIdentity,
 ) -> Result<(), SetupError> {
+    apply_setup_from_with_authority(
+        input,
+        executable_path,
+        paths,
+        runner,
+        caller,
+        &ReleaseAuthority::canonical(),
+    )
+}
+
+pub fn apply_setup_from_with_authority(
+    input: impl Read,
+    executable_path: &Path,
+    paths: &InstallPaths,
+    runner: &mut dyn CommandRunner,
+    caller: CallerIdentity,
+    authority: &ReleaseAuthority,
+) -> Result<(), SetupError> {
     caller.authenticate_for(paths)?;
     let envelope = decode_apply_frame(input)?;
     caller.require_sudo_root(envelope.caller_uid)?;
     validate_apply_envelope(&envelope)?;
+    let release = verified_release(
+        envelope.release_manifest,
+        envelope.release_signature,
+        authority,
+    )?;
     let state = install_state(paths)?;
     if !matches!(
         (&envelope.plan, state),
@@ -544,13 +794,18 @@ pub fn apply_setup_from(
         return Err(SetupError::PrivilegedInput);
     }
     validate_plan_against_installation(&envelope.plan, paths)?;
-    verify_regular_file_digest(executable_path, &envelope.setup_sha256, 64 * 1024 * 1024)
+    let package_path = validated_staging_session(executable_path, paths)?;
+    verify_release_artifact_size(executable_path, release.setup.size)
+        .map_err(|_| SetupError::PrivilegedInput)?;
+    verify_regular_file_digest(executable_path, &release.setup.sha256, 64 * 1024 * 1024)
+        .map_err(|_| SetupError::PrivilegedInput)?;
+    verify_release_artifact_size(&package_path, release.package.size)
         .map_err(|_| SetupError::PrivilegedInput)?;
     let staged = stage_verified_package_from(
-        package_path,
-        &envelope.package.sha256,
-        &envelope.package.version,
-        &envelope.package.architecture,
+        &package_path,
+        &release.package.sha256,
+        &release.version,
+        &release.architecture,
         false,
     )?;
     let owner = paths
@@ -645,10 +900,11 @@ fn validate_plan_against_installation(
 
 fn validate_apply_envelope(envelope: &ApplyEnvelope) -> Result<(), SetupError> {
     if envelope.schema_version != 1
-        || !valid_sha256(&envelope.setup_sha256)
-        || !valid_sha256(&envelope.package.sha256)
-        || !valid_package_version(&envelope.package.version)
-        || !matches!(envelope.package.architecture.as_str(), "amd64" | "arm64")
+        || envelope.caller_uid == 0
+        || envelope.release_manifest.is_empty()
+        || envelope.release_manifest.len() > MAX_RELEASE_BYTES
+        || envelope.release_signature.is_empty()
+        || envelope.release_signature.len() > MAX_RELEASE_SIGNATURE_BYTES
     {
         return Err(SetupError::PrivilegedInput);
     }
@@ -929,7 +1185,7 @@ fn install_state(paths: &InstallPaths) -> Result<InstallState, SetupError> {
     let state_path = setup_state_path(paths);
     let state = safe_existing_file(&state_path, paths.required_owner)?;
     match (config, ca, agent, state) {
-        (false, false, _, false) => Ok(InstallState::Fresh),
+        (false, false, false, false) => Ok(InstallState::Fresh),
         (true, true, true, true) => {
             paired_configuration(&paths.config, paths)?;
             let raw = fs::read(&state_path).map_err(|_| SetupError::ExistingInstall)?;
@@ -988,25 +1244,86 @@ fn safe_existing_file(path: &Path, required_owner: Option<u32>) -> Result<bool, 
     }
 }
 
+fn verify_release_artifact_size(path: &Path, expected: u64) -> Result<(), SetupError> {
+    let metadata = fs::symlink_metadata(path).map_err(|_| SetupError::ReleaseSignature)?;
+    if !metadata.file_type().is_file()
+        || metadata.file_type().is_symlink()
+        || metadata.len() != expected
+    {
+        return Err(SetupError::ReleaseSignature);
+    }
+    Ok(())
+}
+
+fn validated_staging_session(
+    executable_path: &Path,
+    paths: &InstallPaths,
+) -> Result<PathBuf, SetupError> {
+    if !executable_path.is_absolute()
+        || executable_path.file_name().and_then(|name| name.to_str()) != Some("vonk-spark-setup")
+    {
+        return Err(SetupError::PrivilegedInput);
+    }
+    let session = executable_path
+        .parent()
+        .ok_or(SetupError::PrivilegedInput)?;
+    if session.parent() != Some(paths.staging_root.as_path()) {
+        return Err(SetupError::PrivilegedInput);
+    }
+    let session_name = session
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or(SetupError::PrivilegedInput)?;
+    let suffix = session_name
+        .strip_prefix("vonk-spark-setup.")
+        .ok_or(SetupError::PrivilegedInput)?;
+    if !(6..=64).contains(&suffix.len()) || !suffix.bytes().all(|byte| byte.is_ascii_alphanumeric())
+    {
+        return Err(SetupError::PrivilegedInput);
+    }
+    let expected_owner = paths
+        .required_owner
+        .unwrap_or_else(|| rustix::process::geteuid().as_raw());
+    let session_metadata =
+        fs::symlink_metadata(session).map_err(|_| SetupError::PrivilegedInput)?;
+    if !session_metadata.file_type().is_dir()
+        || session_metadata.file_type().is_symlink()
+        || session_metadata.uid() != expected_owner
+        || session_metadata.permissions().mode() & 0o777 != 0o700
+    {
+        return Err(SetupError::PrivilegedInput);
+    }
+    let package = session.join("vonk-forge-agent.deb");
+    for (path, mode) in [(executable_path, 0o700), (package.as_path(), 0o600)] {
+        let metadata = fs::symlink_metadata(path).map_err(|_| SetupError::PrivilegedInput)?;
+        if !metadata.file_type().is_file()
+            || metadata.file_type().is_symlink()
+            || metadata.nlink() != 1
+            || metadata.uid() != expected_owner
+            || metadata.permissions().mode() & 0o777 != mode
+        {
+            return Err(SetupError::PrivilegedInput);
+        }
+    }
+    Ok(package)
+}
+
 struct StagedPackage {
     _directory: TempDir,
     path: PathBuf,
+}
+
+fn secure_tempdir(prefix: &str) -> Result<TempDir, SetupError> {
+    tempfile::Builder::new()
+        .prefix(prefix)
+        .tempdir_in("/var/tmp")
+        .map_err(SetupError::PrivilegedWrite)
 }
 
 impl StagedPackage {
     fn path(&self) -> &Path {
         &self.path
     }
-}
-
-fn stage_verified_package(request: &SetupRequest) -> Result<StagedPackage, SetupError> {
-    stage_verified_package_from(
-        &request.package,
-        &request.expected_sha256,
-        &request.expected_version,
-        &request.expected_architecture,
-        true,
-    )
 }
 
 fn stage_verified_package_from(
@@ -1041,7 +1358,7 @@ fn stage_verified_package_from(
     if !same_file(&before, &open) {
         return Err(SetupError::UnsafePackage);
     }
-    let directory = tempfile::tempdir().map_err(SetupError::PrivilegedWrite)?;
+    let directory = secure_tempdir("vonk-spark-package.")?;
     let path = directory
         .path()
         .join(source.file_name().ok_or(SetupError::UnsafePackage)?);
@@ -1449,30 +1766,55 @@ impl CommandRunner for SystemCommandRunner {
 }
 
 pub struct TtyPrompt {
+    terminal: Option<TtyTerminal>,
+}
+
+struct TtyTerminal {
     reader: BufReader<File>,
     tty: File,
 }
 
 impl TtyPrompt {
-    pub fn open() -> Result<Self, SetupError> {
+    pub fn new() -> Self {
+        Self { terminal: None }
+    }
+
+    fn terminal(&mut self) -> Result<&mut TtyTerminal, String> {
+        if self.terminal.is_none() {
+            self.terminal = Some(Self::open_terminal()?);
+        }
+        self.terminal
+            .as_mut()
+            .ok_or_else(|| "tty unavailable".to_owned())
+    }
+
+    fn open_terminal() -> Result<TtyTerminal, String> {
         let tty = OpenOptions::new()
             .read(true)
             .write(true)
             .open("/dev/tty")
-            .map_err(SetupError::PrivilegedWrite)?;
-        let reader = BufReader::new(tty.try_clone().map_err(SetupError::PrivilegedWrite)?);
-        Ok(Self { reader, tty })
+            .map_err(|_| "tty unavailable".to_owned())?;
+        let reader = BufReader::new(tty.try_clone().map_err(|_| "tty unavailable".to_owned())?);
+        Ok(TtyTerminal { reader, tty })
+    }
+}
+
+impl Default for TtyPrompt {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
 impl Prompt for TtyPrompt {
     fn value(&mut self, label: &str) -> Result<String, String> {
-        write!(self.tty, "{label}: ").map_err(|_| "tty output failed".to_owned())?;
-        self.tty
+        let terminal = self.terminal()?;
+        write!(terminal.tty, "{label}: ").map_err(|_| "tty output failed".to_owned())?;
+        terminal
+            .tty
             .flush()
             .map_err(|_| "tty output failed".to_owned())?;
         let mut value = String::new();
-        if self
+        if terminal
             .reader
             .read_line(&mut value)
             .map_err(|_| "tty input failed".to_owned())?

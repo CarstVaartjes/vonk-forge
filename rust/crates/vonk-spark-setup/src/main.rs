@@ -19,13 +19,9 @@ struct Cli {
     #[arg(long, hide = true)]
     package: Option<PathBuf>,
     #[arg(long, hide = true)]
-    package_sha256: Option<String>,
+    release_manifest: Option<PathBuf>,
     #[arg(long, hide = true)]
-    package_version: Option<String>,
-    #[arg(long, hide = true)]
-    package_architecture: Option<String>,
-    #[arg(long, hide = true)]
-    setup_sha256: Option<String>,
+    release_signature: Option<PathBuf>,
     #[command(subcommand)]
     command: Option<InternalCommand>,
 }
@@ -33,10 +29,7 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum InternalCommand {
     #[command(name = "__apply", hide = true)]
-    Apply {
-        #[arg(long, hide = true)]
-        package: PathBuf,
-    },
+    Apply,
 }
 
 fn main() {
@@ -50,11 +43,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     let paths = InstallPaths::system();
     let caller = CallerIdentity::current()?;
-    if let Some(InternalCommand::Apply { package }) = cli.command {
+    if let Some(InternalCommand::Apply) = cli.command {
         let executable = std::env::current_exe()?;
         apply_setup_from(
             std::io::stdin().lock(),
-            &package,
             &executable,
             &paths,
             &mut SystemCommandRunner,
@@ -63,21 +55,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     caller.ensure_public()?;
-    let request = SetupRequest::new(
+    let request = SetupRequest::from_signed_release(
         cli.package.ok_or("release package is required")?,
-        cli.package_sha256
-            .ok_or("release package SHA-256 is required")?,
-        cli.package_version
-            .ok_or("release package version is required")?,
-        cli.package_architecture
-            .ok_or("release package architecture is required")?,
-        cli.setup_sha256
-            .ok_or("release setup SHA-256 is required")?,
+        cli.release_manifest
+            .ok_or("signed release manifest is required")?,
+        cli.release_signature
+            .ok_or("signed release signature is required")?,
         std::env::current_exe()?,
     )?;
     validate_system_host(&request)?;
     let mut runner = SystemCommandRunner;
-    let mut prompt = TtyPrompt::open()?;
+    let mut prompt = TtyPrompt::new();
     let prepared = prepare_setup(&request, &paths, &mut prompt, &mut runner, caller)?;
     handoff_to_root(&prepared, &mut runner)?;
     Ok(())
@@ -89,14 +77,8 @@ mod tests {
 
     #[test]
     fn hidden_apply_is_the_only_privileged_cli_phase() {
-        let cli = Cli::try_parse_from([
-            "vonk-spark-setup",
-            "__apply",
-            "--package",
-            "/var/tmp/vonk-spark-setup/agent.deb",
-        ])
-        .unwrap();
-        assert!(matches!(cli.command, Some(InternalCommand::Apply { .. })));
+        let cli = Cli::try_parse_from(["vonk-spark-setup", "__apply"]).unwrap();
+        assert!(matches!(cli.command, Some(InternalCommand::Apply)));
         assert!(
             Cli::try_parse_from(["vonk-spark-setup", "--privileged"]).is_err(),
             "the former whole-installer root mode must not remain accepted"
@@ -104,11 +86,9 @@ mod tests {
         assert!(
             Cli::try_parse_from([
                 "vonk-spark-setup",
-                "--package-sha256",
-                &"a".repeat(64),
+                "--release-manifest",
+                "/tmp/release.json",
                 "__apply",
-                "--package",
-                "/var/tmp/vonk-spark-setup/agent.deb",
             ])
             .is_err(),
             "public release arguments cannot be mixed into the root apply phase"

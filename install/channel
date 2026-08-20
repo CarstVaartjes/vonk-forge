@@ -127,4 +127,7 @@ curl -fsSL --proto '=https' --tlsv1.2 "$origin/$selected_path" -o "$bootstrap" |
 [ "$(sha256 "$bootstrap")" = "$selected_sha256" ] ||
     fail "the immutable release bootstrap failed checksum verification"
 
-VONK_INSTALL_BASE_URL="$origin/$release_prefix" /bin/sh "$bootstrap"
+VONK_INSTALL_BASE_URL="$origin/$release_prefix" \
+VONK_INSTALL_RELEASE_MANIFEST="$release" \
+VONK_INSTALL_RELEASE_SIGNATURE="$release_signature" \
+    /bin/sh "$bootstrap"

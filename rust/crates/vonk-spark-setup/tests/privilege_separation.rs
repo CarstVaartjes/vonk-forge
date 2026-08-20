@@ -1,15 +1,136 @@
 use std::{
-    collections::VecDeque, fs, io::Write, path::PathBuf, process::Command as ProcessCommand,
+    collections::VecDeque,
+    fs,
+    io::Write,
+    path::PathBuf,
+    process::{Command as ProcessCommand, Stdio},
 };
 
 use sha2::{Digest, Sha256};
 use tempfile::tempdir;
 use vonk_spark_setup::{
-    CallerIdentity, Command, CommandOutput, CommandRunner, InstallPaths, Prompt, SetupError,
-    SetupRequest, apply_setup_from, handoff_to_root, prepare_setup,
+    CallerIdentity, Command, CommandOutput, CommandRunner, InstallPaths, Prompt, ReleaseAuthority,
+    SetupError, SetupRequest, TtyPrompt, apply_setup_from_with_authority, handoff_to_root,
+    prepare_setup_with_authority,
 };
 
 const TOKEN: &str = "A123456789012345678901234567890123456789012";
+
+struct SignedRelease {
+    authority: ReleaseAuthority,
+    manifest: PathBuf,
+    signature: PathBuf,
+}
+
+fn signed_release(
+    root: &std::path::Path,
+    package: &std::path::Path,
+    executable: &std::path::Path,
+) -> SignedRelease {
+    let private_key = root.join("installer-release-private.pem");
+    let public_key = root.join("installer-release-public.pem");
+    assert!(
+        ProcessCommand::new("/usr/bin/openssl")
+            .args([
+                "genpkey",
+                "-algorithm",
+                "RSA",
+                "-pkeyopt",
+                "rsa_keygen_bits:2048",
+                "-out",
+            ])
+            .arg(&private_key)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .unwrap()
+            .success()
+    );
+    assert!(
+        ProcessCommand::new("/usr/bin/openssl")
+            .args(["pkey", "-in"])
+            .arg(&private_key)
+            .args(["-pubout", "-out"])
+            .arg(&public_key)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let manifest = root.join("release.json");
+    let package_raw = fs::read(package).unwrap();
+    let setup_raw = fs::read(executable).unwrap();
+    let release = serde_json::json!({
+        "artifacts": {
+            "agent-package-linux-amd64": {
+                "path": "artifacts/stable/releases/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/spark/current/linux-amd64/vonk-forge-agent.deb",
+                "sha256": hex::encode(Sha256::digest(&package_raw)),
+                "size": package_raw.len(),
+            },
+            "spark-setup-linux-amd64": {
+                "path": "artifacts/stable/releases/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/spark/current/linux-amd64/vonk-spark-setup",
+                "sha256": hex::encode(Sha256::digest(&setup_raw)),
+                "size": setup_raw.len(),
+            }
+        },
+        "bootstraps": {
+            "nas": {
+                "path": "artifacts/stable/releases/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/bootstraps/nas",
+                "sha256": "c".repeat(64),
+                "size": 1,
+            },
+            "spark": {
+                "path": "artifacts/stable/releases/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/bootstraps/spark",
+                "sha256": "d".repeat(64),
+                "size": 1,
+            }
+        },
+        "channel": "stable",
+        "generation": "a".repeat(64),
+        "images": {"api": format!("example.test/api@sha256:{}", "e".repeat(64))},
+        "schema_version": 1,
+        "source_sha": "b".repeat(40),
+        "version": "1.0.0",
+    });
+    fs::write(
+        &manifest,
+        format!("{}\n", serde_json::to_string(&release).unwrap()),
+    )
+    .unwrap();
+    let raw_signature = root.join("release.raw.sig");
+    assert!(
+        ProcessCommand::new("/usr/bin/openssl")
+            .args(["dgst", "-sha256", "-sign"])
+            .arg(&private_key)
+            .args(["-out"])
+            .arg(&raw_signature)
+            .arg(&manifest)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let signature = root.join("release.sig");
+    assert!(
+        ProcessCommand::new("/usr/bin/openssl")
+            .args(["base64", "-A", "-in"])
+            .arg(&raw_signature)
+            .args(["-out"])
+            .arg(&signature)
+            .status()
+            .unwrap()
+            .success()
+    );
+    fs::OpenOptions::new()
+        .append(true)
+        .open(&signature)
+        .unwrap()
+        .write_all(b"\n")
+        .unwrap();
+    SignedRelease {
+        authority: ReleaseAuthority::from_pem(fs::read(public_key).unwrap()).unwrap(),
+        manifest,
+        signature,
+    }
+}
 
 #[derive(Default)]
 struct RecordingRunner {
@@ -135,9 +256,48 @@ fn paths(root: &std::path::Path) -> InstallPaths {
         config: root.join("etc/vonk-forge-agent/agent.toml"),
         ca: root.join("etc/vonk-forge-agent/controller-ca.pem"),
         agent: root.join("usr/lib/vonk-forge/vonk-agent"),
+        staging_root: root.join("var/tmp"),
+        sudo: PathBuf::from("/usr/bin/sudo"),
         service: "vonk-forge-agent.service".to_owned(),
         required_owner: None,
     }
+}
+
+fn signed_request(root: &std::path::Path) -> (SetupRequest, ReleaseAuthority) {
+    let package_path = root.join("vonk-forge-agent_1.0.0_amd64.deb");
+    package(&package_path);
+    let executable = root.join("vonk-spark-setup");
+    fs::write(&executable, b"verified setup executable").unwrap();
+    let signed = signed_release(root, &package_path, &executable);
+    let request = SetupRequest::from_signed_release(
+        package_path,
+        signed.manifest,
+        signed.signature,
+        executable,
+    )
+    .unwrap();
+    (request, signed.authority)
+}
+
+fn root_session(root: &std::path::Path, prepared: &vonk_spark_setup::PreparedSetup) -> PathBuf {
+    let session = root.join("var/tmp/vonk-spark-setup.0123456789abcdef");
+    fs::create_dir_all(&session).unwrap();
+    fs::set_permissions(
+        &session,
+        std::os::unix::fs::PermissionsExt::from_mode(0o700),
+    )
+    .unwrap();
+    let executable = session.join("vonk-spark-setup");
+    fs::copy(prepared.executable_path(), &executable).unwrap();
+    fs::set_permissions(
+        &executable,
+        std::os::unix::fs::PermissionsExt::from_mode(0o700),
+    )
+    .unwrap();
+    let package = session.join("vonk-forge-agent.deb");
+    fs::copy(prepared.package_path(), &package).unwrap();
+    fs::set_permissions(package, std::os::unix::fs::PermissionsExt::from_mode(0o600)).unwrap();
+    executable
 }
 
 fn request(root: &std::path::Path) -> SetupRequest {
@@ -149,15 +309,82 @@ fn request(root: &std::path::Path) -> SetupRequest {
 fn request_for_package(root: &std::path::Path, package_path: PathBuf) -> SetupRequest {
     let executable = root.join("vonk-spark-setup");
     fs::write(&executable, b"verified setup executable").unwrap();
-    SetupRequest::new(
-        package_path.clone(),
-        hex::encode(Sha256::digest(fs::read(package_path).unwrap())),
-        "1.0.0".to_owned(),
-        "amd64".to_owned(),
-        hex::encode(Sha256::digest(b"verified setup executable")),
-        executable,
+    let signed = signed_release(root, &package_path, &executable);
+    SetupRequest::from_signed_release(package_path, signed.manifest, signed.signature, executable)
+        .unwrap()
+}
+
+fn test_authority(paths: &InstallPaths) -> ReleaseAuthority {
+    let root = paths
+        .staging_root
+        .parent()
+        .and_then(std::path::Path::parent)
+        .unwrap();
+    ReleaseAuthority::from_pem(fs::read(root.join("installer-release-public.pem")).unwrap())
+        .unwrap()
+}
+
+fn prepare_setup(
+    request: &SetupRequest,
+    paths: &InstallPaths,
+    prompt: &mut dyn Prompt,
+    runner: &mut dyn CommandRunner,
+    caller: CallerIdentity,
+) -> Result<vonk_spark_setup::PreparedSetup, SetupError> {
+    prepare_setup_with_authority(
+        request,
+        paths,
+        prompt,
+        runner,
+        caller,
+        &test_authority(paths),
     )
-    .unwrap()
+}
+
+fn apply_setup_from(
+    input: impl std::io::Read,
+    package_source: &std::path::Path,
+    executable_source: &std::path::Path,
+    paths: &InstallPaths,
+    runner: &mut dyn CommandRunner,
+    caller: CallerIdentity,
+) -> Result<(), SetupError> {
+    let session = paths.staging_root.join("vonk-spark-setup.0123456789abcdef");
+    if session.exists() {
+        fs::remove_dir_all(&session).unwrap();
+    }
+    fs::create_dir_all(&session).unwrap();
+    fs::set_permissions(
+        &session,
+        std::os::unix::fs::PermissionsExt::from_mode(0o700),
+    )
+    .unwrap();
+    let executable = session.join("vonk-spark-setup");
+    if executable_source.is_file() {
+        fs::copy(executable_source, &executable).unwrap();
+        fs::set_permissions(
+            &executable,
+            std::os::unix::fs::PermissionsExt::from_mode(0o700),
+        )
+        .unwrap();
+    }
+    let package = session.join("vonk-forge-agent.deb");
+    if package_source.is_file() {
+        fs::copy(package_source, &package).unwrap();
+        fs::set_permissions(
+            &package,
+            std::os::unix::fs::PermissionsExt::from_mode(0o600),
+        )
+        .unwrap();
+    }
+    apply_setup_from_with_authority(
+        input,
+        &executable,
+        paths,
+        runner,
+        caller,
+        &test_authority(paths),
+    )
 }
 
 fn runner_with_bootstrap(ca: &[u8]) -> RecordingRunner {
@@ -191,6 +418,107 @@ fn configured_install(paths: &InstallPaths, ca: &[u8], state: &str) {
     fs::write(&paths.ca, ca).unwrap();
     fs::write(&paths.agent, "installed agent").unwrap();
     fs::write(paths.config.with_file_name("setup-state"), state).unwrap();
+}
+
+#[test]
+fn root_apply_accepts_only_artifacts_bound_by_the_trusted_signed_release() {
+    let temporary = tempdir().unwrap();
+    let install_paths = paths(temporary.path());
+    fs::create_dir_all(install_paths.config.parent().unwrap()).unwrap();
+    let (request, authority) = signed_request(temporary.path());
+    let ca = controller_ca();
+    let mut prepare_runner = runner_with_bootstrap(&ca);
+    let mut prompt = fresh_answers(&ca);
+    let prepared = prepare_setup_with_authority(
+        &request,
+        &install_paths,
+        &mut prompt,
+        &mut prepare_runner,
+        CallerIdentity::unprivileged(1000),
+        &authority,
+    )
+    .unwrap();
+    let mut handoff_runner = RecordingRunner::default();
+    handoff_to_root(&prepared, &mut handoff_runner).unwrap();
+    let frame = handoff_runner.commands[0].stdin.clone();
+    let staged_executable = root_session(temporary.path(), &prepared);
+
+    let malicious = temporary.path().join("malicious.deb");
+    package_with_identity(&malicious, "vonk-forge-agent", "1.0.0", "amd64");
+    fs::copy(
+        malicious,
+        staged_executable
+            .parent()
+            .unwrap()
+            .join("vonk-forge-agent.deb"),
+    )
+    .unwrap();
+    let mut apply_runner = RecordingRunner::default();
+    let result = apply_setup_from_with_authority(
+        frame.as_slice(),
+        &staged_executable,
+        &install_paths,
+        &mut apply_runner,
+        CallerIdentity::sudo_root(1000),
+        &authority,
+    );
+
+    assert!(result.is_err());
+    assert!(apply_runner.commands.is_empty());
+    assert!(!install_paths.config.exists());
+}
+
+#[test]
+fn root_apply_rejects_an_attacker_signed_release_and_non_session_execution() {
+    let temporary = tempdir().unwrap();
+    let trusted_root = temporary.path().join("trusted");
+    let attacker_root = temporary.path().join("attacker");
+    fs::create_dir_all(&trusted_root).unwrap();
+    fs::create_dir_all(&attacker_root).unwrap();
+    let install_paths = paths(temporary.path());
+    fs::create_dir_all(install_paths.config.parent().unwrap()).unwrap();
+    let (_, trusted_authority) = signed_request(&trusted_root);
+    let (attacker_request, attacker_authority) = signed_request(&attacker_root);
+    let ca = controller_ca();
+    let mut prepare_runner = runner_with_bootstrap(&ca);
+    let mut prompt = fresh_answers(&ca);
+    let attacker_prepared = prepare_setup_with_authority(
+        &attacker_request,
+        &install_paths,
+        &mut prompt,
+        &mut prepare_runner,
+        CallerIdentity::unprivileged(1000),
+        &attacker_authority,
+    )
+    .unwrap();
+    let mut handoff_runner = RecordingRunner::default();
+    handoff_to_root(&attacker_prepared, &mut handoff_runner).unwrap();
+    let frame = handoff_runner.commands[0].stdin.clone();
+    let staged_executable = root_session(temporary.path(), &attacker_prepared);
+
+    let mut runner = RecordingRunner::default();
+    let untrusted = apply_setup_from_with_authority(
+        frame.as_slice(),
+        &staged_executable,
+        &install_paths,
+        &mut runner,
+        CallerIdentity::sudo_root(1000),
+        &trusted_authority,
+    );
+    assert!(matches!(untrusted, Err(SetupError::ReleaseSignature)));
+    assert!(runner.commands.is_empty());
+
+    let mut runner = RecordingRunner::default();
+    let outside_session = apply_setup_from_with_authority(
+        frame.as_slice(),
+        attacker_prepared.executable_path(),
+        &install_paths,
+        &mut runner,
+        CallerIdentity::sudo_root(1000),
+        &attacker_authority,
+    );
+    assert!(matches!(outside_session, Err(SetupError::PrivilegedInput)));
+    assert!(runner.commands.is_empty());
 }
 
 #[test]
@@ -417,6 +745,28 @@ fn existing_upgrade_never_prompts_or_discovers_and_restarts_through_apply() {
     );
 }
 
+#[test]
+fn tty_prompt_construction_is_lazy_for_headless_upgrades() {
+    let temporary = tempdir().unwrap();
+    let install_paths = paths(temporary.path());
+    let ca = controller_ca();
+    configured_install(&install_paths, &ca, "paired-v1\n");
+    let setup_request = request(temporary.path());
+    let mut prompt = TtyPrompt::new();
+    let mut runner = RecordingRunner::default();
+
+    let result = prepare_setup(
+        &setup_request,
+        &install_paths,
+        &mut prompt,
+        &mut runner,
+        CallerIdentity::unprivileged(1000),
+    );
+
+    assert!(result.is_ok());
+    assert!(runner.commands.is_empty());
+}
+
 fn fresh_prepared(
     root: &std::path::Path,
     install_paths: &InstallPaths,
@@ -531,6 +881,29 @@ fn public_preparation_rejects_root_before_prompting_or_network_io() {
     );
 
     assert!(result.is_err());
+    assert!(runner.commands.is_empty());
+}
+
+#[test]
+fn markerless_agent_only_state_fails_closed_before_prompting_or_network_io() {
+    let temporary = tempdir().unwrap();
+    let install_paths = paths(temporary.path());
+    fs::create_dir_all(install_paths.config.parent().unwrap()).unwrap();
+    fs::create_dir_all(install_paths.agent.parent().unwrap()).unwrap();
+    fs::write(&install_paths.agent, b"partial agent install").unwrap();
+    let setup_request = request(temporary.path());
+    let mut prompt = NoPrompt;
+    let mut runner = RecordingRunner::default();
+
+    let result = prepare_setup(
+        &setup_request,
+        &install_paths,
+        &mut prompt,
+        &mut runner,
+        CallerIdentity::unprivileged(1000),
+    );
+
+    assert!(matches!(result, Err(SetupError::ExistingInstall)));
     assert!(runner.commands.is_empty());
 }
 
@@ -836,6 +1209,8 @@ fn setup_state_below_a_symlinked_configuration_directory_fails_before_prompting(
         config: unsafe_directory.join("agent.toml"),
         ca: unsafe_directory.join("controller-ca.pem"),
         agent: temporary.path().join("usr/lib/vonk-forge/vonk-agent"),
+        staging_root: temporary.path().join("var/tmp"),
+        sudo: PathBuf::from("/usr/bin/sudo"),
         service: "vonk-forge-agent.service".to_owned(),
         required_owner: None,
     };
