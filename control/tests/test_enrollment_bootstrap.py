@@ -12,7 +12,9 @@ from vonk_control.enrollment_bootstrap import EnrollmentBootstrapConfig
 
 def _controller_ca() -> tuple[x509.Certificate, bytes]:
     key = ed25519.Ed25519PrivateKey.generate()
-    subject = x509.Name([x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, "controller-ca")])
+    subject = x509.Name(
+        [x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, "controller-ca")]
+    )
     certificate = (
         x509.CertificateBuilder()
         .subject_name(subject)
@@ -21,6 +23,7 @@ def _controller_ca() -> tuple[x509.Certificate, bytes]:
         .serial_number(x509.random_serial_number())
         .not_valid_before(datetime(2026, 8, 19, tzinfo=UTC) - timedelta(days=1))
         .not_valid_after(datetime(2026, 8, 19, tzinfo=UTC) + timedelta(days=365))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
         .sign(key, algorithm=None)
     )
     return certificate, certificate.public_bytes(serialization.Encoding.PEM)
@@ -43,7 +46,35 @@ def test_from_paths_returns_the_public_controller_ca_sha256_fingerprint(
         controller_endpoint="https://agents.example.test:8443",
         enrollment_endpoint="https://enroll.example.test:8443",
         ca_fingerprint=certificate.fingerprint(hashes.SHA256()).hex(),
+        ca_pem=pem.decode("ascii"),
     )
+
+
+def test_from_paths_rejects_a_non_ca_certificate(tmp_path: Path) -> None:
+    key = ed25519.Ed25519PrivateKey.generate()
+    subject = x509.Name(
+        [x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, "controller-leaf")]
+    )
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(subject)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(datetime(2026, 8, 19, tzinfo=UTC) - timedelta(days=1))
+        .not_valid_after(datetime(2026, 8, 19, tzinfo=UTC) + timedelta(days=365))
+        .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+        .sign(key, algorithm=None)
+    )
+    controller_ca = tmp_path / "controller-ca.pem"
+    controller_ca.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
+
+    with pytest.raises(ValueError, match="CA certificate"):
+        EnrollmentBootstrapConfig.from_paths(
+            controller_endpoint="https://agents.example.test:8443",
+            enrollment_endpoint="https://enroll.example.test:8443",
+            controller_ca_path=controller_ca,
+        )
 
 
 def test_from_paths_rejects_non_https_controller_origin(tmp_path: Path) -> None:

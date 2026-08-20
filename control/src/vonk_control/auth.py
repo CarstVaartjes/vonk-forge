@@ -28,12 +28,6 @@ MUTATION_ROLES = {
     ("POST", "/api/v1/changes"): frozenset({"administrator"}),
     ("POST", "/api/v1/jobs/{job_id}/resume"): frozenset({"operator", "administrator"}),
     ("POST", "/api/v1/agents/enrollments/grants"): frozenset({"administrator"}),
-    ("POST", "/api/v1/agents/enrollments/{enrollment_id}/approve"): frozenset(
-        {"administrator"}
-    ),
-    ("POST", "/api/v1/agents/enrollments/{enrollment_id}/reject"): frozenset(
-        {"administrator"}
-    ),
     ("POST", "/api/v1/agents/nodes/{node_id}/revoke"): frozenset({"administrator"}),
     # Local catalog authoring and WorkloadRun imports change the controller's
     # authoritative PostgreSQL state. Keep them administrator-only and list
@@ -257,7 +251,7 @@ class TrustedProxyAgentIdentityMiddleware:
         if (
             isinstance(path, str)
             and path.startswith("/agent/v1/")
-            and path != "/agent/v1/enroll"
+            and path not in {"/agent/v1/bootstrap", "/agent/v1/enroll"}
             and (
                 agent_identity_from_scope(safe_scope) is None
                 or validator is None

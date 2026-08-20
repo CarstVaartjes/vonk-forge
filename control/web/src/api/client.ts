@@ -7,7 +7,6 @@ import type {
   AuditResponse,
   AuditSummary,
   ControlApi,
-  EnrollmentDecisionResponse,
   EnrollmentGrantResponse,
   EnrollmentListResponse,
   FleetEvidenceResponse,
@@ -416,19 +415,6 @@ export class ApiClient implements ControlApi {
     return resultData(await this.generated.POST("/api/v1/agents/enrollments/grants", {
       body: {ttl_seconds: ttlSeconds},
       signal,
-    }));
-  }
-
-  async approveEnrollment(enrollmentId: string): Promise<EnrollmentDecisionResponse> {
-    return resultData(await this.generated.POST("/api/v1/agents/enrollments/{enrollment_id}/approve", {
-      params: {path: {enrollment_id: enrollmentId}},
-    }));
-  }
-
-  async rejectEnrollment(enrollmentId: string, reason: string): Promise<EnrollmentDecisionResponse> {
-    return resultData(await this.generated.POST("/api/v1/agents/enrollments/{enrollment_id}/reject", {
-      body: {reason},
-      params: {path: {enrollment_id: enrollmentId}},
     }));
   }
 

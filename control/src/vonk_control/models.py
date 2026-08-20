@@ -759,7 +759,6 @@ class AgentEnrollment(Base):
     )
     decision_actor: Mapped[str | None] = mapped_column(String(200))
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    rejection_reason: Mapped[str | None] = mapped_column(Text)
     certificate_pem: Mapped[str | None] = mapped_column(Text)
     chain_pem: Mapped[str | None] = mapped_column(Text)
     certificate_serial: Mapped[str | None] = mapped_column(String(128), unique=True)

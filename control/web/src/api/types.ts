@@ -14,7 +14,6 @@ export type AgentsResponse = components["schemas"]["AgentsResponse"];
 export type EnrollmentSummary = components["schemas"]["EnrollmentSummary"];
 export type EnrollmentListResponse = components["schemas"]["EnrollmentListResponse"];
 export type EnrollmentGrantResponse = components["schemas"]["EnrollmentGrantResponse"];
-export type EnrollmentDecisionResponse = components["schemas"]["EnrollmentDecisionResponse"];
 export type JobDetail = components["schemas"]["JobDetailResponse"];
 export type JobResumeResponse = components["schemas"]["JobResumeResponse"];
 export type JobSummary = components["schemas"]["JobSummary"];
@@ -123,7 +122,5 @@ export interface ControlApi extends LibraryApi {
   agents(): Promise<AgentsResponse>;
   enrollments(): Promise<EnrollmentListResponse>;
   createEnrollmentGrant(ttlSeconds: number, signal?: AbortSignal): Promise<EnrollmentGrantResponse>;
-  approveEnrollment(enrollmentId: string): Promise<EnrollmentDecisionResponse>;
-  rejectEnrollment(enrollmentId: string, reason: string): Promise<EnrollmentDecisionResponse>;
   revokeAgentNode(nodeId: string): Promise<void>;
 }

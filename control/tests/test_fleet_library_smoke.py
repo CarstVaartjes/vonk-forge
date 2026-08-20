@@ -19,9 +19,8 @@ def test_fresh_fleet_library_smoke() -> None:
     assert report["revoked_fleet_nodes"] == []
     assert report["audit_actions"] == [
         "agent.enrollment.grant.create",
-        "agent.enrollment.approve",
+        "agent.enrollment.submit.approved",
         "agent.node.revoke",
     ]
     assert report["identity_history_revoked"] is True
     assert report["library_recipe_count"] == 0
- 

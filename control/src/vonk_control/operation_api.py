@@ -39,8 +39,6 @@ _ACTIVE_PUBLICATION_STATES = frozenset({"completed"})
 _ADMIN_OPERATION_IDS = {
     ("post", "/api/v1/agents/enrollments/grants"): "createEnrollmentGrant",
     ("get", "/api/v1/agents/enrollments"): "listAgentEnrollments",
-    ("post", "/api/v1/agents/enrollments/{enrollment_id}/approve"): "approveAgentEnrollment",
-    ("post", "/api/v1/agents/enrollments/{enrollment_id}/reject"): "rejectAgentEnrollment",
     ("post", "/api/v1/agents/nodes/{node_id}/revoke"): "revokeAgentNode",
     ("get", "/api/v1/fleet"): "getFleetStatus",
     ("get", "/api/v1/fleet/stream"): "streamFleetEvents",

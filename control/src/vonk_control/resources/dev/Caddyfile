@@ -128,11 +128,20 @@ https://{$VONK_AGENT_ENROLL_HOSTNAME}:{$VONK_BACKEND_PORT} {
 	tls /run/secrets/controller-server-certificate /run/secrets/controller-server-key
 
 	@managed remote_ip {$VONK_MANAGEMENT_CIDRS}
+	@bootstrap {
+		method GET
+		path /agent/v1/bootstrap
+	}
 	@enrollment {
 		method POST
 		path /agent/v1/enroll
 	}
 	handle @managed {
+		handle @bootstrap {
+			reverse_proxy control-api:8000 {
+				header_up -X-Vonk-Agent-*
+			}
+		}
 		handle @enrollment {
 			reverse_proxy control-api:8000 {
 				header_up -X-Vonk-Agent-*

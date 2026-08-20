@@ -15,7 +15,7 @@ from threading import Event
 
 import pytest
 from cryptography import x509
-from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -89,6 +89,28 @@ PACKAGED_RUNTIME_IDENTITY = {
     "semantic_version": "1.2.3",
     "self_test_passed": True,
 }
+
+
+def _controller_ca() -> tuple[str, str]:
+    key = ed25519.Ed25519PrivateKey.generate()
+    subject = x509.Name(
+        [x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, "controller-ca")]
+    )
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(subject)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(datetime(2026, 8, 2, tzinfo=UTC))
+        .not_valid_after(datetime(2027, 8, 3, tzinfo=UTC))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+        .sign(key, algorithm=None)
+    )
+    pem = certificate.public_bytes(serialization.Encoding.PEM).decode("ascii")
+    return pem, certificate.fingerprint(hashes.SHA256()).hex()
+
+
 PROBE_RESULT = {
     "status": "ok",
     "evidence": {
@@ -239,6 +261,7 @@ def agent_system(tmp_path):
     )
     operations = AgentJobService(sessions, clock=clock)
     operations.set_contact_consumer(presence.observe_in_session)
+    controller_ca_pem, controller_ca_fingerprint = _controller_ca()
     services = AgentApiServices(
         enrollment=EnrollmentService(sessions, Authority(), clock=clock),
         operations=operations,
@@ -253,7 +276,8 @@ def agent_system(tmp_path):
         bootstrap=EnrollmentBootstrapConfig(
             controller_endpoint="https://agents.example.test:8443",
             enrollment_endpoint="https://enroll.example.test:8443",
-            ca_fingerprint="a" * 64,
+            ca_fingerprint=controller_ca_fingerprint,
+            ca_pem=controller_ca_pem,
         ),
     )
     services.artifact_root.mkdir()
@@ -435,7 +459,8 @@ def test_telemetry_body_cannot_choose_node_identity(agent_system) -> None:
 
 
 def test_telemetry_authentication_happens_before_json_parsing(agent_system) -> None:
-    client, _, _, _ = agent_system
+    client, services, _, _ = agent_system
+    assert services.bootstrap is not None
     response = client.post(
         "/agent/v1/telemetry",
         headers={"content-type": "application/json"},
@@ -554,7 +579,8 @@ def test_telemetry_streams_only_to_endpoint_body_limit(
     agent_system,
     headers: tuple[tuple[bytes, bytes], ...],
 ) -> None:
-    client, _, _, _ = agent_system
+    client, services, _, _ = agent_system
+    assert services.bootstrap is not None
     status_code, reads = chunked_asgi_telemetry(client.app, extra_headers=headers)
     assert status_code == 413
     assert reads == 2
@@ -926,7 +952,7 @@ def admin_headers(codec: TokenCodec, role: str = "administrator") -> dict[str, s
 
 
 def enrollment_grant(services: AgentApiServices) -> str:
-    return services.enrollment.create(NODE_A, "administrator", 60).token
+    return services.enrollment.create(NODE_C, "administrator", 60).token
 
 
 def assert_grant_consumed(services: AgentApiServices, token: str) -> None:
@@ -939,13 +965,13 @@ def valid_enrollment_body(token: str) -> bytes:
     csr = (
         x509.CertificateSigningRequestBuilder()
         .subject_name(
-            x509.Name([x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, NODE_A)])
+            x509.Name([x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, NODE_C)])
         )
         .add_extension(
             x509.SubjectAlternativeName(
                 [
                     x509.UniformResourceIdentifier(
-                        f"spiffe://vonk-forge.local/node/{NODE_A}"
+                        f"spiffe://vonk-forge.local/node/{NODE_C}"
                     )
                 ]
             ),
@@ -967,7 +993,7 @@ def valid_enrollment_body(token: str) -> bytes:
             "grant_token": token,
             "csr": csr.decode("ascii"),
             "evidence": {
-                "node_id": NODE_A,
+                "node_id": NODE_C,
                 "csr_public_key_fingerprint": hashlib.sha256(public).hexdigest(),
                 "host_key_fingerprint": "host",
                 "hardware_fingerprint": "hardware",
@@ -1030,7 +1056,7 @@ def parent(sessions, clock: Clock) -> Job:
         kind="agent.operations",
         state="queued",
         actor="administrator",
-        authority_revision="a"  * 64,
+        authority_revision="a" * 64,
         targets=[NODE_A],
         payload_digest=hashlib.sha256(b"{}").hexdigest(),
         payload={},
@@ -1421,15 +1447,13 @@ def test_unknown_claim_capability_is_rejected_without_contact(agent_system) -> N
         assert session.get(AgentPresence, NODE_A) is None
 
 
-
-
 def test_authenticated_heartbeat_preserves_claim_advertised_protocol_after_exact_fence_validation(
     agent_system,
     monkeypatch,
 ) -> None:
     client, services, _, clock = agent_system
     services.operations.enqueue(
-        parent(services.sessions, clock).id, NODE_A, "node.probe", "a"  * 64, {}
+        parent(services.sessions, clock).id, NODE_A, "node.probe", "a" * 64, {}
     )
     claim = client.post(
         "/agent/v1/claim",
@@ -1486,7 +1510,7 @@ def test_authenticated_result_preserves_claim_advertised_protocol_after_exact_fe
 ) -> None:
     client, services, _, clock = agent_system
     services.operations.enqueue(
-        parent(services.sessions, clock).id, NODE_A, "node.probe", "a"  * 64, {}
+        parent(services.sessions, clock).id, NODE_A, "node.probe", "a" * 64, {}
     )
     claim = client.post(
         "/agent/v1/claim",
@@ -1540,7 +1564,7 @@ def test_authenticated_result_preserves_claim_advertised_protocol_after_exact_fe
 def test_exact_fenced_probe_success_writes_bounded_durable_health(agent_system) -> None:
     client, services, _, clock = agent_system
     services.operations.enqueue(
-        parent(services.sessions, clock).id, NODE_A, "node.probe", "a"  * 64, {}
+        parent(services.sessions, clock).id, NODE_A, "node.probe", "a" * 64, {}
     )
     claim = client.post(
         "/agent/v1/claim",
@@ -1595,7 +1619,7 @@ def test_exact_fenced_probe_success_writes_bounded_durable_health(agent_system) 
 def test_failed_probe_result_never_writes_health_observation(agent_system) -> None:
     client, services, _, clock = agent_system
     services.operations.enqueue(
-        parent(services.sessions, clock).id, NODE_A, "node.probe", "a"  * 64, {}
+        parent(services.sessions, clock).id, NODE_A, "node.probe", "a" * 64, {}
     )
     claim = client.post(
         "/agent/v1/claim", headers=agent_headers(NODE_A, "serial-a")
@@ -1647,7 +1671,7 @@ def test_untrusted_and_stale_requests_do_not_record_agent_contact(agent_system) 
         assert node.protocol_version is None
 
     services.operations.enqueue(
-        parent(services.sessions, clock).id, NODE_A, "node.probe", "a"  * 64, {}
+        parent(services.sessions, clock).id, NODE_A, "node.probe", "a" * 64, {}
     )
     claim = client.post(
         "/agent/v1/claim", headers=agent_headers(NODE_A, "serial-a")
@@ -1750,7 +1774,7 @@ def test_persisted_certificate_state_is_checked_on_every_agent_request(
 def test_fence_and_cross_node_result_updates_are_denied(agent_system) -> None:
     client, services, _, clock = agent_system
     services.operations.enqueue(
-        parent(services.sessions, clock).id, NODE_A, "node.probe", "a"  * 64, {}
+        parent(services.sessions, clock).id, NODE_A, "node.probe", "a" * 64, {}
     )
     claim = client.post(
         "/agent/v1/claim", headers=agent_headers(NODE_A, "serial-a")
@@ -1793,7 +1817,7 @@ def test_fence_and_cross_node_result_updates_are_denied(agent_system) -> None:
     )
 
 
-def test_enrollment_routes_are_admin_only_and_pending_exact_replay_is_idempotent(
+def test_enrollment_grant_is_admin_only_and_submission_immediately_issues_idempotently(
     agent_system,
 ) -> None:
     client, _, codec, _ = agent_system
@@ -1805,8 +1829,6 @@ def test_enrollment_routes_are_admin_only_and_pending_exact_replay_is_idempotent
         ).status_code
         == 403
     )
-    # Existing node is deliberately unrelated to submitting a one-use grant;
-    # approval remains the point that rejects a duplicate immutable node.
     grant = client.post(
         "/api/v1/agents/enrollments/grants",
         headers=admin_headers(codec),
@@ -1816,13 +1838,13 @@ def test_enrollment_routes_are_admin_only_and_pending_exact_replay_is_idempotent
     csr = (
         x509.CertificateSigningRequestBuilder()
         .subject_name(
-            x509.Name([x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, NODE_A)])
+            x509.Name([x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, NODE_C)])
         )
         .add_extension(
             x509.SubjectAlternativeName(
                 [
                     x509.UniformResourceIdentifier(
-                        f"spiffe://vonk-forge.local/node/{NODE_A}"
+                        f"spiffe://vonk-forge.local/node/{NODE_C}"
                     )
                 ]
             ),
@@ -1842,7 +1864,7 @@ def test_enrollment_routes_are_admin_only_and_pending_exact_replay_is_idempotent
         "grant_token": grant["token"],
         "csr": csr.decode(),
         "evidence": {
-            "node_id": NODE_A,
+            "node_id": NODE_C,
             "csr_public_key_fingerprint": hashlib.sha256(public).hexdigest(),
             "host_key_fingerprint": "host",
             "hardware_fingerprint": "hardware",
@@ -1852,8 +1874,52 @@ def test_enrollment_routes_are_admin_only_and_pending_exact_replay_is_idempotent
     }
     first = client.post("/agent/v1/enroll", json=body)
     replay = client.post("/agent/v1/enroll", json=body)
-    assert first.status_code == replay.status_code == 202
+    assert first.status_code == replay.status_code == 200
     assert first.content == replay.content == canonical_message(first.json())
+    assert first.json()["node_id"] == NODE_C
+    assert "certificate_pem" in first.json()
+
+
+def test_public_enrollment_bootstrap_is_canonical_bounded_and_contains_only_public_trust(
+    agent_system,
+) -> None:
+    client, services, _, _ = agent_system
+    assert services.bootstrap is not None
+
+    response = client.get("/agent/v1/bootstrap")
+
+    assert response.status_code == 200
+    assert response.content == canonical_message(response.json())
+    assert response.json() == {
+        "ca_fingerprint": services.bootstrap.ca_fingerprint,
+        "ca_pem": services.bootstrap.ca_pem,
+        "controller_endpoint": "https://agents.example.test:8443",
+        "enrollment_endpoint": "https://enroll.example.test:8443",
+    }
+    assert len(response.content) < 64 * 1024
+    assert "PRIVATE KEY" not in response.text
+
+
+def test_obsolete_enrollment_decision_routes_are_not_exposed(agent_system) -> None:
+    client, _, codec, _ = agent_system
+    headers = admin_headers(codec)
+
+    assert (
+        client.post(
+            "/api/v1/agents/enrollments/unknown/approve", headers=headers
+        ).status_code
+        == 404
+    )
+    assert client.post("/agent/v1/bootstrap").status_code == 405
+    assert client.get("/agent/v1/enroll").status_code == 405
+    assert (
+        client.post(
+            "/api/v1/agents/enrollments/unknown/reject",
+            headers=headers,
+            json={"reason": "obsolete"},
+        ).status_code
+        == 404
+    )
 
 
 def test_enrollment_grant_ttl_accepts_nine_hundred_and_rejects_above_contract(
@@ -1879,7 +1945,8 @@ def test_enrollment_grant_ttl_accepts_nine_hundred_and_rejects_above_contract(
 def test_enrollment_grant_returns_configured_origins_and_controller_ca_fingerprint(
     agent_system,
 ) -> None:
-    client, _, codec, _ = agent_system
+    client, services, codec, _ = agent_system
+    assert services.bootstrap is not None
 
     grant = client.post(
         "/api/v1/agents/enrollments/grants",
@@ -1895,7 +1962,7 @@ def test_enrollment_grant_returns_configured_origins_and_controller_ca_fingerpri
     } == {
         "controller_endpoint": "https://agents.example.test:8443",
         "enrollment_endpoint": "https://enroll.example.test:8443",
-        "ca_fingerprint": "a" * 64,
+        "ca_fingerprint": services.bootstrap.ca_fingerprint,
     }
 
 
@@ -1916,11 +1983,36 @@ def test_rust_agent_enrollment_shape_remains_controller_compatible(
     assert set(body["evidence"]) == set(fixture["evidence"])
     response = client.post("/agent/v1/enroll", json=body)
 
-    assert response.status_code == 202
-    assert response.json()["node_id"] == NODE_A
+    assert response.status_code == 200
+    assert response.json()["node_id"] == NODE_C
     event = audits.for_request(response.headers["x-request-id"])
-    assert event.action == "agent.enrollment.submit.pending-approval"
-    assert event.targets[1:] == (response.json()["id"], NODE_A)
+    assert event.action == "agent.enrollment.submit.approved"
+    assert event.targets[1] == NODE_C
+    assert body["grant_token"] not in repr(event)
+
+
+def test_uncertain_enrollment_provider_write_returns_503_without_reissuing(
+    agent_system, monkeypatch
+) -> None:
+    client, services, _, _ = agent_system
+    calls = 0
+
+    def fail_issue(*_args: object, **_kwargs: object) -> IssuedCertificate:
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("provider response lost")
+
+    monkeypatch.setattr(services.enrollment._authority, "issue_node", fail_issue)
+    monkeypatch.setattr(services.enrollment, "_issuance_replay_wait_seconds", 0)
+    body = json.loads(valid_enrollment_body(enrollment_grant(services)))
+
+    first = client.post("/agent/v1/enroll", json=body)
+    replay = client.post("/agent/v1/enroll", json=body)
+
+    assert first.status_code == replay.status_code == 503
+    assert calls == 1
+    event = client.app.state.test_audits.for_request(first.headers["x-request-id"])
+    assert event.action == "agent.enrollment.submit.uncertain"
     assert body["grant_token"] not in repr(event)
 
 
@@ -2260,10 +2352,10 @@ def test_agent_runtime_spec_requires_exact_dependencies_and_registry_projection(
     )
 
 
-def test_approved_exact_enrollment_replay_picks_up_certificate_and_mismatch_is_denied(
+def test_exact_enrollment_replay_returns_certificate_and_mismatch_is_denied(
     agent_system,
 ) -> None:
-    client, services, codec, _ = agent_system
+    client, services, _, _ = agent_system
     grant = services.enrollment.create(NODE_C, "administrator", 60)
     key = ed25519.Ed25519PrivateKey.generate()
     csr = (
@@ -2304,29 +2396,15 @@ def test_approved_exact_enrollment_replay_picks_up_certificate_and_mismatch_is_d
             "boot_id": "boot",
         },
     }
-    pending = client.post("/agent/v1/enroll", json=body)
-    enrollment_id = pending.json()["id"]
-    approval = client.post(
-        f"/api/v1/agents/enrollments/{enrollment_id}/approve",
-        headers=admin_headers(codec),
-    )
-
-    assert approval.status_code == 200
-    assert approval.json() == {
-        "id": enrollment_id,
-        "node_id": NODE_C,
-        "state": "approved",
-    }
-    assert "certificate" not in approval.text.lower()
-    assert "chain" not in approval.text.lower()
-
+    issued = client.post("/agent/v1/enroll", json=body)
     pickup = client.post("/agent/v1/enroll", json=body)
     mismatch = client.post(
         "/agent/v1/enroll",
         json={**body, "evidence": {**body["evidence"], "boot_id": "different"}},
     )
 
-    assert pickup.status_code == 200
+    assert issued.status_code == pickup.status_code == 200
+    assert issued.content == pickup.content
     assert pickup.content == canonical_message(pickup.json())
     assert pickup.json()["generation"] == 1
     assert "certificate_pem" in pickup.json()
@@ -2334,10 +2412,10 @@ def test_approved_exact_enrollment_replay_picks_up_certificate_and_mismatch_is_d
     assert "certificate" not in mismatch.text.lower()
 
 
-def test_human_enrollment_mutations_audit_only_success_with_request_actor_and_targets(
+def test_human_enrollment_mutations_audit_only_grant_and_revocation(
     agent_system,
 ) -> None:
-    client, services, codec, _clock = agent_system
+    client, _services, codec, _clock = agent_system
     headers = admin_headers(codec)
     audits = client.app.state.test_audits
 
@@ -2363,34 +2441,6 @@ def test_human_enrollment_mutations_audit_only_success_with_request_actor_and_ta
             },
         },
     )
-    approval = client.post(
-        f"/api/v1/agents/enrollments/{pending.json()['id']}/approve",
-        headers=headers,
-    )
-
-    node_d = "spk_" + "d" * 32
-    direct_grant = services.enrollment.create(node_d, "administrator", 60)
-    reject_csr = _csr_for(node_d)
-    rejected_pending = client.post(
-        "/agent/v1/enroll",
-        json={
-            "grant_token": direct_grant.token,
-            "csr": reject_csr.decode(),
-            "evidence": {
-                "node_id": node_d,
-                "csr_public_key_fingerprint": _csr_fingerprint(reject_csr),
-                "host_key_fingerprint": "host-d",
-                "hardware_fingerprint": "hardware-d",
-                "agent_digest": "d" * 64,
-                "boot_id": "boot-d",
-            },
-        },
-    )
-    rejection = client.post(
-        f"/api/v1/agents/enrollments/{rejected_pending.json()['id']}/reject",
-        headers=headers,
-        json={"reason": "evidence mismatch"},
-    )
     revocation = client.post(
         f"/api/v1/agents/nodes/{NODE_A}/revoke",
         headers=headers,
@@ -2398,22 +2448,13 @@ def test_human_enrollment_mutations_audit_only_success_with_request_actor_and_ta
 
     assert [
         grant_response.status_code,
-        approval.status_code,
-        rejection.status_code,
+        pending.status_code,
         revocation.status_code,
-    ] == [201, 200, 200, 204]
+    ] == [201, 200, 204]
     expected = {
         grant_response.headers["x-request-id"]: (
             "agent.enrollment.grant.create",
             (),
-        ),
-        approval.headers["x-request-id"]: (
-            "agent.enrollment.approve",
-            (pending.json()["id"], NODE_C),
-        ),
-        rejection.headers["x-request-id"]: (
-            "agent.enrollment.reject",
-            (rejected_pending.json()["id"], node_d),
         ),
         revocation.headers["x-request-id"]: (
             "agent.node.revoke",
@@ -2445,7 +2486,7 @@ def test_human_enrollment_mutations_audit_only_success_with_request_actor_and_ta
             headers=headers,
         ),
     ]
-    assert [response.status_code for response in failures] == [422, 409, 409, 404]
+    assert [response.status_code for response in failures] == [422, 404, 404, 404]
     assert len(audits.list()) == successful_count
 
 
@@ -2596,7 +2637,7 @@ def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
 ) -> None:
     client, services, _, clock = agent_system
     services.operations.enqueue(
-        parent(services.sessions, clock).id, NODE_A, "node.probe", "a"  * 64, {}
+        parent(services.sessions, clock).id, NODE_A, "node.probe", "a" * 64, {}
     )
     claim = client.post(
         "/agent/v1/claim", headers=agent_headers(NODE_A, "serial-a")
@@ -2636,7 +2677,7 @@ def test_invalid_failed_result_is_not_reported_as_an_acknowledged_stale_attempt(
 ) -> None:
     client, services, _, clock = agent_system
     services.operations.enqueue(
-        parent(services.sessions, clock).id, NODE_A, "node.probe", "a"  * 64, {}
+        parent(services.sessions, clock).id, NODE_A, "node.probe", "a" * 64, {}
     )
     claim = client.post(
         "/agent/v1/claim", headers=agent_headers(NODE_A, "serial-a")
@@ -2693,7 +2734,7 @@ def test_claim_endpoint_long_poll_wakes_when_work_is_enqueued(agent_system) -> N
         )
         time.sleep(0.05)
         operation = services.operations.enqueue(
-            parent_job.id, NODE_A, "node.probe", "a"  * 64, {}
+            parent_job.id, NODE_A, "node.probe", "a" * 64, {}
         )
         response = waiting.result(timeout=1)
 
@@ -2719,7 +2760,7 @@ def test_enrollment_rate_limit_rejects_before_reading_request_body(
         asgi_post(
             app, "/agent/v1/enroll", valid_enrollment_body(enrollment_grant(services))
         )[0]
-        == 202
+        == 200
     )
     sent: list[dict[str, object]] = []
     reads = 0
@@ -2786,8 +2827,9 @@ def test_normal_enrollment_object_still_succeeds(agent_system) -> None:
         valid_enrollment_body(token),
     )
 
-    assert status_code == 202
-    assert json.loads(response)["state"] == "pending-approval"
+    assert status_code == 200
+    assert json.loads(response)["node_id"] == NODE_C
+    assert "certificate_pem" in json.loads(response)
 
 
 def test_oversized_enrollment_preserves_split_discovery_prefix(agent_system) -> None:
@@ -2948,7 +2990,7 @@ def test_artifact_access_is_owned_content_addressed_and_range_bounded(
         parent(services.sessions, clock).id,
         NODE_A,
         "node.probe",
-        "a"  * 64,
+        "a" * 64,
         {"artifact_digest": digest},
     )
     response = client.get(
@@ -2992,7 +3034,7 @@ def test_recipe_image_range_does_not_snapshot_the_complete_archive(
         parent(services.sessions, clock).id,
         NODE_A,
         "recipe.image.import.v1",
-        "a"  * 64,
+        "a" * 64,
         {
             "schema_version": 1,
             "kind": "recipe.image.import.v1",
@@ -3025,7 +3067,7 @@ def test_artifact_symlink_is_never_served(agent_system, tmp_path) -> None:
         parent(services.sessions, clock).id,
         NODE_A,
         "node.probe",
-        "a"  * 64,
+        "a" * 64,
         {"artifact_digest": digest},
     )
     assert (
@@ -3044,7 +3086,7 @@ def test_artifact_digest_is_verified_from_open_descriptor(agent_system) -> None:
         parent(services.sessions, clock).id,
         NODE_A,
         "node.probe",
-        "a"  * 64,
+        "a" * 64,
         {"artifact_digest": digest},
     )
     assert (
@@ -3061,13 +3103,17 @@ def test_retired_agent_update_tuf_routes_are_absent(agent_system) -> None:
     paths = client.get("/openapi.json").json()["paths"]
 
     assert not any(path.startswith("/agent/v1/tuf/") for path in paths)
-    assert client.get(
-        "/agent/v1/tuf/metadata/timestamp.json", headers=headers
-    ).status_code == 404
-    assert client.get(
-        f"/agent/v1/tuf/targets/platform/releases/1.2.3/{'a' * 64}.json",
-        headers=headers,
-    ).status_code == 404
+    assert (
+        client.get("/agent/v1/tuf/metadata/timestamp.json", headers=headers).status_code
+        == 404
+    )
+    assert (
+        client.get(
+            f"/agent/v1/tuf/targets/platform/releases/1.2.3/{'a' * 64}.json",
+            headers=headers,
+        ).status_code
+        == 404
+    )
 
 
 def test_authenticated_agents_can_fetch_only_signed_workload_tuf_targets(
@@ -3114,7 +3160,7 @@ def test_invalid_ranges_do_not_leak_artifact_descriptors(agent_system) -> None:
         parent(services.sessions, clock).id,
         NODE_A,
         "node.probe",
-        "a"  * 64,
+        "a" * 64,
         {"artifact_digest": digest},
     )
     fd_directory = "/proc/self/fd" if os.path.isdir("/proc/self/fd") else "/dev/fd"
@@ -3336,7 +3382,7 @@ def test_enrollment_unknown_top_level_field_burns_valid_grant(agent_system) -> N
     assert client.post("/agent/v1/enroll", json=body).status_code == 403
 
 
-def test_enrollment_listing_paginates_stably_and_can_filter_pending_review(
+def test_enrollment_listing_paginates_stably_and_can_filter_issuing(
     agent_system,
 ) -> None:
     client, services, codec, clock = agent_system
@@ -3358,7 +3404,7 @@ def test_enrollment_listing_paginates_stably_and_can_filter_pending_review(
                     id=str(uuid.uuid4()),
                     grant_id=grant_id,
                     node_id=NODE_A,
-                    state="pending-approval" if index == 0 else "rejected",
+                    state="issuing" if index == 0 else "approved",
                     csr_pem="csr",
                     csr_public_key_pem="pem",
                     csr_public_key_fingerprint="a" * 64,
@@ -3379,7 +3425,7 @@ def test_enrollment_listing_paginates_stably_and_can_filter_pending_review(
         headers=admin_headers(codec),
     ).json()
     assert len(second["enrollments"]) == 1
-    pending = client.get(
-        "/api/v1/agents/enrollments?state=pending_review", headers=admin_headers(codec)
+    issuing = client.get(
+        "/api/v1/agents/enrollments?state=issuing", headers=admin_headers(codec)
     ).json()
-    assert [item["state"] for item in pending["enrollments"]] == ["pending_review"]
+    assert [item["state"] for item in issuing["enrollments"]] == ["issuing"]

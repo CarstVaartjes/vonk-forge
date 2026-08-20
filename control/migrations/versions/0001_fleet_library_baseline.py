@@ -311,7 +311,6 @@ def upgrade() -> None:
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.Column('decision_actor', sa.String(length=200), nullable=True),
     sa.Column('decided_at', sa.DateTime(timezone=True), nullable=True),
-    sa.Column('rejection_reason', sa.Text(), nullable=True),
     sa.Column('certificate_pem', sa.Text(), nullable=True),
     sa.Column('chain_pem', sa.Text(), nullable=True),
     sa.Column('certificate_serial', sa.String(length=128), nullable=True),

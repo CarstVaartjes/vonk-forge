@@ -614,41 +614,6 @@
         "title": "EndpointResponse",
         "type": "object"
       },
-      "EnrollmentDecisionResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "id": {
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Id",
-            "type": "string"
-          },
-          "node_id": {
-            "pattern": "^spk_[0-9a-f]{32}$",
-            "title": "Node Id",
-            "type": "string"
-          },
-          "state": {
-            "enum": [
-              "pending_review",
-              "issuing",
-              "approved",
-              "rejected",
-              "expired",
-              "certificate_issued"
-            ],
-            "title": "State",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "node_id",
-          "state"
-        ],
-        "title": "EnrollmentDecisionResponse",
-        "type": "object"
-      },
       "EnrollmentGrantResponse": {
         "additionalProperties": false,
         "properties": {
@@ -831,18 +796,6 @@
             "pattern": "^spk_[0-9a-f]{32}$",
             "title": "Node Id",
             "type": "string"
-          },
-          "rejection_reason": {
-            "anyOf": [
-              {
-                "maxLength": 1024,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rejection Reason"
           },
           "state": {
             "maxLength": 32,
@@ -5125,22 +5078,6 @@
         "title": "RecipeTopology",
         "type": "object"
       },
-      "RejectRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "reason": {
-            "maxLength": 1024,
-            "minLength": 1,
-            "title": "Reason",
-            "type": "string"
-          }
-        },
-        "required": [
-          "reason"
-        ],
-        "title": "RejectRequest",
-        "type": "object"
-      },
       "RejectedNode": {
         "additionalProperties": false,
         "properties": {
@@ -7883,184 +7820,6 @@
           }
         ],
         "summary": "Create Grant"
-      }
-    },
-    "/api/v1/agents/enrollments/{enrollment_id}/approve": {
-      "post": {
-        "operationId": "approveAgentEnrollment",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "enrollment_id",
-            "required": true,
-            "schema": {
-              "title": "Enrollment Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnrollmentDecisionResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Service Unavailable"
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "summary": "Approve"
-      }
-    },
-    "/api/v1/agents/enrollments/{enrollment_id}/reject": {
-      "post": {
-        "operationId": "rejectAgentEnrollment",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "enrollment_id",
-            "required": true,
-            "schema": {
-              "title": "Enrollment Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RejectRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnrollmentDecisionResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Service Unavailable"
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "summary": "Reject"
       }
     },
     "/api/v1/agents/nodes/{node_id}/revoke": {

@@ -8,6 +8,7 @@ import hashlib
 import re
 import secrets
 import threading
+import time
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
@@ -58,6 +59,10 @@ class EnrollmentDenied(RuntimeError):
     """Enrollment input or state does not authorize the requested operation."""
 
 
+class EnrollmentIssuanceUncertain(EnrollmentDenied):
+    """A provider write may have succeeded and must never be retried automatically."""
+
+
 class RemoteRevocationUncertain(EnrollmentDenied):
     """Local denial committed, but provider confirmation remains pending."""
 
@@ -80,17 +85,12 @@ class EnrollmentGrant:
 
 
 @dataclass(frozen=True)
-class PendingEnrollment:
-    id: str
-    node_id: str
-    state: str
-
-
-@dataclass(frozen=True)
 class _IssuanceClaim:
+    enrollment_id: str
     node_id: str
     csr_pem: bytes
     purpose: str
+    actor: str
 
 
 @dataclass(frozen=True)
@@ -112,10 +112,14 @@ class EnrollmentService:
         authority: CertificateAuthority,
         *,
         clock: Callable[[], datetime],
+        issuance_replay_wait_seconds: float = 5.0,
     ) -> None:
+        if not 0 <= issuance_replay_wait_seconds <= 30:
+            raise ValueError("issuance replay wait must be between zero and 30 seconds")
         self._sessions = sessions
         self._authority = authority
         self._clock = clock
+        self._issuance_replay_wait_seconds = issuance_replay_wait_seconds
         # SQLite ignores row locks. PostgreSQL correctness comes from the
         # locked grant row; this preserves the same behavior in local tests.
         self._submit_lock = threading.RLock()
@@ -127,7 +131,9 @@ class EnrollmentService:
         # production database transaction boundary.
         self._rotation_lock = threading.RLock()
 
-    def create(self, node_id: str | None, actor: str, ttl_seconds: int) -> EnrollmentGrant:
+    def create(
+        self, node_id: str | None, actor: str, ttl_seconds: int
+    ) -> EnrollmentGrant:
         return self._create(node_id, actor, ttl_seconds, purpose="new-node")
 
     def _create(
@@ -165,11 +171,13 @@ class EnrollmentService:
 
     def submit(
         self, token: str, csr: bytes, evidence: Mapping[str, object]
-    ) -> PendingEnrollment | IssuedCertificate:
+    ) -> IssuedCertificate:
         token_bytes = _decode_token(token)
         now = _utc(self._clock())
         failure: str | None = None
-        outcome: PendingEnrollment | IssuedCertificate | None = None
+        outcome: IssuedCertificate | None = None
+        claim: _IssuanceClaim | None = None
+        wait_for_enrollment_id: str | None = None
         with self._submit_lock, self._sessions.begin() as session:
             grant = session.scalar(
                 select(AgentEnrollmentGrant)
@@ -190,10 +198,8 @@ class EnrollmentService:
                     failure = "enrollment replay does not match original request"
                 elif enrollment.state == "approved":
                     outcome = _issued(enrollment)
-                elif enrollment.state == "rejected":
-                    failure = "enrollment was rejected"
-                elif enrollment.state in {"pending-approval", "issuing"}:
-                    outcome = _pending(enrollment)
+                elif enrollment.state == "issuing":
+                    wait_for_enrollment_id = enrollment.id
                 else:
                     failure = "enrollment state is invalid"
             elif _stored_utc(grant.expires_at) <= now:
@@ -203,8 +209,8 @@ class EnrollmentService:
                 try:
                     if not isinstance(csr, bytes) or len(csr) > _MAX_CSR_BYTES:
                         raise EnrollmentDenied("CSR is too large")
-                    csr_pem, public_key_pem, public_key_fingerprint, csr_node_id = _load_csr(
-                        grant.node_id, csr
+                    csr_pem, public_key_pem, public_key_fingerprint, csr_node_id = (
+                        _load_csr(grant.node_id, csr)
                     )
                 except EnrollmentDenied as error:
                     failure = str(error)
@@ -221,7 +227,7 @@ class EnrollmentService:
                         id=str(uuid.uuid4()),
                         grant_id=grant.id,
                         node_id=node_id,
-                        state="pending-approval",
+                        state="issuing",
                         csr_pem=csr_pem.decode("ascii"),
                         csr_public_key_pem=public_key_pem.decode("ascii"),
                         csr_public_key_fingerprint=public_key_fingerprint,
@@ -230,33 +236,61 @@ class EnrollmentService:
                         agent_digest=values["agent_digest"],
                         boot_id=values["boot_id"],
                         created_at=now,
+                        decision_actor=grant.created_by,
+                        decided_at=now,
                     )
+                    _lock_node_issuance(session, node_id)
+                    if session.get(AgentNode, node_id) is not None:
+                        failure = "node identity already exists"
+                    competing = session.scalar(
+                        select(AgentEnrollment.id)
+                        .where(
+                            AgentEnrollment.node_id == node_id,
+                            AgentEnrollment.state == "issuing",
+                        )
+                        .with_for_update(of=AgentEnrollment)
+                        .limit(1)
+                    )
+                    if competing is not None:
+                        failure = "node enrollment issuance is in progress"
                     grant.node_id = node_id
                     grant.consumed_at = now
-                    session.add(enrollment)
-                    outcome = _pending(enrollment)
+                    if failure is None:
+                        session.add(enrollment)
+                        claim = _IssuanceClaim(
+                            enrollment.id,
+                            node_id,
+                            csr_pem,
+                            grant.purpose,
+                            grant.created_by,
+                        )
                 else:
                     grant.consumed_at = now
         if failure is not None:
             raise EnrollmentDenied(failure)
-        assert outcome is not None
-        return outcome
-
-    def approve(self, enrollment_id: str, actor: str) -> IssuedCertificate:
-        _validate_actor(actor)
-        now = _utc(self._clock())
+        if outcome is not None:
+            return outcome
+        if wait_for_enrollment_id is not None:
+            return self._wait_for_issuance(wait_for_enrollment_id)
+        assert claim is not None
         with self._issuance_lock:
-            claim = self._claim_issuance(enrollment_id, actor, now)
-            if isinstance(claim, IssuedCertificate):
-                return claim
-            issued = self._authority.issue_node(claim.node_id, claim.csr_pem, now)
+            try:
+                issued = self._authority.issue_node(claim.node_id, claim.csr_pem, now)
+            except Exception as error:
+                raise EnrollmentIssuanceUncertain(
+                    "certificate issuance is uncertain; manual recovery required"
+                ) from error
             if issued.node_id != claim.node_id:
-                raise EnrollmentDenied("certificate authority returned a mismatched node identity")
+                raise EnrollmentIssuanceUncertain(
+                    "certificate issuance is uncertain; manual recovery required"
+                )
             try:
                 with self._sessions.begin() as session:
-                    enrollment = _locked_enrollment(session, enrollment_id)
+                    enrollment = _locked_enrollment(session, claim.enrollment_id)
                     if enrollment.state != "issuing":
-                        raise EnrollmentDenied("certificate issuance state changed; manual recovery required")
+                        raise EnrollmentDenied(
+                            "certificate issuance state changed; manual recovery required"
+                        )
                     if (
                         claim.purpose == "new-node"
                         and session.get(AgentNode, enrollment.node_id) is not None
@@ -266,7 +300,7 @@ class EnrollmentService:
                         session,
                         enrollment,
                         issued,
-                        actor,
+                        claim.actor,
                         now,
                         purpose=claim.purpose,
                     )
@@ -281,35 +315,32 @@ class EnrollmentService:
                 # The durable issuing state was committed before the provider
                 # call.  Never retry automatically after an uncertain write:
                 # the provider may already have created this certificate.
-                raise EnrollmentDenied("certificate persistence failed; manual recovery required") from error
+                raise EnrollmentIssuanceUncertain(
+                    "certificate persistence failed; manual recovery required"
+                ) from error
             return issued
 
-    def reject(self, enrollment_id: str, actor: str, reason: str) -> PendingEnrollment:
-        _validate_actor(actor)
-        if not reason.strip():
-            raise ValueError("rejection reason is required")
-        now = _utc(self._clock())
-        with self._sessions.begin() as session:
-            enrollment = _locked_enrollment(session, enrollment_id)
-            if enrollment.state == "approved":
-                raise EnrollmentDenied("enrollment already approved")
-            if enrollment.state == "rejected":
-                return _pending(enrollment)
-            if enrollment.state != "pending-approval":
-                raise EnrollmentDenied("enrollment state cannot be rejected")
-            enrollment.state = "rejected"
-            enrollment.decision_actor = actor
-            enrollment.decided_at = now
-            enrollment.rejection_reason = reason
-            return _pending(enrollment)
+    def _wait_for_issuance(self, enrollment_id: str) -> IssuedCertificate:
+        deadline = time.monotonic() + self._issuance_replay_wait_seconds
+        while time.monotonic() < deadline:
+            with self._sessions() as session:
+                enrollment = session.get(AgentEnrollment, enrollment_id)
+                if enrollment is None:
+                    raise EnrollmentDenied("enrollment state is invalid")
+                if enrollment.state == "approved":
+                    return _issued(enrollment)
+                if enrollment.state != "issuing":
+                    raise EnrollmentDenied("enrollment state is invalid")
+            time.sleep(0.01)
+        raise EnrollmentIssuanceUncertain(
+            "certificate issuance is uncertain; manual recovery required"
+        )
 
     def renew(self, node_id: str, serial: str, csr: bytes) -> IssuedCertificate:
         with self._rotation_lock:
             return self._renew_locked(node_id, serial, csr)
 
-    def _renew_locked(
-        self, node_id: str, serial: str, csr: bytes
-    ) -> IssuedCertificate:
+    def _renew_locked(self, node_id: str, serial: str, csr: bytes) -> IssuedCertificate:
         _validate_node_id(node_id)
         if not serial.strip():
             raise ValueError("certificate serial is required")
@@ -372,27 +403,38 @@ class EnrollmentService:
     ) -> _RotationClaim | IssuedCertificate:
         with self._sessions.begin() as session:
             node = session.scalar(
-                select(AgentNode).where(AgentNode.node_id == node_id).with_for_update(of=AgentNode)
+                select(AgentNode)
+                .where(AgentNode.node_id == node_id)
+                .with_for_update(of=AgentNode)
             )
             if node is None:
                 raise EnrollmentDenied("certificate serial does not identify node")
-            certificates = list(session.scalars(
-                select(AgentCertificate)
-                .where(AgentCertificate.node_id == node_id)
-                .order_by(AgentCertificate.serial)
-                .with_for_update(of=AgentCertificate)
-            ))
+            certificates = list(
+                session.scalars(
+                    select(AgentCertificate)
+                    .where(AgentCertificate.node_id == node_id)
+                    .order_by(AgentCertificate.serial)
+                    .with_for_update(of=AgentCertificate)
+                )
+            )
             certificate = next(
                 (candidate for candidate in certificates if candidate.serial == serial),
                 None,
             )
             if certificate is None:
                 raise EnrollmentDenied("certificate serial does not identify node")
-            if node.state != "active" or node.revoked_at is not None or certificate.revoked_at is not None:
+            if (
+                node.state != "active"
+                or node.revoked_at is not None
+                or certificate.revoked_at is not None
+            ):
                 raise EnrollmentDenied("node identity is retired or revoked")
             if certificate.state != "active":
                 raise EnrollmentDenied("certificate is not active")
-            if _stored_utc(certificate.not_before) > now or _stored_utc(certificate.not_after) <= now:
+            if (
+                _stored_utc(certificate.not_before) > now
+                or _stored_utc(certificate.not_after) <= now
+            ):
                 raise EnrollmentDenied("certificate is not currently valid")
             staged = next(
                 (
@@ -404,7 +446,9 @@ class EnrollmentService:
             )
             if staged is not None:
                 if staged.csr_public_key_fingerprint != csr_fingerprint:
-                    raise EnrollmentDenied("a different certificate rotation is already staged")
+                    raise EnrollmentDenied(
+                        "a different certificate rotation is already staged"
+                    )
                 return _certificate_issued(staged)
             intent = session.scalar(
                 select(AgentCertificateRotation)
@@ -417,20 +461,26 @@ class EnrollmentService:
                     or intent.csr_public_key_fingerprint != csr_fingerprint
                     or intent.csr_pem != normalized_csr.decode("ascii")
                 ):
-                    raise EnrollmentDenied("a different certificate rotation is already in progress")
+                    raise EnrollmentDenied(
+                        "a different certificate rotation is already in progress"
+                    )
                 if (
                     intent.state == "issuing"
-                    and now - _stored_utc(intent.updated_at) >= _ROTATION_ISSUANCE_TIMEOUT
+                    and now - _stored_utc(intent.updated_at)
+                    >= _ROTATION_ISSUANCE_TIMEOUT
                 ):
                     intent.state = "manual-recovery"
                     intent.updated_at = now
                 if intent.state not in {"issuing", "manual-recovery"}:
                     raise EnrollmentDenied("certificate rotation state is invalid")
                 return _rotation_claim(intent, owner=False)
-            generation = max(
-                (candidate.generation for candidate in certificates),
-                default=0,
-            ) + 1
+            generation = (
+                max(
+                    (candidate.generation for candidate in certificates),
+                    default=0,
+                )
+                + 1
+            )
             intent = AgentCertificateRotation(
                 node_id=node_id,
                 source_serial=serial,
@@ -451,7 +501,9 @@ class EnrollmentService:
         claim: _RotationClaim,
     ) -> None:
         if issued.node_id != claim.node_id:
-            raise EnrollmentDenied("certificate authority returned a mismatched node identity")
+            raise EnrollmentDenied(
+                "certificate authority returned a mismatched node identity"
+            )
         if issued.serial == claim.source_serial:
             raise EnrollmentDenied("certificate authority reused renewal serial")
         try:
@@ -482,12 +534,14 @@ class EnrollmentService:
                     now,
                 )
                 return "revocation-pending"
-            certificates = list(session.scalars(
-                select(AgentCertificate)
-                .where(AgentCertificate.node_id == claim.node_id)
-                .order_by(AgentCertificate.serial)
-                .with_for_update(of=AgentCertificate)
-            ))
+            certificates = list(
+                session.scalars(
+                    select(AgentCertificate)
+                    .where(AgentCertificate.node_id == claim.node_id)
+                    .order_by(AgentCertificate.serial)
+                    .with_for_update(of=AgentCertificate)
+                )
+            )
             intent = session.scalar(
                 select(AgentCertificateRotation)
                 .where(
@@ -518,19 +572,21 @@ class EnrollmentService:
             )
             state = "revoked" if denied else "staged"
             revoked_at = now if denied else None
-            session.add(AgentCertificate(
-                serial=issued.serial,
-                node_id=claim.node_id,
-                not_before=issued.not_before,
-                not_after=issued.not_after,
-                fingerprint=issued.fingerprint,
-                state=state,
-                generation=claim.generation,
-                certificate_pem=issued.certificate_pem.decode("ascii"),
-                chain_pem=issued.chain_pem.decode("ascii"),
-                csr_public_key_fingerprint=claim.csr_public_key_fingerprint,
-                revoked_at=revoked_at,
-            ))
+            session.add(
+                AgentCertificate(
+                    serial=issued.serial,
+                    node_id=claim.node_id,
+                    not_before=issued.not_before,
+                    not_after=issued.not_after,
+                    fingerprint=issued.fingerprint,
+                    state=state,
+                    generation=claim.generation,
+                    certificate_pem=issued.certificate_pem.decode("ascii"),
+                    chain_pem=issued.chain_pem.decode("ascii"),
+                    csr_public_key_fingerprint=claim.csr_public_key_fingerprint,
+                    revoked_at=revoked_at,
+                )
+            )
             if denied:
                 intent.state = "revocation-pending"
                 intent.updated_at = now
@@ -563,16 +619,18 @@ class EnrollmentService:
                     "issued-certificate revocation evidence conflicts; manual recovery required"
                 )
             return
-        session.add(AgentIssuedCertificateRevocation(
-            serial=issued.serial,
-            node_id=claim.node_id,
-            provider_request_id=claim.provider_request_id,
-            fingerprint=issued.fingerprint,
-            generation=claim.generation,
-            state="revocation-pending",
-            created_at=now,
-            updated_at=now,
-        ))
+        session.add(
+            AgentIssuedCertificateRevocation(
+                serial=issued.serial,
+                node_id=claim.node_id,
+                provider_request_id=claim.provider_request_id,
+                fingerprint=issued.fingerprint,
+                generation=claim.generation,
+                state="revocation-pending",
+                created_at=now,
+                updated_at=now,
+            )
+        )
         session.flush()
 
     def _revoke_denied_rotation(
@@ -603,12 +661,14 @@ class EnrollmentService:
                 )
                 if node is None:
                     return
-                list(session.scalars(
-                    select(AgentCertificate)
-                    .where(AgentCertificate.node_id == claim.node_id)
-                    .order_by(AgentCertificate.serial)
-                    .with_for_update(of=AgentCertificate)
-                ))
+                list(
+                    session.scalars(
+                        select(AgentCertificate)
+                        .where(AgentCertificate.node_id == claim.node_id)
+                        .order_by(AgentCertificate.serial)
+                        .with_for_update(of=AgentCertificate)
+                    )
+                )
                 intent = session.scalar(
                     select(AgentCertificateRotation)
                     .where(
@@ -630,16 +690,21 @@ class EnrollmentService:
         with self._rotation_lock:
             self._activate_locked(node_id, serial, generation)
 
-    def _activate_locked(
-        self, node_id: str, serial: str, generation: int
-    ) -> None:
+    def _activate_locked(self, node_id: str, serial: str, generation: int) -> None:
         _validate_node_id(node_id)
-        if not serial.strip() or not isinstance(generation, int) or isinstance(generation, bool) or generation < 1:
+        if (
+            not serial.strip()
+            or not isinstance(generation, int)
+            or isinstance(generation, bool)
+            or generation < 1
+        ):
             raise ValueError("certificate activation identity is invalid")
         now = _utc(self._clock())
         with self._sessions.begin() as session:
             node = session.scalar(
-                select(AgentNode).where(AgentNode.node_id == node_id).with_for_update(of=AgentNode)
+                select(AgentNode)
+                .where(AgentNode.node_id == node_id)
+                .with_for_update(of=AgentNode)
             )
             certificate = session.scalar(
                 select(AgentCertificate)
@@ -664,14 +729,16 @@ class EnrollmentService:
                 or _stored_utc(certificate.not_after) <= now
             ):
                 raise EnrollmentDenied("certificate is not staged for activation")
-            older = list(session.scalars(
-                select(AgentCertificate)
-                .where(
-                    AgentCertificate.node_id == node_id,
-                    AgentCertificate.generation < generation,
+            older = list(
+                session.scalars(
+                    select(AgentCertificate)
+                    .where(
+                        AgentCertificate.node_id == node_id,
+                        AgentCertificate.generation < generation,
+                    )
+                    .with_for_update(of=AgentCertificate)
                 )
-                .with_for_update(of=AgentCertificate)
-            ))
+            )
             certificate.state = "active"
             for previous in older:
                 previous.state = "revoked"
@@ -689,27 +756,33 @@ class EnrollmentService:
         now = _utc(self._clock())
         with self._sessions.begin() as session:
             node = session.scalar(
-                select(AgentNode).where(AgentNode.node_id == node_id).with_for_update(of=AgentNode)
+                select(AgentNode)
+                .where(AgentNode.node_id == node_id)
+                .with_for_update(of=AgentNode)
             )
             certificates: list[AgentCertificate] = []
             if node is not None:
-                certificates = list(session.scalars(
-                    select(AgentCertificate)
-                    .where(AgentCertificate.node_id == node_id)
-                    .order_by(AgentCertificate.serial)
-                    .with_for_update(of=AgentCertificate)
-                ))
+                certificates = list(
+                    session.scalars(
+                        select(AgentCertificate)
+                        .where(AgentCertificate.node_id == node_id)
+                        .order_by(AgentCertificate.serial)
+                        .with_for_update(of=AgentCertificate)
+                    )
+                )
                 session.scalar(
                     select(AgentCertificateRotation)
                     .where(AgentCertificateRotation.node_id == node_id)
                     .with_for_update(of=AgentCertificateRotation)
                 )
-            orphan_evidence = list(session.scalars(
-                select(AgentIssuedCertificateRevocation)
-                .where(AgentIssuedCertificateRevocation.node_id == node_id)
-                .order_by(AgentIssuedCertificateRevocation.serial)
-                .with_for_update(of=AgentIssuedCertificateRevocation)
-            ))
+            orphan_evidence = list(
+                session.scalars(
+                    select(AgentIssuedCertificateRevocation)
+                    .where(AgentIssuedCertificateRevocation.node_id == node_id)
+                    .order_by(AgentIssuedCertificateRevocation.serial)
+                    .with_for_update(of=AgentIssuedCertificateRevocation)
+                )
+            )
             if node is None and not orphan_evidence:
                 raise EnrollmentDenied("node identity does not exist")
             if node is not None:
@@ -738,7 +811,9 @@ class EnrollmentService:
             else:
                 self._confirm_remote_revocation(node_id, serial, now)
         if uncertain:
-            raise RemoteRevocationUncertain("local revocation complete; remote CA revocation is uncertain")
+            raise RemoteRevocationUncertain(
+                "local revocation complete; remote CA revocation is uncertain"
+            )
 
     def _confirm_remote_revocation(
         self,
@@ -802,44 +877,6 @@ class EnrollmentService:
                 intent.state = "revoked"
                 intent.updated_at = now
 
-    def _claim_issuance(self, enrollment_id: str, actor: str, now: datetime) -> _IssuanceClaim | IssuedCertificate:
-        with self._sessions.begin() as session:
-            enrollment = _locked_enrollment(session, enrollment_id)
-            if enrollment.state == "approved":
-                return _issued(enrollment)
-            if enrollment.state == "rejected":
-                raise EnrollmentDenied("enrollment was rejected")
-            if enrollment.state == "issuing":
-                raise EnrollmentDenied("certificate issuance is in progress; manual recovery required")
-            if enrollment.state != "pending-approval":
-                raise EnrollmentDenied("enrollment state cannot be approved")
-            _lock_node_issuance(session, enrollment.node_id)
-            grant = session.get(AgentEnrollmentGrant, enrollment.grant_id)
-            if grant is None or grant.purpose != "new-node":
-                raise EnrollmentDenied("enrollment purpose is invalid")
-            if session.get(AgentNode, enrollment.node_id) is not None:
-                raise EnrollmentDenied("node identity already exists")
-            competing = session.scalar(
-                select(AgentEnrollment.id)
-                .where(
-                    AgentEnrollment.node_id == enrollment.node_id,
-                    AgentEnrollment.id != enrollment.id,
-                    AgentEnrollment.state == "issuing",
-                )
-                .with_for_update(of=AgentEnrollment)
-                .limit(1)
-            )
-            if competing is not None:
-                raise EnrollmentDenied("node enrollment issuance is in progress")
-            enrollment.state = "issuing"
-            enrollment.decision_actor = actor
-            enrollment.decided_at = now
-            return _IssuanceClaim(
-                enrollment.node_id,
-                enrollment.csr_pem.encode("ascii"),
-                grant.purpose,
-            )
-
 
 def _persist_issued_enrollment(
     session: Session,
@@ -854,7 +891,9 @@ def _persist_issued_enrollment(
         certificate_pem = issued.certificate_pem.decode("ascii")
         chain_pem = issued.chain_pem.decode("ascii")
     except UnicodeDecodeError as error:
-        raise EnrollmentDenied("certificate authority returned non-PEM certificate material") from error
+        raise EnrollmentDenied(
+            "certificate authority returned non-PEM certificate material"
+        ) from error
     node = session.get(AgentNode, enrollment.node_id)
     if purpose != "new-node" or node is not None:
         raise EnrollmentDenied("enrollment purpose is invalid")
@@ -868,17 +907,19 @@ def _persist_issued_enrollment(
     # the FK parent explicitly for PostgreSQL.
     session.flush([node])
     generation = 1
-    session.add(AgentCertificate(
-        serial=issued.serial,
-        node_id=enrollment.node_id,
-        not_before=issued.not_before,
-        not_after=issued.not_after,
-        fingerprint=issued.fingerprint,
-        state="active",
-        generation=generation,
-        certificate_pem=certificate_pem,
-        chain_pem=chain_pem,
-    ))
+    session.add(
+        AgentCertificate(
+            serial=issued.serial,
+            node_id=enrollment.node_id,
+            not_before=issued.not_before,
+            not_after=issued.not_after,
+            fingerprint=issued.fingerprint,
+            state="active",
+            generation=generation,
+            certificate_pem=certificate_pem,
+            chain_pem=chain_pem,
+        )
+    )
     enrollment.state = "approved"
     enrollment.decision_actor = actor
     enrollment.decided_at = now
@@ -893,7 +934,9 @@ def _persist_issued_enrollment(
 
 def _locked_enrollment(session: Session, enrollment_id: str) -> AgentEnrollment:
     enrollment = session.scalar(
-        select(AgentEnrollment).where(AgentEnrollment.id == enrollment_id).with_for_update(of=AgentEnrollment)
+        select(AgentEnrollment)
+        .where(AgentEnrollment.id == enrollment_id)
+        .with_for_update(of=AgentEnrollment)
     )
     if enrollment is None:
         raise EnrollmentDenied("unknown enrollment")
@@ -903,20 +946,25 @@ def _locked_enrollment(session: Session, enrollment_id: str) -> AgentEnrollment:
 def _lock_node_issuance(session: Session, node_id: str) -> None:
     """Serialize claims for an absent node identity across PostgreSQL services."""
     if session.get_bind().dialect.name == "postgresql":
-        key = int.from_bytes(hashlib.sha256(node_id.encode("ascii")).digest()[:8], "big", signed=True)
+        key = int.from_bytes(
+            hashlib.sha256(node_id.encode("ascii")).digest()[:8], "big", signed=True
+        )
         session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": key})
 
 
 def _issued(enrollment: AgentEnrollment) -> IssuedCertificate:
-    if any(value is None for value in (
-        enrollment.certificate_pem,
-        enrollment.chain_pem,
-        enrollment.certificate_serial,
-        enrollment.certificate_fingerprint,
-        enrollment.certificate_not_before,
-        enrollment.certificate_not_after,
-        enrollment.certificate_generation,
-    )):
+    if any(
+        value is None
+        for value in (
+            enrollment.certificate_pem,
+            enrollment.chain_pem,
+            enrollment.certificate_serial,
+            enrollment.certificate_fingerprint,
+            enrollment.certificate_not_before,
+            enrollment.certificate_not_after,
+            enrollment.certificate_generation,
+        )
+    ):
         raise RuntimeError("approved enrollment is missing certificate metadata")
     return IssuedCertificate(
         node_id=enrollment.node_id,
@@ -928,10 +976,6 @@ def _issued(enrollment: AgentEnrollment) -> IssuedCertificate:
         not_after=_stored_utc(enrollment.certificate_not_after),  # type: ignore[arg-type]
         generation=enrollment.certificate_generation,  # type: ignore[arg-type]
     )
-
-
-def _pending(enrollment: AgentEnrollment) -> PendingEnrollment:
-    return PendingEnrollment(id=enrollment.id, node_id=enrollment.node_id, state=enrollment.state)
 
 
 def _replay_matches(
@@ -991,9 +1035,7 @@ def _rotation_claim(
     )
 
 
-def _load_csr(
-    node_id: str | None, csr: bytes
-) -> tuple[bytes, bytes, str, str]:
+def _load_csr(node_id: str | None, csr: bytes) -> tuple[bytes, bytes, str, str]:
     try:
         request = x509.load_pem_x509_csr(csr)
     except (TypeError, ValueError) as error:
@@ -1009,20 +1051,35 @@ def _load_csr(
     if len(request.extensions) != 1:
         raise EnrollmentDenied("CSR must contain only the node URI SAN extension")
     try:
-        sans = request.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+        sans = request.extensions.get_extension_for_class(
+            x509.SubjectAlternativeName
+        ).value
     except x509.ExtensionNotFound as error:
         raise EnrollmentDenied("CSR node URI SAN is required") from error
-    expected_sans = x509.SubjectAlternativeName([
-        x509.UniformResourceIdentifier(f"spiffe://vonk-forge.local/node/{csr_node_id}")
-    ])
+    expected_sans = x509.SubjectAlternativeName(
+        [
+            x509.UniformResourceIdentifier(
+                f"spiffe://vonk-forge.local/node/{csr_node_id}"
+            )
+        ]
+    )
     if sans != expected_sans:
         raise EnrollmentDenied("CSR node URI SAN does not match enrollment node")
     public_key = request.public_key()
     if not isinstance(public_key, ed25519.Ed25519PublicKey):
         raise EnrollmentDenied("CSR public key must be Ed25519")
-    public_key_pem = public_key.public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
-    public_key_der = public_key.public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
-    return request.public_bytes(serialization.Encoding.PEM), public_key_pem, _digest(public_key_der), csr_node_id
+    public_key_pem = public_key.public_bytes(
+        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
+    )
+    public_key_der = public_key.public_bytes(
+        serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+    )
+    return (
+        request.public_bytes(serialization.Encoding.PEM),
+        public_key_pem,
+        _digest(public_key_der),
+        csr_node_id,
+    )
 
 
 def _validate_evidence(
@@ -1036,7 +1093,11 @@ def _validate_evidence(
         return values, "evidence fields are invalid"
     for name in _EVIDENCE_FIELDS:
         value = evidence.get(name)
-        if not isinstance(value, str) or not value.strip() or len(value) > _EVIDENCE_LIMITS[name]:
+        if (
+            not isinstance(value, str)
+            or not value.strip()
+            or len(value) > _EVIDENCE_LIMITS[name]
+        ):
             return values, f"evidence {name} is required"
         values[name] = value
     if values["node_id"] != csr_node_id:
@@ -1056,7 +1117,9 @@ def _decode_token(token: str) -> bytes:
     if not isinstance(token, str) or _TOKEN.fullmatch(token) is None:
         raise EnrollmentDenied("invalid enrollment grant")
     try:
-        value = base64.b64decode((token + "=").encode("ascii"), altchars=b"-_", validate=True)
+        value = base64.b64decode(
+            (token + "=").encode("ascii"), altchars=b"-_", validate=True
+        )
     except (ValueError, binascii.Error) as error:
         raise EnrollmentDenied("invalid enrollment grant") from error
     if len(value) != 32:
@@ -1070,7 +1133,9 @@ def _digest(value: bytes) -> str:
 
 def _validate_node_id(node_id: str) -> None:
     if _NODE_ID.fullmatch(node_id) is None:
-        raise ValueError("node ID must be a canonical spk_<32 lowercase hex characters> value")
+        raise ValueError(
+            "node ID must be a canonical spk_<32 lowercase hex characters> value"
+        )
 
 
 def _validate_actor(actor: str) -> None:

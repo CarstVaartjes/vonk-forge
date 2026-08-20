@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from cryptography import x509
-from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -37,10 +37,22 @@ NODE_ID = "spk_" + "c" * 32
 
 
 class _Authority(CertificateAuthority):
-    def issue_node(self, node_id: str, public_key_pem: bytes, now: datetime) -> IssuedCertificate:
-        return IssuedCertificate(node_id, b"certificate", b"chain", "serial-c", "fp-c", now, now + timedelta(days=1))
+    def issue_node(
+        self, node_id: str, public_key_pem: bytes, now: datetime
+    ) -> IssuedCertificate:
+        return IssuedCertificate(
+            node_id,
+            b"certificate",
+            b"chain",
+            "serial-c",
+            "fp-c",
+            now,
+            now + timedelta(days=1),
+        )
 
-    def renew_node(self, node_id: str, public_key_pem: bytes, now: datetime, *, request_id: str) -> IssuedCertificate:
+    def renew_node(
+        self, node_id: str, public_key_pem: bytes, now: datetime, *, request_id: str
+    ) -> IssuedCertificate:
         return self.issue_node(node_id, public_key_pem, now)
 
     def revocation_bundle(self, now: datetime) -> bytes:
@@ -59,15 +71,45 @@ def _csr() -> bytes:
     key = ed25519.Ed25519PrivateKey.generate()
     return (
         x509.CertificateSigningRequestBuilder()
-        .subject_name(x509.Name([x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, NODE_ID)]))
+        .subject_name(
+            x509.Name([x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, NODE_ID)])
+        )
         .add_extension(
             x509.SubjectAlternativeName(
-                [x509.UniformResourceIdentifier(f"spiffe://vonk-forge.local/node/{NODE_ID}")]
+                [
+                    x509.UniformResourceIdentifier(
+                        f"spiffe://vonk-forge.local/node/{NODE_ID}"
+                    )
+                ]
             ),
             critical=False,
         )
         .sign(key, algorithm=None)
         .public_bytes(serialization.Encoding.PEM)
+    )
+
+
+def _bootstrap_config() -> EnrollmentBootstrapConfig:
+    key = ed25519.Ed25519PrivateKey.generate()
+    subject = x509.Name(
+        [x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, "controller-ca")]
+    )
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(subject)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(datetime(2026, 8, 17, tzinfo=UTC))
+        .not_valid_after(datetime(2027, 8, 18, tzinfo=UTC))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+        .sign(key, algorithm=None)
+    )
+    return EnrollmentBootstrapConfig(
+        controller_endpoint="https://agents.example.test:8443",
+        enrollment_endpoint="https://enroll.example.test:8443",
+        ca_fingerprint=certificate.fingerprint(hashes.SHA256()).hex(),
+        ca_pem=certificate.public_bytes(serialization.Encoding.PEM).decode("ascii"),
     )
 
 
@@ -100,11 +142,7 @@ def run_fresh_fleet_library_smoke() -> dict[str, object]:
         workload_tuf_metadata_root=root / "workload-tuf-metadata",
         workload_tuf_target_root=root / "workload-tuf-targets",
         fabric_policy=ManagementAddressPolicy.parse("192.168.100.0/24"),
-        bootstrap=EnrollmentBootstrapConfig(
-            controller_endpoint="https://agents.example.test:8443",
-            enrollment_endpoint="https://enroll.example.test:8443",
-            ca_fingerprint="a" * 64,
-        ),
+        bootstrap=_bootstrap_config(),
     )
     for path in (
         services.artifact_root,
@@ -133,7 +171,9 @@ def run_fresh_fleet_library_smoke() -> dict[str, object]:
         metrics=MetricsRegistry(),
     )
     client = TestClient(app)
-    token = codec.issue(Actor("admin", "administrator"), ttl_seconds=600, now=int(now.timestamp()))
+    token = codec.issue(
+        Actor("admin", "administrator"), ttl_seconds=600, now=int(now.timestamp())
+    )
     headers = {"Authorization": f"Bearer {token}"}
     initial = client.get("/api/v1/fleet", headers=headers)
     assert initial.status_code == 200, initial.text
@@ -145,10 +185,14 @@ def run_fresh_fleet_library_smoke() -> dict[str, object]:
     )
     assert grant.status_code == 201, grant.text
     csr = _csr()
-    public = x509.load_pem_x509_csr(csr).public_key().public_bytes(
-        serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+    public = (
+        x509.load_pem_x509_csr(csr)
+        .public_key()
+        .public_bytes(
+            serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+        )
     )
-    pending = client.post(
+    issued = client.post(
         "/agent/v1/enroll",
         json={
             "grant_token": grant.json()["token"],
@@ -163,11 +207,7 @@ def run_fresh_fleet_library_smoke() -> dict[str, object]:
             },
         },
     )
-    assert pending.status_code == 202, pending.text
-    approval = client.post(
-        f"/api/v1/agents/enrollments/{pending.json()['id']}/approve", headers=headers
-    )
-    assert approval.status_code == 200, approval.text
+    assert issued.status_code == 200, issued.text
     active = client.get("/api/v1/fleet", headers=headers)
     assert active.status_code == 200, active.text
     node_ids = [node["id"] for node in active.json()["nodes"]]
@@ -192,7 +232,7 @@ def run_fresh_fleet_library_smoke() -> dict[str, object]:
             if event["action"]
             in {
                 "agent.enrollment.grant.create",
-                "agent.enrollment.approve",
+                "agent.enrollment.submit.approved",
                 "agent.node.revoke",
             }
         ],
@@ -200,5 +240,7 @@ def run_fresh_fleet_library_smoke() -> dict[str, object]:
             item["node_id"] == NODE_ID and item["revoked_at"] is not None
             for item in history.json()["identities"]
         ),
-        "library_recipe_count": len(library.json().get("recipes", library.json().get("unlinked_recipes", []))),
+        "library_recipe_count": len(
+            library.json().get("recipes", library.json().get("unlinked_recipes", []))
+        ),
     }

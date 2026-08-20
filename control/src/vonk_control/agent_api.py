@@ -48,8 +48,8 @@ from .auth import (
 from .enrollment import (
     MAX_ENROLLMENT_GRANT_TTL_SECONDS,
     EnrollmentDenied,
+    EnrollmentIssuanceUncertain,
     EnrollmentService,
-    PendingEnrollment,
     RemoteRevocationUncertain,
     RenewalInProgress,
 )
@@ -72,7 +72,6 @@ from .models import (
     RecipeSourceBundle,
 )
 from .operation_api import bounded_error_responses
-from .pki import IssuedCertificate
 from .presence import AgentPresenceService, ManagementAddressPolicy, PresenceError
 from .recipe_contract import recipe_content_sha256, validate_recipe
 from .recipe_operations import RecipeRunObservation, record_recipe_run_observations
@@ -208,45 +207,13 @@ class EnrollmentSubmitRequest(BaseModel):
         return evidence
 
 
-class RejectRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    reason: str = Field(min_length=1, max_length=1024)
-
-
-class EnrollmentDecisionResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    id: str = Field(min_length=1, max_length=128)
-    node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
-    state: Literal[
-        "pending_review",
-        "issuing",
-        "approved",
-        "rejected",
-        "expired",
-        "certificate_issued",
-    ]
-
-
-_ENROLLMENT_API_STATES = frozenset(
-    {
-        "pending_review",
-        "issuing",
-        "approved",
-        "rejected",
-        "expired",
-        "certificate_issued",
-    }
-)
+_ENROLLMENT_API_STATES = frozenset({"issuing", "certificate_issued"})
 
 
 def _enrollment_api_state(enrollment: AgentEnrollment) -> str:
-    if enrollment.state == "pending-approval":
-        return "pending_review"
     if enrollment.state == "approved":
-        return "certificate_issued" if enrollment.certificate_serial else "approved"
-    if enrollment.state == "issuing":
-        return "issuing"
-    return enrollment.state
+        return "certificate_issued"
+    return "issuing"
 
 
 class EnrollmentGrantResponse(BaseModel):
@@ -258,6 +225,14 @@ class EnrollmentGrantResponse(BaseModel):
     controller_endpoint: str = Field(min_length=1, max_length=2048)
     enrollment_endpoint: str = Field(min_length=1, max_length=2048)
     ca_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class EnrollmentBootstrapResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    controller_endpoint: str = Field(min_length=1, max_length=2048)
+    enrollment_endpoint: str = Field(min_length=1, max_length=2048)
+    ca_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    ca_pem: str = Field(min_length=1, max_length=64 * 1024)
 
 
 class EnrollmentSummary(BaseModel):
@@ -273,7 +248,6 @@ class EnrollmentSummary(BaseModel):
     created_at: str = Field(min_length=1, max_length=64)
     decision_actor: str | None = Field(default=None, max_length=200)
     decided_at: str | None = Field(default=None, max_length=64)
-    rejection_reason: str | None = Field(default=None, max_length=1024)
     certificate_serial: str | None = Field(default=None, max_length=256)
     certificate_fingerprint: str | None = Field(default=None, max_length=512)
 
@@ -769,7 +743,6 @@ def _enrollment_view(enrollment: AgentEnrollment) -> dict[str, object]:
         "decided_at": _now(enrollment.decided_at).isoformat()
         if enrollment.decided_at
         else None,
-        "rejection_reason": enrollment.rejection_reason,
         "certificate_serial": enrollment.certificate_serial,
         "certificate_fingerprint": enrollment.certificate_fingerprint,
     }
@@ -1187,12 +1160,8 @@ def install_agent_routes(
                 if state not in _ENROLLMENT_API_STATES:
                     raise HTTPException(status_code=422, detail="state is invalid")
                 persistence_state = {
-                    "pending_review": "pending-approval",
                     "issuing": "issuing",
-                    "approved": "approved",
                     "certificate_issued": "approved",
-                    "rejected": "rejected",
-                    "expired": "expired",
                 }[state]
                 statement = statement.where(AgentEnrollment.state == persistence_state)
             if cursor is not None:
@@ -1227,75 +1196,6 @@ def install_agent_routes(
         )
 
     @human.post(
-        "/enrollments/{enrollment_id}/approve",
-        response_model=EnrollmentDecisionResponse,
-        responses=bounded_error_responses(401, 403, 409, 503),
-    )
-    def approve(
-        enrollment_id: str,
-        request: Request,
-        authenticated: Actor = authenticated_actor,
-    ) -> EnrollmentDecisionResponse:
-        _require_administrator(
-            authenticated, "/api/v1/agents/enrollments/{enrollment_id}/approve"
-        )
-        required = _require_services(services)
-        try:
-            issued = required.enrollment.approve(enrollment_id, authenticated.subject)
-        except (EnrollmentDenied, ValueError) as error:
-            raise HTTPException(status_code=409, detail=str(error)) from None
-        audits.append(
-            AuditRecord(
-                request.state.request_id,
-                authenticated.subject,
-                "agent.enrollment.approve",
-                None,
-                (enrollment_id, issued.node_id),
-            )
-        )
-        return EnrollmentDecisionResponse(
-            id=enrollment_id,
-            node_id=issued.node_id,
-            state="approved",
-        )
-
-    @human.post(
-        "/enrollments/{enrollment_id}/reject",
-        response_model=EnrollmentDecisionResponse,
-        responses=bounded_error_responses(401, 403, 409, 503),
-    )
-    def reject(
-        enrollment_id: str,
-        body: RejectRequest,
-        request: Request,
-        authenticated: Actor = authenticated_actor,
-    ) -> EnrollmentDecisionResponse:
-        _require_administrator(
-            authenticated, "/api/v1/agents/enrollments/{enrollment_id}/reject"
-        )
-        required = _require_services(services)
-        try:
-            record = required.enrollment.reject(
-                enrollment_id, authenticated.subject, body.reason
-            )
-        except (EnrollmentDenied, ValueError) as error:
-            raise HTTPException(status_code=409, detail=str(error)) from None
-        audits.append(
-            AuditRecord(
-                request.state.request_id,
-                authenticated.subject,
-                "agent.enrollment.reject",
-                None,
-                (record.id, record.node_id),
-            )
-        )
-        return EnrollmentDecisionResponse(
-            id=record.id,
-            node_id=record.node_id,
-            state="rejected",
-        )
-
-    @human.post(
         "/nodes/{node_id}/revoke",
         status_code=status.HTTP_204_NO_CONTENT,
         responses=bounded_error_responses(401, 403, 404, 503),
@@ -1326,7 +1226,28 @@ def install_agent_routes(
         )
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-    @agent.post("/enroll", status_code=status.HTTP_202_ACCEPTED)
+    @agent.get(
+        "/bootstrap",
+        response_model=EnrollmentBootstrapResponse,
+        responses=bounded_error_responses(503),
+    )
+    def enrollment_bootstrap() -> Response:
+        required = _require_services(services)
+        if required.bootstrap is None:
+            raise HTTPException(
+                status_code=503,
+                detail="agent enrollment bootstrap is unavailable",
+            )
+        return _json_response(
+            EnrollmentBootstrapResponse(
+                controller_endpoint=required.bootstrap.controller_endpoint,
+                enrollment_endpoint=required.bootstrap.enrollment_endpoint,
+                ca_fingerprint=required.bootstrap.ca_fingerprint,
+                ca_pem=required.bootstrap.ca_pem,
+            ).model_dump()
+        )
+
+    @agent.post("/enroll")
     async def enroll(request: Request) -> Response:
         required = _require_services(services)
         if not limiter.admit():
@@ -1386,6 +1307,20 @@ def install_agent_routes(
             outcome = required.enrollment.submit(
                 body["grant_token"], csr_bytes, service_evidence
             )
+        except EnrollmentIssuanceUncertain as error:
+            token_identifier = hashlib.sha256(
+                body["grant_token"].encode("utf-8")
+            ).hexdigest()
+            audits.append(
+                AuditRecord(
+                    request.state.request_id,
+                    "agent-enrollment",
+                    "agent.enrollment.submit.uncertain",
+                    None,
+                    (f"token-sha256:{token_identifier}",),
+                )
+            )
+            raise HTTPException(status_code=503, detail=str(error)) from None
         except EnrollmentDenied as error:
             token_identifier = hashlib.sha256(
                 body["grant_token"].encode("utf-8")
@@ -1401,25 +1336,6 @@ def install_agent_routes(
             )
             _consume_enrollment_denial(required, scan.tokens)
             raise HTTPException(status_code=403, detail=str(error)) from None
-        if isinstance(outcome, IssuedCertificate):
-            token_identifier = hashlib.sha256(
-                body["grant_token"].encode("utf-8")
-            ).hexdigest()
-            audits.append(
-                AuditRecord(
-                    request.state.request_id,
-                    "agent-enrollment",
-                    "agent.enrollment.submit.approved",
-                    None,
-                    (
-                        f"token-sha256:{token_identifier}",
-                        outcome.node_id,
-                        f"certificate-serial:{outcome.serial}",
-                    ),
-                )
-            )
-            return _json_response(_issued_response(outcome))
-        assert isinstance(outcome, PendingEnrollment)
         token_identifier = hashlib.sha256(
             body["grant_token"].encode("utf-8")
         ).hexdigest()
@@ -1427,15 +1343,16 @@ def install_agent_routes(
             AuditRecord(
                 request.state.request_id,
                 "agent-enrollment",
-                f"agent.enrollment.submit.{outcome.state}",
+                "agent.enrollment.submit.approved",
                 None,
-                (f"token-sha256:{token_identifier}", outcome.id, outcome.node_id),
+                (
+                    f"token-sha256:{token_identifier}",
+                    outcome.node_id,
+                    f"certificate-serial:{outcome.serial}",
+                ),
             )
         )
-        return _json_response(
-            {"id": outcome.id, "node_id": outcome.node_id, "state": outcome.state},
-            status_code=status.HTTP_202_ACCEPTED,
-        )
+        return _json_response(_issued_response(outcome))
 
     @agent.post("/claim")
     def claim(request: Request, body: ClaimRequest) -> Response:

@@ -7,16 +7,6 @@ class InvalidStateTransitionError(ValueError):
     """Raised when a domain state transition is not allowed."""
 
 
-class EnrollmentState(StrEnum):
-    CREATED = "created"
-    WAITING_FOR_REGISTRATION = "waiting_for_registration"
-    PENDING_REVIEW = "pending_review"
-    APPROVED = "approved"
-    REJECTED = "rejected"
-    EXPIRED = "expired"
-    CERTIFICATE_ISSUED = "certificate_issued"
-
-
 class OperationState(StrEnum):
     QUEUED = "queued"
     RUNNING = "running"
@@ -37,17 +27,6 @@ class CertificateState(StrEnum):
     EXPIRED = "expired"
 
 
-_ENROLLMENT_TRANSITIONS: dict[EnrollmentState, frozenset[EnrollmentState]] = {
-    EnrollmentState.CREATED: frozenset({EnrollmentState.WAITING_FOR_REGISTRATION}),
-    EnrollmentState.WAITING_FOR_REGISTRATION: frozenset(
-        {EnrollmentState.PENDING_REVIEW}
-    ),
-    EnrollmentState.PENDING_REVIEW: frozenset(
-        {EnrollmentState.APPROVED, EnrollmentState.REJECTED, EnrollmentState.EXPIRED}
-    ),
-    EnrollmentState.APPROVED: frozenset({EnrollmentState.CERTIFICATE_ISSUED}),
-}
-
 _OPERATION_TRANSITIONS: dict[OperationState, frozenset[OperationState]] = {
     OperationState.QUEUED: frozenset(
         {OperationState.RUNNING, OperationState.CANCELLED}
@@ -62,18 +41,9 @@ _OPERATION_TRANSITIONS: dict[OperationState, frozenset[OperationState]] = {
 }
 
 
-def transition_enrollment(
-    current: EnrollmentState, target: EnrollmentState
-) -> EnrollmentState:
-    """Validate and return an enrollment state transition."""
-    if target not in _ENROLLMENT_TRANSITIONS.get(current, frozenset()):
-        raise InvalidStateTransitionError(
-            f"invalid enrollment transition: {current.value} -> {target.value}"
-        )
-    return target
-
-
-def transition_operation(current: OperationState, target: OperationState) -> OperationState:
+def transition_operation(
+    current: OperationState, target: OperationState
+) -> OperationState:
     """Validate and return an operation state transition."""
     if target not in _OPERATION_TRANSITIONS.get(current, frozenset()):
         raise InvalidStateTransitionError(
