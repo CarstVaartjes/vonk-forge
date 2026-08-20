@@ -25,6 +25,26 @@ def _artifacts(tmp_path: Path, kind: str) -> dict[str, Path]:
     return result
 
 
+def _package(tmp_path: Path, platform: str) -> Path:
+    architecture = {"linux-amd64": "amd64", "linux-arm64": "arm64"}[platform]
+    root = tmp_path / f"package-root-{architecture}"
+    (root / "DEBIAN").mkdir(parents=True)
+    (root / "DEBIAN/control").write_text(
+        "Package: vonk-forge-agent\n"
+        "Version: 1.2.3~dev.4+g0123456789ab\n"
+        f"Architecture: {architecture}\n"
+        "Maintainer: test <test@example.test>\n"
+        "Description: test\n"
+    )
+    package = tmp_path / f"agent-{platform}.deb"
+    subprocess.run(
+        ["/usr/bin/dpkg-deb", "--build", "--root-owner-group", root, package],
+        check=True,
+        capture_output=True,
+    )
+    return package
+
+
 @pytest.mark.parametrize("kind", ("nas", "spark"))
 def test_renderer_pins_every_supported_native_installer(
     tmp_path: Path, kind: str
@@ -47,8 +67,7 @@ def test_renderer_pins_every_supported_native_installer(
         command.extend(("--payload", str(payload)))
     else:
         for platform in artifacts:
-            package = tmp_path / f"agent-{platform}.deb"
-            package.write_bytes(f"Debian package for {platform}\n".encode())
+            package = _package(tmp_path, platform)
             command.extend(("--package", f"{platform}={package}"))
 
     result = subprocess.run(
@@ -66,6 +85,8 @@ def test_renderer_pins_every_supported_native_installer(
         for platform in artifacts:
             package = tmp_path / f"agent-{platform}.deb"
             assert hashlib.sha256(package.read_bytes()).hexdigest() in rendered
+        assert "@SPARK_" not in rendered
+        assert rendered.count("1.2.3~dev.4+g0123456789ab") == 2
     assert result.stdout == f"sha256:{hashlib.sha256(output.read_bytes()).hexdigest()}\n"
 
 

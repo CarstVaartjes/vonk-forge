@@ -8,7 +8,9 @@ import hashlib
 import os
 import re
 import stat
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,7 +19,8 @@ PLATFORMS = {
     "spark": ("linux-amd64", "linux-arm64"),
 }
 MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
-PLACEHOLDER = re.compile(r"@[A-Z0-9_]+_SHA256@")
+PLACEHOLDER = re.compile(r"@[A-Z0-9_]+@")
+PACKAGE_VERSION = re.compile(r"[A-Za-z0-9][A-Za-z0-9.+~:-]{0,127}\Z")
 
 
 class RenderError(ValueError):
@@ -69,6 +72,37 @@ def _artifact_arguments(values: list[str]) -> dict[str, Path]:
     return result
 
 
+def _package_identity(raw: bytes, expected_architecture: str) -> str:
+    with tempfile.TemporaryDirectory(prefix="vonk-spark-package-") as directory:
+        package = Path(directory) / "package.deb"
+        package.write_bytes(raw)
+        environment = {"LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "PATH": "/usr/bin:/bin"}
+
+        def field(name: str) -> str:
+            completed = subprocess.run(
+                ["/usr/bin/dpkg-deb", "--field", package, name],
+                env=environment,
+                text=True,
+                capture_output=True,
+                timeout=30,
+                check=False,
+            )
+            if completed.returncode != 0:
+                raise RenderError("Spark package metadata is invalid")
+            return completed.stdout.strip()
+
+        package_name = field("Package")
+        version = field("Version")
+        architecture = field("Architecture")
+    if (
+        package_name != "vonk-forge-agent"
+        or architecture != expected_architecture
+        or PACKAGE_VERSION.fullmatch(version) is None
+    ):
+        raise RenderError("Spark package identity is invalid")
+    return version
+
+
 def render(
     kind: str,
     artifacts: dict[str, Path],
@@ -108,15 +142,24 @@ def render(
         if packages is None or set(packages) != expected:
             raise RenderError("spark package platforms are incomplete")
         for platform, path in packages.items():
-            digest = hashlib.sha256(
-                _read_regular(path, f"{platform} package", MAX_ARTIFACT_BYTES)
-            ).hexdigest()
+            raw = _read_regular(path, f"{platform} package", MAX_ARTIFACT_BYTES)
+            digest = hashlib.sha256(raw).hexdigest()
             placeholder = f"@SPARK_{platform}_PACKAGE_SHA256@".upper().replace(
                 "-", "_"
             )
             if rendered.count(placeholder) != 1:
                 raise RenderError(f"bootstrap template is missing {platform} package")
             rendered = rendered.replace(placeholder, digest)
+            architecture = {"linux-amd64": "amd64", "linux-arm64": "arm64"}[platform]
+            version = _package_identity(raw, architecture)
+            version_placeholder = (
+                f"@SPARK_{platform}_PACKAGE_VERSION@".upper().replace("-", "_")
+            )
+            if rendered.count(version_placeholder) != 1:
+                raise RenderError(
+                    f"bootstrap template is missing {platform} package version"
+                )
+            rendered = rendered.replace(version_placeholder, version)
     if PLACEHOLDER.search(rendered):
         raise RenderError("bootstrap template has unresolved digests")
     return rendered.encode("ascii")

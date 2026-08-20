@@ -235,6 +235,16 @@ def test_upgrade_postinst_is_local_and_cannot_poison_dpkg_on_controller_failure(
         assert forbidden not in postinst
 
 
+def test_postinst_creates_stable_root_owned_native_machine_evidence() -> None:
+    postinst = POSTINST.read_text()
+
+    assert "umask 077" in postinst
+    assert "machine_evidence=/var/lib/vonk-forge-agent/machine-evidence" in postinst
+    assert "openssl rand -hex 32" in postinst
+    assert "install -o root -g vonk-agent -m 0640" in postinst
+    assert "ssh_host_" not in postinst
+
+
 @pytest.mark.parametrize(
     "package_version",
     (
@@ -327,6 +337,10 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
     payload = tmp_path / "payload"
     subprocess.run(["/usr/bin/dpkg-deb", "--extract", first_deb, payload], check=True)
     assert (payload / "etc/vonk-forge-agent/containers-storage.conf").is_file()
+    assert not (payload / "etc/vonk-forge-agent/agent.toml").exists()
+    assert (control / "conffiles").read_text().splitlines() == [
+        "/etc/vonk-forge-agent/containers-storage.conf"
+    ]
     agent = payload / "usr/lib/vonk-forge/vonk-agent"
     assert agent.is_file()
     assert stat.S_IMODE(agent.stat().st_mode) == 0o555

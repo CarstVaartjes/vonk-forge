@@ -27,6 +27,18 @@ const UPGRADE_PATH: &str = "/usr/bin/vonk-agent-upgrade";
 const SERVICE: &str = "vonk-forge-agent.service";
 const DATA_DIR: &str = "/var/lib/vonk-forge-agent";
 const FRAME_MAGIC: &[u8] = b"VONK-SPARK-CONFIG-V1\0";
+const ROOT_HANDOFF: &str = r#"
+umask 077
+root=$(/usr/bin/mktemp -d /var/tmp/vonk-spark-setup.XXXXXX)
+trap '/bin/rm -rf -- "$root"' EXIT HUP INT TERM
+setup=$root/vonk-spark-setup
+package=$root/vonk-forge-agent_$5_$6.deb
+/usr/bin/install -o root -g root -m 0700 -- "$1" "$setup"
+/usr/bin/install -o root -g root -m 0600 -- "$2" "$package"
+printf '%s  %s\n' "$3" "$setup" | /usr/bin/sha256sum --check --status
+printf '%s  %s\n' "$4" "$package" | /usr/bin/sha256sum --check --status
+"$setup" --privileged --package "$package" --package-sha256 "$4" --package-version "$5" --package-architecture "$6" --setup-sha256 "$3"
+"#;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Command {
@@ -51,6 +63,11 @@ impl Command {
 
     pub fn with_stdin(mut self, stdin: Vec<u8>) -> Self {
         self.stdin = stdin;
+        self
+    }
+
+    pub fn with_env(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.env.insert(name.into(), value.into());
         self
     }
 }
@@ -91,6 +108,9 @@ pub trait Prompt {
 pub struct SetupRequest {
     package: PathBuf,
     expected_sha256: String,
+    expected_version: String,
+    expected_architecture: String,
+    expected_executable_sha256: String,
     executable: PathBuf,
 }
 
@@ -98,9 +118,18 @@ impl SetupRequest {
     pub fn new(
         package: PathBuf,
         expected_sha256: String,
+        expected_version: String,
+        expected_architecture: String,
+        expected_executable_sha256: String,
         executable: PathBuf,
     ) -> Result<Self, SetupError> {
-        if !package.is_absolute() || !executable.is_absolute() || !valid_sha256(&expected_sha256) {
+        if !package.is_absolute()
+            || !executable.is_absolute()
+            || !valid_sha256(&expected_sha256)
+            || !valid_package_version(&expected_version)
+            || !matches!(expected_architecture.as_str(), "amd64" | "arm64")
+            || !valid_sha256(&expected_executable_sha256)
+        {
             return Err(SetupError::UnsafeInput(
                 "release-controlled setup arguments",
             ));
@@ -108,9 +137,40 @@ impl SetupRequest {
         Ok(Self {
             package,
             expected_sha256,
+            expected_version,
+            expected_architecture,
+            expected_executable_sha256,
             executable,
         })
     }
+}
+
+pub fn handoff_to_root(
+    request: &SetupRequest,
+    runner: &mut dyn CommandRunner,
+) -> Result<(), SetupError> {
+    verify_regular_file_digest(
+        &request.executable,
+        &request.expected_executable_sha256,
+        64 * 1024 * 1024,
+    )?;
+    let staged = stage_verified_package(request)?;
+    let command = Command::new(
+        "/usr/bin/sudo",
+        [
+            "/bin/sh".to_owned(),
+            "-ceu".to_owned(),
+            ROOT_HANDOFF.to_owned(),
+            "vonk-spark-root-handoff".to_owned(),
+            request.executable.display().to_string(),
+            staged.path().display().to_string(),
+            request.expected_executable_sha256.clone(),
+            request.expected_sha256.clone(),
+            request.expected_version.clone(),
+            request.expected_architecture.clone(),
+        ],
+    );
+    run_checked(runner, command).map(|_| ())
 }
 
 #[derive(Debug, Clone)]
@@ -146,6 +206,12 @@ pub enum SetupError {
     PackageDigest,
     #[error("setup package is not a Debian package")]
     PackageFormat,
+    #[error("setup package identity does not match the selected release")]
+    PackageIdentity,
+    #[error(
+        "Spark installation requires Debian or Ubuntu with systemd on the selected architecture"
+    )]
+    UnsupportedHost,
     #[error("existing installation is incomplete or unsafe")]
     ExistingInstall,
     #[error("interactive setup failed")]
@@ -160,34 +226,74 @@ pub enum SetupError {
     PrivilegedWrite(#[source] io::Error),
 }
 
+pub fn validate_system_host(request: &SetupRequest) -> Result<(), SetupError> {
+    let os_release =
+        fs::read_to_string("/etc/os-release").map_err(|_| SetupError::UnsupportedHost)?;
+    let architecture = match std::env::consts::ARCH {
+        "x86_64" => "amd64",
+        "aarch64" => "arm64",
+        _ => return Err(SetupError::UnsupportedHost),
+    };
+    validate_host_description(
+        &os_release,
+        Path::new("/run/systemd/system").is_dir(),
+        architecture,
+        &request.expected_architecture,
+    )?;
+    for executable in [
+        "/bin/rm",
+        "/bin/sh",
+        "/usr/bin/apt-get",
+        "/usr/bin/curl",
+        "/usr/bin/dpkg-deb",
+        "/usr/bin/install",
+        "/usr/bin/mktemp",
+        "/usr/bin/setpriv",
+        "/usr/bin/sha256sum",
+        "/usr/bin/sudo",
+        "/usr/bin/systemctl",
+    ] {
+        let metadata = fs::metadata(executable).map_err(|_| SetupError::UnsupportedHost)?;
+        if !metadata.is_file() || metadata.permissions().mode() & 0o111 == 0 {
+            return Err(SetupError::UnsupportedHost);
+        }
+    }
+    Ok(())
+}
+
+fn validate_host_description(
+    os_release: &str,
+    systemd_present: bool,
+    architecture: &str,
+    expected_architecture: &str,
+) -> Result<(), SetupError> {
+    let distribution = os_release
+        .lines()
+        .find_map(|line| line.strip_prefix("ID="))
+        .map(|value| value.trim_matches('"'));
+    if !matches!(distribution, Some("debian" | "ubuntu"))
+        || !systemd_present
+        || architecture != expected_architecture
+    {
+        return Err(SetupError::UnsupportedHost);
+    }
+    Ok(())
+}
+
 pub fn run_setup(
     request: &SetupRequest,
     paths: &InstallPaths,
     prompt: &mut dyn Prompt,
     runner: &mut dyn CommandRunner,
 ) -> Result<(), SetupError> {
-    let staged = stage_verified_package(&request.package, &request.expected_sha256)?;
+    let staged = stage_verified_package(request)?;
     match install_state(paths)? {
-        InstallState::Existing => run_checked(
-            runner,
-            sudo(Command::new(
-                &paths.upgrade,
-                [
-                    "install-local".to_owned(),
-                    staged.path().display().to_string(),
-                    request.expected_sha256.clone(),
-                ],
-            )),
-        )
-        .map(|_| ()),
-        InstallState::Fresh | InstallState::Placeholder => {
-            fresh_setup(request, paths, prompt, runner, &staged)
-        }
+        InstallState::Existing => upgrade_existing(paths, runner, &staged),
+        InstallState::Fresh => fresh_setup(paths, prompt, runner, &staged),
     }
 }
 
 fn fresh_setup(
-    request: &SetupRequest,
     paths: &InstallPaths,
     prompt: &mut dyn Prompt,
     runner: &mut dyn CommandRunner,
@@ -225,11 +331,12 @@ fn fresh_setup(
     .stdout;
     verify_ca(&ca, &ca_sha256)?;
 
-    install_fresh_package(runner, staged)?;
+    install_package(runner, staged)?;
 
     let config = GeneratedConfig {
         enrollment_url: enrollment,
         controller_url: controller,
+        ca_path: paths.ca.clone(),
         ca_sha256,
         node_id: format!("spk_{}", Uuid::new_v4().simple()),
     };
@@ -237,9 +344,12 @@ fn fresh_setup(
         config: config.to_toml(),
         ca,
     };
-    run_checked(
-        runner,
-        sudo(Command::new(&request.executable, ["--privileged-write"]).with_stdin(write.encode()?)),
+    write_privileged_as(
+        write.encode()?.as_slice(),
+        paths,
+        paths
+            .required_owner
+            .unwrap_or_else(|| rustix::process::geteuid().as_raw()),
     )?;
 
     let pair = Command::new(
@@ -263,53 +373,73 @@ fn fresh_setup(
         ],
     )
     .with_stdin(format!("{pairing_token}\n").into_bytes());
-    run_checked(runner, sudo(pair))?;
+    run_checked(runner, pair)?;
     run_checked(
         runner,
-        sudo(Command::new(
-            "/usr/bin/systemctl",
-            ["enable", "--now", &paths.service],
-        )),
+        Command::new("/usr/bin/systemctl", ["enable", "--now", &paths.service]),
     )?;
     run_checked(
         runner,
-        sudo(Command::new(
+        Command::new(
             &paths.agent,
             [
                 "--config",
                 paths.config.to_string_lossy().as_ref(),
                 "self-test",
             ],
-        )),
+        ),
     )?;
     verify_sustained_readiness(paths, runner)
 }
 
-fn install_fresh_package(
+fn install_package(
     runner: &mut dyn CommandRunner,
     staged: &StagedPackage,
 ) -> Result<(), SetupError> {
-    run_checked(runner, sudo(Command::new("/usr/bin/apt-get", ["update"])))?;
     run_checked(
         runner,
-        sudo(Command::new(
+        Command::new("/usr/bin/apt-get", ["update"]).with_env("DEBIAN_FRONTEND", "noninteractive"),
+    )?;
+    run_checked(
+        runner,
+        Command::new(
             "/usr/bin/apt-get",
             [
                 "install".to_owned(),
                 "--yes".to_owned(),
                 "--no-install-recommends".to_owned(),
+                "-o".to_owned(),
+                "Dpkg::Options::=--force-confold".to_owned(),
                 staged.path().display().to_string(),
             ],
-        )),
+        )
+        .with_env("DEBIAN_FRONTEND", "noninteractive"),
     )
     .map(|_| ())
 }
 
-fn sudo(command: Command) -> Command {
-    let mut arguments = Vec::with_capacity(command.args.len() + 1);
-    arguments.push(command.program.display().to_string());
-    arguments.extend(command.args);
-    Command::new("/usr/bin/sudo", arguments).with_stdin(command.stdin)
+fn upgrade_existing(
+    paths: &InstallPaths,
+    runner: &mut dyn CommandRunner,
+    staged: &StagedPackage,
+) -> Result<(), SetupError> {
+    install_package(runner, staged)?;
+    run_checked(
+        runner,
+        Command::new("/usr/bin/systemctl", ["restart", &paths.service]),
+    )?;
+    run_checked(
+        runner,
+        Command::new(
+            &paths.agent,
+            [
+                "--config",
+                paths.config.to_string_lossy().as_ref(),
+                "self-test",
+            ],
+        ),
+    )?;
+    verify_sustained_readiness(paths, runner)
 }
 
 fn run_checked(
@@ -334,18 +464,18 @@ fn verify_sustained_readiness(
     for attempt in 0..30 {
         let active = run_checked(
             runner,
-            sudo(Command::new(
+            Command::new(
                 "/usr/bin/systemctl",
                 ["is-active", "--quiet", &paths.service],
-            )),
+            ),
         );
         let current_pid = active.and_then(|_| {
             run_checked(
                 runner,
-                sudo(Command::new(
+                Command::new(
                     "/usr/bin/systemctl",
                     ["show", "--property", "MainPID", "--value", &paths.service],
-                )),
+                ),
             )
         });
         match current_pid.and_then(|output| {
@@ -369,7 +499,7 @@ fn verify_sustained_readiness(
                 pid = Some(current_pid.clone());
                 let ready = run_checked(
                     runner,
-                    sudo(Command::new(
+                    Command::new(
                         &paths.agent,
                         [
                             "--config",
@@ -382,7 +512,7 @@ fn verify_sustained_readiness(
                             "--max-age-seconds",
                             "90",
                         ],
-                    )),
+                    ),
                 );
                 if ready.is_ok() {
                     healthy += 1;
@@ -409,7 +539,6 @@ fn verify_sustained_readiness(
 
 enum InstallState {
     Fresh,
-    Placeholder,
     Existing,
 }
 
@@ -418,38 +547,25 @@ fn install_state(paths: &InstallPaths) -> Result<InstallState, SetupError> {
     let agent = safe_existing_file(&paths.agent, paths.required_owner)?;
     match (config, agent) {
         (false, false) => Ok(InstallState::Fresh),
-        (true, true) => match paired_configuration(&paths.config, paths)? {
-            true => Ok(InstallState::Existing),
-            false => Ok(InstallState::Placeholder),
-        },
+        (false, true) => Ok(InstallState::Fresh),
+        (true, true) => {
+            paired_configuration(&paths.config, paths)?;
+            Ok(InstallState::Existing)
+        }
         _ => Err(SetupError::ExistingInstall),
     }
 }
 
-fn paired_configuration(path: &Path, paths: &InstallPaths) -> Result<bool, SetupError> {
+fn paired_configuration(path: &Path, paths: &InstallPaths) -> Result<(), SetupError> {
     let raw = fs::read(path).map_err(|_| SetupError::ExistingInstall)?;
     if raw.len() > 64 * 1024 {
         return Err(SetupError::ExistingInstall);
     }
     let config: WrittenConfig = toml::from_slice(&raw).map_err(|_| SetupError::ExistingInstall)?;
-    if packaged_placeholder(&config) {
-        return Ok(false);
-    }
     if !valid_written_config(&config, paths) {
         return Err(SetupError::ExistingInstall);
     }
-    Ok(true)
-}
-
-fn packaged_placeholder(config: &WrittenConfig) -> bool {
-    config.enrollment_url.as_str() == "https://enroll.vonkforge.invalid/"
-        && config.controller_url.as_str() == "https://controller.vonkforge.invalid/"
-        && config.ca_path == Path::new(CA_PATH)
-        && config.ca_sha256 == "0".repeat(64)
-        && config.data_dir == Path::new(DATA_DIR)
-        && config.node_id == "spk_00000000000000000000000000000000"
-        && config.poll_min_seconds == 2
-        && config.poll_max_seconds == 60
+    Ok(())
 }
 
 fn safe_existing_file(path: &Path, required_owner: Option<u32>) -> Result<bool, SetupError> {
@@ -479,7 +595,9 @@ impl StagedPackage {
     }
 }
 
-fn stage_verified_package(source: &Path, expected: &str) -> Result<StagedPackage, SetupError> {
+fn stage_verified_package(request: &SetupRequest) -> Result<StagedPackage, SetupError> {
+    let source = &request.package;
+    let expected = &request.expected_sha256;
     if !source.is_absolute() || !valid_sha256(expected) || !valid_package_name(source) {
         return Err(SetupError::UnsafePackage);
     }
@@ -538,10 +656,14 @@ fn stage_verified_package(source: &Path, expected: &str) -> Result<StagedPackage
     if !same_file(&open, &after) || total != before.len() {
         return Err(SetupError::UnsafePackage);
     }
-    if hex::encode(digest.finalize()) != expected {
+    if hex::encode(digest.finalize()) != *expected {
         return Err(SetupError::PackageDigest);
     }
-    verify_debian_archive(&path)?;
+    verify_debian_identity(
+        &path,
+        &request.expected_version,
+        &request.expected_architecture,
+    )?;
     Ok(StagedPackage {
         _directory: directory,
         path,
@@ -578,39 +700,77 @@ fn same_file(left: &fs::Metadata, right: &fs::Metadata) -> bool {
         && left.ctime_nsec() == right.ctime_nsec()
 }
 
-fn verify_debian_archive(path: &Path) -> Result<(), SetupError> {
-    let mut file = File::open(path).map_err(SetupError::PrivilegedWrite)?;
-    let mut magic = [0_u8; 8];
-    file.read_exact(&mut magic)
-        .map_err(|_| SetupError::PackageFormat)?;
-    if magic != *b"!<arch>\n" {
-        return Err(SetupError::PackageFormat);
-    }
-    let mut header = [0_u8; 60];
-    file.read_exact(&mut header)
-        .map_err(|_| SetupError::PackageFormat)?;
-    if &header[..16]
-        .iter()
-        .copied()
-        .take_while(|byte| *byte != b' ')
-        .collect::<Vec<_>>()
-        != b"debian-binary/"
-        || &header[58..] != b"`\n"
+fn verify_regular_file_digest(path: &Path, expected: &str, maximum: u64) -> Result<(), SetupError> {
+    let before = fs::symlink_metadata(path).map_err(|_| SetupError::UnsafePackage)?;
+    if !before.file_type().is_file()
+        || before.file_type().is_symlink()
+        || before.nlink() != 1
+        || before.len() == 0
+        || before.len() > maximum
+        || before.permissions().mode() & 0o022 != 0
     {
-        return Err(SetupError::PackageFormat);
+        return Err(SetupError::UnsafePackage);
     }
-    let size = std::str::from_utf8(&header[48..58])
-        .ok()
-        .and_then(|value| value.trim().parse::<usize>().ok())
-        .ok_or(SetupError::PackageFormat)?;
-    if size != 4 {
-        return Err(SetupError::PackageFormat);
+    let mut input = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc_nofollow())
+        .open(path)
+        .map_err(|_| SetupError::UnsafePackage)?;
+    let open = input.metadata().map_err(|_| SetupError::UnsafePackage)?;
+    if !same_file(&before, &open) {
+        return Err(SetupError::UnsafePackage);
     }
-    let mut version = [0_u8; 4];
-    file.read_exact(&mut version)
-        .map_err(|_| SetupError::PackageFormat)?;
-    if version != *b"2.0\n" {
-        return Err(SetupError::PackageFormat);
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let count = input
+            .read(&mut buffer)
+            .map_err(|_| SetupError::UnsafePackage)?;
+        if count == 0 {
+            break;
+        }
+        digest.update(&buffer[..count]);
+    }
+    let after = input.metadata().map_err(|_| SetupError::UnsafePackage)?;
+    if !same_file(&open, &after) || hex::encode(digest.finalize()) != expected {
+        return Err(SetupError::PackageDigest);
+    }
+    Ok(())
+}
+
+fn verify_debian_identity(
+    path: &Path,
+    expected_version: &str,
+    expected_architecture: &str,
+) -> Result<(), SetupError> {
+    fn field(path: &Path, name: &str) -> Result<String, SetupError> {
+        let output = ProcessCommand::new("/usr/bin/dpkg-deb")
+            .args(["--field"])
+            .arg(path)
+            .arg(name)
+            .env_clear()
+            .env("LANG", "C.UTF-8")
+            .env("LC_ALL", "C.UTF-8")
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .map_err(|_| SetupError::PackageFormat)?;
+        if !output.status.success() {
+            return Err(SetupError::PackageFormat);
+        }
+        String::from_utf8(output.stdout)
+            .map(|value| value.trim().to_owned())
+            .map_err(|_| SetupError::PackageFormat)
+    }
+
+    let package = field(path, "Package")?;
+    let version = field(path, "Version")?;
+    let architecture = field(path, "Architecture")?;
+    if package != "vonk-forge-agent"
+        || version != expected_version
+        || architecture != expected_architecture
+    {
+        return Err(SetupError::PackageIdentity);
     }
     Ok(())
 }
@@ -668,6 +828,14 @@ fn valid_sha256(value: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
+fn valid_package_version(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'+' | b'~' | b':' | b'-')
+        })
+}
+
 fn valid_token(value: &str) -> bool {
     value.len() == 43
         && value
@@ -696,6 +864,7 @@ fn verify_ca(ca: &[u8], expected: &str) -> Result<(), SetupError> {
 struct GeneratedConfig {
     enrollment_url: Url,
     controller_url: Url,
+    ca_path: PathBuf,
     ca_sha256: String,
     node_id: String,
 }
@@ -703,8 +872,12 @@ struct GeneratedConfig {
 impl GeneratedConfig {
     fn to_toml(&self) -> String {
         format!(
-            "enrollment_url = \"{}\"\ncontroller_url = \"{}\"\nca_path = \"{CA_PATH}\"\nca_sha256 = \"{}\"\ndata_dir = \"{DATA_DIR}\"\nnode_id = \"{}\"\npoll_min_seconds = 2\npoll_max_seconds = 60\n",
-            self.enrollment_url, self.controller_url, self.ca_sha256, self.node_id,
+            "enrollment_url = \"{}\"\ncontroller_url = \"{}\"\nca_path = \"{}\"\nca_sha256 = \"{}\"\ndata_dir = \"{DATA_DIR}\"\nnode_id = \"{}\"\npoll_min_seconds = 2\npoll_max_seconds = 60\n",
+            self.enrollment_url,
+            self.controller_url,
+            self.ca_path.display(),
+            self.ca_sha256,
+            self.node_id,
         )
     }
 }
@@ -1034,5 +1207,25 @@ mod tests {
             fs::metadata(&paths.ca).unwrap().permissions().mode() & 0o777,
             0o644
         );
+    }
+
+    #[test]
+    fn host_validation_rejects_non_debian_and_missing_systemd_before_setup() {
+        assert!(matches!(
+            validate_host_description("ID=fedora\n", true, "amd64", "amd64"),
+            Err(SetupError::UnsupportedHost)
+        ));
+        assert!(matches!(
+            validate_host_description("ID=debian\n", false, "amd64", "amd64"),
+            Err(SetupError::UnsupportedHost)
+        ));
+    }
+
+    #[test]
+    fn host_validation_rejects_a_release_for_another_architecture() {
+        assert!(matches!(
+            validate_host_description("ID=ubuntu\n", true, "amd64", "arm64"),
+            Err(SetupError::UnsupportedHost)
+        ));
     }
 }

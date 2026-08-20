@@ -46,7 +46,8 @@ cat > "$bin/apt-get" <<'FAKE'
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'apt-get %s\n' "$*" >> "${UPGRADE_ACTION_LOG:?}"
-if [[ "$*" == 'install --only-upgrade --yes vonk-forge-agent' ]]; then
+if [[ "$*" == 'install --only-upgrade --yes vonk-forge-agent' \
+  || "$*" == install\ --yes\ --no-install-recommends\ -o\ Dpkg::Options::=--force-confold\ /*.deb ]]; then
   "${WRITE_UPGRADED_AGENT:?}" "${UPGRADED_VERSION:-1.1.0}" "${UPGRADED_HEALTH:-yes}"
 fi
 FAKE
@@ -178,10 +179,9 @@ local_sha256=$(sha256sum "$local_package" | cut -d' ' -f1)
 env "${common_environment[@]}" "$script" install-local "$local_package" \
   "$local_sha256" \
   > "$test_root/local-output"
-grep -Fxq "dpkg --install $local_package" "$log"
-test "$(sed -n '/dpkg --configure -a/=' "$log")" -lt \
-  "$(sed -n '/dpkg --install/=' "$log")"
-! grep -Eq '^apt-get ' "$log"
+grep -Fxq 'apt-get update' "$log"
+grep -Fxq "apt-get install --yes --no-install-recommends -o Dpkg::Options::=--force-confold $local_package" "$log"
+! grep -Fq "dpkg --install $local_package" "$log"
 grep -Fq 'upgrade complete: vonk-agent 1.1.0 is healthy' \
   "$test_root/local-output"
 
@@ -196,7 +196,7 @@ then
   printf '%s\n' 'local upgrade accepted unavailable controller readiness' >&2
   exit 1
 fi
-grep -Fxq "dpkg --install $local_package" "$log"
+grep -Fxq "apt-get install --yes --no-install-recommends -o Dpkg::Options::=--force-confold $local_package" "$log"
 test "$(UPGRADE_ACTION_LOG="$log" \
   "$root/usr/lib/vonk-forge/vonk-agent" --version)" = \
   'vonk-agent 1.1.0'

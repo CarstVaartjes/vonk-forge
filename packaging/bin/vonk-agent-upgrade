@@ -52,10 +52,7 @@ attempts="${VONK_AGENT_UPGRADE_ATTEMPTS:-30}"
 sustained_required="${VONK_AGENT_UPGRADE_SUSTAINED:-3}"
 interval_seconds="${VONK_AGENT_UPGRADE_INTERVAL_SECONDS:-2}"
 
-required_commands=("$dpkg" "$dpkg_query" "$systemctl" /usr/bin/sha256sum)
-if [[ "$mode" == apt ]]; then
-  required_commands+=("$apt_get")
-fi
+required_commands=("$apt_get" "$dpkg" "$dpkg_query" "$systemctl" /usr/bin/sha256sum)
 for required in "${required_commands[@]}"; do
   if [[ ! -x "$required" ]]; then
     printf 'required executable is unavailable: %s\n' "$required" >&2
@@ -87,13 +84,16 @@ case "$mode" in
       printf '%s\n' 'verified local package SHA-256 changed before installation' >&2
       exit 1
     fi
+    # shellcheck disable=SC2016
     if ! "$dpkg_query" -W -f='${db:Status-Status}' vonk-forge-agent \
       >/dev/null 2>&1; then
       fresh_install=true
     fi
-    printf '%s\n' 'Installing caller-verified local Vonk Forge agent package without network access...'
-    "$dpkg" --configure -a
-    "$dpkg" --install "$local_package"
+    printf '%s\n' 'Installing caller-verified local Vonk Forge agent package with dependency resolution...'
+    export DEBIAN_FRONTEND=noninteractive
+    "$apt_get" update
+    "$apt_get" install --yes --no-install-recommends \
+      -o Dpkg::Options::=--force-confold "$local_package"
     ;;
 esac
 
@@ -107,6 +107,7 @@ if [[ ! "$version" =~ ^vonk-agent\ [0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   exit 1
 fi
 binary_semantic="${version#vonk-agent }"
+# shellcheck disable=SC2016
 package_version="$("$dpkg_query" -W -f='${Version}' vonk-forge-agent)"
 if [[ ! "$package_version" =~ ^([0-9]+\.[0-9]+\.[0-9]+)([~+.-].*)?$ ]]; then
   printf 'installed package version is invalid: %s\n' "$package_version" >&2
