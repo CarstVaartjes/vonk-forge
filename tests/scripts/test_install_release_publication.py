@@ -286,6 +286,40 @@ def _gate_report(
     return path
 
 
+def _spark_gate_report(
+    path: Path,
+    publication: Path,
+    gates: set[str],
+    platform: str,
+    *,
+    run_id: int = 123456,
+) -> Path:
+    plan = json.loads((publication / "publication-plan.json").read_text())
+    _canonical(
+        path,
+        {
+            "channel": plan["channel"],
+            "gates": sorted(gates),
+            "generation": plan["generation"],
+            "platform": platform,
+            "run_id": run_id,
+            "schema_version": 2,
+            "source_sha": SOURCE_SHA,
+            "status": "passed",
+            "synthetic_device": {
+                "architecture": platform,
+                "cdi_name": "nvidia.com/gpu=all",
+                "fixture_sha256": "e" * 64,
+                "physical_gpu": False,
+                "provenance": "ci-only-synthetic-cdi",
+                "synthetic": True,
+            },
+            "version": plan["version"],
+        },
+    )
+    return path
+
+
 def _accept_command(
     publication: Path,
     output_root: Path,
@@ -361,15 +395,17 @@ def test_acceptance_authority_signs_only_the_complete_exact_generation(
                 "nas_workstation",
             },
         ),
-        _gate_report(
+        _spark_gate_report(
             report_root / "spark-amd64.json",
             publication,
             {"spark_amd64", "spark_pairing", "spark_job"},
+            "linux-amd64",
         ),
-        _gate_report(
+        _spark_gate_report(
             report_root / "spark-arm64.json",
             publication,
             {"spark_arm64", "spark_renewal", "spark_upgrade"},
+            "linux-arm64",
         ),
     ]
 
@@ -423,11 +459,17 @@ def test_workflow_nas_gate_report_is_accepted_and_gate_drift_is_rejected(
     nas_gates = set(json.loads(step["env"]["VONK_ACCEPTANCE_GATE_NAMES"]))
     reports = [
         _gate_report(tmp_path / "nas.json", publication, nas_gates),
-        _gate_report(
-            tmp_path / "amd64.json", publication, {"spark_amd64", "spark_pairing", "spark_job"}
+        _spark_gate_report(
+            tmp_path / "amd64.json",
+            publication,
+            {"spark_amd64", "spark_pairing", "spark_job"},
+            "linux-amd64",
         ),
-        _gate_report(
-            tmp_path / "arm64.json", publication, {"spark_arm64", "spark_renewal", "spark_upgrade"}
+        _spark_gate_report(
+            tmp_path / "arm64.json",
+            publication,
+            {"spark_arm64", "spark_renewal", "spark_upgrade"},
+            "linux-arm64",
         ),
     ]
     accepted = subprocess.run(_accept_command(publication, tmp_path / "accepted", reports), cwd=ROOT, text=True, capture_output=True, check=False)
